@@ -2130,9 +2130,13 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Record a Process start or exit. An exit forgets this Process and the
+    /// finished children it was keeping when nothing else needs them
+    /// ([`processes::FORGETTABLE`]).
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute(
             "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
                 via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
@@ -2144,6 +2148,22 @@ impl SqliteStore {
                 process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
                 process.os_started_at],
         )?;
+        if process.completed_at.is_some() {
+            let forget = |scope: &str| {
+                tx.execute(
+                    &format!(
+                        "DELETE FROM processes WHERE id IN (SELECT p.id FROM processes p
+                         WHERE {scope} AND {})",
+                        processes::FORGETTABLE
+                    ),
+                    [&process.id],
+                )
+            };
+            // Children first: any child left would keep this Process.
+            forget("p.parent_lf_process_id=?1")?;
+            forget("p.id=?1")?;
+        }
+        tx.commit()?;
         Ok(())
     }
 

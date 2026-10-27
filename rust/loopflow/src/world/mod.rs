@@ -606,9 +606,9 @@ impl World {
         let (name, steps) = crate::ops::task::load_task_graph(&checkout, &graph)?;
         let (started, ended) = self.span(&steps, ended_days_ago, minutes, outcome)?;
         // The Task run starts its Graph, which starts the first step.
+        // Each Process is recorded running, then finished once its references
+        // exist, as live commands do; otherwise its exit would forget it.
         let mut run = self.process(&trace, None, &checkout, argv, started - 2);
-        run.completed_at = Some(ended);
-        outcome.complete(&mut run);
         store.sqlite.record_process(&run)?;
         if let Some((workflow, index, take_up)) = edge {
             if take_up {
@@ -630,6 +630,9 @@ impl World {
         if outcome == Outcome::Succeeded {
             store.sqlite.arrive_workflow_edge(&task.id, &run.id)?;
         }
+        run.completed_at = Some(ended);
+        outcome.complete(&mut run);
+        store.sqlite.record_process(&run)?;
         Ok(run.id)
     }
 
@@ -649,12 +652,13 @@ impl World {
             vec!["lf", "task", "workflow", "move", issue, node],
             self.now,
         );
-        mover.completed_at = Some(self.now);
-        Outcome::Succeeded.complete(&mut mover);
         store.sqlite.record_process(&mover)?;
         store
             .sqlite
             .set_workflow_node(&task.id, node, &mover.id, Some(note))?;
+        mover.completed_at = Some(self.now);
+        Outcome::Succeeded.complete(&mut mover);
+        store.sqlite.record_process(&mover)?;
         Ok(())
     }
 
@@ -720,8 +724,7 @@ impl World {
                 break;
             }
         }
-        graph.completed_at = Some(begin);
-        outcome.complete(&mut graph);
+        // Its steps finish while it runs, so exit forgets none of them.
         store.sqlite.record_process(&graph)?;
         store.sqlite.record_graph_process(&graph.id, &compiled)?;
         for (process, key) in records {
@@ -730,6 +733,9 @@ impl World {
                 .sqlite
                 .record_graph_step(&graph.id, &process.id, key, &[Vec::new()])?;
         }
+        graph.completed_at = Some(begin);
+        outcome.complete(&mut graph);
+        store.sqlite.record_process(&graph)?;
         Ok(())
     }
 

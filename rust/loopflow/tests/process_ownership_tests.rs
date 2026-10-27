@@ -7,7 +7,7 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use loopflow::harness::codex_connection::CodexConnection;
-use loopflow::id::LfProcessId;
+use loopflow::id::{LfProcessId, TraceId};
 use loopflow::session::{LfSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
@@ -612,6 +612,7 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
         .await
         .unwrap();
     drop(store);
+    let parent = running_parent(&database);
     let conn = rusqlite::Connection::open(&database).unwrap();
     let schema: String = conn
         .query_row(
@@ -625,7 +626,7 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
         (vec!["--version"], 0),
         (vec!["session", "list", "--definitely-not-a-flag"], 2),
     ] {
-        let output = command(home.path(), home.path(), &args)
+        let output = child(home.path(), home.path(), &args, &parent)
             .env("PATH", "")
             .output()
             .unwrap();
@@ -636,9 +637,12 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
         );
     }
     let rows: Vec<(i32, String)> = conn
-        .prepare("SELECT exit_code,outcome FROM processes ORDER BY started_at,rowid")
+        .prepare(
+            "SELECT exit_code,outcome FROM processes WHERE parent_lf_process_id=?1
+             ORDER BY started_at,rowid",
+        )
         .unwrap()
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_map([parent.0.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
@@ -676,10 +680,12 @@ async fn early_observation_records_preflight() {
         .await
         .unwrap();
     drop(store);
-    let output = command(
+    let parent = running_parent(&database);
+    let output = child(
         home.path(),
         home.path(),
         &["self", "install", "preflight", "--json"],
+        &parent,
     )
     .output()
     .unwrap();
@@ -687,12 +693,62 @@ async fn early_observation_records_preflight() {
     let conn = rusqlite::Connection::open(&database).unwrap();
     let (count, completed): (i64, i64) = conn
         .query_row(
-            "SELECT count(*),count(completed_at) FROM processes",
-            [],
+            "SELECT count(*),count(completed_at) FROM processes WHERE parent_lf_process_id=?1",
+            [parent.0.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
     assert_eq!((count, completed), (1, 1));
+}
+
+#[tokio::test]
+async fn exit_observation_writes_only_agent_issued_processes() {
+    let home = tempfile::tempdir().unwrap();
+    let database = home.path().join("loopflow.db");
+    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let caller = serde_json::json!({
+        "session_id": "session",
+        "agent_process_id": null,
+        "origin_exec_id": LfProcessId::new(),
+    })
+    .to_string();
+    let rows = || -> Vec<bool> {
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .prepare("SELECT via_agent FROM processes")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    let rejected = ["task", "--no-such-flag"];
+
+    let direct = command(home.path(), home.path(), &rejected)
+        .output()
+        .unwrap();
+    assert!(!direct.status.success(), "{direct:?}");
+    assert_eq!(rows(), Vec::<bool>::new(), "nothing saw it running");
+
+    let hook = command(
+        home.path(),
+        home.path(),
+        &["__context-block", "--moment", "start"],
+    )
+    .env("LF_AGENT_CALLER", &caller)
+    .stdin(std::process::Stdio::null())
+    .output()
+    .unwrap();
+    assert_eq!(rows(), Vec::<bool>::new(), "the harness ran it: {hook:?}");
+
+    let issued = command(home.path(), home.path(), &rejected)
+        .env("LF_AGENT_CALLER", &caller)
+        .output()
+        .unwrap();
+    assert!(!issued.status.success(), "{issued:?}");
+    assert_eq!(rows(), [true]);
 }
 
 #[test]
@@ -710,13 +766,21 @@ fn empty_release_check_returns_through_process_completion() {
     let gh = bin.join("gh");
     std::fs::write(&gh, "#!/bin/sh\ncase \"$1 $2\" in '--version ') exit 0;; 'pr list') echo '[]'; exit 0;; esac\nexit 1\n").unwrap();
     std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let output = command(home.path(), repo.path(), &["repo", "release", "check"])
-        .env(
-            "PATH",
-            format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
-        )
-        .output()
-        .unwrap();
+    let database = home.path().join("loopflow.db");
+    drop(SqliteStore::new(&database).unwrap());
+    let parent = running_parent(&database);
+    let output = child(
+        home.path(),
+        repo.path(),
+        &["repo", "release", "check"],
+        &parent,
+    )
+    .env(
+        "PATH",
+        format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
+    )
+    .output()
+    .unwrap();
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -724,15 +788,18 @@ fn empty_release_check_returns_through_process_completion() {
         "{output:?}"
     );
     assert!(!stderr.contains("Error:"), "{output:?}");
-    assert_recorded_exit(home.path(), 1);
+    assert_recorded_exit(home.path(), &parent.0, 1);
 }
 
-fn assert_recorded_exit(home: &Path, code: i32) {
+fn assert_recorded_exit(home: &Path, parent: &LfProcessId, code: i32) {
     let conn = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let rows: Vec<(String, Option<i32>, bool, Option<String>)> = conn
-        .prepare("SELECT outcome,exit_code,completed_at IS NOT NULL,signal FROM processes")
+        .prepare(
+            "SELECT outcome,exit_code,completed_at IS NOT NULL,signal FROM processes
+             WHERE parent_lf_process_id=?1",
+        )
         .unwrap()
-        .query_map([], |row| {
+        .query_map([parent.as_str()], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .unwrap()
@@ -753,6 +820,7 @@ async fn command_failure_records_the_process_result() {
         .await
         .unwrap();
     let repo = TestRepo::new();
+    let parent = running_parent(&database);
     for args in [
         vec!["session", "rename", "missing", "Name"],
         vec![
@@ -764,29 +832,31 @@ async fn command_failure_records_the_process_result() {
             "--json",
         ],
     ] {
-        let result = command(home.path(), repo.path(), &args).output().unwrap();
+        let result = child(home.path(), repo.path(), &args, &parent)
+            .output()
+            .unwrap();
         assert_eq!(result.status.code(), Some(1), "{result:?}");
     }
     std::fs::write(repo.path().join("change.txt"), "retained work").unwrap();
     let lock = repo.path().join(".git/index.lock");
     std::fs::write(&lock, "retained lock").unwrap();
-    let result = command(home.path(), repo.path(), &["commit", "-m", "fixture"])
-        .output()
-        .unwrap();
+    let result = child(
+        home.path(),
+        repo.path(),
+        &["commit", "-m", "fixture"],
+        &parent,
+    )
+    .output()
+    .unwrap();
     assert_eq!(result.status.code(), Some(1), "{result:?}");
     assert!(String::from_utf8_lossy(&result.stderr).contains("index.lock"));
     assert_eq!(std::fs::read_to_string(lock).unwrap(), "retained lock");
     let conn = rusqlite::Connection::open(database).unwrap();
-    let row: (String, i32) = conn
-        .query_row("SELECT outcome,exit_code FROM processes", [], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
-        .unwrap();
-    assert_eq!(row, ("failed".into(), 1));
     let failed: i64 = conn
         .query_row(
-            "SELECT count(*) FROM processes WHERE outcome='failed' AND exit_code=1",
-            [],
+            "SELECT count(*) FROM processes
+             WHERE parent_lf_process_id=?1 AND outcome='failed' AND exit_code=1",
+            [parent.0.as_str()],
             |row| row.get(0),
         )
         .unwrap();
@@ -806,6 +876,27 @@ fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {
         }
     }
     command.args(args).current_dir(cwd).env("LF_HOME", home);
+    command
+}
+
+/// A running lf parent keeps its finished children, so their rows stay readable.
+fn running_parent(database: &Path) -> (LfProcessId, TraceId) {
+    let parent = (LfProcessId::new(), TraceId::new());
+    rusqlite::Connection::open(database)
+        .unwrap()
+        .execute(
+            "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
+            rusqlite::params![parent.0, parent.1],
+        )
+        .unwrap();
+    parent
+}
+
+fn child(home: &Path, cwd: &Path, args: &[&str], parent: &(LfProcessId, TraceId)) -> Command {
+    let mut command = command(home, cwd, args);
+    command
+        .env("LF_PROCESS_ID", parent.0.as_str())
+        .env("LF_TRACE_ID", parent.1.as_str());
     command
 }
 
@@ -834,13 +925,13 @@ struct Attached {
 }
 
 impl Attached {
-    fn start(home: &Path, repo: &Path, name: &str, preload: Option<&Path>) -> Self {
+    fn start(home: &Path, repo: &Path, name: &str) -> Self {
+        Self::spawn(command(home, repo, &["__telemetry-scorecard"]), home, name)
+    }
+
+    fn spawn(mut command: Command, home: &Path, name: &str) -> Self {
         let output = home.join(format!("{name}.output"));
         let log = std::fs::File::create(&output).unwrap();
-        let mut command = command(home, repo, &["__telemetry-scorecard"]);
-        if let Some(preload) = preload {
-            command.env("LD_PRELOAD", preload);
-        }
         let mut child = command
             .env("LF_TEST_ATTACHED", name)
             .env("LF_TEST_BINARY", env!("CARGO_BIN_EXE_lf"))
@@ -923,7 +1014,17 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
     };
     #[cfg(not(target_os = "linux"))]
     let preload: Option<std::path::PathBuf> = None;
-    let mut attached = Attached::start(home.path(), repo.path(), "interrupt", preload.as_deref());
+    let parent = running_parent(&database);
+    let mut command = child(
+        home.path(),
+        repo.path(),
+        &["__telemetry-scorecard"],
+        &parent,
+    );
+    if let Some(preload) = &preload {
+        command.env("LD_PRELOAD", preload);
+    }
+    let mut attached = Attached::spawn(command, home.path(), "interrupt");
     // SAFETY: this PID is our still-owned child, retained until wait completes.
     assert_eq!(
         unsafe { libc::kill(attached.child.id() as i32, libc::SIGINT) },
@@ -999,10 +1100,10 @@ async fn actual_agent_process_children_follow_attachment_handoff_but_not_provide
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
     write_scorecard(repo.path());
-    let original = Attached::start(home.path(), repo.path(), "original", None);
+    let original = Attached::start(home.path(), repo.path(), "original");
     let original_id = original.id.clone();
-    let replacement = Attached::start(home.path(), repo.path(), "replacement", None);
-    let restart = Attached::start(home.path(), repo.path(), "restart", None);
+    let replacement = Attached::start(home.path(), repo.path(), "replacement");
+    let restart = Attached::start(home.path(), repo.path(), "restart");
     let session_id = "agent-process-ownership-fixture";
     reserve_session(&store, session_id, repo.path());
     let first = store
@@ -1136,8 +1237,8 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
     write_scorecard(repo.path());
-    let original = Attached::start(home.path(), repo.path(), "original", None);
-    let replacement = Attached::start(home.path(), repo.path(), "replacement", None);
+    let original = Attached::start(home.path(), repo.path(), "original");
+    let replacement = Attached::start(home.path(), repo.path(), "replacement");
     let session = "native-client-transfer";
     reserve_session(&store, session, repo.path());
     let first = store
@@ -1419,26 +1520,22 @@ async fn inspection_records_one_completed_process_without_starting_work() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("LF_")
-            || key.to_string_lossy().starts_with("LOOPFLOW_")
-        {
-            command.env_remove(key);
-        }
-    }
-    let output = command
-        .args(["session", "list", "--all", "--json"])
-        .current_dir(home.path())
-        .env("LF_HOME", home.path())
-        .output()
-        .unwrap();
+    let parent = running_parent(&database);
+    let output = child(
+        home.path(),
+        home.path(),
+        &["session", "list", "--all", "--json"],
+        &parent,
+    )
+    .output()
+    .unwrap();
     assert!(output.status.success(), "{output:?}");
     let connection = rusqlite::Connection::open(&database).unwrap();
     let (count, completed): (i64, i64) = connection
         .query_row(
-            "SELECT count(*), count(completed_at) FROM processes WHERE outcome='succeeded'",
-            [],
+            "SELECT count(*), count(completed_at) FROM processes
+             WHERE parent_lf_process_id=?1 AND outcome='succeeded'",
+            [parent.0.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .expect("every parsed lf command has a process row");

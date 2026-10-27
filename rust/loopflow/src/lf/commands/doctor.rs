@@ -1,12 +1,12 @@
 //! Diagnose current storage, execution records and scheduled obligations.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::ops::cron::calendar;
 use anyhow::{anyhow, Result};
 use chrono::{Local, Utc};
-use time::{Duration, OffsetDateTime};
+use time::OffsetDateTime;
 
 use crate::lf::output::Colors;
 use crate::ops::{CronObligation, CronSource};
@@ -96,11 +96,7 @@ pub fn run(json: bool) -> Result<()> {
     match crate::ops::default_launch_agents_dir()
         .and_then(|directory| crate::ops::list_cron_obligations(&directory))
     {
-        Ok(obligations) => checks.push(check_continuity(
-            events.as_deref().unwrap_or(&[]),
-            &obligations,
-            now,
-        )),
+        Ok(obligations) => checks.push(check_continuity(&obligations, now)),
         Err(error) => checks.push(Check::fail(
             "continuity",
             format!("cannot read durable scheduler obligations: {error}"),
@@ -376,10 +372,10 @@ fn audit_at(events: &[LfProcess], obligations: &[CronObligation], now: i64) -> V
         return vec![Check::warn("continuity", "ledger is empty")];
     }
     if events.is_empty() {
-        return vec![check_continuity(events, obligations, now)];
+        return vec![check_continuity(obligations, now)];
     }
     vec![
-        check_continuity(events, obligations, now),
+        check_continuity(obligations, now),
         check_attribution(events),
         check_identity(events),
         check_lineage(events),
@@ -392,16 +388,9 @@ struct ExpectedInterval {
     end: i64,
 }
 
-fn check_continuity(events: &[LfProcess], obligations: &[CronObligation], now: i64) -> Check {
-    let gaps = ledger_gap_days(events, now);
+fn check_continuity(obligations: &[CronObligation], now: i64) -> Check {
     if obligations.is_empty() {
-        return Check::ok(
-            "continuity",
-            format!(
-                "no installed cron obligations; {}",
-                format_gap_summary(&gaps, obligations)
-            ),
-        );
+        return Check::ok("continuity", "no installed cron obligations");
     }
 
     let mut due = 0usize;
@@ -451,12 +440,11 @@ fn check_continuity(events: &[LfProcess], obligations: &[CronObligation], now: i
         ));
     }
 
-    let history = format_gap_summary(&gaps, obligations);
     if !missing.is_empty() {
         return Check::fail(
             "continuity",
             format!(
-                "{} current scheduled obligation(s) missing: {}; {history}",
+                "{} current scheduled obligation(s) missing: {}",
                 missing.len(),
                 missing.join("; ")
             ),
@@ -464,69 +452,8 @@ fn check_continuity(events: &[LfProcess], obligations: &[CronObligation], now: i
     }
     Check::ok(
         "continuity",
-        format!("{satisfied}/{due} current scheduled obligation(s) have receipts; {history}"),
+        format!("{satisfied}/{due} current scheduled obligation(s) have receipts"),
     )
-}
-
-fn ledger_gap_days(events: &[LfProcess], now: i64) -> Vec<time::Date> {
-    let days: BTreeSet<_> = events.iter().filter_map(|e| day_of(e.started_at)).collect();
-    let (Some(first), Some(last_event_day)) = (days.first(), days.last()) else {
-        return Vec::new();
-    };
-    let last = day_of(now)
-        .map(|today| today.max(*last_event_day))
-        .unwrap_or(*last_event_day);
-
-    let mut gaps = Vec::new();
-    let mut cursor = *first;
-    while cursor < last {
-        cursor += Duration::days(1);
-        if cursor < last && !days.contains(&cursor) {
-            gaps.push(cursor);
-        }
-    }
-    gaps
-}
-
-fn format_gap_summary(gaps: &[time::Date], obligations: &[CronObligation]) -> String {
-    if gaps.is_empty() {
-        return "no historical ledger gap-days".to_string();
-    }
-    let first_activation_day = obligations
-        .iter()
-        .filter_map(|obligation| day_of(obligation.activated_at))
-        .min();
-
-    let mut summaries = Vec::new();
-    let historical = if let Some(activation) = first_activation_day {
-        let (before_activation, after_activation): (Vec<_>, Vec<_>) =
-            gaps.iter().partition(|gap| **gap < activation);
-        if !before_activation.is_empty() {
-            summaries.push(format!(
-                "{} historical ledger gap-day(s) predate first cron activation {activation}: {}",
-                before_activation.len(),
-                format_gap_dates(&before_activation),
-            ));
-        }
-        after_activation
-    } else {
-        gaps.iter().collect()
-    };
-    if !historical.is_empty() {
-        summaries.push(format!(
-            "{} historical ledger gap-day(s) retained outside the current scheduled-receipt window: {}",
-            historical.len(),
-            format_gap_dates(&historical),
-        ));
-    }
-    summaries.join("; ")
-}
-
-fn format_gap_dates(gaps: &[&time::Date]) -> String {
-    gaps.iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 fn latest_due_interval(obligation: &CronObligation, now: i64) -> Option<ExpectedInterval> {
@@ -634,12 +561,6 @@ fn check_lineage(events: &[LfProcess]) -> Check {
             dangling.len()
         ),
     )
-}
-
-fn day_of(ts: i64) -> Option<time::Date> {
-    OffsetDateTime::from_unix_timestamp(ts)
-        .ok()
-        .map(|dt| dt.date())
 }
 
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
@@ -801,53 +722,11 @@ mod tests {
     }
 
     #[test]
-    fn august_ledger_gaps_predate_the_durable_cron_obligation() {
-        let mut rows = vec![row(timestamp("2026-08-03T12:00:00Z"), "completed")];
-        for day in 12..=23 {
-            rows.push(row(
-                timestamp(&format!("2026-08-{day:02}T12:00:00Z")),
-                "completed",
-            ));
-        }
-        rows.push(row(timestamp("2026-08-25T12:00:00Z"), "completed"));
-        let now = timestamp("2026-08-25T23:00:00Z");
-        let mut cron = obligation(timestamp("2026-08-22T16:00:00Z"));
-        let interval = latest_due_interval(&cron, now).unwrap();
-        cron.receipts
-            .push(receipt(&cron, interval.start + 60, CronSource::Scheduled));
-
-        let check = check_continuity(&rows, &[cron], now);
-
-        assert_eq!(check.status, Status::Ok, "{}", check.detail);
-        assert!(
-            check
-                .detail
-                .contains("8 historical ledger gap-day(s) predate first cron activation"),
-            "{}",
-            check.detail
-        );
-        for day in 4..=11 {
-            assert!(
-                check.detail.contains(&format!("2026-08-{day:02}")),
-                "{}",
-                check.detail
-            );
-        }
-        assert!(
-            check.detail.contains(
-                "1 historical ledger gap-day(s) retained outside the current scheduled-receipt window: 2026-08-24"
-            ),
-            "{}",
-            check.detail
-        );
-    }
-
-    #[test]
     fn a_missing_due_receipt_names_the_cron_home_interval_and_action() {
         let now = timestamp("2026-08-23T23:00:00Z");
         let cron = obligation(timestamp("2026-08-20T00:00:00Z"));
 
-        let check = check_continuity(&[], &[cron], now);
+        let check = check_continuity(&[cron], now);
 
         assert_eq!(check.status, Status::Fail, "{}", check.detail);
         for expected in [
@@ -875,7 +754,7 @@ mod tests {
         let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
         cron.wave.clear();
         cron.target_kind = CronTargetKind::Repository;
-        let check = check_continuity(&[], &[cron], now);
+        let check = check_continuity(&[cron], now);
         assert_eq!(check.status, Status::Fail);
         assert!(check.detail.contains("lf cron sync --repo"));
         assert!(check
@@ -888,7 +767,7 @@ mod tests {
         let now = timestamp("2026-08-23T23:00:00Z");
         let cron = obligation(now);
 
-        let check = check_continuity(&[], &[cron], now);
+        let check = check_continuity(&[cron], now);
 
         assert_eq!(check.status, Status::Ok, "{}", check.detail);
         assert!(
@@ -908,10 +787,7 @@ mod tests {
         cron.receipts
             .push(receipt(&cron, interval.start + 60, CronSource::Manual));
 
-        assert_eq!(
-            check_continuity(&[], &[cron.clone()], now).status,
-            Status::Fail
-        );
+        assert_eq!(check_continuity(&[cron.clone()], now).status, Status::Fail);
 
         let mut scheduled = receipt(&cron, interval.start + 120, CronSource::Scheduled);
         scheduled.outcome = CronOutcome::Failed;
@@ -919,37 +795,19 @@ mod tests {
         scheduled.error = Some("target failed".to_string());
         cron.receipts.push(scheduled);
 
-        assert_eq!(check_continuity(&[], &[cron], now).status, Status::Ok);
+        assert_eq!(check_continuity(&[cron], now).status, Status::Ok);
     }
 
     #[test]
-    fn a_later_receipt_restores_the_current_window_without_rewriting_history() {
+    fn a_later_receipt_restores_the_current_window() {
         let now = timestamp("2026-08-23T23:00:00Z");
-        let rows = vec![
-            row(timestamp("2026-08-03T12:00:00Z"), "completed"),
-            row(timestamp("2026-08-12T12:00:00Z"), "completed"),
-        ];
-        let original_rows = rows.clone();
         let mut cron = obligation(timestamp("2026-08-20T00:00:00Z"));
         let interval = latest_due_interval(&cron, now).unwrap();
-        assert_eq!(
-            check_continuity(&rows, &[cron.clone()], now).status,
-            Status::Fail
-        );
+        assert_eq!(check_continuity(&[cron.clone()], now).status, Status::Fail);
 
         cron.receipts
             .push(receipt(&cron, interval.start + 60, CronSource::Scheduled));
-        let check = check_continuity(&rows, &[cron], now);
-
-        assert_eq!(check.status, Status::Ok, "{}", check.detail);
-        assert_eq!(rows, original_rows);
-        assert!(
-            check
-                .detail
-                .contains("historical ledger gap-day(s) retained"),
-            "{}",
-            check.detail
-        );
+        assert_eq!(check_continuity(&[cron], now).status, Status::Ok);
     }
 
     #[test]
@@ -981,11 +839,8 @@ mod tests {
         let mut prior = receipt(&cron, interval.start + 60, CronSource::Scheduled);
         prior.target_kind = CronTargetKind::Skill;
         cron.receipts.push(prior);
-        assert_eq!(
-            check_continuity(&[], &[cron.clone()], now).status,
-            Status::Ok
-        );
+        assert_eq!(check_continuity(&[cron.clone()], now).status, Status::Ok);
         cron.receipts[0].source = CronSource::Triggered;
-        assert_eq!(check_continuity(&[], &[cron], now).status, Status::Fail);
+        assert_eq!(check_continuity(&[cron], now).status, Status::Fail);
     }
 }

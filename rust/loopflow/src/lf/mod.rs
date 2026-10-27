@@ -209,40 +209,15 @@ impl Cli {
         }
     }
 
-    /// Whether this invocation becomes a Process row. Provider hooks run once
-    /// per agent turn and Desktop polls once per refresh; nothing references
-    /// them, so recording each would make them most of the store. Previews,
-    /// planning and location reads, and hooks an earlier lf left behind are
-    /// effect-free reads too.
-    pub fn records_process(&self) -> bool {
-        if self.context || self.explain {
-            return false;
-        }
+    /// A provider hook: the harness runs it on the agent's behalf, once per
+    /// turn, event or tool call. Includes hooks an earlier lf left behind.
+    pub fn harness_callback(&self) -> bool {
         match &self.command {
-            Some(Commands::ContextBlock { .. }) => false,
-            Some(Commands::External(parts)) => !parts[0].starts_with("__"),
-            Some(Commands::Task { cmd }) => !matches!(
-                cmd,
-                TaskCommand::File { .. }
-                    | TaskCommand::Files { .. }
-                    | TaskCommand::Diff { .. }
-                    | TaskCommand::Location { .. }
-                    | TaskCommand::WatchFiles { .. }
-            ),
-            Some(Commands::Wave { cmd }) => !matches!(
-                cmd,
-                WaveCommand::Show { .. }
-                    | WaveCommand::Workflow {
-                        cmd: WaveWorkflowCommand::List { .. }
-                            | WaveWorkflowCommand::Show { .. }
-                            | WaveWorkflowCommand::Source { .. }
-                    }
-            ),
-            Some(Commands::Desktop { cmd }) => !matches!(
-                cmd,
-                DesktopCommand::View { .. } | DesktopCommand::Layout { save: false, .. }
-            ),
-            _ => true,
+            Some(
+                Commands::ContextBlock { .. } | Commands::PiEvent | Commands::ToolLifeline { .. },
+            ) => true,
+            Some(Commands::External(parts)) => parts[0].starts_with("__"),
+            _ => false,
         }
     }
 

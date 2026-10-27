@@ -88,15 +88,12 @@ fn ci_remains_a_read_only_home_report_outside_a_checkout() {
     let sessions: i64 = db
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
-    let completed: i64 = db
-        .query_row(
-            "SELECT count(*) FROM processes WHERE outcome='succeeded'",
-            [],
-            |row| row.get(0),
-        )
+    let processes: i64 = db
+        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
         .unwrap();
     assert_eq!(sessions, 0);
-    assert_eq!(completed, 1);
+    // Nothing references the finished read, so its exit forgets it.
+    assert_eq!(processes, 0);
 }
 
 #[test]

@@ -306,10 +306,13 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "automate", issue, enabled ? "on" : "off"], cwd)
     }
 
+    // Task content reads and saves address the Task by issue and run outside its
+    // checkout, so a Desktop poll is never counted as the Task's execution.
+
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
-    public func taskChanges(issue: String, base: String = "parent", cwd: String?) async throws -> TaskChangesSnapshot {
-        let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], cwd)
+    public func taskChanges(issue: String, base: String = "parent") async throws -> TaskChangesSnapshot {
+        let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], nil)
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
@@ -436,8 +439,7 @@ public struct RegistryQuery: Sendable {
         issue: String,
         path: String?,
         base: String = "parent",
-        draft: String? = nil,
-        cwd: String?
+        draft: String? = nil
     ) async throws -> TaskDiffSnapshot {
         var args = ["task", "diff", issue]
         if let path { args.append(path) }
@@ -445,35 +447,34 @@ public struct RegistryQuery: Sendable {
         let stdout: String
         if let draft {
             args.append("--draft")
-            stdout = try await runWithInput(args, cwd, draft)
+            stdout = try await runWithInput(args, nil, draft)
         } else {
-            stdout = try await run(args, cwd)
+            stdout = try await run(args, nil)
         }
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
     }
 
     /// One page of immediate directory entries in the Task checkout.
     public func taskFiles(issue: String, directory: String, cursor: String? = nil,
-                          showIgnored: Bool = false, cwd: String?) async throws -> TaskDirectory {
+                          showIgnored: Bool = false) async throws -> TaskDirectory {
         var args = ["task", "files", issue, directory.isEmpty ? "." : directory, "--json"]
         if let cursor { args += ["--cursor", cursor] }
         if showIgnored { args.append("--show-ignored") }
-        return try Self.decode(TaskDirectory.self, from: try await run(args, cwd))
+        return try Self.decode(TaskDirectory.self, from: try await run(args, nil))
     }
 
     /// Current contents of one file, constrained to the Task worktree.
     public func taskFile(
         issue: String,
-        path: String,
-        cwd: String?
+        path: String
     ) async throws -> TaskFileSnapshot {
-        let stdout = try await run(["task", "file", issue, path, "--json"], cwd)
+        let stdout = try await run(["task", "file", issue, path, "--json"], nil)
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 
-    public func saveTaskFile(issue: String, path: String, revision: String, content: String,
-                             cwd: String?) async throws -> TaskFileSave {
-        let stdout = try await runWithInput(["task", "save", issue, path, "--revision", revision, "--json"], cwd, content)
+    public func saveTaskFile(issue: String, path: String, revision: String,
+                             content: String) async throws -> TaskFileSave {
+        let stdout = try await runWithInput(["task", "save", issue, path, "--revision", revision, "--json"], nil, content)
         return try Self.decode(TaskFileSave.self, from: stdout)
     }
 

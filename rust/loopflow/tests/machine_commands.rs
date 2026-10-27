@@ -771,10 +771,23 @@ fn transport_options_require_machine_and_retired_commands_are_gone() {
 fn remote_command_exit_is_retained_in_local_process_history() {
     let fixture = Machines::new();
     assert_success(&fixture.run(&["machine", "add", "mini"]));
-    let output = fixture.run(&["--machine", "mini", "fail"]);
+    let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
+    // A running parent keeps its finished child, so the exit stays readable.
+    let parent = loopflow::id::LfProcessId::new();
+    let trace = loopflow::id::TraceId::new();
+    db.execute(
+        "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
+        rusqlite::params![parent, trace],
+    )
+    .unwrap();
+    let output = fixture
+        .command(&["--machine", "mini", "fail"])
+        .env("LF_PROCESS_ID", parent.as_str())
+        .env("LF_TRACE_ID", trace.as_str())
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(42));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("Error:"));
-    let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
     let outcome: (String, i32, bool) = db.query_row(
         "SELECT outcome, exit_code, completed_at IS NOT NULL FROM processes WHERE command LIKE '%--machine%fail%' ORDER BY started_at DESC LIMIT 1", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     ).unwrap();

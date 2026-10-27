@@ -144,10 +144,11 @@ output, dead process receipts, every database backup but the newest, and
 captures and logs older than `--keep-days` (7). It prunes the store to facts
 (provider stream lines stay in `runs/<capture>/events.jsonl`, and usage keeps
 one row per provider turn), closes Processes whose OS process is gone without
-recording an exit, and expires unreferenced inspection Processes older than
-seven days; Loopflow also does this hourly. Provider hooks (`lf __context-block`)
-and Desktop's file and diff polls are never recorded as Processes. It then
-rotates `~/.lf` to its budget. Set the budget in `~/.lf/config.yaml`:
+recording an exit, and forgets finished Processes nothing needs; Loopflow also
+does this hourly. Every lf process is listed while it runs. At exit its row goes
+unless an agent issued it, its parent is still running, or a child, Session event,
+Graph or step, Workflow, Wave activation, CI repair, transport or relocation
+references it. It then rotates `~/.lf` to its budget. Set the budget in `~/.lf/config.yaml`:
 
 ```yaml
 disk_budget: 20G                       # the default

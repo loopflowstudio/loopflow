@@ -10,6 +10,7 @@ use loopflow::ops::{
 };
 use loopflow::work::task::PrMergeMode;
 use loopflow_test_support::TestRepo;
+use rusqlite::OptionalExtension;
 use support::{
     codex_app_server_script, counting_open_script, presentation_attempts, register_task_with_pr,
     EnvGuard,
@@ -1857,15 +1858,17 @@ fi"#;
         }
         assert!(!repair_launches.exists());
         let conn = rusqlite::Connection::open(&database).unwrap();
-        let initial: (String, i64) = conn
+        let initial: Option<(String, i64)> = conn
             .query_row(
                 "SELECT id,exit_code FROM processes WHERE parent_lf_process_id IS NULL",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
+            .optional()
             .unwrap();
         // A Graph stopped short of its end exits 3, which no caller retries.
-        assert_eq!(initial.1, if graph { 3 } else { 0 });
+        // A direct land nothing references is forgotten at exit.
+        assert_eq!(initial.as_ref().map(|row| row.1), graph.then_some(3));
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
@@ -1984,7 +1987,8 @@ fi"#;
                     );
                 });
             assert_ne!(
-                owner, initial.0,
+                Some(&owner),
+                initial.as_ref().map(|row| &row.0),
                 "repair belongs to the later reconcile process"
             );
             let parent: (Option<String>, i64) = conn

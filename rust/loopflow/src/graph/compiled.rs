@@ -32,6 +32,8 @@ pub struct GraphNode {
     /// Literal skill name, operation, or XOR router.
     pub label: String,
     pub kind: GraphNodeKind,
+    /// Graph processes recorded before 0.14.17 stored this as `human`.
+    #[serde(alias = "human")]
     pub interactive: bool,
     /// Key of the earlier node this deciding occurrence can return to.
     pub returns_to: Option<u32>,
@@ -589,6 +591,14 @@ pub fn project_position(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_graph_process_recorded_before_0_14_17_still_parses() {
+        // `lf graph ship` as 0.14.16 recorded it, before `human` became `interactive`.
+        let recorded = r#"{"name":"ship","steps":[{"key":0,"id":null,"label":"gate","kind":"skill","human":false,"returns_to":null,"sources":["ship"],"paths":[]}],"interactions":{"stages":[],"transitions":[]}}"#;
+        let graph: super::CompiledGraph = serde_json::from_str(recorded).unwrap();
+        assert!(!graph.steps[0].interactive);
+    }
+
     #[test]
     fn template_resolution_preserves_composition_and_execution() {
         use super::{graph_catalog, CompiledGraph, GraphCompositionItem};

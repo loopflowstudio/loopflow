@@ -1,6 +1,7 @@
 # LOO-628: `lf resume` moves a conversation to another account or Machine
 
-Status: design reviewed with Jack Heart 2026-10-26 (concept review); ready to implement. Product direction is Jack Heart's
+Status: design reviewed with Jack Heart 2026-10-26 (concept review). Slices 1
+and 2 built (2026-10-26); slice 3 (Task move) unbuilt. Product direction is Jack Heart's
 (LOO-610 conversation, 2026-10-26) and is binding; mechanisms below are chosen
 here and reversible.
 
@@ -303,6 +304,15 @@ second Task-to-Machine command beside `lf task move --machine`.
    isolated Claude and Codex conversation pinned to `first`, resolved with
    `--account …=second`, resumes the same id with the transcript in
    `second`'s home and the pin moved; a named login that cannot launch fails.
+   Built 2026-10-26 (c3c298cf4c): `ProviderAccountRoute::adopt` +
+   `transcript::copy_between`, `resume_requested_session` and the harness
+   session-dropping branches deleted, `SessionRecord.account` with DTO
+   fixtures. `-a` narrowing needed no new code: resolution is already
+   per-provider, so a Claude login on the same email never competes for a
+   Codex launch (asserted in the test). Remaining: the unit test
+   (`naming_another_login_moves_an_isolated_conversation_with_its_transcript`)
+   covers Codex only; a Claude counterpart is unwritten, though the Machine
+   move test places a Claude transcript through the same copy.
 2. **Session move.** `send` / `receive` / `Move` (task null) with refusal
    paths; native transcript placement with the log fallback; `ssh::request`
    stdin; relay in the `--machine` branch; old-client message; connect-by-id
@@ -314,9 +324,12 @@ second Task-to-Machine command beside `lf task move --machine`.
    `lf resume <id>` on the source via `agent_sessions.moved_to_machine_id`,
    the old client's "moved to" line, and `lf machine use --session` moving the
    primary (`complete_primary_session` deleted). Remaining in this slice:
-   the `conversation.md` fallback when M's provider refuses the transcript;
+   the `conversation.md` fallback when M's provider refuses the transcript
+   (`moves.rs` has no `conversation_log` use yet);
    `lf resume --task X` on S following a Task Session moved alone; the
-   account-move line on the old client; cloning when M lacks the repository.
+   account-move line on the old client (slice 1 step 4; no such message exists
+   yet); cloning when M lacks the repository (`check_out` only reuses or adds
+   a worktree of an existing checkout).
 3. **Task move.** `lf task move --machine`, `Move.task` (ownership marker,
    Workflow position and history), delete `lf machine use --task`;
    docs/reference.
@@ -324,8 +337,9 @@ second Task-to-Machine command beside `lf task move --machine`.
 ## Done when (gate, headless)
 
 - `cargo test -p loopflow provider_account`: isolated move adopts the
-  transcript for Claude and Codex; missing transcript errors; `-a claude`
-  narrows a bare email shared by a Codex login.
+  transcript for Claude and Codex (Codex exists; Claude unwritten); missing
+  transcript errors; a login on the same email under the other provider never
+  competes (exists).
 - `cargo test -p loopflow --test integration machine_commands` on
   `preview_machines()`:
   - `resume_moves_a_session_to_another_machine`: dirty worktree → commit on

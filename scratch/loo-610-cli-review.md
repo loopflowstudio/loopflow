@@ -692,3 +692,6 @@ Daytona/Modal land; then it names them.
   slugs moved to the staged pages; `docs/index.md` map rewritten.
   Checks: docs integration tests 5/5, website suite 72/72, every documented
   `lf` path resolves against the branch build. Remaining: gate, publish.
+- 2026-10-26 compress: `snapshot_task_detail` destructures the Workflow
+  selection; `docs/config.md` teaches `lf self sync-skills`. Checks: clippy,
+  `--lib local_planning::unconfigured_repository_runs` pass. Remaining: gate.

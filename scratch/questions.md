@@ -30,8 +30,6 @@
   replaced wording is in git (`docs/getting-started.md`, `troubleshooting.md`
   at main). The README skill link is absolute because `docs/index.md` shares
   the README opening verbatim (`test_readme_index_sync`).
-- **Not fixed, pre-existing:** `docs/config.md` teaches `lf sync-skills`, but
-  `self sync-skills` is hidden, so the shortcut does not resolve.
 - **Proposed Wave memory updates (read-only here):** `.lf/wave/{infrastructure,
   product,growth,intelligence}/MEMORY.md` link `docs/lf.md`/`planning.md`/
   `subscriptions.md`; repoint to `work.md`, `ops.md`, `lf-reference.md`.

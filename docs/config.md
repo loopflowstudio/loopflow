@@ -615,8 +615,8 @@ Codex uses captured instructions. Both retain the original resource directory;
 resources removed with the bundle are not preserved.
 
 ```bash
-lf sync-skills --yes       # personal skills and builtin skills/Graphs → home
-lf sync-skills --repo      # repository skills/Graphs → this checkout
+lf self sync-skills --yes   # personal skills and builtin skills/Graphs → home
+lf self sync-skills --repo  # repository skills/Graphs → this checkout
 ```
 
 Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository exports

@@ -22,7 +22,9 @@ Otherwise the repair is pushed on top (`push_with_upstream_if_needed`). Both `re
 Test: `final_preparation_keeps_published_history_and_merges_main_only_on_conflict` (was `…when_the_base_changes`,
 which assumed a sync on every land).
 
-## 3. Flaky tests — investigated; nothing left to delete
+## 3. Flaky tests — investigated; nothing left to quarantine
+The brief asks to quarantine the report's cross-PR flaky tests. The evidence below finds each one fixed, deleted,
+a real failure, or a production bug, so this PR quarantines none. Review should confirm that reading.
 CI logs since Sep 29 (about 280 job logs) give these causes:
 - `session_steers::public_context_capability…`: partial `handoff.json` read. Fixed by #1731 (tmp file + rename).
 - `install::artifact_tests::a_settled_install…`: running binary pruned before it was observable (Oct 8–9).
@@ -33,7 +35,7 @@ CI logs since Sep 29 (about 280 job logs) give these causes:
   are no longer in the tree.
 - Swift 20-min timeouts: the hung tests (Git planning, Navigation preview/Apply) have been deleted. Since then there
   has been one hang, `AppAppearanceTests` "window modifier follows preview, Cancel and Apply" (Oct 25). The PR step
-  limit is now 5 min and `test_desktop.sh` names unfinished tests. One occurrence is below the deletion bar.
+  limit is 5 min (already on main) and `test_desktop.sh` names unfinished tests. One occurrence is below the deletion bar.
 - Still open, outside this PR: `database is locked` / `SQLITE_BUSY_SNAPSHOT` (extended 517) in waited landing
   (3 runs under its old name), `work_watch` and `store_contention`. It is a production bug, so the tests should
   stay. Likely cause: deferred `conn.transaction()` read→write upgrades, which `busy_timeout` never retries
@@ -45,7 +47,7 @@ CI logs since Sep 29 (about 280 job logs) give these causes:
   anchors rewritten, AGENTS.md included; release notes left as shipped.
 - Built: `docs/lf-reference.md` commits only its preamble; `website/dev.py sync-docs` appends `lf help --all --json`.
   `reference_matches_the_compiled_cli` deleted. AGENTS.md, TESTING.md and `.lf/skills/pr-message.md` updated.
-- Built: `ops/task.rs` 6,841 → 2,680 lines. PR delivery moved to `task/delivery.rs`, read-only views to
+- Built: `ops/task.rs` 6,841 → 2,691 lines. PR delivery moved to `task/delivery.rs`, read-only views to
   `task/snapshot.rs` and tests to `task/tests.rs`; callers keep their `ops::task::` paths through re-exports.
   `ops/human_session.rs` 2,412 → 1,579 lines, with all its tests in `human_session/tests.rs`. Its record/launch
   production seam stays: one file for one owner was enough.
@@ -78,3 +80,4 @@ After syncing main (70825b1e8a): `scripts/check_architecture.py` now skips out-o
 Compress after sync: inlined `render_lf_reference` into `website/dev.py::_generate_lf_reference`; `_generate_lf_reference` on a temp copy → 2,428-line reference from installed lf. No other reductions found.
 Checkpoint 8d6fd07572 (all four items committed): `cargo fmt --check` clean; earlier focused checks still apply, no code changed since.
 Compress after checkpoint: `cargo clippy --all-targets -D warnings` and `cargo fmt --check` clean; #1743's architecture-reference edit carried into the kept inventory; only a doc-comment rewrap in `land.rs`.
+Realign after merging #1742 (06a199b4b3): it touches none of the split or gated files; no code change, earlier checks still apply.

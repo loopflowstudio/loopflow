@@ -1,6 +1,6 @@
 # LOO-643: Repair retained Process ancestry without losing Session history
 
-Status: slices 1–5 implemented and synced with main (2026-10-27); gate and ship remain. Jack Heart authorized an end-to-end
+Status: slices 1–5 implemented and synced with main; gate passed (2026-10-27); PR and land remain. Jack Heart authorized an end-to-end
 autonomous fix, local hotfix and patch release. No ad-hoc SQL writes to the live store.
 
 ## Problem
@@ -181,7 +181,8 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
 3. Done: doctor's remedy count reads `unrecorded_agent_ancestry`.
 4. Done: sync with main (#1718).
 5. Done: prune help and troubleshooting name the ancestry repair (concept review).
-6. Remaining: gate, PR, land. The root operator owns the shared patch release,
+6. Done: gate (2026-10-27).
+7. Remaining: PR, land. The root operator owns the shared patch release,
    `lf install`, and the live `lf monitor prune` readback after merge (Jack's steer, 2026-10-27).
 
 ## Done when
@@ -207,4 +208,6 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
   never reaches the resume claim, so it proves nothing here. Resuming Jack's MTG-159
   conversation is his call; the store test carries the resumability proof.
 
-Check results (through `24ea687e7e`: slice 5, `start_record` cwd compression, main sync with #1731): `cargo test -p loopflow --lib -- journal doctor harness::agent_process store::sqlite::processes retention session_record::runtime` → 86 passed; clippy `--all-targets` clean; full lib and integration suites deferred to gate.
+Gate (2026-10-27, through `78a68913cc`, host load ~150–310): `cargo fmt --all -- --check` ok; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib` 2150 passed before the run hit its own 90-minute tool deadline (SIGTERM), and the 113 failed/unfinished tests rerun with `--exact` → 103 passed, 10 ignored, 0 failed (the 78 earlier failures, in untouched chapter/store/status/graph tests, left no panic output); `cargo test -p loopflow --test process_ownership_tests --test session_lifecycle_tests` → 12 + 29 passed. Full matrix stays with CI.
+
+LOO-647 (in flight) moves `retention::prune` into `top::run_prune`/`ProcessPruneReport`; Jack Heart sent its worker this repair's `would_repair`/`repaired`/`retained` contract so one prune path keeps both. Root owns the installed dry-run/repair/no-op/history acceptance.

@@ -363,7 +363,7 @@ fn sync_conflict_returns_error() {
     assert_eq!(
         loopflow::git::intervention_state(repo.path()).unwrap(),
         Some("merge"),
-        "the owned conflict must remain available to the recovery child"
+        "the owned conflict must remain for whoever continues it"
     );
 }
 

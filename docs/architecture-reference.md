@@ -1371,8 +1371,8 @@ the tracked source tree.
 - Bind is write-once, same-target idempotent and valid for done Tasks. CLI states
   the permanent target and writes; Desktop confirms. Historical attribution and
   the ownership log survive assignment and attachment changes.
-- OS locks cover their named critical sections. Sync admits only its exact
-  recovery child; causal identity does not bypass Git or PR mutation authority.
+- OS locks cover their named critical sections. Sync fences agents only while it
+  merges or publishes; causal identity does not bypass Git or PR mutation authority.
 - Store copies preserve evidence without acquiring process authority. Promotion
   and historical-writer continuity remain separate proof obligations.
 - Reads are Machine-local unless explicitly routed by `lf --machine`. Indexed summaries

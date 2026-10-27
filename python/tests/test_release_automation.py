@@ -214,9 +214,7 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     assert "| crontab -" in bootstrap
     assert "DOPPLER_TOKEN" not in bootstrap
     assert "loopflow-release-publisher" in bootstrap
-    assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
-        "| crontab -"
-    )
+    assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index("| crontab -")
 
     public_contract = "\n".join(
         [
@@ -282,8 +280,10 @@ esac
     for tool in ("jq", "git"):
         os.symlink(shutil.which(tool), tools / tool)
     (home / "crontab").write_text("*/5 * * * * unrelated-job\n")
+    agents = home / "Library/LaunchAgents"
+    agents.mkdir(parents=True)
     for job in ("telemetry-daily", "release-run"):
-        _executable(home / f"Library/LaunchAgents/loopflow.cron.infrastructure.{job}.plist", "")
+        (agents / f"loopflow.cron.infrastructure.{job}.plist").touch()
 
     env = {
         "HOME": str(home),
@@ -330,9 +330,7 @@ def test_cron_bootstrap_installs_jobs_for_a_wave_running_on_its_local_default(tm
 def test_cron_bootstrap_keeps_launchd_jobs_when_the_crontab_write_fails(tmp_path):
     repo, env = _cron_host(tmp_path, wave_machine=None)
     tools = Path(env["PATH"].split(":")[0])
-    crontab = tools / "crontab"
-    crontab.unlink()
-    _executable(crontab, 'if [ "$1" = -l ]; then cat "$HOME/crontab"; else exit 1; fi\n')
+    _executable(tools / "crontab", 'if [ "$1" = -l ]; then cat "$HOME/crontab"; else exit 1; fi\n')
 
     result = _bootstrap(repo, env)
 

@@ -1,7 +1,7 @@
 # LOO-629: cron bootstrap on the local default Machine
 
 Status (2026-10-27): script repair and cutover reorder committed; repair PR
-opened; host cutover pending after landing.
+#1732 open; host cutover pending after landing.
 
 ## Done in this branch
 - `scripts/bootstrap-cron-host.sh`: `.wave.machine == null` (no Wave Machine
@@ -32,7 +32,7 @@ Machine reading it". No new flag or explicit-local requirement.
   a rerun repairs it.
 
 ## Remaining live acceptance
-Land the new repair PR (#1711 merged; it is history); main's script still
+Land repair PR #1732 (#1711 merged; it is history); main's script still
 exits 1 on the null placement until it lands.
 
 1. Dependency resolved 2026-10-27: v0.14.18 published 14:21Z and the gate

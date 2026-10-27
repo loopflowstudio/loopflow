@@ -755,18 +755,13 @@ fn empty_release_check_returns_through_process_completion() {
     let database = home.path().join("loopflow.db");
     drop(SqliteStore::new(&database).unwrap());
     let parent = RunningParent::insert(&database);
-    let output = child(
-        home.path(),
-        repo.path(),
-        &["release", "check"],
-        &parent,
-    )
-    .env(
-        "PATH",
-        format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
-    )
-    .output()
-    .unwrap();
+    let output = child(home.path(), repo.path(), &["release", "check"], &parent)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", bin.display()),
+        )
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(

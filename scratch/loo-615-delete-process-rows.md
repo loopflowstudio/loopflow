@@ -191,6 +191,11 @@ with `nil` cwd; `graph list --processes --for-task` names the Task.
   that `lf work watch` emits no new frame for an unchanged Task while
   `lf task diff` runs 20 times from outside the checkout. If it does, the fix
   is in watch-frame dedup, not a new denylist.
+  Gate (2026-10-27): `lf monitor work --json --watch` in a fresh Task checkout
+  while 20 `lf task diff` ran from `/tmp`. No Task or Wave frame was sent, since
+  the fingerprint dedup at `work_watch.rs:1101` absorbs the bumps. `activity`
+  sent a frame for each running `task diff`, which is the intended live tree.
+  Afterwards the only `processes` row was the watch itself.
 - **Exit latency.** One extra `DELETE` with indexed `NOT EXISTS` probes inside
   the existing terminal transaction stays inside `receipt_wait`.
   `tests/store_contention.rs` keeps passing unchanged.

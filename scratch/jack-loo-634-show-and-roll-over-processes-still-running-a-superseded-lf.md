@@ -57,7 +57,7 @@ busy turns).
 - Graph steps are pinned through `LF_BIN` (`os_process::resolve_lf_binary`), and the
   Graph process holds its cursor in memory. Stopping a Graph and relaunching its
   route replays effects; architecture forbids resuming a stopped Graph. Moving a Graph
-  is therefore blocked on a product choice (see questions.md), not on code.
+  is therefore outside this Task (see Concept review).
 - Classification and stop are separated by every earlier resume (seconds each), so
   a person can start a turn or attach a terminal in between. Rollover re-checks the
   pid's live evidence and the stay rules right before each stop and lists a changed
@@ -71,6 +71,16 @@ busy turns).
   helper activation and the CLI-only set carries no app artifact.
 - Attached terminals stay listed ("detach or close, then roll over again") rather
   than being cut off.
+
+## Concept review (2026-10-27, headless)
+
+One action (`rollover`), three concepts (running binary, selected install, store
+floor), one per-owner Disposition; surfaces reuse doctor, `monitor ps` and promote.
+Nothing to rename or merge. The Outcome's "Graph steps at a boundary" is settled by
+two accepted constraints, not left open: the Task keeps LOO-107 pinning (steps run on
+the Graph's `LF_BIN`), and architecture forbids resuming a stopped Graph. A Graph
+can't change binary without relaxing one of them, so Graphs are listed as staying;
+a follow-up Task may choose which constraint to relax. No implement direction.
 
 ## Exclusions
 

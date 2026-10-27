@@ -30,6 +30,8 @@ Machine reading it". No new flag or explicit-local requirement.
 - Gate path `~/.lf-machine/install/gates/1/lf` is what lf re-execs to
   (`installation.rs` `GATE_DIRECTORY`); a gate version change fails loudly and
   a rerun repairs it.
+- Second pass (after the reorder and fixture commits): nothing new to change;
+  CRON_HOST.md matches the script; no open product choice.
 
 ## Remaining live acceptance
 Land repair PR #1732 (#1711 merged; it is history); main's script still

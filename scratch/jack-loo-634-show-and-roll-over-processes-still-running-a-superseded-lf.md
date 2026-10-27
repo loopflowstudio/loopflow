@@ -194,7 +194,7 @@ untouched, no resume or replay) are each a listed disposition. Nothing to change
   per step; branch current with origin/main; no open policy choice.
 - 2026-10-27 realign (recovery steer): no rerun; origin/main still f66d7acdee, `os_process.rs:241` and `graph.rs:736` match the plan, PR #1729 open and mergeable with no failing checks.
 - 2026-10-27 publish: `lf sync` no-op (origin/main f66d7acdee); `lf pr publish` refreshed #1729 copy to the Graph-boundary slice; no rerun.
-- 2026-10-27 gate (HEAD 53b5db9362, origin/main f66d7acdee): fmt, clippy, `--lib -- rollover executable_is_the_running_file restore` (12), CLI reference (1), `integration doctor_tests` (6) pass; Docker proof reused from realign (no Rust change since), CI `task-installation` owns it on submit.
+- 2026-10-27 gate (HEAD 53b5db9362, origin/main f66d7acdee): fmt, clippy, `--lib -- rollover executable_is_the_running_file restore` (12), CLI reference (1), `integration doctor_tests` (6) pass; Docker proof not rerun (later commits touch only rollover rendering, which it does not exercise); CI `task-installation` owns it on submit.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).
 

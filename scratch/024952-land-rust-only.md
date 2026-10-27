@@ -27,6 +27,8 @@ One rule (concept review, 2026-10-27, built): `pr::pr_requires_resync(&PrMergeOb
 `required-integration`) and the release wait (`NeedsIntegration`). Queue membership → no; DIRTY → yes; BEHIND only
 without a queue; an unarmed PR on a queue evicted for `merge_conflict` → yes. `merge_needs_integration` deleted, so a
 repair disarm on a queue with BEHIND no longer tells the repair loop to integrate. `decide_merge` takes the observation.
+Second concept pass (after #1741/#1745): `lf land`, the watcher and the release wait still read the one rule; a
+queue eviction for `merge_conflict` surfaces as a failing check and the following `lf land` resyncs. Nothing to change.
 
 ## 3. Flaky tests — investigated; nothing left to quarantine
 The brief asks to quarantine the report's cross-PR flaky tests. The evidence below finds each one fixed, deleted,
@@ -89,3 +91,4 @@ Compress after checkpoint: `cargo clippy --all-targets -D warnings` and `cargo f
 Realign after merging #1742 (06a199b4b3): it touches none of the split or gated files; no code change, earlier checks still apply.
 One resync rule: `grep merge_needs_integration` empty; `cargo clippy --all-targets -D warnings` clean; `--lib ops::pr` (incl. `pr_landing`) → 68 passed, plus `release::…merge_request_removals_decide_landing_and_release_alike`; `land_tests::` → 29/30 under machine load, the miss (`waited_land_retains_intent…`, 30 s fixture deadline) passed alone with and without this change.
 Compress: `ReleasePrWait::NeedsIntegration` carries no state (an eviction's `merge_state` misnamed the cause); `cargo clippy --all-targets -D warnings` clean, `--lib ops::release` → 45 passed.
+Realign after merging #1741/#1745 (26677d6f1e, no resync files touched): `grep merge_needs_integration` empty; `cargo clippy --all-targets -D warnings` clean; `--lib ops::pr` → 66/67, the miss (`pr_landing::…unchanged_incident_gets_one_repair…`, main's backoff-timing assertion at :2011, scripted observations) passed alone.

@@ -226,49 +226,45 @@ impl Provider {
 
     /// What this provider rents for the hardware, at its published price.
     /// Where it sells fixed shapes (RunPod CPU flavors, EC2 instance types,
-    /// Droplet sizes),
-    /// the smallest one holding the hardware.
+    /// Droplet sizes), the smallest one holding the hardware.
     pub fn offer(self, hardware: &Hardware) -> Result<Offer, String> {
         let vcpus = i64::from(hardware.vcpus);
         let memory = i64::from(hardware.memory_gb);
-        let sized = |vcpu: i64, gib: i64, extra: i64| Offer {
-            machine_type: None,
-            usd_per_hour: Usd::from_micros(vcpu * vcpus + gib * memory + extra),
+        let offer = |machine_type: Option<String>, micros: i64| Offer {
+            machine_type,
+            usd_per_hour: Usd::from_micros(micros),
         };
+        let per_size = |vcpu: i64, gib: i64, extra: i64| vcpu * vcpus + gib * memory + extra;
         let no_shape = || format!("{self} rents nothing with {hardware}");
         match (self, hardware.gpu.as_deref()) {
             (Self::Daytona | Self::Digitalocean | Self::Fly, Some(_)) => Err(format!(
                 "{self} rents no GPUs; --gpu works on runpod, aws and modal"
             )),
-            (Self::Daytona, None) => Ok(sized(
-                50_400,
-                16_200,
-                108 * i64::from(hardware.disk_gb.saturating_sub(5)),
+            (Self::Daytona, None) => Ok(offer(
+                None,
+                per_size(
+                    50_400,
+                    16_200,
+                    108 * i64::from(hardware.disk_gb.saturating_sub(5)),
+                ),
             )),
-            (Self::Modal, gpu) => {
-                let mut offer = sized(70_956, 24_012, 0);
-                if let Some(gpu) = gpu {
-                    let (_, name, usd) = find_gpu(MODAL_GPUS, self, gpu)?;
-                    offer.machine_type = Some(name.to_string());
-                    offer.usd_per_hour = offer.usd_per_hour + Usd::from_micros(usd);
-                }
-                Ok(offer)
+            (Self::Modal, None) => Ok(offer(None, per_size(70_956, 24_012, 0))),
+            (Self::Modal, Some(gpu)) => {
+                let (_, name, usd) = find_gpu(self, MODAL_GPUS, |row| row.0, gpu)?;
+                Ok(offer(
+                    Some(name.to_string()),
+                    per_size(70_956, 24_012, *usd),
+                ))
             }
-            (Self::Fly, None) => Ok(sized(29_167, 8_333, FLY_IPV4_MICROS)),
+            (Self::Fly, None) => Ok(offer(None, per_size(29_167, 8_333, FLY_IPV4_MICROS))),
             (Self::Runpod, None) => RUNPOD_CPUS
                 .iter()
                 .find(|(_, gib_per_vcpu, _)| gib_per_vcpu * vcpus >= memory)
-                .map(|(flavor, _, usd)| Offer {
-                    machine_type: Some((*flavor).to_string()),
-                    usd_per_hour: Usd::from_micros(usd * vcpus),
-                })
+                .map(|(flavor, _, usd)| offer(Some((*flavor).to_string()), usd * vcpus))
                 .ok_or_else(no_shape),
             (Self::Runpod, Some(gpu)) => {
-                let (_, id, usd) = find_gpu(RUNPOD_GPUS, self, gpu)?;
-                Ok(Offer {
-                    machine_type: Some(id.to_string()),
-                    usd_per_hour: Usd::from_micros(usd),
-                })
+                let (_, id, usd) = find_gpu(self, RUNPOD_GPUS, |row| row.0, gpu)?;
+                Ok(offer(Some(id.to_string()), *usd))
             }
             (Self::Aws, None) => AWS_CPUS
                 .iter()
@@ -277,37 +273,26 @@ impl Provider {
                     let (size_vcpus, size) = AWS_SIZES
                         .iter()
                         .find(|(size_vcpus, _)| *size_vcpus >= vcpus)?;
-                    (gib_per_vcpu * size_vcpus >= memory).then(|| Offer {
-                        machine_type: Some(format!("{family}.{size}")),
-                        usd_per_hour: Usd::from_micros(usd * size_vcpus),
-                    })
-                })
-                .ok_or_else(no_shape),
-            (Self::Digitalocean, None) => DIGITALOCEAN_SIZES
-                .iter()
-                .filter(|(_, size_vcpus, size_gib, _)| *size_vcpus >= vcpus && *size_gib >= memory)
-                .min_by_key(|(_, _, _, usd)| *usd)
-                .map(|(slug, _, _, usd)| Offer {
-                    machine_type: Some((*slug).to_string()),
-                    usd_per_hour: Usd::from_micros(*usd),
+                    (gib_per_vcpu * size_vcpus >= memory)
+                        .then(|| offer(Some(format!("{family}.{size}")), usd * size_vcpus))
                 })
                 .ok_or_else(no_shape),
             (Self::Aws, Some(gpu)) => {
-                let (_, family, sizes) = AWS_GPUS
-                    .iter()
-                    .find(|(name, _, _)| *name == gpu)
-                    .ok_or_else(|| unknown_gpu(self, gpu, AWS_GPUS.iter().map(|row| row.0)))?;
+                let (_, family, sizes) = find_gpu(self, AWS_GPUS, |row| row.0, gpu)?;
                 sizes
                     .iter()
                     .find(|(size_vcpus, size_gib, _, _)| {
                         *size_vcpus >= vcpus && *size_gib >= memory
                     })
-                    .map(|(_, _, size, usd)| Offer {
-                        machine_type: Some(format!("{family}.{size}")),
-                        usd_per_hour: Usd::from_micros(*usd),
-                    })
+                    .map(|(_, _, size, usd)| offer(Some(format!("{family}.{size}")), *usd))
                     .ok_or_else(no_shape)
             }
+            (Self::Digitalocean, None) => DIGITALOCEAN_SIZES
+                .iter()
+                .filter(|(_, size_vcpus, size_gib, _)| *size_vcpus >= vcpus && *size_gib >= memory)
+                .min_by_key(|(_, _, _, usd)| *usd)
+                .map(|(slug, _, _, usd)| offer(Some((*slug).to_string()), *usd))
+                .ok_or_else(no_shape),
         }
     }
 
@@ -419,23 +404,17 @@ const DIGITALOCEAN_SIZES: &[(&str, i64, i64, i64)] = &[
 /// $2/month for the app's dedicated IPv4.
 const FLY_IPV4_MICROS: i64 = 2_778;
 
-fn find_gpu(
-    table: &'static [(&'static str, &'static str, i64)],
+/// The row of a provider's GPU table for a `--gpu` name.
+fn find_gpu<R>(
     provider: Provider,
+    table: &'static [R],
+    name: fn(&R) -> &str,
     gpu: &str,
-) -> Result<(&'static str, &'static str, i64), String> {
-    table
-        .iter()
-        .find(|(name, _, _)| *name == gpu)
-        .copied()
-        .ok_or_else(|| unknown_gpu(provider, gpu, table.iter().map(|row| row.0)))
-}
-
-fn unknown_gpu<'a>(provider: Provider, gpu: &str, known: impl Iterator<Item = &'a str>) -> String {
-    format!(
-        "{provider} rents no {gpu}; it rents {}",
-        known.collect::<Vec<_>>().join(", ")
-    )
+) -> Result<&'static R, String> {
+    table.iter().find(|row| name(row) == gpu).ok_or_else(|| {
+        let known: Vec<&str> = table.iter().map(name).collect();
+        format!("{provider} rents no {gpu}; it rents {}", known.join(", "))
+    })
 }
 
 impl fmt::Display for Provider {
@@ -636,8 +615,8 @@ pub enum Refusal {
     },
 }
 
-/// The machine limit, then what the provider offers and its price, then the cap. The window is at most
-/// `MAX_HOURS`.
+/// The machine limit, then what the provider offers and its price, then the
+/// cap. The window is at most `MAX_HOURS`.
 pub fn admit(
     ondemand: &OnDemand,
     live: u32,

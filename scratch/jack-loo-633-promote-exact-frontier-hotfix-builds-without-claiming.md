@@ -1,7 +1,26 @@
 # LOO-633: promote exact-frontier hotfix builds without claiming release authority
 
-Status: implemented and verified 2026-10-26 (draft PR pending). Source: Task definition; evidence in
-`scratch/database-locked-5-whys.md` (Why 3).
+Status: implemented and verified on the branch 2026-10-26; plan reconciled with main
+2026-10-27 (draft PR pending). Source: Task definition; evidence in
+`scratch/database-locked-5-whys.md` (Why 3). Jack Heart asked (Task comment) to ship
+without stopping for review.
+
+## Problem
+
+Promote refused validation-only builds, so the LOO-604 hotfix was rebuilt with
+`LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published` (second 5-min
+build) and recorded as a release. The same env vars would let a draft-bearing build
+advance the store. A hotfix migrates nothing, yet had no supported path.
+
+## Demo
+
+Temporary worktree at this branch's tip (stands in for the tag), two-line fix, plain
+`cargo build --release -p loopflow --bin lf`, `./target/release/lf self install promote
+--preview` → `VERDICT: promote (no migration to apply)` and `hotfix <rev> on <tag>`;
+promote; `lf --version` and `lf self doctor` show the label. Add an empty migration draft,
+rebuild, preview → `REFUSED` before anything changes. No v0.14.x tag carries this rule
+and the live store is on the v0.14.17 frontier, so a literal "hotfix on a release tag"
+is first possible on the release that ships this.
 
 ## Decision
 
@@ -17,10 +36,10 @@ validation-only build outright:
 
 Provenance: `build.rs` emits `LOOPFLOW_BUILD_LABEL` (`[dirty ]hotfix|development <rev9>
 on <git describe tag>`, empty for releases) and `LOOPFLOW_VERSION_LINE`.
-`lf --version` prints `lf 0.14.16+e9b2c2eac (hotfix e9b2c2eac on v0.14.16)`; releases
+`lf --version` prints `lf 0.14.17+e9b2c2eac (hotfix e9b2c2eac on v0.14.17)`; releases
 still print `lf X.Y.Z`. `CandidateIdentity.build_label` and `ArtifactSet.build_label`
 (Option; older receipts parse as None, older lf ignores it) carry it into the preview,
-promote output, receipt and `lf doctor`.
+promote output, receipt and `lf self doctor`.
 
 ## Delete — do not maintain
 
@@ -28,18 +47,35 @@ promote output, receipt and `lf doctor`.
 - `promote_published_from_installation`'s published-only refusal.
 - Authority check in `exact_published_switch_candidate`; ValidationOnly→Development
   mapping in `active_install_matches_candidate`.
+- `.lf/skills/hotfix.md` (landed on main in #1712, LOO-635) step 4's env-var build and
+  its "wrong provenance label" caveat: a plain `cargo build --release` now promotes.
+  Keep step 1's empty migration diff (it catches drafts before a build; promote is the
+  enforcement).
 
-Kept: `LOOPFLOW_BUILD_PROVENANCE`/`LOOPFLOW_MIGRATION_AUTHORITY` (release CI needs them).
+Kept: `LOOPFLOW_BUILD_PROVENANCE`/`LOOPFLOW_MIGRATION_AUTHORITY` (release CI needs them;
+`scripts/test_task_installation.py --repository-upgrade` migrates, so it keeps them).
 
 ## Remaining
 
-Check: `cargo test` lib (compatibility, build_info, version, installation) + `global_commands` + `one_machine_tests`, fmt, clippy — pass.
-`scripts/test_task_installation.py --repository-upgrade` keeps the env-var route: it migrates.
+- Rebase onto main. Expect conflicts from #1708 (CLI reorg: `lf doctor` → `lf self
+  doctor`, `doctor.rs`, `lf/mod.rs`, `docs/architecture-reference.md`). `install.rs` and
+  `installation.rs` are untouched on main.
+- Update `.lf/skills/hotfix.md` per the delete list; step 5's verdict text is unchanged.
+- Coordinate with open #1656 (newcomer install) on `commands/install.rs` /
+  `installation.rs`: whichever lands second rebases; no shared API changes.
+- Run the demo.
 
+## Done when
 
-- Demo: the Task names v0.14.16, but that tag predates this rule and the live store is
-  on the v0.14.17 frontier (a v0.14.16 hotfix is `Behind`, refused). Demo with this
-  branch's tip as the "tag" (temporary worktree, two-line fix, `cargo build --release`,
-  `promote --preview`, promote); then the same with a draft (refused). The literal
-  "hotfix on a release tag" path is first available on the release that ships this.
-- Coordinate with #1656 (newcomer install) on `commands/install.rs` / `installation.rs`.
+- A draft-free, unreleased build on the store's exact frontier previews `promote (no
+  migration to apply)` and promotes without either env var.
+- The receipt, `lf --version`, promote output and `lf self doctor` show `hotfix <rev>
+  on <tag>`; a release build still shows `lf X.Y.Z` with no label.
+- The same build with a draft, or against a `Behind`/`AheadPending` store, is refused
+  before anything changes.
+- `.lf/skills/hotfix.md` no longer sets the env vars.
+
+Gate check: `cargo test -p loopflow --lib` (compatibility, build_info, version,
+installation) + `--test global_commands` + `--test one_machine_tests`, `cargo fmt
+--check`, `cargo clippy --all-targets -- -D warnings`.
+Check (2026-10-26, pre-rebase): above set — pass.

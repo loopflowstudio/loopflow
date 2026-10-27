@@ -144,7 +144,9 @@ pub fn machine_invocation(args: &[String]) -> Result<Option<(Cli, Vec<String>)>,
         }
         if value.starts_with('-') {
             let name = value.split('=').next().expect("split has a first item");
-            let is_transport = matches!(name, "--machine" | "--forward-agent");
+            // A command that names its own `--machine` (`lf task move`) keeps it.
+            let is_transport = matches!(name, "--machine" | "--forward-agent")
+                && (path.is_empty() || flag(current, name).is_none());
             let start = index;
             if takes_separate_value(&tree, current, value, boundary) && index + 1 < args.len() {
                 index += 1;

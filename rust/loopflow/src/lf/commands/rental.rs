@@ -621,10 +621,7 @@ pub fn place(
         })?;
     }
     let (_, machine) = rent(&runtime, sqlite, name, None, None, false)?;
-    let label = machine
-        .label
-        .clone()
-        .unwrap_or_else(|| machine.id.to_string());
+    let label = machine.name();
     prepare(&runtime, &label, repo, sqlite, batch)?;
     hand_off(&runtime, repo, issue, &label)?;
     Ok(false)

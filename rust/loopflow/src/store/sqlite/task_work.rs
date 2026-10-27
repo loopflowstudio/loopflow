@@ -312,6 +312,29 @@ fn append_workflow_move(
     Ok(())
 }
 
+/// A Task's Workflow as another Machine takes it up: the graph it took up,
+/// where it stands, and every move so far.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct WorkflowRecord {
+    pub graph: CapturedGraph,
+    pub node: String,
+    /// The route it is on; the Graph carrying it stayed behind.
+    pub edge: Option<u32>,
+    pub moves: Vec<WorkflowMoveRecord>,
+}
+
+/// One move, without the Process that made it, which lives where it ran.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct WorkflowMoveRecord {
+    pub workflow: String,
+    pub kind: WorkflowMoveKind,
+    pub from: String,
+    pub to: String,
+    pub edge: Option<u32>,
+    pub note: Option<String>,
+    pub at: i64,
+}
+
 /// How a Task reaches `end`.
 #[derive(Debug, Clone)]
 pub(crate) enum EndMove {
@@ -810,6 +833,92 @@ impl SqliteStore {
             },
         };
         Workflow::new(row.definition, row.routes, position, history)
+    }
+
+    /// The Task's Workflow as it moves to another Machine.
+    pub(crate) fn workflow_record(&self, task: &TaskId) -> StoreResult<Option<WorkflowRecord>> {
+        use rusqlite::OptionalExtension;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some((graph, node, edge)) = conn
+            .query_row(
+                "SELECT graph,node,edge FROM task_workflows WHERE task_id=?1",
+                [task.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<u32>>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let moves = workflow_moves(&conn, task)?
+            .into_iter()
+            .map(|step| WorkflowMoveRecord {
+                workflow: step.workflow,
+                kind: step.kind,
+                from: step.from,
+                to: step.to,
+                edge: step.edge,
+                note: step.note,
+                at: step.at,
+            })
+            .collect();
+        Ok(Some(WorkflowRecord {
+            graph: serde_json::from_str(&graph)?,
+            node,
+            edge,
+            moves,
+        }))
+    }
+
+    /// Take up a Workflow that moved here. A Task on a route stays on it,
+    /// carried by `by`, the receiving Process: it ends with the move, so the
+    /// route reads as stopped and `lf task run` runs its slice again. Moves
+    /// this Machine already holds, from an earlier stay, are not repeated.
+    pub(crate) fn place_moved_workflow(
+        &self,
+        task: &TaskId,
+        record: &WorkflowRecord,
+        by: Option<&LfProcessId>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let edge = record.edge.zip(by);
+        tx.execute(
+            "INSERT OR REPLACE INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6)",
+            rusqlite::params![
+                task.as_str(),
+                serde_json::to_string(&record.graph)?,
+                record.node,
+                edge.map(|(edge, _)| edge),
+                edge.map(|(_, by)| by),
+                crate::store::rows::now_unix()
+            ],
+        )?;
+        for step in &record.moves {
+            tx.execute(
+                "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,note,at)
+                 SELECT ?1,?2,?3,?4,?5,?6,?7,?8 WHERE NOT EXISTS(
+                     SELECT 1 FROM task_workflow_moves WHERE task_id=?1 AND workflow=?2 AND kind=?3
+                     AND from_node=?4 AND to_node=?5 AND edge IS ?6 AND note IS ?7 AND at=?8)",
+                rusqlite::params![
+                    task.as_str(),
+                    step.workflow,
+                    step.kind.as_str(),
+                    step.from,
+                    step.to,
+                    step.edge,
+                    step.note,
+                    step.at
+                ],
+            )?;
+        }
+        Ok(tx.commit()?)
     }
 
     /// The stage a graph taken up now is placed at: the Task's last recorded

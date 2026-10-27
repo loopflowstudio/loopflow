@@ -46,19 +46,24 @@ pub(super) fn read(store: &SqliteStore, session: &LfSession) -> Result<String> {
 
 /// Save the current conversation and return the first turn for another provider.
 pub(crate) fn continuation(store: &SqliteStore, session: &LfSession) -> Result<String> {
-    let id = &session.id;
     let from = session.provider.as_deref().unwrap_or_default();
-    let log = read(store, session)?;
+    continue_from(session, from, &read(store, session)?)
+}
+
+/// Save `log`, a conversation that began in `from`, with the Session's
+/// input and return the first turn that picks it up.
+pub(super) fn continue_from(session: &LfSession, from: &str, log: &str) -> Result<String> {
+    let id = &session.id;
     let path = super::local_capture_dir(session.input_key()?)
         .ok_or_else(|| anyhow!("Session {id} has an invalid capture reference"))?
         .join("conversation.md");
     fs::create_dir_all(path.parent().expect("a capture file has a directory"))?;
-    fs::write(&path, &log).context("write conversation log")?;
+    fs::write(&path, log).context("write conversation log")?;
     Ok(format!(
         "This Session continues a conversation that began in {from}. Its full log is at {}; \
          the excerpt below is its beginning and end. Pick up where it left off.\n\n{}",
         path.display(),
-        excerpt(&log)
+        excerpt(log)
     ))
 }
 

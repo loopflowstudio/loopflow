@@ -1,61 +1,61 @@
-# v0.14.18
+# v0.14.19
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.18 reorganizes `lf` around the work itself. Root help now starts with Tasks, Waves, Sessions, Graphs and Skills. Delivery, machine and account plumbing moves under `lf ops`, and the familiar short forms (`lf land`, `lf wt create`, `lf machine use`, `lf release run`) still resolve. The release also fixes things that interrupted work that was otherwise going fine. Headless Claude steps no longer end while their background commands are still running. CI repair and sync can run while you keep working in a Task. Launches go to the account with the most room. Task and Wave status can read Graphs recorded before v0.14.17 again. There is no store format change, so older `lf` versions keep working against the same `~/.lf`.
+v0.14.19 makes the store smaller, easier to diagnose, and less likely to stall your work. Finished Process rows that nothing references are now deleted instead of kept for a week. When the store reports `database is locked`, `lf.log` and `lf doctor` name the process and binary that held the write lock. Claude Sessions keep receiving steers and Task context after `/clear`. This release changes the store format: **lf < 0.14.19 can no longer open the store (raised by: drop_steer_adapter_thread)**. Upgrade every `lf` that shares `~/.lf` together, including the macOS app.
 
-## A command tree that starts with the work
+## A smaller store with readable lock contention
 
-Root help used to list about thirty peer groups in no particular order, and many jobs had two or three spellings. Now it is ordered by pillar: the work model first, then history and monitoring, then `ops`, config and the rest. Most of the change is moves, and `lf repo` is gone. (#1708)
+Routine commands used to leave a Process row behind for every run. On Jack Heart's live store, that history reached about 950,000 rows and 10.5 GB. Lock contention was also hard to trace: when a write timed out, only the waiting process logged anything. Finding the 0.14.16 usage-receipt delete that held the lock for seconds at a time took hours of reading the store by hand. (#1718, #1724, #1726)
 
-- **Delivery and machine plumbing live under `lf ops`.** That covers `lf ops pr …`, `lf ops wt …`, `lf ops account …`, `lf ops machine …` (with `pool` and `ondemand` underneath it), `lf ops commit` and `lf ops sync`. `lf sync` stays a shortcut even though `task sync` also exists.
-- **`lf repo`'s subcommands were redistributed:**
-  - `release {run,check,notes,bump,tag,publish,status}` → `lf ops release …`
-  - `ci` and `tokens` → `lf ops ci` and `lf ops tokens`
-  - `identity` → `lf config repository`
-  - `planning {key,status}` → `lf config planning {key,status}`
-  - `connect` and `reteam` → `lf wave connect` and `lf wave reteam`
-  - `new-chapter` → `lf wave new-chapter`
-  - `refresh` → `lf wave status --sync`, which now also exchanges the Git planning ref. `refresh --all` and `release history` have no replacement.
-- **Steering replaces comments.** `lf repo comment` and `lf wave comment` are removed. `lf session steer "…"` with no Session id steers the Wave chosen with the global `--wave`, or else the current repository. `lf task comment` is unchanged.
-- **Repository scope comes from the global `--repo` selector.** `lf ops machine use` and `lf session steer` no longer have their own boolean `--repo` flag.
-- **Every Task has a Workflow.** A Task with no Workflow checks its Wave default, then the repository `workflow:`, and then falls back to the builtin `code`. Desktop no longer shows "No workflow selected".
-- **New builtin `auto` workflow.** It runs `pursue` and then `deliver` as one route, with no stage for a person. Use it to take a Task from request to merged PR with nobody stepping in.
-- **The docs follow the same order.** The README explains a Task first (one conversation, a Workflow, its own PR, its history), then Graphs and Skills, then Waves, and ends with a "You want to…" table. `docs/` is rewritten as a reading path that starts at Get started.
+- **Finished Processes are deleted unless something needs them.** A finished lf Process is kept only if an agent issued it, a running parent may still read its result, or another record references it. That covers Graph results, Session history and Task shipping references. Agent Processes are always kept. Retention cleanup uses the same rule in place of the seven-day expiry, and it also removes rows left behind by an interrupted exit. On a clone of the live store, this cut Process rows from 953,191 to 104,998, and the store went from 10.5 GB to 287 MB after VACUUM. (#1718)
+- **Unreferenced command outcomes are no longer history.** That includes failures. If you relied on finding an old failed command among the Process rows, it is gone once the command exits. (#1718)
+- **Desktop polling no longer looks like Task execution.** File, diff, save and Graph-history queries from the Mac app now run outside the Task checkout. Keeping a Task's files open no longer counts as work in that checkout. (#1718)
+- **Every `lf.log` line ends with `pid=… lf=<version> rev=<short revision>`.** Existing lock-timeout warnings from the journal, activity tracker and prune now name their process without further changes. (#1724)
+- **Slow writers report themselves.** A write transaction that holds the store lock for 3 s or more logs `held the store write lock held_seconds=… call_site=…`. The call site is the innermost `loopflow::` frame. (#1724)
+- **`lf doctor` adds a `contention` check.** It reads the last 24 hours of `lf.log` and groups `database is locked` failures and slow writes by binary, as `lf <version> (<rev>)`. For each binary it lists the pids, the longest hold and the call sites. Lines from older binaries appear as `unidentified (older lf)`. The check can warn but never fails. (#1724)
+- **The hourly store prune waits for the write lock** instead of failing whenever another writer holds it. (#1726)
 
-## Scheduled work is ordinary cron
+## Claude Sessions survive `/clear`
 
-`lf wave cron` (add, list, publish, unpublish, sync, history, trigger, remove, disposition) is removed, together with its module, its test suite and the `cron` crate, about 8,000 lines in all. Scheduled telemetry and releases are now plain crontab lines that run `lf … graph release-run`. `release/CRON_HOST.md` and `scripts/bootstrap-cron-host.sh` show how to set them up. `lf self doctor` no longer runs a cron-continuity audit. (#1708)
+After `/clear` in an lf-launched Claude Session, every later prompt failed with `UserPromptSubmit hook error … Context callback does not belong to the selected native conversation`. Steers and the Loopflow context block stopped arriving for the rest of that process, and `lf session connect` reopened the conversation you had cleared. The cause was two records of the selected conversation that drifted apart. (#1731)
 
-## Agents finish what they started
+- **The new conversation gets the start context.** The per-launch `SessionStart` hook now also matches `clear`, so the conversation `/clear` opens receives its Task brief and any pending steers.
+- **One record of the selected conversation.** The Session's agent-session row is now the only record. The `drop_steer_adapter_thread` migration removes the stale copy that steer adapters kept, which is what raises the store floor.
+- **Resume follows the move.** When the selection moves, Loopflow appends a resume reference on the same account, so `lf session connect` opens the conversation you are in. The move is also recorded in Session history.
+- **Refusals name both sides:** `Context callback names native conversation <B>; this Session selects <A>`.
+- **Unchanged protections:** subagent callbacks, `PostToolUse` calls that name another conversation, and replaced or completed agent processes are still refused. Only the provider's own `SessionStart` inside the owned process can move the selection.
+- **Not included:** switching conversations with `/new` or `/resume` inside one Pi process still fails as before, because Pi reports only `session_start`.
 
-Two separate problems could cut real work short. A headless Claude step used to settle at its first `result`, even when the agent had backgrounded a test suite and ended its turn to wait for it. Loopflow then shut Claude down, the command was killed, and the Graph moved on (the LOO-596 incident). Separately, `lf land`'s CI repair refused with "checkout is busy" whenever a Task Session or any other process was live in the checkout, and a sync held its lock through network fetches and conflict resolution. (#1688, #1714)
+## Hotfixes without pretending to be releases
 
-- **Headless Claude steps wait for background tasks.** A step stays alive while Claude reports running background tasks. It completes on the turn Claude starts after they finish, and only that final answer is recorded. Steers accepted in the meantime still settle. While background tasks run, the Session counts as busy. The headless instructions now tell agents to stop long-lived processes such as servers or watchers before they answer, because one that never exits keeps the step running. Codex and OpenCode were not changed. (#1688)
-- **CI repair runs beside live work.** Landing no longer checks the checkout for running work before it starts `ci-fix`, so your Task Session stays open throughout the repair. Restoring a missing checkout no longer checks either. Abandon, `wt delete` and cleanup of completed Tasks still wait, because they remove the checkout. (#1714)
-- **Sync holds its lock only while it merges or pushes.** `lf sync` fetches and plans before it takes the lock, and refuses if HEAD moved in between. It releases the lock while `sync-conflicts` runs and takes it back to verify and push. Verification checks only what gets pushed, so tracked edits from other writers no longer fail it. An HTTP push that stalls aborts after five minutes without progress. (#1714)
-- **A blocked launch names the sync holding the lock:** `lf sync pid 4121 has held the sync lock for 14 min (feature onto origin/main)…`. (#1714)
+Promoting a hotfix used to require `LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published`. That meant a second full rebuild, it recorded the hotfix as a release, and the same variables could have let a build carrying a migration draft advance the store. Promotion now asks for release authority only when the store would change. (#1730)
 
-## Launches go to the account with the most room
+- **A plain `cargo build --release` promotes** when it has no migration drafts and matches the store's frontier exactly. Builds with pending drafts are still refused. An unreleased build facing a store that is ahead of it, or one it would migrate, is also refused. Only a published release may change or pass the migration frontier.
+- **Builds say what they are.** Unreleased builds carry a label such as `lf 0.14.17+e9b2c2eac (hotfix e9b2c2eac on v0.14.17)`, with `development` and `dirty` variants. `lf --version`, the install receipt, promote output and `lf doctor`'s `build:` and `install-selection` lines show it. Releases still print plain `lf X.Y.Z`.
+- Promote messages no longer say "published": `promoted …`, `promotion refused; every target is unchanged`.
+- The `hotfix` skill now takes a single plain release build and reports the hotfix label.
 
-In shared mode, launches used to stay on the signed-in account until one of its usage windows reached 95%, and then follow declared route order. Running Claudes could sit on an almost exhausted account while another account had plenty left. (#1717)
+## Cleaner disks and one release scheduler
 
-- **Ranking:** eligible accounts sort by plan first (Codex Pro ahead of Plus). Within a plan, the account whose tightest unreset window has the lowest use goes first. Route order only breaks ties. The 95% threshold is gone. A window that has reset, or has no reset time, counts as full room.
-- **Shared mode:** the signed-in account wins only ties. A launch switches every running Claude or Codex only when another account ranks strictly ahead. An explicit `--account` still wins, and the ranking applies within what it leaves open. Resumed provider sessions stay on the account that created them.
-- **Switches are recorded first.** The switch is written to the store before the native login changes. If it can't be recorded, the launch fails and the current login stays in place, so `used_account` attribution stays correct.
-- **`lf account route`** shows each account's tightest window (`weekly 80% used`) instead of a `demoted:` line.
+A draft build killed while snapshotting the shared store left a full-size `.tmp…` directory in `~/.lf/copies`, and it stayed there for up to 30 days. On the release cron host, launchd agents from an older lf kept running `release-run` alongside the new crontab. They retried a stale v0.14.13 selection and failed every day. (#1727, #1711)
+
+- **Abandoned snapshots are removed promptly.** The next snapshot clears them first. Hourly rotation and `lf disk clean` remove them whenever no snapshot holds the copies lock, whatever their age, and log each one to `~/.lf/logs/disk.log` as `abandoned snapshot`. If a snapshot is running, that step is skipped. (#1727)
+- **`lf disk` sizes count what a removal would free.** On macOS, an APFS clone reports only its private blocks. Other platforms still count allocated blocks. (#1727)
+- **`scripts/bootstrap-cron-host.sh` retires the old launchd agents.** After its preflight checks, it boots out and deletes every `~/Library/LaunchAgents/loopflow.cron.<wave>.*.plist` and prints `removed launchd job <label>`, then installs the crontab. On Linux or a fresh host, the step does nothing. `release/CRON_HOST.md` shows how to confirm which scheduler is live. (#1711)
 
 ## Operational notes
 
-- **No store break.** This release adds no migration, and `lf` v0.14.17 can still open the store.
-- **Update scripts and crontabs that call moved commands.** Short forms resolve, but scripted canonical paths such as `lf repo release run`, `lf repo ci` or `lf pr land` should move to the paths above. Anything that relied on `lf wave cron` schedules must be set up again as crontab entries that run `lf … graph release-run` (see `release/CRON_HOST.md`).
-- **JSON rename:** in `lf account route --json`, the field `demotion` is now `tightest`. Update any consumers.
-- **`LF_GIT_OPERATION_ID` is gone.** Conflict resolvers no longer need it, because the sync lock isn't held while they run. The macOS app and the environment docs no longer set it either. Lock records written by an older `lf` have no `locked_at`, so the refusal can't say how long those syncs have held the lock. The two versions still share the same lock file.
-- **Known limits:** the push stall timeout covers HTTP remotes only, and a stalled SSH push can still hold the sync lock. If another writer runs `git add` while a conflict resolver works, that change lands in the merge commit. This is deliberate.
-- **Upgrading from v0.14.17 fixes Task and Wave status.** v0.14.17 renamed the Graph field `human` to `interactive`, and Task status and Wave status then failed with `missing field interactive` on Graphs recorded earlier. v0.14.18 accepts the retained `human` name in compiled nodes and saved steps, including nested ones, and still writes `interactive`. Review stages and routes are preserved, and no records are rewritten. (#1722)
+- **Store break:** lf < 0.14.19 can no longer open the store (raised by: drop_steer_adapter_thread). The release migration also carries the `forget_processes` changes, including indexes for the Process reference checks. Upgrade the CLI and the macOS app together. An older `lf` still on `PATH`, for example in a cron job or on another machine sharing the home, will refuse to open the store until you upgrade it.
+- **Expect a large first cleanup.** Retention cleanup after upgrading removes Process history that the old rules kept. The 10.5 GB → 287 MB figure above includes a VACUUM. The PR's measurements came from a clone with indexes applied by hand and pruning invoked directly, not from `lf disk clean`.
+- **Reading contention:** after upgrading, `lf doctor`'s `contention` line is the first place to look for `database is locked`. Lines written by lf before 0.14.19 have no `pid=… lf=…` suffix and are grouped as `unidentified (older lf)`. The check has known blind spots. A hold is reported only when it ends, so a writer that never commits goes unnamed, although the processes it blocks are still counted. Time between `BEGIN` and the first statement, and the WAL write at commit, are not measured.
+- **Release cron host:** rerun `scripts/bootstrap-cron-host.sh infrastructure` from main. Afterwards, `launchctl list | grep loopflow.cron` should print nothing and `crontab -l | grep loopflow:infrastructure` should show both jobs.
+- **Hotfix label source:** until a release that includes the new promotion rule is tagged, the label's `on <tag>` part comes from `git describe` against the nearest `v*` tag. Promote does not check how far the source has drifted from that tag. The hotfix skill's empty-migration-diff step remains the review point for that.
+- **Abandoned-snapshot rule:** a `copies/.tmp*` directory counts as abandoned whenever nobody holds the copies lock. Anything that stages there must hold that lock.
 
 ## Small changes
 
-- Prompt goldens and the shared `StandInClaude` test fixture cover the background-task contract. (#1688)
-- Short comments now state what each remaining lock protects: the worktree lease, journal append, credential lock and landing observer. (#1714)
-- `docs/subscriptions.md` describes the plan-then-room ordering. (#1717)
+- cmux workspaces opened by `lf open` are now named `<Task title> · <identifier>`, without a stage suffix, and are renamed only when the Task title changes. Before renaming, lf reads the current name. A name you set by hand in cmux is kept, unless it happens to look like one of lf's own names. Taskless Sessions no longer rename their workspace. The tab and tmux window still follow the Session name and standing. (#1716)
+- The same title-first order now applies to Herdr labels, new tmux windows, `lf open` links and receipts, and the `lf task create` and Task status lines. Session names still lead with the identifier. (#1716)
+- Provider hooks no longer inherit attribution as agent-issued commands. (#1718)
+- `docs/troubleshooting.md`, `docs/telemetry.md`, `docs/sessions.md` and `docs/architecture-reference.md` describe the contention check, process retention, snapshot cleanup, the workspace/tab split, steer ownership and the hotfix frontier rule.

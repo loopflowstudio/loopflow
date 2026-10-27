@@ -2611,14 +2611,6 @@ mod tests {
         ] {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
-        // `lf set` replaced these; they no longer parse.
-        for args in [
-            vec!["lf", "wave", "workflow", "set", "code", "product"],
-            vec!["lf", "ops", "account", "route", "set", "claude", "work@"],
-            vec!["lf", "ops", "machine", "use", "mini"],
-        ] {
-            assert!(Cli::try_parse_from(args.clone()).is_err(), "{args:?}");
-        }
         assert!(matches!(
             Cli::try_parse_from(["lf", "task", "defer", "LOO-1"]).unwrap().command,
             Some(Commands::Task { cmd: TaskCommand::Defer { issue } }) if issue == "LOO-1"

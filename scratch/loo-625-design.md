@@ -12,8 +12,8 @@ agent: claude
 skills:            # or whatever key .lf/config.yaml already uses for per-skill agents
   implement: claude:opus
 
-lf wave set machine daytona infrastructure      # personal, local store
-lf wave set account.claude work infrastructure
+lf set machine daytona --wave infrastructure    # personal, local store
+lf set account.claude work --wave infrastructure
 
 lf wave status infrastructure --json   # each value with its source: task | wave | repo | global | default
 lf task run LOO-xxx                    # runs code on Opus, on daytona, billed to work — no flags
@@ -49,7 +49,7 @@ The repository is the Wave of Tasks without one: no Wave file means repo values.
 **Personal (local store rows).** Machine and account routes, per Wave.
 
 - Machine: the existing Wave machine row. Accounts: `RouteScope::Wave` beside `Repo |
-  Default`; resolution Wave > Repo > Default. Both are written by `lf wave set` (One verb).
+  Default`; resolution Wave > Repo > Default. Both are written by `lf set` (One verb).
 - `workflow`, `agent`, `skill_agents` are edited in `config.yaml` by hand; no command
   writes committed config (Jack Heart, 2026-10-27).
 
@@ -97,9 +97,7 @@ machine and account routes, each with value and source
 Implemented: Wave `config.yaml` layer (`config::load_wave_config`, `config_layers`),
 `skill_agents`, launch/Task agent resolution per Wave, `waves.workflow` dropped (draft `wave_setup`), `RouteScope::Wave`,
 `WaveDetailSnapshot.setup` (`work/wave/setup.rs`),
-GOAL.md fallback marked LOO-640, this repository's `.lf/wave/*/config.yaml`, docs. The
-`lf wave workflow set` and `lf account route set --wave` commands built here are
-replaced by One verb (Remaining).
+GOAL.md fallback marked LOO-640, this repository's `.lf/wave/*/config.yaml`, docs.
 
 End to end: `a_task_run_takes_its_waves_agent_and_account_without_flags`
 (`tests/linear/task_graph_launch_tests.rs`) runs `lf -b task run` with a Claude stand-in;
@@ -110,38 +108,14 @@ Launches and `lf wave status` share one route chain
 `wave::context::ambient_wave_id`. `config::workflow_setting` is the one
 Wave → repo → builtin `code` Workflow resolution (Task default and Wave setup).
 
-## Resolved after the merge of main (2026-10-27)
+## Settled history (2026-10-27)
 
-The branch merged main (#1708 CLI/docs reorganization; `task_workflow_default` now
-falls back to builtin `code`). Docs moved to `docs/work.md#set-it-up-once`,
-`orchestration.md`, `config.md`.
-
-- Cross-repository Wave workflow migration: dropped (Jack Heart steer 2a6771a3,
-  superseding 1fd58a58). manabot and etude-studio selections were written by hand;
-  `waves.workflow` is dropped as designed, no code writes into other repositories.
-- Failing tests: the six store/planning lib tests pass with inherited `LF_*` unset
-  (their failure came from the lf-launched shell's environment);
-  `registry_is_complete` classifies `ops account route set` with `machine use`.
-- Keychain escape: `a_task_run_takes_its_waves_agent_and_account_without_flags`
-  launched shared, so the child `lf skill probe` signed in the fixture's native
-  Claude home with `security -i`. It and `wave_setup_tests` now launch with
-  `LF_ACCOUNT_ISOLATION=isolated`.
-
-## Concept review (2026-10-27)
-
-One mismatch, settled by the accepted source list `task | wave | repo | global | default`:
-the same question, "which layer chose this?", has two vocabularies people see. `lf wave
-status` says `repo` / `default`; a Task's `workflow_source` (Task JSON, Desktop
-`TaskWorkView` "code · repository") says `repository` / `builtin`, from
-`ops::task::task_workflow_default`.
-
-Settled and implemented: one vocabulary, one type. `task_workflow_default` returns a `SetupSource` and
-the Task snapshot's `workflow_source` is `Option<SetupSource>`
-(`SetupSource::Task` added for a Task's own choice; `WaveSetup` never emits it); Task JSON,
-`lf wave status` and the missing-Workflow error prefix say `task` / `wave` / `repo` / `default`.
-Swift keeps `String?`.
-
-The machine/account command forms are superseded by `lf wave set` (One verb).
+- Cross-repository Wave workflow migration dropped (Jack Heart steer 2a6771a3); manabot
+  and etude-studio selections were written by hand.
+- Keychain escape: launch tests use `LF_ACCOUNT_ISOLATION=isolated`.
+- Concept review: one source vocabulary. `task_workflow_default` returns `SetupSource`;
+  Task JSON, `lf wave status` and the missing-Workflow error say
+  `task | personal | wave | repo | global | default`. Swift keeps `String?`.
 
 ## Remaining
 
@@ -155,6 +129,8 @@ b4f19861) is built: `lf/commands/setting.rs`, `scope_settings` table in draft
   `WorkCLISubscriptionTests`), clippy, DTO fixtures.
 
 Check (LF_* unset, 2026-10-27, after restoring the `lf set` work from the stash `lf checkout update` left and merging main's Fly removal): `--test integration wave_setup_tests` and CLI-shape tests (`reference_matches_the_compiled_cli`, `wave_resolution_matrix`, `machine_commands`, `cli_discovery`, `documented_commands`) pass; `--lib -- setting config:: scope_defaults` pass with `harness::claude` capture passing serially (concurrency flake); fmt and clippy `--all-targets` clean. Gate owns the full suites.
+
+Compress (2026-10-27): `cargo test --lib lf::tests your_workflow_for_a_wave`, fmt, clippy `--all-targets`: pass.
 
 ## One verb: `lf set` (Jack Heart, 2026-10-27, accepted)
 

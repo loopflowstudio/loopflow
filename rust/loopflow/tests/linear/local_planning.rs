@@ -3920,7 +3920,7 @@ fn auto_workflow_runs_a_task_to_end() {
 }
 
 #[test]
-fn wave_workflow_set_selects_the_builtin_auto() {
+fn your_workflow_for_a_wave_selects_the_builtin_auto() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     lf(

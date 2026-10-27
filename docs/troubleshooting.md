@@ -61,6 +61,11 @@ fetching. That reference may be stale, and merged source may be newer than the
 latest published release. `lf install` installs that published release; Doctor
 itself installs nothing.
 
+Contention reads the last day of `logs/lf.log`: `database is locked` failures
+and any write that held the store lock for 3 s or more, grouped by the lf
+binary that logged them, with the holder's pids and the function that held the
+lock. Lines from binaries older than this check group as `unidentified (older lf)`.
+
 ## A Task stopped advancing
 
 **Symptom:** the Task is not done, but nothing is moving, or its agent

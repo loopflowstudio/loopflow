@@ -1,3 +1,9 @@
+-- draft: drop_steer_adapter_thread
+-- The Session's agent_sessions.provider_thread is the one selected native
+-- conversation; context callbacks follow it, so the adapter keeps no copy.
+ALTER TABLE steer_adapters DROP COLUMN provider_thread;
+
+-- draft: forget_processes
 -- A finished Process is deleted at exit unless a row references it. Each
 -- reference probe needs an index, or every exit and every prune candidate
 -- scans the referencing table.

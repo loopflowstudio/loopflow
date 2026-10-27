@@ -54,6 +54,20 @@ pub fn run(
         })
     );
     let runtime = tokio::runtime::Runtime::new()?;
+    if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
+        // Resuming a Session that lives here, or moved elsewhere, moves it there first.
+        runtime.block_on(async {
+            let Some(store) = crate::store::open_existing_store().await else {
+                return anyhow::Ok(());
+            };
+            let store: crate::store::SharedStore = std::sync::Arc::new(store);
+            let Some(session) = crate::ops::human_session::session_by_id(&store, id).await? else {
+                return Ok(());
+            };
+            let machine = resolve_target(target, forward_agent).await?;
+            super::session_move::relay(&store, &session, &machine).await
+        })?;
+    }
     let source = if preview || resident_operation {
         None
     } else {
@@ -75,14 +89,19 @@ pub fn run(
         None if cli.repo.is_some() => None,
         None => super::work_route::resolve(cli)?,
     };
-    if let Some(route) = &work_route {
-        if route.machine_id != target.id {
+    if let Some(route) = work_route
+        .as_ref()
+        .filter(|route| route.machine_id != target.id)
+    {
+        // `resume --task X` continues the Task on M, so the Task moves there first.
+        let Some(task) = super::work_route::resumed_task(cli).filter(|_| !preview) else {
             return Err(anyhow!(
-                "Task is owned on Machine {}, not {}; `lf machine use <machine> --task` moves it",
+                "Task is owned on Machine {}, not {}; `lf task move <task> --machine <machine>` moves it",
                 route.machine_id,
                 target.id
             ));
-        }
+        };
+        super::session_move::move_task(task, target.id.as_str())?;
     }
     // A Machine names no checkout: the destination resolves the repository's
     // own checkout from its identity. A path/name stays the caller's selection.
@@ -147,7 +166,7 @@ pub fn run(
             cmd: crate::lf::TaskCommand::Location { .. }
         })
     ) {
-        let bytes = runtime.block_on(request(&target, &cmd[1..]))?;
+        let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
         print!("{}", String::from_utf8(bytes)?);
         return Ok(());
     }
@@ -161,7 +180,7 @@ pub fn run(
         if !connection.json {
             cmd.push("--json".into());
         }
-        let bytes = runtime.block_on(request(&target, &cmd[1..]))?;
+        let bytes = runtime.block_on(request(&target, &cmd[1..], None))?;
         let mut record: crate::ops::human_session::SessionRecord = serde_json::from_slice(&bytes)?;
         anyhow::ensure!(
             record
@@ -436,26 +455,44 @@ fn run_ssh(dest: &str, forward_agent: bool, preamble: &str) -> anyhow::Result<()
     command_result(dest, status.code())
 }
 
-/// One bounded request through the ordinary SSH envelope. No probes, credentials,
-/// provider launch or local fallback; callers validate the request-bound reply.
+/// One bounded request through the ordinary SSH envelope, with `input` on its
+/// stdin. No probes, credentials, provider launch or local fallback; callers
+/// validate the request-bound reply. A request carrying input (a moved
+/// conversation) may check out its branch there, so it waits longer.
 pub(crate) async fn request(
     machine: &crate::durable::Machine,
     args: &[String],
+    input: Option<&[u8]>,
 ) -> anyhow::Result<Vec<u8>> {
+    use tokio::io::AsyncWriteExt;
     let cmd = std::iter::once("lf".to_string())
         .chain(args.iter().cloned())
         .collect::<Vec<_>>();
     let preamble = build_preamble(&cmd, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
-    let mut child = tokio::process::Command::new("ssh");
-    child
+    let mut command = tokio::process::Command::new("ssh");
+    command
         .args(crate::machine_route::bounded_ssh_args(
             &machine.route,
             false,
         )?)
         .arg(preamble)
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let output = tokio::time::timeout(std::time::Duration::from_secs(20), child.output())
+    let bound = std::time::Duration::from_secs(if input.is_some() { 300 } else { 20 });
+    let exchange = async {
+        let mut child = command.spawn()?;
+        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+            stdin.write_all(input).await?;
+        }
+        child.wait_with_output().await
+    };
+    let output = tokio::time::timeout(bound, exchange)
         .await
         .context("Machine command unavailable: peer timed out")??;
     anyhow::ensure!(

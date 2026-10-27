@@ -383,7 +383,8 @@ fn describe(entry: &TaskOwnershipEntry) -> String {
     }
 }
 
-fn marker(entry: &TaskOwnershipEntry) -> StoreResult<String> {
+/// The marked text an entry travels in; `ingest_ownership_marker` reads it.
+pub(crate) fn marker(entry: &TaskOwnershipEntry) -> StoreResult<String> {
     // Escape angle brackets so a person name cannot close the HTML comment.
     let json = serde_json::to_string(entry)?
         .replace('<', "\\u003c")
@@ -595,7 +596,7 @@ fn notify_superseded_in(
     let text = format!(
         "Also claimed later by {later}. {owner} still owns this Task on this Machine and \
          nothing was cancelled. Keep going, or run `lf task unclaim` or \
-         `lf machine use <machine> --task` to end this claim."
+         `lf task move <task> --machine <machine>` to end this claim."
     );
     let steer = super::steers::save_in(
         conn,
@@ -717,6 +718,15 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(entry)
+    }
+
+    /// Take in an entry another Machine wrote, before planning delivers its comment.
+    pub(crate) fn ingest_ownership_marker(&self, task: &TaskId, marker: &str) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let inserted = ingest_marker_in(&tx, task, marker, None)?;
+        tx.commit()?;
+        Ok(inserted)
     }
 
     pub fn unclaim_task(&self, task: &TaskId) -> StoreResult<TaskOwnershipEntry> {

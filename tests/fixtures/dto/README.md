@@ -20,6 +20,9 @@ overview, Graph processes, comments and recorded work from
 read prints with `--json`, or `null` with `unavailable` set. Rust checks each body
 against its read's type; Swift decodes each through its part.
 
+`move.json` pins the Session or Task move `lf session send` prints and `lf
+session receive` reads on another Machine. Only lf reads it, so it has no Swift mirror.
+
 `task_execution.json` pins the execution boundary inside the status envelope's
 optional Task snapshot (`execution.execution`).
 This CLI-only contract is tested in Rust. The Mac app receives its derived

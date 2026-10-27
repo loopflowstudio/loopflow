@@ -303,6 +303,13 @@ pub struct Machine {
     pub observed_at: OffsetDateTime,
 }
 
+impl Machine {
+    /// Its label, else its id.
+    pub fn name(&self) -> String {
+        self.label.clone().unwrap_or_else(|| self.id.to_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum Author {

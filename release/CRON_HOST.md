@@ -1,22 +1,31 @@
 # Maintained cron Machine
 
-Run the infrastructure Wave's telemetry and release jobs on your Wave Machine
-for it. That setting is the authority; a hostname in a document is not.
+Run the infrastructure Wave's telemetry and release jobs on the Machine that
+runs the Wave's Tasks. That setting is the authority; a hostname in a document
+is not.
 
 ```bash
-lf machine use mini infrastructure
-lf machine id
-lf wave status infrastructure --json | jq -r '.wave.machine.id'
 scripts/bootstrap-cron-host.sh infrastructure
 crontab -l | grep loopflow:infrastructure
 ```
 
-The two Machine ids must match. `bootstrap-cron-host.sh` fails before changing
-the crontab when they differ.
+With no Wave Machine default, the Wave runs where it is read, so any Machine
+may bootstrap it. To pin it elsewhere, set the default first and bootstrap from
+that Machine:
+
+```bash
+lf machine use mini infrastructure
+lf wave status infrastructure --json | jq -r '.wave.machine.id'   # must equal `lf machine id`
+```
+
+`bootstrap-cron-host.sh` fails before changing the crontab when the Wave is
+placed on another Machine.
 
 ## Host prerequisites
 
-- Promote an installed release `lf`.
+- Promote an installed release `lf` (`lf self install`). Every check and both
+  jobs run its entry gate, `~/.lf-machine/install/gates/1/lf`, whatever `lf`
+  comes first on your shell's PATH; promotion replaces the binary behind it.
 - Keep the repository's authoritative checkout on the placed Machine.
 - Configure at least one managed Claude or Codex account in the Machine store.
 - Install `uv`, `gh`, `cargo`, `flyctl`, `security`, `swift`, `xcrun`, and
@@ -45,18 +54,29 @@ changes.
 
 ## Release schedules
 
-Each job is an ordinary crontab line running an ordinary lf command in that
-minimal environment:
+Each job is a short crontab line that runs a generated wrapper:
 
 ```
-0 9 * * *  cd ~/src/loopflow && env -i HOME=… PATH=… LF_HOME=… lf --wave infrastructure --batch graph telemetry-daily >> .lf/logs/telemetry-daily.log 2>&1
-0 10 * * * cd ~/src/loopflow && env -i HOME=… PATH=… LF_HOME=… lf --wave infrastructure --batch graph release-run >> .lf/logs/release-run.log 2>&1
+0 9 * * *  /bin/sh ~/src/loopflow/.lf/cron/infrastructure.telemetry-daily.sh # loopflow:infrastructure:telemetry-daily
+0 10 * * * /bin/sh ~/src/loopflow/.lf/cron/infrastructure.release-run.sh # loopflow:infrastructure:release-run
 ```
+
+The wrapper holds the ordinary lf command in that minimal environment:
+
+```bash
+cat .lf/cron/infrastructure.release-run.sh
+# cd ~/src/loopflow && exec env -i HOME=… PATH=… LF_HOME=… ~/.lf-machine/install/gates/1/lf --wave infrastructure --batch graph release-run >> .lf/logs/release-run.log 2>&1
+```
+
+cron reads only the first 999 bytes of a command and runs that prefix, and the
+host PATH alone can exceed it, so the command lives in the wrapper. The
+bootstrap refuses to write a line of 1,000 bytes or more. Its telemetry check
+runs the same wrapper cron runs.
 
 `release-run` resolves to `.lf/graphs/release-run.yaml`, whose single operation
 is `release run patch`. The release command's exit status is the job's; an
 agent's successful report cannot turn a blocked release into success. Rerun the
-bootstrap to rewrite the lines after the host path or checkout moves.
+bootstrap to rewrite the wrappers after the host path or checkout moves.
 
 Earlier lf scheduled these jobs as launchd agents named
 `loopflow.cron.<wave>.<job>`. The bootstrap unloads and deletes them before

@@ -1240,12 +1240,13 @@ uv run python scripts/test_network.py uv run python tests/e2e/codex_terminal.py 
 Use a native Codex binary supporting app-server and `--remote`. The headless PTY
 fixture uses disposable provider and Loopflow homes, a loopback model endpoint, and an
 independently authored wrapper supplying trust plus SessionStart/Stop hooks.
-It explicitly trusts the fixture's Loopflow hooks, verifies context reaches the
-model, and checks immediate skill startup, prompt, tool and stop callback receipts.
-It deletes the native context binding before reconnect to prove restoration from
-the saved Session, then checks fresh scratch context, two retained completed
-turns, provider cleanup, and preserved user settings. Provider output alone is
-not hook evidence: untrusted hooks do not run.
+Only the wrapper's hooks are pre-trusted, and stale persisted decisions sit at
+Loopflow's hook IDs; Codex skips untrusted thread hooks silently, so context in
+the model request is the proof Loopflow's own hooks ran. It checks immediate
+skill startup, deletes the native context binding before reconnect to prove
+restoration from the saved Session, then requires fresh scratch context, a steer
+saved between turns delivered at the next prompt, two retained completed turns,
+provider cleanup, and preserved user settings.
 Add `--context-repo /path/to/loopflow-checkout` to run the built-in `demo` with
 copied agent instructions, scratch and Infrastructure Wave context. Wave context
 is supplied as scratch in the isolated store, without a planning provider binding.

@@ -84,7 +84,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 
 ```bash
 lf task claim LOO-123               # you, on this Machine
-lf machine use mini --task LOO-123  # same person, mini's Machine
+lf task move LOO-123 --machine mini # same person, mini's Machine
 lf task unclaim LOO-123             # unowned, history intact
 lf desktop task LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
@@ -107,11 +107,10 @@ lf --repo loopflow machine use mini --tasks    # only the repository's new Tasks
 lf machine list                               # each Machine with the defaults naming it
 ```
 
-Bare `lf machine use mini` applies to the worktree's Task (a handoff), else its
-Wave, else this repository; `--task`, `--repo` or a Wave argument always wins.
+Bare `lf machine use mini` applies to the worktree's Wave, else this
+repository; `--repo` or a Wave argument always wins.
 A Wave or repository has two settings, where its new Tasks run and where its
-primary Session runs. `--tasks` or `--session` sets one (bare, it skips the
-worktree's Task); neither sets both. Each resolves on its own, with no fallback
+primary Session runs. `--tasks` or `--session` sets one; neither sets both. Each resolves on its own, with no fallback
 from one to the other.
 A default lives in Machine-local SQLite `scope_defaults`, keyed by Wave or
 repository identity, and is copied to the
@@ -121,17 +120,18 @@ Resolution for an unowned Task walks its Wave, its parent Waves, its repository,
 so single-Machine use needs no setup. `lf wave show`'s `machine` field reads the
 same resolver.
 
-Setting the Session Machine moves the Wave Session: the old Machine completes its Wave primary
-Session and the new Machine admits a fresh one (fresh Wave context, as with
-`--fresh`; native provider history stays behind). `lf session connect --wave <w>`,
+Setting the Session Machine moves the Wave Session with its native provider
+history, as `lf --machine <machine> resume <session>` does. `lf session connect --wave <w>`,
 a bare connect resolving to a Wave or the repository, and Desktop's Wave Session
 route to the Session Machine over `lf --machine`. `lf open` reads a primary on
 another of your Machines through that connect, never from this Machine's copy.
 
 A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
-moves no existing Task; `lf machine use <machine> --task <task>` moves one and completes
-its primary Session on the old Machine. The new Machine admits a primary on first
-connect.
+moves no existing Task; `lf task move <task> --machine <machine>` moves one. It
+stops the Task's Graph and its step Processes, commits and pushes its worktree,
+hands it off, and carries its Workflow position, history and primary Session; the
+new Machine checks out the branch and `lf task run` there runs the stopped route
+again. A worktree mid-merge or mid-rebase refuses to move.
 
 Forwarding stays within one person's Machines. Claim, handoff, unclaim,
 `task run`, `task checkout` and global `--task` pick their writer and re-check

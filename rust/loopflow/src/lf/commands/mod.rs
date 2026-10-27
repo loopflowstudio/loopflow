@@ -28,6 +28,7 @@ pub mod replay;
 pub mod run;
 pub mod session;
 pub mod session_history;
+pub mod session_move;
 pub mod ship;
 pub mod ssh;
 pub mod task_row;

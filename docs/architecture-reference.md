@@ -663,7 +663,7 @@ effects. The unconditional-update race remains a protocol limit.
 <!-- architecture-map:end -->
 
 The public API column covers top-level command families, not every subcommand or
-Rust function. [`lf` reference](lf.md) owns argument-level detail. DTOs emitted
+Rust function. [`lf` reference](lf-reference.md) owns argument-level detail. DTOs emitted
 by `--json` are required-field projections; Rust/Swift fixture tests own their
 wire parity.
 

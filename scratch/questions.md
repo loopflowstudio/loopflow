@@ -21,3 +21,17 @@
   Desktop's "No workflow selected" fallback in `TaskWorkView` no longer shows.
   Making the DTO field required touches Rust, Swift and fixtures; left for the
   LOO-604 read redesign, which reshapes these projections anyway.
+- **Docs redo (item 6) choices** (2026-10-26). `scratch/README.draft.md` was
+  the current draft (it matches the Story section); v2/v3 were discarded.
+  `docs/subscriptions.md` stays as account reference: `ops.md` summarizes
+  accounts in 20 lines and folding 490 lines of routing/remote-selection
+  semantics would lose them. The drafts' `<!-- changed from -->` notes were
+  drafting artifacts ("on this branch") and were dropped from `docs/`; the
+  replaced wording is in git (`docs/getting-started.md`, `troubleshooting.md`
+  at main). The README skill link is absolute because `docs/index.md` shares
+  the README opening verbatim (`test_readme_index_sync`).
+- **Not fixed, pre-existing:** `docs/config.md` teaches `lf sync-skills`, but
+  `self sync-skills` is hidden, so the shortcut does not resolve.
+- **Proposed Wave memory updates (read-only here):** `.lf/wave/{infrastructure,
+  product,growth,intelligence}/MEMORY.md` link `docs/lf.md`/`planning.md`/
+  `subscriptions.md`; repoint to `work.md`, `ops.md`, `lf-reference.md`.

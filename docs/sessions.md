@@ -12,9 +12,8 @@ comes back after a crash.
 lf resume                          # this checkout's ongoing conversation: its Task's, or the repository's
 lf resume --wave billing           # the Wave's ongoing conversation
 lf resume --fresh --task LOO-12    # a new conversation for the Task; the old one keeps its history
-lf session list --available        # conversations waiting on your input, across this repository
+lf session list --available        # conversations available for your next turn, across this repository
 ```
-<!-- changed from: `lf connect` — on this branch `connect` and `resume` are the same command, `lf session connect`; examples use `resume` -->
 
 Each scope (repository, Wave, Task) has one ongoing conversation. `lf resume`
 opens it, creating one when absent, with that scope's operating instructions.

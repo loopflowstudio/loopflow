@@ -7,7 +7,7 @@ lf monitor --json
 ```
 
 Generated from the compiled Clap tree. Canonical command paths are shown; unique shortcuts also resolve. See
-[the workflow guide](lf.md) for examples. This reference lists public commands.
+[Get started](getting-started.md) for examples. This reference lists public commands.
 
 ## Selection and output
 

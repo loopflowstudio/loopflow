@@ -213,7 +213,7 @@ to execute the same read remotely. The historical `lf history show` interface an
 their transitional wire shape is recorded in the cutover status. They do not
 query a central execution service.
 
-[Conducting →](conducting.md) covers the full monitoring surface. The Mac app is
+[Telemetry →](telemetry.md) covers the full monitoring surface. The Mac app is
 built on exactly these calls — it keeps no second database.
 
 ## The contract

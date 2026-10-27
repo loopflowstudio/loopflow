@@ -6,48 +6,48 @@ lf init
 npx skills add loopflowstudio/loopflow --skill loopflow -g -y   # teach your coding agent to use lf
 ```
 
-`lf` is the command you type *and* the CLI your coding agent uses to get work
-done. Works with Claude Code, Codex, OpenCode and Pi, on your own logins.
+`lf` is how your agent orchestra conducts itself. It launches coding agents for
+you, and lets your agents launch more. It organizes them around Tasks: one Task
+ties together the tracker issue, the worktree, the branch and the pull request.
+Then Waves split the work into areas, each with its own Graph, machine and
+accounts. It works with Claude Code, Codex, OpenCode and Pi, on your existing
+subscriptions, inside whatever terminal, multiplexer and tracker you already use.
 
-**Work: say what you want, and it becomes Tasks that run without you.** Each
-Task gets its own worktree, branch and pull request, so ten requests come back
-as ten PRs you can review one at a time.
-
-```bash
-lf task create --title "rent CPU pods for templates with no GPU"   # prints the Task ID
-lf -b task run <ID>
-```
-
-**Context: every agent starts where the last one left off.** Each launch carries
-the Wave's memory, the Task's notes in `scratch/`, the docs you name and any new
-comments, and gets them back after compaction.
+**1. Launch agents.** In any git repository:
 
 ```bash
-lf comment <ID> "default to the smallest pod"    # reaches the run before its next step
-lf gate --docs docs/runpod.md                    # name what it should read
+lf : "fix the flaky retry test"            # an agent, on whichever of your logins has room
+lf -a codex : "fix the flaky retry test"   # the same thing on Codex
+lf debug -c                                # a Skill: paste an error, it finds and fixes the cause
+lf resume --all                            # after a crash or reboot, every interrupted conversation comes back
 ```
 
-**Orchestration: work finishes while you're doing something else.** Runs go to
-the agent and machine you pick, Graphs carry them step to step, Waves keep their
-Tasks moving, and landing repairs CI until the PR merges. Get as much as
-possible off the main thread: plans into code, code into verified code.
+The last install line teaches your own coding agent to do the same, so you can
+just ask it: *"Split the auth cleanup into Tasks and run them with lf."*
+[What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
+
+**2. Organize them around Tasks.** A Task is one outcome: its tracker issue, its
+worktree and branch, its agents and its pull request, in one place. Ten requests
+come back as ten PRs you review one at a time, and every agent on a Task starts
+where the last one left off.
 
 ```bash
-lf --machine mini -b -a codex graph pursue   # a Graph, headless, on Codex, on your mini
-lf land --wait-and-fix          # merge when checks pass; fix them if not
+lf task create --title "fix the flaky retry test"   # prints the Task ID
+lf -b task run <ID>                                   # worktree, branch, agents, PR
+lf comment <ID> "keep the retry budget at 3"          # reaches the run before its next step
+lf resume --task <ID>                                 # its conversation, from any terminal
+lf land --wait-and-fix                                # merge when checks pass; fix them if not
 ```
 
-**Sessions: you never lose a conversation.** Every conversation outlives its
-terminal, and new work starts on whichever of your logins has room. Close the
-window and come back next week; the conversation and what it knows are still
-there.
+**3. Split the work into Waves.** A Wave is an area of work with its own goal,
+memory and plan, and its own assignments: the Graph its Tasks run, the machine
+they run on and the logins that pay. Your repository is the Wave for anything
+without one.
 
-```bash
-lf resume --task <ID>
-```
-
-**Skill Graphs: write down how you work.** Skills are Markdown and Graphs are
-YAML, files in your repository reviewed like code.
+A Graph is how an area of work runs: a YAML list of Skills, and a Skill is a
+Markdown file, both in your repository and reviewed like code. Each step can name
+its own agent, and the whole Graph runs interactively, headless or on another
+machine.
 
 ```markdown
 <!-- .lf/skills/audit.md -->
@@ -56,15 +56,15 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 
 ```yaml
 # .lf/graphs/ship-api.yaml
-- design      # leaves scratch/<task>.md
 - implement   # leaves commits on the branch
 - audit
 - gate        # leaves passing checks
 ```
 
 ```bash
-lf audit                 # run one Skill
-lf -b graph ship-api     # run the Graph headless
+lf -b task run <ID> ship-api               # one Task through the Graph
+lf wave workflow set code infrastructure   # every infrastructure Task: build, demo, then land
+lf machine use mini infrastructure          # and run on your mini
 ```
 
 Loopflow ships reasonable workflows for software engineering, and they are
@@ -95,16 +95,20 @@ for a term. The Mac app and CLI read the same owners.
 
 ## Read by area
 
+Read in order; each page starts from what the one before it left you with.
+
 | You want to | Read |
 |---|---|
-| Install it and try one piece of work | [Get Started](getting-started.md) |
-| See what got done and what you can pick up | [Conducting](conducting.md) |
-| Give it a goal to keep working on | [Waves](waves.md) |
-| Share Tasks with coworkers or capture them in a meeting | [Plan and share Tasks](planning.md) |
-| Change how it works | [Authoring](authoring.md) |
+| Install it and take one piece of work to a pull request | [Get started](getting-started.md) |
+| Hand off many Tasks, steer them, and keep a longer objective moving | [Work](work.md) |
+| Come back to any conversation, after a crash or from another terminal | [Sessions](sessions.md) |
+| Land, repair CI, release, and run on other machines and logins | [Ops](ops.md) |
+| See Work in Desktop, cmux, Herdr, tmux or your own UI | [Surfaces](surfaces.md) |
+| See what agents did and what it cost | [Telemetry](telemetry.md) |
+| Write Skills and Graphs and pick the agent for each step | [Orchestration](orchestration.md) |
+| Fix something that went wrong | [Troubleshooting](troubleshooting.md) |
 | Drive it from another AI agent | [The Agent API](agent-api.md) |
-| Look up a word | [Glossary](glossary.md) |
-| Look up a command | [`lf` reference](lf.md) |
+| Look up a word or a command | [Glossary](glossary.md) · [`lf` reference](lf-reference.md) |
 
 ## Shape one conversation
 
@@ -139,7 +143,7 @@ lf ship-api
 
 Built-ins cover the common ground: `debug`, `design`, `implement`, `compress`,
 `gate`, `qa`, the `code` graph, and more. Repo skills in `.lf/skills/` override
-and extend them. [Authoring](authoring.md) starts with a working skill and then
+and extend them. [Orchestration](orchestration.md) starts with a working skill and then
 adds graph and goal structure only where it earns its place.
 
 ## Context
@@ -178,7 +182,7 @@ scratch/                  # working notes; default delivery clears added files
 ## For agents
 
 Every documentation URL serves HTML. The reviewed Markdown source remains
-available to agents: append `.md` to the URL (`/docs/waves.md`) or request the
+available to agents: append `.md` to the URL (`/docs/work.md`) or request the
 canonical URL with `Accept: text/markdown`. The curated index is
 [/llms.txt](/llms.txt); the complete corpus in one file is
 [/llms-full.txt](/llms-full.txt). Inside a Loopflow-launched conversation you already
@@ -186,8 +190,8 @@ carry the operating contract (`LOOPFLOW.md`) — these pages are the long form.
 
 ## Next
 
-[Get Started →](getting-started.md) · [Waves →](waves.md) · [The Agent API →](agent-api.md) · [Conducting →](conducting.md)
+[Get started →](getting-started.md) · [Work →](work.md) · [The Agent API →](agent-api.md)
 
 ## Reference
 
-[Glossary](glossary.md) · [`lf` commands](lf.md) · [Authoring](authoring.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)
+[Glossary](glossary.md) · [`lf` commands](lf-reference.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)

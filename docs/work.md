@@ -74,7 +74,6 @@ lf planning status                 # which plan this repository reads, and what'
 lf task claim LOO-12               # take it; the earlier owner's Sessions are told
 lf task unclaim LOO-12             # hand it back, history intact
 ```
-<!-- changed from: `lf user` sets your display name — this branch's `lf user` (config user) only prints it -->
 
 Tasks, comments and status sync through your Git remote by default, as a ref
 (`refs/loopflow/planning/shared/main` on `origin`), never a branch. Everyone who
@@ -258,7 +257,6 @@ position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 **Sync.** `lf task sync LOO-12 --retry-creation` retries an uncertain tracker
 creation with its saved ID; `--retry-updates` retries saved field changes after
 reading the tracker again. `lf wave status --sync` refreshes from Linear first.
-<!-- changed from: `lf refresh` exchanged Git planning on demand; `repo refresh` is deleted on this branch -->
 
 Every flag: [`lf task`](lf-reference.md#lf-task), [`lf wave`](lf-reference.md#lf-wave).
 

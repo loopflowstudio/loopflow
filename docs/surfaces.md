@@ -48,7 +48,7 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **⌘K**: search Waves, Tasks, Sessions, Graphs and Workflows.
 
 ```bash
-lf desktop view 'state:available'                       # a Dashboard of everything waiting on you
+lf desktop view 'state:available'                       # a Dashboard of every available conversation
 lf desktop query attention 'state:available or state:blocked'   # save it as "attention"
 ```
 

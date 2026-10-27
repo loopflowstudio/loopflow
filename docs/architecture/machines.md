@@ -309,7 +309,7 @@ recorded endpoints alone do not prove liveness.
 
 `lf discord serve <wave>` is a foreground bridge from a configured channel to
 bounded conversations. It has no Wave cursor or inbox authority. Cron and Task execution
-do not require a daemon or bridge. See [Discord](../waves.md#discord-bridge).
+do not require a daemon or bridge. See [Discord](../work.md#talk-to-it-from-discord).
 
 ## Move a Wave without changing its identity
 

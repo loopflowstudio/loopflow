@@ -521,21 +521,7 @@ stages; don't teach the whole system at once. The README teaches three steps
 reader already did and adds one idea; reference material sits at the end of the
 page or in `lf-reference.md`.
 
-| New page | Covers | Built from |
-|---|---|---|
-| `README.md` | five benefits: Work, Sessions, Orchestration, Ops, Telemetry, Surfaces | `scratch/README.draft.md` (current README reorganized; LOO-550 wording kept) |
-| `docs/index.md` | the map, one paragraph per pillar | `index.md` |
-| `docs/getting-started.md` | install → `lf :` → first Task → resume → land (LOO-509) | `getting-started.md` |
-| `docs/work.md` | Tasks, Waves, Projects/KRs, planning providers, comments/steers | `planning.md`, `waves.md`, Task parts of `lf.md` |
-| `docs/sessions.md` | resume, steer, rename/bind, what survives a crash | `conducting.md` (inspect/resume), Session parts of `lf.md` |
-| `docs/orchestration.md` | Skills, Graphs, Workflows, Goals, machines, `-a` | `authoring.md`, Graph/machine parts of `lf.md` |
-| `docs/ops.md` | publish, land, CI repair, release, commit/sync/wt, machines, accounts | `lf.md` "Publish and finish", `subscriptions.md` (accounts) |
-| `docs/telemetry.md` | `history`, `history usage`, `ps`, `doctor` | `conducting.md` (health/usage) |
-| `docs/surfaces.md` | `open` per host, Desktop and `lf desktop`, JSON for your own UI | `conducting.md` (Mac app), `agent-api.md` (observe) |
-| `docs/troubleshooting.md` | what survives, what went wrong, what to run next (LOO-404) | `troubleshooting.md` |
-| kept as reference | `config.md`, `security.md`, `glossary.md`, `agent-api.md`, `lf-reference.md` (generated), `architecture*` | — |
-| removed | `lf.md` (dissolved into pillar pages), `conducting.md`, `planning.md`, `waves.md`, `authoring.md`, `subscriptions.md` (folded) | — |
-| `data-clones.md` | developer tool → `docs/architecture/` or deleted with `clone` | — |
+Implemented 2026-10-26; the page list is `docs/index.md` "Read by area".
 
 ## Task plan (draft; each lands real code)
 
@@ -694,10 +680,15 @@ Daytona/Modal land; then it names them.
   reference); items 4 (`code` default, test
   `local_planning::unconfigured_repository_runs_tasks_on_the_builtin_code_workflow`)
   and 5 (skill/LOOPFLOW.md drafts in place, alignment test updated) done.
-  Item 6 (docs/README) remains. Scratch is over budget (~120 KB vs 98 KB)
-  because of the live item-6 drafts (`README.draft*.md`, `docs-draft/`); they
-  leave scratch when item 6 moves them into place.
+  Item 6 done in the next run (see below).
   Checks: integration suite 429/436 then 7 fixed and rerun green; two_people,
   golden_prompt, clippy, Xcode build-for-testing and SwiftPM build pass. Lib
   suite not rerun in full (stopped at 966/2215 under machine load; its 9
   failures passed in isolation) — gate/CI.
+- 2026-10-26 item 6: README and `docs/{getting-started,work,sessions,ops,
+  surfaces,telemetry,orchestration,troubleshooting}.md` in place; `lf.md`,
+  `conducting.md`, `planning.md`, `waves.md`, `authoring.md` deleted;
+  `subscriptions.md` kept (questions). Website registry, home links and e2e
+  slugs moved to the staged pages; `docs/index.md` map rewritten.
+  Checks: docs integration tests 5/5, website suite 72/72, every documented
+  `lf` path resolves against the branch build. Remaining: gate, publish.

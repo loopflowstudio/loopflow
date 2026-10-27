@@ -18,7 +18,7 @@ lf land --wait-and-fix   # sync, mark ready, auto-merge; repair failing CI until
 Run it in the Task's checkout, or from anywhere with `lf --task LOO-12 land --wait-and-fix`.
 It checks the PR every 15 seconds and starts a `ci-fix` agent when a required
 check fails. Elapsed time never ends the wait; a verified merge, a closed PR, a
-blocker that needs you, or Ctrl-C does. Interrupting leaves the landing intent in
+blocker `ci-fix` cannot clear, or Ctrl-C does. Interrupting leaves the landing intent in
 place, so a later watcher picks it up.
 
 Bare `lf land` requests auto-merge, records that you want it landed, and returns.

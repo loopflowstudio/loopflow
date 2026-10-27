@@ -65,7 +65,7 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Planning synchronization](lf.md#choose-planning-synchronization) | — | `planning: {provider: linear, team: "<id>"}`, `planning: {provider: asana, team: "<gid-or-url>"}`, `planning: {provider: notion, team: "<page-url-or-id>"}` or `planning: {provider: git, shared: team}` |
+| [Planning synchronization](work.md#share-the-plan) | — | `planning: {provider: linear, team: "<id>"}`, `planning: {provider: asana, team: "<gid-or-url>"}`, `planning: {provider: notion, team: "<page-url-or-id>"}` or `planning: {provider: git, shared: team}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff files` | `diff_files: true` |
@@ -185,7 +185,7 @@ context:
 ```
 
 Scheduled commands are personal and never configured here; see
-[Schedule ordinary commands](lf.md#schedule-ordinary-commands).
+[Schedule it yourself](ops.md#schedule-it-yourself).
 
 Example repo config:
 
@@ -458,7 +458,7 @@ frontmatter never changes scheduling.
 | **Default** | interactive for a direct TTY; headless otherwise |
 
 Graphs hold autonomous steps only; a `human: true` step is rejected at launch.
-See [Authoring](authoring.md#graphs).
+See [Orchestration](orchestration.md).
 
 ### Chrome
 

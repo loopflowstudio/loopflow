@@ -507,7 +507,7 @@ complete Task Work.
 
 ## Move a Task through its workflow
 
-A [workflow](../authoring.md#workflows) is the outer shape of a Task: nodes
+A [workflow](../orchestration.md#workflows) is the outer shape of a Task: nodes
 where a person takes part in the Task conversation, and edges that each run
 one Graph. On its first `lf task run`, a Task selects the explicitly named Workflow,
 its Wave default, repository `workflow:`, then the builtin `code`. A captured Workflow stays fixed. `task_workflows` holds one

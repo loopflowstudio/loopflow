@@ -861,7 +861,7 @@ name (the `lf desktop` verb), title, arguments, default keys and `perform`.
 the Desktop socket look actions up there; nothing else mutates navigation or panes.
 Keys and menus act on the shown workspace's focused pane; a socket request names an
 exact window and pane, and `lf desktop` resolves those from one inspection (see the
-[CLI examples](../docs/lf.md#desktop-navigation)).
+[CLI examples](../docs/surfaces.md#drive-desktop-from-a-script)).
 
 `DesktopServer` (`LoopflowMac/DesktopServer.swift`) binds
 `$LF_HOME/run/desktop/<bundle-id>.sock` at launch (0700 directory, 0600 socket,

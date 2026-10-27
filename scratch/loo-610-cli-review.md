@@ -694,4 +694,10 @@ Daytona/Modal land; then it names them.
   reference); items 4 (`code` default, test
   `local_planning::unconfigured_repository_runs_tasks_on_the_builtin_code_workflow`)
   and 5 (skill/LOOPFLOW.md drafts in place, alignment test updated) done.
-  Item 6 (docs/README) remains.
+  Item 6 (docs/README) remains. Scratch is over budget (~120 KB vs 98 KB)
+  because of the live item-6 drafts (`README.draft*.md`, `docs-draft/`); they
+  leave scratch when item 6 moves them into place.
+  Checks: integration suite 429/436 then 7 fixed and rerun green; two_people,
+  golden_prompt, clippy, Xcode build-for-testing and SwiftPM build pass. Lib
+  suite not rerun in full (stopped at 966/2215 under machine load; its 9
+  failures passed in isolation) — gate/CI.

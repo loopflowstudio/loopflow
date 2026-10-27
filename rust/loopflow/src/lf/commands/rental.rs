@@ -672,7 +672,7 @@ pub fn place_by_default(repo: &std::path::Path, issue: &str, batch: bool) -> any
     if !is_pool && sqlite.ondemand(&capacity)?.is_none() {
         return Err(anyhow!(
             "{issue}'s default capacity {capacity} is no pool or on-demand here; \
-             `lf machine use <machine>` replaces it"
+             `lf set machine <machine>` replaces it"
         ));
     }
     let placement = Placement {

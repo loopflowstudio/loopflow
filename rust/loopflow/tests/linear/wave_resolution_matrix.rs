@@ -59,8 +59,10 @@ const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"]];
 
 /// Membership changes name an explicit destination and preserve execution context.
-/// `machine use` names the Wave whose default it sets, else applies to the checkout.
-const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"], &["ops", "machine", "use"]];
+/// `lf set` and `lf unset` take only the typed root `--wave`, else apply to the
+/// checkout's repository; `wave_setup_tests::settings_scope_by_the_typed_wave_only`
+/// covers them.
+const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"]];
 
 /// Commands whose optional `--wave` filters recorded results instead of
 /// selecting ambient Wave context. These must not inherit `LF_WAVE_ID`.
@@ -108,13 +110,6 @@ const COMMANDS: &[Cmd] = &[
         id: "wave workflow show",
         path: &["wave", "workflow", "show"],
         base_args: &["wave", "workflow", "show", "--json"],
-        wave_form: WaveForm::Positional,
-        global_default: false,
-    },
-    Cmd {
-        id: "wave workflow set",
-        path: &["wave", "workflow", "set"],
-        base_args: &["wave", "workflow", "set", "feature"],
         wave_form: WaveForm::Positional,
         global_default: false,
     },

@@ -1030,17 +1030,20 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
     repo.commit("Set up the Wave once");
     for args in [
         &[
-            "account",
-            "route",
-            "set",
-            "claude",
-            "work@example.com",
             "--wave",
             "task-pr-tests",
+            "set",
+            "account.claude",
+            "work@example.com",
         ][..],
         &["-b", "task", "run", "INF-123", "proof"],
     ] {
-        let output = command(repo.path(), home.path(), args).output().unwrap();
+        // Isolated launches run in the routed account's own home; a shared one
+        // would sign in the native home, which is the Keychain on macOS.
+        let output = command(repo.path(), home.path(), args)
+            .env("LF_ACCOUNT_ISOLATION", "isolated")
+            .output()
+            .unwrap();
         assert!(
             output.status.success(),
             "{args:?}: {}",

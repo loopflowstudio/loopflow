@@ -1,11 +1,8 @@
 //! Set up each area of work once: a Wave's committed `config.yaml` and your
-//! own Machine and account routes choose how its work runs, with no flags.
+//! own `lf set` values choose how its work runs, with no flags.
 use std::path::Path;
 use std::process::Command;
 
-use loopflow::durable::{DefaultScope, MachineSetting};
-use loopflow::profile::{ProviderRoute, RouteScope};
-use loopflow::provider_auth::Provider;
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::ProviderAccountId;
 use loopflow_test_support::TestRepo;
@@ -19,6 +16,9 @@ fn lf(repo: &Path, home: &Path, args: &[&str]) -> std::process::Output {
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("PATH", "/usr/bin:/bin")
         .env("NO_COLOR", "1")
+        // Routed launches stay in the account's own home; a shared one signs in
+        // the native home, which is the Keychain on macOS.
+        .env("LF_ACCOUNT_ISOLATION", "isolated")
         .current_dir(repo)
         .args(args)
         .stdin(std::process::Stdio::null())
@@ -75,17 +75,10 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
 
     let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let checkout = repo.path().to_str().unwrap();
-    let infra = store.ensure_wave(checkout, "infra").unwrap();
-    let research = store.ensure_wave(checkout, "research").unwrap();
+    store.ensure_wave(checkout, "infra").unwrap();
+    store.ensure_wave(checkout, "research").unwrap();
     store.ensure_wave(checkout, "plain").unwrap();
     let here = store.local_machine().unwrap().id;
-    store
-        .set_machine_default(
-            &DefaultScope::Wave(infra.clone()),
-            MachineSetting::Tasks,
-            &here,
-        )
-        .unwrap();
     store
         .upsert_provider_account(&loopflow::store::ProviderAccount {
             provider: "codex".into(),
@@ -108,16 +101,19 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
             updated_at: 1,
         })
         .unwrap();
-    store
-        .set_provider_route(&ProviderRoute {
-            scope: RouteScope::Wave(research.clone()),
-            provider: Provider::Codex,
-            accounts: vec![ProviderAccountId::parse("work").unwrap()],
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
     drop(store);
+    // Machines and account routes are yours: `lf set`, never committed.
+    for args in [
+        vec!["--wave", "infra", "set", "machine.tasks", here.as_str()],
+        vec!["--wave", "research", "set", "account.codex", "work"],
+    ] {
+        let output = lf(repo.path(), home.path(), &args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     // Launches take their Wave's agent, per skill first; no Wave is the repository's.
     assert_eq!(
@@ -143,7 +139,8 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     assert_eq!(infra["workflow"]["source"], "wave");
     assert_eq!(infra["agent"]["value"], "claude");
     assert_eq!(infra["skill_agents"]["probe"]["value"], "claude:opus");
-    assert_eq!(infra["tasks_machine"]["source"], "wave");
+    assert_eq!(infra["tasks_machine"]["value"], here.as_str());
+    assert_eq!(infra["tasks_machine"]["source"], "personal");
     assert_eq!(infra["session_machine"]["source"], "default");
     assert_eq!(infra["accounts"]["codex"]["source"], "default");
 
@@ -154,12 +151,64 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     assert_eq!(research["agent"]["source"], "wave");
     assert_eq!(research["tasks_machine"]["source"], "default");
     assert_eq!(research["accounts"]["codex"]["accounts"][0], "work");
-    assert_eq!(research["accounts"]["codex"]["source"], "wave");
+    assert_eq!(research["accounts"]["codex"]["source"], "personal");
 
     let plain = setup("plain");
     assert_eq!(plain["workflow"]["source"], "repo");
     assert_eq!(plain["agent"]["value"], "codex");
     assert_eq!(plain["agent"]["source"], "repo");
+}
+
+#[test]
+fn your_own_value_wins_for_you_until_you_unset_it() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(
+        ".lf/config.yaml",
+        "agent: codex\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
+    repo.create_file(".lf/skills/probe.md", "Probe.");
+    repo.create_file(".lf/wave/research/GOAL.md", "Find out.\n");
+    repo.create_file(".lf/wave/research/config.yaml", "agent: codex:o3\n");
+    repo.stage_all();
+    repo.commit("Share the research agent");
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    store
+        .ensure_wave(repo.path().to_str().unwrap(), "research")
+        .unwrap();
+    drop(store);
+    let ok = |args: &[&str]| {
+        let output = lf(repo.path(), home.path(), args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    let agent = || {
+        json(lf(
+            repo.path(),
+            home.path(),
+            &["wave", "status", "research", "--json"],
+        ))["setup"]["agent"]
+            .clone()
+    };
+
+    ok(&["--wave", "research", "set", "agent", "claude:haiku"]);
+    assert_eq!(
+        launch_agent(repo.path(), home.path(), Some("research")),
+        "claude:haiku"
+    );
+    assert_eq!(agent()["source"], "personal");
+    let committed = std::fs::read_to_string(repo.path().join(".lf/wave/research/config.yaml"));
+    assert_eq!(committed.unwrap(), "agent: codex:o3\n");
+
+    ok(&["--wave", "research", "unset", "agent"]);
+    assert_eq!(agent()["value"], "codex:o3");
+    assert_eq!(agent()["source"], "wave");
+    assert!(!lf(repo.path(), home.path(), &["set", "release", "x"])
+        .status
+        .success());
 }
 
 #[test]
@@ -187,4 +236,47 @@ fn a_wave_file_rejects_repository_settings() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+#[test]
+fn settings_scope_by_the_typed_wave_only() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(".lf/wave/research/GOAL.md", "Find out.\n");
+    repo.stage_all();
+    repo.commit("Add a Wave");
+    let store = SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let checkout = repo.path().canonicalize().unwrap();
+    let wave = store
+        .ensure_wave(checkout.to_str().unwrap(), "research")
+        .unwrap();
+    // An ambient Wave, as in its Task's worktree, does not scope `lf set`.
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env("LF_WAVE_ID", wave.as_str())
+        .current_dir(repo.path())
+        .args(["set", "agent", "claude:haiku"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let typed = lf(
+        repo.path(),
+        home.path(),
+        &["--wave", "research", "set", "skill_agents.probe", "codex"],
+    );
+    assert!(typed.status.success());
+    let settings = store
+        .scope_settings(checkout.to_str(), Some("research"))
+        .unwrap();
+    assert_eq!(settings.repository["agent"], "claude:haiku");
+    assert_eq!(settings.wave["skill_agents.probe"], "codex");
+    assert!(!settings.wave.contains_key("agent"));
 }

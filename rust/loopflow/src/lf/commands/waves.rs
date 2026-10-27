@@ -252,7 +252,7 @@ pub struct TaskDetailSnapshot {
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
     pub workflow_name: Option<String>,
-    pub workflow_source: Option<String>,
+    pub workflow_source: Option<crate::work::wave::setup::SetupSource>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -516,7 +516,7 @@ pub struct RoadmapTask {
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
     pub workflow_name: Option<String>,
-    pub workflow_source: Option<String>,
+    pub workflow_source: Option<crate::work::wave::setup::SetupSource>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -1460,7 +1460,10 @@ async fn snapshot_task_detail(
         }),
     };
     let (workflow_name, workflow_source) = match workflow {
-        Some(workflow) => (workflow.definition.name, "task"),
+        Some(workflow) => (
+            workflow.definition.name,
+            crate::work::wave::setup::SetupSource::Task,
+        ),
         None => crate::ops::task::task_workflow_default(store, task)?,
     };
     Ok(TaskDetailSnapshot {
@@ -1479,7 +1482,7 @@ async fn snapshot_task_detail(
         condition,
         actions,
         workflow_name: Some(workflow_name),
-        workflow_source: Some(workflow_source.to_owned()),
+        workflow_source: Some(workflow_source),
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,

@@ -159,17 +159,17 @@ keeps the authority it found.
 Builtins are `feature` (explore, demo, deliver, verify), `code` (demo, deliver,
 verify), `auto` (pursue then deliver, no stops: request to merged PR without
 you) and `research` (findings, no PR). To change one, copy it, commit it, and
-select it for a Wave:
+select it for a Wave with `workflow: feature` in `.lf/wave/product/config.yaml`:
 
 ```bash
-lf graph customize feature               # copies the builtin to .lf/graphs/feature.yaml
-lf wave workflow set feature product     # writes workflow: to .lf/wave/product/config.yaml
+lf graph customize feature                   # copies the builtin to .lf/graphs/feature.yaml
+lf --wave product set workflow feature       # or only for you, without committing
 ```
 
-Commit that file; teammates run your definition once they have your commit.
+Commit those files; teammates run your definition once they have your commit.
 A Task captures its Workflow on its first `lf task run`: the one you name, then
-its Wave's `workflow:`, then the repository's in `.lf/config.yaml`, then
-builtin `code`. Later edits apply to new Tasks; `lf task workflow restart LOO-12`
+your `lf set workflow` for its Wave and then its repository, then its Wave's
+`workflow:`, then the repository's in `.lf/config.yaml`, then builtin `code`. Later edits apply to new Tasks; `lf task workflow restart LOO-12`
 moves an existing one back to `start` without reloading it.
 
 ## Run Tasks on other machines

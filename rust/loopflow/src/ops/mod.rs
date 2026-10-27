@@ -60,7 +60,7 @@ pub use release::{
     ReleaseNotesDegradation, ReleaseNotesStatus, ReleaseReceipt, ReleaseRunOutcome,
     ReleaseStatusResult,
 };
-pub(crate) use run::{render_task_context, select_execution_work};
+pub(crate) use run::render_task_context;
 #[doc(hidden)]
 pub use run::{
     resolve_execution_binding, resolve_work_binding, resolve_work_selection, WorkBinding,

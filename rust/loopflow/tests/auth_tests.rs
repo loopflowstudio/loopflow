@@ -591,7 +591,7 @@ esac
             "--routing",
             "automatic",
         ],
-        vec!["account", "route", "set", "codex", "active@", "--default"],
+        vec!["set", "account.codex", "active@", "--global"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .current_dir(home.path())
@@ -636,11 +636,11 @@ esac
     );
     let unscoped = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(home.path())
-        .args(["account", "route", "set", "codex", "active@"])
+        .args(["set", "account.codex", "active@"])
         .output()
         .unwrap();
     assert!(!unscoped.status.success());
-    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("--default"));
+    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("--global"));
 }
 
 #[test]

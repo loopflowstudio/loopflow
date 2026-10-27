@@ -131,11 +131,10 @@ async fn run_async(cmd: &AccountCommand) -> Result<()> {
         } => token_account(provider, email, file.as_deref(), chrome_profile.as_deref()).await,
         AccountCommand::Use { .. } => unreachable!("run handles use with its provider"),
         AccountCommand::Route {
-            cmd,
             repo,
             default,
             json,
-        } => super::profile::run_route_async(cmd.as_ref(), repo.as_deref(), *default, *json).await,
+        } => super::profile::show_route(repo.as_deref(), *default, *json).await,
         AccountCommand::Set {
             provider,
             email,

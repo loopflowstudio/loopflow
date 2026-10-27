@@ -560,7 +560,7 @@ than `config.yaml`:
 
 ```bash
 lf account connect claude primary@example.com --chrome-profile primary@example.com
-lf account route set claude primary@ engineering@
+lf set account.claude primary@,engineering@
 lf --account primary@ implement
 ```
 

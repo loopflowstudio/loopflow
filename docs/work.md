@@ -201,9 +201,11 @@ context_budgets:
 ```
 
 ```bash
-lf machine use mini billing                                   # your Machine for its Tasks
-lf account route set claude work@example.com --wave billing   # the login that pays
-lf wave status billing                                        # each setting and its source
+lf --wave billing set machine mini                        # your Machine for its Tasks
+lf --wave billing set account.claude work@example.com     # the login that pays
+lf --wave billing set agent codex                         # your agent here; the team's stays claude
+lf set account.claude me@example.com --global             # every repository
+lf wave status billing                                    # each setting and its source
 ```
 
 `config.yaml` has the shape of `.lf/config.yaml` and holds only what the Wave
@@ -211,8 +213,16 @@ changes; launches in the Wave layer it over the repository's and your
 `~/.lf/config.yaml`. Repository settings (`planning`, `release`, `exclude`,
 `merge_method`, `land`, `pr`) are an error there. It also carries the Wave's
 `id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
-settings. Machines and account routes are yours, stored on your Machine: a
-launch uses the nearest of Wave, repository and default.
+settings.
+
+`lf set` never edits committed config. It stores your own value on this
+Machine for the repository, a Wave (`lf --wave <wave> set`) or every repository
+(`--global`); without `--wave` it sets the repository, even in a Wave's Task
+worktree. Your `workflow`, `agent` or `skill_agents.<skill>` wins over the
+committed value for you only, and `lf wave status` reports it as `personal`.
+Machines (`machine`, `machine.tasks`, `machine.session`) and account routes
+(`account.<provider>`) exist only this way; a launch uses the nearest of Wave,
+repository and global. `lf unset <key>` hands the choice back.
 
 A Wave without `config.yaml` reads these keys from `GOAL.md` frontmatter, which
 released lf still reads (LOO-640 removes that).
@@ -221,7 +231,6 @@ released lf still reads (LOO-640 removes that).
 
 ```bash
 lf wave update-plan --wave billing --plan plan.json
-lf wave workflow set feature billing     # writes workflow: to .lf/wave/billing/config.yaml
 ```
 
 ```json

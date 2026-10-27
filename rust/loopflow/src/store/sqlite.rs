@@ -63,6 +63,7 @@ pub(crate) mod wave_definitions;
 
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
+pub use scope_defaults::ScopeSettings;
 pub(crate) use task_work::{EndMove, TaskShipping};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
@@ -1590,6 +1591,19 @@ impl SqliteStore {
         }
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Clear a provider's route at one scope; false when it had none.
+    pub fn clear_provider_route(
+        &self,
+        scope: &RouteScope,
+        provider: Provider,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "DELETE FROM provider_routes WHERE scope = ?1 AND scope_id = ?2 AND provider = ?3",
+            params![scope.kind(), scope.id(), provider.as_str()],
+        )? > 0)
     }
 
     pub fn provider_route(

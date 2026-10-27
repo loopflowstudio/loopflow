@@ -1,7 +1,8 @@
 //! A Wave's effective setup: what its Tasks run, where, and which logins pay,
 //! each with the layer that chose it. Shared settings come from the layered
-//! config (`~/.lf/config.yaml` → `.lf/config.yaml` → `.lf/wave/<name>/config.yaml`);
-//! Machine and account routes are your own, stored on this Machine.
+//! config (`~/.lf/config.yaml` → `.lf/config.yaml` → `.lf/wave/<name>/config.yaml`)
+//! under your own `lf set` values; Machine and account routes are only yours,
+//! stored on this Machine.
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -16,10 +17,14 @@ use crate::repository::RepoId;
 use crate::store::SharedStore;
 use crate::work::wave::Wave;
 
-/// Which layer chose a setting. A Task's own choice outranks all of these.
+/// Which layer chose a setting. `Task` is a Task's own choice, which outranks
+/// the rest; a Wave's setup never reports it. `Personal` is your own `lf set`
+/// value for the Wave or repository, above the committed `Wave` and `Repo`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SetupSource {
+    Task,
+    Personal,
     Wave,
     Repo,
     Global,
@@ -29,6 +34,8 @@ pub enum SetupSource {
 impl SetupSource {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Task => "task",
+            Self::Personal => "personal",
             Self::Wave => "wave",
             Self::Repo => "repo",
             Self::Global => "global",
@@ -40,6 +47,7 @@ impl SetupSource {
 impl From<ConfigLayer> for SetupSource {
     fn from(layer: ConfigLayer) -> Self {
         match layer {
+            ConfigLayer::Personal => Self::Personal,
             ConfigLayer::Wave => Self::Wave,
             ConfigLayer::Repo => Self::Repo,
             ConfigLayer::Global => Self::Global,
@@ -109,8 +117,7 @@ pub async fn read_wave_setup(
             Some(route) => AccountSetup {
                 accounts: route.accounts.iter().map(ToString::to_string).collect(),
                 source: match route.scope {
-                    RouteScope::Wave(_) => SetupSource::Wave,
-                    RouteScope::Repo(_) => SetupSource::Repo,
+                    RouteScope::Wave(_) | RouteScope::Repo(_) => SetupSource::Personal,
                     RouteScope::Default => SetupSource::Global,
                 },
             },
@@ -121,11 +128,12 @@ pub async fn read_wave_setup(
         };
         accounts.insert(provider.as_str().to_owned(), setup);
     }
+    let (workflow, workflow_layer) = workflow_setting(&layers)?;
     Ok(WaveSetup {
-        workflow: setting(workflow_setting(&layers)).unwrap_or(SetupValue {
-            value: Some("code".to_owned()),
-            source: SetupSource::Default,
-        }),
+        workflow: SetupValue {
+            value: Some(workflow),
+            source: workflow_layer.map_or(SetupSource::Default, SetupSource::from),
+        },
         agent,
         skill_agents,
         tasks_machine: machine(store, wave, MachineSetting::Tasks)?,
@@ -151,8 +159,7 @@ fn machine(
     Ok(SetupValue {
         value: Some(machine.to_string()),
         source: match source {
-            OwningMachineSource::Wave(_) => SetupSource::Wave,
-            OwningMachineSource::Repository => SetupSource::Repo,
+            OwningMachineSource::Wave(_) | OwningMachineSource::Repository => SetupSource::Personal,
             OwningMachineSource::ThisMachine => SetupSource::Default,
         },
     })

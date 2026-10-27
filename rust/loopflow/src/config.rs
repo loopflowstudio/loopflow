@@ -165,12 +165,15 @@ const REPO_ONLY_KEYS: &[&str] = &[
     "pr",
 ];
 
-/// The config layer a value came from, farthest first.
+/// The config layer a value came from, farthest first. `Personal` is your
+/// own `lf set` value for the repository or Wave; yours for every repository
+/// sits with `~/.lf/config.yaml` as `Global`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigLayer {
     Global,
     Repo,
     Wave,
+    Personal,
 }
 
 /// Summary configuration for a specific path.
@@ -749,7 +752,9 @@ pub struct ConfigLayerValues {
     pub value: serde_yaml_ng::Value,
 }
 
-/// The present config layers for work in a Wave, farthest first.
+/// The present config layers for work in a Wave, farthest first: global
+/// files, the repository's and Wave's committed config, then your `lf set`
+/// values for the repository and the Wave.
 pub fn config_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
@@ -762,6 +767,21 @@ pub fn config_layers(
             path: global_path,
             value,
         });
+    }
+    // Your values for every repository rank with the global file; yours for
+    // the repository and then the Wave rank above every committed layer.
+    let mut personal = Vec::new();
+    if let Some((path, settings)) = personal_settings(repo_root, wave) {
+        let layer = |layer, values: &BTreeMap<String, String>| {
+            (!values.is_empty()).then(|| ConfigLayerValues {
+                layer,
+                path: path.clone(),
+                value: settings_value(values),
+            })
+        };
+        layers.extend(layer(ConfigLayer::Global, &settings.global));
+        personal.extend(layer(ConfigLayer::Personal, &settings.repository));
+        personal.extend(layer(ConfigLayer::Personal, &settings.wave));
     }
     let Some(repo_root) = repo_root else {
         return Ok(layers);
@@ -786,7 +806,53 @@ pub fn config_layers(
             });
         }
     }
+    layers.extend(personal);
     Ok(layers)
+}
+
+/// Your `lf set` values in effect for this repository and Wave. The local
+/// store is optional here: absent, or older than this build, it holds none.
+fn personal_settings(
+    repo_root: Option<&Path>,
+    wave: Option<&str>,
+) -> Option<(PathBuf, crate::store::sqlite::ScopeSettings)> {
+    let read = || -> anyhow::Result<Option<(PathBuf, crate::store::sqlite::ScopeSettings)>> {
+        let Some(store) = crate::store::read_existing_registry()? else {
+            return Ok(None);
+        };
+        if !store.sqlite.has_scope_settings()? {
+            return Ok(None);
+        }
+        let repo = repo_root
+            .and_then(|root| crate::repository::CanonicalRepo::discover(root).ok())
+            .map(|repo| repo.to_string());
+        let settings = store.sqlite.scope_settings(repo.as_deref(), wave)?;
+        Ok(Some((crate::store::database_path_from_env()?, settings)))
+    };
+    read().unwrap_or_else(|error| {
+        tracing::warn!(%error, "your lf set values are unavailable");
+        None
+    })
+}
+
+fn settings_value(values: &BTreeMap<String, String>) -> serde_yaml_ng::Value {
+    let mut mapping = serde_yaml_ng::Mapping::new();
+    for (key, value) in values {
+        match key.split_once('.') {
+            Some((parent, child)) => {
+                let entry = mapping
+                    .entry(parent.into())
+                    .or_insert_with(|| serde_yaml_ng::Mapping::new().into());
+                if let Some(entry) = entry.as_mapping_mut() {
+                    entry.insert(child.into(), value.as_str().into());
+                }
+            }
+            None => {
+                mapping.insert(key.as_str().into(), value.as_str().into());
+            }
+        }
+    }
+    serde_yaml_ng::Value::Mapping(mapping)
 }
 
 /// The nearest layer setting the value at `path`, such as
@@ -804,13 +870,24 @@ pub fn layer_setting<'a>(
     })
 }
 
-/// The nearest layer selecting a Workflow. Personal config never selects one
-/// for a repository's Tasks, and it is the farthest layer, so a global
-/// selection is simply ignored.
+/// The Workflow a Task in these layers takes up and the layer selecting it;
+/// no layer means the builtin `code`. A global value (`~/.lf/config.yaml`)
+/// never selects one for a repository's Tasks, and it is the farthest layer,
+/// so it is simply ignored.
 pub fn workflow_setting(
     layers: &[ConfigLayerValues],
-) -> Option<(ConfigLayer, &serde_yaml_ng::Value)> {
-    layer_setting(layers, &["workflow"]).filter(|(layer, _)| *layer != ConfigLayer::Global)
+) -> Result<(String, Option<ConfigLayer>), LoadError> {
+    let Some((layer, value)) =
+        layer_setting(layers, &["workflow"]).filter(|(layer, _)| *layer != ConfigLayer::Global)
+    else {
+        return Ok(("code".to_owned(), None));
+    };
+    let name = value
+        .as_str()
+        .ok_or_else(|| LoadError::InvalidGraph("workflow must be a Workflow name".to_owned()))?;
+    crate::workflow::validate_workflow_name(name)
+        .map_err(|error| LoadError::InvalidGraph(format!("workflow {name}: {error}")))?;
+    Ok((name.to_owned(), Some(layer)))
 }
 
 /// Keys a Wave's `config.yaml` may set: every `Config` key a repository may

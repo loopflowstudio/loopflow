@@ -627,42 +627,6 @@ async fn planning_response(
     axum::Json(json!({"data":data}))
 }
 
-#[tokio::test]
-async fn wave_workflow_selects_a_committed_definition_offline() {
-    let fixture = Fixture::new().await;
-    let (repo, wave) = planning_repo(&fixture).await;
-    LINEAR_TEST_CONTEXT
-        .scope(fixture.context("http://127.0.0.1:1"), async {
-            let missing = crate::ops::project::set_workflow(&repo, Some(wave.slug()), "review")
-                .await
-                .unwrap_err()
-                .to_string();
-            assert!(missing.contains(".lf/graphs/review.yaml"), "{missing}");
-            std::fs::create_dir_all(repo.join(".lf/graphs")).unwrap();
-            std::fs::write(repo.join(".lf/graphs/review.yaml"), "- cmd: help\n").unwrap();
-            let selected = crate::ops::project::set_workflow(&repo, Some(wave.slug()), "review")
-                .await
-                .unwrap();
-            assert_eq!(selected.workflow.as_deref(), Some("review"));
-            assert_eq!(selected.wave_id, *wave.id());
-            assert_eq!(
-                crate::ops::project::workflow(&repo, Some(wave.slug()))
-                    .await
-                    .unwrap()
-                    .workflow
-                    .as_deref(),
-                Some("review")
-            );
-            assert!(
-                std::fs::read_to_string(crate::work::wave::config::config_path(&repo, wave.slug()))
-                    .unwrap()
-                    .contains("workflow: review")
-            );
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
-        })
-        .await;
-}
-
 fn seed_provider_task(
     runtime: &tokio::runtime::Runtime,
     state: &Arc<tokio::sync::Mutex<PlanningState>>,

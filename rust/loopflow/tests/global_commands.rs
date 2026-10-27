@@ -296,12 +296,12 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     let output = command(
         home.path(),
         cwd.path(),
-        &["account", "route", "set", "claude", "person@example.com"],
+        &["set", "account.claude", "person@example.com"],
     )
     .output()
     .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("--repo owner/name"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--global"));
     assert!(!cwd.path().join(".lf").exists());
 }
 

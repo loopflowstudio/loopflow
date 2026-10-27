@@ -47,10 +47,6 @@ pub fn run(
                 | crate::lf::TaskCommand::Save { .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
-        }) | Some(crate::lf::Commands::Ops {
-            cmd: crate::lf::OpsCommand::Machine {
-                cmd: crate::lf::MachineCommand::Use { .. }
-            }
         })
     );
     let runtime = tokio::runtime::Runtime::new()?;

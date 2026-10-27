@@ -455,7 +455,7 @@ Read chapter plans and Tasks without starting work; an explicit Wave includes hi
 
 ## lf wave workflow
 
-Select and inspect the Wave default Workflow
+Inspect the Wave default Workflow
 
 | Argument | What it does |
 |---|---|
@@ -481,22 +481,12 @@ List graphs, including unavailable local files
 
 ## lf wave workflow show
 
-Show the Wave's default Workflow
+Show the Workflow the Wave's new Tasks take up; select one with `workflow:` in `.lf/wave/<name>/config.yaml`
 
 | Argument | What it does |
 |---|---|
 | `<wave>` | wave |
 | `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave workflow set
-
-Select the graph future Tasks take up; captured Tasks stay unchanged. Writes `workflow:` to the Wave's committed `.lf/wave/<name>/config.yaml`
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `<wave>` | wave |
 | `--help / -h` | Print help |
 
 ## lf wave edit-plan
@@ -1881,19 +1871,6 @@ Check reachability and version without prompting
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf ops machine use
-
-Run work on a Machine: set a Wave's or this repository's default. Bare, it applies to the worktree's Wave, else this repository; `lf task move --machine` moves one Task
-
-| Argument | What it does |
-|---|---|
-| `<machine>` | A registered Machine label, this Machine's hostname, or a Machine id |
-| `<wave>` | Set this Wave's default for new Tasks and its Wave Session |
-| `--session` | Set only where the scope's primary Session runs, and move it there Default: false. |
-| `--tasks` | Set only where the scope's new Tasks run Default: false. |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
 ## lf ops machine rename
 
 Change a saved machine's label
@@ -2142,7 +2119,7 @@ Sign the provider's ordinary home in as a stored login: `lf account <provider> u
 
 ## lf ops account route
 
-Explain configured and automatic account selection, or replace a route
+Explain configured and automatic account selection; `lf set account.<provider>` replaces a route
 
 | Argument | What it does |
 |---|---|
@@ -2151,17 +2128,25 @@ Explain configured and automatic account selection, or replace a route
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf ops account route set
+## lf set
 
-Replace a provider's ordered route
+Set your own value of a setting for this repository, a Wave or every repository; it never edits committed config
 
 | Argument | What it does |
 |---|---|
-| `<provider>` | provider |
-| `<accounts>` | accounts |
-| `--repo` | repo |
-| `--wave` | Route this Wave's work; it wins over the repository's route |
-| `--default` | default Default: false. |
+| `<key>` | key |
+| `<value>` | value |
+| `--global` | Every repository Default: false. |
+| `--help / -h` | Print help |
+
+## lf unset
+
+Clear your own value of a setting, so the committed config chooses
+
+| Argument | What it does |
+|---|---|
+| `<key>` | key |
+| `--global` | Every repository Default: false. |
 | `--help / -h` | Print help |
 
 ## lf config

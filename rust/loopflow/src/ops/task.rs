@@ -27,6 +27,7 @@ pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
 use crate::work::task::comment::TaskComments;
+use crate::work::wave::setup::SetupSource;
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
@@ -536,12 +537,12 @@ pub(crate) struct TaskRunSelection {
     pub take_up: Option<crate::workflow::CapturedGraph>,
 }
 
-/// The Workflow a Task takes up when it names none: its Wave's, then the
-/// repository's `workflow:`, then the builtin `code`.
+/// The Workflow a Task takes up when it names none: your `lf set workflow`,
+/// then its Wave's and the repository's `workflow:`, then the builtin `code`.
 pub(crate) fn task_workflow_default(
     store: &Store,
     task: &Task,
-) -> OpsResult<(String, &'static str)> {
+) -> OpsResult<(String, SetupSource)> {
     let repo = repository_for_task(store, task)?;
     let wave = match &task.wave_id {
         Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
@@ -549,18 +550,9 @@ pub(crate) fn task_workflow_default(
     };
     let layers = crate::config::config_layers(Some(&repo), wave.as_ref().map(|w| w.slug()))
         .map_err(task_error)?;
-    let Some((layer, name)) = crate::config::workflow_setting(&layers) else {
-        return Ok(("code".to_string(), "builtin"));
-    };
-    let name = name
-        .as_str()
-        .ok_or_else(|| task_error("workflow must be a Workflow name"))?;
-    crate::workflow::validate_workflow_name(name).map_err(task_error)?;
-    let source = match layer {
-        crate::config::ConfigLayer::Wave => "wave",
-        _ => "repository",
-    };
-    Ok((name.to_owned(), source))
+    let (name, layer) = crate::config::workflow_setting(&layers).map_err(task_error)?;
+    let source = layer.map_or(SetupSource::Default, SetupSource::from);
+    Ok((name, source))
 }
 
 /// The graph a Task takes up before it moves: the one `named` when it differs
@@ -587,7 +579,8 @@ pub(crate) fn task_graph_to_take_up(
                 .map_err(task_error)?
                 .ok_or_else(|| {
                     task_error(format!(
-                        "{source} {}",
+                        "{} {}",
+                        source.as_str(),
                         crate::workflow::missing_workflow(&name)
                     ))
                 })

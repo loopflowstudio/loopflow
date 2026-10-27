@@ -79,8 +79,9 @@ lf comment <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run be
 for you to try the change, then deliver it and stop again for you to check it on
 `main`. Name it once; the Task keeps it. Set
 `workflow: code` in `.lf/config.yaml` and `lf task run <ID>` picks it up for
-every new Task. `auto` skips both stops: `lf wave workflow set auto <wave>` and
-that Wave's Tasks run from request to merged PR without you.
+every new Task. `auto` skips both stops: with `workflow: auto` in
+`.lf/wave/<wave>/config.yaml`, that Wave's Tasks run from request to merged PR
+without you.
 
 While it runs:
 

@@ -941,7 +941,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "set", "proof", "inbox"],
+        &["--wave", "inbox", "set", "workflow", "proof"],
     );
     let catalog = lf(
         repo.path(),
@@ -2775,7 +2775,7 @@ fn wave_documents_and_workflows_follow_files() {
         lf(
             repo.path(),
             home.path(),
-            &["wave", "workflow", "set", "finish", "tools/parser"],
+            &["--wave", "tools/parser", "set", "workflow", "finish"],
         );
         std::fs::write(root.join("parser/MEMORY.md"), "Edited child memory λ.\n").unwrap();
         let context = lf(
@@ -3325,7 +3325,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "set", "code", wave.slug()],
+        &["--wave", wave.slug(), "set", "workflow", "code"],
     );
     let selected = lf(
         repo.path(),
@@ -3789,7 +3789,7 @@ fn waveless_task_lifecycle() {
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
     assert_eq!(listed[0]["task"]["id"], id);
     assert_eq!(listed[0]["workflow_name"], "proof");
-    assert_eq!(listed[0]["workflow_source"], "repository");
+    assert_eq!(listed[0]["workflow_source"], "repo");
     let inventory = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
     assert_eq!(inventory["tasks"]["items"][0]["task"]["id"], id);
     let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
@@ -3881,7 +3881,7 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_workflow() {
     let id = created["id"].as_str().unwrap();
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
     assert_eq!(listed[0]["workflow_name"], "code");
-    assert_eq!(listed[0]["workflow_source"], "builtin");
+    assert_eq!(listed[0]["workflow_source"], "default");
     lf(repo.path(), home.path(), &["-b", "task", "run", id]);
     let shown = lf(
         repo.path(),
@@ -3931,7 +3931,7 @@ fn wave_workflow_set_selects_the_builtin_auto() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "set", "auto", "product"],
+        &["--wave", "product", "set", "workflow", "auto"],
     );
     let created = lf(
         repo.path(),
@@ -3948,7 +3948,7 @@ fn wave_workflow_set_selects_the_builtin_auto() {
         .find(|task| task["task"]["id"] == created["id"])
         .unwrap();
     assert_eq!(task["workflow_name"], "auto");
-    assert_eq!(task["workflow_source"], "wave");
+    assert_eq!(task["workflow_source"], "personal");
 }
 
 #[test]
@@ -3978,7 +3978,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "set", "wave", "product"],
+        &["--wave", "product", "set", "workflow", "wave"],
     );
     let task = lf(
         repo.path(),
@@ -4004,7 +4004,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "set", "explicit", "product"],
+        &["--wave", "product", "set", "workflow", "explicit"],
     );
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     repo.create_file(".lf/config.yaml", "workflow: ''\n");

@@ -2,67 +2,24 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::lf::RouteCommand;
 use crate::profile::{ProviderRoute, RouteScope};
-use crate::provider_account::{account_login, match_account, open_account_store, AccountMatch};
+use crate::provider_account::{account_login, match_account, AccountMatch};
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
 
-pub(super) async fn run_route_async(
-    cmd: Option<&RouteCommand>,
-    repo: Option<&str>,
-    default: bool,
-    json: bool,
-) -> Result<()> {
-    match cmd {
-        Some(RouteCommand::Set {
-            provider,
-            accounts,
-            repo,
-            wave,
-            default,
-        }) => {
-            let store = open_account_store().await?;
-            let (scope, label) = if *default {
-                (RouteScope::Default, "default".to_string())
-            } else if let Some(wave) = wave {
-                let cwd = std::env::current_dir()?;
-                let repo = crate::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
-                let wave = crate::work::wave::context::resolve_managed_wave(
-                    Some(&store),
-                    Some(&repo),
-                    Some(wave),
-                    None,
-                )
-                .await?;
-                (
-                    RouteScope::Wave(wave.id().clone()),
-                    format!("Wave {}", wave.slug()),
-                )
-            } else {
-                let repo = resolve_repo_id(repo.as_deref())?.ok_or_else(|| anyhow!(
-                    "Run lf account route set in a repository with an origin, or pass --repo owner/name, --wave or --default."
-                ))?;
-                let label = repo.to_string();
-                (RouteScope::Repo(repo), label)
-            };
-            set_route(&store, scope, &label, provider, accounts).await
-        }
-        None => {
-            let repo_id = if default {
-                None
-            } else {
-                resolve_repo_id(repo)?
-            };
-            show_routes(
-                crate::provider_account::read_account_store()?.as_ref(),
-                repo_id.as_ref(),
-                json,
-            )
-            .await
-        }
-    }
+pub(super) async fn show_route(repo: Option<&str>, default: bool, json: bool) -> Result<()> {
+    let repo_id = if default {
+        None
+    } else {
+        resolve_repo_id(repo)?
+    };
+    show_routes(
+        crate::provider_account::read_account_store()?.as_ref(),
+        repo_id.as_ref(),
+        json,
+    )
+    .await
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -230,14 +187,14 @@ async fn show_routes(
     Ok(())
 }
 
-async fn set_route(
+/// Replace `provider`'s route at `scope` with the logins in order.
+pub(crate) async fn set_route(
     store: &SharedStore,
     scope: RouteScope,
     label: &str,
-    raw_provider: &str,
-    raw_accounts: &[String],
+    provider: Provider,
+    raw_accounts: &[&str],
 ) -> Result<()> {
-    let provider = parse_managed_provider(raw_provider)?;
     let mut accounts = Vec::new();
     for raw_account in raw_accounts {
         accounts.push(find_provider_account(store, provider, raw_account).await?);

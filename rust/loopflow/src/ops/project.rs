@@ -292,37 +292,13 @@ pub struct WaveWorkflow {
 pub async fn workflow(repo: &Path, selector: Option<&str>) -> OpsResult<WaveWorkflow> {
     let store = read_store()?;
     let wave = workflow_wave(&store, repo, selector).await?;
+    let layers =
+        crate::config::config_layers(Some(repo), Some(wave.slug())).map_err(project_error)?;
+    let (name, layer) = crate::config::workflow_setting(&layers).map_err(project_error)?;
     Ok(WaveWorkflow {
-        workflow: crate::work::wave::config::wave_workflow(repo, wave.slug())
-            .map_err(project_error)?,
+        workflow: layer.map(|_| name),
         wave_id: wave.id().clone(),
         wave: wave.slug().into(),
-    })
-}
-
-pub async fn set_workflow(
-    repo: &Path,
-    selector: Option<&str>,
-    name: &str,
-) -> OpsResult<WaveWorkflow> {
-    let store = read_store()?;
-    let wave = workflow_wave(&store, repo, selector).await?;
-    crate::workflow::validate_workflow_name(name).map_err(project_error)?;
-    if crate::workflow::load_workflow(name, repo)
-        .map_err(project_error)?
-        .is_none()
-    {
-        return Err(project_error(crate::workflow::missing_workflow(name)));
-    }
-    crate::work::wave::config::update_wave_config(repo, wave.slug(), |map| {
-        map.insert("workflow".into(), name.into());
-        Ok(())
-    })
-    .map_err(project_error)?;
-    Ok(WaveWorkflow {
-        wave_id: wave.id().clone(),
-        wave: wave.slug().into(),
-        workflow: Some(name.into()),
     })
 }
 

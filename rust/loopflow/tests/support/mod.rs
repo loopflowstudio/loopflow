@@ -335,8 +335,7 @@ pub fn bind_task_planning(repo: &TestRepo) {
     repo.commit("Bind fixture planning before creating Task checkouts");
 }
 
-/// Select a Wave's default Workflow as `lf wave workflow set` does: in its
-/// `config.yaml` in `repo`.
+/// Select a Wave's default Workflow in its committed `config.yaml` in `repo`.
 #[allow(dead_code)] // Shared helper compiled into integration tests without Workflows.
 pub fn select_wave_workflow(
     repo: &Path,

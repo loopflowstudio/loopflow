@@ -94,6 +94,6 @@
       "wave_id": null
     },
     "workflow_name": "code",
-    "workflow_source": "builtin"
+    "workflow_source": "default"
   }
 }

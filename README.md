@@ -82,9 +82,9 @@ agent: claude:opus
 ```
 
 ```bash
-lf machine use mini infrastructure                                  # and run on your mini
-lf account route set claude work@example.com --wave infrastructure  # billed to your work login
-lf wave status infrastructure                                       # each setting and where it came from
+lf --wave infrastructure set machine mini                       # and run on your mini
+lf --wave infrastructure set account.claude work@example.com    # billed to your work login
+lf wave status infrastructure                                   # each setting and where it came from
 ```
 
 **Without a Task,** `lf` still launches any agent or Skill directly:

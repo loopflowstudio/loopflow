@@ -249,7 +249,7 @@ fn flow_and_workflow_catalogs_read_the_same_graphs() {
         .unwrap();
     // A Workflow is selected by name; its definition is the committed graph.
     let definition = repo.path().join(".lf/graphs/feature.yaml");
-    let selected = run(&["wave", "workflow", "set", "feature", "proof"]);
+    let selected = run(&["--wave", "proof", "set", "workflow", "feature"]);
     assert!(
         selected.status.success(),
         "{}",
@@ -259,7 +259,7 @@ fn flow_and_workflow_catalogs_read_the_same_graphs() {
     assert!(entry(&workflows)["workflow"].is_object());
     assert_eq!(entry(&workflows)["source"], ".lf/graphs/feature.yaml");
     std::fs::write(&definition, "invalid: true\n").unwrap();
-    assert!(!run(&["wave", "workflow", "set", "feature", "proof"])
+    assert!(!run(&["--wave", "proof", "set", "workflow", "feature"])
         .status
         .success());
     assert!(entry(&run(&["wave", "workflow", "list", "--json"]))["unavailable"].is_string());

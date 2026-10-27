@@ -25,3 +25,21 @@ INSERT INTO provider_routes_next SELECT
 FROM provider_routes;
 DROP TABLE provider_routes;
 ALTER TABLE provider_routes_next RENAME TO provider_routes;
+
+-- Your own overrides of shared setup (`workflow`, `agent`, `skill_agents.<skill>`)
+-- for a Wave, a repository or every repository, set by `lf set`.
+CREATE TABLE scope_settings (
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('wave', 'repository', 'global')),
+    scope_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    set_at INTEGER NOT NULL,
+    PRIMARY KEY (scope_kind, scope_id, key),
+    CHECK ((scope_kind = 'global') = (scope_id = ''))
+);
+CREATE TRIGGER store_revision_scope_settings_insert AFTER INSERT ON scope_settings
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_scope_settings_update AFTER UPDATE ON scope_settings
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_scope_settings_delete AFTER DELETE ON scope_settings
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;

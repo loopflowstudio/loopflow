@@ -184,8 +184,8 @@ helper → stays with "update Desktop". No rename, merge or open product choice.
   graph_live_across_switch_runs_next_step_on_selected_install` passes (1 test).
 - 2026-10-27 compress (one `place` per disposition; one loop renders both process lists): clippy and `--lib -- rollover` (4) pass.
 - 2026-10-27 realign: no rerun; the f66d7acdee merge left every rollover file unchanged.
-- 2026-10-27 kickoff (recovery steer): source re-read, no change — `os_process.rs:241`
-  main Home → Desktop helper or entry gate, private Home → `LF_BIN`; `graph.rs:736`
+- 2026-10-27 kickoff and implement (recovery steer): source re-read, no change, no rerun — `os_process.rs:241`
+  main Home → Desktop helper or entry gate, private Home → `LF_BIN`; `lf/commands/graph.rs:736`
   per step; branch current with origin/main; no open policy choice.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).

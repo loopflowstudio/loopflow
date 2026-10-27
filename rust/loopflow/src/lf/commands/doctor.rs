@@ -362,26 +362,6 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
     }
 }
 
-pub fn audit(events: &[LfProcess]) -> Vec<Check> {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    audit_at(events, &[], now)
-}
-
-fn audit_at(events: &[LfProcess], obligations: &[CronObligation], now: i64) -> Vec<Check> {
-    if events.is_empty() && obligations.is_empty() {
-        return vec![Check::warn("continuity", "ledger is empty")];
-    }
-    if events.is_empty() {
-        return vec![check_continuity(obligations, now)];
-    }
-    vec![
-        check_continuity(obligations, now),
-        check_attribution(events),
-        check_identity(events),
-        check_lineage(events),
-    ]
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ExpectedInterval {
     start: i64,
@@ -605,7 +585,10 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{audit, check_continuity, inspect_store, latest_due_interval, Status};
+    use super::{
+        check_attribution, check_continuity, check_identity, check_lineage, inspect_store,
+        latest_due_interval, Status,
+    };
     use crate::durable::{CronReceiptId, MachineId};
     use crate::ops::{
         parse_schedule, CronObligation, CronOutcome, CronReceipt, CronSource, CronTargetKind,
@@ -670,11 +653,15 @@ mod tests {
     }
 
     fn status_of(rows: &[LfProcess], name: &str) -> Status {
-        audit(rows)
-            .into_iter()
-            .find(|check| check.name == name)
-            .expect("check exists")
-            .status
+        [
+            check_attribution(rows),
+            check_identity(rows),
+            check_lineage(rows),
+        ]
+        .into_iter()
+        .find(|check| check.name == name)
+        .expect("check exists")
+        .status
     }
 
     fn timestamp(value: &str) -> i64 {

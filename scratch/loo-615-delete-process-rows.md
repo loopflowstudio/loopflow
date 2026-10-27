@@ -327,6 +327,6 @@ With inherited `LF_*` unset and `< /dev/null`:
   long-lived-parent count recorded in one line.
 
 Check (2026-10-26): `swift test --filter 'RegistryQueryTests|TaskFilesTests'` 43 ok;
-`--lib journal` 30 ok. Earlier sweep: everything else touched passes except
+`--lib journal` 30 ok. Compress (2026-10-26): running-parent fixture shared as `loopflow_test_support::RunningParent`; doctor's test-only `audit` dropped; clippy clean, `--lib doctor failed_placement` 13 ok, `process_ownership_tests` 12 ok, touched integration tests 8 ok. Earlier sweep: everything else touched passes except
 `store_contention` under load. The clone probe and the quiet contention
 comparison are deferred to gate.

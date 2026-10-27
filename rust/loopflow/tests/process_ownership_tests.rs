@@ -7,11 +7,11 @@ use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
 use loopflow::harness::codex_connection::CodexConnection;
-use loopflow::id::{LfProcessId, TraceId};
+use loopflow::id::LfProcessId;
 use loopflow::session::{LfSession, TitleSource};
 use loopflow::store::sqlite::SqliteStore;
 use loopflow::store::{open_ephemeral_store, StorageConfig};
-use loopflow_test_support::TestRepo;
+use loopflow_test_support::{RunningParent, TestRepo};
 
 #[tokio::test]
 async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_without_losing_history()
@@ -612,7 +612,7 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
         .await
         .unwrap();
     drop(store);
-    let parent = running_parent(&database);
+    let parent = RunningParent::insert(&database);
     let conn = rusqlite::Connection::open(&database).unwrap();
     let schema: String = conn
         .query_row(
@@ -642,7 +642,7 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
              ORDER BY started_at,rowid",
         )
         .unwrap()
-        .query_map([parent.0.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_map([parent.id.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
@@ -680,7 +680,7 @@ async fn early_observation_records_preflight() {
         .await
         .unwrap();
     drop(store);
-    let parent = running_parent(&database);
+    let parent = RunningParent::insert(&database);
     let output = child(
         home.path(),
         home.path(),
@@ -694,7 +694,7 @@ async fn early_observation_records_preflight() {
     let (count, completed): (i64, i64) = conn
         .query_row(
             "SELECT count(*),count(completed_at) FROM processes WHERE parent_lf_process_id=?1",
-            [parent.0.as_str()],
+            [parent.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
@@ -768,7 +768,7 @@ fn empty_release_check_returns_through_process_completion() {
     std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
     let database = home.path().join("loopflow.db");
     drop(SqliteStore::new(&database).unwrap());
-    let parent = running_parent(&database);
+    let parent = RunningParent::insert(&database);
     let output = child(
         home.path(),
         repo.path(),
@@ -788,10 +788,10 @@ fn empty_release_check_returns_through_process_completion() {
         "{output:?}"
     );
     assert!(!stderr.contains("Error:"), "{output:?}");
-    assert_recorded_exit(home.path(), &parent.0, 1);
+    assert_recorded_exit(home.path(), &parent.id, 1);
 }
 
-fn assert_recorded_exit(home: &Path, parent: &LfProcessId, code: i32) {
+fn assert_recorded_exit(home: &Path, parent: &str, code: i32) {
     let conn = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let rows: Vec<(String, Option<i32>, bool, Option<String>)> = conn
         .prepare(
@@ -799,7 +799,7 @@ fn assert_recorded_exit(home: &Path, parent: &LfProcessId, code: i32) {
              WHERE parent_lf_process_id=?1",
         )
         .unwrap()
-        .query_map([parent.as_str()], |row| {
+        .query_map([parent], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .unwrap()
@@ -820,7 +820,7 @@ async fn command_failure_records_the_process_result() {
         .await
         .unwrap();
     let repo = TestRepo::new();
-    let parent = running_parent(&database);
+    let parent = RunningParent::insert(&database);
     for args in [
         vec!["session", "rename", "missing", "Name"],
         vec![
@@ -856,7 +856,7 @@ async fn command_failure_records_the_process_result() {
         .query_row(
             "SELECT count(*) FROM processes
              WHERE parent_lf_process_id=?1 AND outcome='failed' AND exit_code=1",
-            [parent.0.as_str()],
+            [parent.id.as_str()],
             |row| row.get(0),
         )
         .unwrap();
@@ -879,24 +879,9 @@ fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {
     command
 }
 
-/// A running lf parent keeps its finished children, so their rows stay readable.
-fn running_parent(database: &Path) -> (LfProcessId, TraceId) {
-    let parent = (LfProcessId::new(), TraceId::new());
-    rusqlite::Connection::open(database)
-        .unwrap()
-        .execute(
-            "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
-            rusqlite::params![parent.0, parent.1],
-        )
-        .unwrap();
-    parent
-}
-
-fn child(home: &Path, cwd: &Path, args: &[&str], parent: &(LfProcessId, TraceId)) -> Command {
+fn child(home: &Path, cwd: &Path, args: &[&str], parent: &RunningParent) -> Command {
     let mut command = command(home, cwd, args);
-    command
-        .env("LF_PROCESS_ID", parent.0.as_str())
-        .env("LF_TRACE_ID", parent.1.as_str());
+    parent.adopt(&mut command);
     command
 }
 
@@ -1014,7 +999,7 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
     };
     #[cfg(not(target_os = "linux"))]
     let preload: Option<std::path::PathBuf> = None;
-    let parent = running_parent(&database);
+    let parent = RunningParent::insert(&database);
     let mut command = child(
         home.path(),
         repo.path(),
@@ -1520,7 +1505,7 @@ async fn inspection_records_one_completed_process_without_starting_work() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    let parent = running_parent(&database);
+    let parent = RunningParent::insert(&database);
     let output = child(
         home.path(),
         home.path(),
@@ -1535,7 +1520,7 @@ async fn inspection_records_one_completed_process_without_starting_work() {
         .query_row(
             "SELECT count(*), count(completed_at) FROM processes
              WHERE parent_lf_process_id=?1 AND outcome='succeeded'",
-            [parent.0.as_str()],
+            [parent.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .expect("every parsed lf command has a process row");

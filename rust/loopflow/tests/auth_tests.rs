@@ -23,19 +23,10 @@ fn account_status_preserves_local_evidence_without_provider_executables() {
         .block_on(store.upsert_provider_account(&seeded))
         .unwrap();
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    // A running parent keeps its finished children, so their rows stay readable.
-    let parent = loopflow::id::LfProcessId::new();
-    let trace = loopflow::id::TraceId::new();
-    db.execute(
-        "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
-        rusqlite::params![parent, trace],
-    )
-    .unwrap();
+    let parent = loopflow_test_support::RunningParent::insert(&home.path().join("loopflow.db"));
     let child = || {
         let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-        command
-            .env("LF_PROCESS_ID", parent.as_str())
-            .env("LF_TRACE_ID", trace.as_str());
+        parent.adopt(&mut command);
         command
     };
     let inspect = |json: bool, verify: bool| {
@@ -78,7 +69,7 @@ fn account_status_preserves_local_evidence_without_provider_executables() {
         .query_row(
             "SELECT count(*),sum(outcome='succeeded' AND completed_at IS NOT NULL) FROM processes
              WHERE parent_lf_process_id=?1",
-            [parent.as_str()],
+            [&parent.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();

@@ -771,19 +771,11 @@ fn transport_options_require_machine_and_retired_commands_are_gone() {
 fn remote_command_exit_is_retained_in_local_process_history() {
     let fixture = Machines::new();
     assert_success(&fixture.run(&["machine", "add", "mini"]));
-    let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
-    // A running parent keeps its finished child, so the exit stays readable.
-    let parent = loopflow::id::LfProcessId::new();
-    let trace = loopflow::id::TraceId::new();
-    db.execute(
-        "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
-        rusqlite::params![parent, trace],
-    )
-    .unwrap();
-    let output = fixture
-        .command(&["--machine", "mini", "fail"])
-        .env("LF_PROCESS_ID", parent.as_str())
-        .env("LF_TRACE_ID", trace.as_str())
+    let database = fixture.root.path().join("local/loopflow.db");
+    let db = rusqlite::Connection::open(&database).unwrap();
+    let parent = loopflow_test_support::RunningParent::insert(&database);
+    let output = parent
+        .adopt(&mut fixture.command(&["--machine", "mini", "fail"]))
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(42));

@@ -599,28 +599,21 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
 fn failed_placement_is_observed_without_starting_a_task() {
     let task = WorkflowTask::new();
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    // A running parent keeps its failed child, so the observation stays readable.
-    let parent = loopflow::id::LfProcessId::new();
-    let trace = loopflow::id::TraceId::new();
-    db.execute(
-        "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
-        rusqlite::params![parent, trace],
-    )
-    .unwrap();
-    let output = command(
-        task.repo.path(),
-        task.home.path(),
-        &["--task", "missing-task", "graph", "proof"],
-    )
-    .env("LF_PROCESS_ID", parent.as_str())
-    .env("LF_TRACE_ID", trace.as_str())
-    .output()
-    .unwrap();
+    let parent =
+        loopflow_test_support::RunningParent::insert(&task.home.path().join("loopflow.db"));
+    let output = parent
+        .adopt(&mut command(
+            task.repo.path(),
+            task.home.path(),
+            &["--task", "missing-task", "graph", "proof"],
+        ))
+        .output()
+        .unwrap();
     assert!(!output.status.success());
     let (cwd, outcome): (String, String) = db
         .query_row(
             "SELECT cwd,outcome FROM processes WHERE parent_lf_process_id=?1",
-            [parent.as_str()],
+            [&parent.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();

@@ -267,19 +267,10 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     fs::create_dir_all(home.path().join(".lf")).unwrap();
     SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
     let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
-    // A running parent keeps its finished children, so their rows stay readable.
-    let parent = loopflow::id::LfProcessId::new();
-    let trace = loopflow::id::TraceId::new();
-    database
-        .execute(
-            "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
-            rusqlite::params![parent, trace],
-        )
-        .unwrap();
+    let parent = loopflow_test_support::RunningParent::insert(&home.path().join(".lf/loopflow.db"));
     let child = |args: &[&str]| {
-        command(home.path(), cwd.path(), args)
-            .env("LF_PROCESS_ID", parent.as_str())
-            .env("LF_TRACE_ID", trace.as_str())
+        parent
+            .adopt(&mut command(home.path(), cwd.path(), args))
             .output()
             .unwrap()
     };
@@ -291,7 +282,7 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     let commands: i64 = database
         .query_row(
             "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
-            [parent.as_str()],
+            [&parent.id],
             |row| row.get(0),
         )
         .unwrap();

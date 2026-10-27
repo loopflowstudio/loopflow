@@ -37,6 +37,9 @@ Check: `cargo test` lib (compatibility, build_info, version, installation) + `gl
 `scripts/test_task_installation.py --repository-upgrade` keeps the env-var route: it migrates.
 
 
-- Demo: worktree at v0.14.16, two-line fix, `cargo build --release`,
-  `lf self install promote --preview`, promote; then the same with a draft (refused).
+- Demo: the Task names v0.14.16, but that tag predates this rule and the live store is
+  on the v0.14.17 frontier (a v0.14.16 hotfix is `Behind`, refused). Demo with this
+  branch's tip as the "tag" (temporary worktree, two-line fix, `cargo build --release`,
+  `promote --preview`, promote); then the same with a draft (refused). The literal
+  "hotfix on a release tag" path is first available on the release that ships this.
 - Coordinate with #1656 (newcomer install) on `commands/install.rs` / `installation.rs`.

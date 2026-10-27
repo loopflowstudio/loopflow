@@ -88,4 +88,4 @@ noted in `scratch/questions.md`.
 Gate check: `cargo test -p loopflow --lib` (compatibility, build_info, version,
 installation) + `--test global_commands` + `--test one_machine_tests`, `cargo fmt
 --check`, `cargo clippy --all-targets -- -D warnings`.
-Check (2026-10-27, merged main 4a85fb3a5a; compress folded doctor's label and renamed the promote fn): focused lib tests + global_commands + fmt + `cargo build -p loopflow` — pass; clippy and one_machine_tests left to gate.
+Gate (2026-10-27, 666b3d993d on main 4a85fb3a5a): fmt --check, clippy -D warnings, lib `compatibility build_info version installation` (62 pass), global_commands (45 pass), one_machine_tests (3 pass) — all pass.

@@ -918,16 +918,15 @@ async fn serve_codex_native(
     };
 
     let (store, session, attachment) = &owner;
-    let mut connection = CodexConnection {
-        store: store.clone(),
-        session_id: session.clone().into(),
-        thread_id: launch
+    let mut connection = CodexConnection::new(
+        store.clone(),
+        session.clone().into(),
+        launch
             .resume_token
             .clone()
             .or(store.session_thread(session)?),
-        attachment: Some(attachment.clone()),
-        account_id: launch.provider_account_id.clone(),
-    };
+        Some(attachment.clone()),
+    );
     connection.ensure_thread_resolved()?;
     let (events, _events) = tokio::sync::mpsc::unbounded_channel();
     let mut harness = CodexHarness::new(events, ApprovalPolicy::NativeClient);
@@ -949,7 +948,7 @@ async fn serve_codex_native(
     let thread = params["threadId"].as_str().map(AgentSessionId::from);
     harness.stop().await?;
     connection.thread_id = thread.clone();
-    connection.account_id = account.clone();
+    connection.account_route = harness.account_route();
     // Recover saved history before opening the UI, without replaying its input.
     if thread.is_some() {
         tokio::time::timeout(

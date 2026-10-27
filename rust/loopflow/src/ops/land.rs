@@ -45,8 +45,8 @@ enum Integration {
 
 /// Prepare one PR: commit, merge main when GitHub needs it, apply configured
 /// cleanup, mark ready, and finalize per `finalize`. `arm` requests auto-merge;
-/// `submit` leaves the PR for manual merge. Neither rotates the worktree. Returns the resulting PR,
-/// or `None` for a local merge.
+/// `submit` leaves the PR for manual merge. Neither rotates the worktree.
+/// Returns the resulting PR, or `None` for a local merge.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,

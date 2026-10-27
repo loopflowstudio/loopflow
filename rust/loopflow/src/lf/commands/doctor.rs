@@ -60,6 +60,7 @@ struct DoctorReport<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 struct StoreReport {
     build_provenance: crate::build_info::BuildProvenance,
+    build_label: Option<String>,
     migration_authority: String,
     build_source_identity: String,
     build_source_root: Option<String>,
@@ -285,6 +286,7 @@ fn inspect_store(path: &Path) -> StoreReport {
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
+        build_label: crate::build_info::label().map(str::to_string),
         migration_authority: match crate::build_info::migration_authority() {
             crate::build_info::MigrationAuthority::Published => "published",
             crate::build_info::MigrationAuthority::ValidationOnly => "validation-only",
@@ -334,8 +336,12 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
                 Ok(Some(selection)) => Check::ok(
                     "install-selection",
                     format!(
-                        "{:?} installation {} selects {}",
-                        selection.source,
+                        "{} installation {} selects {}",
+                        selection
+                            .artifact_set
+                            .build_label
+                            .clone()
+                            .unwrap_or_else(|| format!("{:?}", selection.source)),
                         selection.installation_id,
                         selection.store.display()
                     ),
@@ -466,9 +472,13 @@ fn check_lineage(events: &[LfProcess]) -> Check {
 
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     let colors = Colors::default();
+    let build = store
+        .build_label
+        .clone()
+        .unwrap_or_else(|| store.build_provenance.to_string());
     println!(
-        "build: {} ({}) · migrations {}",
-        store.build_provenance, store.build_source_identity, store.migration_authority
+        "build: {build} ({}) · migrations {}",
+        store.build_source_identity, store.migration_authority
     );
     println!("revision: {}", store.build_source_revision);
     if let Some(root) = &store.build_source_root {

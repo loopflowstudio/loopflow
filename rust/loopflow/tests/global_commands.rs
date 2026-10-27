@@ -188,7 +188,10 @@ fn installation_uses_candidate_authority_from_any_checkout() {
         let output = cmd.output().unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("only a published candidate"), "{error}");
+        assert!(
+            error.contains("only a published release may advance"),
+            "{error}"
+        );
     }
 }
 
@@ -216,7 +219,7 @@ fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
     .unwrap();
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("only a published candidate"), "{error}");
+    assert!(error.contains("every target is unchanged"), "{error}");
     assert_eq!(
         fs::read(database).unwrap(),
         b"not a compatible Task registry"

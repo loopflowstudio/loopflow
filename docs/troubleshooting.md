@@ -158,13 +158,15 @@ lf disk clean              # remove it; each removal is logged to ~/.lf/logs/dis
 ```
 
 `lf disk clean` removes worktrees `lf wt prune` would, finished Tasks' build
-output, dead process receipts, every database backup but the newest, and
-captures and logs older than `--keep-days` (7). It also forgets finished
+output, dead process receipts, every database backup but the newest,
+captures and logs older than `--keep-days` (7), and snapshot staging
+directories a killed draft build left in `~/.lf/copies`, however recent.
+It also forgets finished
 Processes nothing needs: every lf process is listed while it runs, and at exit
 its row goes unless an agent issued it, its parent is still running, or
-something references it. The database, account homes, the
-newest backup, anything written in the last day and anything a process holds
-open are never removed.
+something references it. The database, account homes, the newest backup,
+anything else written in the last day and anything a process holds open are
+never removed.
 
 Starting a Session rotates `~/.lf` at most hourly: backups, draft store copies,
 captures and logs older than 30 days go, the same window Claude Code keeps its

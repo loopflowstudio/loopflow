@@ -2131,11 +2131,12 @@ impl SqliteStore {
 
     /// Record a Process start or exit. An exit forgets this Process and the
     /// finished children it was keeping when nothing else needs them
-    /// ([`processes::FORGETTABLE`]).
+    /// ([`processes::FORGETTABLE`]). Each statement commits on its own so a
+    /// writer holds the lock only briefly; a row an interrupted exit leaves is
+    /// forgotten by the retention prune.
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
             "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
                 via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
@@ -2149,7 +2150,7 @@ impl SqliteStore {
         )?;
         if process.completed_at.is_some() {
             let forget = |scope: &str| {
-                tx.execute(
+                conn.execute(
                     &format!(
                         "DELETE FROM processes WHERE id IN (SELECT p.id FROM processes p
                          WHERE {scope} AND {})",
@@ -2162,7 +2163,6 @@ impl SqliteStore {
             forget("p.parent_lf_process_id=?1")?;
             forget("p.id=?1")?;
         }
-        tx.commit()?;
         Ok(())
     }
 

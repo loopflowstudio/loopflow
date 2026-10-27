@@ -681,6 +681,10 @@ repeats the global `--task`/`--wave` — LOO-618 reshapes resume; per-command
 configuration). `ops ci --repo` (a GitHub owner/repo) and `self sync-skills
 --repo` (export target) mean something else and stay.
 
+After #1706/#1707: `--gpu`/`--spot` sit under `lf ops machine ondemand` and
+docs say `lf ondemand`/`lf pool`; `history replay` reads the store's input
+capture, not `events.jsonl`. Nothing to change.
+
 ## Run notes
 
 - `wave cron` deletion merged by hand from a side worktree; orphaned cron

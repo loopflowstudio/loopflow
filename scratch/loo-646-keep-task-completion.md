@@ -223,10 +223,10 @@ out of this Task.
 
 ## Remaining
 
-- Gate: full `task_planning_tests`, `linear_observation_tests`, clippy.
 - After landing: `lf task status LOO-615 --json` read-only check.
 
 ## Check results
 - `cargo test -p loopflow --lib task_completion_` → 18 passed (new: survives_rate_limit…, uncertain_write_retries…, unknown_history_stays_pending…, explicit_retry_adopts_reopening…); affected suites and clippy deferred to gate.
 - compress: readback history read proved required (`task_completion_` → 17/18 without it). Realign: source unchanged, no rerun; gate owns `task_planning_tests`, `linear_observation_tests`, clippy.
 - Gate: `cargo test -p loopflow --lib -- task_planning_tests linear_observation_tests --test-threads=2` → 86 passed (slow on a loaded host; 6 threads stalled past 30m); `cargo fmt --check`, `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
+- Gate (post-merge of main f66d7acdee, 2026-10-27): diff review found no changes needed; merge touched no branch files, so prior test/clippy results stand; `cargo fmt --all --check` clean; CI owns the merged-tree matrix.

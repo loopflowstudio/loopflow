@@ -1,7 +1,8 @@
 # LOO-604: one lf API for Loopflow state
 
 Status: implementing; core rebuilt (watches, open-Task scope, batched details,
-live reads) and Remaining 0–0b (minimal streamed JSON, Task-status summaries) done. Jack Heart
+live reads) and Remaining 0–0c (minimal streamed JSON, Task-status summaries,
+bare `lf ps` ids) done; concept review after 0c found nothing further to change. Jack Heart
 (2026-10-27) asked to finish the design and publish the PR; Remaining 1–6
 continue after it. Client API docs done (surfaces "Build
 your own view" is the watch list); published as PR #1719 (2026-10-27).

@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use clap::{CommandFactory, FromArgMatches};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde::Serialize;
 
 use crate::journal::{OsProcess, ProcessIdentityEvidence};
@@ -116,14 +116,48 @@ fn compact_usage(conn: &Connection, cursor: &Cursor) -> StoreResult<u64> {
 }
 
 /// One row per native usage key in the turn, at its latest receipt's position.
+/// One usage key's receipts merged into its last row; the earlier rows go.
+struct UsageMerge {
+    removed: Vec<i64>,
+    kept: i64,
+    key: String,
+    payload: String,
+}
+
 fn compact_native_turn(
     conn: &Connection,
     session: &str,
     thread: &str,
     turn: &str,
 ) -> StoreResult<u64> {
-    let tx = conn.unchecked_transaction()?;
-    let rows = tx
+    if native_turn_merges(conn, session, thread, turn)?.is_empty() {
+        return Ok(0);
+    }
+    // A deferred transaction that has read cannot wait for the write lock:
+    // SQLite returns busy at once if any live writer holds it. Take the lock
+    // first, then plan again under it.
+    let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let mut removed = 0;
+    for merge in native_turn_merges(&tx, session, thread, turn)? {
+        for seq in &merge.removed {
+            removed += tx.execute("DELETE FROM session_events WHERE seq=?1", [seq])? as u64;
+        }
+        tx.execute(
+            "UPDATE session_events SET receipt_key=?2,payload=?3 WHERE seq=?1",
+            params![merge.kept, merge.key, merge.payload],
+        )?;
+    }
+    tx.commit()?;
+    Ok(removed)
+}
+
+fn native_turn_merges(
+    conn: &Connection,
+    session: &str,
+    thread: &str,
+    turn: &str,
+) -> StoreResult<Vec<UsageMerge>> {
+    let rows = conn
         .prepare(
             "SELECT seq,receipt_key,payload FROM session_events
              WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3 AND kind='usage' ORDER BY seq",
@@ -132,19 +166,16 @@ fn compact_native_turn(
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let starts = tx
+    let starts = conn
         .prepare(
             "SELECT seq FROM session_events WHERE session_id=?1 AND provider_thread=?2
              AND provider_turn!=?3 AND kind='started' ORDER BY seq",
         )?
         .query_map([session, thread, turn], |row| row.get::<_, i64>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    // As the recorder keys them: a receipt that arrives after the thread's
-    // next turn began keeps a row of its own.
     let mut turn_rows = BTreeMap::<String, i64>::new();
     let mut keys = BTreeMap::<String, Vec<(i64, String, serde_json::Value)>>::new();
     for (seq, receipt, payload) in rows {
-        // An unreadable receipt stays as it was recorded.
         let Ok(payload) = serde_json::from_str::<serde_json::Value>(&payload) else {
             continue;
         };
@@ -159,35 +190,29 @@ fn compact_native_turn(
         };
         keys.entry(key).or_default().push((seq, receipt, payload));
     }
-    let mut removed = 0;
+    let mut merges = Vec::new();
     for (key, receipts) in keys {
         if let [(_, receipt, _)] = receipts.as_slice() {
             if *receipt == key {
                 continue;
             }
         }
-        let kept = receipts.last().expect("a key has a receipt").0;
         let merged = receipts
             .iter()
             .map(|(_, _, payload)| payload.clone())
             .reduce(|saved, later| merge_native_usage(&saved, &later))
             .expect("a key has a receipt");
-        for (seq, ..) in &receipts[..receipts.len() - 1] {
-            removed += tx.execute("DELETE FROM session_events WHERE seq=?1", [seq])? as u64;
-        }
-        tx.execute(
-            "UPDATE session_events SET receipt_key=?2,payload=?3 WHERE seq=?1",
-            params![kept, key, serde_json::to_string(&merged)?],
-        )?;
+        let (last, earlier) = receipts.split_last().expect("a key has a receipt");
+        merges.push(UsageMerge {
+            removed: earlier.iter().map(|(seq, ..)| *seq).collect(),
+            kept: last.0,
+            key,
+            payload: serde_json::to_string(&merged)?,
+        });
     }
-    tx.commit()?;
-    Ok(removed)
+    Ok(merges)
 }
 
-/// Close unfinished Processes whose OS process is gone: a restart, SIGKILL, a
-/// crash or a closed terminal ends lf without its exit path. As when a dead
-/// agent is settled, `completed_at` records when it was found dead and the
-/// outcome stays unknown. A machine restart bounds the exit by the boot time.
 fn close_dead_processes(conn: &Connection, home: &Path, now: i64) -> StoreResult<u64> {
     let columns = super::processes::PROCESS_SELECT
         .strip_suffix(" FROM processes e")
@@ -380,6 +405,52 @@ mod tests {
 
     use super::{prune, PROCESS_RETENTION_SECONDS};
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn prune_merges_per_receipt_usage_while_a_live_writer_holds_the_lock() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = SqliteStore::open_ephemeral(&path).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let conn = Connection::open(&path).unwrap();
+        for (receipt, total) in [("r1", 10), ("r2", 20)] {
+            let counts = serde_json::json!({"inputTokens":total,"outputTokens":0});
+            conn.execute(
+                "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+                 VALUES('conversation','thread','a','usage',?1,0,?2)",
+                rusqlite::params![receipt, serde_json::json!({"total":counts,"last":counts}).to_string()],
+            )
+            .unwrap();
+        }
+
+        let (locked, held) = std::sync::mpsc::channel();
+        let writer = {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let conn = Connection::open(path).unwrap();
+                conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+                locked.send(()).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                conn.execute_batch("COMMIT").unwrap();
+            })
+        };
+        held.recv().unwrap();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        assert_eq!(prune(&path, now).unwrap().usage_rows, 1);
+        writer.join().unwrap();
+
+        let rows: Vec<(String, String)> = conn
+            .prepare("SELECT receipt_key,payload FROM session_events WHERE kind='usage'")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].0, "");
+        assert!(rows[0].1.contains("20"));
+        assert!(home.path().join("store.db.usage-cursor").exists());
+    }
 
     #[test]
     fn prune_expires_unreferenced_processes_and_retires_the_capture_cursor() {

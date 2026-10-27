@@ -46,6 +46,8 @@ pub struct LandResult {
     pub branch_deleted: bool,
 }
 
+/// Exclusive use of a release or deletion worktree path while it is created
+/// or removed; ordinary Task checkouts never take one.
 #[derive(Debug)]
 pub(crate) struct WorktreeLease {
     path: PathBuf,

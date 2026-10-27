@@ -1265,12 +1265,6 @@ struct SessionsContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(PaneGeometry.workspaceShape)
-        .overlay {
-            PaneGeometry.workspaceShape
-                .strokeBorder(palette.shadow.opacity(0.3), lineWidth: 2)
-                .blur(radius: 3)
-                .allowsHitTesting(false)
-        }
         .accessibilityIdentifier("work-workspace-\(key.id)")
     }
 

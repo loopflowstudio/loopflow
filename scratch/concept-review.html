@@ -19,7 +19,6 @@
   .frame { display:flex; gap:6px; padding:6px; height:102px; border-radius:0 14px 14px 14px; position:relative; }
   .before { border:1px solid var(--accent); }
   .after { border-radius:0 0 14px 14px; }
-  .after:after { content:""; position:absolute; inset:0; border:2px solid var(--line); border-radius:inherit; opacity:.3; filter:blur(3px); pointer-events:none; }
   .pane { flex:1; min-width:0; padding:14px 8px; border:1px solid var(--line); background:var(--pane); border-radius:8px; font-size:14px; }
   .note { color:var(--muted); font-size:14px; }
   table { width:100%; border-collapse:collapse; font-size:14px; }
@@ -34,22 +33,21 @@
   <code>MultiplexerStore.swift</code> and <code>TerminalPaneLayoutTests.swift</code>.
 </header>
 <main>
-  <h1>No product decision is open.</h1>
-  <p>Jack Heart requested square top corners, rounded lower corners and a fading edge.
-  The implementation matches that contract. Visual acceptance remains pending.</p>
+  <h1>Remove the extra workspace border.</h1>
+  <p>Jack Heart’s October 27 feedback removes the extra border entirely, superseding the earlier fading-edge proposal. Square top corners and rounded lower corners remain.</p>
   <div class="comparison">
     <figure>
       <figcaption>Before — hard outline, rounded top right</figcaption>
       <div class="frame before"><div class="pane">Conversation</div><div class="pane">Shell</div></div>
     </figure>
     <figure>
-      <figcaption>Implemented — square top, fading outline</figcaption>
+      <figcaption>Revised — square top, no outer outline</figcaption>
       <div class="frame after"><div class="pane">Conversation</div><div class="pane">Shell</div></div>
     </figure>
   </div>
-  <p class="note">Schematic only: CSS does not prove SwiftUI rendering. Shadow tuning is provisional; no additional behavior is proposed.</p>
+  <p class="note">Schematic only: CSS does not prove SwiftUI rendering. The earlier blurred-outline proposal is superseded.</p>
   <p><strong>The consequential mismatch:</strong> the former active-color workspace outline competed
-  with pane emphasis. The frame now decorates the workspace; the pane still owns focus.</p>
+  with pane emphasis. The workspace now clips its content without an outer decoration; the pane still owns focus.</p>
   <h2>Same actions, same state</h2>
   <table>
     <thead><tr><th>Action</th><th>Concept</th><th>Existing API, before and after</th></tr></thead>
@@ -60,13 +58,11 @@
       <tr><td>Reload after a save failure</td><td>Saved and current pane intent</td><td><code>loadPaneIntent</code> merges saved content while retaining current edits</td></tr>
     </tbody>
   </table>
-  <p>No frame record, setting, migration or provider operation is needed. The decoration
-  accepts no pointer input; recovery controls remain in the workspace.</p>
+  <p>No frame record, setting, migration or provider operation is needed. The removed decoration
+  adds no pointer handling; recovery controls remain in the workspace.</p>
   <h2>Next proof: the actual frame</h2>
   <p>Compare Light and Dark in Desktop. Check lower-corner clearance, pane focus,
-  native terminal sizing and input. A hard halo, an invisible edge or visual crowding
-  would call for tuning within the accepted outcome.</p>
-  <p class="note">Headless geometry checks previously passed. This review changed only local
-  notes and this page; it neither reran those checks nor supplied visual acceptance.</p>
+  native terminal sizing and input. Confirm that no extra workspace outline remains.</p>
+  <p class="note">The border-free revision passed the Desktop build and all four Light/Dark × split-axis geometry cases. This schematic does not supply visual acceptance.</p>
 </main>
 </html>

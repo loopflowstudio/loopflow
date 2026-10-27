@@ -386,7 +386,7 @@ one tool pane. A lone terminal omits the redundant pane header. A neutral edge a
 distinguish the selected pane without recoloring its reported activity.
 Terminal surfaces sit inside the rounded edge, so text wraps before the border
 in both single and split panes.
-The workspace has square top corners and a soft shadow edge. Its rounded lower
+The workspace has square top corners without an outer border. Its rounded lower
 corners follow the pane radius plus its inset, keeping the gap even around nested corners.
 The workspace also leaves clearance from the native window's larger lower corners.
 

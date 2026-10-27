@@ -1,6 +1,6 @@
 # ce4160 — A taken-over Codex terminal says where its conversation went
 
-Status: built, uncommitted, awaiting gate (realigned 2026-10-27). Based on
+Status: built and published (PR #1746); gated 2026-10-27. Based on
 main `3fc51be5`, which includes LOO-628 repair PR #1740 (merged); keep its
 login-pinning fix intact.
 
@@ -92,8 +92,8 @@ already inserts (no schema change). Callers: account move → `Account(target)`
 selection (`human_session.rs` ~1385) and provider `import` → `Terminal`;
 `moves::take` → `Machine { to, task }` (`send_task` passes its Task). A store
 read `attachment_departure(session, &SessionAttachment) -> Option<Departure>`
-follows the rotated row's `attachment_exit_seq` to that payload, matching our
-token.
+reads that payload by its receipt key `attachment:<token>:exit`, so a later
+attachment never answers for an earlier one.
 
 **B. The launcher ends a relay client whose attachment is lost.**
 (Revised 2026-10-27 at kickoff to the built mechanism; the earlier
@@ -248,3 +248,4 @@ the viewer-handoff notice stays outside this Task.
 - 2026-10-27 realign: no code change, no rerun; origin/main has nothing past base.
 - 2026-10-27 rename to `Departure::Terminal`: `a_stop_records_where_the_conversation_went` 1/1, `transport::native` 5/5, `session_launch_contract` 25/25, clippy clean, fmt applied; no `Departure::Client` left in `rust/`.
 - 2026-10-27 publish (after syncing main e970aec6): clippy/fmt clean, focused lib 6/6; `session_launch_contract` 23/25 in-suite at load avg ~200 (opencode setup-failure and machine-dispatch 20s deadlines), both pass alone.
+- 2026-10-27 gate (load avg 210–250): `cargo fmt --check` and clippy `--all-targets -D warnings` clean; focused lib 8/8; `session_launch_contract` 23/25 in-suite, the same two as at publish (opencode setup-failure 20s deadline; machine-dispatch `success` assert), both pass alone (20.9s, 57.4s). Neither touches the Codex move path; the only shared change is a 50ms `wait_for_exit` poll. CI owns the in-suite result.

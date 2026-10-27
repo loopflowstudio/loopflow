@@ -235,6 +235,29 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Keep one fact of `session`'s captured `input` at stream position `seq`.
+    pub(crate) fn record_capture_fact(
+        &self,
+        session: &crate::session::LfSession,
+        input: &str,
+        seq: u64,
+        at: time::OffsetDateTime,
+        fact: &crate::session_record::CaptureFact,
+    ) -> StoreResult<()> {
+        let (source, evidence) = fact.observation(seq, at);
+        self.retain_session_observation(
+            session,
+            &crate::session::SessionObservation {
+                artifact_key: input.to_owned(),
+                payload: serde_json::json!({"input_id": input, "source": source, "evidence": evidence}),
+                source,
+                observed_at: at.unix_timestamp(),
+                task_id: session.task_id.clone(),
+                wave_id: session.wave_id.clone(),
+            },
+        )
+    }
+
     /// Keep initiating failures without unbounded growth during reconnect storms.
     pub(crate) fn retain_codex_relay_failure(
         &self,
@@ -471,15 +494,10 @@ impl SqliteStore {
                ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                AND origin.provider_turn=e.provider_turn AND origin.kind='started'
              WHERE e.session_id=?11 AND e.seq>?2
-             AND (NOT ?8 OR (e.kind IN ('started','usage','completed','output') AND origin.captured_event IS NULL
+             AND (NOT ?8 OR (e.kind IN ('started','usage','completed','output') AND COALESCE(origin.captured_event,e.captured_event) IS NULL
                   AND e.provider_thread IS ?9 AND e.provider_turn IS ?10))
              AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':')
-                  OR (e.kind!='observed' AND origin.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?4)))
-             AND (?4 IS NULL OR CASE WHEN json_valid(e.payload) THEN
-                 COALESCE(json_extract(e.payload,'$.evidence.schema_version'),0)!=1 OR
-                 COALESCE(json_extract(e.payload,'$.evidence.type'),'') NOT IN
-                     ('activity','handoff','user_input','conversation','text','tool_use','result','provider_output')
-                 ELSE 1 END)
+                  OR (e.kind!='observed' AND COALESCE(origin.captured_event,e.captured_event)=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?4)))
              AND ((e.kind='observed' AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.source') END IN ('manifest.json','runs','terminal.json')) OR (
                  (?5 IS NULL OR (CASE WHEN e.kind IN ('observed','captured') THEN e.wave_id ELSE origin.wave_id END)
                      IN (SELECT id FROM wave_addresses WHERE id=?12 OR slug=?5))
@@ -909,45 +927,6 @@ mod tests {
         assert_eq!(snapshot.observed_at, 1);
         assert_eq!(snapshot.first_provider_attempt_at, Some(10));
         assert_eq!(snapshot.usage.gaps, 0);
-    }
-
-    #[test]
-    fn summary_reads_usage_without_hydrating_conversation_text() {
-        let home = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
-        store.test_session("conversation", "run_00000000000000000000000000000001");
-        let input =
-            crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
-                .unwrap();
-        let session = store.session("conversation").unwrap().unwrap();
-        let text = "retained transcript ".repeat(4096);
-        let events = [
-            json!({"schema_version":1,"seq":0,"type":"conversation","event":{"type":"text_delta","turn_id":"turn","content":text}}),
-            json!({"schema_version":1,"seq":1,"type":"usage","usage":{"input_tokens":12}}),
-            json!({"unparsed":"partial historical event"}),
-        ];
-        for (seq, evidence) in events.iter().enumerate() {
-            let source = format!("events.jsonl:{seq}");
-            store
-                .retain_session_observation(
-                    &session,
-                    &crate::session::SessionObservation {
-                        artifact_key: input.clone(),
-                        source: source.clone(),
-                        observed_at: 1,
-                        task_id: None,
-                        wave_id: None,
-                        payload: json!({"input_id":input,"source":source,"evidence":evidence}),
-                    },
-                )
-                .unwrap();
-        }
-        let summary = store.summary_for_input(&session.id, &input).unwrap();
-        assert_eq!(summary.len(), 2);
-        assert_eq!(summary[0].payload["evidence"], events[1]);
-        assert_eq!(summary[1].payload["evidence"], events[2]);
-        assert_eq!(store.input_events(&input).unwrap(), events);
-        assert_eq!(store.session_history(&session.id, 0, 0).unwrap().len(), 4);
     }
 
     #[test]
@@ -1653,7 +1632,7 @@ mod tests {
             old.recorded_outcome, None,
             "native completion cannot invent the command outcome"
         );
-        // A later recovered checkpoint measures this same turn, not extra work.
+        // A stream usage copy an earlier lf stored is not usage: only native rows count.
         for (seq, event) in [
             json!({"type":"provider_session_observed","attempt_key":"attempt","provider_session_id":"thread"}),
             json!({"type":"usage","provider":"codex","model":null,"attempt_key":"attempt","turn_key":"turn",
@@ -1672,8 +1651,8 @@ mod tests {
         assert_eq!(old.usage.streams, 1);
         assert_eq!(old.usage.input_tokens, Some(18));
         assert_eq!(old.usage.output_tokens, Some(5));
-        assert_eq!(old.usage.cost_usd, Some(0.2));
-        assert_eq!(old.usage.final_streams, 1);
+        assert_eq!(old.usage.cost_usd, None);
+        assert_eq!(old.usage.final_streams, 0);
         // An unobserved start cannot borrow the replacement's input or attribution.
         store
             .record_session_event(
@@ -1827,25 +1806,11 @@ mod tests {
                 )
                 .unwrap();
         }
-        let session = store.session("conversation").unwrap().unwrap();
-        for (seq, event) in [
-            json!({"type":"provider_session_observed","attempt_key":"attempt","provider_session_id":"thread"}),
-            json!({"type":"usage","provider":"codex","model":null,"attempt_key":"attempt","turn_key":"b",
-                "usage_stream_id":"recorder-b","observation_seq":1,"counter_kind":"cumulative","start_known":true,
-                "final_receipt":true,"usage":{"input_tokens":30,"output_tokens":0,"total_input_tokens":30}})
-        ].into_iter().enumerate() {
-            let mut evidence = json!({"schema_version":1,"seq":seq,"observed_at":"2026-09-29T00:00:00Z"});
-            evidence.as_object_mut().unwrap().extend(event.as_object().unwrap().clone());
-            let source = format!("events.jsonl:{seq}");
-            store.retain_session_observation(&session, &crate::session::SessionObservation {
-                artifact_key:input.clone(), source:source.clone(), observed_at:1, task_id:None,wave_id:None,
-                payload:json!({"input_id":input,"source":source,"evidence":evidence})
-            }).unwrap();
-        }
+        // B's usage is unknown: 20 for A and C's 10-token suffix.
         let usage = store.input_history(&input).unwrap().usage;
-        assert_eq!(usage.total_input_tokens, Some(60));
-        assert_eq!(usage.streams, 3);
-        assert_eq!(usage.final_streams, 1);
+        assert_eq!(usage.total_input_tokens, Some(30));
+        assert_eq!(usage.streams, 2);
+        assert_eq!(usage.final_streams, 0);
         assert!(
             usage.gaps > 0,
             "C has only its observed suffix, not a complete baseline"

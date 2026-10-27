@@ -337,6 +337,7 @@ its index in the draft, and a shipped-Task case in `forget_tests`. The draft now
 builds on the 0.14.17 release batch. Any later column that references
 `processes` must join `FORGETTABLE` in the same change.
 
+Check (2026-10-27, after merge of main): `--lib -- processes retention` 26 ok, `linear_on_demand_native_hooks_share_freshness_across_processes` hit its 5 s deadline at load 66 and passed alone.
 Check (2026-10-26): `swift test --filter 'RegistryQueryTests|TaskFilesTests'` 43 ok;
 `--lib journal` 30 ok. Compress (2026-10-26): running-parent fixture shared as `loopflow_test_support::RunningParent`; doctor's test-only `audit` dropped; clippy clean, `--lib doctor failed_placement` 13 ok, `process_ownership_tests` 12 ok, touched integration tests 8 ok. Earlier sweep: everything else touched passes except
 `store_contention` under load. The clone probe and the quiet contention

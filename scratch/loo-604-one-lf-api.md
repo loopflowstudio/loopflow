@@ -201,6 +201,16 @@ unless "Work needed" says otherwise.
 
 ## Remaining work
 
+0. Concept review (2026-10-27), implied by the Task's outcome ("plainly the
+   API a herdr/tmux/other-GUI client uses"): the page that client's author
+   reads, `docs/surfaces.md` "Build your own view", lists one-shot reads only
+   and never mentions `--watch`; the watch protocol sits in `docs/work.md`.
+   Make that section the client API: the reads Desktop watches (`wave show
+   --all`, `task list`, `task status <id>`, `session list`, `history --since`,
+   `ps`, `planning status`, `desktop plans`), each `--watch --json`, one frame
+   example and the stdin request, linking `docs/work.md` instead of repeating
+   it. Docs name the live-process read `lf ps` (shortest form), not
+   `lf monitor ps`. No open product choice.
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 2. `lf task status`: flat in Graphs; measure what still grows on Jack's store

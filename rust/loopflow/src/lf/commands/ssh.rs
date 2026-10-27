@@ -91,11 +91,16 @@ pub fn run(
     };
     if let Some(route) = &work_route {
         if route.machine_id != target.id {
-            return Err(anyhow!(
+            // `resume --task X` continues the Task where it is addressed, so it moves there.
+            if let Some(task) = resumed_task(cli) {
+                super::session_move::move_task(task, target.id.as_str())?;
+            } else {
+                return Err(anyhow!(
                 "Task is owned on Machine {}, not {}; `lf task move <task> --machine <machine>` moves it",
-                route.machine_id,
-                target.id
-            ));
+                    route.machine_id,
+                    target.id
+                ));
+            }
         }
     }
     // A Machine names no checkout: the destination resolves the repository's
@@ -203,6 +208,20 @@ pub fn run(
     }
     let preamble = build_preamble(&cmd, &extra_env);
     run_ssh(&target.route, forward_agent, &preamble)
+}
+
+fn resumed_task(cli: &Cli) -> Option<&str> {
+    match &cli.command {
+        Some(crate::lf::Commands::Session {
+            cmd:
+                crate::lf::SessionCommand::Connect {
+                    id: None,
+                    connection,
+                    ..
+                },
+        }) => connection.task.as_deref(),
+        _ => None,
+    }
 }
 
 fn resident_args(

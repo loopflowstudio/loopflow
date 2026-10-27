@@ -201,13 +201,15 @@ lf machine end code-1                                # give a rented machine bac
 Providers read their keys from the environment (`doppler run -- lf …`):
 Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
 `~/.modal.toml`; RunPod `RUNPOD_API_KEY`; AWS `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY` and `AWS_REGION`; Fly `FLY_API_TOKEN` (and `FLY_ORG`,
-default `personal`). `--gpu` rents one GPU on RunPod, AWS or Modal, on a
+`AWS_SECRET_ACCESS_KEY` and `AWS_REGION`. `--gpu` rents one GPU on RunPod, AWS or Modal, on a
 machine with at least `--vcpus` and `--memory-gb`. `--spot` rents
 interruptible capacity on AWS or RunPod, never charged above the admitted
 price; the provider may end it early, losing unpushed work. EC2 prices are
-us-east-1's, so AWS names the region it rents in and the region it priced. Its
-provider deletes a rented machine at its deadline. `lf machine use code infrastructure`
+us-east-1's, so AWS names the region it rents in and the region it priced. When
+the repository plans in Linear, a rented machine gets an access token this
+laptop just refreshed; the refresh grant stays here, so Linear works there for
+the token's lifetime (about a day). Its provider deletes a rented machine at
+its deadline. `lf machine use code infrastructure`
 (or `--repo`) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
 Processes are copied home, so `lf session list` shows them "from code-1".

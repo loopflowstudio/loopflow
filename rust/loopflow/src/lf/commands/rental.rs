@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::durable::{CapacityDefault, Machine, MachineId};
+use crate::durable::{CapacityDefault, Machine, MachineId, RepositoryId};
 use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
 use crate::rental::sandbox::Sandboxes;
@@ -22,7 +22,7 @@ use crate::rental::{
 use crate::store::sqlite::SqliteStore;
 use crate::store::Store;
 
-/// An image-built sandbox answers SSH within seconds; RunPod, AWS and Fly
+/// An image-built sandbox answers SSH within seconds; RunPod and AWS
 /// install the tools on stock Ubuntu first, which takes minutes.
 const SSH_WAIT: Duration = Duration::from_secs(20 * 60);
 
@@ -397,11 +397,9 @@ pub(crate) fn rent(
             sqlite.set_rental_state(&rental.id, RentalState::Unconfirmed)?;
             return Err(anyhow!(
                 "{error}; it is unknown whether {} created {}. `lf ondemand list` finds it by name \
-                 and gives it back; {} deletes it by {} if it exists",
+                 and gives it back",
                 ondemand.provider,
-                rental.provider_name,
-                ondemand.provider,
-                clock(rental.deadline)
+                rental.provider_name
             ));
         }
     };
@@ -498,11 +496,15 @@ fn attach(
         std::thread::sleep(Duration::from_secs(2));
     }
     let installed = match linux_lf {
+        // A development build runs as one does anywhere: on its own disposable
+        // home, which it may create and which the published install never
+        // claims. sshd sessions read the selection from /etc/environment.
         Some(binary) => {
             println!("Uploading {} as its lf", binary.display());
             first_contact(
                 route,
-                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf",
+                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf \
+                 && printf 'LF_HOME=%s/.lf-dev\\nLF_BIN=%s/.local/bin/lf\\n' \"$HOME\" \"$HOME\" | sudo tee -a /etc/environment >/dev/null",
                 Stdio::from(std::fs::File::open(binary)?),
             )?
         }
@@ -620,11 +622,33 @@ pub fn place(
             super::machine_credentials::require_unattended_logins(&accounts).await
         })?;
     }
-    let (_, machine) = rent(&runtime, sqlite, name, None, None, false)?;
+    // The Task's own repository, wherever this checkout was first recorded.
+    let (_, task) = runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))?;
+    let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
-    prepare(&runtime, &label, repo, sqlite, batch)?;
+    if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
+        // Nothing ran on it yet, so nothing is lost by giving it back now.
+        let cleanup = Sandboxes::from_env(rental.provider)
+            .and_then(|api| delete_sandbox(sqlite, &api, &rental));
+        if let Err(cleanup) = cleanup {
+            eprintln!("{label}: {cleanup:#}");
+        }
+        return Err(error);
+    }
     hand_off(&runtime, repo, issue, &label)?;
     Ok(false)
+}
+
+/// The value Git resolves for `key` in `repo`, when one is set.
+fn git_config(repo: &std::path::Path, key: &str) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["config", key])
+        .output()
+        .ok()?;
+    let value = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (output.status.success() && !value.is_empty()).then_some(value)
 }
 
 /// An unowned Task whose Wave or repository names a pool or on-demand goes
@@ -684,13 +708,14 @@ fn hand_off(
     Ok(())
 }
 
-/// Logins, then this repository cloned and bound to the same identity, so the
-/// forwarded run finds its plan there.
+/// Logins (Linear too when it holds the plan), then this repository cloned
+/// and bound to the Task's repository identity, so the forwarded run finds its
+/// plan there.
 fn prepare(
     runtime: &tokio::runtime::Runtime,
     label: &str,
     repo: &std::path::Path,
-    sqlite: &SqliteStore,
+    repository: &RepositoryId,
     batch: bool,
 ) -> anyhow::Result<()> {
     use crate::provider_auth::Provider as Login;
@@ -705,31 +730,19 @@ fn prepare(
     runtime.block_on(super::machine_credentials::connect_claude_accounts(
         &machine, batch,
     ))?;
-    let key = crate::repository::CanonicalRepo::discover(repo)?.to_string();
-    let id = sqlite
-        .repository_id(&key)?
-        .ok_or_else(|| anyhow!("{} has no repository identity yet", repo.display()))?;
-    let origin = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .context("could not read the repository's origin")?;
-    let origin = String::from_utf8(origin.stdout)?.trim().to_string();
-    if origin.is_empty() {
-        return Err(anyhow!("{} has no origin to clone", repo.display()));
+    let planning = crate::config::load_config(Some(repo))?
+        .unwrap_or_default()
+        .planning_transport();
+    if matches!(planning, crate::config::PlanningConfig::Linear { .. }) {
+        runtime.block_on(super::machine_credentials::connect(
+            &machine,
+            Login::Linear,
+            None,
+            None,
+            batch,
+        ))?;
     }
-    let directory = repo
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| anyhow!("{} has no directory name", repo.display()))?;
-    let q = super::ssh::sh_quote;
-    let script = format!(
-        "{} && mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || gh repo clone {origin} {dir} || git clone {origin} {dir}; }} && cd {dir} && lf repository --bind {id}",
-        super::machine::REMOTE_PATH,
-        dir = q(directory),
-        origin = q(&origin),
-    );
+    let (origin, script) = checkout_script(repo, repository)?;
     let status = Command::new("ssh")
         .args(crate::machine_route::bounded_ssh_args(
             &machine.route,
@@ -740,11 +753,45 @@ fn prepare(
         .status()
         .context("could not run ssh")?;
     if !status.success() {
-        return Err(anyhow!(
-            "could not clone {origin} on {label}; `lf machine end {label}` gives it back"
-        ));
+        return Err(anyhow!("could not clone {origin} on {label}"));
     }
     Ok(())
+}
+
+/// The origin, and the remote script that clones it and binds `repository`.
+fn checkout_script(
+    repo: &std::path::Path,
+    repository: &RepositoryId,
+) -> anyhow::Result<(String, String)> {
+    let origin = git_config(repo, "remote.origin.url")
+        .ok_or_else(|| anyhow!("{} has no origin to clone", repo.display()))?;
+    let directory = repo
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("{} has no directory name", repo.display()))?;
+    let q = super::ssh::sh_quote;
+    // gh clones `owner/name` over HTTPS with the GitHub login just connected;
+    // handed an SSH origin it would use SSH, which a fresh machine cannot verify.
+    let clone = match crate::git::worktrees::github_nwo(&origin) {
+        Some((owner, name)) => format!("gh repo clone {}", q(&format!("{owner}/{name}"))),
+        None => format!("git clone {}", q(&origin)),
+    };
+    // Claiming the Task there names its person by Git identity, as here.
+    let identity: String = ["user.name", "user.email"]
+        .iter()
+        .filter_map(|key| {
+            Some(format!(
+                "git config --global {key} {} && ",
+                q(&git_config(repo, key)?)
+            ))
+        })
+        .collect();
+    let script = format!(
+        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repository --bind {repository}",
+        super::machine::REMOTE_PATH,
+        dir = q(directory),
+    );
+    Ok((origin, script))
 }
 
 // ---------------------------------------------------------------------------
@@ -799,6 +846,9 @@ fn reconcile(sqlite: &SqliteStore, api: &Sandboxes, rental: &Rental) -> anyhow::
         return Ok(());
     };
     let Some(machine_id) = &rental.machine_id else {
+        if rental.boot_abandoned(now()) {
+            delete_sandbox(sqlite, api, &rental)?;
+        }
         return Ok(());
     };
     let Some(machine) = sqlite.machine_by_id(machine_id)? else {
@@ -839,8 +889,7 @@ fn refresh(
         Some(sandbox) if !sandbox.gone => {}
         // Its lifetime passed, or someone deleted it.
         ended => {
-            // What an ended machine leaves behind (a Fly app's IPv4, an exited
-            // pod's disk) still bills until it is deleted.
+            // What an ended machine leaves behind (an exited pod's disk) still bills until it is deleted.
             if ended.is_some() {
                 api.delete(id)?;
             }
@@ -1124,17 +1173,18 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::{end_rental, read_holdings, refresh, Ended};
+    use super::{checkout_script, end_rental, read_holdings, reconcile, refresh, Ended};
     use crate::durable::MachineId;
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
-    use crate::rental::{Hardware, OnDemand, Provider, Rental, RentalState, Usd};
+    use crate::rental::{Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS};
     use crate::store::sqlite::SqliteStore;
 
     type Log = Rc<RefCell<Vec<String>>>;
 
     /// A running rental of `code-1` and a provider that knows its sandbox.
-    fn running(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
+    /// Created and confirmed, with no Machine yet: what a boot leaves.
+    fn booting(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
         let store = SqliteStore::open_ephemeral(&dir.join("db")).unwrap();
         store
             .add_ondemand(&OnDemand {
@@ -1154,14 +1204,9 @@ mod tests {
             })
             .unwrap();
         let rental = store.admit_rental("code", None, None, false).unwrap();
-        store
+        let rental = store
             .confirm_rental(&rental.id, "sb-1", rental.usd_per_hour)
             .unwrap();
-        let machine = MachineId::new();
-        store
-            .add_machine(&machine, "ssh://lf@203.0.113.7:40022", "code-1")
-            .unwrap();
-        let rental = store.attach_rental(&rental.id, &machine).unwrap();
         let log: Log = Rc::default();
         let kept = log.clone();
         let api = Sandboxes::with_call(
@@ -1171,6 +1216,16 @@ mod tests {
                 Ok(br#"{"id": "sb-1", "gone": false, "route": null}"#.to_vec())
             }),
         );
+        (store, rental, api, log)
+    }
+
+    fn running(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
+        let (store, rental, api, log) = booting(dir);
+        let machine = MachineId::new();
+        store
+            .add_machine(&machine, "ssh://lf@203.0.113.7:40022", "code-1")
+            .unwrap();
+        let rental = store.attach_rental(&rental.id, &machine).unwrap();
         (store, rental, api, log)
     }
 
@@ -1229,14 +1284,25 @@ mod tests {
     }
 
     #[test]
+    fn a_boot_whose_lf_died_is_given_back_once_its_window_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, api, log) = booting(dir.path());
+        assert_eq!(rental.state, RentalState::Booting);
+        reconcile(&store, &api, &rental).unwrap();
+        assert!(!deleted(&log), "a fresh boot may still be running");
+        let later = rental.created_at + time::Duration::seconds(BOOT_SECONDS);
+        assert!(rental.boot_abandoned(later));
+    }
+
+    #[test]
     fn refreshing_an_ended_machine_deletes_what_it_left() {
         let dir = tempfile::tempdir().unwrap();
         let (store, rental, _, _) = running(dir.path());
         let log: Log = Rc::default();
         let kept = log.clone();
-        // A Fly app whose Machine exited still holds its IPv4.
+        // An exited pod still holds its disk.
         let api = Sandboxes::with_call(
-            Provider::Fly,
+            Provider::Runpod,
             Box::new(move |op, _| {
                 kept.borrow_mut().push(op.to_string());
                 Ok(br#"{"id": "sb-1", "gone": true, "route": null}"#.to_vec())
@@ -1245,6 +1311,47 @@ mod tests {
         assert!(refresh(&store, &api, &rental).unwrap().is_none());
         assert!(deleted(&log));
         assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+    }
+
+    #[test]
+    fn a_worktree_checkout_binds_its_tasks_repository_on_a_fresh_home() {
+        let _env = crate::journal::test_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("loopflow");
+        let git = |cwd: &std::path::Path, args: &[&str]| {
+            let status = std::process::Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        std::fs::create_dir(&main).unwrap();
+        git(&main, &["init", "-q"]);
+        git(&main, &["config", "user.name", "Jack Heart"]);
+        git(&main, &["config", "user.email", "jack@example.com"]);
+        git(
+            &main,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:loopflowstudio/loopflow.git",
+            ],
+        );
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "start"]);
+        let worktree = dir.path().join("loopflow.task");
+        git(
+            &main,
+            &["worktree", "add", "-q", worktree.to_str().unwrap()],
+        );
+        // No store records either checkout: the Task alone names the repository.
+        let repository = crate::durable::RepositoryId::new();
+        let (_, script) = checkout_script(&worktree, &repository).unwrap();
+        assert!(script.ends_with(&format!("lf repository --bind {repository}")));
+        assert!(script.contains("gh repo clone 'loopflowstudio/loopflow'"));
+        assert!(script.contains("git config --global user.email 'jack@example.com'"));
     }
 
     #[test]

@@ -58,8 +58,6 @@ fn prices_follow_each_providers_published_rates() {
     assert_eq!(Provider::Daytona.usd_per_hour(&box4()), Ok(usd("0.33174")));
     // Modal sandboxes: 2 cores × $0.141912 + 8 × $0.024012.
     assert_eq!(Provider::Modal.usd_per_hour(&box4()), Ok(usd("0.475920")));
-    // Fly: 4 performance vCPUs × $21/month, 8 GiB × $6/month, one IPv4 at $2/month.
-    assert_eq!(Provider::Fly.usd_per_hour(&box4()), Ok(usd("0.18611")));
 }
 
 fn gpu(name: &str) -> Hardware {
@@ -97,7 +95,6 @@ fn gpus_rent_where_the_provider_offers_them() {
         .offer(&gpu("A40"))
         .unwrap_err()
         .contains("--gpu works on runpod, aws and modal"));
-    assert!(Provider::Fly.offer(&gpu("A40")).is_err());
     assert!(Provider::Aws
         .offer(&gpu("H100"))
         .unwrap_err()
@@ -131,7 +128,7 @@ fn spot_rents_only_where_the_provider_sells_it() {
     };
     assert!(Provider::Aws.offer(&spot).is_ok());
     assert!(Provider::Runpod.offer(&spot).is_ok());
-    for provider in [Provider::Daytona, Provider::Modal, Provider::Fly] {
+    for provider in [Provider::Daytona, Provider::Modal] {
         let refused = provider.offer(&spot).unwrap_err();
         assert!(refused.starts_with(provider.as_str()), "{refused}");
         assert!(

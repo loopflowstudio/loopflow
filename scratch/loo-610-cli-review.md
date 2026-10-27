@@ -538,7 +538,7 @@ Implemented 2026-10-26; the page list is `docs/index.md` "Read by area".
 | Usage | `lf usage` filter × group × bucket × measure; interactive-Session usage gap fixed or explained | LOO-611, LOO-612 for `source` |
 | GUI API → **LOO-604** | `--watch` on ordinary reads; Desktop moves onto them (Jack Heart: LOO-604's approach). Left here: `lf open --files/--graphs` | — |
 | `lf serve` | Opt-in stateless server: CLI-over-socket, GitHub webhook replacing `pr ci` polling; Desktop uses it when present | GUI API |
-| Planning surface | `repo` dissolved or slimmed per D5 | D5 |
+| Planning surface | `wave` planning plumbing (`edit-plan update-plan new-chapter ensure bind-project connect reteam`) grouped or cut; `config repository --bind/--relocate` deleted once identity resolves by Git locator | — |
 | Code host port (filed, local `985879`, Linear sync uncertain) | One code-host + CI port; a second host proves pr/land/ci/release end to end | LOO-610 `pr`/ops surface |
 
 ## Concept review: the front door (2026-10-26, open)
@@ -686,6 +686,26 @@ front door vs. "start a conversation" (above); promise-or-delete for §7's
 commands (`discord`, `machine pool/ondemand`, `wave plan`, `desktop` pane
 control, `history replay`) and the not-yet-reviewed roots `clone`,
 `portfolio`, `disk`, `scratch`, `monitor`.
+
+## Concept review of the built slice (2026-10-26, Graph step)
+
+Checked the compiled root against the accepted direction ("organize the API by
+the product's pillars"; root shows core concepts and essential verbs).
+
+**Next implement direction: order root help by pillar.** `lf --help` lists
+commands in `Commands` enum order (`lf/mod.rs:431`, rendered by
+`navigation.rs:430`), so a recruit's first screen reads `clone ops ship
+scratch monitor disk : session …` with `task` and `wave` near the end. Reorder
+the enum (and so the generated reference) as: Work `task wave ship` · Sessions
+`session open :` · Orchestration `graph skill` · Telemetry `history` ·
+Surfaces `desktop monitor` · `ops` · `config self list help context` · then the
+not-yet-reviewed `clone portfolio disk scratch discord`. No names or paths
+change; regenerate `docs/lf-reference.md`; `documented_commands` and the
+reference test are the proof.
+
+Considered and left: `lf ship` → `lf task ship`. It is a Task verb, but main
+(#1652) chose the root deliberately, `lf ship` would still resolve by elision,
+and moving it changes only the canonical path; recorded in questions.
 
 ## Run notes
 

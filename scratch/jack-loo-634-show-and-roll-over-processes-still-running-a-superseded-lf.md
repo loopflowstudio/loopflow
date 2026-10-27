@@ -102,6 +102,21 @@ One action (`rollover`), three concepts (running binary, selected install, store
 floor), one per-owner Disposition; surfaces reuse doctor, `monitor ps` and promote.
 Nothing to rename or merge.
 
+Second pass (2026-10-27, headless, after the Graph slice). The concepts hold:
+`NextStep` is the third disposition LOO-502 implies, and no new policy choice
+remains (Desktop helper reported, not updated, which the Outcome allows). Two
+corrections for implement:
+
+- The below-floor runner reason says "`lf task run` retries its route", but
+  `runs_graph` matches every `graph_processes` runner, taskless ones included,
+  which have no route. Say "it fails at its next step; rerun the Graph (`lf task
+  run` for a Task's route)" so the 2 a.m. reader of a taskless Graph isn't sent
+  to a command that doesn't apply.
+- `next_step` entries use `StayingProcess`, so moving runners are typed as
+  staying. Rename it `ListedProcess` (process, binary, reason), which fits both
+  lists. `--json` has no Swift mirror and no fixture, so the field names stay
+  and nothing else changes.
+
 ## Graph steps at a boundary (implemented 2026-10-27)
 
 - `rollover::disposition` checks `SqliteStore::runs_graph` first; a Graph runner

@@ -165,7 +165,9 @@ pub struct TaskSnapshot {
     pub provider: String,
     pub pr: Option<TaskPr>,
     pub latest_event: Option<crate::work::task::TaskEvent>,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: time::OffsetDateTime,
     /// Freshness of the PR state against GitHub as of this read. `Degraded`
     /// means a bounded remote read failed and the PR fields are cached, not

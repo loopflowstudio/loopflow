@@ -134,6 +134,8 @@ public struct WorkFrame: Sendable {
     /// order of `work.graphProcesses`, comments, and its recorded execution.
     public struct TaskPart: Sendable {
         public let task: String
+        /// The Task's row, current even after the Task leaves the plan.
+        public let row: RoadmapTask?
         public let work: TaskOverview
         public let graphProcesses: [GraphProcessDetail]
         public let comments: TaskComments
@@ -220,9 +222,10 @@ public struct WorkFrame: Sendable {
         let graphProcesses: [GraphProcessDetail]
         let comments: TaskComments?
         let execution: Execution?
+        let row: RoadmapTask?
 
         enum CodingKeys: String, CodingKey {
-            case overview, comments, execution
+            case overview, comments, execution, row
             case graphProcesses = "graph_processes"
         }
     }
@@ -281,7 +284,8 @@ public struct WorkFrame: Sendable {
             guard let work = status.overview, let comments = status.comments else {
                 return frame(read, .task(nil), unavailable: "Task \(task) is not registered on this Machine")
             }
-            return frame(read, .task(TaskPart(task: task, work: work, graphProcesses: status.graphProcesses,
+            return frame(read, .task(TaskPart(task: task, row: status.row, work: work,
+                                              graphProcesses: status.graphProcesses,
                                               comments: comments, diagnostics: status.execution?.work)))
         case .workActivity:
             let read = try envelope(WorkActivitySnapshot.self)

@@ -574,8 +574,14 @@ fn task_pane(issue: &str, watch: bool) -> Result<()> {
             .context("only a registered Task can be watched")?;
         return super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop);
     }
-    println!("{}", serde_json::to_string(&status)?);
-    Ok(())
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = crate::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .context("no Loopflow store exists on this Machine")?;
+        let pane = super::waves::task_pane(&store, status).await?;
+        println!("{}", serde_json::to_string(&pane)?);
+        Ok(())
+    })
 }
 
 /// `lf desktop plans`: every plan a repository window shows, the default and

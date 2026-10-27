@@ -900,6 +900,9 @@ final class WorkModel {
             }
         }
     }
+    /// The latest row from a Task's own watch, current after the Task leaves
+    /// the plan (completed, canceled).
+    private var watchedTaskRow: RoadmapTask?
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
     private struct RepositoryReadingKey: Hashable {
@@ -1375,6 +1378,10 @@ final class WorkModel {
                 cache?.saveSessions([page], repo: repoPath)
             }
         case .task(let body):
+            // A frame about its own Task stays true after the selection moves on.
+            if let body, let row = body.row, row.task.identifier == body.task, watchedTaskRow != row {
+                watchedTaskRow = row
+            }
             guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
             guard let body else {
@@ -2268,6 +2275,9 @@ final class WorkModel {
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
         if let current = currentTask(id: id) { return current }
+        if let row = watchedTaskRow, row.id == id || row.runtime?.workId == id {
+            return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
+        }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id { return retained }
         return nil
     }

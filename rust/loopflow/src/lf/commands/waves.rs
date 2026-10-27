@@ -914,7 +914,7 @@ pub fn watch_task_status(repo: &Path, issue: String, shape: Shape) -> Result<()>
                 let store = super::watch::require_store(store)?;
                 let status = crate::ops::task::read_task_status(&store, &repo, &args.issue).await?;
                 Ok(match shape {
-                    Shape::Desktop => serde_json::to_value(status)?,
+                    Shape::Desktop => serde_json::to_value(task_pane(&store, status).await?)?,
                     Shape::Tasks => serde_json::to_value(task_detail(&store, status).await?)?,
                 })
             }
@@ -943,6 +943,29 @@ impl ClosedTaskPageSnapshot {
             next: self.next,
         }
     }
+}
+
+/// `lf desktop task`: `lf task status`'s reading plus the Task's Desktop row,
+/// which keeps the pane current after the Task leaves the plan.
+#[derive(Debug, Serialize)]
+pub struct DesktopTaskPane {
+    #[serde(flatten)]
+    pub status: crate::ops::task::TaskStatus,
+    pub row: Option<RoadmapTask>,
+}
+
+pub(crate) async fn task_pane(
+    store: &SharedStore,
+    status: crate::ops::task::TaskStatus,
+) -> Result<DesktopTaskPane> {
+    let row = match &status.task {
+        Some(task) => {
+            let shared = SharedTaskReads::read(store).await?;
+            snapshot_task_details(store, vec![task], false, &shared)?.pop()
+        }
+        None => None,
+    };
+    Ok(DesktopTaskPane { status, row })
 }
 
 /// `lf task status --json`.

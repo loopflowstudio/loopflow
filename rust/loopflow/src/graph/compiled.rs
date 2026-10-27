@@ -559,7 +559,12 @@ mod tests {
         project_position(&CompiledGraph::new("", steps), key, &iterations, false)
     }
 
-    fn skill(name: &str, id: Option<&str>, interactive: bool, returns: Option<usize>) -> ConcreteStep {
+    fn skill(
+        name: &str,
+        id: Option<&str>,
+        interactive: bool,
+        returns: Option<usize>,
+    ) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             id: id.map(str::to_string),

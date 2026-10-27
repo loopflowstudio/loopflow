@@ -311,6 +311,37 @@ the Wave view rather than the plan (and Rust must report it from there)?* Eviden
 `selections.rs` `plan_in` default slots; `WorkModel.boardPlan` maps both boards to
 one plan; `DashboardView.swift:37` still offers Working Tasks.
 
+## Concept review (October 26, after items 1–7 and 12)
+
+Accepted model, one screen: a Wave view (and the repository page) is three view
+parts: `session` (left), `board` (right) and `tiles` (the strip, below), each hideable,
+zoomable and resizable through the one `lf desktop hide|zoom|resize` state that
+`view_parts` reports. The board is one Task-state vocabulary shown one section at a
+time: Backlog (unstarted, deferred) · Working (idle, active, moving) · Autonomous
+(shipping) · Done. Session Available/Busy is a row marker on its own axis, as AGENTS.md
+puts it. People are one per email, named by GitHub once `lf repo people` resolves them.
+Nothing here needs a design change: the Task-state axis, the Session axis and the
+view-part grammar each have one owner.
+
+Plan sections above "Implementation status" (Demo, Layout's board-left diagram and
+Done · Active · Backlog columns, `+N more`) describe the superseded first cut;
+the binding sections below supersede them. Realign rewrites them to the model above;
+no code depends on them.
+
+**Open product choice, defaulted (questions #17, reversible; needs Jack's look):**
+Jack's item 7 defines the strip as Tasks "being worked on (a live Session or Graph)".
+What was built is the Working rule (idle, active, moving), because Rust's `wave:` and
+repository expressions feed both the strip and the sidebar, and the sidebar is Working
+Tasks. So Autonomous (shipping) Tasks, which have a live Graph, appear on the board
+and not on the strip. Idle Tasks with no live Session appear on it. Question: *Should
+the strip also show Autonomous Tasks? That would make it a different set from the
+sidebar, with the strip's members coming from the board's Working + Autonomous rather
+than the sidebar's plan. Or should the strip stay the sidebar's Working Tasks?*
+Evidence: `work/selection.rs` the `wave:`/repository `in_scope` filter;
+`WaveStandup.started([.shipping])`.
+
+Next implement work is unchanged: `focus -p N/…` turning the strip.
+
 ## Check results
 
 - Oct 26 (items 1–7, 12): `cargo test -p loopflow --lib -- desktop:: selection ops::people` 79 pass; `--test integration` dto/desktop/repo_people/reference/documented 48 pass; clippy clean; `scripts/test_desktop.sh --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests'` 156 pass. Part routing of `zoom`/`resize -p board` through the CLI has no live-Desktop test (gate/demo); `lf repo people` against GitHub ran by hand only.

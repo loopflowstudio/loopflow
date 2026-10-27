@@ -12,7 +12,7 @@ pub(crate) fn finish_session_attachment(
     attachment: &SessionAttachment,
     outcome: &str,
 ) -> StoreResult<()> {
-    store.finish_session_attachment(session, attachment, outcome, || {
+    store.finish_session_attachment(session, attachment, outcome, None, || {
         close_session_agent_process(store, session)
     })
 }

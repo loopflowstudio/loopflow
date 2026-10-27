@@ -201,7 +201,8 @@ struct DesktopAction {
         if let missing = arguments.first(where: { $0.required && context.args[$0.name] == nil }) {
             throw DesktopArgumentError("\(name) requires \(missing.name)=…; nothing changed.")
         }
-        if scope == .pane { _ = try context.addressed }
+        // A view part named by `part` stands in for the pane.
+        if scope == .pane, context.args["part"] == nil { _ = try context.addressed }
         let outcome = try run(context)
         return outcome ?? DesktopActionOutcome(pane: context.pane?.id, tab: context.tab ?? context.pane?.content.selectedTabID)
     }
@@ -277,8 +278,8 @@ struct DesktopAction {
             let tiles: [WorkMemberRef]? = switch model.navigation.destination {
             case .workingTasks: model.workingTaskMembers
             case .dashboard, .view: model.selectedViewPlan?.projection.visible
-            case .work(let wave?) where wave.kind == .wave: model.waveTiles(wave.id)
-            case .work, .entered: nil
+            case .work: model.navigation.waveView.map { model.boardTiles($0) }
+            case .entered: nil
             }
             guard let tiles else { throw DesktopTargetError("This window shows no tiles. Nothing changed.") }
             guard let member = tiles.first(where: { $0.work.id == id }) else {
@@ -287,7 +288,87 @@ struct DesktopAction {
             model.enterTile(member.work, origin: nil)
             return nil
         },
+        DesktopAction("page", "Turn Wave Tasks to Page", arguments: [.init(name: "page", kind: .integer, required: true)],
+                      available: { $0.model.navigation.waveView != nil }) { context in
+            let model = context.model
+            guard let wave = model.navigation.waveView, let plan = model.boardPlan(wave) else {
+                throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
+            }
+            let pages = plan.slots.pages(model.boardTiles(wave)).count
+            guard let page = Int(try context.string("page")), (1...pages).contains(page) else {
+                throw DesktopArgumentError("page must be 1 to \(pages); nothing changed.")
+            }
+            model.navigation.wavePages[wave] = page - 1
+            return nil
+        },
+        DesktopAction("section", "Show Wave Board Section", arguments: [.init(name: "section", kind: .string, required: true)],
+                      available: { $0.model.navigation.waveView != nil }) { context in
+            guard let view = context.model.navigation.waveView else {
+                throw DesktopTargetError("This window shows no Wave board. Nothing changed.")
+            }
+            let value = try context.string("section")
+            guard let section = WaveBoardSection(rawValue: value) else {
+                throw DesktopArgumentError("section=\(value) is not backlog, working, autonomous or done; nothing changed.")
+            }
+            context.model.navigation.boardSections[view] = section
+            return nil
+        },
+        DesktopAction("filter", "Set Wave Board Done Days", arguments: [.init(name: "days", kind: .integer, required: true)],
+                      available: { $0.model.navigation.waveView != nil }) { context in
+            guard context.model.navigation.waveView != nil else {
+                throw DesktopTargetError("This window shows no Wave board. Nothing changed.")
+            }
+            var filter = TaskHistoryFilter()
+            filter.editDays(try context.string("days"))
+            if let message = filter.validationMessage { throw DesktopArgumentError(message) }
+            UserDefaults.standard.set(filter.days, forKey: WaveStandupDefaults.doneDaysKey)
+            return nil
+        },
     ]
+
+    /// `lf desktop hide|show -p board|tiles` names a Wave view part in place of a pane.
+    private static let part = DesktopActionArgument(name: "part", kind: .string, required: false)
+
+    /// The Wave view part `part=` names; nil when the action addresses a pane.
+    private static func viewPart(_ context: DesktopActionContext) throws -> (WorkNavigation.Board, WaveViewPart)? {
+        guard let name = context.args["part"] else { return nil }
+        guard let view = context.model.navigation.waveView else {
+            throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
+        }
+        guard let part = WaveViewPart(rawValue: name) else {
+            throw DesktopArgumentError("part=\(name) is not board, session or tiles; nothing changed.")
+        }
+        return (view, part)
+    }
+
+    /// Move the divider between `part` and `toward=` so `part` takes `ratio` of their split.
+    private static func resizeViewPart(_ context: DesktopActionContext, view: WorkNavigation.Board,
+                                       part: WaveViewPart, ratio: Double) throws {
+        let value = try context.string("toward")
+        guard let toward = WaveViewPart(rawValue: value), toward != part else {
+            throw DesktopArgumentError("toward=\(value) must name another of board, session or tiles; nothing changed.")
+        }
+        var ratios = context.model.navigation.waveRatios[view] ?? WaveViewRatios()
+        switch (part, toward) {
+        case (.session, .board): ratios.session = ratio
+        case (.board, .session): ratios.session = 1 - ratio
+        case (.tiles, _): ratios.band = 1 - ratio
+        case (_, .tiles): ratios.band = ratio
+        default: return
+        }
+        context.model.navigation.waveRatios[view] = ratios
+    }
+
+    /// Hide or show the named Wave view part; false when the action addresses a pane.
+    private static func setViewPart(_ context: DesktopActionContext, hidden: Bool) throws -> Bool {
+        guard let (view, part) = try viewPart(context) else { return false }
+        let name = part.rawValue
+        guard context.model.isHidden(part, in: view) != hidden else {
+            throw DesktopTargetError("\(name) is already \(hidden ? "hidden" : "shown"); nothing changed.")
+        }
+        context.model.setHidden(part, hidden, in: view)
+        return true
+    }
 
     private static func cycle(_ context: DesktopActionContext, by offset: Int) throws -> DesktopActionOutcome? {
         guard !context.model.sidebarTaskIDs.isEmpty else { throw DesktopTargetError("The sidebar shows no Tasks. Nothing changed.") }
@@ -320,14 +401,20 @@ struct DesktopAction {
             if let terminal = try? context.terminal { workspaces.surfaces.focus(terminal) }
             return nil
         },
-        DesktopAction("zoom", "Zoom Pane", scope: .pane, arguments: [.init(name: "on", kind: .boolean, required: false)],
+        DesktopAction("zoom", "Zoom Pane", scope: .pane, arguments: [.init(name: "on", kind: .boolean, required: false), part],
             keys: [.init(.return, [.command, .shift])]) { context in
+            if let (view, part) = try viewPart(context) {
+                let on = try context.boolean("on") ?? (context.model.zoomedPart(in: view) != part)
+                context.model.setZoomed(on ? part : nil, in: view)
+                return nil
+            }
             let (workspace, pane) = try context.addressed
             if let on = try context.boolean("on") { workspace.multiplexer.setZoom(pane.id, enabled: on) }
             else { workspace.toggleFocus(pane.id) }
             return nil
         },
-        DesktopAction("hide", "Hide Pane", scope: .pane) { context in
+        DesktopAction("hide", "Hide Pane", scope: .pane, arguments: [part]) { context in
+            if try setViewPart(context, hidden: true) { return nil }
             let (workspace, pane) = try context.addressed
             workspace.setCollapsed(paneId: pane.id, collapsed: true)
             return nil
@@ -337,7 +424,8 @@ struct DesktopAction {
             workspace.closePane(pane.id, tab: context.tab)
             return nil
         },
-        DesktopAction("show", "Show Pane", scope: .pane) { context in
+        DesktopAction("show", "Show Pane", scope: .pane, arguments: [part]) { context in
+            if try setViewPart(context, hidden: false) { return nil }
             let (workspace, pane) = try context.addressed
             guard workspace.multiplexer.collapsedPaneIds.contains(pane.id) else {
                 throw DesktopTargetError("\(pane.id) is already shown; nothing changed.")
@@ -366,14 +454,18 @@ struct DesktopAction {
             return nil
         },
         DesktopAction("resize", "Resize Pane", scope: .pane, arguments: [
-            .init(name: "toward", kind: .pane, required: true), .init(name: "ratio", kind: .ratio, required: true),
+            .init(name: "toward", kind: .pane, required: true), .init(name: "ratio", kind: .ratio, required: true), part,
         ]) { context in
-            let (workspace, pane) = try context.addressed
-            let toward = try context.peer("toward")
             let value = try context.string("ratio")
             guard let ratio = Double(value), ratio.isFinite, (0.1...0.9).contains(ratio) else {
                 throw DesktopArgumentError("Split ratio must be between 0.1 and 0.9; nothing changed.")
             }
+            if let (view, part) = try viewPart(context) {
+                try resizeViewPart(context, view: view, part: part, ratio: ratio)
+                return nil
+            }
+            let (workspace, pane) = try context.addressed
+            let toward = try context.peer("toward")
             workspace.multiplexer.updateRatio(between: pane.id, and: toward.id, ratio: ratio)
             return nil
         },

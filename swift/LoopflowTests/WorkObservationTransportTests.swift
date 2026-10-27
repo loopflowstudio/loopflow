@@ -93,16 +93,20 @@ struct WorkObservationTransportTests {
         #expect(survivor.isRunning)
     }
 
-    @Test("Silence expires the reading and stops the reader")
+    @Test("Silence after the first frame expires the reading and stops the reader")
     func stalled() async throws {
-        let process = shell("exec /bin/sleep 30")
+        let directory = try directory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data(frame(1).utf8).write(to: directory.appendingPathComponent("frame"))
+        let process = shell("/bin/cat frame; exec /bin/sleep 30", cwd: directory)
         let reader = try LocalWorkObservation.start(process: process, configurationChanged: { false })
         var iterator = reader.frames.makeAsyncIterator()
+        #expect(try await iterator.next()?.sequence == 1)
         do {
             _ = try await iterator.next()
             Issue.record("A stalled pipe was accepted")
         } catch {
-            #expect(error.localizedDescription.contains("ten seconds"))
+            #expect(error.localizedDescription.contains("no observation for 10 seconds"))
         }
         await reader.cancel()
         #expect(!process.isRunning)

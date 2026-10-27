@@ -510,7 +510,7 @@ complete Task Work.
 A [workflow](../authoring.md#workflows) is the outer shape of a Task: nodes
 where a person takes part in the Task conversation, and edges that each run
 one Graph. On its first `lf task run`, a Task selects the explicitly named Workflow,
-its Wave default, then repository `workflow:`. A captured Workflow stays fixed. `task_workflows` holds one
+its Wave default, repository `workflow:`, then the builtin `code`. A captured Workflow stays fixed. `task_workflows` holds one
 row per Task: the graph as it was then, never edited, and the Task's
 position. A later edit to the YAML applies to Tasks that take it up
 afterwards; taking one up again starts over at `start`.

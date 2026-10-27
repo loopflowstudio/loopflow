@@ -210,7 +210,7 @@ Then offer Linear binding as above. Connection creates or links the Initiative
 and preserves existing Projects; it does not provision an initial Project.
 Inspect available Linear status/content: one In Progress Project is the current
 plan, Planned Projects hold future plans, and Completed Projects retain history.
-Tasks select an explicit Workflow, then their Wave default, then repository `workflow:`.
+Tasks select an explicit Workflow, then their Wave default, repository `workflow:`, then the builtin `code`.
 
 If no current Project exists, report that planning gap. Establishing a chapter
 requires accepted repository-wide direction and plan dispositions: preview with

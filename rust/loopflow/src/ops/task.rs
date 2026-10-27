@@ -537,10 +537,12 @@ pub(crate) enum TaskRunSelection {
     Graph(String),
 }
 
+/// The Workflow a Task takes up when it names none: its Wave's, then the
+/// repository's `workflow:`, then the builtin `code`.
 pub(crate) fn task_workflow_default(
     store: &Store,
     task: &Task,
-) -> OpsResult<Option<(String, &'static str)>> {
+) -> OpsResult<(String, &'static str)> {
     if let Some(wave) = &task.wave_id {
         if let Some(name) = store
             .sqlite
@@ -548,17 +550,20 @@ pub(crate) fn task_workflow_default(
             .map_err(task_error)?
         {
             crate::workflow::validate_workflow_name(&name).map_err(task_error)?;
-            return Ok(Some((name, "wave")));
+            return Ok((name, "wave"));
         }
     }
     let repo = repository_for_task(store, task)?;
     let name = crate::config::load_repo_config(&repo)
         .map_err(task_error)?
         .and_then(|c| c.workflow);
-    if let Some(name) = &name {
-        crate::workflow::validate_workflow_name(name).map_err(task_error)?;
+    match name {
+        Some(name) => {
+            crate::workflow::validate_workflow_name(&name).map_err(task_error)?;
+            Ok((name, "repository"))
+        }
+        None => Ok(("code".to_string(), "builtin")),
     }
-    Ok(name.map(|name| (name, "repository")))
 }
 
 pub(crate) fn select_task_run(
@@ -605,16 +610,7 @@ pub(crate) fn select_task_run(
             if let Some(graph) = requested {
                 return Ok(TaskRunSelection::Graph(load_task_graph(checkout, graph)?.0));
             }
-            let selection = task_workflow_default(store, task)?;
-            let Some((name, source)) = selection else {
-                let available = crate::workflow::available_workflow_names(checkout)
-                    .map_err(task_error)?
-                    .join(", ");
-                return Err(task_error(format!(
-                    "No workflow selected. Use `lf task run {} <workflow>`. Available: {available}",
-                    task.identifier
-                )));
-            };
+            let (name, source) = task_workflow_default(store, task)?;
             Some(
                 crate::workflow::load_workflow(&name, &repository_for_task(store, task)?)
                     .map_err(task_error)?

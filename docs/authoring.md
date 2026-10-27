@@ -290,7 +290,7 @@ like builtin `research`. An edge is named by what it runs, so two edges
 leaving one node run different things.
 
 On its first `lf task run`, a Task selects the Workflow you name, then its Wave
-default, then repository `workflow:`. It keeps the graph as it was then.
+default, repository `workflow:`, then the builtin `code`. It keeps the graph as it was then.
 The Task's position is stored. Choosing an edge puts the Task on it; the
 process that ran the edge puts the Task at its target when the Graph succeeds.
 A Graph that stops or fails leaves the Task on the edge, shown as stopped:

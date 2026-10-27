@@ -724,6 +724,16 @@ Forget it; its rentals' history stays
 | `<name>` | name |
 | `--help / -h` | Print help |
 
+## lf ops tokens
+
+Measure this codebase: lines and tokens per directory (tracked files only)
+
+| Argument | What it does |
+|---|---|
+| `--json` | Emit as JSON Default: false. |
+| `--days` | Walk git history instead: the codebase's size on each day it changed |
+| `--help / -h` | Print help |
+
 ## lf ops account
 
 Refresh account access and capacity, or manage logins and routing
@@ -1818,7 +1828,7 @@ Show one Wave's current plan, Task details, and execution evidence
 |---|---|
 | `<wave>` | Wave name (default: the ambient wave) |
 | `--json` | Emit the status snapshot as JSON Default: false. |
-| `--sync` | Refresh planning from Linear before reading Default: false. |
+| `--sync` | Refresh planning from its provider (Git or Linear) before reading Default: false. |
 | `--help / -h` | Print help |
 
 ## lf wave rename
@@ -2341,16 +2351,6 @@ Show direct provider-authored usage from recorded Session inputs
 | `--project` | Limit to Session inputs attributed to one Project |
 | `--task` | Limit to Session inputs attributed to one Task |
 | `--context` | Break each step's submitted input down by source, flagged against budgets Default: false. |
-| `--help / -h` | Print help |
-
-## lf history tokens
-
-Measure this codebase: lines and tokens per directory (tracked files only)
-
-| Argument | What it does |
-|---|---|
-| `--json` | Emit as JSON Default: false. |
-| `--days` | Walk git history instead: the codebase's size on each day it changed |
 | `--help / -h` | Print help |
 
 ## lf history replay

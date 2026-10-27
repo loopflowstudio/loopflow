@@ -499,7 +499,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
         panic!("expected saved command");
     };
     let canonical = normalize_args(captured.item.argv()).unwrap();
-    assert_eq!(canonical, step.item.argv());
+    assert_eq!(canonical, ["lf", "ops", "pr", "land", "--local"]);
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
     let legacy = serde_json::json!({"Command": {
@@ -526,11 +526,11 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
         normalized(&["lf", "account", "rou"]),
-        ["lf", "account", "route"]
+        ["lf", "ops", "account", "route"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--wait-and-fix"]),
-        ["lf", "pr", "land", "--wait-and-fix"]
+        ["lf", "ops", "pr", "land", "--wait-and-fix"]
     );
     assert_eq!(
         normalized(&["lf", "task", "comment", "status"]),
@@ -591,7 +591,7 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
     let saved: loopflow::graph::Command =
         serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
     assert_eq!(saved.clone().current().argv(), ["lf", "open"]);
-    assert!(Cli::try_parse_from(["lf", "pr", "open", "--help"])
+    assert!(Cli::try_parse_from(["lf", "ops", "pr", "open", "--help"])
         .is_err_and(|error| { error.kind() == clap::error::ErrorKind::DisplayHelp }));
 }
 
@@ -746,10 +746,14 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
 }
 
 #[test]
-fn git_commands_keep_their_root_ownership() {
+fn git_commands_belong_to_ops_not_task() {
     let tree = loopflow::lf::navigation::command_tree();
     for name in ["pr", "wt", "sync", "commit"] {
-        assert!(tree.find_subcommand(name).is_some());
+        assert!(tree
+            .find_subcommand("ops")
+            .unwrap()
+            .find_subcommand(name)
+            .is_some());
         if name == "sync" {
             continue;
         } // Task planning sync is separate from Git sync.
@@ -798,7 +802,7 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
         (vec!["pool"], vec!["ops", "machine", "pool"]),
         (vec!["release", "run"], vec!["ops", "release", "run"]),
         (vec!["ci", "watch"], vec!["ops", "ci", "watch"]),
-        (vec!["tokens"], vec!["history", "tokens"]),
+        (vec!["tokens"], vec!["ops", "tokens"]),
         (vec!["repository"], vec!["config", "repository"]),
         (vec!["planning", "key"], vec!["config", "planning", "key"]),
         (vec!["reteam"], vec!["wave", "reteam"]),

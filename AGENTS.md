@@ -237,15 +237,15 @@ The instinct on a bug is often a new check. Invert it: can the system adapt inst
 A Wave's objective, memory, cadence, budget and instruments survive planning
 boundaries. A Chapter is the shared name of each Wave's one In Progress Linear
 Project. Linear Project status owns current/planned/completed history; there is
-no Chapter table or plan packet. Project owns Tasks, KRs and targets. Wave owns the optional default Workflow; repository `workflow:` is the final default.
+no Chapter table or plan packet. Project owns Tasks, KRs and targets. Wave owns the optional default Workflow; repository `workflow:` comes next, and the builtin `code` is the final default.
 
 A Task's work includes every Session, Graph and Process associated with
 its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
 Graph authority and never rewrites historical usage. Every Graph naming the Task
 is equally its work; a stopped Graph is history its caller inspects, never a
-position to resume. A Task with no Workflow takes up its Wave's default, then repository `workflow:`
-on its first `lf task run`; one that named its own keeps it.
+position to resume. A Task with no Workflow takes up its Wave's default, then repository `workflow:`,
+then the builtin `code` on its first `lf task run`; one that named its own keeps it.
 WorkflowDefinition and GraphDefinition occupy separate `.lf/workflows/` and
 `.lf/graphs/` namespaces. `lf wave workflow` owns definition discovery,
 customization and Wave selection. `lf task workflow show` reads the captured

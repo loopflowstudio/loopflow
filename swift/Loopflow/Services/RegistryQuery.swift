@@ -595,7 +595,7 @@ public struct RegistryQuery: Sendable {
     /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        let stdout = try await run(["history", "tokens", "--json"], repoPath)
+        let stdout = try await run(["ops", "tokens", "--json"], repoPath)
         return try Self.decode(CodeNode.self, from: stdout)
     }
 
@@ -603,7 +603,7 @@ public struct RegistryQuery: Sendable {
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        let stdout = try await run(["history", "tokens", "--json", "--days", String(days)], repoPath)
+        let stdout = try await run(["ops", "tokens", "--json", "--days", String(days)], repoPath)
         return try Self.decode([CodeSnapshot].self, from: stdout)
     }
 

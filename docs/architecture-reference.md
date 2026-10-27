@@ -571,7 +571,7 @@ not imported. Runtime readers use only the final schema and current encodings.
 
 Linear statuses are the owner: one In Progress Project per Wave, sharing a chapter
 name across the repository. Planned Projects express future plans; Completed
-Projects retain history. A Task without a captured Workflow selects an explicit request, its Wave default, then repository `workflow:`.
+Projects retain history. A Task without a captured Workflow selects an explicit request, its Wave default, repository `workflow:`, then the builtin `code`.
 There is no Chapter row, packet or local switch. Rotation uses an explicit target
 and stable Project identities, converges after partial mutations, preserves active
 Task identity/worktree/PR/execution, and refuses unrelated competing plans.

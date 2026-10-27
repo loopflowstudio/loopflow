@@ -162,8 +162,7 @@ impl Command {
             "doctor" | "install" => Some("self"),
             "ps" | "top" => Some("monitor"),
             "usage" | "replay" => Some("history"),
-            "release" | "ci" => Some("ops"),
-            "tokens" => Some("history"),
+            "release" | "ci" | "tokens" => Some("ops"),
             _ => None,
         };
         if let Some(owner) = owner {

@@ -1,4 +1,4 @@
-//! `lf history tokens` — how big is this codebase, in the units a model pays for.
+//! `lf ops tokens` — how big is this codebase, in the units a model pays for.
 //!
 //! Lines measure source size; tokens are what a run costs. They disagree
 //! wildly — a minified file or a lockfile is cheap in lines and ruinous in

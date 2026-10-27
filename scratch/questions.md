@@ -16,3 +16,8 @@
   (every Wave from Linear in one call) has no replacement.
 - **`lf sync` is a reserved shortcut to `ops sync`**, because `task sync` also
   exists and descendant elision would otherwise call it ambiguous.
+- **`code` default keeps `workflow_name` Optional on the wire** (2026-10-26).
+  Task reads now always report a Workflow (`code · builtin` at worst), so
+  Desktop's "No workflow selected" fallback in `TaskWorkView` no longer shows.
+  Making the DTO field required touches Rust, Swift and fixtures; left for the
+  LOO-604 read redesign, which reshapes these projections anyway.

@@ -156,7 +156,7 @@ lf wave workflow show product --json
 
 A Task keeps its captured Workflow. Before first take-up, an explicit Task
 selection wins, followed by its Wave default and repository `workflow:` in
-`.lf/config.yaml`. No selection means `lf task run` asks for a Workflow. An
+`.lf/config.yaml`. With none of these, `lf task run` takes up the builtin `code`. An
 invalid selection reports an error. Wave defaults survive Project rotation;
 Projects do not retain workflow selections.
 

@@ -154,7 +154,7 @@ fn two_people_share_one_repository() {
     let task = pair.create_task(Maya, "GPU fallback");
 
     // 5. Lee's refresh imports Maya's new Task.
-    pair.ok(Lee, &["refresh"]);
+    pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
     assert!(pair.ok(Lee, &["task", "list"]).contains("GPU fallback"));
 
     // 2. Maya's first checkout records the branch in planning; Lee gets it.
@@ -182,12 +182,12 @@ fn two_people_share_one_repository() {
         .to_string(),
     )
     .unwrap();
-    pair.ok(Maya, &["refresh"]);
-    pair.ok(Lee, &["refresh"]);
+    pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
+    pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
 
     // 1. Lee's comment, synced through Git, steers Maya's Task.
     pair.ok(Lee, &["comment", &task, "keep CPU path"]);
-    pair.ok(Maya, &["refresh"]);
+    pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
     assert!(
         pair.steers(Maya)
             .iter()
@@ -226,8 +226,8 @@ fn two_people_share_one_repository() {
     }
     let nameless = pair.create_task(Maya, "Nameless");
     pair.ok(Maya, &["task", "claim", &nameless]);
-    pair.ok(Maya, &["refresh"]);
-    pair.ok(Lee, &["refresh"]);
+    pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
+    pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
     // An unnamed owner reads as their key, so Lee can tell whose claim it is.
     let named = pair.ok(Lee, &["task", "status", &nameless]);
     assert!(
@@ -279,9 +279,9 @@ fn two_people_share_one_repository() {
     );
     pair.git(&maya, &["push", "origin", "main"]);
     pair.ok(Maya, &["wave", "workflow", "set", "review", "infra"]);
-    pair.ok(Maya, &["refresh"]);
+    pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
     pair.git(&pair.repo(Lee), &["pull", "--ff-only"]);
-    pair.ok(Lee, &["refresh"]);
+    pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
     let fresh = pair.create_task(Lee, "Review me");
     let preview = pair.json(Lee, &["task", "run", &fresh, "--explain", "--json"]);
     assert_eq!(preview["action"]["workflow"], "review", "{preview}");

@@ -3872,6 +3872,34 @@ fn waveless_task_lifecycle() {
     assert!(completed["execution"]["project_id"].is_null());
 }
 #[test]
+fn unconfigured_repository_runs_tasks_on_the_builtin_code_workflow() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    // Stand in for pursue's agent steps; the Workflow stays the builtin.
+    repo.create_file(".lf/graphs/pursue.yaml", "- cmd: graph show pursue\n");
+    repo.stage_all();
+    repo.commit("Stand in for pursue");
+    repo.push();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &["task", "create", "--title", "First Task", "--json"],
+    );
+    let id = created["id"].as_str().unwrap();
+    let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
+    assert_eq!(listed[0]["workflow_name"], "code");
+    assert_eq!(listed[0]["workflow_source"], "builtin");
+    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
+    let shown = lf(
+        repo.path(),
+        home.path(),
+        &["task", "workflow", "show", id, "--json"],
+    );
+    assert_eq!(shown["name"], "code");
+    assert_eq!(shown["position"]["node"], "demo");
+}
+
+#[test]
 fn workflow_defaults_follow_task_wave_and_repository() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

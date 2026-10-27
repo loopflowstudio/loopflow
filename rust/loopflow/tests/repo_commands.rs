@@ -43,7 +43,7 @@ fn tokens_measures_tracked_source_through_the_repo_owner() {
     let tree: Value = serde_json::from_slice(&success(run(
         repo.path(),
         home.path(),
-        &["history", "tokens", "--json"],
+        &["ops", "tokens", "--json"],
     )))
     .unwrap();
     let source = tree["children"]
@@ -62,7 +62,7 @@ fn tokens_measures_tracked_source_through_the_repo_owner() {
     let history: Value = serde_json::from_slice(&success(run(
         repo.path(),
         home.path(),
-        &["history", "tokens", "--days", "1", "--json"],
+        &["ops", "tokens", "--days", "1", "--json"],
     )))
     .unwrap();
     assert_eq!(history.as_array().unwrap().len(), 1);
@@ -117,8 +117,8 @@ fn release_bump_uses_the_same_operation_from_cli_and_captured_graph() {
         command: "repo".into(),
         args: ["release", "bump", "0.9.2"].map(str::to_string).to_vec(),
     };
-    // A Graph runs the operation as its own command.
-    let argv = captured.argv();
+    // A Graph runs the captured operation under its current owner.
+    let argv = captured.current().argv();
     let argv: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
     success(run(repo.path(), home.path(), &argv));
     assert!(fs::read_to_string(repo.path().join("Cargo.toml"))

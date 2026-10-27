@@ -649,6 +649,15 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: MachineCommand,
     },
+    /// Measure this codebase: lines and tokens per directory (tracked files only)
+    Tokens {
+        /// Emit as JSON
+        #[arg(long)]
+        json: bool,
+        /// Walk git history instead: the codebase's size on each day it changed
+        #[arg(long, value_name = "DAYS")]
+        days: Option<u32>,
+    },
     /// Refresh account access and capacity, or manage logins and routing
     Account {
         #[command(subcommand)]
@@ -1358,7 +1367,7 @@ pub enum WaveCommand {
         /// Emit the status snapshot as JSON
         #[arg(long)]
         json: bool,
-        /// Refresh planning from Linear before reading
+        /// Refresh planning from its provider (Git or Linear) before reading
         #[arg(long)]
         sync: bool,
     },

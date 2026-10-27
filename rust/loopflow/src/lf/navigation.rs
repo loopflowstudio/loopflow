@@ -348,7 +348,12 @@ pub fn resolve_path<'a>(tree: &'a Command, path: &[String]) -> Result<(&'a Comma
         let Some(expansion) = resolve_child(current, name, &canonical)? else {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidSubcommand,
-                format!("unknown command: lf {}", path.join(" ")),
+                format!(
+                    "unknown command: lf {}",
+                    [canonical.as_slice(), std::slice::from_ref(name)]
+                        .concat()
+                        .join(" ")
+                ),
             )
             .into());
         };

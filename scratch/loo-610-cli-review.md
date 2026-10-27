@@ -454,7 +454,8 @@ design for the follow-ups. No compatibility aliases; Desktop, skills, docs,
    - `repo release *` → `lf ops release *` (Jack Heart: software ops).
    - `repo ci`, `repo ci watch` → `lf ops ci`, `lf ops ci watch` (Desktop:
      `CIWatchers.swift:31`).
-   - `repo tokens` → `lf history tokens` (Desktop: `RegistryQuery.swift:605,613`).
+   - `repo tokens` → `lf ops tokens` (Jack Heart, 2026-10-26: not `history`, which
+     is Session history per LOO-604). Desktop: `RegistryQuery.swift:605,613`.
    - `repo comment` → `lf session steer --repo` (steer the repo scope's Sessions).
    - `repo refresh` → delete; `wave status --sync` already refreshes
      (Desktop `RegistryQuery.swift:579` uses it).
@@ -480,17 +481,70 @@ design for the follow-ups. No compatibility aliases; Desktop, skills, docs,
    `documented_commands` passes; Swift builds; affected Rust/Swift tests pass.
 
 Demo: `lf --help` (no `repo`; `ops` holds delivery and environment), `lf land` /
-`lf release status` / `lf ci watch --status` / `lf history tokens` work; Desktop's Telemetry,
+`lf release status` / `lf ci watch --status` / `lf ops tokens` work; Desktop's Telemetry,
 planning and CI views still load.
+
+## Docs and README redo (Jack Heart, 2026-10-26: part of this Task)
+
+After the CLI slice verifies, the next pursue iteration on this Task rewrites
+the README and `docs/` around the reorganized surface, in the same PR.
+
+- Structure by what you work with: **Work** (`task`, `wave`), **Sessions**
+  (`session`, resume), **Orchestration** (`graph`, `skill`, `lf <name>`),
+  plus **Telemetry** (`history`, usage) and **Surfaces** (`open`, `desktop`,
+  `--watch`) and **ops** (`pr release ci tokens commit sync wt machine
+  account`). Context and Skill Graphs remain README benefits, not sections.
+- Benefit first, examples carry it, shortest unique commands (`lf land`,
+  `lf commit`, `lf account`), and claim only what exists today: no `lf resume`
+  takeover/`session new` (LOO-618), no `--watch` (LOO-604), no front door
+  until they land.
+- Covers what LOO-509 (getting-started path matches the released product) and
+  LOO-404 (docs answer what survives, what went wrong, what to run next) ask
+  for in `docs/`; their Tasks close into this one when it lands, or keep only
+  what's left. Website stays LOO-513.
+- Keep Jack's own wording where it exists (README lines from LOO-550) unless
+  the surface it describes changed; flag rather than silently rewrite.
+
+**README voice (Jack Heart, 2026-10-26).** Opens with "A software instrument"
+and "arrange and conduct". At its core lf is an agent launcher and session
+manager; Skills and Graphs are introduced early, as what you launch. Every
+example must visibly do something only lf does (`lf resume` alone shows
+nothing; `lf resume --all`, `--task`, a provider ID do).
+
+### Docs map (proposed; drafts in scratch/, moved into place after the CLI run lands)
+
+**Staged, not all at once (Jack Heart, 2026-10-26).** Walk people through it in
+stages; don't teach the whole system at once. The README teaches three steps
+(start an agent with `lf :`, `lf resume`, hand it off as a Task) and then a
+"When you want more" table pointing to one page per next stage, in order: Ops
+(land), Surfaces, Telemetry, Orchestration, Waves. Each page opens from what the
+reader already did and adds one idea; reference material sits at the end of the
+page or in `lf-reference.md`.
+
+| New page | Covers | Built from |
+|---|---|---|
+| `README.md` | five benefits: Work, Sessions, Orchestration, Ops, Telemetry, Surfaces | `scratch/README.draft.md` (current README reorganized; LOO-550 wording kept) |
+| `docs/index.md` | the map, one paragraph per pillar | `index.md` |
+| `docs/getting-started.md` | install → `lf :` → first Task → resume → land (LOO-509) | `getting-started.md` |
+| `docs/work.md` | Tasks, Waves, Projects/KRs, planning providers, comments/steers | `planning.md`, `waves.md`, Task parts of `lf.md` |
+| `docs/sessions.md` | resume, steer, rename/bind, what survives a crash | `conducting.md` (inspect/resume), Session parts of `lf.md` |
+| `docs/orchestration.md` | Skills, Graphs, Workflows, Goals, machines, `-a` | `authoring.md`, Graph/machine parts of `lf.md` |
+| `docs/ops.md` | publish, land, CI repair, release, commit/sync/wt, machines, accounts | `lf.md` "Publish and finish", `subscriptions.md` (accounts) |
+| `docs/telemetry.md` | `history`, `history usage`, `ps`, `doctor` | `conducting.md` (health/usage) |
+| `docs/surfaces.md` | `open` per host, Desktop and `lf desktop`, JSON for your own UI | `conducting.md` (Mac app), `agent-api.md` (observe) |
+| `docs/troubleshooting.md` | what survives, what went wrong, what to run next (LOO-404) | `troubleshooting.md` |
+| kept as reference | `config.md`, `security.md`, `glossary.md`, `agent-api.md`, `lf-reference.md` (generated), `architecture*` | — |
+| removed | `lf.md` (dissolved into pillar pages), `conducting.md`, `planning.md`, `waves.md`, `authoring.md`, `subscriptions.md` (folded) | — |
+| `data-clones.md` | developer tool → `docs/architecture/` or deleted with `clone` | — |
 
 ## Task plan (draft; each lands real code)
 
 | Task | Lands | Depends on |
 |---|---|---|
-| **LOO-610 (this)** | The design, plus the decided deletions: `wave cron`, `repo tokens` → `history`, `clone`, `portfolio import`, `scratch` command, `monitor` → `ps`, `pool`/`ondemand` → `machine`; reference, docs, skills, tests regenerated | — |
+| **LOO-610 (this)** | The design, plus: `wave cron` deleted; `lf repo` dissolved (scope above); the `lf ops` group (`pr release ci tokens commit sync wt machine account`, `pool`/`ondemand` under `machine`); reference, docs, skills, tests regenerated. Not in this slice: `clone`, `portfolio`, `scratch`, `monitor` | — |
 | Resume (LOO-618) | `lf resume` per §3; `task hold/release`; deletes `session attach`, `--try/--takeover/--if-free`; absorbs LOO-424 | D2 |
 | Usage | `lf usage` filter × group × bucket × measure; interactive-Session usage gap fixed or explained | LOO-611, LOO-612 for `source` |
-| GUI API | `lf watch`, `lf view`, `lf task files …`; Desktop moves onto them; `lf open --files/--graphs`; the build-your-own-UI page | D3 |
+| GUI API → **LOO-604** | `--watch` on ordinary reads; Desktop moves onto them (Jack Heart: LOO-604's approach). Left here: `lf open --files/--graphs` | — |
 | `lf serve` | Opt-in stateless server: CLI-over-socket, GitHub webhook replacing `pr ci` polling; Desktop uses it when present | GUI API |
 | Planning surface | `repo` dissolved or slimmed per D5 | D5 |
 | Code host port (filed, local `985879`, Linear sync uncertain) | One code-host + CI port; a second host proves pr/land/ci/release end to end | LOO-610 `pr`/ops surface |
@@ -541,6 +595,90 @@ concepts is generally better.
 Resuming a Task's conversation stays one verb on the Session: `lf resume
 LOO-610` or `lf --task LOO-610 resume`; no `task resume` (proposed, follows D2).
 
+## Alignment with LOO-604 and LOO-594 (2026-10-26)
+
+**Decided (Jack Heart, 2026-10-26): use LOO-604's approach.** No `lf watch` or
+`lf view` nouns; live reads are `--watch` on ordinary commands; the GUI API is
+the CLI. §4's GUI-API table and the "GUI API" row of the Task plan are
+superseded and owned by LOO-604. LOO-594 notes below remain proposals.
+
+LOO-604 (one lf API for Loopflow state) carries Jack Heart's decisions that
+supersede parts of §4–§5 here:
+
+- **Live API is `--watch` on ordinary reads** (Jack, option B): `lf task list
+  --watch`, `lf session list --watch`, `lf task status <id> --watch`, the
+  live-process read; `lf monitor work` deleted. → drop this review's `lf watch`
+  noun and `lf view`; the GUI API is the ordinary CLI plus `--watch`. No
+  separate GUI surface to document beyond that.
+- **`lf history` is Session history** (Jack): Session records tagged with
+  Task/Wave/Project; Work changes live on the Task. → `history tokens`
+  (codebase measurement, added by this Task's first slice) does not fit; it
+  belongs with the codebase (`ops`) or goes. Usage stays under history, so the
+  telemetry stories read `lf history usage --by …` unless `lf usage` is
+  promoted.
+- **Open Tasks are the live set; `lf task list [query] --done --since`** pages
+  closed ones (Jack). Fits the Work pillar; `wave show`/`wave status` reduce to
+  Wave fields plus `task list --wave`.
+- **Conflict:** LOO-604 keeps `lf repo planning status` as the peer-planning
+  read; this Task moved it to `lf config planning status`. Whichever lands
+  second renames in its Desktop call (`RegistryQuery.peerPlanningStatus`).
+  Both branches edit `RegistryQuery.swift` and `docs/lf-reference.md`.
+
+LOO-594 (Desktop Wave view as a standup board, accepted):
+
+- Its board (Done in the last N days · Active · Backlog, against the chapter's
+  KRs) is the same question as this review's front door ("what moved, what's
+  moving, what needs a person"). Proposed: the terminal front door renders that
+  standup read for the current scope (Wave, else repository), from LOO-604's
+  `task list` reads; Desktop and terminal share one query.
+- It grows `lf desktop` (`enter`, `back`, `send -p session`, `-p board|session|
+  tiles`): consistent with host-native pane control. `desktop send -p session`
+  types into a pane; `lf session steer` is the portable way to reach a
+  conversation.
+
+## Decided additions to LOO-610 (Jack Heart, 2026-10-26)
+
+4. **`code` is the default workflow.** `lf task run <ID>` with no workflow named
+   by the Task, its Wave or `.lf/config.yaml` takes up the builtin `code`
+   workflow instead of failing with "No workflow selected"
+   (`ops/task.rs` ~607, `task_workflow_default`). Test: a fresh repository with
+   no `workflow:` runs `lf -b task run <ID>` to its first edge.
+5. **Agents hand off changes as Tasks by default.** Replace
+   `skills/loopflow/SKILL.md` and `rust/loopflow/src/builtins/LOOPFLOW.md` with
+   `scratch/skill-draft/SKILL.md` and `scratch/skill-draft/LOOPFLOW.md`; add
+   `skills/loopflow/README.md` from `scratch/skill-draft/README.md`. Update any
+   test that pins LOOPFLOW.md text.
+6. **Docs and README** move into place from `scratch/README.draft.md` and
+   `scratch/docs-draft/` after items 1–5 verify (see "Docs and README redo").
+
+## Story, auto mode and configuration (Jack Heart, 2026-10-26)
+
+- **Story:** Loopflow launches agents for you (and your agents launch more),
+  organizes them around Tasks, which unify PRs, task tracking, worktrees and
+  remote branches, and Waves break the work into sections with their own
+  assignments: Graph, account, machine.
+- **Sell auto mode.** The main thing to sell is that work runs without you.
+- **Configuration is Wave configuration.** Add Wave-wide configurability for
+  everything (Graph, agent, machine, accounts); repository-wide follows because a
+  repository is the Wave of Tasks without one. Don't build a separate
+  repository config path. (LOO-625.)
+- **Workflow = your chosen Graph.** A Workflow is fundamentally a Graph; its
+  interactive stages happen in the app or the Task conversation, not inside the
+  process. Human/interactive flags must be consistent everywhere, and a Graph
+  annotated with interactive stages works both when you take part and when you
+  just run it. (LOO-622, plus the existing Task Jack recalls on human vs
+  interactive flags.)
+
+## Coordination with the rental-machines work (2026-10-26)
+
+`loopflow.rental-machines` (LOO-527 rewritten + LOO-542, one PR, uncommitted)
+replaces RunPod with Daytona and Modal and deletes `lf ondemand availability`.
+It edits `lf/mod.rs` (`OndemandCommand` args), `bin/lf.rs`, `machine*.rs`,
+`docs/lf-reference.md`, `docs/lf.md`. LOO-610 moved `ondemand`/`pool` under
+`lf ops machine`. Whichever lands second rebases: the provider changes move into
+the `ops machine ondemand` tree. The README's rental row names no provider until
+Daytona/Modal land; then it names them.
+
 ## Run notes
 
 - 2026-10-26: the first pursue run's implement step handed the `wave cron`
@@ -551,4 +689,9 @@ LOO-610` or `lf --task LOO-610 resume`; no `task resume` (proposed, follows D2).
   Compress pass then removed the cron-only release-lock intervention test and
   its `release_history.json` fixture, cron mentions in docs, and stale
   `repo comment`/`repo identity`/`repo refresh` calls in tests and e2e scripts.
-  Remaining: Swift build, gate.
+  Remaining: gate.
+- 2026-10-26 verify run: `history tokens` → `ops tokens` (Desktop, tests,
+  reference); items 4 (`code` default, test
+  `local_planning::unconfigured_repository_runs_tasks_on_the_builtin_code_workflow`)
+  and 5 (skill/LOOPFLOW.md drafts in place, alignment test updated) done.
+  Item 6 (docs/README) remains.

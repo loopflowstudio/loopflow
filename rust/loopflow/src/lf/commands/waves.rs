@@ -1444,12 +1444,10 @@ async fn snapshot_task_detail(
             launch_refusal: launch_refusal.as_deref(),
         });
     let selection = match store.sqlite.workflow(&task.id)? {
-        Some(workflow) => Some((workflow.definition.name, "task")),
+        Some(workflow) => (workflow.definition.name, "task"),
         None => crate::ops::task::task_workflow_default(store, task)?,
     };
-    let (workflow_name, workflow_source) = selection
-        .map(|(name, source)| (name, source.to_owned()))
-        .unzip();
+    let (workflow_name, workflow_source) = (Some(selection.0), Some(selection.1.to_owned()));
     Ok(TaskDetailSnapshot {
         task: task_summary(
             task,

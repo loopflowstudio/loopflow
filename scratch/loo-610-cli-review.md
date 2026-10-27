@@ -671,43 +671,15 @@ It edits `lf/mod.rs` (`OndemandCommand` args), `bin/lf.rs`, `machine*.rs`,
 the `ops machine ondemand` tree. The README's rental row names no provider until
 Daytona/Modal land; then it names them.
 
-## Concept review in the Graph: one steer verb (2026-10-26, built)
+## One steer verb (2026-10-26, built)
 
-Walk: Jack wants to redirect every Session working in a scope. Today the verb
-depends on the scope:
-
-```
-lf session steer SESSION "…"            # one Session
-lf session steer --repo "…"             # was: the repository's Sessions
-lf wave comment WAVE "…" --steer        # a Wave's Sessions; --steer is required
-lf task comment ISSUE "…" [--steer]     # publishes to the Task's thread
-```
-
-Accepted decisions settle it: `repo comment` → Session (Jack), and `--repo` is
-a scope selector like `--wave` (Jack). This slice made `--repo` a boolean on
-`session steer` (id `repo_steer`), so `lf --repo loopflow session steer --repo
-"…"` spells the same flag with two meanings, and the Wave form kept a
-mandatory flag that carries no choice.
-
-Direction:
-
-```
-lf session steer SESSION "…"            # one Session
-lf session steer "…"                    # the current scope's Sessions: the Wave
-                                        # with --wave, else the repository
-lf --wave billing session steer "…"
-lf --repo loopflow session steer "…"
-```
-
-- Delete `wave comment` and `session steer`'s boolean `--repo`; the scope
-  comes from the global `--wave`/`--repo`/cwd, the way every other command
-  resolves it. Stores keep `save_repository_steer` and the Wave steer writer.
-- `task comment` stays: it reads and publishes the Task's thread, which is a
-  different thing from a steer; its `--steer` keeps meaning "also direct".
-- Update `docs/sessions.md:76`, `docs/architecture-reference.md:883-884`,
-  `session_steers.rs`/`global_commands.rs` callers, regenerate the reference.
-- Counterexample checked: Desktop calls neither form (`RegistryQuery.swift`
-  only reads `task comment`), so no client moves.
+`lf session steer SESSION "…"` steers one Session; without an id it steers the
+Wave named by global `--wave`, else the repository from global `--repo` or the
+cwd. `wave comment` and `session steer`'s boolean `--repo` are deleted (the
+boolean spelled the global scope selector twice; Jack: `--repo` is a scope
+selector like `--wave`). `task comment` stays: it publishes the Task's thread,
+and its `--steer` keeps meaning "also direct". Desktop calls neither deleted
+form.
 
 Unresolved, outside this Task's slice (do not block publish): bare `lf` as
 front door vs. "start a conversation" (above); promise-or-delete for §7's

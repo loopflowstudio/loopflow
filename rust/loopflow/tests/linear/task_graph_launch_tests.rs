@@ -561,13 +561,22 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
 #[test]
 fn failed_placement_is_observed_without_starting_a_task() {
     let task = WorkflowTask::new();
-    let output = task.run(&["--task", "missing-task", "graph", "proof"]);
-    assert!(!output.status.success());
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let parent =
+        loopflow_test_support::RunningParent::insert(&task.home.path().join("loopflow.db"));
+    let output = parent
+        .adopt(&mut command(
+            task.repo.path(),
+            task.home.path(),
+            &["--task", "missing-task", "graph", "proof"],
+        ))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
     let (cwd, outcome): (String, String) = db
         .query_row(
-            "SELECT cwd,outcome FROM processes ORDER BY rowid DESC LIMIT 1",
-            [],
+            "SELECT cwd,outcome FROM processes WHERE parent_lf_process_id=?1",
+            [&parent.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();

@@ -41,15 +41,13 @@
 Jack folded LOO-430/431/432 into LOO-427: identity, window
 control and terminal I/O in one diff.
 
-October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
-removes copied placements, preserves legacy overrides and routes known Tasks
-without rewriting Machine defaults. Gate retains placement suites;
-seeded IDs prove routing, not exchange/admission.
+October 8: LOO-427 leaves unknown checkout location unavailable; `92cafe61d`
+routes known Tasks without rewriting Machine defaults. Seeded IDs prove routing,
+not exchange/admission.
 
 `desktop text/key` reuse existing owners: Jack selected cursor insertion into
 drafts with Enter separate; control-text/IME limits are reversible. Verified lf3
-enables bounded reads. Headless builds skip native I/O diagnostics;
-extraction/input remains unproved. Reads grant no input authority.
+enables bounded reads; extraction/input remains unproved. Reads grant no input authority.
 
 Jack's October 8 API: `--context` previews input, `--explain` is broader,
 `--chrome` controls execution. Root `run`, `--max-turns` and `--no-loopflow` are
@@ -59,7 +57,7 @@ Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypass
 execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
 retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave-owned `show`, `workflow` and `edit-plan` replace root roadmap/Project locally;
 retained Project IDs and the snapshot/writer owners survive. Desktop sends Wave identity.
-Flow previews expose initial input; future/loop input stays unavailable. Broader explanation remains. Discord is unchanged;
+Flow previews expose initial input; future/loop input stays unavailable. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
 portable identity; remembered names remain open. Scoped IDs survive dispatch.
@@ -220,15 +218,12 @@ Jack authorized shipping #1499 October 9; native acceptance was not established.
 Observed provider conflicts win; matching readback does not guarantee atomic writes
 against an unseen reopening. LOO-385 overlap does not establish closure.
 
-## Terminal-host adoption (2026-10-07)
+## Historical pointers
 
-Jack Heart authorized landing after cmux/herdr trials, without full adoption proof.
-LOO-421's failures and limits: `27613222eb:.lf/wave/product/MEMORY.md`, this heading.
-
-## Live Home reconciliation
-
-LOO-380 proof and unresolved LOO-367/366/343/test-Wave findings:
-`314095b00:wave/product/MEMORY.md`, this heading. Unrechecked; no new cleanup authority.
+- Terminal-host adoption (2026-10-07): Jack Heart authorized landing after cmux/herdr
+  trials without full adoption proof; LOO-421 limits at `27613222eb`, same file.
+- LOO-380 Live Home proof, unresolved LOO-367/366/343/test-Wave findings:
+  `314095b00:wave/product/MEMORY.md`; no cleanup authority.
 
 ## Reactive workspace (2026-10-05)
 

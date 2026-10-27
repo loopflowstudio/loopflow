@@ -28,7 +28,7 @@ pub enum DiffContext {
 #[derive(Parser, Debug, Default)]
 #[command(name = "lf", bin_name = "lf", disable_help_subcommand = true)]
 #[command(about = "Open Loopflow or run its CLI")]
-#[command(version = crate::build_info::BUILD_VERSION)]
+#[command(version = crate::build_info::VERSION_LINE)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -208,37 +208,13 @@ impl Cli {
         }
     }
 
-    /// Whether this invocation becomes a Process row. Provider hooks run once
-    /// per agent turn and Desktop polls once per refresh; nothing references
-    /// them, so recording each would make them most of the store. Previews,
-    /// planning and location reads, and hooks an earlier lf left behind are
-    /// effect-free reads too.
-    pub fn records_process(&self) -> bool {
-        if self.context || self.explain {
-            return false;
-        }
+    /// A provider hook: the harness runs it on the agent's behalf, once per
+    /// turn, event or tool call. Includes hooks an earlier lf left behind.
+    pub fn harness_callback(&self) -> bool {
         match &self.command {
-            Some(Commands::ContextBlock { .. }) => false,
-            Some(Commands::External(parts)) => !parts[0].starts_with("__"),
-            Some(Commands::Task { cmd }) => !matches!(
-                cmd,
-                TaskCommand::File { .. }
-                    | TaskCommand::Files { .. }
-                    | TaskCommand::Diff { .. }
-                    | TaskCommand::Location { .. }
-                    | TaskCommand::WatchFiles { .. }
-            ),
-            Some(Commands::Wave { cmd }) => !matches!(
-                cmd,
-                WaveCommand::Show { .. }
-                    | WaveCommand::Workflow {
-                        cmd: WaveWorkflowCommand::List { .. }
-                            | WaveWorkflowCommand::Show { .. }
-                            | WaveWorkflowCommand::Source { .. }
-                    }
-            ),
-            Some(Commands::Desktop { cmd }) => !cmd.is_read(),
-            _ => true,
+            Some(Commands::ContextBlock { .. }) => true,
+            Some(Commands::External(parts)) => parts[0].starts_with("__"),
+            _ => false,
         }
     }
 
@@ -2728,7 +2704,7 @@ mod tests {
         assert_eq!(error.kind(), clap::error::ErrorKind::DisplayVersion);
         assert_eq!(
             error.to_string(),
-            format!("lf {}\n", crate::build_info::BUILD_VERSION)
+            format!("lf {}\n", crate::build_info::VERSION_LINE)
         );
     }
 

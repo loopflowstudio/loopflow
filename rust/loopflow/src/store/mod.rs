@@ -14,6 +14,7 @@ pub(crate) mod changes;
 mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
+pub mod contention;
 pub mod copy;
 mod durable;
 mod metrics;

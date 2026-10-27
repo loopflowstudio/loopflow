@@ -388,6 +388,29 @@ mod tests {
     }
 
     #[test]
+    fn retained_graph_preserves_routes_after_interactive_field_rename() {
+        let graph: CapturedGraph = serde_json::from_str(
+            r#"{"name":"code","steps":[
+                {"Skill":{"skill":{"name":"implement"},"id":null,"human":false,"returns":null,"sources":[]}},
+                {"Skill":{"skill":{"name":"demo"},"id":"review","human":true,"returns":null,"sources":[]}}
+            ]}"#,
+        )
+        .unwrap();
+        let (definition, _) = graph.project().unwrap();
+        assert_eq!(definition.nodes.len(), 1);
+        assert_eq!(definition.nodes[0].name, "review");
+        assert_eq!(
+            routes(&definition, START),
+            [("implement".into(), "review".into())]
+        );
+        assert_eq!(routes(&definition, "review"), [(END.into(), END.into())]);
+        let current = serde_json::to_value(&graph).unwrap();
+        assert_eq!(current["steps"][0]["Skill"]["interactive"], false);
+        assert_eq!(current["steps"][1]["Skill"]["interactive"], true);
+        assert!(current["steps"][1]["Skill"].get("human").is_none());
+    }
+
+    #[test]
     fn builtin_graphs_project_their_stages_and_the_routes_between_them() {
         let repo = tempfile::tempdir().unwrap();
         let feature = load_workflow("feature", repo.path()).unwrap().unwrap();

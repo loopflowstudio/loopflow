@@ -99,7 +99,7 @@ cheap in lines and expensive in tokens; this shows it.
 ## Is Loopflow healthy
 
 ```bash
-lf doctor             # store, process records, lineage, attribution, installation
+lf doctor             # store, process records, lineage, attribution, installation, lock contention
 lf doctor --planning  # repository planning, read without changing it
 ```
 

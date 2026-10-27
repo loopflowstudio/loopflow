@@ -197,8 +197,6 @@ struct ReaderState {
     /// Per-response receipts keyed by Claude message id. Repeated assistant
     /// snapshots replace one entry; distinct tool-loop responses accumulate.
     assistant_usage: HashMap<String, TurnUsage>,
-    /// Main-conversation message ids already reported as a `Request`.
-    requests: HashSet<String>,
 }
 
 #[derive(Debug, Default)]
@@ -299,21 +297,16 @@ impl ReaderState {
             .or_insert(input);
     }
 
-    /// A main-conversation request's input, once per message id: one request
-    /// streams several lines repeating the same usage.
-    fn observe_request(&mut self, value: &Value) -> Option<u64> {
+    /// A request's input the first time its message id appears: one request
+    /// streams several lines repeating the same usage. Call before
+    /// `observe_assistant_usage` records the id.
+    fn observe_request(&self, value: &Value) -> Option<u64> {
         let message = value.get("message")?;
-        let usage = message.get("usage")?;
-        let input = usage.get("input_tokens").and_then(Value::as_u64)?;
-        let id = message
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if !id.is_empty() && !self.requests.insert(id.to_owned()) {
+        let id = message.get("id").and_then(Value::as_str)?;
+        if self.assistant_usage.contains_key(id) {
             return None;
         }
-        let cached = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
-        Some(input + cached("cache_read_input_tokens") + cached("cache_creation_input_tokens"))
+        total_input(message.get("usage")?)
     }
 
     fn observe_assistant_usage(&mut self, value: &Value) -> Option<TurnUsage> {
@@ -327,9 +320,7 @@ impl ReaderState {
             .and_then(Value::as_u64);
         let receipt = TurnUsage {
             input_tokens,
-            total_input_tokens: input_tokens.map(|input| {
-                input + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0)
-            }),
+            total_input_tokens: total_input(usage),
             output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
             reasoning_tokens: usage.get("reasoning_tokens").and_then(Value::as_u64),
             cache_read_tokens,
@@ -473,6 +464,16 @@ fn parse_reset_timestamp(value: &Value) -> Option<i64> {
     time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
         .ok()
         .map(|timestamp| timestamp.unix_timestamp())
+}
+
+/// A request's whole input: fresh tokens plus cache reads and writes.
+fn total_input(usage: &Value) -> Option<u64> {
+    let tokens = |key: &str| usage.get(key).and_then(Value::as_u64);
+    Some(
+        tokens("input_tokens")?
+            + tokens("cache_read_input_tokens").unwrap_or(0)
+            + tokens("cache_creation_input_tokens").unwrap_or(0),
+    )
 }
 
 /// Map one NDJSON line to display events. Returns `Some(status)` when the
@@ -625,6 +626,7 @@ fn process_line(
         // These contain tool_use blocks and text blocks.
         "assistant" => {
             state.observe_assistant_pressure(event);
+            let request = state.observe_request(event).filter(|_| main);
             if let Some(usage) = state.observe_assistant_usage(event) {
                 out.push(Decoded::from(ConversationEvent::UsageCheckpoint {
                     turn_id: turn_id.to_string(),
@@ -632,10 +634,10 @@ fn process_line(
                     final_receipt: false,
                 }));
             }
+            if let Some(input_tokens) = request {
+                out.push(ProviderFact::Request { input_tokens }.into());
+            }
             if main {
-                if let Some(input_tokens) = state.observe_request(event) {
-                    out.push(ProviderFact::Request { input_tokens }.into());
-                }
                 process_assistant_message(event, turn_id, out, state);
             }
         }

@@ -188,7 +188,7 @@ unless "Work needed" says otherwise.
 | `session list` | watch | R | page or diff (Remaining 1) |
 | `task status <id>` | watch | T | flat in Graphs; Sessions/Processes unmeasured (Remaining 2) |
 | `history --since 7d` | watch | W/P/T | |
-| `monitor ps` | watch | M | shrinks with LOO-615 |
+| `ps` | watch | M | shrinks with LOO-615 |
 | `planning status` | watch | R | holds the repository's planning sync |
 | `desktop plans` | watch | R | |
 | `wave status` per Wave | `openHistoricalReference`, `ProjectHistoryView`; user action | W | check historical Projects are in the plan |

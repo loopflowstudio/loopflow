@@ -315,6 +315,7 @@ one plan; `DashboardView.swift:37` still offers Working Tasks.
 ## Check results
 
 - Oct 26 (items 1–7, 12): `cargo test -p loopflow --lib -- desktop:: selection ops::people` 79 pass; `--test integration` dto/desktop/repo_people/reference/documented 48 pass; clippy clean; `scripts/test_desktop.sh --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests'` 156 pass. Part routing of `zoom`/`resize -p board` through the CLI has no live-Desktop test (gate/demo); `lf repo people` against GitHub ran by hand only.
+- Oct 26 compress (section vocabulary, `Person.github`): `scripts/test_desktop.sh --filter 'WaveStandupTests|DesktopPaneControlTests'` 35 pass.
 
 ## Direction added October 26, 2026, after acceptance (binding; supersedes conflicts above)
 

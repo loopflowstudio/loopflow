@@ -89,7 +89,7 @@ public struct DesktopViewPart: Codable, Sendable, Equatable {
     public let kind: Kind
     /// The Work a session part converses with.
     public let work: WorkWorkspaceKey?
-    /// A board's shown section: `done`, `active` or `backlog`.
+    /// A board's shown section: `backlog`, `working`, `autonomous` or `done`.
     public let section: String?
     /// A board's Done window in days; 0 includes all ages.
     public let doneDays: Int?

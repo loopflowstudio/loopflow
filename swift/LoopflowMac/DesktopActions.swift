@@ -308,7 +308,7 @@ struct DesktopAction {
             }
             let value = try context.string("section")
             guard let section = WaveBoardSection(rawValue: value) else {
-                throw DesktopArgumentError("section=\(value) is not done, active or backlog; nothing changed.")
+                throw DesktopArgumentError("section=\(value) is not backlog, working, autonomous or done; nothing changed.")
             }
             context.model.navigation.boardSections[view] = section
             return nil

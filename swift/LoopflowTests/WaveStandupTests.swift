@@ -93,8 +93,8 @@ struct WaveStandupTests {
         let shared = standup(tasks + [ada], github: ["jack@loopflow.studio": user])
         #expect(shared.showsPeople)
         #expect(shared.working[0].person?.name == "Jack H.")
-        #expect(shared.working[1].person?.avatarURL == user.avatarUrl)
-        #expect(shared.working[2].person?.avatarURL == nil)
+        #expect(shared.working[1].person?.github?.avatarUrl == user.avatarUrl)
+        #expect(shared.working[2].person?.github?.avatarUrl == nil)
     }
 
     @Test func doneWindowCountsWholeDaysBackFromNow() throws {

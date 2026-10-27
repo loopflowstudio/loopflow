@@ -30,8 +30,7 @@ struct WaveStandup: Equatable {
     struct Person: Equatable, Hashable {
         let key: String
         let name: String
-        let login: String?
-        let avatarURL: URL?
+        let github: GitHubPerson?
         var initials: String {
             let words = name.split(whereSeparator: { $0 == " " || $0 == "@" || $0 == "." }).prefix(2)
             return words.compactMap(\.first).map { String($0).uppercased() }.joined()
@@ -46,7 +45,7 @@ struct WaveStandup: Equatable {
     /// Pictures and names appear once the started and finished Tasks span two people.
     let showsPeople: Bool
 
-    /// `tasks` fill Active and Backlog; `closed` fills Done. Today both come from the
+    /// `tasks` fill Backlog, Working and Autonomous; `closed` fills Done. Today both come from the
     /// Wave roadmap; LOO-604 moves closed Tasks to `lf task list --done`, which then
     /// becomes `closed` alone. `github` maps lowercase owner emails to their users;
     /// `sessions` names each started Task's Session attention.
@@ -63,8 +62,7 @@ struct WaveStandup: Equatable {
             guard let owner = task.runtime?.owner,
                   let key = owner.personKey?.lowercased() ?? owner.person.map({ emails[$0] ?? $0 }) else { return nil }
             let user = github[key]
-            return Person(key: key, name: user?.name ?? owner.person ?? user?.login ?? key,
-                          login: user?.login, avatarURL: user?.avatarUrl)
+            return Person(key: key, name: user?.name ?? owner.person ?? user?.login ?? key, github: user)
         }
         done = closed.filter { task in
             guard task.task.isSuccessful, !task.condition.unresolvedExecution else { return false }
@@ -476,7 +474,7 @@ struct WavePersonPicture: View {
 
     var body: some View {
         Group {
-            if let url = person.avatarURL {
+            if let url = person.github?.avatarUrl {
                 AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { initials }
             } else {
                 initials
@@ -484,7 +482,7 @@ struct WavePersonPicture: View {
         }
         .frame(width: 20, height: 20)
         .clipShape(Circle())
-        .help(person.login.map { "\(person.name) (@\($0))" } ?? person.name)
+        .help(person.github.map { "\(person.name) (@\($0.login))" } ?? person.name)
     }
 
     private var initials: some View {

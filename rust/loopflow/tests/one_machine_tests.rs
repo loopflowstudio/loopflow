@@ -166,6 +166,7 @@ fn default_and_nested_commands_use_the_installed_cli_and_main_home() {
         source: InstallSource::Published,
         source_revision: "fixture".into(),
         source_identity: "fixture".into(),
+        build_label: None,
         content_sha256: hex::encode(Sha256::digest(artifact.sha256.as_bytes())),
         artifacts: vec![artifact],
     };

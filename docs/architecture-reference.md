@@ -1242,6 +1242,11 @@ the separate `lf reteam` operation.
 6. Recover or roll back from the persisted artifact-selection receipt.
 7. Garbage-collect old artifacts separately from activation.
 
+Only a published release may change the store's migration frontier. An
+unreleased build without migration drafts that knows the store's frontier
+exactly migrates nothing, so promotion accepts it as a hotfix; its receipt,
+`lf --version` and `lf doctor` name it, e.g. `hotfix e9b2c2eac on v0.14.16`.
+
 The installation promotion lock serializes artifact selection and service
 replacement. It does not discover, drain, stop, or settle conversations and it is not
 held by ordinary harnesses. Store cloning remains useful because preview can

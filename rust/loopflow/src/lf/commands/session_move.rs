@@ -6,7 +6,7 @@
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::durable::{Machine, MachineId, TaskOwnership};
+use crate::durable::{Machine, MachineId, TaskId, TaskOwnership};
 use crate::ops::human_session::moves::{self, Move};
 use crate::session::LfSession;
 use crate::store::SharedStore;
@@ -19,8 +19,12 @@ pub(crate) async fn relay(
     target: &Machine,
 ) -> Result<()> {
     let id = session.id.to_string();
-    let moved = match store.sqlite.session_moved_to(&id)? {
-        Some(machine) if machine == target.id => return Ok(()),
+    let moved_to = store.sqlite.session_moved_to(&id)?;
+    if moved_to.as_ref() == Some(&target.id) {
+        return Ok(());
+    }
+    ready(store, target, None, &format!("Session {}", session.title)).await?;
+    let moved = match moved_to {
         Some(machine) => {
             let source = registered(store, &machine)?;
             let bytes = super::ssh::request(
@@ -42,7 +46,7 @@ pub(crate) async fn relay(
     receive(store, &moved, Some(target))
         .await
         .map_err(|error| retry(error, &format!("Session {id}"), &id, target))?;
-    eprintln!("Moved {} to {}", session.title, label(target));
+    eprintln!("Moved {} to {}", session.title, target.name());
     Ok(())
 }
 
@@ -77,9 +81,13 @@ async fn relay_task(store: &SharedStore, issue: &str, target: &str) -> Result<Ta
         .map_or(local.clone(), |machine| machine.id.clone());
     let route = store.task_execution_route(&task.id).await?;
     let name = &task.identifier;
-    let moved: Move = if route.machine_id == to {
+    if route.machine_id == to {
         anyhow::bail!("{name} already runs on {}", describe(target.as_ref()));
-    } else if route.machine_id == local {
+    }
+    if let Some(target) = &target {
+        ready(store, target, Some(&task.id), name).await?;
+    }
+    let moved: Move = if route.machine_id == local {
         moves::send_task(store, task.id.as_str(), &to).await?
     } else {
         let source = super::ssh::resolve_target(route.machine_id.as_str(), false).await?;
@@ -132,6 +140,32 @@ async fn relay_task(store: &SharedStore, issue: &str, target: &str) -> Result<Ta
     Ok(store.sqlite.task_ownership(&task.id)?)
 }
 
+/// Before anything is committed, pushed, stopped or handed off, `target`
+/// answers that it can receive the move and, for a Task, that it knows it.
+async fn ready(
+    store: &SharedStore,
+    target: &Machine,
+    task: Option<&TaskId>,
+    what: &str,
+) -> Result<()> {
+    if target.id == store.sqlite.local_machine()?.id {
+        return Ok(());
+    }
+    let mut args = vec!["session".into(), "receive".into(), "--check".into()];
+    if let Some(task) = task {
+        args.extend(["--task".into(), task.to_string()]);
+    }
+    super::ssh::request(target, &args, None)
+        .await
+        .map(drop)
+        .map_err(|error| {
+            anyhow!(
+                "{what} did not move: {} cannot receive it; nothing was sent\n{error:#}",
+                target.name()
+            )
+        })
+}
+
 /// Receive on `target`, over SSH unless it is this Machine (`None`).
 async fn receive(store: &SharedStore, moved: &Move, target: Option<&Machine>) -> Result<()> {
     match target {
@@ -153,9 +187,9 @@ async fn receive(store: &SharedStore, moved: &Move, target: Option<&Machine>) ->
 fn retry(error: anyhow::Error, what: &str, selector: &str, target: &Machine) -> anyhow::Error {
     anyhow!(
         "{error:#}\n{what} was sent but did not arrive on {}; where it lived, retry with\n  lf session send {selector} --to {} | lf --machine {} session receive",
-        label(target),
+        target.name(),
         target.id,
-        label(target),
+        target.name(),
     )
 }
 
@@ -168,17 +202,10 @@ fn registered(store: &SharedStore, machine: &MachineId) -> Result<Machine> {
 
 fn describe(machine: Option<&Machine>) -> String {
     match machine {
-        Some(machine) => label(machine),
+        Some(machine) => machine.name(),
         None => format!(
             "{} (this Machine)",
             crate::store::sqlite::task_ownership::local_label()
         ),
     }
-}
-
-fn label(machine: &Machine) -> String {
-    machine
-        .label
-        .clone()
-        .unwrap_or_else(|| machine.id.to_string())
 }

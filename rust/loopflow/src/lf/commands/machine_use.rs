@@ -213,8 +213,7 @@ fn describe(store: &SqliteStore, machine: &MachineId) -> anyhow::Result<String> 
     }
     Ok(store
         .machine_by_id(machine)?
-        .and_then(|machine| machine.label)
-        .unwrap_or_else(|| machine.to_string()))
+        .map_or_else(|| machine.to_string(), |machine| machine.name()))
 }
 
 /// The Session lives on your Machine for its scope: admit it here, or move
@@ -243,10 +242,7 @@ async fn move_primary_session(
 /// keeps its old choice until this runs again.
 async fn copy_to_my_machines(store: &SqliteStore, args: &[String]) -> anyhow::Result<()> {
     for machine in store.machines()? {
-        let name = machine
-            .label
-            .clone()
-            .unwrap_or_else(|| machine.id.to_string());
+        let name = machine.name();
         match crate::lf::commands::ssh::request(&machine, args, None).await {
             Ok(_) => eprintln!("copied to {name}"),
             Err(error) => eprintln!(

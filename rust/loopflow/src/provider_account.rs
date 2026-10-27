@@ -267,10 +267,8 @@ impl ProviderAccountRoute {
         let AccountLogin::Stored { store, .. } = &self.login else {
             return Ok(());
         };
-        let harness = match self.provider {
-            Provider::Claude => crate::harness::HarnessKind::Claude,
-            _ => crate::harness::HarnessKind::Codex,
-        };
+        let harness = crate::harness::HarnessKind::parse(self.provider.as_str())
+            .expect("account routes exist only for agent providers");
         let to = self.conversation_home();
         let from =
             crate::transcript::conversation_home(&store.sqlite, self.provider, agent_session, None)

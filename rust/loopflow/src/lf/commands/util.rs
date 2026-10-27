@@ -256,8 +256,7 @@ fn moved_away(
     };
     let label = store
         .machine_by_id(&machine)?
-        .and_then(|machine| machine.label)
-        .unwrap_or_else(|| machine.to_string());
+        .map_or_else(|| machine.to_string(), |machine| machine.name());
     // A Task that went with its conversation is resumed by its name.
     for task in store.session_task_ids(&session.id)? {
         let owner = store.task_ownership(&task)?.owner;

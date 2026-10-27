@@ -267,12 +267,22 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             println!("{}", serde_json::to_string(&moved)?);
             Ok(())
         }
-        SessionCommand::Receive { json } => {
+        SessionCommand::Receive {
+            check: true, task, ..
+        } => {
+            let store = open_shared_store().await?;
+            if let Some(task) = task {
+                let id = crate::durable::TaskId::parse(task)?;
+                crate::ops::human_session::moves::known_task(&store, &id, task).await?;
+            }
+            Ok(())
+        }
+        SessionCommand::Receive { json, .. } => {
             let mut input = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)?;
-            let moved = serde_json::from_str(&input).context("read the moved Session")?;
+            let moved: crate::ops::human_session::moves::Move =
+                serde_json::from_str(&input).context("read the moved Session")?;
             let store = open_shared_store().await?;
-            let moved: crate::ops::human_session::moves::Move = moved;
             let task = moved.task.as_ref().map(|task| task.identifier.clone());
             let session = crate::ops::human_session::moves::receive(&store, moved).await?;
             let Some(session) = session else {

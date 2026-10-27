@@ -327,13 +327,6 @@ fn checkpoint(
     })
 }
 
-fn harness(provider: Provider) -> HarnessKind {
-    match provider {
-        Provider::Claude => HarnessKind::Claude,
-        _ => HarnessKind::Codex,
-    }
-}
-
 fn history(store: &SqliteStore, session: &LfSession) -> Result<Option<MovedHistory>> {
     let Some(key) = session.artifact_key.as_deref() else {
         return Ok(None);
@@ -341,22 +334,19 @@ fn history(store: &SqliteStore, session: &LfSession) -> Result<Option<MovedHisto
     let Some(reference) = store.input_provider_session(key)? else {
         return Ok(None);
     };
-    let provider: Provider = session
-        .provider
-        .as_deref()
-        .unwrap_or_default()
-        .parse()
-        .map_err(|_| {
-            anyhow!(
-                "Session {} runs on {}, whose conversations do not move between Machines",
-                session.id,
-                session.provider.as_deref().unwrap_or("an unknown provider")
-            )
-        })?;
+    let named = session.provider.as_deref().unwrap_or_default();
+    let (Ok(provider), Some(harness)) = (named.parse::<Provider>(), HarnessKind::parse(named))
+    else {
+        bail!(
+            "Session {} runs on {}, whose conversations do not move between Machines",
+            session.id,
+            session.provider.as_deref().unwrap_or("an unknown provider")
+        );
+    };
     let thread = reference.agent_session;
     let located = crate::transcript::locate(
         store,
-        harness(provider),
+        harness,
         &thread,
         reference.account_id.as_ref(),
         &session.cwd,
@@ -415,6 +405,15 @@ fn read_file(base: &Path, path: &Path) -> Result<MovedFile> {
     })
 }
 
+/// The Task a move carries, which this Machine must already know.
+pub(crate) async fn known_task(store: &SharedStore, task: &TaskId, name: &str) -> Result<Task> {
+    store.get_task(task).await?.ok_or_else(|| {
+        anyhow!(
+            "Task {name} is unknown on this Machine; sync its planning here, then move it again"
+        )
+    })
+}
+
 /// Check out the moved branch in a worktree of this repository, admit the
 /// same Session there and place its transcript where its provider resumes it.
 /// A moved Task is taken in first: its handoff, its checkout on the carried
@@ -443,9 +442,11 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
     else {
         return Ok(Some(session));
     };
-    let provider: Provider = provider
-        .parse()
-        .map_err(|_| anyhow!("unknown provider {provider}"))?;
+    let (Ok(provider), Some(harness)) =
+        (provider.parse::<Provider>(), HarnessKind::parse(provider))
+    else {
+        bail!("unknown provider {provider}");
+    };
     let home = crate::transcript::conversation_home(
         &store.sqlite,
         provider,
@@ -460,7 +461,7 @@ pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<L
     for file in &history.files {
         write_file(&base, file)?;
     }
-    if !readable(provider, &base, &history.files) {
+    if !readable(harness, &base, &history.files) {
         // This Machine's provider cannot read the transcript: a fresh
         // conversation starts from its log instead.
         let request =
@@ -487,15 +488,8 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
     let repository = match (&moved.checkout, &moved.task) {
         (Some(checkout), _) => checkout.repository_id.clone(),
         (None, Some(task)) => {
-            store
-                .get_task(&task.task_id)
+            known_task(store, &task.task_id, &task.identifier)
                 .await?
-                .ok_or_else(|| {
-                    anyhow!(
-                        "Task {} is unknown on this Machine; sync its planning here, then move it again",
-                        task.identifier
-                    )
-                })?
                 .repository_id
         }
         (None, None) => bail!("the move names neither a checkout nor a Task"),
@@ -515,13 +509,7 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
         .map(|name| name.trim_end_matches(".git"))
         .filter(|name| !name.is_empty())
         .ok_or_else(|| anyhow!("cannot name a checkout for {}", checkout.origin))?;
-    let root = crate::config::repository_root()?.unwrap_or_else(|| "~/src".into());
-    let root = match root.strip_prefix("~") {
-        Ok(suffix) => dirs::home_dir()
-            .ok_or_else(|| anyhow!("home directory unavailable"))?
-            .join(suffix),
-        Err(_) => root,
-    };
+    let root = crate::repo::checkouts_root()?;
     let path = root.join(name);
     anyhow::ensure!(
         !path.exists(),
@@ -548,11 +536,7 @@ async fn take_in_task(
     checkout: Option<&MovedCheckout>,
 ) -> Result<Task> {
     let name = &moved.identifier;
-    store.get_task(&moved.task_id).await?.ok_or_else(|| {
-        anyhow!(
-            "Task {name} is unknown on this Machine; sync its planning here, then move it again"
-        )
-    })?;
+    known_task(store, &moved.task_id, name).await?;
     store
         .sqlite
         .ingest_ownership_marker(&moved.task_id, &moved.ownership_marker)?;
@@ -588,9 +572,9 @@ async fn take_in_task(
 
 /// Whether the placed transcript reads as turns here. A provider version this
 /// Machine's reader does not know yields none.
-fn readable(provider: Provider, base: &Path, files: &[MovedFile]) -> bool {
+fn readable(harness: HarnessKind, base: &Path, files: &[MovedFile]) -> bool {
     files.first().is_some_and(|file| {
-        crate::transcript::read(harness(provider), &Source::File(base.join(&file.path)))
+        crate::transcript::read(harness, &Source::File(base.join(&file.path)))
             .is_ok_and(|turns| !turns.is_empty())
     })
 }

@@ -1,7 +1,7 @@
 # LOO-628: `lf resume` moves a conversation to another account or Machine
 
-Status: design reviewed with Jack Heart 2026-10-26 (concept review). Slices 1,
-2 and 3 built (2026-10-26/27); the demo remains. Product direction is Jack Heart's
+Status: design reviewed with Jack Heart 2026-10-26 (concept review). Slices 1, 2 and 3,
+the pre-handoff check of M and the `lf resume` help built (2026-10-26/27); the demo remains. Product direction is Jack Heart's
 (LOO-610 conversation, 2026-10-26) and is binding; mechanisms below are chosen
 here and reversible.
 
@@ -262,6 +262,20 @@ Decisions made while building slice 3 (2026-10-27, reversible):
    When `resume --account` selects a login other than the conversation's
    pinned one, `Prefer` does not fall back to the old login for that launch.
 
+### Concept review against the build (2026-10-27, headless)
+
+Every accepted decision is built. `lf --machine M resume --task X` refuses
+and points to `lf task move` (`ssh.rs` route check), which matches Jack's
+"people should use the task move API". `lf session receive --check` is
+plumbing behind the pre-handoff check; no user learns it.
+
+Built 2026-10-27: `lf help resume` lists the account move, the
+conversation-only Machine move and `lf task move`; `docs/subscriptions.md`
+says `--account` on `lf resume` re-pins the conversation and a named login that
+cannot launch fails.
+
+No open product choice; `scratch/questions.md` holds only demo-decided risks.
+
 ## Alternatives considered
 
 - **Rendered log for Machine moves** (the Task text's "copies the Session
@@ -293,11 +307,13 @@ Decisions made while building slice 3 (2026-10-27, reversible):
   `docs/lf-reference.md` regenerated; `lf resume` and `lf task move` help examples.
 - **Absent and error states:** mid-operation worktree → refuse, name state;
   push rejected → refuse, nothing handed off; transcript missing → refuse with
-  the Gap message (no empty conversation); target unreachable or older lf
-  before `receive` → the initiator probes M's version first, so nothing is
-  handed off; `receive` fails after handoff → M owns the Task, and the
-  initiator prints the exact retry,
-  `lf --machine S session send <session|--task X> --to M | lf --machine M session receive`.
+  the Gap message (no empty conversation); M unreachable, an older lf without
+  `receive`, or a Task M does not know → before `send`, `relay`/`relay_task`
+  run `lf session receive --check [--task X]` on M (skipped when M is this
+  Machine) and exit naming M and the cause; nothing is committed, pushed,
+  stopped or handed off. `receive` fails after handoff → M owns the Task,
+  and the initiator prints the retry to run where the work lived,
+  `lf session send <session|--task X> --to M | lf --machine M session receive`.
   `send` is idempotent: already-clean, already-pushed and already-handed-to-M
   steps are skipped and the transcript is re-read on S. Task owned by another person →
   existing handoff refusal. Task Session moved alone → conversation only; Task stays.
@@ -372,9 +388,12 @@ second Task-to-Machine command beside `lf task move --machine`.
     worktree edits land in the checkpoint commit, and the Task arrives on M
     on the same edge.
   - mid-merge fixture: both moves exit non-zero naming "merge", nothing changed.
+  - `task_move_hands_nothing_off_when_mini_cannot_receive_it`: a Task mini
+    never synced, then an unreachable mini; each exits non-zero, the worktree
+    stays uncommitted and the Task owned here.
 - DTO fixture tests (Rust + Swift) for `move.json` and `SessionRecord.account`.
 - Demo: two real Claude logins and two real Codex logins on one Machine
   (verifies the Codex cross-account risk), then `lf task move` laptop → mini
   with a real Task and keep talking to it there.
 
-Check results: 2026-10-27 — `provider_account` naming_another_login (Codex + Claude), `machine_commands` (38, incl. task_move_carries_ownership_workflow_and_session, task_move_stops_a_live_graph, task_move_refuses_a_mid_merge_worktree, resume_task_follows_a_task_session_moved_alone, a_moved_session_clones_its_repository_where_none_is_checked_out), lib `moves::`/`provider_account`/`lf::tests`/`navigation`/`wave_resolution`/`local_planning::`, clippy --all-targets, CLI reference: pass. Demo (real logins, laptop → mini) unrun.
+Check results: 2026-10-27 — cargo fmt --check, `cargo clippy --all-targets -- -D warnings`, `--test integration machine_commands` (36 pass, incl. all nine move tests), `reference_matches_the_compiled_cli` (rerun after the resume help): pass. Demo (real logins, laptop → mini) remains.

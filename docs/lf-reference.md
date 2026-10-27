@@ -782,6 +782,8 @@ Admit a Session `lf session send` printed, read from stdin: check out its branch
 
 | Argument | What it does |
 |---|---|
+| `--check` | Read no move; exit non-zero unless this Machine can receive one Default: false. |
+| `--task` | With --check, also require that this Machine knows the Task |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

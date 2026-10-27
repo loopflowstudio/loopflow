@@ -1385,16 +1385,24 @@ impl SharedPlan {
     }
 
     fn task(&self) -> loopflow::durable::TaskId {
-        let project = self
-            .remote
-            .ensure_wave_project(self.remote_path.to_str().unwrap(), "owners")
+        Self::create_task(&self.remote, &self.remote_path)
+    }
+
+    /// A Task only the laptop knows: mini never synced its planning.
+    fn local_task(&self) -> loopflow::durable::TaskId {
+        Self::create_task(&self.local, &self.local_path)
+    }
+
+    fn create_task(
+        store: &loopflow::store::sqlite::SqliteStore,
+        path: &Path,
+    ) -> loopflow::durable::TaskId {
+        let project = store
+            .ensure_wave_project(path.to_str().unwrap(), "owners")
             .unwrap();
-        self.remote
+        store
             .create_task(&loopflow::work::task::NewTask {
-                repository_id: self
-                    .remote
-                    .ensure_repository(self.remote_path.to_str().unwrap())
-                    .unwrap(),
+                repository_id: store.ensure_repository(path.to_str().unwrap()).unwrap(),
                 id: loopflow::durable::TaskId::new(),
                 project_id: Some(project.id),
                 title: "Ownership demo".into(),
@@ -2064,9 +2072,15 @@ fn git_dir(worktree: &Path) -> std::path::PathBuf {
 /// A Task the laptop owns, checked out on `branch` in a worktree of the
 /// laptop's checkout, with mini knowing it through planning.
 fn placed_task(plan: &SharedPlan, branch: &str) -> (loopflow::durable::TaskId, std::path::PathBuf) {
-    use loopflow::work::task::{TaskPr, TaskPrId};
     let task = plan.task();
     plan.to_local();
+    let worktree = place(plan, &task, branch);
+    (task, worktree)
+}
+
+/// Check `task` out on the laptop, owned there.
+fn place(plan: &SharedPlan, task: &loopflow::durable::TaskId, branch: &str) -> std::path::PathBuf {
+    use loopflow::work::task::{TaskPr, TaskPrId};
     let worktree = plan.local_path.with_file_name(format!(
         "{}.{branch}",
         plan.local_path.file_name().unwrap().to_str().unwrap()
@@ -2086,7 +2100,7 @@ fn placed_task(plan: &SharedPlan, branch: &str) -> (loopflow::durable::TaskId, s
     let now = time::OffsetDateTime::now_utc();
     plan.local
         .place_task(
-            &task,
+            task,
             &worktree,
             branch,
             &TaskPr {
@@ -2110,10 +2124,10 @@ fn placed_task(plan: &SharedPlan, branch: &str) -> (loopflow::durable::TaskId, s
             },
         )
         .unwrap();
-    if !plan.local.task_owned(&task).unwrap() {
-        plan.local.claim_task(&task).unwrap();
+    if !plan.local.task_owned(task).unwrap() {
+        plan.local.claim_task(task).unwrap();
     }
-    (task, worktree)
+    worktree
 }
 
 /// A Claude conversation in `cwd`, admitted the way connecting admits it.
@@ -2256,6 +2270,47 @@ fn task_move_refuses_a_mid_merge_worktree() {
     assert!(stderr.contains("mid-merge"), "{stderr}");
     assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), head);
     assert_eq!(plan.local.task_ownership(&task).unwrap().log.len(), before);
+}
+
+#[test]
+fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let task = plan.local_task();
+    let worktree = place(&plan, &task, "stay-task");
+    fs::write(worktree.join("notes.txt"), "uncommitted\n").unwrap();
+    let before = plan.local.task_ownership(&task).unwrap().log.len();
+    let unchanged = || {
+        assert_eq!(
+            git(&worktree, &["status", "--porcelain"]),
+            "?? notes.txt",
+            "the worktree stays uncommitted"
+        );
+        assert_eq!(plan.local.task_ownership(&task).unwrap().log.len(), before);
+        assert!(plan.local.task_owned(&task).unwrap());
+    };
+    let refused = |expected: &str| {
+        let output = fixture
+            .command(&["task", "move", task.as_str(), "--machine", "mini"])
+            .current_dir(&plan.local_path)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(expected), "{stderr}");
+    };
+
+    // Mini answers but has never synced the Task.
+    refused("unknown on this Machine");
+    unchanged();
+
+    // Mini does not answer at all.
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        "#!/bin/sh\nexit 255\n",
+    );
+    refused("unreachable");
+    unchanged();
 }
 
 #[test]

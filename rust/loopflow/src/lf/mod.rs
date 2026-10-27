@@ -1248,7 +1248,10 @@ pub enum SessionCommand {
         search: Option<String>,
     },
     /// Open the ongoing conversation of this scope, or an exact Session
-    #[command(visible_alias = "resume")]
+    #[command(
+        visible_alias = "resume",
+        after_help = "Moves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+    )]
     Connect {
         /// Session ID, Task identifier, or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
@@ -1310,6 +1313,12 @@ pub enum SessionCommand {
     /// Admit a Session `lf session send` printed, read from stdin: check out its
     /// branch and place its conversation so it resumes here
     Receive {
+        /// Read no move; exit non-zero unless this Machine can receive one
+        #[arg(long)]
+        check: bool,
+        /// With --check, also require that this Machine knows the Task
+        #[arg(long, requires = "check")]
+        task: Option<String>,
         #[arg(long)]
         json: bool,
     },

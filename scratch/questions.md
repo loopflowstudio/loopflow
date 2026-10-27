@@ -12,8 +12,5 @@ design's "Concept review". Remaining, decided by the demo:
   placed transcript (version skew). A provider that accepts the file but
   refuses the conversation at launch (the Codex cross-account case) is not
   detected; `lf -a <provider> resume` (`Resume::Import`) is the manual path.
-- A Task unknown on M fails `receive` after the handoff is written on S; the
-  printed retry applies once M syncs planning. A pre-handoff probe on M would
-  close that gap.
 - On the default branch a Session moves only when clean and is never committed
   to or pushed; a repository primary on `main` with edits refuses to move.

@@ -83,6 +83,17 @@ fn fixed_shapes_take_the_smallest_that_holds_the_hardware() {
     assert_eq!(aws.usd_per_hour, usd("0.2016"));
     let l4 = Provider::Aws.offer(&gpu("L4")).unwrap();
     assert_eq!(l4.machine_type.as_deref(), Some("g6.xlarge"));
+    // 4 vCPUs and 8 GiB fit c-4 exactly; 12 GiB takes the cheaper of c-8 and g-4.
+    let droplet = Provider::Digitalocean.offer(&box4()).unwrap();
+    assert_eq!(droplet.machine_type.as_deref(), Some("c-4"));
+    assert_eq!(droplet.usd_per_hour, usd("0.125"));
+    let roomier = Provider::Digitalocean
+        .offer(&Hardware {
+            memory_gb: 12,
+            ..box4()
+        })
+        .unwrap();
+    assert_eq!(roomier.machine_type.as_deref(), Some("g-4vcpu-16gb"));
 }
 
 #[test]
@@ -97,6 +108,7 @@ fn gpus_rent_where_the_provider_offers_them() {
         .unwrap_err()
         .contains("--gpu works on runpod, aws and modal"));
     assert!(Provider::Fly.offer(&gpu("A40")).is_err());
+    assert!(Provider::Digitalocean.offer(&gpu("A40")).is_err());
     assert!(Provider::Aws
         .offer(&gpu("H100"))
         .unwrap_err()

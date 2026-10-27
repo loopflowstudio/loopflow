@@ -1,4 +1,4 @@
-"""The rental bridge's requests to RunPod, AWS and Fly, over mocked HTTP and SDKs."""
+"""The rental bridge's requests to RunPod, AWS, DigitalOcean and Fly, over mocked HTTP and SDKs."""
 
 import base64
 import importlib.util
@@ -63,6 +63,8 @@ def http(monkeypatch):
 
     monkeypatch.setenv("RUNPOD_API_KEY", "rp-key")
     monkeypatch.setenv("FLY_API_TOKEN", "FlyV1 fm2_token")
+    monkeypatch.setenv("DIGITALOCEAN_TOKEN", "do-token")
+    monkeypatch.delenv("DIGITALOCEAN_REGION", raising=False)
     return install
 
 
@@ -221,6 +223,65 @@ def test_aws_reuses_its_security_group(aws):
     bridge._aws("create", {**REQUEST, "type": "c7i.large"})
     assert dict(aws.calls)["run_instances"]["SecurityGroupIds"] == ["sg-old"]
     assert "create_security_group" not in dict(aws.calls)
+
+
+# --- DigitalOcean ---------------------------------------------------------
+
+
+def _droplet(status, address=None):
+    v4 = [{"type": "private", "ip_address": "10.0.0.2"}]
+    if address:
+        v4.append({"type": "public", "ip_address": address})
+    return {"droplet": {"id": 42, "name": "lf-rent-0b5c", "status": status, "networks": {"v4": v4}}}
+
+
+def test_digitalocean_creates_a_tagged_droplet_and_waits_for_its_address(http):
+    fake = http(
+        {
+            ("POST", "/v2/droplets"): [(202, _droplet("new"))],
+            ("GET", "/v2/droplets/42"): [
+                (200, _droplet("new")),
+                (200, _droplet("active", "203.0.113.20")),
+            ],
+        }
+    )
+    reply = bridge._digitalocean("create", {**REQUEST, "type": "c-4"})
+    assert reply == {"id": "42", "gone": False, "route": "ssh://lf@203.0.113.20"}
+    method, url, body, headers = fake.sent[0]
+    assert (method, url) == ("POST", "https://api.digitalocean.com/v2/droplets")
+    assert headers["Authorization"] == "Bearer do-token"
+    assert body["name"] == "lf-rent-0b5c"
+    assert (body["region"], body["size"], body["image"]) == ("nyc3", "c-4", "ubuntu-24-04-x64")
+    assert body["tags"] == ["loopflow"]
+    user_data = body["user_data"]
+    assert "PasswordAuthentication no" in user_data
+    assert user_data.index("claude-code") < user_data.index("authorized_keys")
+    # No guardian rides along, so the account token never reaches the Droplet.
+    assert "do-token" not in json.dumps(body) and "guardian" not in user_data
+
+
+def test_digitalocean_finds_a_droplet_by_name_and_reads_absence(http):
+    fake = http(
+        {
+            ("GET", "/v2/droplets?name="): [
+                (200, {"droplets": [_droplet("off")["droplet"]]}),
+            ],
+            ("GET", "/v2/droplets/7"): [(404, None)],
+        }
+    )
+    assert bridge._digitalocean("get", {"name": "lf-rent_0b5c"}) == {
+        "id": "42",
+        "gone": True,
+        "route": None,
+    }
+    assert "name=lf-rent-0b5c" in fake.sent[0][1]
+    assert bridge._digitalocean("get", {"id": "7"}) is None
+
+
+def test_digitalocean_delete_tolerates_an_absent_droplet(http):
+    fake = http({("DELETE", "/v2/droplets/42"): [(404, None)]})
+    assert bridge._digitalocean("delete", {"id": "42"}) is None
+    assert fake.sent[0][0] == "DELETE"
 
 
 # --- Fly ------------------------------------------------------------------

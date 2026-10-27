@@ -26,7 +26,7 @@ tests with mocked HTTP. No second abstraction.
 |---|---|---|---|---|
 | RunPod | REST, no SDK | pod name | public IP + mapped 22 | none native |
 | AWS EC2 | `boto3` | tag `loopflow:name` | public IP, key in user-data | `shutdown -h +N` with terminate-on-shutdown |
-| DigitalOcean | `pydo` | droplet name + tag | public IP, SSH key | none native; poweroff still bills |
+| DigitalOcean | REST, no SDK | droplet name (+ `loopflow` tag) | public IP, SSH key | none native; poweroff still bills |
 | Fly.io | REST, no SDK | machine name in a per-account app | dedicated IPv4 TCP service on 22 | `auto_destroy` + init exits after N |
 
 Images: Modal/Daytona build from `ubuntu:24.04` + TOOLS in the bridge. RunPod
@@ -84,7 +84,8 @@ the box that can delete every Droplet. Until decided, DO ships with no guardian.
 ## Credentials
 
 Doppler has `DAYTONA_API_KEY` and `FLY_API_TOKEN`. Missing: `RUNPOD_API_KEY`,
-AWS (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, region), `DIGITALOCEAN_TOKEN`.
+AWS (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, region), `DIGITALOCEAN_TOKEN`
+(optional `DIGITALOCEAN_REGION`, default `nyc3`).
 The live demo per provider needs those set (`doppler secrets set NAME > /dev/null`).
 
 ## Order
@@ -96,14 +97,17 @@ AWS, delete kind on RunPod) and its tests; RunPod, AWS and Fly in the bridge
 with request-shape tests over mocked HTTP/boto3; `Provider::offer` (price and
 the provider's machine type: RunPod flavor/GPU id, EC2 instance type, Modal
 GPU); `--gpu` on RunPod, AWS and Modal; a refresh that finds a machine ended
-still deletes it. Assumptions in `scratch/questions.md`.
+still deletes it. DigitalOcean (Jack, 2026-10-26): create/get/delete over
+REST in the bridge with request-shape tests, dedicated-CPU sizes, no guardian,
+out of the README and `docs/lf.md` until the guardian credential is decided.
+Assumptions in `scratch/questions.md`.
 
 Remaining:
-- Live run per provider (needs `RUNPOD_API_KEY`, AWS keys + region in Doppler);
+- Live run per provider (needs `RUNPOD_API_KEY`, AWS keys + region,
+  `DIGITALOCEAN_TOKEN` in Doppler);
   README rental row only after each passes.
-- DigitalOcean (Jack, 2026-10-26): create/get/named/delete in the bridge with
-  request-shape tests, no guardian, out of the README until the guardian
-  credential is decided.
 - Still open with Jack: DigitalOcean's guardian credential; AWS spot. Modal
   Functions are not needed yet (Jack); `--gpu` stays `Sandbox.create(gpu=...)`.
 - No publication until LOO-527 has a PR to stack on.
+
+Check: `uv run pytest python/tests/test_rental_bridge.py` 13 passed; `cargo test -p loopflow --lib rental` 26 passed; clippy clean (2026-10-26).

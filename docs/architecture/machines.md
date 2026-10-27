@@ -262,7 +262,11 @@ stock Ubuntu 24.04 and install the same tools before admitting `lf`. Modal runs
 key-only sshd behind a TCP tunnel; Daytona's SSH gateway takes a token valid for
 the sandbox's life, which rides in the Machine route; RunPod maps port 22 on a
 public IP, AWS opens 22 in a `loopflow-rentals` security group, and each Fly
-rental is its own app with a dedicated IPv4.
+rental is its own app with a dedicated IPv4. DigitalOcean Droplets (plain HTTP,
+`DIGITALOCEAN_TOKEN`, `DIGITALOCEAN_REGION` default `nyc3`) boot Ubuntu 24.04
+the same way, on a dedicated-CPU size, with no guardian yet: a powered-off
+Droplet still bills, and deleting itself would need an account-wide token on
+the box, so only lf's reconcile deletes one.
 
 The hard deadline never needs the laptop. Daytona (`ttl_minutes`) and Modal
 (`timeout`) hold it themselves; elsewhere the guardian

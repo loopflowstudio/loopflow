@@ -152,6 +152,9 @@ impl Turn {
                     });
                 }
                 let usage = message_usage(message);
+                if let Some(input_tokens) = usage.total_input_tokens {
+                    facts.push(ProviderFact::Request { input_tokens }.into());
+                }
                 if self.messages == 0 {
                     self.usage = usage;
                 } else {

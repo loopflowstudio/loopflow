@@ -637,20 +637,15 @@ impl Harness for ClaudeHarness {
 
 #[cfg(test)]
 mod activity_tests {
-    use std::time::Duration;
-
     use tokio::process::Command;
     use tokio::sync::mpsc;
 
     use super::ClaudeHarness;
     use crate::harness::Harness;
-    use crate::session_record::{
-        activity, CaptureHandle, SessionCaptureSpec, SessionGraphMembership,
-    };
+    use crate::session_record::activity;
 
     #[tokio::test]
     async fn claude_body_activity_does_not_require_process_group_authority() {
-        let home = tempfile::tempdir().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.child = Some(
@@ -660,35 +655,10 @@ mod activity_tests {
                 .spawn()
                 .unwrap(),
         );
-        let capture = CaptureHandle::begin_at(
-            home.path(),
-            SessionCaptureSpec {
-                harness: "claude".into(),
-                model: None,
-                surface: "headless".into(),
-                cwd: home.path().into(),
-                repo: None,
-                worktree: None,
-                skill: None,
-                subjects: vec![],
-                graph: SessionGraphMembership::Independent,
-                work: None,
-            },
-        )
-        .unwrap();
-        capture.observe_activity(harness.pid()).await;
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if activity::read(home.path(), &capture.artifact_key()).await
-                    == activity::Activity::Running
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("a live Claude child must have observable CPU without a process group");
+        assert!(
+            activity::sample(harness.pid()).await.is_some(),
+            "a live Claude child must have observable CPU without a process group"
+        );
         assert_eq!(harness.process_group_id(), None);
         // The injected child was never admitted; kill_on_drop ends it.
     }

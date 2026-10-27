@@ -197,6 +197,8 @@ struct ReaderState {
     /// Per-response receipts keyed by Claude message id. Repeated assistant
     /// snapshots replace one entry; distinct tool-loop responses accumulate.
     assistant_usage: HashMap<String, TurnUsage>,
+    /// Main-conversation message ids already reported as a `Request`.
+    requests: HashSet<String>,
 }
 
 #[derive(Debug, Default)]
@@ -295,6 +297,23 @@ impl ReaderState {
             .entry(model.to_string())
             .and_modify(|peak| *peak = (*peak).max(input))
             .or_insert(input);
+    }
+
+    /// A main-conversation request's input, once per message id: one request
+    /// streams several lines repeating the same usage.
+    fn observe_request(&mut self, value: &Value) -> Option<u64> {
+        let message = value.get("message")?;
+        let usage = message.get("usage")?;
+        let input = usage.get("input_tokens").and_then(Value::as_u64)?;
+        let id = message
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if !id.is_empty() && !self.requests.insert(id.to_owned()) {
+            return None;
+        }
+        let cached = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+        Some(input + cached("cache_read_input_tokens") + cached("cache_creation_input_tokens"))
     }
 
     fn observe_assistant_usage(&mut self, value: &Value) -> Option<TurnUsage> {
@@ -472,9 +491,20 @@ fn process_line(
         .unwrap_or(value);
 
     let event_type = event.get("type").and_then(Value::as_str)?;
+    // Subagent traffic has its own context window and conversation; only lines
+    // without a parent tool use belong to this one.
+    let main = value["parent_tool_use_id"].is_null();
 
     match event_type {
         "system" => {
+            if event["subtype"] == "compact_boundary" && main {
+                out.push(
+                    ProviderFact::Compacted {
+                        pre_tokens: event["compact_metadata"]["pre_tokens"].as_u64(),
+                    }
+                    .into(),
+                );
+            }
             if let Some(session_id) = event
                 .get("session_id")
                 .or_else(|| value.get("session_id"))
@@ -602,11 +632,16 @@ fn process_line(
                     final_receipt: false,
                 }));
             }
-            process_assistant_message(event, turn_id, out, state);
+            if main {
+                if let Some(input_tokens) = state.observe_request(event) {
+                    out.push(ProviderFact::Request { input_tokens }.into());
+                }
+                process_assistant_message(event, turn_id, out, state);
+            }
         }
 
         // Tool result events: type "user" with tool_result content.
-        "user" => {
+        "user" if main => {
             process_user_message(event, turn_id, out, state);
         }
 

@@ -82,8 +82,8 @@ pub(crate) async fn execution_of_latest_graph(
     );
     snapshot.captured = input.as_ref().map(|(_, _, captured)| *captured);
     if snapshot.state == TaskExecutionState::Running {
-        if let Some((_, input, captured)) = &input {
-            match activity::read(&crate::store::lf_home_dir(), input).await {
+        if let (Some((session, _, captured)), Some(step)) = (&input, step) {
+            match activity::read(&store.sqlite, session, step.started_at) {
                 Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
                     snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, inspect its effects, then launch fresh work.");

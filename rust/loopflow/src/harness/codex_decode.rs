@@ -561,6 +561,12 @@ impl CodexDecoder {
                         }
                         .into(),
                     );
+                    if let Some(input_tokens) = params
+                        .pointer("/tokenUsage/last/inputTokens")
+                        .and_then(Value::as_u64)
+                    {
+                        out.push(ProviderFact::Request { input_tokens }.into());
+                    }
                 }
                 "item/completed" => {
                     if let Some(text) = final_text(&params["item"]) {
@@ -1103,6 +1109,7 @@ mod tests {
                 "Activity Working".to_owned(),
                 r#"Activity Previewed "OK""#.to_owned(),
                 at("Usage", turn, ""),
+                "Request 16065".to_owned(),
                 "RateLimit".to_owned(),
                 "Activity Yielded(true)".to_owned(),
                 at("TurnCompleted", turn, " Completed"),
@@ -1136,6 +1143,7 @@ mod tests {
                 at("TurnStarted", turn, ""),
                 r#"Activity Previewed "Recovered after the retry.""#.to_owned(),
                 at("Usage", turn, ""),
+                "Request 100".to_owned(),
                 "Activity Yielded(true)".to_owned(),
                 at("TurnCompleted", turn, " Completed"),
                 at("Output", turn, r#" {"text":"Recovered after the retry."}"#),

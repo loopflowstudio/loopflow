@@ -194,6 +194,30 @@ impl SqliteStore {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// What filled the context of each provider turn one input started, in
+    /// order; `None` for a turn completed before turns retained it.
+    pub(crate) fn input_turn_context(
+        &self,
+        input: &str,
+    ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT json_extract(done.payload,'$.context') FROM session_events start
+             JOIN session_events done ON done.session_id=start.session_id
+               AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
+               AND done.kind='completed'
+             WHERE start.kind='started' AND start.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)
+             ORDER BY done.seq",
+        )?;
+        let rows = query.query_map([input], |row| row.get::<_, Option<String>>(0))?;
+        rows.map(|row| {
+            row?.map(|context| serde_json::from_str(&context))
+                .transpose()
+                .map_err(Into::into)
+        })
+        .collect()
+    }
+
     pub(crate) fn input_final_answer(&self, input: &str) -> StoreResult<Option<String>> {
         let native: Option<String> = {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -309,6 +333,50 @@ impl SqliteStore {
                 activity.open_tools as i64, activity.pending_input as i64, activity.yielded, attachment.agent_process_id, activity.preview.as_ref().map(serde_json::to_string).transpose()?],
         )?;
         Ok(())
+    }
+
+    /// The launching process's latest CPU sample of its provider body. Only
+    /// the attachment that owns the reading may update it, and a Session that
+    /// has not spoken yet has no row to update.
+    pub(crate) fn record_session_cpu(
+        &self,
+        session: &str,
+        attachment: &crate::process::SessionAttachment,
+        sampled_at: i64,
+        quiet_since: Option<i64>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE session_activity SET cpu_sampled_at=?3,cpu_quiet_since=?4
+             WHERE session_id=?1 AND attachment_token=?2",
+            params![session, attachment.token, sampled_at, quiet_since],
+        )?;
+        Ok(())
+    }
+
+    /// The current attachment's last provider signal and CPU sample.
+    pub(crate) fn session_liveness(
+        &self,
+        session: &str,
+    ) -> StoreResult<Option<crate::session::SessionLiveness>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT act.observed_at,act.cpu_sampled_at,act.cpu_quiet_since FROM session_activity act
+                 JOIN agent_sessions s ON s.id=act.session_id
+                 JOIN processes p ON p.id=s.agent_process_id
+                 WHERE act.session_id=?1 AND act.attachment_token=p.attachment_token
+                 AND act.agent_process_id=p.id",
+                [session],
+                |row| {
+                    Ok(crate::session::SessionLiveness {
+                        observed_at: row.get(0)?,
+                        cpu_sampled_at: row.get(1)?,
+                        cpu_quiet_since: row.get(2)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// When the next open Session becomes Available through quiet alone, which

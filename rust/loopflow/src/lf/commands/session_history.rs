@@ -165,7 +165,7 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
         return Ok(());
     }
     if view == SessionView::Context {
-        let step = crate::context_usage::step_context(&home, &snapshot);
+        let step = crate::context_usage::step_context(&home, &store, &snapshot);
         if json {
             println!("{}", serde_json::to_string(&step)?);
         } else {
@@ -219,7 +219,9 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
     println!("Evidence gaps: {}", snapshot.evidence_gaps);
     println!(
         "{}",
-        crate::context_usage::render_step(&crate::context_usage::step_context(&home, &snapshot))
+        crate::context_usage::render_step(&crate::context_usage::step_context(
+            &home, &store, &snapshot
+        ))
     );
     let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;
     print!("\n{}", super::history_transcript::render(&conversation));

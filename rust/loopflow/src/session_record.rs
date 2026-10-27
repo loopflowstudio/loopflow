@@ -238,9 +238,6 @@ struct SessionContextArtifact<'a> {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum CaptureEvent {
-    Activity {
-        observation: activity::Observation,
-    },
     Usage {
         provider: String,
         model: Option<String>,
@@ -2455,9 +2452,7 @@ impl SessionCapture {
 
     /// Append a stream event to `events.jsonl` only.
     fn append_event(&mut self, event: CaptureEvent) -> std::io::Result<()> {
-        if !matches!(&event, CaptureEvent::Activity { .. }) {
-            self.activity.note_event(OffsetDateTime::now_utc());
-        }
+        self.activity.note_event(OffsetDateTime::now_utc());
         let (seq, observed_at) = self.next_position()?;
         self.recorder
             .record(RecorderMessage::Event(serde_json::json!(EventEnvelope {

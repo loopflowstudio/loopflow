@@ -206,9 +206,7 @@ impl Cli {
     /// turn, event or tool call. Includes hooks an earlier lf left behind.
     pub fn harness_callback(&self) -> bool {
         match &self.command {
-            Some(
-                Commands::ContextBlock { .. } | Commands::PiEvent | Commands::ToolLifeline { .. },
-            ) => true,
+            Some(Commands::ContextBlock { .. }) => true,
             Some(Commands::External(parts)) => parts[0].starts_with("__"),
             _ => false,
         }

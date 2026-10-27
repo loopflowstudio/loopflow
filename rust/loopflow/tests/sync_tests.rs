@@ -373,7 +373,7 @@ fn second_identical_conflict_reuses_resolution_without_recovery() {
     let repo = create_conflicting_repo();
     let original_head = repo.head_sha();
     let recovery = start_conflicting_recovery(&repo);
-    recover_sync(recovery, |_context| {
+    recover_sync(recovery, || {
         repo.create_file("conflict.txt", "reviewed resolution\n");
         let result = loopflow::git::continue_merge(repo.path(), None)?;
         assert!(result.success, "the reviewed resolution must complete");
@@ -442,7 +442,7 @@ fn zero_exit_recovery_is_rejected_while_sequencer_remains() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| Ok(()));
+    let result = recover_sync(recovery, || Ok(()));
 
     assert!(
         matches!(result, Err(OpsError::Message(ref message)) if message.contains("still reports an active merge")),
@@ -460,7 +460,7 @@ fn recovery_abort_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| {
+    let result = recover_sync(recovery, || {
         git(repo.path(), &["merge", "--abort"]);
         Ok(())
     });
@@ -477,7 +477,7 @@ fn recovery_on_wrong_branch_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| {
+    let result = recover_sync(recovery, || {
         git(repo.path(), &["merge", "--abort"]);
         git(repo.path(), &["checkout", "main"]);
         Ok(())
@@ -495,7 +495,7 @@ fn recovery_with_detached_head_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| {
+    let result = recover_sync(recovery, || {
         git(repo.path(), &["merge", "--abort"]);
         git(repo.path(), &["checkout", "--detach"]);
         Ok(())
@@ -513,7 +513,7 @@ fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| {
+    let result = recover_sync(recovery, || {
         repo.create_file("conflict.txt", "resolved\n");
         git(repo.path(), &["add", "conflict.txt"]);
         git(
@@ -929,7 +929,7 @@ fn long_branch_resolves_one_merge_and_keeps_the_resolution() {
     }
     let original = repo.head_sha();
     let recovery = start_conflicting_recovery(&repo);
-    recover_sync(recovery, |_| {
+    recover_sync(recovery, || {
         assert_eq!(
             repo.head_sha(),
             original,

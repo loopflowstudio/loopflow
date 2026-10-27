@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -9,8 +8,6 @@ use uuid::Uuid;
 
 use crate::git::{absolute_git_dir, current_branch, intervention_state, rev_parse};
 use crate::ops::error::{OpsError, OpsResult};
-
-pub(crate) const LF_GIT_OPERATION_ID_ENV: &str = "LF_GIT_OPERATION_ID";
 
 /// Recorded as the target of a sequencer Loopflow adopted rather than started,
 /// where the real sync target is unknowable after the fact.
@@ -25,11 +22,6 @@ impl GitOperationId {
         Self(format!("gitop_{}", Uuid::new_v4()))
     }
 
-    fn parse(value: &str) -> OpsResult<Self> {
-        validate_id(value, "Git operation")?;
-        Ok(Self(value.to_string()))
-    }
-
     fn as_str(&self) -> &str {
         &self.0
     }
@@ -37,10 +29,9 @@ impl GitOperationId {
 
 /// The owner of the one sync sequencer a worktree may have in flight.
 ///
-/// `id` is the only authority: an exact match on `LF_GIT_OPERATION_ID`
-/// authorizes a recovery child to continue or abort. Everything else is
-/// evidence for whoever reads this record during an incident — `root_pid`
-/// names the owner in refusals, and the trace ids link it to the journal.
+/// The record's flock is the authority; these fields are evidence for whoever
+/// reads it during an incident — `id` and `root_pid` name the owner in
+/// refusals, and the trace ids link it to the journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct GitOperationOwner {
     id: GitOperationId,
@@ -57,9 +48,10 @@ pub(crate) struct GitOperationOwner {
     pub(crate) target_sha: Option<String>,
 }
 
-/// The history-rewrite fence, held only while its sync runs. A sync that stops
-/// on conflicts or errors drops it; Git's merge state stays for whoever
-/// continues, and other writers are admitted meanwhile.
+/// The history-rewrite fence, held only while Git's merge, abort or commit
+/// steps run. A sync that stops on conflicts or errors drops it, and so does
+/// one handing its conflicts to a resolver; Git's merge state stays for
+/// whoever continues, and other writers are admitted meanwhile.
 #[derive(Debug)]
 pub(crate) struct SyncOperation {
     file: File,
@@ -80,44 +72,14 @@ impl SyncOperation {
         write_json(&mut self.file, &self.owner)
     }
 
-    pub(crate) fn scoped_env(&self) -> BTreeMap<String, String> {
-        BTreeMap::from([(
-            LF_GIT_OPERATION_ID_ENV.to_string(),
-            self.owner.id.as_str().to_string(),
-        )])
+    /// Let go of the fence and keep the record, so a resolver can continue
+    /// the merge while other writers are admitted.
+    pub(crate) fn release(self) -> GitOperationOwner {
+        self.owner
     }
 
     pub(crate) fn complete(self) -> OpsResult<()> {
         remove_locked_record(&self.path)
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum OperationAuthorization {
-    Borrowed(GitOperationOwner),
-    Adopted(SyncOperation),
-}
-
-impl OperationAuthorization {
-    pub(crate) fn owner(&self) -> &GitOperationOwner {
-        match self {
-            Self::Borrowed(owner) => owner,
-            Self::Adopted(operation) => operation.owner(),
-        }
-    }
-
-    /// Release ownership after a verified completion or an authorized abort.
-    ///
-    /// A borrowed operation keeps its record: the waiting parent still holds
-    /// that lock, so its visible path must survive until the parent observes
-    /// the outcome and releases ownership itself. Unlinking a locked file would
-    /// let a foreign operation create a new inode and enter the worktree during
-    /// the handoff.
-    pub(crate) fn complete(self) -> OpsResult<()> {
-        match self {
-            Self::Borrowed(_) => Ok(()),
-            Self::Adopted(operation) => operation.complete(),
-        }
     }
 }
 
@@ -147,35 +109,36 @@ pub(crate) fn begin_sync_operation(worktree: &Path, target_ref: &str) -> OpsResu
     Ok(SyncOperation { file, path, owner })
 }
 
-pub(crate) fn authorize_sync_control(
-    worktree: &Path,
-    adopt_raw: bool,
-) -> OpsResult<OperationAuthorization> {
+/// Take the fence back after a resolver ran, to verify and publish the sync.
+pub(crate) fn reclaim_sync_operation(owner: GitOperationOwner) -> OpsResult<SyncOperation> {
+    let path = operation_path(&owner.worktree)?;
+    let mut file = create_record(&path)?;
+    match FileExt::try_lock_exclusive(&file) {
+        Ok(()) => {}
+        Err(error) if is_contended(&error) => {
+            let current = read_json::<GitOperationOwner>(&mut file).ok();
+            return Err(live_operation_error(current.as_ref()));
+        }
+        Err(error) => return Err(error.into()),
+    }
+    write_json(&mut file, &owner)?;
+    Ok(SyncOperation { file, path, owner })
+}
+
+pub(crate) fn authorize_sync_control(worktree: &Path, adopt_raw: bool) -> OpsResult<SyncOperation> {
     if intervention_state(worktree)? != Some("merge") {
         return Err(OpsError::Message(
             "no sync is in progress in this worktree".to_string(),
         ));
     }
 
-    let requested = std::env::var(LF_GIT_OPERATION_ID_ENV)
-        .ok()
-        .map(|value| GitOperationId::parse(&value))
-        .transpose()?;
     let path = operation_path(worktree)?;
     if path.exists() {
         let mut file = open_record(&path)?;
         match FileExt::try_lock_exclusive(&file) {
             Err(error) if is_contended(&error) => {
-                let owner = read_json::<GitOperationOwner>(&mut file).map_err(|_| {
-                    OpsError::Message(
-                        "a live sync operation is starting; retry after its owner reports state"
-                            .to_string(),
-                    )
-                })?;
-                if requested.as_ref() != Some(&owner.id) {
-                    return Err(live_operation_error(Some(&owner)));
-                }
-                return Ok(OperationAuthorization::Borrowed(owner));
+                let owner = read_json::<GitOperationOwner>(&mut file).ok();
+                return Err(live_operation_error(owner.as_ref()));
             }
             Err(error) => return Err(error.into()),
             Ok(()) => {
@@ -222,7 +185,7 @@ fn adopt_operation(
     path: PathBuf,
     mut file: File,
     stored: Option<GitOperationOwner>,
-) -> OpsResult<OperationAuthorization> {
+) -> OpsResult<SyncOperation> {
     let mut owner = match stored {
         Some(owner) => owner,
         None => new_owner(worktree, RAW_TARGET_REF)?,
@@ -232,11 +195,7 @@ fn adopt_operation(
     owner.trace_id = std::env::var(crate::journal::LF_TRACE_ID_ENV).ok();
     owner.lf_process_id = std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok();
     write_json(&mut file, &owner)?;
-    Ok(OperationAuthorization::Adopted(SyncOperation {
-        file,
-        path,
-        owner,
-    }))
+    Ok(SyncOperation { file, path, owner })
 }
 
 fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> {
@@ -253,27 +212,15 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
     })
 }
 
-pub(crate) fn prepare_agent_process(
-    worktree: &Path,
-    env: &BTreeMap<String, String>,
-) -> OpsResult<()> {
+/// Admit an agent to a worktree unless a sync is mid-merge in it right now.
+pub(crate) fn prepare_agent_process(worktree: &Path) -> OpsResult<()> {
     if absolute_git_dir(worktree).is_err() {
         return Ok(());
     }
-
-    let requested_operation = env
-        .get(LF_GIT_OPERATION_ID_ENV)
-        .cloned()
-        .or_else(|| std::env::var(LF_GIT_OPERATION_ID_ENV).ok())
-        .map(|value| GitOperationId::parse(&value))
-        .transpose()?;
-    fence_agent_process(worktree, requested_operation.as_ref())
+    fence_agent_process(worktree)
 }
 
-fn fence_agent_process(
-    worktree: &Path,
-    requested_operation: Option<&GitOperationId>,
-) -> OpsResult<()> {
+fn fence_agent_process(worktree: &Path) -> OpsResult<()> {
     let path = operation_path(worktree)?;
     if !path.exists() {
         return Ok(());
@@ -283,9 +230,6 @@ fn fence_agent_process(
     match FileExt::try_lock_exclusive(&file) {
         Err(error) if is_contended(&error) => {
             let owner = read_json::<GitOperationOwner>(&mut file).ok();
-            if owner.as_ref().map(|owner| &owner.id) == requested_operation {
-                return Ok(());
-            }
             Err(live_operation_error(owner.as_ref()))
         }
         Err(error) => Err(error.into()),
@@ -373,7 +317,7 @@ fn live_operation_error(owner: Option<&GitOperationOwner>) -> OpsError {
         .map(owner_label)
         .unwrap_or_else(|| "a live integration operation".to_string());
     OpsError::Message(format!(
-        "refusing to mutate Git: {label} owns this worktree; only its authorized recovery child may continue or abort"
+        "refusing to mutate Git: {label} is running in this worktree; retry when it stops"
     ))
 }
 
@@ -386,17 +330,6 @@ fn owner_label(owner: &GitOperationOwner) -> String {
     )
 }
 
-fn validate_id(value: &str, label: &str) -> OpsResult<()> {
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
-        return Err(OpsError::Message(format!("invalid {label} id")));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use std::process::Command;
@@ -404,11 +337,13 @@ mod tests {
     use loopflow_test_support::TestRepo;
 
     use super::{begin_sync_operation, fence_agent_process, operation_path, GitOperationOwner};
+    use crate::ops::{
+        continue_sync_for_resolution, recover_sync, sync_with_recovery, NullProgress, OpsError,
+        SyncOptions,
+    };
 
-    #[test]
-    fn a_running_sync_fences_agents_and_a_stopped_one_admits_them() {
+    fn conflicting_feature() -> TestRepo {
         let fixture = TestRepo::new();
-        let repo = fixture.path();
         fixture.create_branch("feature");
         fixture.create_file("README.md", "feature");
         fixture.stage_all();
@@ -417,11 +352,18 @@ mod tests {
         fixture.create_file("README.md", "main");
         fixture.stage_all();
         fixture.commit("main");
+        fixture.push();
         fixture.checkout("feature");
+        fixture
+    }
+
+    #[test]
+    fn a_running_sync_fences_agents_and_a_stopped_one_admits_them() {
+        let fixture = conflicting_feature();
+        let repo = fixture.path();
 
         let operation = begin_sync_operation(repo, "main").unwrap();
-        assert!(fence_agent_process(repo, None).is_err());
-        assert!(fence_agent_process(repo, Some(&operation.owner().id)).is_ok());
+        assert!(fence_agent_process(repo).is_err());
 
         // The sync stops on conflicts and its process lets go of the fence.
         let merge = Command::new("git")
@@ -431,8 +373,40 @@ mod tests {
             .unwrap();
         assert!(!merge.status.success());
         drop(operation);
-        assert!(fence_agent_process(repo, None).is_ok());
+        assert!(fence_agent_process(repo).is_ok());
         assert!(operation_path(repo).unwrap().exists());
+    }
+
+    #[test]
+    fn a_resolving_sync_admits_other_agents_until_it_publishes() {
+        let fixture = conflicting_feature();
+        let repo = fixture.path();
+        let options = SyncOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        };
+        let recovery = match sync_with_recovery(repo, &options, &NullProgress) {
+            Err(OpsError::SyncConflict {
+                recovery: Some(recovery),
+                ..
+            }) => *recovery,
+            other => panic!("expected an owned conflict, got {other:?}"),
+        };
+
+        recover_sync(recovery, || {
+            // A wedged resolver would sit here; other writers still get in.
+            assert!(fence_agent_process(repo).is_ok());
+            fixture.create_file("README.md", "both");
+            continue_sync_for_resolution(repo, false)
+        })
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(repo.join("README.md")).unwrap(),
+            "both"
+        );
+        assert!(!operation_path(repo).unwrap().exists());
     }
 
     #[test]

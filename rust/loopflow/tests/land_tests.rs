@@ -1647,7 +1647,6 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
             "test body",
         ])
         .current_dir(&worktree)
-        .env_remove("LF_GIT_OPERATION_ID")
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env("LOOPFLOW_DIRECTIVE_FILE", &directive_path)
@@ -1731,7 +1730,6 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
             let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
             command
                 .current_dir(&worktree)
-                .env_remove("LF_GIT_OPERATION_ID")
                 .env_remove("LF_TRACE_ID")
                 .env_remove("LF_PROCESS_ID")
                 .env("LF_HOME", &lf_home);

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -9,7 +9,8 @@ use crate::git::{
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::git_operation::{
-    authorize_sync_control, begin_sync_operation, GitOperationOwner, SyncOperation,
+    authorize_sync_control, begin_sync_operation, reclaim_sync_operation, GitOperationOwner,
+    SyncOperation,
 };
 use crate::ops::progress::Progress;
 
@@ -242,18 +243,17 @@ pub(crate) fn abort_sync_after_authorization(
     Ok(())
 }
 
+/// Hand a stopped merge to a resolver without fencing the checkout, then take
+/// the fence back to verify and publish what it left.
 pub fn recover_sync(
     recovery: SyncRecovery,
-    launch: impl FnOnce(&BTreeMap<String, String>) -> OpsResult<()>,
+    launch: impl FnOnce() -> OpsResult<()>,
 ) -> OpsResult<SyncVerification> {
-    let worktree = recovery.operation.owner().worktree.clone();
-    launch(&recovery.operation.scoped_env())?;
-    finish_sync(
-        &worktree,
-        recovery.operation,
-        &recovery.expected,
-        recovery.push,
-    )
+    let owner = recovery.operation.release();
+    let worktree = owner.worktree.clone();
+    launch()?;
+    let operation = reclaim_sync_operation(owner)?;
+    finish_sync(&worktree, operation, &recovery.expected, recovery.push)
 }
 
 fn start_owned_sync(

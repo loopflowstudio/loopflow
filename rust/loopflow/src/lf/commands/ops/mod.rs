@@ -533,15 +533,9 @@ fn resolve_sync_conflict(
         )?;
     }
     progress.status("Launching sync agent to resolve conflicts...");
-    Ok(recover_sync(*recovery, |env| {
-        process_skill_agent(
-            repo_root,
-            "sync-conflicts",
-            Some(&context),
-            Some(env),
-            config,
-        )
-        .map_err(|error| OpsError::Message(error.to_string()))
+    Ok(recover_sync(*recovery, || {
+        process_skill_agent(repo_root, "sync-conflicts", Some(&context), config)
+            .map_err(|error| OpsError::Message(error.to_string()))
     })?)
 }
 
@@ -2604,7 +2598,6 @@ fn process_skill_agent(
     repo_root: &Path,
     skill_name: &str,
     context: Option<&str>,
-    env: Option<&std::collections::BTreeMap<String, String>>,
     config: &Config,
 ) -> Result<()> {
     let skill = load_skill(skill_name, repo_root)?;
@@ -2664,8 +2657,7 @@ fn process_skill_agent(
     )?;
     capture.record_input("initial", &prepared.config.task_prompt);
 
-    let mut launch = prepared.config;
-    launch.env.extend(env.cloned().unwrap_or_default());
+    let launch = prepared.config;
     let process = ProcessConfig {
         auto: true,
         stream: true,

@@ -1058,11 +1058,13 @@ checkpointing, and land take short OS-held locks only around their exact Git
 mutation. Independent agents may edit and run concurrently; the shared
 worktree remains the durable blackboard.
 
-A sync takes an exclusive lock on `rebase-owner.json` for the complete Git
-sequencer lifetime. New agent launches refuse while that sync lock is live.
-The exact `LF_GIT_OPERATION_ID` lets only the operation's recovery child
-continue or abort inside the fence. A raw or crashed sync can be adopted only
-through the explicit adoption path, which mints a new id.
+A sync takes an exclusive lock on `rebase-owner.json` only while its Git
+merge, abort or commit steps run, and while it verifies and pushes the result.
+New agent launches refuse while that sync lock is live. A merge stopped on
+conflicts releases the lock before its `sync-conflicts` resolver launches, so a
+stuck resolver fences no one; the resolver's `lf sync --continue` adopts the
+stopped operation's record like any other continuation. A raw sync without a
+readable record can be adopted only through `--adopt`, which mints a new id.
 
 Unowned and stopped Git operations do not block agent launch. A stopped operation's
 receipt survives so continuation can adopt its pinned target. Raw merges use
@@ -1074,7 +1076,7 @@ Therefore:
 - reader/build/test + agent is allowed;
 - live sync + new independent agent launch is blocked;
 - a running agent does not reserve the worktree against sync;
-- sync + its exact recovery child is allowed;
+- a stopped or resolving sync admits agents, and one continuation adopts it;
 - stale JSON with no OS lock is not a live owner;
 - raw Git outside Loopflow is not compelled by these advisory locks.
 

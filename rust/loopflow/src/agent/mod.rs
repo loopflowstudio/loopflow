@@ -1253,7 +1253,7 @@ fn _run_harness_once(
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
     if let Some(cwd) = launch_worktree.as_deref() {
-        crate::ops::git_operation::prepare_agent_process(cwd, &config.env)
+        crate::ops::git_operation::prepare_agent_process(cwd)
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     }
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -1481,7 +1481,7 @@ fn _run_agent_once(
     }
 
     cmd.current_dir(&command.cwd);
-    crate::ops::git_operation::prepare_agent_process(&command.cwd, &launch.env)
+    crate::ops::git_operation::prepare_agent_process(&command.cwd)
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     cmd.env_remove(crate::os_process::DISCORD_TOKEN_ENV);
 

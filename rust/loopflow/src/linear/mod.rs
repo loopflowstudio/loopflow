@@ -846,14 +846,14 @@ impl LinearClient {
         if let Some(name) = expected_name.filter(|name| !team.name.eq_ignore_ascii_case(name)) {
             return Err(LinearError::Message(format!(
                 "repository {repository} is already bound to Linear Team {} ({}, key {}); \
-                 it cannot rebind through --team-name {name:?}. Run repository-wide `lf repo reteam` instead.",
+                 it cannot rebind through --team-name {name:?}. Run repository-wide `lf reteam` instead.",
                 team.name, team.id, team.key
             )));
         }
         if let Some(key) = expected_key.filter(|key| !team.key.eq_ignore_ascii_case(key.trim())) {
             return Err(LinearError::Message(format!(
                 "repository {repository} is already bound to Linear Team {} ({}, key {}); \
-                 it cannot rebind through --team-key {key:?}. Run repository-wide `lf repo reteam` instead.",
+                 it cannot rebind through --team-key {key:?}. Run repository-wide `lf reteam` instead.",
                 team.name, team.id, team.key
             )));
         }
@@ -886,7 +886,7 @@ impl LinearClient {
             ))),
             None => Err(LinearError::Message(format!(
                 "Linear team {} ({}, key {}) has no Loopflow repository claim; \
-                 run `lf repo connect --team-key {}` to claim it for {repository}",
+                 run `lf wave connect --team-key {}` to claim it for {repository}",
                 team.name, team.id, team.key, team.key
             ))),
         }
@@ -896,7 +896,7 @@ impl LinearClient {
         self.team_id.clone().ok_or_else(|| {
             LinearError::Message(
                 "Linear write requires `planning.team` in .lf/config.yaml; \
-                 run `lf repo connect <wave> --team-key <KEY>`"
+                 run `lf wave connect <wave> --team-key <KEY>`"
                     .to_string(),
             )
         })
@@ -3490,7 +3490,7 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("already bound"));
-        assert!(error.to_string().contains("lf repo reteam"));
+        assert!(error.to_string().contains("lf reteam"));
         assert_eq!(requests.lock().await.len(), 1);
     }
 

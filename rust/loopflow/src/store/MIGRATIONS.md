@@ -49,7 +49,7 @@ triggers. Later commands on the same copy pay none of it.
 ## The release cut assigns canonical ids
 
 The release PR is the single publication boundary that turns drafts into canonical
-migrations. `lf repo release run` invokes the canonicalizer with `--release-cut` inside the
+migrations. `lf release run` invokes the canonicalizer with `--release-cut` inside the
 release worktree, **after the version bump and before the commit**, so the generated
 files are part of the release PR and run under real Rust CI before the queue merges
 and tags. It freezes the draft set, rejects missing or cyclic dependencies, and topologically orders it (edges
@@ -176,8 +176,8 @@ the last release tag and fails the build if one moved.
   raise the reader floor.
 - Runtime SQL names its columns: no positional `INSERT ... VALUES`, no `SELECT *`.
 
-It runs in CI, and — because `lf repo release` cuts a tag from local state and never
-reads a CI result — `lf repo release check` and `lf repo release run` run it themselves
+It runs in CI, and — because `lf release` cuts a tag from local state and never
+reads a CI result — `lf release check` and `lf release run` run it themselves
 before anything is cut. Same script, both paths.
 
 ## Identity

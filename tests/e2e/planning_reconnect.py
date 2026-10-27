@@ -263,7 +263,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         return result.stdout
 
     # Acquire a real baseline before the outage, not an invented provider revision.
-    run("repo", "refresh", "--all")
+    run("wave", "status", fixture["wave"], "--sync")
     remote_id = db.execute(
         "SELECT id FROM tasks WHERE external_issue_id=?", (server.state["issues"][2]["id"],)
     ).fetchone()[0]

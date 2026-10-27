@@ -1,23 +1,22 @@
 # Maintained cron Machine
 
-Run the infrastructure Wave's declared telemetry and release jobs on your Wave
-Machine for it. That setting is the authority; a hostname in a document is not.
+Run the infrastructure Wave's telemetry and release jobs on your Wave Machine
+for it. That setting is the authority; a hostname in a document is not.
 
 ```bash
 lf machine use mini infrastructure
 lf machine id
 lf wave status infrastructure --json | jq -r '.wave.machine.id'
 scripts/bootstrap-cron-host.sh infrastructure
-lf cron history --wave infrastructure --days 35
+crontab -l | grep loopflow:infrastructure
 ```
 
 The two Machine ids must match. `bootstrap-cron-host.sh` fails before changing
-launchd when they differ.
+the crontab when they differ.
 
 ## Host prerequisites
 
-- Promote an installed release `lf`; cron installation rejects development and
-  task-worktree binaries.
+- Promote an installed release `lf`.
 - Keep the repository's authoritative checkout on the placed Machine.
 - Configure at least one managed Claude or Codex account in the Machine store.
 - Install `uv`, `gh`, `cargo`, `flyctl`, `security`, `swift`, `xcrun`, and
@@ -41,157 +40,31 @@ loopflow-release-publisher \
 The logical command is the public contract; its Machine-local implementation owns
 the private provider binding. The bootstrap never reads or prints a secret and
 never forwards a Task lease, provider lease, GitHub token, PM token, or
-invocation context. A missing command or failed check stops before any cron is installed.
+invocation context. A missing command or failed check stops before the crontab
+changes.
 
 ## Release schedules
 
-Crons are personal: the bootstrap installs the two release jobs on this Machine
-with `lf cron add`. They stay private until `lf cron publish <name>` shows one
-to teammates:
+Each job is an ordinary crontab line running an ordinary lf command in that
+minimal environment:
 
-```bash
-lf cron add telemetry-daily --schedule "0 0 9 * * *" -- --wave infrastructure --batch flow telemetry-daily
-lf cron add release-run --schedule "0 0 10 * * *" -- --wave infrastructure --batch flow release-run
+```
+0 9 * * *  cd ~/src/loopflow && env -i HOME=… PATH=… LF_HOME=… lf --wave infrastructure --batch graph telemetry-daily >> .lf/logs/telemetry-daily.log 2>&1
+0 10 * * * cd ~/src/loopflow && env -i HOME=… PATH=… LF_HOME=… lf --wave infrastructure --batch graph release-run >> .lf/logs/release-run.log 2>&1
 ```
 
-`release-run` resolves to `.lf/flows/release-run.yaml`, whose single operation
-is `release run patch`. The release command's error reaches the cron receipt;
-an agent's successful report cannot turn a blocked release into success.
-Release notes still use the agent stage inside that command. After updating an
-existing host, run `lf cron sync` to reinstall the jobs with the current lf,
-then inspect `lf cron list --wave infrastructure`.
+`release-run` resolves to `.lf/graphs/release-run.yaml`, whose single operation
+is `release run patch`. The release command's exit status is the job's; an
+agent's successful report cannot turn a blocked release into success. Rerun the
+bootstrap to rewrite the lines after the host path or checkout moves.
 
-`lf cron add` refuses unless this Machine is your Machine for the Wave's Tasks.
-Each job captures the non-secret host path, Machine id, Machine/store paths,
-authoritative checkout, installed binary, exact schedule, and log path.
-Scheduled execution repeats the owning-Machine check and fails with a receipt
-instead of running after ownership moves.
-
-launchd uses host-local time and coalesces missed calendar firings after wake.
-Receipts record the actual start; declarations alone never count as evidence of
-a nightly run. Place the Wave on an always-on Machine when uninterrupted wall-clock
-cadence matters.
-
-## Durable evidence
-
-```bash
-lf cron list --wave infrastructure --json
-lf cron trigger --wave infrastructure --flow telemetry-daily --wait --timeout 15m
-lf cron trigger --wave infrastructure --flow release-run --wait --timeout 3h
-lf cron history --wave infrastructure --days 35 --json
-```
-
-`list` reports the exact schedule, loaded state, installed Machine, repo, binary,
-and latest receipt. `trigger` exercises launchd rather than invoking the target
-directly. Every firing writes a private, versioned receipt under
-`<LF_HOME>/cron/receipts/<wave>/<flow>/`; receipts contain identity, timing,
-outcome, exit status, and the log path, never environment values or output.
-
-An early failure is `failed`, a successful no-op is `succeeded`, and a killed
-runner remains `running` but is rendered `stale`. Detailed output stays at
-`<repo>/.lf/logs/cron.<wave>.<flow>.log`. These rows begin the 14-night,
-four-release, and 30-day authority/host-drift observation windows; bootstrap
-does not claim that elapsed evidence in advance.
+cron uses host-local time and skips firings while the Machine sleeps. Place the
+Wave on an always-on Machine when uninterrupted wall-clock cadence matters.
 
 Loopflow remains the concrete deployment. Mirror this shape into Cadenza only
 when its release needs it; do not extract a generic deployment platform.
 
-## Scheduled release settlements
-
-```bash
-lf release history --wave infrastructure --days 35 --json
-lf cron disposition <failed-receipt-or-closed-opportunity-id> \
-  --wave infrastructure --owner <registered-task-work-id> \
-  --reason "Repair the failed check; retry through the next configured firing"
-```
-
-Infrastructure resolves `release-run` to the repository's mechanical flow.
-Each scheduled wake captures all outstanding original due times and executes
-one release operation. Earlier misses point to that execution; they cannot
-supply extra publication or no-change settlements. Due times arriving while
-it runs wait for the next wake. An incomplete candidate keeps its original
-owner, tag, and commit through recovery.
-Collapse preserves each due time's first-attempt timing. Operator-triggered or
-manual attempts on covered misses still disqualify the owner's unattended pair,
-including when those misses fall before the displayed history window.
-
-`release history` joins retained obligations, execution attempts, verification,
-product outcomes, and physical cron receipts. It also reports failed telemetry
-and late or missing repair dispositions. `observation_frontier: null` means
-opportunity observation has not begun; historical process success never fills
-that gap. Due times reconstructed before observation retain uncertain timezone
-provenance. The report keeps older owner records when current rows refer to them.
-
-The scheduler's exit status and the release outcome are separate facts. A zero
-exit without product proof remains unverified. Published settlement requires
-exact artifact hashes, required checks, and a public exact-version installer
-smoke. No-change requires an empty fetched source range, a fully verified
-published baseline, and current scheduled telemetry. Deferred work retains its
-reason and continuation; failed attempts survive later recovery.
-
-Each release attempt freezes `telemetry` observations for its covered due times.
-Original prerequisite intervals retain their receipt ids and `obligation_id`,
-which names the retained telemetry schedule, timezone and Machine segment in
-`obligations`. Sync and removal preserve those segments before replacing the
-installed job. Telemetry segments contain no release opportunities. Unobserved
-history, installation gaps and dues before the segment's first scheduled check
-remain explicitly unknown. Linked receipts stay in history even when older than
-its requested window; a replacement job's receipt cannot repair an old interval.
-
-Missing or failed current telemetry gets at most one automatic retry through the
-installed cron executor before release selection. Its receipt has source
-`recovery` and is reserved on the attempt before launch. Catch-up does not retry
-once per missed day. A running prerequisite defers release while its runner is
-live or its identity is unknown. New receipts retain the runner's OS start time;
-confirmed runner death permits recovery only after the existing job lock can be
-acquired. A surviving check keeps that lock. Historical receipts without start
-identity remain unresolved, regardless of age or PID availability. Recovery
-retains the interrupted receipt without inventing its result; a failed retry
-stops release. Recovery does not rewrite failures, supply repair ownership, or
-change `doctor`'s scheduling-continuity checks.
-
-Recovery waits up to one hour. If the check has not finished, release defers with
-its receipt id, log path and next configured release due time. The physical
-receipt stays Running with no exit result. The check continues holding its job
-lock; the deadline never kills it or authorizes overlap. After the lock is free,
-a later wake can run a fresh check. An unobserved late exit does not retroactively
-pass the original receipt. Ordinary scheduled/manual targets retain their
-existing wait behavior.
-
-Release overlap records the exact next configured due time, obligation and Machine
-observed by the contender. The active execution keeps its frozen coverage.
-If closure is already observed, the continuation points to the original Machine's
-opportunity disposition command. A later schedule change can supersede a saved
-retry time; history retains it as an observation, not a reservation. History
-keeps physical attempt and overlap receipts linked to retained opportunities,
-even outside the display window. An overlap never adds a successful settlement.
-
-A repair disposition references an existing registered Task and records local
-repair ownership. It does not start work, assign a remote issue, or erase the
-failure. The earliest disposition timestamp determines whether ownership was
-recorded within a day. Pending external handoffs remain pending.
-
-Closed schedules retain unfinished opportunities on their original Machine.
-`release history` lists their execution owners under `summary.closed_unsettled`,
-even outside `--days`, and prints the retained candidate and disposition command.
-Use the opportunity id on that Machine to assign its repair; ownership is late if
-first recorded more than a day after closure. Collapsed dues share their owner's
-blocker. Disposition leaves the blocker, attempts and candidate intact: it neither
-settles a release nor moves execution to a replacement Machine. An already running
-operation can still record its exact settlement; closure does not prove its exit.
-Saved waits show their previously expected firing as history after closure.
-A replacement schedule on the same Machine resumes the original candidate owner
-and freezes all outstanding predecessor and successor dues in one execution.
-`attempts[].execution_obligation` identifies the segment that fired; original due
-identities and historical telemetry stay on their own segments. Collapse links
-in history are derived from the frozen `covered` set. A changed Machine breaks the
-continuation chain. A removed schedule requires repair because it cannot fire.
-
-Ordinary `cron trigger` records intervention before asking launchd to kickstart;
-it does not terminate an active job. A firing that may have resulted from that
-request is marked `triggered`. Triggered executions cannot qualify as unattended
-settlements. Two adjacent original due opportunities need two distinct automatic
-executions, with at least one publication; collapsed rows cannot form that pair.
+## Release lock
 
 The publisher launcher must preserve the inherited `LF_RELEASE_LOCK_FD`
 descriptor and its environment reference through `process`. It is an OS lock

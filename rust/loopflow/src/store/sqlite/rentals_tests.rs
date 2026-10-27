@@ -235,3 +235,29 @@ fn hardware_rented_before_spot_existed_reads_as_on_demand() {
         assert!(!hardware.spot, "{sql}");
     }
 }
+
+#[test]
+fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_current_draft(&conn, "scope_tasks_capacity");
+    conn.execute_batch(include_str!(
+        "../../../tests/fixtures/migrations/scope_tasks_capacity_released.sql"
+    ))
+    .unwrap();
+    conn.execute_batch(&current_draft_sql("scope_tasks_capacity"))
+        .unwrap();
+    let names: Vec<String> = conn
+        .prepare("SELECT name FROM ondemands ORDER BY name")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(names, ["gpu"]);
+    let rentals: i64 = conn
+        .query_row("SELECT count(*) FROM rentals", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rentals, 0);
+}

@@ -2409,7 +2409,7 @@ fn opencode_transient_failure_does_not_invent_a_continuation_or_accept_failed_ou
 fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     let fixture = Fixture::new(false);
     support::install_native_codex(&fixture.home.path().join("bin"));
-    let identity = fixture.json(&["repo", "identity", "--json"]);
+    let identity = fixture.json(&["config", "repository", "--json"]);
     let task = fixture.json(&["task", "create", "--title", "Retained checkout", "--json"]);
     let task_id = task["id"].as_str().unwrap();
     fixture.json(&["task", "checkout", task_id, "--json"]);
@@ -2469,7 +2469,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
     assert_eq!(fixture.count("agent_sessions"), 1);
     assert_eq!(native(), before);
     let output = fixture
-        .command(&["repo", "identity", "--json"])
+        .command(&["config", "repository", "--json"])
         .current_dir(&moved)
         .output()
         .unwrap();

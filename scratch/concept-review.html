@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-642 concept review</title>
+<style>
+  :root { --fg:#1d1d1f; --muted:#6e6e73; --bg:#fbfbfa; --rule:#e2e2e0; --code:#f1f0ec; --new:#2f6f3e; --old:#9a3b2f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8e8e6; --muted:#9a9a9f; --bg:#161617; --rule:#2c2c2e; --code:#222224; --new:#7fc48f; --old:#e08a7c; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Helvetica Neue", sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
+  header p { color:var(--muted); margin:.2rem 0; font-size:.9rem; }
+  h1 { font-size:1.6rem; margin:0 0 .5rem; }
+  h2 { font-size:1.15rem; margin:2.8rem 0 .6rem; }
+  code, pre { font-family: ui-monospace, Menlo, monospace; font-size:.88em; background:var(--code); border-radius:4px; }
+  code { padding:.05em .3em; }
+  pre { padding:.9rem 1rem; overflow-x:auto; line-height:1.45; }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; }
+  td, th { text-align:left; vertical-align:top; padding:.5rem .6rem .5rem 0; border-bottom:1px solid var(--rule); }
+  th { color:var(--muted); font-weight:500; }
+  .new { color:var(--new); }
+  .old { color:var(--old); }
+  .tag { font-size:.75rem; letter-spacing:.04em; text-transform:uppercase; }
+  .callout { border-left:3px solid var(--old); padding:.2rem 0 .2rem 1rem; margin:1.4rem 0; }
+  ol li { margin:.5rem 0; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Nothing left to change. LOO-622 answered the landing question the same way.</h1>
+  <p>LOO-642 · concept-review step, fourth pass (no person present) · 2026-10-27</p>
+  <p>Built from <code>scratch/loo-642-keep-auto-ship.md</code>, <code>scratch/questions.md</code>, the working diff of <code>ops/task/ship.rs</code>, <code>lf/mod.rs</code>, <code>AGENTS.md</code>, <code>docs/architecture-reference.md</code>, <code>docs/orchestration.md</code>, and the Task brief's LOO-622 note (PR #1733 open)</p>
+</header>
+
+<p><strong>Outcome: advance.</strong> The code and the docs both say that only <code>lf ship</code> lands. LOO-622 now says only its AutoShip mode lands: <code>lf -b task run</code> or <code>lf ship</code>. A plain run to <code>end</code> does not land. That matches this Task, so the open question is closed.</p>
+
+<h2>Actions → concepts → APIs (as implemented)</h2>
+<table>
+  <tr><th>Person or system does</th><th>Approval</th><th>Store write</th></tr>
+  <tr><td><code>lf ship T</code></td><td>Handoff: may land, even over a route-only approval</td><td><code>ship_task(…, lands=true)</code>; <code>ship_lands</code> only rises</td></tr>
+  <tr><td><code>lf task run T pursue</code> (route into <code>end</code>)</td><td>Route-only: runs that route, then ends at the next stage, or at <code>end</code> with a hint</td><td><code>choose_edge_in</code> → <code>lands=false</code></td></tr>
+  <tr><td>restart on read</td><td>Keeps the authority it found</td><td><code>lf --task T ship --recover</code></td></tr>
+  <tr><td><code>lf ship --stop T</code></td><td>None</td><td><code>end_shipping("Stopped shipping: …")</code></td></tr>
+</table>
+
+<h2>Where LOO-622 meets this</h2>
+<div class="callout">
+<p><span class="tag old">Before (third pass)</span></p>
+<pre>LOO-622: a run ending with no interactive step left approves shipping.
+         Does that approval land?  (open)</pre>
+<p><span class="tag new">Now (LOO-622, per Task brief)</span></p>
+<pre>TaskRunMode::{Stop, InPlace, AutoShip}
+AutoShip (lf -b task run | lf ship)  → lands = true
+Stop / InPlace, route into end       → lands = false</pre>
+</div>
+<p>Whichever PR lands second does the rebase. It maps AutoShip to <code>ship_task(…, lands=true)</code>. It also changes "only <code>lf ship</code>" to "only Auto-Ship" in <code>AGENTS.md</code>, <code>orchestration.md</code> and the <code>lf ship</code> long help. This branch's code stays as it is.</p>
+
+<h2>Questions</h2>
+<ol>
+  <li>None open.</li>
+</ol>
+</main>
+</body>
+</html>

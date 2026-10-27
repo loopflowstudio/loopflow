@@ -5,6 +5,7 @@
 //! never qualifies. Each Session resumes through the ordinary `lf resume` path
 //! in a new owner with no viewer; terminals attach when they show it.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -60,35 +61,54 @@ async fn interrupted(store: &SharedStore) -> Result<Vec<crate::session::LfSessio
 
 pub(crate) async fn resume_all(store: &SharedStore) -> Result<Vec<ResumedSession>> {
     // Concurrent runs would each start an owner for the same Session.
-    let _all = tokio::task::spawn_blocking(|| lock_session_process("resume-all")).await??;
+    let _all = lock_resume_all().await?;
+    let binary = std::env::current_exe()?;
     let mut resumed = Vec::new();
     for session in interrupted(store).await? {
-        let turn_cut_off = store.sqlite.session_turn_was_running(&session.id)?;
-        let outcome = match start(store, &session).await {
-            Ok(outcome) => outcome,
-            Err(error) => ResumeOutcome::Failed {
-                reason: format!("{error:#}"),
-            },
-        };
-        resumed.push(ResumedSession {
-            id: session.id.as_str().to_owned(),
-            title: session.title.clone(),
-            outcome,
-            turn_cut_off,
-        });
+        resumed.push(resume(store, &session, &binary).await?);
     }
     Ok(resumed)
 }
 
+/// Serializes every caller that starts owners for Sessions it found stopped.
+pub(crate) async fn lock_resume_all() -> Result<std::fs::File> {
+    tokio::task::spawn_blocking(|| lock_session_process("resume-all")).await?
+}
+
+/// Reopen one stopped Session in a new owner running `binary`.
+pub(crate) async fn resume(
+    store: &SharedStore,
+    session: &crate::session::LfSession,
+    binary: &Path,
+) -> Result<ResumedSession> {
+    let turn_cut_off = store.sqlite.session_turn_was_running(&session.id)?;
+    let outcome = match start(store, session, binary).await {
+        Ok(outcome) => outcome,
+        Err(error) => ResumeOutcome::Failed {
+            reason: format!("{error:#}"),
+        },
+    };
+    Ok(ResumedSession {
+        id: session.id.as_str().to_owned(),
+        title: session.title.clone(),
+        outcome,
+        turn_cut_off,
+    })
+}
+
 /// Start `lf resume <id>` in its own owner and wait until it holds the conversation.
-async fn start(store: &SharedStore, session: &crate::session::LfSession) -> Result<ResumeOutcome> {
+async fn start(
+    store: &SharedStore,
+    session: &crate::session::LfSession,
+    binary: &Path,
+) -> Result<ResumeOutcome> {
     anyhow::ensure!(
         session.cwd.is_dir(),
         "its checkout {} no longer exists",
         session.cwd.display()
     );
     let argv = [
-        std::env::current_exe()?.to_string_lossy().into_owned(),
+        binary.to_string_lossy().into_owned(),
         "session".into(),
         "connect".into(),
         session.id.as_str().to_owned(),

@@ -1382,6 +1382,38 @@ pub(crate) fn newer_store_floor(conn: &rusqlite::Connection) -> StoreResult<Opti
     )
 }
 
+/// The oldest lf release that can open this store, from every applied row,
+/// including rows a newer release wrote; `None` for an empty store.
+pub(crate) fn store_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
+    let recorded = ledger_has_reader_floor(conn)?;
+    let mut floors = Vec::new();
+    for version in applied_versions(conn)? {
+        let floor: Option<String> = if recorded {
+            conn.query_row(
+                "SELECT reader_floor FROM schema_migrations WHERE version=?1",
+                [&version],
+                |row| row.get(0),
+            )?
+        } else {
+            None
+        };
+        floors.push(match floor {
+            Some(floor) => floor,
+            None => MigrationId::parse_version(&version)
+                .ok_or_else(incompatible)?
+                .release(),
+        });
+    }
+    Ok(highest_floor(floors))
+}
+
+/// Whether lf `version` (`0.14.16`, `0.14.16+e9b2c2eac`) is at or above
+/// `floor`; `None` when either is not a release.
+pub(crate) fn release_meets_floor(version: &str, floor: &str) -> Option<bool> {
+    let core = version.split(['+', '-']).next().unwrap_or(version);
+    Some(parse_release(core)? >= parse_release(floor)?)
+}
+
 /// The floor this binary's pending migrations raise the store to, or `None`
 /// when every lf that opens the store now still can after promotion.
 pub(crate) fn raised_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {

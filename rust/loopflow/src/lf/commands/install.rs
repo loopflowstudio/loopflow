@@ -1405,18 +1405,10 @@ fn app_executable_paths(
     paths
 }
 
-#[cfg(target_os = "macos")]
-#[link(name = "proc")]
-unsafe extern "C" {
-    fn proc_pidpath(pid: libc::c_int, buffer: *mut libc::c_void, size: u32) -> libc::c_int;
-}
-
 /// Every process as `(pid, launched name, executable path)`. The path is absent
 /// when the kernel refuses it.
 #[cfg(target_os = "macos")]
 fn process_executables() -> Result<Vec<(libc::pid_t, String, Option<PathBuf>)>> {
-    use std::ffi::CStr;
-
     let output = Command::new("/bin/ps")
         .args(["-wwaxo", "pid=,comm="])
         .output()
@@ -1443,28 +1435,12 @@ fn process_executables() -> Result<Vec<(libc::pid_t, String, Option<PathBuf>)>> 
         else {
             continue;
         };
-        let mut buffer = vec![0_u8; 4096];
-        // SAFETY: `buffer` is writable for its reported size and `pid` came
-        // from the kernel-backed process table emitted by `/bin/ps`.
-        let length = unsafe {
-            proc_pidpath(
-                pid,
-                buffer.as_mut_ptr().cast::<libc::c_void>(),
-                buffer.len() as u32,
-            )
-        };
-        let executable = if length <= 0 {
-            // SAFETY: signal zero does not mutate the process and only probes
-            // whether the pid observed above still exists.
-            if unsafe { libc::kill(pid, 0) } != 0 {
-                continue;
-            }
-            None
-        } else {
-            let executable = CStr::from_bytes_until_nul(&buffer)
-                .map_err(|error| anyhow!("read executable identity for process {pid}: {error}"))?;
-            Some(PathBuf::from(executable.to_string_lossy().as_ref()))
-        };
+        let executable = crate::journal::OsProcess::executable(pid as u32);
+        // SAFETY: signal zero does not mutate the process and only probes
+        // whether the pid observed above still exists.
+        if executable.is_none() && unsafe { libc::kill(pid, 0) } != 0 {
+            continue;
+        }
         processes.push((pid, command.to_string(), executable));
     }
     Ok(processes)
@@ -2660,6 +2636,7 @@ fn promote_published_from_installation(
         switch.candidate.path.display(),
         store_path.display()
     );
+    crate::lf::commands::rollover::report_after_promote();
     if sync_skills {
         if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
             eprintln!(

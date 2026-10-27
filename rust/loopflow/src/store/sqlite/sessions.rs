@@ -603,6 +603,36 @@ impl SqliteStore {
         )?)
     }
 
+    /// The unfinished Sessions execution owner `owner` holds, by id.
+    pub(crate) fn owner_sessions(
+        &self,
+        owner: &crate::id::LfProcessId,
+    ) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT id FROM agent_sessions
+             WHERE transport_lf_process_id=?1 AND completed_at IS NULL ORDER BY id",
+        )?;
+        let rows = query
+            .query_map([owner.as_str()], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(rows)
+    }
+
+    /// Whether a viewer is attached to execution owner `owner`.
+    pub(crate) fn owner_viewed(&self, owner: &crate::id::LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT viewed FROM processes WHERE id=?1",
+                [owner.as_str()],
+                |row| row.get::<_, Option<bool>>(0),
+            )
+            .optional()?
+            .flatten()
+            .unwrap_or(false))
+    }
+
     /// A Task's unfinished interactive conversations, each with its last opening.
     pub(crate) fn task_conversations(
         &self,

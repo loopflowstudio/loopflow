@@ -12,6 +12,9 @@ PROOFS = {
     "running_provider_uses_updated_install_for_commands_hooks_and_graph": (
         "os_process::installation_tests"
     ),
+    "graph_live_across_switch_runs_next_step_on_selected_install": (
+        "os_process::installation_tests"
+    ),
     "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_machine_tests",
     "task_adopts_linear_checkout_and_preserves_graph_history": "task_adoption_tests",
     "declared_agent_can_start_another_tasks_graph": "session_lifecycle_tests",

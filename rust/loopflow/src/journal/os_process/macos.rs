@@ -1,8 +1,10 @@
 //! Read the kernel directly: macOS's setuid ps cannot execute inside an
 //! inherited sandbox. Birth identity and command evidence keep the same owner.
 
+use std::ffi::CStr;
 use std::io;
 use std::mem::{size_of, MaybeUninit};
+use std::path::PathBuf;
 
 use super::OsProcess;
 
@@ -142,6 +144,29 @@ pub(super) fn sample() -> io::Result<Vec<OsProcess>> {
         }
     }
     Ok(processes)
+}
+
+#[link(name = "proc")]
+unsafe extern "C" {
+    fn proc_pidpath(pid: libc::c_int, buffer: *mut libc::c_void, size: u32) -> libc::c_int;
+}
+
+pub(super) fn executable(pid: u32) -> Option<PathBuf> {
+    let mut buffer = vec![0_u8; 4096];
+    // SAFETY: `buffer` is writable for its reported size; the call only reads
+    // the kernel's record of the process executable.
+    let length = unsafe {
+        proc_pidpath(
+            pid as libc::c_int,
+            buffer.as_mut_ptr().cast::<libc::c_void>(),
+            buffer.len() as u32,
+        )
+    };
+    if length <= 0 {
+        return None;
+    }
+    let path = CStr::from_bytes_until_nul(&buffer).ok()?;
+    Some(PathBuf::from(path.to_string_lossy().as_ref()))
 }
 
 fn arguments(pid: u32) -> io::Result<Option<String>> {

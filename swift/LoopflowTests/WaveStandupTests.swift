@@ -66,6 +66,9 @@ struct WaveStandupTests {
             // The roadmap files an unstarted Task under waiting; its state puts it in Backlog.
             try task("FRESH", section: "waiting", rank: 5),
             try task("HELD", section: "later", rank: 0, status: "deferred"),
+            // Canceled or merged upstream before anyone started it: old data, off the board.
+            try task("LEFTOVER", state: "canceled", rank: 6, status: "unstarted"),
+            try task("FOLDED", state: "duplicate", rank: 7, status: "unstarted"),
         ]
         let standup = standup(tasks, sessions: ["IDLE": .available, "SHIP": .busy])
         #expect(standup.done.map(\.id) == ["DONE-1"])

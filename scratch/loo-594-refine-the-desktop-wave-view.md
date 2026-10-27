@@ -23,73 +23,15 @@ Jack's October 26 direction (LOO-576 demo, `scratch/direction.md`):
 Beneficiary: Jack (and anyone he shares the screen with) working at the level of a
 Wave: what moved, what's moving, what needs a person, against the chapter's KRs.
 
-## Demo
+## Demo and layout (first cut, superseded)
 
-```bash
-lf open loopflow://loopflow/wave/product      # the Wave view
-lf desktop state --json | jq '.windows[0] | {destination, open_work, view: .view.slots}'
-lf desktop enter 4                            # footer turns to page 2, Task 4 opens in full
-lf desktop back                               # back to the standup, page 2 still showing
-lf desktop send -p session "what's blocked?"  # the Wave conversation on the right
-```
-
-On screen: a calm standup board filling the top left (Wave objective and chapter KRs
-across the top; Done · Active · Backlog
-columns below, readable from across a room), the Wave conversation on the right, and
-three live Task tiles across the bottom with `Page 2 of 3`.
-
-## Layout
-
-```
-┌──────────────────────────────────────────────┬────────────────────────┐
-│ Standup board (61.8% width)                  │ Wave Session (38.2%)   │
-│  product · objective (one line)              │  conversation pane     │
-│  Chapter demo-20260924 · KR ✓ ✗ · targets    │  (`-p session`)        │
-│  Done           │ Active │ Backlog           │                        │
-├──────────────────────────────────────────────┴────────────────────────┤ 61.8%
-│ Task strip: [ tile 4 ] [ tile 5 ] [ tile 6 ]          ‹ Page 2 of 3 › │ 38.2%
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-Golden proportions follow Jack's October 20 slot default. The footer spans the full
-width (direction says "wide"); the conversation keeps the top band. **[review]**
-
-### Standup board (main pane)
-
-Read-only, large type (Typography strong 20+/body 15), no scrolling at a 1440×900
-window with ≤ 6 rows per column; overflow shows `+N more` that enters nothing (the
-sidebar and footer are the selectors). Everything derives from the Wave's
-`WaveRoadmap` the model already reads (`lf wave show --json`); nothing new is stored.
-
-| Region | Source (existing fields) |
-|---|---|
-| Header: Wave name, objective first line, status | `wave.displayName`, `wave.goal`, `wave.status` |
-| Chapter: current Project name/status, KR checklist, metric targets | `currentProject.{name,status,krs[].holds,metricTargets}`, `metricPortfolio` |
-| **Done** in the last N days. Header reads `Done`; hovering discloses `· last 7 days`; clicking the range edits the number in place (default 7, 0 = all; sticky locally in app defaults, not shared). Reuses `TaskHistoryFilter` and its inline edit view (Jack Heart, Oct 26) | `task.completed && task.completedAt ≥ now − N days`, plus `pr.phase == .merged` for still-open Tasks |
-| **Active** | `section ∈ {.now, .waiting}`: identifier, name, owner summary, PR phase, `nextMove.reason`; waiting rows carry their reason inline, not a column of their own |
-| **Backlog** | `section ∈ {.notStarted, .later}` and not terminal (terminal Tasks also sit in `.later`; they belong to Done), in rank order, not started first |
-| Header menu: Project history, Realign Projects…, Workflow | moved from `WaveOverview` actions |
-
-Jack Heart, October 26: the third column is **Backlog**, not "Needs a person". Jack also flagged this as the first UI that should show Tasks across people on a team; Done and Active rows get small GitHub profile pictures and names, hidden for a solo player; identity source and solo rule are proposed in `scratch/questions.md` #4, so the reasoning that follows is superseded. Previously: columns group by state, not by person: Jack is the one person and agents do the
-work, so per-person standup rows would be one row. **[review]**
-
-### Wave Session (right pane)
-
-The Wave workspace's existing `WorkspacePanesView` (its session pane, `-p session`),
-unchanged in behavior; only its place moves from left 62% to right 38.2%.
-
-### Task strip (footer)
-
-`DashboardSlotGrid` + `DashboardTile`, unchanged tech, members `model.waveTiles(id)`
-(the Wave's planned and started Tasks in the shared order). Tiles show the Task's
-live primary Session face (compact panes) as on Dashboards (decided, Jack Heart Oct 26). Header click or the expand button enters the Task
-(`.entered(from: .wave(id))`): full Task workspace, crumb back to the Wave, and the
-sidebar selects that Task's row. Body clicks stay inside the terminal, as on
-Dashboards; tiles never take window focus (`takesFocus: false`, existing).
-
-Paging: three slots per page from the plan's `slots`. A tile addressed by `enter`,
-`focus -p N/…` or sidebar selection turns the footer to its page; the page survives
-enter/back (held by the Wave view, not the grid's `@State`).
+The first cut's Demo, board-left Layout, Done · Active · Backlog columns and `+N
+more` are replaced by the binding sections below (Session left, board right with one
+selectable section, strip below). Full text: git `d9b99a6fa1`, this file. Still
+current from it: tiles show the Task's live primary Session face; header click or
+expand enters the Task (`.entered(from: .wave(id))`); body clicks stay in the
+terminal; tiles never take focus; the page survives enter/back; `enter`, `focus -p
+N/…` or sidebar selection turns the strip to the Task's page.
 
 ## Chosen approach
 
@@ -346,6 +288,7 @@ Next implement work is unchanged: `focus -p N/…` turning the strip.
 
 - Oct 26 (items 1–7, 12): `cargo test -p loopflow --lib -- desktop:: selection ops::people` 79 pass; `--test integration` dto/desktop/repo_people/reference/documented 48 pass; clippy clean; `scripts/test_desktop.sh --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests'` 156 pass. Part routing of `zoom`/`resize -p board` through the CLI has no live-Desktop test (gate/demo); `lf repo people` against GitHub ran by hand only.
 - Oct 26 compress (section vocabulary, `Person.github`): `scripts/test_desktop.sh --filter 'WaveStandupTests|DesktopPaneControlTests'` 35 pass.
+- Oct 27 demo answers: `scripts/test_desktop.sh --filter 'WaveStandupTests|WorkModelTests|WorkObservationTransportTests'` pass (silence test now sends a first frame, then expects the 10 s limit); 60 s startup limit and board fill unverified headless (demo).
 
 ## Direction added October 26, 2026, after acceptance (binding; supersedes conflicts above)
 
@@ -413,3 +356,13 @@ Jack Heart answered the demo questions:
 2. **No cancelled/abandoned distinction.** Linear "canceled" is abandoned; Tasks such as LOO-299 and LOO-318 that read `unstarted` locally but are canceled/merged upstream are old data to ignore. Keep them off the board (and the Backlog count) without inventing a separate state.
 3. **Fix the first-load reader timeout here.** Desktop reports "Workspace reader sent no observation for ten seconds" when the Work feed's startup runs past 10 s under load, before its first heartbeat. Make startup survive a slow first read (e.g. the feed emits a heartbeat before its first, slow projection, and/or Desktop's no-observation limit starts at the first frame) without hiding a reader that is truly hung.
 4. **Board paint bug:** the board part's dark background covers only the left part of its pane (to about x 1390 of 2000). The board must fill its part's frame.
+
+Built October 27: (1) no change; the strip already lists Working Tasks only.
+(2) `WaveStandup.state`: a Task planning closed (completed, canceled, duplicate) whose
+local state is still unstarted reads done, so it leaves Backlog and its count;
+Done still counts only completed. (3) `LocalLineObservation` allows 60 s of silence
+before a reader's first frame and 10 s after it; the feed itself is unchanged (its
+heartbeat already runs every 2 s once started; the stall was process startup).
+(4) The board and `WaveViewHeader` fill with `.background(_, ignoresSafeAreaEdges: [])`:
+the default style background ignores safe areas, which matches the capture (a fill from
+the board's left edge up into the titlebar at a stale size). Confirm in the demo window.

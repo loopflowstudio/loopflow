@@ -85,9 +85,11 @@ struct WaveStandup: Equatable {
         showsPeople = Set((working + autonomous + done).compactMap { $0.person?.key }).count >= 2
     }
 
-    /// A Task's state; a Task with no runtime has no checkout, unless planning closed it.
+    /// A Task's state. One planning closed before anyone started it (completed,
+    /// canceled, or merged upstream) is finished, whatever its local record says.
     private static func state(_ task: RoadmapTask) -> TaskState {
-        task.runtime?.status ?? (task.task.isTerminal ? .done : .unstarted)
+        let status = task.runtime?.status ?? .unstarted
+        return status == .unstarted && task.task.isTerminal ? .done : status
     }
 
     func rows(_ section: WaveBoardSection) -> [Row] {
@@ -194,7 +196,9 @@ struct WaveStandupBoard: View {
         }
         .padding(Spacing.xl)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(palette.background)
+        // A fill that ignores safe areas escapes the part's clip into the titlebar
+        // and keeps a stale size there; this one is the board's frame exactly.
+        .background(palette.background, ignoresSafeAreaEdges: [])
         .accessibilityIdentifier("wave-standup-board")
         .task(id: model.repoPath) { await model.loadGitHubPeople() }
         .sheet(isPresented: $showRealignment) {
@@ -329,7 +333,7 @@ struct WaveViewHeader: View {
             ShowHiddenMenu(model: model, view: view)
         }
         .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
-        .background(palette.background)
+        .background(palette.background, ignoresSafeAreaEdges: [])
         .accessibilityIdentifier("wave-view-header")
     }
 

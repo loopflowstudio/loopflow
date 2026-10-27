@@ -63,3 +63,6 @@ Experience: the placement check against this Mac's real Wave state, gate `lf 0.1
 - Full bootstrap not run here: the script refuses non-main checkouts by design,
   so the real cutover runs from `~/src/loopflow` after #1732 lands (step 2 above).
 Decision: advance. Next proof: land #1732, run step 2, retain the 10:00 release-run log.
+
+## Gate (2026-10-27)
+`uv run pytest python/tests/test_release_automation.py -q` → 14 passed; `ruff format --check`/`ruff check` clean; `bash -n scripts/bootstrap-cron-host.sh` ok; shellcheck not installed locally (not enforced in CI). No code changes needed.

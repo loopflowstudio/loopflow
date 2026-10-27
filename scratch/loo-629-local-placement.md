@@ -50,3 +50,16 @@ exits 1 on the null placement until it lands.
    proof unless Jack directs a manual run.
 
 Check: `uv run pytest python/tests/test_release_automation.py -q` → 14 passed.
+
+## Demo (2026-10-27, headless, standing in for Jack)
+Experience: the placement check against this Mac's real Wave state, gate `lf 0.14.18`.
+- Live `wave status infrastructure --json` → `{"machine":null}`; crontab empty;
+  both `loopflow.cron.infrastructure.*` launchd plists present.
+- Old filter `.wave.machine.id` on that output: prints `null`, exit 1 — the
+  failure in `/tmp/loo629-bootstrap-live.log` (stops at "placed Machine").
+- Branch filter: empty id, exit 0 → "runs on this Machine" path.
+- Explicit and foreign placement, quoted cron env, cutover order: covered by
+  behavioral script tests, `uv run pytest python/tests/test_release_automation.py -q` → 14 passed.
+- Full bootstrap not run here: the script refuses non-main checkouts by design,
+  so the real cutover runs from `~/src/loopflow` after #1732 lands (step 2 above).
+Decision: advance. Next proof: land #1732, run step 2, retain the 10:00 release-run log.

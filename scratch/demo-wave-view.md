@@ -134,3 +134,23 @@ Agent observations (verified):
 ## Canceled leftovers fixed in the store (October 27)
 
 Jack Heart: no code for state users can't reach; edit the local store. Sixteen Tasks were `canceled` in Linear with no checkout and no `abandoned_at` (LOO-299, LOO-307/308/310, LOO-313/314/315, LOO-318, LOO-395, LOO-410, LOO-430/431/432, MTG-82, MTG-116, MTG-120). Set `abandoned_at` and `abandon_reason='canceled in Linear'` directly in `~/.lf/loopflow.db`; `lf task status LOO-299` now reads `abandoned`. Original rows saved as INSERTs in the session scratchpad (`canceled-tasks-backup.sql`).
+
+## Headless demo pass — October 27, 2026 (branch 4479041f76, no one present)
+
+The agent ran this pass on Jack Heart's behalf. There was no live capture. The running
+Loopflow Dev app (bundle built 12:28) did not answer `LF_DESKTOP=com.loopflow.mac.dev lf
+desktop state` on three tries ("did not answer within 10 seconds"; load average about
+82). Computer Use was unavailable. The agent left the app running because it may be Jack's.
+
+- Steer 677bb5cf (no code for canceled/merged-upstream leftovers): confirmed. The
+  diff from f66d7acdee has no Backlog override or new state. The only `canceled` in the
+  diff is a test row that checks Done counts only planning-successful Tasks, which was
+  already true before. The sixteen leftovers were fixed in the store on October 27.
+- Since Jack's walk-through, the following are covered by tests (Swift focused tests
+  passed, recorded in 3038a16c2c and a26e8f97aa): the reader's 60 s limit before its
+  first frame, and removal of the override.
+- Paint fix (the board background fills its part, 1ccee83229): not yet seen in a
+  window. Next action: Jack confirms at review in Loopflow Dev that the board's dark
+  background covers the whole right part.
+- Decision: advance. The direction from the walk-through is built, and the only
+  unverified item is visual. It goes to review, not another implementation pass.

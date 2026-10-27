@@ -161,7 +161,8 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   `history`, `desktop plans` (new command); `session_watch.rs` and its
   `refresh`/`rescan` requests deleted.
   `TaskStatus` gains `overview`, `graph_processes`, `comments`; Desktop's Debug
-  disclosure reads `execution.work` from it. Watch frames carry `home`/`copy`.
+  disclosure reads `execution.work` from it. Watch frames are
+  `{answers, unavailable, body}`; the store/build comes from `lf --version`.
   Deleted `next_quiet_available`, `roadmap_all`, `current_waves`,
   `observeTaskDiagnostics`. Fixture: `watch_frames.json`.
 - One Task row: `TaskDetailSnapshot` and Swift `WaveTaskWork` are deleted;
@@ -281,3 +282,4 @@ unless "Work needed" says otherwise.
 - Client API docs (surfaces watch list, work.md `lf ps`): `--test integration documented_commands` 4 passed.
 - Minimal streamed JSON (75faef7b22): integration world_recipes (7), watch lib (15), dto_fixtures, cli_reference (regenerated), planning_foreground, performance, global_commands (45), session_lifecycle (29), two_people, process_ownership (11) passed; `test_desktop.sh` 18 suites / 233 tests passed. machine_commands failed only under parallel load (passes alone). Not run: clippy and the lib linear suites (graph, local_planning, status, task_graph_launch, wave_*), stopped when the disk filled: gate.
 - Compress (`DesktopCommand::is_read` shared by preview and process recording; `TaskNames::read` takes an optional store): clippy --all-targets clean (also covers 75faef7b22's deferred clippy); integration `dto_fixtures world_recipes global_commands` 50 passed.
+- Realign after main sync (b3fb1ba128): `every_verb_names_a_registry_action` skips the branch's `lf desktop plans|plan|done|wave|task` reads; `cargo test -p loopflow --lib every_verb_names_a_registry_action` passed.

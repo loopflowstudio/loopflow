@@ -3278,8 +3278,12 @@ mod tests {
         let cli = <crate::lf::Cli as clap::CommandFactory>::command();
         let desktop = cli.find_subcommand("desktop").unwrap();
         let saved = ["view", "query", "pin", "unpin", "rename", "layout"];
+        let work_reads = ["plans", "plan", "done", "wave", "task"];
         for verb in desktop.get_subcommands().map(clap::Command::get_name) {
-            if saved.contains(&verb) || super::READING_VERBS.contains(&verb) {
+            if saved.contains(&verb)
+                || work_reads.contains(&verb)
+                || super::READING_VERBS.contains(&verb)
+            {
                 continue;
             }
             assert!(names.contains(&verb), "{verb} is not a registry action");

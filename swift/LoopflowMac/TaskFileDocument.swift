@@ -179,7 +179,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         onEdit?()
     }
 
-    func save(issue: String, cwd: String, query: RegistryQuery) async {
+    func save(issue: String, query: RegistryQuery) async {
         guard canSave, let revision = snapshot?.revision else { return }
         saving = true
         saveFailed = false
@@ -187,7 +187,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         var refreshAfterSave = false
         do {
             let result = try await query.saveTaskFile(issue: issue, path: path, revision: revision,
-                                                      content: submitted, cwd: cwd)
+                                                      content: submitted)
             saveMessage = result.message
             updateAccess(result.file)
             recoveries = result.file.recoveries
@@ -210,7 +210,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
         }
         saving = false
         if refreshAfterSave {
-            do { await reconcile(try await query.taskFile(issue: issue, path: path, cwd: cwd)) }
+            do { await reconcile(try await query.taskFile(issue: issue, path: path)) }
             catch { saveMessage = "Saved; refresh failed: \(error.localizedDescription)" }
         } else if let pending = deferredSnapshot { await reconcile(pending) }
         onEdit?()
@@ -545,7 +545,7 @@ final class TaskFilesStore {
             }) {
                 do {
                     let revision = document.snapshot?.revision
-                    let next = try await self.query.taskFile(issue: self.issue, path: path, cwd: self.cwd)
+                    let next = try await self.query.taskFile(issue: self.issue, path: path)
                     guard !Task.isCancelled else { return }
                     guard revision == document.snapshot?.revision else {
                         self.invalidate([path])
@@ -610,7 +610,7 @@ final class TaskFilesStore {
             do { try await Task.sleep(for: .seconds(2)) } catch { return }
             guard let self, let document, self.autosave, document.canSave else { return }
             self.autosaves[document.path] = nil
-            await document.save(issue: self.issue, cwd: self.cwd, query: self.query)
+            await document.save(issue: self.issue, query: self.query)
         }
     }
 
@@ -658,7 +658,7 @@ final class TaskFilesStore {
         isRefreshingChanges = true
         defer { if generation == refreshGeneration { isRefreshingChanges = false } }
         do {
-            let changes = try await query.taskChanges(issue: issue, base: "parent", cwd: cwd)
+            let changes = try await query.taskChanges(issue: issue, base: "parent")
             guard !Task.isCancelled, generation == refreshGeneration else { return }
             self.changes = changes
             if selection == nil, let first = changes.scratch.first ?? changes.files.first?.path {
@@ -681,7 +681,7 @@ final class TaskFilesStore {
         observation?.watch(path)
         let revision = documents[path]?.snapshot?.revision
         do {
-            let next = try await query.taskFile(issue: issue, path: path, cwd: cwd)
+            let next = try await query.taskFile(issue: issue, path: path)
             guard !Task.isCancelled, selection == path, generation == fileGeneration,
                   documents[path]?.snapshot?.revision == revision else { return }
             await document(path).reconcile(next)
@@ -706,7 +706,7 @@ final class TaskFilesStore {
             // Debounce edits; identity checks also protect transports that finish after cancellation.
             if document?.dirty == true { try await Task.sleep(for: .milliseconds(180)) }
             let next = try await query.taskDiff(issue: issue, path: path, base: base,
-                                               draft: document?.dirty == true ? document?.text : nil, cwd: cwd)
+                                               draft: document?.dirty == true ? document?.text : nil)
             let lines = await Task.detached(priority: .userInitiated) {
                 TaskPatchLine.changes(in: next.patch)
             }.value

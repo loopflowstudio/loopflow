@@ -22,6 +22,16 @@ Otherwise the repair is pushed on top (`push_with_upstream_if_needed`). Both `re
 Test: `final_preparation_keeps_published_history_and_merges_main_only_on_conflict` (was `…when_the_base_changes`,
 which assumed a sync on every land).
 
+**Next implement (concept review, 2026-10-27):** one rule for "GitHub can't merge this PR as it is". Today it exists twice
+in `ops/pr.rs`: `merge_needs_integration` (the landing watcher reports `required-integration` from it) and the new
+`pr_requires_resync` (land merges main from it). They disagree on a reachable state: on a merge-queue repo after a
+repair disarm (removal `ByLoopflow`, request `None`) with GitHub reporting BEHIND, the watcher says
+`required-integration` but `lf land` does not merge main. It converges once re-armed, but the repair loop is told to
+integrate and then doesn't. Make `pr_requires_resync` the one rule over `PrMergeObservation` (state, request,
+`merge_queue_enabled`, conflict eviction), have `pr_landing.rs` and `release.rs` call it in place of
+`merge_needs_integration`, and delete `merge_needs_integration`. BEHIND counts only without a queue, matching item 2.
+Keep the existing watcher tests at `pr.rs` ~2533/2653 by moving them onto the one rule.
+
 ## 3. Flaky tests — investigated; nothing left to quarantine
 The brief asks to quarantine the report's cross-PR flaky tests. The evidence below finds each one fixed, deleted,
 a real failure, or a production bug, so this PR quarantines none. Review should confirm that reading.

@@ -59,6 +59,7 @@ struct DoctorReport<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 struct StoreReport {
     build_provenance: crate::build_info::BuildProvenance,
+    build_label: Option<String>,
     migration_authority: String,
     build_source_identity: String,
     build_source_root: Option<String>,
@@ -235,6 +236,7 @@ fn inspect_store(path: &Path) -> StoreReport {
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
+        build_label: crate::build_info::label().map(str::to_string),
         migration_authority: match crate::build_info::migration_authority() {
             crate::build_info::MigrationAuthority::Published => "published",
             crate::build_info::MigrationAuthority::ValidationOnly => "validation-only",
@@ -283,12 +285,19 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
             let selection = match &selected {
                 Ok(Some(selection)) => Check::ok(
                     "install-selection",
-                    format!(
-                        "{:?} installation {} selects {}",
-                        selection.source,
-                        selection.installation_id,
-                        selection.store.display()
-                    ),
+                    match &selection.artifact_set.build_label {
+                        Some(label) => format!(
+                            "{label} installation {} selects {}",
+                            selection.installation_id,
+                            selection.store.display()
+                        ),
+                        None => format!(
+                            "{:?} installation {} selects {}",
+                            selection.source,
+                            selection.installation_id,
+                            selection.store.display()
+                        ),
+                    },
                 ),
                 Ok(None) => Check::ok(
                     "install-selection",
@@ -427,10 +436,16 @@ fn check_lineage(events: &[LfProcess]) -> Check {
 
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     let colors = Colors::default();
-    println!(
-        "build: {} ({}) · migrations {}",
-        store.build_provenance, store.build_source_identity, store.migration_authority
-    );
+    match &store.build_label {
+        Some(label) => println!(
+            "build: {label} ({}) · migrations {}",
+            store.build_source_identity, store.migration_authority
+        ),
+        None => println!(
+            "build: {} ({}) · migrations {}",
+            store.build_provenance, store.build_source_identity, store.migration_authority
+        ),
+    }
     println!("revision: {}", store.build_source_revision);
     if let Some(root) = &store.build_source_root {
         println!("source: {root}");

@@ -48,6 +48,8 @@ pub struct CandidateIdentity {
     pub authority: MigrationAuthority,
     pub package_version: String,
     pub build_version: Option<String>,
+    /// An unreleased build's provenance, e.g. `hotfix e9b2c2eac on v0.14.16`.
+    pub build_label: Option<String>,
     pub latest_known_migration: String,
 }
 
@@ -59,13 +61,15 @@ impl CandidateIdentity {
             authority: build_info::migration_authority(),
             package_version: env!("CARGO_PKG_VERSION").to_string(),
             build_version: Some(build_info::BUILD_VERSION.to_string()),
+            build_label: build_info::label().map(str::to_string),
             latest_known_migration: migrations::latest_known_version(),
         }
     }
 
     fn display_version(&self) -> &str {
-        self.build_version
+        self.build_label
             .as_deref()
+            .or(self.build_version.as_deref())
             .unwrap_or(&self.package_version)
     }
 }
@@ -175,6 +179,10 @@ pub struct PromotionArtifacts<'a> {
 /// compatibility with the store, decide whether the global command may be
 /// replaced. Pure over its inputs — no I/O — so every branch is unit-tested
 /// below.
+///
+/// Authority matters only where the store would change. An unreleased build
+/// without drafts that knows the store's frontier exactly migrates nothing, so
+/// it promotes as a hotfix; changing or passing the frontier stays published-only.
 pub fn decide(
     authority: MigrationAuthority,
     pending_migration_drafts: &[&str],
@@ -183,13 +191,6 @@ pub fn decide(
 ) -> Verdict {
     let mut reasons = Vec::new();
     let mut migrate = false;
-
-    if authority == MigrationAuthority::ValidationOnly {
-        reasons.push(
-            "a validation-only source build cannot become the production runtime; install a published release artifact"
-                .to_string(),
-        );
-    }
 
     if !pending_migration_drafts.is_empty() {
         reasons.push(format!(
@@ -206,10 +207,25 @@ pub fn decide(
         Compatibility::Incompatible { reason } => reasons.push(format!(
             "candidate cannot operate the shared store: {reason}"
         )),
-        Compatibility::Exact { .. } | Compatibility::Behind { .. } => {}
-        Compatibility::AheadPending { .. } => match authority {
+        Compatibility::Exact { .. } => {}
+        Compatibility::Behind {
+            applied_frontier, ..
+        } => {
+            if authority == MigrationAuthority::ValidationOnly {
+                reasons.push(format!(
+                    "a newer release migrated the store to {applied_frontier}; an unreleased build promotes only onto the frontier it knows exactly"
+                ));
+            }
+        }
+        Compatibility::AheadPending {
+            applied_frontier,
+            latest_known,
+            ..
+        } => match authority {
             MigrationAuthority::Published => migrate = true,
-            MigrationAuthority::ValidationOnly => {}
+            MigrationAuthority::ValidationOnly => reasons.push(format!(
+                "only a published release may advance the store from {applied_frontier} to {latest_known}; an unreleased build promotes only onto the frontier it knows exactly"
+            )),
         },
     }
 
@@ -665,6 +681,29 @@ mod compatibility_tests {
         assert!(matches!(
             decide(ValidationOnly, &[], &compatibility, &executable()),
             Verdict::Reject { .. }
+        ));
+    }
+
+    #[test]
+    fn an_unreleased_build_without_drafts_promotes_onto_its_exact_frontier() {
+        let exact = Compatibility::Exact {
+            frontier: "current".to_string(),
+        };
+        assert_eq!(
+            decide(ValidationOnly, &[], &exact, &executable()),
+            Verdict::Promote
+        );
+        assert!(matches!(
+            decide(ValidationOnly, &["0.14.018_draft"], &exact, &executable()),
+            Verdict::Reject { reasons } if reasons.len() == 1 && reasons[0].contains("0.14.018_draft")
+        ));
+        let behind = Compatibility::Behind {
+            applied_frontier: "newer".to_string(),
+            reader_floor: "older".to_string(),
+        };
+        assert!(matches!(
+            decide(ValidationOnly, &[], &behind, &executable()),
+            Verdict::Reject { reasons } if reasons[0].contains("knows exactly")
         ));
     }
 
@@ -1815,6 +1854,7 @@ fn installation_artifact_set(
         source,
         source_revision: candidate.source_revision.clone(),
         source_identity: candidate.source_identity.clone(),
+        build_label: candidate.build_label.clone(),
         content_sha256: digest,
         artifacts,
     };
@@ -1915,11 +1955,9 @@ fn active_install_matches_candidate(
     helper_verdict: &Verdict,
     store: &Path,
 ) -> Result<bool> {
-    let source = match candidate.authority {
-        MigrationAuthority::Published => crate::installation::InstallSource::Published,
-        MigrationAuthority::ValidationOnly => crate::installation::InstallSource::Development,
-    };
-    if active.selection.source != source || active.selection.store != store {
+    if active.selection.source != crate::installation::InstallSource::Published
+        || active.selection.store != store
+    {
         return Ok(false);
     }
     if !active_selection_has_settled_receipt(root, &active.selection)? {
@@ -2222,8 +2260,7 @@ fn exact_published_switch_candidate(
     if !store_is_exact(&preflight.verdict) {
         return Ok(None);
     }
-    if preflight.candidate.authority != MigrationAuthority::Published
-        || preflight.candidate.source_revision != receipt.target.artifact_set.source_revision
+    if preflight.candidate.source_revision != receipt.target.artifact_set.source_revision
         || preflight.candidate.source_identity != receipt.target.artifact_set.source_identity
     {
         return Err(anyhow!(
@@ -2516,11 +2553,6 @@ fn promote_published_from_installation(
     }
     let store_path = crate::store::production_database_path();
     let preview = read_binary_preview(candidate_binary)?;
-    if preview.candidate.authority != MigrationAuthority::Published {
-        return Err(anyhow!(
-            "only a published candidate may advance a receipt-managed installation"
-        ));
-    }
     // Newcomers see only the outcome; a refusal lists its reasons below.
     if preview_only {
         render_human(&preview);
@@ -2537,7 +2569,7 @@ fn promote_published_from_installation(
     }
     if let Verdict::Reject { reasons } = &preview.verdict {
         return Err(anyhow!(
-            "published return refused; every target is unchanged:\n  - {}",
+            "promotion refused; every target is unchanged:\n  - {}",
             reasons.join("\n  - ")
         ));
     }
@@ -2562,7 +2594,7 @@ fn promote_published_from_installation(
             )?
         {
             println!(
-                "published {} is already installed (store {})",
+                "{} is already installed (store {})",
                 preview.candidate.display_version(),
                 prior.selection.store.display()
             );
@@ -2654,7 +2686,7 @@ fn promote_published_from_installation(
     settle_switch(&root, &mut switch, &active)?;
     resume_switch_app(&switch)?;
     println!(
-        "promoted published {}: {} -> {} (store {})",
+        "promoted {}: {} -> {} (store {})",
         preview.candidate.display_version(),
         prepared.cli_target.display(),
         switch.candidate.path.display(),
@@ -2777,6 +2809,7 @@ mod artifact_tests {
             source: InstallSource::Published,
             source_revision: id.to_string(),
             source_identity: "release".to_string(),
+            build_label: None,
             content_sha256: id.to_string(),
             artifacts: paths
                 .iter()

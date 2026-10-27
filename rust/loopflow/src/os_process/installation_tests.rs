@@ -56,6 +56,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
             source: InstallSource::Published,
             source_revision: "fixture".into(),
             source_identity: "fixture".into(),
+            build_label: None,
             content_sha256: installation::artifact_set_sha256(binary, None, None).unwrap(),
             artifacts: vec![artifact],
         };

@@ -91,8 +91,9 @@ plan in the conversation; do not require a document template or a prior skill.
    - Gate owns affected suites and the design's automated acceptance checks,
      once. Do not run them early because they appear in Done when.
    - If a check cannot run headless here, use a headless equivalent or leave it
-     to gate/CI. Human judgment belongs to demo/review. Neither is a reason to
-     stop implementation or block the Graph. An actual build or test failure
+     to gate/CI rather than stopping implementation. Ask the person for a
+     judgment you need when one is in the conversation; headless, leave it for
+     demo/review instead of blocking the Graph. An actual build or test failure
      still needs a fix.
    - Update remaining work in place. Keep one command/result line with any
      deferred owner; no pass ledger or repeated caveats.

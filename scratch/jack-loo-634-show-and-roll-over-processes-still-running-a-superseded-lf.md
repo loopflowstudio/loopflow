@@ -115,6 +115,11 @@ type), and nothing in the f66d7acdee merge touches rollover. Compatible switch
 → `NextStep`; below the store floor → stays with the rerun reason; Desktop
 helper → stays with "update Desktop". No rename, merge or open product choice.
 
+Fourth pass (2026-10-27, headless, recovery steer, against f181a28911): origin/main
+still f66d7acdee; `disposition` checks `runs_graph` first and resolves `NextStep`
+(`rollover.rs:375`). The steer's criteria (compatible vs below-floor, private Homes
+untouched, no resume or replay) are each a listed disposition. Nothing to change.
+
 ## Graph steps at a boundary (implemented 2026-10-27)
 
 - `rollover::disposition` checks `SqliteStore::runs_graph` first; a Graph runner

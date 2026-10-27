@@ -349,12 +349,14 @@ fn require_foreground(batch: bool) -> Result<()> {
 
 /// Claude's credentials file holding only the access token: nothing to
 /// refresh, so no machine can rotate another's login. `expiresAt` (ms) is a
-/// year from minting, so every send of one token is byte-identical.
+/// year from minting, so every send of one token is byte-identical. Claude
+/// Code reports "Not logged in" for a file without the inference scope.
 fn long_lived_credentials(token: &LongLivedToken) -> String {
     serde_json::json!({
         "claudeAiOauth": {
             "accessToken": token.token.expose_secret(),
             "expiresAt": token.expires_at() * 1000,
+            "scopes": ["user:inference"],
         }
     })
     .to_string()
@@ -1603,6 +1605,11 @@ esac
         assert!(crate::provider_account::identity::cached_identity(&accounts[0]).is_some());
         let path = accounts[0].home.as_ref().unwrap().join(".credentials.json");
         assert_eq!(fs::read_to_string(&path).unwrap(), credential);
+        let installed_json: serde_json::Value = serde_json::from_str(&credential).unwrap();
+        assert_eq!(
+            installed_json["claudeAiOauth"]["scopes"],
+            json!(["user:inference"])
+        );
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600

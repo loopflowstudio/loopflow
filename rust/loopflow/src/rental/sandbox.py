@@ -383,7 +383,10 @@ def _aws_ssh_group(ec2):
 def _aws(op, request):
     import boto3
 
-    ec2 = boto3.client("ec2")
+    # The region lf quoted, read as lf reads it; boto3 alone would ignore
+    # AWS_REGION and rent wherever ~/.aws/config points.
+    region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    ec2 = boto3.client("ec2", region_name=region)
 
     def described(instance, route=None):
         return {
@@ -397,7 +400,7 @@ def _aws(op, request):
         return [i for reservation in reply["Reservations"] for i in reservation["Instances"]]
 
     if op == "create":
-        ami = boto3.client("ssm").get_parameter(Name=AWS_AMI)["Parameter"]["Value"]
+        ami = boto3.client("ssm", region_name=region).get_parameter(Name=AWS_AMI)["Parameter"]["Value"]
         name = request["name"]
         spot = {}
         if request["spot"]:

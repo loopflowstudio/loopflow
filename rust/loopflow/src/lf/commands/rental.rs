@@ -496,11 +496,15 @@ fn attach(
         std::thread::sleep(Duration::from_secs(2));
     }
     let installed = match linux_lf {
+        // A development build runs as one does anywhere: on its own disposable
+        // home, which it may create and which the published install never
+        // claims. sshd sessions read the selection from /etc/environment.
         Some(binary) => {
             println!("Uploading {} as its lf", binary.display());
             first_contact(
                 route,
-                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf",
+                "mkdir -p ~/.local/bin && cat > ~/.local/bin/lf.new && chmod 755 ~/.local/bin/lf.new && mv ~/.local/bin/lf.new ~/.local/bin/lf \
+                 && printf 'LF_HOME=%s/.lf-dev\\nLF_BIN=%s/.local/bin/lf\\n' \"$HOME\" \"$HOME\" | sudo tee -a /etc/environment >/dev/null",
                 Stdio::from(std::fs::File::open(binary)?),
             )?
         }
@@ -636,6 +640,18 @@ pub fn place(
     Ok(false)
 }
 
+/// The value Git resolves for `key` in `repo`, when one is set.
+fn git_config(repo: &std::path::Path, key: &str) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["config", key])
+        .output()
+        .ok()?;
+    let value = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    (output.status.success() && !value.is_empty()).then_some(value)
+}
+
 /// `owner/name` for a GitHub origin in any of its URL forms.
 fn github_repo(origin: &str) -> Option<String> {
     let path = [
@@ -764,8 +780,18 @@ fn prepare(
         Some(slug) => format!("gh repo clone {}", q(&slug)),
         None => format!("git clone {}", q(&origin)),
     };
+    // Claiming the Task there names its person by Git identity, as here.
+    let identity: String = ["user.name", "user.email"]
+        .iter()
+        .filter_map(|key| {
+            Some(format!(
+                "git config --global {key} {} && ",
+                q(&git_config(repo, key)?)
+            ))
+        })
+        .collect();
     let script = format!(
-        "{} && mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repository --bind {id}",
+        "{} && {identity}mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repository --bind {id}",
         super::machine::REMOTE_PATH,
         dir = q(directory),
     );

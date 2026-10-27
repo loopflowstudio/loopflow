@@ -198,8 +198,14 @@ class Ec2:
 def aws(monkeypatch):
     ec2 = Ec2(groups=[])
     ssm = types.SimpleNamespace(get_parameter=lambda Name: {"Parameter": {"Value": "ami-123"}})
-    boto3 = types.SimpleNamespace(client=lambda service: ec2 if service == "ec2" else ssm)
-    monkeypatch.setitem(sys.modules, "boto3", boto3)
+    ec2.regions = []
+
+    def client(service, region_name):
+        ec2.regions.append(region_name)
+        return ec2 if service == "ec2" else ssm
+
+    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=client))
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
     return ec2
 
 
@@ -220,6 +226,12 @@ def test_aws_creates_a_tagged_instance_that_terminates_itself(aws):
     assert user_data.index("claude-code") < user_data.index("authorized_keys")
     ingress = dict(aws.calls)["authorize_security_group_ingress"]
     assert ingress["IpPermissions"][0]["FromPort"] == 22
+
+
+def test_aws_rents_in_the_region_lf_quoted(aws, monkeypatch):
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
+    bridge._aws("create", {**REQUEST, "type": "m7i.xlarge"})
+    assert set(aws.regions) == {"us-east-1"}
 
 
 def test_aws_rents_spot_capped_at_the_admitted_price(aws):

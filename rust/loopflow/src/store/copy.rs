@@ -123,13 +123,19 @@ pub(crate) fn idle_lock(copies: &Path) -> StoreResult<Option<std::fs::File>> {
     Ok(file.try_lock_exclusive().is_ok().then_some(file))
 }
 
+/// Whether `path` names a snapshot's staging directory.
+pub(crate) fn is_staging(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(STAGING))
+}
+
 /// Staging directories under `copies`. Only abandoned while [`idle_lock`] is held.
 pub(crate) fn abandoned_snapshots(copies: &Path) -> Vec<PathBuf> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(copies)
         .map(|entries| {
             entries
                 .flatten()
-                .filter(|entry| entry.file_name().to_string_lossy().starts_with(STAGING))
+                .filter(|entry| is_staging(&entry.path()))
                 .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
                 .map(|entry| entry.path())
                 .collect()

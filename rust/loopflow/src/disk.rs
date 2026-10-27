@@ -331,9 +331,11 @@ fn rotatable_units(home: &Path) -> Vec<Unit> {
 
     // Staging directories go by ownership, not age: see `remove_abandoned_snapshots`.
     let selected_copy = crate::store::default_db_path();
-    let staging = crate::store::copy::abandoned_snapshots(&home.join("copies"));
     for copy in children(&home.join("copies")) {
-        if copy.is_dir() && !selected_copy.starts_with(&copy) && !staging.contains(&copy) {
+        if copy.is_dir()
+            && !selected_copy.starts_with(&copy)
+            && !crate::store::copy::is_staging(&copy)
+        {
             units.push(unit(Category::Copies, vec![copy]));
         }
     }
@@ -384,10 +386,13 @@ fn rotate(
     units.sort_by_key(|unit| unit.modified);
     let cutoff = SystemTime::now() - GRACE;
     let mut open: Option<HashSet<PathBuf>> = None;
-    let mut removed = Vec::new();
-    let mut errors = Vec::new();
-    let mut log = (!dry_run).then(|| open_log(home)).transpose()?;
-    remove_abandoned_snapshots(home, dry_run, &mut log, &mut removed, &mut errors)?;
+    let mut sweep = Sweep {
+        dry_run,
+        log: (!dry_run).then(|| open_log(home)).transpose()?,
+        removed: Vec::new(),
+        errors: Vec::new(),
+    };
+    remove_abandoned_snapshots(home, &mut sweep)?;
     for unit in units {
         if unit.modified > cutoff {
             continue;
@@ -416,57 +421,56 @@ fn rotate(
         {
             continue;
         }
-        if !dry_run {
-            if let Err(error) = remove_paths(&unit.paths) {
-                errors.push(format!("{}: {error:#}", unit.paths[0].display()));
-                continue;
+        sweep.remove(unit.category, &unit.paths, unit.bytes, reason);
+    }
+    Ok((sweep.removed, sweep.errors))
+}
+
+/// One rotation pass's removals and failures, each removal logged as it happens.
+struct Sweep {
+    dry_run: bool,
+    log: Option<File>,
+    removed: Vec<Removal>,
+    errors: Vec<String>,
+}
+
+impl Sweep {
+    fn remove(&mut self, category: Category, paths: &[PathBuf], bytes: u64, reason: String) {
+        if !self.dry_run {
+            if let Err(error) = remove_paths(paths) {
+                self.errors
+                    .push(format!("{}: {error:#}", paths[0].display()));
+                return;
             }
         }
         let removal = Removal {
-            category: unit.category,
-            path: unit.paths[0].clone(),
-            bytes: unit.bytes,
+            category,
+            path: paths[0].clone(),
+            bytes,
             reason,
         };
-        if let Some(log) = log.as_mut() {
+        if let Some(log) = self.log.as_mut() {
             log_removal(log, &removal);
         }
-        removed.push(removal);
+        self.removed.push(removal);
     }
-    Ok((removed, errors))
 }
 
 /// Remove snapshot staging directories whose process died mid-snapshot,
 /// however recent: holding the copies lock proves no snapshot is filling one.
-fn remove_abandoned_snapshots(
-    home: &Path,
-    dry_run: bool,
-    log: &mut Option<File>,
-    removed: &mut Vec<Removal>,
-    errors: &mut Vec<String>,
-) -> Result<()> {
+fn remove_abandoned_snapshots(home: &Path, sweep: &mut Sweep) -> Result<()> {
     let copies = home.join("copies");
     let Some(_idle) = crate::store::copy::idle_lock(&copies)? else {
         return Ok(());
     };
     for path in crate::store::copy::abandoned_snapshots(&copies) {
         let bytes = allocated_bytes(&path);
-        if !dry_run {
-            if let Err(error) = remove_paths(std::slice::from_ref(&path)) {
-                errors.push(format!("{}: {error:#}", path.display()));
-                continue;
-            }
-        }
-        let removal = Removal {
-            category: Category::Copies,
-            path,
+        sweep.remove(
+            Category::Copies,
+            std::slice::from_ref(&path),
             bytes,
-            reason: "abandoned snapshot".to_owned(),
-        };
-        if let Some(log) = log.as_mut() {
-            log_removal(log, &removal);
-        }
-        removed.push(removal);
+            "abandoned snapshot".to_owned(),
+        );
     }
     Ok(())
 }
@@ -784,10 +788,14 @@ mod tests {
         let _snapshotting = crate::store::copy::idle_lock(&home.join("copies"))
             .unwrap()
             .unwrap();
-        let (mut removed, mut errors) = (Vec::new(), Vec::new());
-        super::remove_abandoned_snapshots(home, false, &mut None, &mut removed, &mut errors)
-            .unwrap();
-        assert!(removed.is_empty() && errors.is_empty());
+        let mut sweep = super::Sweep {
+            dry_run: false,
+            log: None,
+            removed: Vec::new(),
+            errors: Vec::new(),
+        };
+        super::remove_abandoned_snapshots(home, &mut sweep).unwrap();
+        assert!(sweep.removed.is_empty() && sweep.errors.is_empty());
         assert!(home.join("copies/.tmpDeF456").exists());
     }
 

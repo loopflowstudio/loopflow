@@ -12,6 +12,7 @@ use crate::ops::{OpsError, OpsResult};
 
 const LOCK_FD_ENV: &str = "LF_RELEASE_LOCK_FD";
 
+/// One release runs per target; its children inherit the descriptor.
 #[derive(Debug)]
 pub(crate) struct ReleaseLock {
     file: File,

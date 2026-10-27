@@ -1875,7 +1875,7 @@ fn persistent_submit_keeps_scratch_and_post_commit_edits() {
 }
 
 #[test]
-fn waited_task_landing_repairs_without_a_watcher_and_preserves_other_work() {
+fn waited_task_landing_repairs_beside_the_open_task_session() {
     waited_task_landing("review", false);
 }
 
@@ -1986,9 +1986,10 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
     support::managed_codex_account(home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let unrelated = loopflow::id::LfProcessId::new();
-    db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
-        rusqlite::params![unrelated, loopflow::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
+    // The Task's own Session stays open in the checkout for the whole landing.
+    let session = loopflow::id::LfProcessId::new();
+    db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'task-session',?5)",
+        rusqlite::params![session, loopflow::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
     let command = || {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (name, _) in
@@ -2069,26 +2070,6 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
             std::thread::sleep(Duration::from_millis(25));
         }
     };
-    // Unrelated live work holds repair; the waiter reports it and keeps checking.
-    wait_for(unrelated.as_str());
-    assert!(!launches.exists(), "unrelated work must prevent repair");
-    // A read runs lazy recovery, which leaves the held delivery for the
-    // waiter to continue and starts no repair.
-    let watched = command()
-        .args(["task", "status", "INF-123", "--json"])
-        .output()
-        .unwrap();
-    assert!(
-        watched.status.success(),
-        "{}",
-        String::from_utf8_lossy(&watched.stderr)
-    );
-    assert!(!launches.exists());
-    let landing_state: String = db
-        .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(landing_state, "watching");
-    db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE id=?1", [&unrelated]).unwrap();
     let original_head = repo.head_sha();
     if failed_startup {
         wait_for("exited before opening a Session");
@@ -2127,6 +2108,14 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     let (output, error) = read();
     assert!(status.success(), "{output}\n{error}");
     assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
+    let session_open: bool = db
+        .query_row(
+            "SELECT completed_at IS NULL FROM processes WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(session_open, "the repair ran beside the open Session");
     let repaired_head = fs::read_to_string(&proof).unwrap();
     assert_ne!(repaired_head.trim(), original_head);
     let published = Command::new("git")

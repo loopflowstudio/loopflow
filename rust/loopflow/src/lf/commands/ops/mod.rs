@@ -659,9 +659,6 @@ pub(crate) fn land_repo(
                     OpsError::DeliveryHeld(reason) => {
                         anyhow::Error::new(crate::process::GraphHeld(reason))
                     }
-                    error @ OpsError::CheckoutBusy(_) => {
-                        anyhow::Error::new(crate::process::GraphHeld(error.to_string()))
-                    }
                     error => anyhow::Error::new(error),
                 }
             })?;

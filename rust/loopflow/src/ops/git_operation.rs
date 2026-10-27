@@ -57,6 +57,9 @@ pub(crate) struct GitOperationOwner {
     pub(crate) target_sha: Option<String>,
 }
 
+/// The history-rewrite fence, held only while its sync runs. A sync that stops
+/// on conflicts or errors drops it; Git's merge state stays for whoever
+/// continues, and other writers are admitted meanwhile.
 #[derive(Debug)]
 pub(crate) struct SyncOperation {
     file: File,
@@ -396,7 +399,52 @@ fn validate_id(value: &str, label: &str) -> OpsResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::GitOperationOwner;
+    use std::path::Path;
+    use std::process::Command;
+
+    use super::{begin_sync_operation, fence_agent_process, operation_path, GitOperationOwner};
+
+    fn git(repo: &Path, args: &[&str]) -> bool {
+        Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    }
+
+    #[test]
+    fn a_running_sync_fences_agents_and_a_stopped_one_admits_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = directory.path();
+        let commit = |contents: &str, message: &str| {
+            std::fs::write(repo.join("file.txt"), contents).unwrap();
+            assert!(git(repo, &["add", "file.txt"]));
+            assert!(git(repo, &["commit", "-m", message]));
+        };
+        assert!(git(repo, &["init", "-b", "main"]));
+        commit("base\n", "base");
+        assert!(git(repo, &["checkout", "-b", "feature"]));
+        commit("feature\n", "feature");
+        assert!(git(repo, &["checkout", "main"]));
+        commit("main\n", "main");
+        assert!(git(repo, &["checkout", "feature"]));
+
+        let operation = begin_sync_operation(repo, "main").unwrap();
+        assert!(fence_agent_process(repo, None).is_err());
+        assert!(fence_agent_process(repo, Some(&operation.owner().id)).is_ok());
+
+        // The sync stops on conflicts and its process lets go of the fence.
+        assert!(!git(repo, &["merge", "--no-commit", "main"]));
+        drop(operation);
+        assert!(fence_agent_process(repo, None).is_ok());
+        assert!(operation_path(repo).unwrap().exists());
+    }
 
     #[test]
     fn sequencer_receipt_preserves_released_process_reference() {

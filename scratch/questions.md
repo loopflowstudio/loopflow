@@ -1,0 +1,4 @@
+# LOO-626 questions
+
+- Stalled sync (assumption, 2026-10-26): Jack's steer releases the history-rewrite fence when a sync stops, errors or stalls. Stops and errors already release it — the fence is a flock owned by the sync process, dropped on conflict return, recovery-agent failure or exit (`a_running_sync_fences_agents_and_a_stopped_one_admits_them`). A sync process that is alive but hung (e.g. a wedged sync-conflicts agent) still holds it; nothing detects that today. Left as is rather than inventing a timeout; killing the process releases it.
+- `lock_task_pr_mutation` stays: it serializes a head move with clearing a head-pinned merge request, so Auto-merge never merges an unreviewed head. It is held for the push/settlement only and refuses rather than waits on contention; a second concurrent push retries.

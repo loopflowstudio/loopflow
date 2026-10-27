@@ -1055,7 +1055,7 @@ async fn restore_task_checkout(
     if worktree.join(".git").try_exists()? {
         return finish_task_checkout(store, task).await;
     }
-    validate_checkout_restoration(store, task, &repo)?;
+    validate_checkout_restoration(task, &repo)?;
     let mut args = vec!["worktree".to_string(), "add".into(), "--force".into()];
     // --force replaces only the stale registration at this absent exact path.
     // A different registered path was rejected above; no branch is reset.
@@ -1106,7 +1106,7 @@ async fn restore_task_checkout(
     finish_task_checkout(store, task).await
 }
 
-fn validate_checkout_restoration(store: &SharedStore, task: &Task, repo: &Path) -> OpsResult<()> {
+fn validate_checkout_restoration(task: &Task, repo: &Path) -> OpsResult<()> {
     let worktree = task.worktree()?;
     if match worktree.symlink_metadata() {
         Ok(_) => true,
@@ -1132,10 +1132,6 @@ fn validate_checkout_restoration(store: &SharedStore, task: &Task, repo: &Path) 
                 worktree.display()
             )));
         }
-    }
-    let blockers = crate::ops::task_execution::task_execution_blockers(&store.sqlite, &task.id)?;
-    if !blockers.is_empty() {
-        return Err(task_error(blockers.join("; ")));
     }
     Ok(())
 }

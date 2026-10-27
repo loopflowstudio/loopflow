@@ -129,6 +129,10 @@ implement: the prune `about` names the repair, regenerate `docs/lf-reference.md`
 and the troubleshooting section adds `lf self doctor` failing `lineage` → prune
 releases ancestry that was never recorded, keeping a Session fact.
 
+Third concept review (2026-10-27, through `65ed22f566`): slice 5 closed that gap;
+the help, troubleshooting and doctor hint now tell one story. The `start_record`
+cwd compression changes no concept. Nothing to change and no open product choice.
+
 ## Alternatives rejected
 
 - **Backfill a placeholder parent row.** Its started_at, trace and command are

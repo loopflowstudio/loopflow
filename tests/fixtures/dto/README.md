@@ -115,3 +115,8 @@ metadata, independent Dashboard identity and portable tile-face intent.
 `closed_task_page.json` pins `lf task list --done --json`: one page of closed
 Tasks as `lf wave status` Task rows, most recently closed first, and the `next` Task to pass as
 `--after`. Open Tasks come from the plan; closed ones only from these pages.
+
+`retention_summary.json` pins `lf history retention --json`: Sessions by harness,
+account, age and retention state (`provider`, `facts`, `unknown`), the soonest
+removals ahead, and each home's expiry policy. Rust and Swift decode it; the
+Desktop Retention card renders it.

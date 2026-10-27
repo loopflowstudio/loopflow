@@ -1,6 +1,8 @@
 # LOO-604: one lf API for Loopflow state
 
-Status: implementing; `lf monitor work` deleted (2026-10-26). Jack Heart requested the Task;
+Status: implementing; core rebuilt (watches, open-Task scope, batched details,
+live reads). Jack Heart (2026-10-27) asked to finish the design and publish the
+PR; Remaining 1–5 continue after it. Jack Heart requested the Task;
 his LOO-602 steer (same day) sets the data the API reads: a facts-only store
 (LOO-611 Session facts + one usage record per turn, LOO-612 ProviderFact,
 LOO-615 Process rows deleted at exit unless referenced). Transcript reads
@@ -59,7 +61,7 @@ Desktop (`WorkWatches`, `swift/Loopflow/Services/WorkObservation.swift`) runs pe
 window: `wave show --all` (plan; Waves derived from it), `desktop plans`
 (Dashboard plans), `planning status` (receipts; holds the repository's planning
 sync), `session list`, `task status <id>` (overview, Graph processes, comments,
-recorded work), `history --since 7d --limit 50 [filters]`, `monitor ps`. Wave
+recorded work), `history --since 7d --limit 50 [filters]`, `monitor ps` (`lf ps`). Wave
 detail is the selected Wave's `WaveRoadmap` from the planning watch. A scope change restarts watches whose argv/cwd changed and
 replays the others' last frame answering the new id. A checkpoint confirms each
 running watch (or only `replay` parts) and follows once each answered with a
@@ -131,7 +133,7 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   are deleted; bare `lf monitor` judges Sessions from their rows. Its watch
   proof now runs `session list --all --watch` (`session_list_watch.rs`).
 - `lf history` is Session records only: input captured, recorded completion,
-  provider turns, tagged with Task/Wave. `WorkCreated`, `Pr*` and `SteerIssued`
+  provider turns, tagged with Task/Wave/Project (`--task/--wave/--project`). `WorkCreated`, `Pr*` and `SteerIssued`
   are deleted with their per-Task PR scan, `steers_since`, `SteerComment` and
   the Work creation timestamps that fed them; Desktop's activity view drops
   their icons and the PR link.
@@ -141,8 +143,8 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   vocabulary, the task_history part, `work_frame.json`); its checkout follower
   moved to `watch/checkouts.rs`. New watches: `wave show`, `wave status`,
   `planning status` (with the sync lifetime; works in a non-Git Work folder),
-  `history`, `desktop plans` (new command), `monitor active` (onto `watch.rs`;
-  `session_watch.rs` and its `refresh`/`rescan` requests deleted).
+  `history`, `desktop plans` (new command); `session_watch.rs` and its
+  `refresh`/`rescan` requests deleted.
   `TaskStatus` gains `overview`, `graph_processes`, `comments`; Desktop's Debug
   disclosure reads `execution.work` from it. Watch frames carry `home`/`copy`.
   Deleted `next_quiet_available`, `roadmap_all`, `current_waves`,
@@ -238,3 +240,4 @@ unless "Work needed" says otherwise.
 - Task status flat in Graphs (+ compress: Task→Wave via `task_wave_in`): clippy clean; lib `store::sqlite::task_work` 7, `graph_inventory` 3, `--test integration performance_tests` 3 passed.
 - Live reads (`lf ps --watch`, `monitor active` deleted): clippy clean; integration `cli_reference`, `session_list_watch`, `dto_fixtures`, `cli_discovery`, `world_recipes::session_list_task_status_and_top_watch`, `boundary_launch_and_resume`, process_ownership `monitor_does_not_treat`, lib `graph_tests` (2), `test_desktop.sh --filter WorkObservationTransportTests` (9) passed.
 - Compress (live reads): reference preamble names `--watch` instead of the deleted `monitor active`; one `EVERY_SESSION` argv in session tests. clippy clean; `--test integration session_cli_tests cli_reference` 20 passed (`available_lists_only_conversations_ready_for_input` failed once under the parallel suite, passes alone twice; untouched: gate).
+- Realign (2026-10-27): plan reconciled to code (watch argv, clocks, history filters); prose only, no checks rerun.

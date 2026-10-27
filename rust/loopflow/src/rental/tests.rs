@@ -24,6 +24,8 @@ fn box4() -> Hardware {
         vcpus: 4,
         memory_gb: 8,
         disk_gb: 10,
+        gpu: None,
+        spot: false,
     }
 }
 
@@ -53,9 +55,90 @@ fn dollars_parse_exactly_and_print_as_people_read_them() {
 #[test]
 fn prices_follow_each_providers_published_rates() {
     // Daytona: 4 × $0.0504 + 8 × $0.0162 + 5 GiB of disk past the free 5 × $0.000108.
-    assert_eq!(Provider::Daytona.usd_per_hour(&box4()), usd("0.33174"));
+    assert_eq!(Provider::Daytona.usd_per_hour(&box4()), Ok(usd("0.33174")));
     // Modal sandboxes: 2 cores × $0.141912 + 8 × $0.024012.
-    assert_eq!(Provider::Modal.usd_per_hour(&box4()), usd("0.475920"));
+    assert_eq!(Provider::Modal.usd_per_hour(&box4()), Ok(usd("0.475920")));
+    // Fly: 4 performance vCPUs × $21/month, 8 GiB × $6/month, one IPv4 at $2/month.
+    assert_eq!(Provider::Fly.usd_per_hour(&box4()), Ok(usd("0.18611")));
+}
+
+fn gpu(name: &str) -> Hardware {
+    Hardware {
+        gpu: Some(name.into()),
+        ..box4()
+    }
+}
+
+#[test]
+fn fixed_shapes_take_the_smallest_that_holds_the_hardware() {
+    let runpod = Provider::Runpod.offer(&box4()).unwrap();
+    assert_eq!(runpod.machine_type.as_deref(), Some("cpu3c"));
+    let aws = Provider::Aws
+        .offer(&Hardware {
+            vcpus: 3,
+            memory_gb: 12,
+            ..box4()
+        })
+        .unwrap();
+    assert_eq!(aws.machine_type.as_deref(), Some("m7i.xlarge"));
+    assert_eq!(aws.usd_per_hour, usd("0.2016"));
+    let l4 = Provider::Aws.offer(&gpu("L4")).unwrap();
+    assert_eq!(l4.machine_type.as_deref(), Some("g6.xlarge"));
+}
+
+#[test]
+fn gpus_rent_where_the_provider_offers_them() {
+    let a40 = Provider::Runpod.offer(&gpu("A40")).unwrap();
+    assert_eq!(a40.machine_type.as_deref(), Some("NVIDIA A40"));
+    assert_eq!(a40.usd_per_hour, usd("0.59"));
+    let modal = Provider::Modal.offer(&gpu("A100")).unwrap();
+    assert_eq!(modal.machine_type.as_deref(), Some("A100-80GB"));
+    assert!(Provider::Daytona
+        .offer(&gpu("A40"))
+        .unwrap_err()
+        .contains("--gpu works on runpod, aws and modal"));
+    assert!(Provider::Fly.offer(&gpu("A40")).is_err());
+    assert!(Provider::Aws
+        .offer(&gpu("H100"))
+        .unwrap_err()
+        .contains("it rents L4, A10G"));
+}
+
+#[test]
+fn gpu_hardware_is_a_floor_the_shape_must_meet() {
+    let big = Provider::Aws
+        .offer(&Hardware {
+            vcpus: 8,
+            memory_gb: 20,
+            ..gpu("L4")
+        })
+        .unwrap();
+    assert_eq!(big.machine_type.as_deref(), Some("g6.2xlarge"));
+    let refused = Provider::Aws
+        .offer(&Hardware {
+            vcpus: 32,
+            ..gpu("A10G")
+        })
+        .unwrap_err();
+    assert_eq!(refused, "aws rents nothing with 32 vCPU 8 GB + A10G");
+}
+
+#[test]
+fn spot_rents_only_where_the_provider_sells_it() {
+    let spot = Hardware {
+        spot: true,
+        ..box4()
+    };
+    assert!(Provider::Aws.offer(&spot).is_ok());
+    assert!(Provider::Runpod.offer(&spot).is_ok());
+    for provider in [Provider::Daytona, Provider::Modal, Provider::Fly] {
+        let refused = provider.offer(&spot).unwrap_err();
+        assert!(refused.starts_with(provider.as_str()), "{refused}");
+        assert!(
+            refused.contains("--spot works on aws and runpod"),
+            "{refused}"
+        );
+    }
 }
 
 #[test]
@@ -167,7 +250,7 @@ fn a_pool_refuses_when_off_empty_or_busy_and_names_why() {
     );
 }
 
-fn rented(by_hand: bool) -> Rental {
+pub(super) fn rented(by_hand: bool) -> Rental {
     let id = RentalId::new();
     Rental {
         provider_name: Rental::provider_name_for(&id),

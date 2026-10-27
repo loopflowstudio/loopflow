@@ -89,14 +89,7 @@ pub(crate) fn begin_sync_operation(worktree: &Path, target_ref: &str) -> OpsResu
     let worktree = canonical(worktree);
     let path = operation_path(&worktree)?;
     let mut file = create_record(&path)?;
-    match FileExt::try_lock_exclusive(&file) {
-        Ok(()) => {}
-        Err(error) if is_contended(&error) => {
-            let owner = read_json::<GitOperationOwner>(&mut file).ok();
-            return Err(live_operation_error(owner.as_ref()));
-        }
-        Err(error) => return Err(error.into()),
-    }
+    lock_record(&mut file)?;
 
     refuse_intervention(&worktree)?;
     if current_branch(&worktree)?.is_none() {
@@ -113,14 +106,7 @@ pub(crate) fn begin_sync_operation(worktree: &Path, target_ref: &str) -> OpsResu
 pub(crate) fn reclaim_sync_operation(owner: GitOperationOwner) -> OpsResult<SyncOperation> {
     let path = operation_path(&owner.worktree)?;
     let mut file = create_record(&path)?;
-    match FileExt::try_lock_exclusive(&file) {
-        Ok(()) => {}
-        Err(error) if is_contended(&error) => {
-            let current = read_json::<GitOperationOwner>(&mut file).ok();
-            return Err(live_operation_error(current.as_ref()));
-        }
-        Err(error) => return Err(error.into()),
-    }
+    lock_record(&mut file)?;
     write_json(&mut file, &owner)?;
     Ok(SyncOperation { file, path, owner })
 }
@@ -135,29 +121,21 @@ pub(crate) fn authorize_sync_control(worktree: &Path, adopt_raw: bool) -> OpsRes
     let path = operation_path(worktree)?;
     if path.exists() {
         let mut file = open_record(&path)?;
-        match FileExt::try_lock_exclusive(&file) {
-            Err(error) if is_contended(&error) => {
-                let owner = read_json::<GitOperationOwner>(&mut file).ok();
-                return Err(live_operation_error(owner.as_ref()));
+        lock_record(&mut file)?;
+        // The lock is free, so the recorded owner is gone. Adopt the operation
+        // it left behind, reusing its pinned branch/target when the record is
+        // still readable.
+        let stored = match read_json::<GitOperationOwner>(&mut file) {
+            Ok(owner) => Some(owner),
+            Err(_) if adopt_raw => None,
+            Err(_) => {
+                return Err(OpsError::Message(
+                    "the stale sync owner record is unreadable; rerun with --adopt to claim the raw sequencer"
+                        .to_string(),
+                ));
             }
-            Err(error) => return Err(error.into()),
-            Ok(()) => {
-                // The lock is free, so the recorded owner is gone. Adopt the
-                // operation it left behind, reusing its pinned branch/target
-                // when the record is still readable.
-                let stored = match read_json::<GitOperationOwner>(&mut file) {
-                    Ok(owner) => Some(owner),
-                    Err(_) if adopt_raw => None,
-                    Err(_) => {
-                        return Err(OpsError::Message(
-                            "the stale sync owner record is unreadable; rerun with --adopt to claim the raw sequencer"
-                                .to_string(),
-                        ));
-                    }
-                };
-                return adopt_operation(worktree, path, file, stored);
-            }
-        }
+        };
+        return adopt_operation(worktree, path, file, stored);
     }
 
     if !adopt_raw {
@@ -168,9 +146,8 @@ pub(crate) fn authorize_sync_control(worktree: &Path, adopt_raw: bool) -> OpsRes
     }
 
     // A raw sequencer with no Loopflow record at all: claim a fresh one.
-    let path = operation_path(worktree)?;
-    let file = create_record(&path)?;
-    FileExt::try_lock_exclusive(&file)?;
+    let mut file = create_record(&path)?;
+    lock_record(&mut file)?;
     adopt_operation(worktree, path, file, None)
 }
 
@@ -227,22 +204,14 @@ fn fence_agent_process(worktree: &Path) -> OpsResult<()> {
     }
 
     let mut file = open_record(&path)?;
-    match FileExt::try_lock_exclusive(&file) {
-        Err(error) if is_contended(&error) => {
-            let owner = read_json::<GitOperationOwner>(&mut file).ok();
-            Err(live_operation_error(owner.as_ref()))
-        }
-        Err(error) => Err(error.into()),
-        Ok(()) => {
-            // An idle merge needs an agent to finish it. Retain its pinned
-            // evidence for adoption by sync --continue or --abort; only a live
-            // lock excludes an independent agent launch.
-            if intervention_state(worktree)?.is_none() {
-                fs::remove_file(path)?;
-            }
-            Ok(())
-        }
+    lock_record(&mut file)?;
+    // An idle merge needs an agent to finish it. Retain its pinned evidence for
+    // adoption by sync --continue or --abort; only a live lock excludes an
+    // independent agent launch.
+    if intervention_state(worktree)?.is_none() {
+        fs::remove_file(path)?;
     }
+    Ok(())
 }
 
 fn refuse_intervention(worktree: &Path) -> OpsResult<()> {
@@ -308,8 +277,16 @@ fn remove_locked_record(path: &Path) -> OpsResult<()> {
     Ok(())
 }
 
-fn is_contended(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::WouldBlock
+/// Take the record's flock, or refuse naming the live sync that holds it.
+fn lock_record(file: &mut File) -> OpsResult<()> {
+    match FileExt::try_lock_exclusive(file) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            let owner = read_json::<GitOperationOwner>(file).ok();
+            Err(live_operation_error(owner.as_ref()))
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn live_operation_error(owner: Option<&GitOperationOwner>) -> OpsError {

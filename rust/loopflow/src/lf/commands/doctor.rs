@@ -285,19 +285,16 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
             let selection = match &selected {
                 Ok(Some(selection)) => Check::ok(
                     "install-selection",
-                    match &selection.artifact_set.build_label {
-                        Some(label) => format!(
-                            "{label} installation {} selects {}",
-                            selection.installation_id,
-                            selection.store.display()
-                        ),
-                        None => format!(
-                            "{:?} installation {} selects {}",
-                            selection.source,
-                            selection.installation_id,
-                            selection.store.display()
-                        ),
-                    },
+                    format!(
+                        "{} installation {} selects {}",
+                        selection
+                            .artifact_set
+                            .build_label
+                            .clone()
+                            .unwrap_or_else(|| format!("{:?}", selection.source)),
+                        selection.installation_id,
+                        selection.store.display()
+                    ),
                 ),
                 Ok(None) => Check::ok(
                     "install-selection",
@@ -436,16 +433,14 @@ fn check_lineage(events: &[LfProcess]) -> Check {
 
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     let colors = Colors::default();
-    match &store.build_label {
-        Some(label) => println!(
-            "build: {label} ({}) · migrations {}",
-            store.build_source_identity, store.migration_authority
-        ),
-        None => println!(
-            "build: {} ({}) · migrations {}",
-            store.build_provenance, store.build_source_identity, store.migration_authority
-        ),
-    }
+    let build = store
+        .build_label
+        .clone()
+        .unwrap_or_else(|| store.build_provenance.to_string());
+    println!(
+        "build: {build} ({}) · migrations {}",
+        store.build_source_identity, store.migration_authority
+    );
     println!("revision: {}", store.build_source_revision);
     if let Some(root) = &store.build_source_root {
         println!("source: {root}");

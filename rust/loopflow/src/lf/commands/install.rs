@@ -2523,7 +2523,7 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn promote_published_from_installation(
+fn promote_from_installation(
     artifacts: PromotionArtifacts<'_>,
     candidate_binary: &Path,
     sync_skills: bool,
@@ -2714,7 +2714,7 @@ pub fn promote(
         delegate_switch_recovery(&receipt)?;
     } else {
         let current = fs::canonicalize(std::env::current_exe()?)?;
-        promote_published_from_installation(artifacts, &current, sync_skills, preview_only)?;
+        promote_from_installation(artifacts, &current, sync_skills, preview_only)?;
     }
     if sync_skills && !preview_only {
         install_link_receiver(artifacts.app_target);

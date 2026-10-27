@@ -77,3 +77,4 @@ Gate check: `cargo test -p loopflow --lib` (compatibility, build_info, version,
 installation) + `--test global_commands` + `--test one_machine_tests`, `cargo fmt
 --check`, `cargo clippy --all-targets -- -D warnings`.
 Check (2026-10-27, rebased on 66ad233139): focused lib tests + global_commands + fmt — pass; clippy and one_machine_tests left to gate.
+Compress (2026-10-27): doctor label formatting folded, promote fn renamed; `cargo build -p loopflow` — pass; tests left to gate.

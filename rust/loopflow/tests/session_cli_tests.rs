@@ -41,6 +41,17 @@ fn install_codex_fixture(home: &std::path::Path, thread: Option<&str>) {
     }
 }
 
+/// Every Session row, whatever its mode or state.
+const EVERY_SESSION: &[&str] = &[
+    "session",
+    "list",
+    "--all",
+    "--interactive",
+    "all",
+    "--history",
+    "--json",
+];
+
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
     command(home, args).output().unwrap()
 }
@@ -220,18 +231,7 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
     assert_eq!(inspected["artifact_key"], run_id.as_str());
     assert_eq!(inspected["caller_artifact_key"], CALLER);
     assert!(inspected["recorded_outcome"].is_null());
-    let listed = run(
-        home.path(),
-        &[
-            "session",
-            "list",
-            "--all",
-            "--interactive",
-            "all",
-            "--history",
-            "--json",
-        ],
-    );
+    let listed = run(home.path(), EVERY_SESSION);
     assert!(
         listed.status.success(),
         "{}",
@@ -397,18 +397,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let mut reopened = second.wait_with_output().unwrap();
         reopened.stdout = std::fs::read(metadata_stdout).unwrap();
         reopened.stderr = std::fs::read(metadata_stderr).unwrap();
-        let active = run(
-            home.path(),
-            &[
-                "session",
-                "list",
-                "--all",
-                "--interactive",
-                "all",
-                "--history",
-                "--json",
-            ],
-        );
+        let active = run(home.path(), EVERY_SESSION);
         // Release the owned provider before asserting, including on the failure path.
         first.stdin.take().unwrap().write_all(b"done\n").unwrap();
         let first = first.wait_with_output().unwrap();
@@ -455,18 +444,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 .clone()
         };
         assert_eq!(state(active), "active");
-        let ended = run(
-            home.path(),
-            &[
-                "session",
-                "list",
-                "--all",
-                "--interactive",
-                "all",
-                "--history",
-                "--json",
-            ],
-        );
+        let ended = run(home.path(), EVERY_SESSION);
         assert_ne!(state(ended), "active");
         if !resume {
             let manifest: serde_json::Value =

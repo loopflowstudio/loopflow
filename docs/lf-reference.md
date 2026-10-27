@@ -23,8 +23,8 @@ limits this launch and its children. A Graph retains its provider selections;
 children check their destination's access before starting a provider.
 Account observations distinguish unavailable, expired and measured capacity.
 
-JSON readers emit one document; `monitor active --watch --json` emits NDJSON
-until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+JSON readers emit one document; with `--watch`, a JSON read emits NDJSON
+frames until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 

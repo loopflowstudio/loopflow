@@ -26,6 +26,7 @@ skills-lock.json
 **/.wave-persistent-token
 .lf/log/
 .lf/logs/
+.lf/cron/
 .lf/locks/
 .lf/prompts/
 .lf/releases/

@@ -111,19 +111,15 @@ fn create(source: &Path, dir: &Path) -> StoreResult<()> {
 }
 
 /// Hold the copies lock when no snapshot is in progress, or `None` while one
-/// is or no copy exists. A snapshot holds it from staging to rename, so while it is held here
-/// every staging directory under `copies` belongs to a process that died.
+/// is or no copy exists. A snapshot holds it from staging to rename, so while
+/// it is held here every staging directory under `copies` belongs to a process
+/// that died.
 pub(crate) fn idle_lock(copies: &Path) -> StoreResult<Option<std::fs::File>> {
     use fs2::FileExt;
     if !copies.is_dir() {
         return Ok(None);
     }
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(copies.join(".lock"))
-        .map_err(io)?;
+    let file = open_lock(&copies.join(".lock"))?;
     Ok(file.try_lock_exclusive().is_ok().then_some(file))
 }
 
@@ -213,14 +209,18 @@ fn clone_file(_source: &Path, _destination: &Path) -> std::io::Result<()> {
 
 fn lock(path: &Path) -> StoreResult<std::fs::File> {
     use fs2::FileExt;
-    let file = std::fs::OpenOptions::new()
+    let file = open_lock(path)?;
+    file.lock_exclusive().map_err(io)?;
+    Ok(file)
+}
+
+fn open_lock(path: &Path) -> StoreResult<std::fs::File> {
+    std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .open(path)
-        .map_err(io)?;
-    file.lock_exclusive().map_err(io)?;
-    Ok(file)
+        .map_err(io)
 }
 
 fn io(error: std::io::Error) -> StoreError {

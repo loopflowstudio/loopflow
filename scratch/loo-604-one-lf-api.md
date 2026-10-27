@@ -83,9 +83,8 @@ expensive. Individual statements are fast, so indexes are not the main gap:
 statement counts are. The one known scan (agent_sessions by execution owner)
 is indexed by #1692, merged into this branch.
 
-An orphaned reader (pid 5210, from an exited Loopflow Dev.app) had run for 3h37m
-at 99% CPU: a descendant still held its stdin open, which was the only stop
-signal.
+An orphaned reader (from an exited Loopflow Dev.app) had run for 3h37m at 99%
+CPU: a descendant still held its stdin open, which was the only stop signal.
 
 ## This change
 
@@ -185,6 +184,10 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
    `TaskDetailFacts` and `GraphExecutionFacts` for its Task. Needed before the
    Task pane watches it on a 2 s clock.
 5. Delete remaining Desktop duplicates; catalog and machine reads.
+6. `lf monitor active --watch` is a second watch loop (`session_watch.rs`: its
+   own 2 s period, `{"action": "refresh"|"rescan"}` requests, bare frames).
+   No Desktop caller; tests in `tests/active_runs_watch.rs`. Move it onto
+   `watch.rs` or delete its `--watch`, so `--watch` has one implementation.
 
 ## Delete — do not maintain
 
@@ -194,6 +197,7 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
   transport), task_history part, `taskComments` read, `allWaves` after createWave, no-stream-only reads
   (`roadmap`, `sessionPage`, `peerPlanningStatus`, `workActivity`) if the
   one-shot transport is not kept for remote Machines.
+  `session_watch.rs` (Remaining 6).
 
 ## Check results
 
@@ -217,4 +221,4 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
   (environment) and the two monitor tests above; Swift `DTOFixtureTests` 48
   passed.
 - Compress (one `TaskListArgs` for `lf task list` and its watch requests; `Watched` keeps only clock and stamp): clippy clean; `--test integration -- task_list_query task_list_watch session_list_task_status_and_top_watch` 3 passed.
-- Live p99 A/B with an installed build: deferred to gate/demo.
+- Realign (2026-10-26): no tests run; plan matched code except the unlisted `monitor active --watch` loop. Live p99 A/B with an installed build: deferred to gate/demo.

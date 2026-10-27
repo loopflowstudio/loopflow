@@ -267,19 +267,27 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
 fn repository_errors_do_not_prevent_home_command_admission() {
     let home = tempfile::tempdir().unwrap();
     let cwd = tempfile::tempdir().unwrap();
-    let output = command(home.path(), cwd.path(), &["sync", "--plan"])
-        .output()
-        .unwrap();
+    fs::create_dir_all(home.path().join(".lf")).unwrap();
+    SqliteStore::new(&home.path().join(".lf/loopflow.db")).unwrap();
+    let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
+    let parent = loopflow_test_support::RunningParent::insert(&home.path().join(".lf/loopflow.db"));
+    let child = |args: &[&str]| {
+        parent
+            .adopt(&mut command(home.path(), cwd.path(), args))
+            .output()
+            .unwrap()
+    };
+    let output = child(&["sync", "--plan"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf sync from a Git repository"));
-    let output = command(home.path(), cwd.path(), &["machine", "id"])
-        .output()
-        .unwrap();
-    let identity = success(output);
+    let identity = success(child(&["machine", "id"]));
     assert!(!identity.trim().is_empty());
-    let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     let commands: i64 = database
-        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+        .query_row(
+            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
+            [&parent.id],
+            |row| row.get(0),
+        )
         .unwrap();
     assert_eq!(
         commands, 2,

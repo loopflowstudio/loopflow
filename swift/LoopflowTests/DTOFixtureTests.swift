@@ -251,6 +251,7 @@ struct DTOFixtureTests {
         #expect(report.windows[1].viewParts.map(\.name) == ["board", "session", "tiles"])
         #expect(report.windows[1].viewParts[0].doneDays == 7)
         #expect(report.windows[1].viewParts[2].page == 2 && report.windows[1].viewParts[2].pages == 3)
+        #expect(report.windows[1].viewParts.map(\.hidden) == [false, true, false])
         #expect(window.workspaces.first?.layout.children.first?.subject == "session-one")
         #expect(window.workspaces.first?.layout.children.first?.surface == "native-surface-incarnation")
         #expect(window.workspaces.first?.layout.children.last?.surface == nil)

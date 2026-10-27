@@ -66,6 +66,9 @@ pub struct DesktopViewPart {
     pub pages: Option<u32>,
     /// A strip's tiles on the shown page; positions still count the whole list.
     pub visible: Vec<WorkWorkspaceKey>,
+    /// Hidden with `lf desktop hide` or the part's hover button; the view's
+    /// `Show…` menu lists it. A session part is hidden as its pane is.
+    pub hidden: bool,
     pub actions: Vec<String>,
 }
 
@@ -947,6 +950,29 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                     part.actions.join(", ")
                 ))
                 .into());
+            }
+            // `hide`/`show` on a board or strip set that part's hidden state in the view.
+            if let Some(part) = part.filter(|_| matches!(name.as_str(), "hide" | "show")) {
+                let mut args = args.clone();
+                args.insert("part".into(), part.name.clone());
+                return perform(
+                    &mut desktop,
+                    DesktopActionRequest {
+                        repository: window.repository.clone(),
+                        window: window.window.clone(),
+                        pane: None,
+                        action: name.clone(),
+                        args,
+                    },
+                    DesktopResolution {
+                        window: window.window.clone(),
+                        work: None,
+                        pane: None,
+                        tab: None,
+                        rule: DesktopTargetRule::Window,
+                    },
+                    json,
+                );
             }
             if let Some(request) =
                 scope.tile_request(window, name, verb.target.pane.as_deref(), args)?
@@ -2745,6 +2771,20 @@ impl DesktopInspection {
                     ));
                 }
             }
+            if !window.view_parts.is_empty() {
+                let parts = window
+                    .view_parts
+                    .iter()
+                    .map(|part| {
+                        if part.hidden {
+                            format!("({})", part.name)
+                        } else {
+                            part.name.clone()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                lines.push(format!("  Parts: {}", parts.join(" ")));
+            }
             lines.push(format!(
                 "  Actions: {} (lf desktop actions)",
                 window.actions.len()
@@ -3189,7 +3229,11 @@ mod tests {
             window
                 .view_part(Some("tiles"))
                 .map(|part| part.actions.clone()),
-            Some(vec!["page".to_owned()])
+            Some(vec![
+                "page".to_owned(),
+                "hide".to_owned(),
+                "show".to_owned()
+            ])
         );
         // `-p session` stays the conversation pane, so send and capture reach it.
         assert!(window.view_part(Some("session")).is_none());

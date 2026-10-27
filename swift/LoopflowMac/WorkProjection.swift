@@ -191,6 +191,20 @@ struct TaskRunDraft: Equatable {
     var error: String?
 }
 
+/// A Wave view's named parts, as `lf desktop -p` names them.
+enum WaveViewPart: String, CaseIterable, Hashable {
+    case board, session, tiles
+
+    /// How the view's `Show…` menu names it.
+    var title: String {
+        switch self {
+        case .board: "Board"
+        case .session: "Session"
+        case .tiles: "Tasks"
+        }
+    }
+}
+
 /// Per-window/repository navigation; independent of terminal layout and liveness.
 @MainActor
 @Observable
@@ -215,6 +229,8 @@ final class WorkNavigation {
     }
     /// Each Wave view's footer page; it outlives entering a tile and coming back.
     var wavePages: [Board: Int] = [:]
+    /// Each Wave view's hidden board and strip; its conversation hides as its session pane.
+    var hiddenViewParts: [Board: Set<WaveViewPart>] = [:]
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working
     var sidebarFocusRequested = false

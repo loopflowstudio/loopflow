@@ -201,7 +201,8 @@ struct DesktopAction {
         if let missing = arguments.first(where: { $0.required && context.args[$0.name] == nil }) {
             throw DesktopArgumentError("\(name) requires \(missing.name)=…; nothing changed.")
         }
-        if scope == .pane { _ = try context.addressed }
+        // A view part named by `part` stands in for the pane.
+        if scope == .pane, context.args["part"] == nil { _ = try context.addressed }
         let outcome = try run(context)
         return outcome ?? DesktopActionOutcome(pane: context.pane?.id, tab: context.tab ?? context.pane?.content.selectedTabID)
     }
@@ -313,6 +314,25 @@ struct DesktopAction {
         },
     ]
 
+    /// `lf desktop hide|show -p board|tiles` names a Wave view part in place of a pane.
+    private static let part = DesktopActionArgument(name: "part", kind: .string, required: false)
+
+    /// Hide or show the named Wave view part; false when the action addresses a pane.
+    private static func setViewPart(_ context: DesktopActionContext, hidden: Bool) throws -> Bool {
+        guard let name = context.args["part"] else { return false }
+        guard let view = context.model.navigation.waveView else {
+            throw DesktopTargetError("This window shows no Wave view. Nothing changed.")
+        }
+        guard let part = WaveViewPart(rawValue: name) else {
+            throw DesktopArgumentError("part=\(name) is not board, session or tiles; nothing changed.")
+        }
+        guard context.model.isHidden(part, in: view) != hidden else {
+            throw DesktopTargetError("\(name) is already \(hidden ? "hidden" : "shown"); nothing changed.")
+        }
+        context.model.setHidden(part, hidden, in: view)
+        return true
+    }
+
     private static func cycle(_ context: DesktopActionContext, by offset: Int) throws -> DesktopActionOutcome? {
         guard !context.model.sidebarTaskIDs.isEmpty else { throw DesktopTargetError("The sidebar shows no Tasks. Nothing changed.") }
         context.model.cycleSidebarTask(offset)
@@ -351,7 +371,8 @@ struct DesktopAction {
             else { workspace.toggleFocus(pane.id) }
             return nil
         },
-        DesktopAction("hide", "Hide Pane", scope: .pane) { context in
+        DesktopAction("hide", "Hide Pane", scope: .pane, arguments: [part]) { context in
+            if try setViewPart(context, hidden: true) { return nil }
             let (workspace, pane) = try context.addressed
             workspace.setCollapsed(paneId: pane.id, collapsed: true)
             return nil
@@ -361,7 +382,8 @@ struct DesktopAction {
             workspace.closePane(pane.id, tab: context.tab)
             return nil
         },
-        DesktopAction("show", "Show Pane", scope: .pane) { context in
+        DesktopAction("show", "Show Pane", scope: .pane, arguments: [part]) { context in
+            if try setViewPart(context, hidden: false) { return nil }
             let (workspace, pane) = try context.addressed
             guard workspace.multiplexer.collapsedPaneIds.contains(pane.id) else {
                 throw DesktopTargetError("\(pane.id) is already shown; nothing changed.")

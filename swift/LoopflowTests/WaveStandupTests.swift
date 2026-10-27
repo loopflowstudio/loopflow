@@ -128,6 +128,46 @@ struct WaveStandupTests {
         #expect(throws: (any Error).self) { try board.inspect().find(viewWithAccessibilityIdentifier: "wave-current-project") }
     }
 
+    @Test func wavePartsHideOnHoverAndTheBoardHeaderShowsThem() throws {
+        let repo = try roadmap().wave.repo
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering is passive") }, repoPath: repo)
+        model.applyFixture(roadmap: .available(try snapshot()), waves: .available([]), workActivity: .loading, repos: [])
+        let registry = SessionsWorkspaceRegistry(localMachineId: "fixture")
+        model.bindWorkspaces(registry, repository: "repo")
+        let conversation = registry.workspace(for: .init(repository: "repo", kind: .repository, id: "repo"),
+                                              title: "repo", location: nil)
+        let view = WorkNavigation.Board.repository
+        #expect(model.navigation.waveView == view)
+        // Nothing hidden: the board header has no Show… menu.
+        #expect(throws: (any Error).self) {
+            try WaveStandupBoard(model: model, view: view).inspect().find(viewWithAccessibilityIdentifier: "show-hidden-panes")
+        }
+        let hover = conversation.stripHover("wave-tiles")
+        hover.isHovered = true
+        let strip = HideablePart(part: .tiles, hover: hover, hide: { model.setHidden(.tiles, true, in: view) }) { Text("Tasks") }
+        try strip.inspect().find(viewWithAccessibilityIdentifier: "wave-hide-tiles").button().tap()
+        // `lf desktop hide -p session` hides the conversation as its pane; `-p board` names the part.
+        let pane = try #require(conversation.multiplexer.sessionPane)
+        conversation.setCollapsed(paneId: pane.id, collapsed: true)
+        try DesktopAction.perform(DesktopActionRequest(repository: "repo", window: "window", pane: nil, action: "hide",
+                                                       args: ["part": "board"]), model: model, workspaces: registry)
+        #expect(model.desktopViewParts(repository: "repo").map(\.hidden) == [true, true, true])
+        #expect(throws: (any Error).self) {
+            try DesktopAction.perform(DesktopActionRequest(repository: "repo", window: "window", pane: nil, action: "hide",
+                                                           args: ["part": "board"]), model: model, workspaces: registry)
+        }
+        // With the board hidden, the view's header row carries Show….
+        let header = WaveViewHeader(model: model, view: view)
+        #expect(try header.inspect().find(ShowHiddenMenu.self).actualView().items.map(\.title) == ["Board", "Session", "Tasks"])
+        try header.inspect().find(viewWithAccessibilityIdentifier: "show-pane-session").button().tap()
+        #expect(!conversation.multiplexer.collapsedPaneIds.contains(pane.id))
+        try DesktopAction.perform(DesktopActionRequest(repository: "repo", window: "window", pane: nil, action: "show",
+                                                       args: ["part": "board"]), model: model, workspaces: registry)
+        let board = WaveStandupBoard(model: model, view: view)
+        try board.inspect().find(viewWithAccessibilityIdentifier: "show-pane-tiles").button().tap()
+        #expect(model.desktopViewParts(repository: "repo").map(\.hidden) == [false, false, false])
+    }
+
     private func snapshot() throws -> RoadmapSnapshot {
         try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
     }

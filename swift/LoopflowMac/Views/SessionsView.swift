@@ -1221,18 +1221,36 @@ struct SessionsContentView: View {
             } else if key.kind != .task, active, let view = navigation.waveView {
                 // A Wave view, the repository page included: the standup board and the
                 // conversation share the top band; the Tasks run along the bottom,
-                // golden proportions both ways.
+                // golden proportions both ways. A hidden part gives its room to the rest.
+                let shown = { (part: WaveViewPart) in !model.isHidden(part, in: view) }
+                let top = shown(.board) || shown(.session)
                 GeometryReader { geometry in
                     VStack(spacing: 0) {
-                        HStack(spacing: 0) {
-                            WaveStandupBoard(model: model, view: view)
-                                .frame(width: geometry.size.width * FocusSizing.golden)
-                            Divider()
-                            conversationPanes(key, entry, isFocused: navigation.palette == nil)
+                        if !shown(.board) { WaveViewHeader(model: model, view: view) }
+                        if top {
+                            HStack(spacing: 0) {
+                                if shown(.board) {
+                                    HideablePart(part: .board, hover: entry.stripHover("wave-board"), hide: { model.setHidden(.board, true, in: view) }) {
+                                        WaveStandupBoard(model: model, view: view)
+                                    }
+                                    .frame(width: shown(.session) ? geometry.size.width * FocusSizing.golden : nil)
+                                }
+                                if shown(.board), shown(.session) { Divider() }
+                                if shown(.session) {
+                                    HideablePart(part: .session, hover: entry.stripHover("wave-session"), hide: { model.setHidden(.session, true, in: view) }) {
+                                        conversationPanes(key, entry, isFocused: navigation.palette == nil)
+                                    }
+                                }
+                            }
+                            .frame(height: shown(.tiles) ? geometry.size.height * FocusSizing.golden : nil)
                         }
-                        .frame(height: geometry.size.height * FocusSizing.golden)
-                        Divider()
-                        WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
+                        if shown(.tiles) {
+                            if top { Divider() }
+                            HideablePart(part: .tiles, hover: entry.stripHover("wave-tiles"), hide: { model.setHidden(.tiles, true, in: view) }) {
+                                WaveTiles(model: model, workspaces: workspaces, sessions: store, view: view)
+                            }
+                        }
+                        if !top, !shown(.tiles) { Spacer() }
                     }
                 }
             } else if terminals {

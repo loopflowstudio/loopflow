@@ -1200,6 +1200,10 @@ fn desktop_state_retains_outer_and_inner_layouts() {
     );
     assert_eq!(parts[0].done_days, Some(7));
     assert_eq!((parts[2].page, parts[2].pages), (Some(2), Some(3)));
+    assert_eq!(
+        parts.iter().map(|part| part.hidden).collect::<Vec<_>>(),
+        [false, true, false]
+    );
     let encoded = serde_json::to_string(&reading).unwrap();
     assert_eq!(
         serde_json::from_str::<DesktopInspection>(&encoded).unwrap(),

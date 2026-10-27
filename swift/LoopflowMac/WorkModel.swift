@@ -753,18 +753,52 @@ final class WorkModel {
         let tiles = boardTiles(view)
         let pages = boardPlan(view)?.slots.pages(tiles) ?? [tiles]
         let page = min(navigation.wavePages[view] ?? 0, pages.count - 1)
-        let repository = workspaceRepository ?? repository
-        let work = if case .wave(let id) = view { WorkWorkspaceKey(repository: repository, kind: .wave, id: id) }
-            else { WorkWorkspaceKey(repository: repository, kind: .repository, id: repository) }
         return [
             DesktopViewPart(name: "board", kind: .board, work: nil, doneDays: doneDays, text: standupText(view, doneDays: doneDays),
-                            page: nil, pages: nil, visible: [], actions: ["filter"]),
-            DesktopViewPart(name: "session", kind: .session, work: work, doneDays: nil, text: nil,
-                            page: nil, pages: nil, visible: [], actions: []),
+                            page: nil, pages: nil, visible: [], hidden: isHidden(.board, in: view),
+                            actions: ["filter", "hide", "show"]),
+            DesktopViewPart(name: "session", kind: .session, work: viewWork(view, repository: workspaceRepository ?? repository),
+                            doneDays: nil, text: nil, page: nil, pages: nil, visible: [], hidden: isHidden(.session, in: view),
+                            actions: []),
             DesktopViewPart(name: "tiles", kind: .strip, work: nil, doneDays: nil, text: nil,
                             page: page + 1, pages: pages.count, visible: pages[page].map(\.work),
-                            actions: ["page"]),
+                            hidden: isHidden(.tiles, in: view), actions: ["page", "hide", "show"]),
         ]
+    }
+
+    /// The Work whose conversation a Wave view shows.
+    private func viewWork(_ view: WorkNavigation.Board, repository: String) -> WorkWorkspaceKey {
+        if case .wave(let id) = view { WorkWorkspaceKey(repository: repository, kind: .wave, id: id) }
+        else { WorkWorkspaceKey(repository: repository, kind: .repository, id: repository) }
+    }
+
+    /// The retained workspace of the Work this window shows.
+    var shownWorkspace: SessionsWorkspace? {
+        workspaceRegistry?.selectedWork.flatMap { workspaceRegistry?.retained($0) }
+    }
+
+    /// The Wave view's conversation workspace, once it is retained.
+    private func viewWorkspace(_ view: WorkNavigation.Board) -> SessionsWorkspace? {
+        guard let repository = workspaceRepository else { return nil }
+        return workspaceRegistry?.retained(viewWork(view, repository: repository))
+    }
+
+    /// The board and strip hide in navigation; the conversation hides as its session
+    /// pane does, so `lf desktop hide -p session` and the hover button agree.
+    func isHidden(_ part: WaveViewPart, in view: WorkNavigation.Board) -> Bool {
+        guard part == .session else { return navigation.hiddenViewParts[view, default: []].contains(part) }
+        guard let store = viewWorkspace(view)?.multiplexer, let pane = store.sessionPane else { return false }
+        return store.collapsedPaneIds.contains(pane.id)
+    }
+
+    func setHidden(_ part: WaveViewPart, _ hidden: Bool, in view: WorkNavigation.Board) {
+        guard part == .session else {
+            if hidden { navigation.hiddenViewParts[view, default: []].insert(part) }
+            else { navigation.hiddenViewParts[view]?.remove(part) }
+            return
+        }
+        guard let workspace = viewWorkspace(view), let pane = workspace.multiplexer.sessionPane else { return }
+        workspace.setCollapsed(paneId: pane.id, collapsed: hidden)
     }
 
     /// The board as `lf desktop capture -p board` reads it.

@@ -109,3 +109,12 @@ point in the ui".
   Tasks item and clickable Dashboard crumbs are gone. The ⌘1–9 menu stays as
   **Go to Task** (it selects sidebar rows, not a Dashboard). `working-tasks`/`goto`
   actions stay for `lf desktop`. A Dashboard's crumb is plain text; Back returns to it.
+
+16. **Show… placement and fresh Tasks (hide/Show…, Oct 26).** Assumed: the Task
+   header is the titlebar crumb (`Show…` follows the Task heading); on a Wave view it
+   is the board header, moving to a slim `WaveViewHeader` row while the board itself
+   is hidden. A fresh Task's empty Shell/Browser start hidden, so its `Show…` lists
+   them, matching `hidden_panes`. A lone visible pane has no strip and cannot hide
+   (the last pane stays). Board/tiles hidden state lives in navigation, not saved
+   across launches.
+

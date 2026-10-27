@@ -98,15 +98,17 @@ public struct DesktopViewPart: Codable, Sendable, Equatable {
     public let pages: Int?
     /// A strip's tiles on the shown page; positions still count the whole list.
     public let visible: [WorkWorkspaceKey]
+    /// Hidden by `lf desktop hide` or its hover button; the view's `Show…` menu lists it.
+    public let hidden: Bool
     public let actions: [String]
 
     public init(name: String, kind: Kind, work: WorkWorkspaceKey?, doneDays: Int?, text: String?,
-                page: Int?, pages: Int?, visible: [WorkWorkspaceKey], actions: [String]) {
+                page: Int?, pages: Int?, visible: [WorkWorkspaceKey], hidden: Bool, actions: [String]) {
         self.name = name; self.kind = kind; self.work = work; self.doneDays = doneDays; self.text = text
-        self.page = page; self.pages = pages; self.visible = visible; self.actions = actions
+        self.page = page; self.pages = pages; self.visible = visible; self.hidden = hidden; self.actions = actions
     }
     enum CodingKeys: String, CodingKey {
-        case name, kind, work, text, page, pages, visible, actions
+        case name, kind, work, text, page, pages, visible, hidden, actions
         case doneDays = "done_days"
     }
 }

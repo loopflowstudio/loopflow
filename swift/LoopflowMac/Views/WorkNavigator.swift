@@ -353,6 +353,9 @@ struct WorkBreadcrumbs: View {
             }
             if let task = model.breadcrumb?.task {
                 TaskHeading(task: task.task)
+                if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {
+                    ShowHiddenMenu(workspace: workspace).font(Typography.caption())
+                }
             }
             if let target = model.machineTarget {
                 WorkMachineControl(model: model, target: target).padding(.leading, 6)

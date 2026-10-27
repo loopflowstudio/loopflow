@@ -206,8 +206,11 @@
           "page": null,
           "pages": null,
           "visible": [],
+          "hidden": false,
           "actions": [
-            "filter"
+            "filter",
+            "hide",
+            "show"
           ]
         },
         {
@@ -223,6 +226,7 @@
           "page": null,
           "pages": null,
           "visible": [],
+          "hidden": true,
           "actions": []
         },
         {
@@ -240,8 +244,11 @@
               "id": "task_44444444444444444444444444444444"
             }
           ],
+          "hidden": false,
           "actions": [
-            "page"
+            "page",
+            "hide",
+            "show"
           ]
         }
       ],

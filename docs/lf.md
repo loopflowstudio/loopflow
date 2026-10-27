@@ -1210,10 +1210,15 @@ lf desktop capture -p board              # the standup board as text
 lf desktop do filter -p board days=14    # Done covers 14 days (0 = all); kept on this Mac
 lf desktop do page -p tiles page=2       # the Task strip turns to page 2
 lf desktop enter 4                       # Task 4 in full; the strip turns to its page
+lf desktop hide -p board                 # the conversation and strip take its room
+lf desktop show -p board
 ```
 
-`lf desktop state` lists each view's parts under `view_parts`, with their state
-and the verbs they accept.
+`lf desktop state` lists each view's parts under `view_parts`, with their state,
+whether they are `hidden`, and the verbs they accept. Every pane and view part
+also hides from a button on hover; the view's header (the Task header, or the
+board's header row on a Wave view) offers a `Show…` menu while anything is
+hidden. `hide -p session` on a Wave view hides its conversation pane, as on a Task.
 
 `hide`, `show`, `move` and `resize` aimed at a tile edit the shared record, so
 every window showing it and the next launch agree: a saved Dashboard's

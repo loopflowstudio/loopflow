@@ -142,7 +142,13 @@
       "name": "hide",
       "title": "Hide Pane",
       "scope": "pane",
-      "arguments": [],
+      "arguments": [
+        {
+          "name": "part",
+          "kind": "string",
+          "required": false
+        }
+      ],
       "keys": []
     },
     {
@@ -158,7 +164,13 @@
       "name": "show",
       "title": "Show Pane",
       "scope": "pane",
-      "arguments": [],
+      "arguments": [
+        {
+          "name": "part",
+          "kind": "string",
+          "required": false
+        }
+      ],
       "keys": []
     },
     {

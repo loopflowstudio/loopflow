@@ -322,6 +322,8 @@ one plan; `DashboardView.swift:37` still offers Working Tasks.
 - `scripts/test_desktop.sh --filter 'WaveStandupTests|TaskHistoryFilterTests|DesktopHeadlessTests|DTOFixtureTests|DashboardWorkspaceTests|WorkNavigationTests|DesktopPaneControlTests|WorkDestinationTests'` → 203 pass. `WorkOpeningCLITests` needs `target/debug/lf` built (gate).
 - Compress (Oct 26): dropped the redundant part filter on `tile_request` (part verbs are never tile verbs) and the empty-verbs branch; `WaveStandup` carries `doneDays` (one default from `TaskHistoryFilter`), Backlog is two ordered filters instead of a sort. Fixed `every_verb_names_a_registry_action` to exempt `do`. `cargo test -p loopflow --lib desktop` → 21 pass; Swift filter (WaveStandup/TaskHistoryFilter/DesktopHeadless/WorkNavigation) → 61 pass.
 
+- Oct 26 (hide/Show…): `cargo test -p loopflow --lib desktop::` 13 pass, `--test integration dto_fixtures` 42 pass, clippy clean; Swift filter (WorkspacePanes/DesktopPaneControl/WaveStandup/WorkDestination/MultiplexerStore/DashboardWorkspace/WorktreeWorkspace/DTOFixture) pass. `hide -p board` CLI routing has no live-Desktop test (gate/demo).
+
 ## Direction added October 26, 2026, after acceptance (binding; supersedes conflicts above)
 
 1. **Align with LOO-604** (branch `jack/loo-604-one-lf-api-for-loopflow-state-inventory-desktops-queries`,
@@ -346,3 +348,32 @@ one plan; `DashboardView.swift:37` still offers Working Tasks.
    The sidebar stays active Tasks only. A repository with no Waves: out of scope
    (LOO-621). Built (c19e51920c, cda832a1cb); the strip shows started Tasks only
    (questions #12), unstarted ones live in Backlog.
+
+## Demo direction — October 26, 2026 (binding)
+
+Jack Heart: "we need to make sure every pane has a hide button on hover that adds a
+Show... in the task header". Every pane in Task and Wave/repository views gets a
+hover hide button; hidden panes appear in a `Show…` menu in the view's header and
+restore from there. Use the existing hidden-pane state and `lf desktop hide/show`
+semantics (one hidden state; UI and CLI agree); `board` and `tiles` become hideable
+view parts like workspace panes. See `scratch/demo-wave-view.md`.
+
+Built October 26: every Task pane strip reveals Hide (eye.slash) on hover, focused
+or not (Close stays for tabs); Wave parts wrap in `HideablePart` (hover flag on the
+Wave workspace). Board/tiles hide in `WorkNavigation.hiddenViewParts`; the Wave
+conversation hides as its session pane (`collapsedPaneIds`), so `hide -p session`
+and the button agree. `WorkModel.isHidden/setHidden` is the one reader/writer.
+`ShowHiddenMenu` sits after the Task crumb and in the board header (in
+`WaveViewHeader` while the board is hidden); absent when nothing is hidden.
+`DesktopViewPart.hidden` reports it; `lf desktop hide|show -p board|tiles` sends
+`part=` to the pane-scoped `hide`/`show`.
+
+## More demo direction — October 26, 2026 (binding; not yet built)
+
+Jack Heart, October 26, 2026 (LOO-594 demo), in addition to hover-hide panes with a Show… menu in the header:
+
+1. "we want the section borders resizable": the dividers between the board and the Wave Session, and between the top band and the Task strip, drag to resize, like Task pane dividers (same ratio state that lf desktop resize writes; reported by lf desktop state).
+2. "the task lists also need to auto paginate and scroll": board Task lists scroll, and load the next page automatically as you reach the end, replacing "+N more".
+3. "I prefer turning it in to just showing one section but the section is selectable. Defaults to backlog": the board shows one section at a time, Done, Active or Backlog, picked by a selector in the board header, defaulting to Backlog. The Done-days control stays on Done. The selected section is reported in the board part state (replacing done_days-only state) and settable via lf desktop do.
+4. "maybe we can switch the session and the tasks pane back": the Wave/repository Session goes back on the left, the board on the right (strip stays below).
+5. "but add a zoom on every pane / so that panel can expand to whole page, and add sometjhing to breadcrumb / with an easy zoom otu": every pane (Task: session, shell, browser; Wave: board, session, tiles) has a hover zoom button beside hide. Zoom fills the whole view; the breadcrumb gains a segment naming the zoomed pane (e.g. "Product › Board"), and clicking the parent crumb, a zoom-out control, or Esc returns. Same zoom state as lf desktop zoom, reported by lf desktop state.

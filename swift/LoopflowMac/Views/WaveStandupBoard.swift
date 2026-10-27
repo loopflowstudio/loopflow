@@ -134,8 +134,12 @@ struct WaveStandupBoard: View {
                 chapter(roadmap)
                 ForEach(roadmap.unavailableTasks, id: \.taskId) { WavePlanningNotice(model: model, task: $0) }
             } else if view == .repository {
-                Text(model.repositoryName).font(Typography.strong(24))
-                    .accessibilityIdentifier("wave-title")
+                HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+                    Text(model.repositoryName).font(Typography.strong(24))
+                        .accessibilityIdentifier("wave-title")
+                    Spacer(minLength: 0)
+                    ShowHiddenMenu(model: model, view: view)
+                }
             }
             if let error = model.roadmap.errorMessage {
                 Text("Refresh failed · \(error)").foregroundStyle(palette.warning)
@@ -172,6 +176,7 @@ struct WaveStandupBoard: View {
                 .help(roadmap.wave.goal)
                 .accessibilityIdentifier("wave-objective")
             Spacer(minLength: 0)
+            ShowHiddenMenu(model: model, view: view)
             Menu {
                 Button("Project history") {
                     model.historyReference = nil
@@ -254,6 +259,29 @@ struct WaveStandupBoard: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityIdentifier("wave-column-\(id)")
+    }
+}
+
+/// A Wave view's header row while its board is hidden: the view's name and its
+/// `Show…` menu, which the board header carries otherwise.
+struct WaveViewHeader: View {
+    let model: WorkModel
+    let view: WorkNavigation.Board
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            Text(title).font(Typography.strong(15)).lineLimit(1)
+            Spacer(minLength: 0)
+            ShowHiddenMenu(model: model, view: view)
+        }
+        .padding(.horizontal, Spacing.xl).padding(.vertical, Spacing.sm)
+        .background(palette.background)
+        .accessibilityIdentifier("wave-view-header")
+    }
+
+    private var title: String {
+        if case .wave(let id) = view { model.wave(id: id)?.wave.displayName ?? id } else { model.repositoryName }
     }
 }
 

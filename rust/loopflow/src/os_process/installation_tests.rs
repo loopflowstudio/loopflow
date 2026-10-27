@@ -49,30 +49,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     let replacement = files.path().join("updated/lf");
     fs::create_dir(replacement.parent().unwrap()).unwrap();
     fs::copy(binary, &replacement).unwrap();
-    let selection = |binary: &Path| {
-        let artifact = ArtifactIdentity::capture(ArtifactRole::Cli, binary).unwrap();
-        let set = ArtifactSet {
-            id: "entry-proof".into(),
-            source: InstallSource::Published,
-            source_revision: "fixture".into(),
-            source_identity: "fixture".into(),
-            build_label: None,
-            content_sha256: installation::artifact_set_sha256(binary, None, None).unwrap(),
-            artifacts: vec![artifact],
-        };
-        ActiveInstall {
-            schema_version: 1,
-            selection: InstallSelection {
-                installation_id: binary.display().to_string(),
-                source: InstallSource::Published,
-                artifact_set: set.clone(),
-                store: database.clone(),
-            },
-            published_fallback: set.clone(),
-            retained_published_sets: vec![set],
-        }
-    };
-    let prior = selection(&failing);
+    let prior = selection(&failing, &database);
     installation::write_active(&root, &prior).unwrap();
     let gate =
         installation::install_entry_gate(&root, &ArtifactRole::Cli, Path::new(binary)).unwrap();
@@ -120,42 +97,8 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     assert_eq!(ready, "retry-ready\n");
     provider.stdout = Some(stdout.into_inner());
     // Retry the failed command from this same live provider and checkout.
-    let active = selection(&replacement);
-    let receipt = SwitchReceipt {
-        schema_version: 1,
-        id: "entry-switch".into(),
-        prior: Some(prior.selection.clone()),
-        target: active.selection.clone(),
-        published_fallback: Some(prior.published_fallback.clone()),
-        target_published_fallback: Some(active.published_fallback.clone()),
-        phase: SwitchPhase::Settled,
-        recovery_owner: RecoveryOwner::Candidate,
-        target_store_advance_started: true,
-        target_store_advanced: true,
-        active_selection_committed: true,
-        coordinator: prior
-            .selection
-            .artifact_set
-            .artifact(&ArtifactRole::Cli)
-            .unwrap()
-            .clone(),
-        candidate: active
-            .selection
-            .artifact_set
-            .artifact(&ArtifactRole::Cli)
-            .unwrap()
-            .clone(),
-        activation: ActivationTargets {
-            cli: gate.clone(),
-            daemon: None,
-            app: None,
-            legacy_app: None,
-        },
-        app_was_running: false,
-        disposable_store_owned: false,
-    };
-    installation::write_switch(&root, &receipt).unwrap();
-    installation::settle_switch(&root, &receipt, &active).unwrap();
+    let active = selection(&replacement, &database);
+    switch(&root, &prior, &active, &gate);
     provider
         .stdin
         .take()
@@ -234,4 +177,228 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
     drop(store);
     fs::remove_dir_all(root).unwrap();
     fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
+fn graph_live_across_switch_runs_next_step_on_selected_install() {
+    assert!(Path::new("/.dockerenv").is_file());
+    let account = installation::account_home().unwrap();
+    let root = installation::root().unwrap();
+    let home = account.join(".lf");
+    assert!(!root.exists());
+    assert!(!home.exists());
+    let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN", "LF_AGENT_CALLER"]);
+    fs::create_dir(&home).unwrap();
+    let database = home.join("loopflow.db");
+    crate::store::migrations::apply_sqlite(&Connection::open(&database).unwrap()).unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let binary = loopflow_test_support::lf_binary();
+    // Step 1 holds at its first git call, a fifo, until the switch settles.
+    let release = files.path().join("release");
+    let held = files.path().join("held");
+    assert!(Command::new("mkfifo")
+        .arg(&release)
+        .status()
+        .unwrap()
+        .success());
+    let tools = files.path().join("tools");
+    fs::create_dir(&tools).unwrap();
+    fs::write(
+        tools.join("git"),
+        format!(
+            "#!/bin/sh\nif [ -n \"${graph}\" ] && mkdir '{}' 2>/dev/null; then read _ < '{}'; fi\nexec /usr/bin/git \"$@\"\n",
+            held.display(),
+            release.display(),
+            graph = crate::ops::graph_process::GRAPH_ID_ENV,
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(tools.join("git"), fs::Permissions::from_mode(0o755)).unwrap();
+    // Two copies of this lf; trailing bytes give the prior one its own digest.
+    let prior_cli = files.path().join("prior/lf");
+    fs::create_dir(prior_cli.parent().unwrap()).unwrap();
+    fs::copy(binary, &prior_cli).unwrap();
+    fs::OpenOptions::new()
+        .append(true)
+        .open(&prior_cli)
+        .unwrap()
+        .write_all(b"prior install")
+        .unwrap();
+    let replacement = files.path().join("updated/lf");
+    fs::create_dir(replacement.parent().unwrap()).unwrap();
+    fs::copy(binary, &replacement).unwrap();
+    let prior = selection(&prior_cli, &database);
+    installation::write_active(&root, &prior).unwrap();
+    let gate =
+        installation::install_entry_gate(&root, &ArtifactRole::Cli, Path::new(binary)).unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    repo.create_file(
+        ".lf/graphs/two-steps.yaml",
+        "- cmd: sync --plan\n- cmd: sync --plan\n",
+    );
+    let mut runner = Command::new(&gate);
+    runner
+        .env_clear()
+        .env("HOME", &account)
+        .env("LF_HOME", &home)
+        .env("PATH", format!("{}:/usr/bin:/bin", tools.display()))
+        .current_dir(repo.path())
+        .args(["graph", "two-steps", "--batch"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut runner = runner.spawn().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while !held.exists() {
+        if runner.try_wait().unwrap().is_some() || std::time::Instant::now() > deadline {
+            let ps = Command::new("ps")
+                .args(["-eo", "pid,ppid,args"])
+                .output()
+                .unwrap();
+            let recorded = Connection::open(&database)
+                .unwrap()
+                .prepare("SELECT command, exit_code FROM processes ORDER BY rowid")
+                .unwrap()
+                .query_map([], |row| {
+                    Ok(format!(
+                        "{} -> {:?}",
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<i64>>(1)?
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            let _ = runner.kill();
+            let output = runner.wait_with_output().unwrap();
+            panic!(
+                "step 1 never held on the prior install: {:?}\n{}\n{recorded:#?}\n{}\n{}",
+                output.status,
+                String::from_utf8_lossy(&ps.stdout),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Promote while the Graph's first step is running on the prior install.
+    let active = selection(&replacement, &database);
+    switch(&root, &prior, &active, &gate);
+    fs::write(&release, "go\n").unwrap();
+    let output = runner.wait_with_output().unwrap();
+    // Exited on its own: the runner was never stopped or relaunched.
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let connection = Connection::open(&database).unwrap();
+    let graphs: i64 = connection
+        .query_row("SELECT count(*) FROM graph_processes", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(graphs, 1, "one Graph, no relaunch");
+    let steps = connection
+        .prepare(
+            "SELECT s.node, p.command, p.exit_code FROM graph_process_steps s
+             JOIN processes p ON p.id=s.lf_process_id ORDER BY s.seq",
+        )
+        .unwrap()
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, u32>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    let nodes = steps.iter().map(|(node, _, _)| *node).collect::<Vec<_>>();
+    assert_eq!(nodes.len(), 2, "each node once, no replay: {steps:?}");
+    assert_ne!(nodes[0], nodes[1], "{steps:?}");
+    assert!(
+        steps.iter().all(|(_, _, exit)| *exit == Some(0)),
+        "{steps:?}"
+    );
+    let (previous, updated) = (prior_cli.to_str().unwrap(), replacement.to_str().unwrap());
+    assert!(steps[0].1.contains(previous), "{steps:?}");
+    assert!(steps[1].1.contains(updated), "{steps:?}");
+    let runner: String = connection
+        .query_row(
+            "SELECT p.command FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        runner.contains(previous),
+        "the runner keeps its lf: {runner}"
+    );
+    drop(connection);
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(home).unwrap();
+}
+
+fn selection(binary: &Path, database: &Path) -> ActiveInstall {
+    let artifact = ArtifactIdentity::capture(ArtifactRole::Cli, binary).unwrap();
+    let set = ArtifactSet {
+        id: "entry-proof".into(),
+        source: InstallSource::Published,
+        source_revision: "fixture".into(),
+        source_identity: "fixture".into(),
+        build_label: None,
+        content_sha256: installation::artifact_set_sha256(binary, None, None).unwrap(),
+        artifacts: vec![artifact],
+    };
+    ActiveInstall {
+        schema_version: 1,
+        selection: InstallSelection {
+            installation_id: binary.display().to_string(),
+            source: InstallSource::Published,
+            artifact_set: set.clone(),
+            store: database.to_path_buf(),
+        },
+        published_fallback: set.clone(),
+        retained_published_sets: vec![set],
+    }
+}
+
+/// Write and settle a compatible switch from `prior` to `active`.
+fn switch(root: &Path, prior: &ActiveInstall, active: &ActiveInstall, gate: &Path) {
+    let cli = |install: &ActiveInstall| {
+        install
+            .selection
+            .artifact_set
+            .artifact(&ArtifactRole::Cli)
+            .unwrap()
+            .clone()
+    };
+    let receipt = SwitchReceipt {
+        schema_version: 1,
+        id: "entry-switch".into(),
+        prior: Some(prior.selection.clone()),
+        target: active.selection.clone(),
+        published_fallback: Some(prior.published_fallback.clone()),
+        target_published_fallback: Some(active.published_fallback.clone()),
+        phase: SwitchPhase::Settled,
+        recovery_owner: RecoveryOwner::Candidate,
+        target_store_advance_started: true,
+        target_store_advanced: true,
+        active_selection_committed: true,
+        coordinator: cli(prior),
+        candidate: cli(active),
+        activation: ActivationTargets {
+            cli: gate.to_path_buf(),
+            daemon: None,
+            app: None,
+            legacy_app: None,
+        },
+        app_was_running: false,
+        disposable_store_owned: false,
+    };
+    installation::write_switch(root, &receipt).unwrap();
+    installation::settle_switch(root, &receipt, active).unwrap();
 }

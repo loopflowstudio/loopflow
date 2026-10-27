@@ -2,6 +2,7 @@
 //! Invalid observations are errors, never evidence that a process disappeared.
 
 use std::io;
+use std::path::PathBuf;
 #[cfg(not(target_os = "macos"))]
 use std::process::Command;
 
@@ -47,6 +48,24 @@ impl OsProcess {
     #[cfg(target_os = "macos")]
     pub(crate) fn sample(_now: i64) -> io::Result<Vec<Self>> {
         macos::sample()
+    }
+
+    /// The executable file `pid` runs, resolved by the kernel rather than the
+    /// path it was launched by; `None` when the kernel withholds it.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn executable(pid: u32) -> Option<PathBuf> {
+        macos::executable(pid)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn executable(pid: u32) -> Option<PathBuf> {
+        let path = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+        // Linux names a replaced or removed file `<path> (deleted)`.
+        let text = path.to_string_lossy();
+        Some(match text.strip_suffix(" (deleted)") {
+            Some(path) => PathBuf::from(path),
+            None => path,
+        })
     }
 
     /// Zombies and processes the kernel is tearing down can never run user code.
@@ -174,6 +193,13 @@ mod tests {
 
     use super::{parse, OsProcess};
     use crate::journal::ProcessIdentityEvidence;
+
+    #[test]
+    fn executable_is_the_running_file_not_its_launch_path() {
+        let expected = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        let actual = OsProcess::executable(std::process::id()).unwrap();
+        assert_eq!(std::fs::canonicalize(actual).unwrap(), expected);
+    }
 
     #[test]
     fn activity_and_control_share_identity_and_zombie_evidence() {

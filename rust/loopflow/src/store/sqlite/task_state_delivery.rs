@@ -5,6 +5,7 @@ use crate::work::edit::WorkValue as Edit;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::TaskId;
+use crate::linear::StateHistory;
 use crate::store::{StoreError, StoreResult};
 
 use super::SqliteStore;
@@ -15,8 +16,8 @@ pub(crate) struct TaskStateDelivery {
     pub task_id: TaskId,
     pub target: String,
     pub attempted: bool,
-    base_revision: Option<String>,
-    base_state: Option<String>,
+    pub base_revision: Option<String>,
+    pub base_state: Option<String>,
 }
 
 fn read_delivery(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskStateDelivery> {
@@ -61,12 +62,14 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
 }
 
 /// Acquisition and delivery use the same transaction rule. No execution rows change.
+/// Only state delivery, holding the Task's delivery lock, supplies known history.
 pub(crate) fn reconcile_in(
     conn: &Connection,
     task: &TaskId,
     observed_revision: Option<&str>,
     observed: &crate::work::edit::Disposition,
     evidence: &str,
+    history: StateHistory,
 ) -> StoreResult<bool> {
     let pending: Option<(TaskStateDelivery, Option<String>)> = conn.query_row(
         "SELECT d.id,d.task_id,d.target,d.attempted,d.base_revision,d.base_state,t.planning_provider_revision
@@ -83,7 +86,6 @@ pub(crate) fn reconcile_in(
         id,
         target,
         base_state,
-        base_revision,
         attempted,
         ..
     } = delivery;
@@ -102,12 +104,20 @@ pub(crate) fn reconcile_in(
         )?;
         return Ok(false);
     }
-    // An unrelated provider revision does not conflict with an unattempted save.
-    // After an uncertain write, a changed revision may represent completion/reopening.
-    if observed.planning_state == base_state
-        && !(attempted && observed_revision != base_revision.as_deref())
-    {
-        return Ok(true);
+    // An unchanged state is pending unless history proves an uncertain write
+    // landed or the issue moved. Only proof of no effect re-arms the write.
+    if observed.planning_state == base_state {
+        match (attempted, history) {
+            (false, _) | (true, StateHistory::Unknown) => return Ok(true),
+            (true, StateHistory::Unchanged) => {
+                conn.execute(
+                    "UPDATE task_state_deliveries SET attempted=0,base_revision=?2 WHERE id=?1",
+                    params![id, observed_revision],
+                )?;
+                return Ok(true);
+            }
+            (true, StateHistory::Changed) => {}
+        }
     }
     conn.execute(
         "UPDATE task_state_deliveries SET settled=1,conflict_json=?2,error=NULL WHERE id=?1",

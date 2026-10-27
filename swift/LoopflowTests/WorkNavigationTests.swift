@@ -68,10 +68,10 @@ struct WorkNavigationTests {
 
         model.select(.wave(id: wave))
         #expect(model.navigation.sidebarWaveID == wave)
-        #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.sidebarWaves.isEmpty)
         model.select(.task(id: "issue-review"))
-        #expect(model.sidebarTaskIDs == ["issue-now", "issue-review"])
+        #expect(model.sidebarTaskIDs == ["issue-now"])
         model.select(nil)
         #expect(model.selection == nil)
         #expect(model.sidebarTaskIDs == ["issue-now"])
@@ -184,16 +184,17 @@ struct WorkNavigationTests {
         #expect(model.navigation.destination == .work(.task(id: "issue-review")))
     }
 
-    @Test("Inside a Wave, ⌘N counts the Wave's rows, not Working Tasks")
+    @Test("Inside a Wave, the sidebar and ⌘N count its started Tasks; the board keeps unstarted ones")
     func waveScopeSlotsCountTheWave() throws {
         let model = try dashboardModel()
         model.select(.wave(id: "wave-1"))
-        #expect(model.sidebarTaskIDs == ["issue-later", "issue-now"])
+        #expect(model.sidebarTaskIDs == ["issue-now"])
+        #expect(model.waveTiles("wave-1").map(\.work.id) == ["issue-later", "issue-now"])
         model.selectSidebarTask(slot: 0)
-        #expect(model.navigation.destination == .work(.task(id: "issue-later")))
+        #expect(model.navigation.destination == .work(.task(id: "issue-now")))
         #expect(model.navigation.sidebarScope == .wave("wave-1"))
-        model.selectSidebarTask(slot: 5)
-        #expect(model.selection == .task(id: "issue-later"))
+        model.selectSidebarTask(slot: 1)
+        #expect(model.selection == .task(id: "issue-now"))
         model.selectDashboard("review")
         #expect(model.navigation.sidebarWaveID == nil)
     }

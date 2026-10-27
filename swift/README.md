@@ -40,10 +40,11 @@ the Machine. Durations and command names only; the files stay on this machine.
 Working Tasks lists every started, uncompleted Task, on any Machine this store
 records, in the repository plan's order (waiting first, then rank). It is the
 repository's built-in query, so opening a Task neither adds nor reorders it.
-Click a Wave to scope the sidebar to its uncompleted Tasks and subwaves;
-**‹ Repo** returns to Working Tasks. Unstarted Tasks open their brief beside
-**Start**, which runs the Task's Workflow; opening alone starts nothing. Waves
-follow Tasks in the same scrolling sidebar, with counts from the planning inventory.
+Click a Wave to scope the sidebar to its started Tasks and subwaves; its board
+keeps the unstarted ones. **‹ Repo** returns to Working Tasks. Unstarted Tasks
+open their brief beside **Start**, which runs the Task's Workflow; opening alone
+starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
+from the planning inventory.
 
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and

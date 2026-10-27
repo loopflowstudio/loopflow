@@ -159,7 +159,11 @@ struct TaskRowMetadataTests {
         let layout = workspace.multiplexer.layout
         let selected = workspace.presentation.selectedSessionId
         let owner = WorkWorkspaceKey(repository: "repo", kind: .wave, id: snapshot.waves[0].wave.id)
-        model.applySelectionPlans([fixtureViewPlan(owner: owner, members: [fixtureViewContent(work: key, title: task.task.name)])], reason: "")
+        let member = fixtureViewContent(work: key, title: task.task.name)
+        model.applySelectionPlans([
+            fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [member]),
+            fixtureViewPlan(owner: owner, members: [member]),
+        ], reason: "")
         model.select(owner.reference)
         #expect(model.sidebarTaskIDs == [task.id])
         var conversationOpened = false

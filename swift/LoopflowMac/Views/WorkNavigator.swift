@@ -34,7 +34,7 @@ struct WorkNavigator: View {
     private var emptyListText: String {
         switch model.navigation.sidebarScope {
         case .repository: "No working Tasks in this list"
-        case .wave: "No open Tasks in this Wave"
+        case .wave: "No working Tasks in this Wave"
         case .dashboard(let id): model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
         }
     }

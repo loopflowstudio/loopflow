@@ -1685,9 +1685,13 @@ final class WorkModel {
     /// The sidebar scope's members: its built-in plan's, or a Dashboard's visible ones in arrangement order.
     private var sidebarMembers: [WorkMemberRef] {
         switch navigation.sidebarScope {
-        case .repository: builtInPlan(.repository)?.resolution.members ?? []
-        case .wave(let id): builtInPlan(.wave(id))?.resolution.members ?? []
-        case .dashboard(let id): dashboard(id)?.projection.visible ?? []
+        case .repository: return builtInPlan(.repository)?.resolution.members ?? []
+        case .wave(let id):
+            // Working Tasks only, as at the repository; the Wave board keeps unstarted ones.
+            let working = Set(workingTaskMembers.map(\.work))
+            return (builtInPlan(.wave(id))?.resolution.members ?? [])
+                .filter { $0.work.kind != .task || working.contains($0.work) }
+        case .dashboard(let id): return dashboard(id)?.projection.visible ?? []
         }
     }
 

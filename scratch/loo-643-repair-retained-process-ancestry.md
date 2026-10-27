@@ -1,6 +1,6 @@
 # LOO-643: Repair retained Process ancestry without losing Session history
 
-Status: slices 1–5 implemented and synced with main `e3d16c5d27` (current origin/main, 2026-10-27); gate passed (2026-10-27); PR and land remain. Jack Heart authorized an end-to-end
+Status: slices 1–5 implemented and synced with main `e3d16c5d27` (current origin/main, 2026-10-27); gate passed (2026-10-27, rerun through `611788839f`); PR and land remain. Jack Heart authorized an end-to-end
 autonomous fix, local hotfix and patch release. No ad-hoc SQL writes to the live store.
 
 ## Problem
@@ -226,5 +226,7 @@ v0.14.19 (#1735) shipped without this change; the patch release follows landing.
 Post-sync check: `cargo test -p loopflow --lib ancestry` → 6 passed, including `prune_releases_unrecorded_ancestry_and_the_session_resumes`; CLI reference test ok.
 
 Main sync (2026-10-27, `e3d16c5d27`: #1741 Auto-Ship revert, #1745 gate scoping) merged clean; its overlap is a `ship_task` call in a `processes.rs` forget test and the `lf ship --recover` reference row, apart from this change's hunks. Post-merge `cargo test -p loopflow --lib ancestry` → 6 passed.
+
+Gate rerun (2026-10-27, `611788839f`, host load ~125–170): `scripts/test.py --reuse-passing --rust-filter <touched modules + process_ownership_tests + session_lifecycle + CLI reference>` → architecture, rustfmt, inventory, website (72) PASS; its rust group stopped twice on syspolicyd host pressure while rebuilding the materialized tree, product unproven there. Headless equivalent in this worktree: `cargo nextest run --all -E <same filter>` → 198 passed; `cargo clippy --all-targets -- -D warnings` clean. Full matrix stays with CI.
 
 Compress (2026-10-27): `prune_agent_processes` replaces the out-param `repair_unrecorded_ancestry` (one store, one entry); `cargo test -p loopflow --lib ancestry` → 6 passed.

@@ -21,4 +21,4 @@
 
 - `lock_task_pr_mutation` stays: it serializes a head move with clearing a head-pinned merge request, so Auto-merge never merges an unreviewed head. Held for the push/settlement only; contention refuses rather than waits.
 
-Check: `cargo clippy --all-targets -- -D warnings` clean; `sync_tests` 43/43 and `ops::git_operation` 4/4 pass (land_tests 30/30 earlier, not touched since).
+Gate (2026-10-26): `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` clean; `ops::git_operation` 4/4; integration `sync_tests land_tests ops_ ci_fix` 76/76 (386 s, git-heavy fixtures). `a_stalled_fetch_admits_other_agents` now stops waiting if the sync finishes without fetching.

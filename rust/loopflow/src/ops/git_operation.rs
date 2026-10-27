@@ -459,10 +459,11 @@ mod tests {
                 sync_with_recovery(&repo, &options, &NullProgress)
             }
         });
-        while !started.exists() {
+        while !started.exists() && !sync.is_finished() {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
 
+        assert!(started.exists(), "the sync finished without fetching");
         assert!(fence_agent_process(&repo).is_ok());
         std::fs::write(&release, "").unwrap();
         assert!(matches!(

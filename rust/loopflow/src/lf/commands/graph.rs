@@ -65,13 +65,13 @@ pub fn run(
     )
 }
 
-/// `lf --task ISSUE graph __edge`: run the slice of the Task's captured graph
+/// `lf --task ISSUE graph route`: run the slice of the Task's captured graph
 /// that its current edge names, from the route's first step to the next
 /// stage. The Task run that chose the edge is this process's parent; it
 /// writes the arrival when this process succeeds.
 pub fn run_task_edge(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
     let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) else {
-        anyhow::bail!("`lf graph __edge` runs a Task's route; name the Task with --task");
+        anyhow::bail!("`lf graph route` runs a Task's route; name the Task with --task");
     };
     let store = block_on(open_graph_store())?;
     store.sqlite.require_task_launch(task)?;
@@ -123,7 +123,7 @@ const TASK_RUN_ATTEMPTS: u32 = 3;
 /// that attempt's log.
 pub fn run_task_edge_for(cli: &Cli, task: &Task, edge: &str, release: bool) -> Result<()> {
     let checkout = task.worktree()?;
-    let args = task_run_args(cli, task.id.as_str(), &["graph", "__edge"]);
+    let args = task_run_args(cli, task.id.as_str(), &["graph", "route"]);
     let store = block_on(open_graph_store())?;
     let store = &store.sqlite;
     let process =
@@ -1281,8 +1281,8 @@ mod tests {
         use clap::Parser;
         let mode = |argv: &[&str]| {
             let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
-            let args = task_run_args(&cli, "INF-1", &["graph", "__edge"]);
-            assert!(args.ends_with(&["--task", "INF-1", "graph", "__edge"].map(String::from)));
+            let args = task_run_args(&cli, "INF-1", &["graph", "route"]);
+            assert!(args.ends_with(&["--task", "INF-1", "graph", "route"].map(String::from)));
             (
                 args.contains(&"--batch".to_owned()),
                 args.contains(&"--interactive".to_owned()),

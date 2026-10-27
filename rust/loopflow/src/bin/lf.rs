@@ -2715,7 +2715,7 @@ fn execute_command(
             unreachable!("install dispatches before home routing")
         }
         Some(Commands::Graph { cmd }) => match cmd {
-            GraphCommand::Edge => {
+            GraphCommand::Route => {
                 let repo_root = loopflow::repo::working_directory()?;
                 with_runtime(&repo_root, args, || {
                     loopflow::lf::commands::graph::run_task_edge(cli, &repo_root, binding)

@@ -1038,9 +1038,8 @@ pub enum GraphCommand {
     /// Print the repository file that defines a Graph, creating
     /// it from the builtin when the repository has none
     Customize { name: String },
-    /// Run the slice of the Task's graph its current edge names; `lf task run` starts it
-    #[command(name = "__edge", hide = true)]
-    Edge,
+    /// Run the slice of the Task's graph its current route names; `lf task run` starts it
+    Route,
     #[command(external_subcommand)]
     External(Vec<String>),
 }

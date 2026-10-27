@@ -2572,6 +2572,14 @@ Print the repository file that defines a Graph, creating it from the builtin whe
 | `<name>` | name |
 | `--help / -h` | Print help |
 
+## lf graph route
+
+Run the slice of the Task's graph its current route names; `lf task run` starts it
+
+| Argument | What it does |
+|---|---|
+| `--help / -h` | Print help |
+
 ## lf skill
 
 Run a skill explicitly

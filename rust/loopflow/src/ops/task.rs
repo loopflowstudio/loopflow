@@ -493,7 +493,7 @@ pub(crate) async fn task_work_status(store: &Store, task: &Task) -> OpsResult<Wo
 /// agent, `reason` as a steer, and the route. A Task on a graph sets out on
 /// the route named, or on its only one; otherwise the Task takes up
 /// the graph named, then its Wave or repository default. The caller then runs
-/// the edge's slice as `lf --task ISSUE graph __edge`; `None` is an edge that
+/// the edge's slice as `lf --task ISSUE graph route`; `None` is an edge that
 /// runs nothing. The returned name is the edge's.
 pub fn task_place(
     repo: &Path,

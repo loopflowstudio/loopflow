@@ -11,16 +11,36 @@ struct WorkNavigator: View {
     @State private var actionTaskID: String?
     @FocusState private var focusedWork: WorkReference?
     @State private var focusMemory = SidebarResponderMemory()
+    /// The clicked Wave row moves to the top; a Dashboard's label into the list header.
+    @Namespace private var scopeTitle
+    @State private var wavesHeight: CGFloat = 130
+    /// The Wave row just clicked, shown before its selection moves it.
+    @State private var pressedScope: WorkNavigation.SidebarScope?
+    /// Pointing at the Waves section reveals New Wave; only that row reads it.
+    @State private var wavesHover = HoverFlag()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var listTitle: String {
         let filter = model.navigation.sidebarFilter
-        guard model.navigation.sidebarWaveID != nil else { return filter.rawValue }
-        let wave = model.sidebarWave?.wave.displayName ?? "Wave unavailable"
-        return filter == .working ? wave : "\(wave) · \(filter.rawValue)"
+        let scope: String
+        switch model.navigation.sidebarScope {
+        case .repository: return filter.rawValue
+        case .wave: scope = model.sidebarWave?.wave.displayName ?? "Wave unavailable"
+        case .dashboard(let id): scope = model.dashboard(id).map { $0.name ?? id } ?? "Dashboard unavailable"
+        }
+        return filter == .working ? scope : "\(scope) · \(filter.rawValue)"
+    }
+
+    private var emptyListText: String {
+        switch model.navigation.sidebarScope {
+        case .repository: "No working Tasks in this list"
+        case .wave: "No working Tasks in this Wave"
+        case .dashboard(let id): model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
+        }
     }
 
     private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) } + model.sidebarWaves.map { .wave(id: $0.wave.id) }
+        model.sidebarTaskIDs.map { .task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
     }
 
     private func moveFocus(_ direction: MoveCommandDirection) {
@@ -40,30 +60,30 @@ struct WorkNavigator: View {
             if let error = model.dashboardError ?? model.selectionPlans.errorMessage {
                 Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
             }
+            // The repository tops the sidebar; a selected Wave moves up under it.
+            VStack(alignment: .leading, spacing: 5) {
+                repositoryRow
+                if let wave = model.sidebarWave { waveRow(wave) }
+            }.padding([.horizontal, .top], 8)
             WorkTaskList(navigation: model.navigation) {
                 // Read once: each read re-filters the plan and every Task's Sessions.
                 let taskIDs = model.sidebarTaskIDs
+                let scope = model.navigation.sidebarScope
                 VStack(alignment: .leading, spacing: 5) {
-                    if model.navigation.sidebarWaveID != nil {
-                        Button { model.select(nil) } label: {
-                            Label(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository",
-                                  systemImage: "chevron.left")
-                        }.buttonStyle(.plain).font(Typography.body(12)).foregroundStyle(palette.textSecondary)
-                            .padding(.horizontal, 10).padding(.top, 6)
-                            .help("Back to Working Tasks")
-                            .accessibilityIdentifier("work-sidebar-back")
+                    if case .dashboard = scope {
+                        HStack {
+                            Text(listTitle.uppercased()).lineLimit(1)
+                                .matchedGeometryEffect(id: scope, in: scopeTitle)
+                            Spacer()
+                            Text("\(taskIDs.count)")
+                        }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
                     }
-                    HStack {
-                        Text(listTitle.uppercased()).lineLimit(1)
-                        Spacer()
-                        Text("\(taskIDs.count)")
-                    }.font(Typography.code(10)).foregroundStyle(palette.textSecondary).padding(10)
-                    // One pass for every row's ⌘N slot; each lookup rebuilds the plan's members.
-                    let slots = Dictionary(model.workingTaskIDs.prefix(9).enumerated().map { ($1, "⌘\($0 + 1)") },
-                                           uniquingKeysWith: { first, _ in first })
-                    ForEach(taskIDs, id: \.self) { id in taskRow(id, slotHint: slots[id]) }
+                    // ⌘N counts the rows on screen; sidebar Task IDs are already unique.
+                    ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
+                        taskRow(id, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
+                    }
                     if taskIDs.isEmpty {
-                        Text(model.navigation.sidebarWaveID == nil ? "No working Tasks in this list" : "No open Tasks in this Wave")
+                        Text(emptyListText)
                             .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
@@ -77,35 +97,13 @@ struct WorkNavigator: View {
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
-                    if !model.sidebarWaves.isEmpty {
-                        Text(model.navigation.sidebarWaveID == nil ? "WAVES" : "SUBWAVES").font(Typography.code(10))
-                            .foregroundStyle(palette.textSecondary).padding(10).padding(.top, 8)
-                    }
-                    ForEach(model.sidebarWaves, id: \.wave.id) { wave in
-                        Button { model.select(.wave(id: wave.wave.id)) } label: {
-                            HStack {
-                                Image(systemName: "water.waves")
-                                Text(wave.wave.displayName).lineLimit(1)
-                                Spacer()
-                                if let reason = wave.tasks.unavailableReason {
-                                    Image(systemName: "exclamationmark.triangle").help(reason)
-                                } else {
-                                    Text("\(wave.tasks.items.count)")
-                                        .font(Typography.code(10)).help("\(wave.tasks.items.count) Tasks")
-                                }
-                            }.font(Typography.body(13)).padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(model.isSelected(.wave(id: wave.wave.id)) ? palette.surface : .clear,
-                                            in: RoundedRectangle(cornerRadius: 6))
-                        }.buttonStyle(.plain)
-                            .focused($focusedWork, equals: .wave(id: wave.wave.id))
-                            .accessibilityLabel("\(wave.wave.displayName), \(wave.tasks.items.count) Tasks")
-                            .accessibilityIdentifier("work-wave-\(wave.wave.id)")
-                    }
-                    if model.navigation.sidebarWaveID == nil { DashboardSidebar(model: model) }
+                    if scope == .repository { DashboardSidebar(model: model, scopeTitle: scopeTitle) }
                 }.padding(8)
             }
+            WaveSectionDivider(navigation: model.navigation)
+            waveSection
         }
+        .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: model.navigation.sidebarScope)
         .foregroundStyle(palette.text).background(palette.surfaceMuted)
         .accessibilityIdentifier("work-navigator")
         .background(SidebarResponderCapture(memory: focusMemory))
@@ -142,6 +140,70 @@ struct WorkNavigator: View {
         .onDisappear { if focusedWork != nil { focusMemory.restore() } }
     }
 
+    /// Pinned below the Task list so any Wave is a click away however far the
+    /// list scrolls; it starts about three rows tall and its divider drags.
+    private var waveSection: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
+                NewWaveRow(model: model, hover: wavesHover)
+            }.padding(8)
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
+            wavesHeight = height
+        }
+        .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
+        .hoverSource(wavesHover)
+    }
+
+    /// The repository is the default Wave; it lists Working Tasks and can't be edited.
+    private var repositoryRow: some View {
+        waveRow(scope: .repository, name: model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository",
+                icon: nil, count: model.workingTaskMembers.count, unavailableReason: nil)
+    }
+
+    private func waveRow(_ wave: WaveRoadmap) -> some View {
+        waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
+                count: wave.tasks.items.count, unavailableReason: wave.tasks.unavailableReason)
+    }
+
+    private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
+                         count: Int, unavailableReason: String?) -> some View {
+        let reference: WorkReference? = if case .wave(let id) = scope { .wave(id: id) } else { nil }
+        let state: SidebarSelection = pressedScope == scope || model.navigation.destination == .work(reference) ? .shown
+            : model.navigation.sidebarScope == scope ? .containing : .none
+        return Button {
+            // The click darkens the row first; it moves once that has landed.
+            guard !reduceMotion else { model.select(reference); return }
+            withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
+            Task {
+                try? await Task.sleep(for: .milliseconds(120))
+                model.select(reference)
+                pressedScope = nil
+            }
+        } label: {
+            HStack {
+                if let icon { Image(systemName: icon) }
+                Text(name).lineLimit(1)
+                Spacer()
+                if let unavailableReason {
+                    Image(systemName: "exclamationmark.triangle").help(unavailableReason)
+                } else {
+                    Text("\(count)").font(Typography.code(10)).help("\(count) Tasks")
+                }
+            }.font(Typography.body(13)).padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
+                .background(SidebarSelectionShape(state: state))
+                // The whole row clicks, as a Task row does, not only its text.
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain)
+            .modifier(FocusedWork(focus: $focusedWork, reference: reference))
+            .accessibilityLabel("\(name), \(count) Tasks")
+            .accessibilityIdentifier("work-wave-\(reference?.id ?? "repository")")
+            .matchedGeometryEffect(id: scope, in: scopeTitle)
+    }
+
     private func taskRow(_ id: String, slotHint: String?) -> some View {
         let found = model.task(id: id)
         let selected = model.isSelected(.task(id: id))
@@ -170,9 +232,7 @@ struct WorkNavigator: View {
         .foregroundStyle(selected ? palette.workSelectedText : otherWave ? palette.textSecondary : palette.text)
         .background {
             Button { model.select(.task(id: id)) } label: {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(selected ? palette.workSelectedFill : Color.clear)
-                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(selected ? palette.selectionEdge : .clear))
+                SidebarSelectionShape(state: selected ? .shown : .none)
                     .contentShape(Rectangle())
             }.buttonStyle(.plain).focused($focusedWork, equals: .task(id: id)).accessibilityLabel(title)
                 .accessibilityAddTraits(selected ? .isSelected : [])
@@ -186,7 +246,7 @@ struct WorkNavigator: View {
         }
         .renderFlash()
         }
-        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarWaveID == nil ? model.workingTaskWorkID(row: id) : nil))
+        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarScope == .repository ? model.workingTaskWorkID(row: id) : nil))
         .contextMenu {
             actions(for: id)
         }
@@ -200,8 +260,9 @@ struct WorkNavigator: View {
     /// The preview line and metadata beneath a row's title.
     private func rowDetail(_ preview: (text: String, help: String, age: String?), slotHint: String?, found: (wave: WaveRoadmap?, task: RoadmapTask)?,
                            status: SessionProgramStatus, selected: Bool, hover: HoverFlag) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
+        let shipping = found?.task.shipping.map { "\($0.label) · \($0.reason)" }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(shipping ?? preview.text).font(Typography.code(11)).lineLimit(status.session?.availability == .available ? 2 : 1)
                 .foregroundStyle(selected ? palette.workSelectedSecondaryText : palette.textSecondary)
                 .help(preview.help).allowsHitTesting(false)
             if let task = found?.task {
@@ -352,12 +413,17 @@ struct WorkMachineControl: View {
 
     private func load() async {
         error = nil
-        do { machines = try await model.machines(for: target) } catch { self.error = error.localizedDescription }
+        // A newer load or a navigation cancels this one; that is not a failure to show.
+        do { machines = try await model.machines(for: target) }
+        catch is CancellationError {}
+        catch { self.error = error.localizedDescription }
     }
 
     private func use(_ id: String) async {
         error = nil
-        do { try await model.useMachine(id, for: target) } catch { self.error = error.localizedDescription }
+        do { try await model.useMachine(id, for: target) }
+        catch is CancellationError {}
+        catch { self.error = error.localizedDescription }
     }
 }
 
@@ -435,6 +501,106 @@ extension WorkJumpScope {
     }
 }
 
+/// The last row of the Waves list while the pointer is over it; names and authors a Wave.
+private struct NewWaveRow: View {
+    let model: WorkModel
+    let hover: HoverFlag
+    @Environment(\.palette) private var palette
+    @State private var naming = false
+    @State private var name = ""
+    @State private var error: String?
+
+    var body: some View {
+        HoverRevealed(flag: hover) {
+            Button { naming = true } label: {
+                HStack {
+                    Image(systemName: "plus")
+                    Text("New Wave").lineLimit(1)
+                    Spacer()
+                }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(RoundedRectangle(cornerRadius: 6))
+            }.buttonStyle(.plain)
+                .accessibilityIdentifier("work-new-wave")
+                .popover(isPresented: $naming, arrowEdge: .trailing) { form }
+        }
+    }
+
+    private var form: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
+            if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
+            HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
+        }.padding(12)
+    }
+
+    private func create() {
+        guard let repoPath = model.repoPath else { return }
+        Task {
+            do {
+                try await PortfolioRepoState.createWave(name: name, repoPath: repoPath)
+                naming = false
+                name = ""
+                error = nil
+                await model.refreshPlanning()
+            } catch let failure {
+                error = failure.localizedDescription
+            }
+        }
+    }
+}
+
+/// Arrow keys walk Wave rows; the repository row has no WorkReference to focus.
+private struct FocusedWork: ViewModifier {
+    let focus: FocusState<WorkReference?>.Binding
+    let reference: WorkReference?
+
+    func body(content: Content) -> some View {
+        if let reference { content.focused(focus, equals: reference) } else { content }
+    }
+}
+
+/// One rule for every sidebar row: the row whose Work fills the center pane is
+/// shown; the Wave or Dashboard containing it, when that isn't itself shown, is
+/// containing. Nothing else is marked.
+enum SidebarSelection {
+    case none, containing, shown
+}
+
+struct SidebarSelectionShape: View {
+    let state: SidebarSelection
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 6)
+        switch state {
+        case .none: shape.fill(Color.clear)
+        case .containing: shape.fill(palette.surface)
+        case .shown: shape.fill(palette.workSelectedFill).overlay(shape.strokeBorder(palette.selectionEdge))
+        }
+    }
+}
+
+/// Drags the pinned Waves section taller or shorter.
+private struct WaveSectionDivider: View {
+    let navigation: WorkNavigation
+    @Environment(\.palette) private var palette
+    @State private var start: CGFloat?
+
+    var body: some View {
+        Rectangle().fill(palette.border).frame(height: 1)
+            .frame(maxWidth: .infinity).padding(.vertical, 3)
+            .contentShape(Rectangle())
+            .onHover { if $0 { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                if start == nil { start = navigation.sidebarWavesHeight }
+                navigation.sidebarWavesHeight = max(44, (start ?? navigation.sidebarWavesHeight) - value.translation.height)
+            }.onEnded { _ in start = nil })
+            .accessibilityLabel("Waves height")
+            .accessibilityIdentifier("work-waves-divider")
+    }
+}
+
 /// Navigation already belongs to one repository, including its sidebar viewport.
 private struct WorkTaskList<Content: View>: View {
     let navigation: WorkNavigation
@@ -450,6 +616,9 @@ private struct WorkTaskList<Content: View>: View {
     var body: some View {
         ScrollView { content }
             .scrollPosition($position)
+            // A new scope's header is at the top, even after clicking a row far down.
+            // Deferred: scrolling in the update that swaps the rows kept the old offset.
+            .onChange(of: navigation.sidebarScope) { Task { position.scrollTo(edge: .top) } }
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
             } action: { _, offset in navigation.sidebarScrollOffset = offset }

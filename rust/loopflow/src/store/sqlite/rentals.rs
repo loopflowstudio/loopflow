@@ -6,8 +6,8 @@ use time::OffsetDateTime;
 
 use crate::durable::{MachineId, TaskId};
 use crate::rental::{
-    self, Hardware, OnDemand, Ownership, Pool, PoolMachine, Provider, Quote, Rental, RentalId,
-    RentalState, Template, Usd,
+    self, Hardware, OnDemand, Ownership, Pool, PoolMachine, Provider, Rental, RentalId,
+    RentalState, Usd,
 };
 use crate::store::rows::now_unix;
 use crate::store::{StoreError, StoreResult};
@@ -62,7 +62,7 @@ fn map_ondemand(row: &rusqlite::Row<'_>) -> StoreResult<OnDemand> {
         name: row.get(0)?,
         provider: Provider::parse(&provider)
             .ok_or_else(|| invalid(format!("unknown provider {provider}")))?,
-        template: serde_json::from_str::<Template>(&template)?,
+        hardware: serde_json::from_str::<Hardware>(&template)?,
         max_machines: row.get(3)?,
         max_usd_per_hour: usd(row.get(4)?)?,
         hours: row.get(5)?,
@@ -273,6 +273,36 @@ impl SqliteStore {
         )?)
     }
 
+    /// When the latest Task ever handed to or claimed on this Machine was
+    /// completed or abandoned.
+    pub fn work_finished_at(&self, machine: &MachineId) -> StoreResult<Option<OffsetDateTime>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT DISTINCT t.id,t.planning_completed_at,t.abandoned_at
+             FROM task_ownership o JOIN tasks t ON t.id=o.task_id WHERE o.machine_id=?1",
+        )?;
+        let rows = statement.query_map([machine.as_str()], |row| {
+            Ok((
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
+        })?;
+        let mut latest = None;
+        for row in rows {
+            let finished = match row? {
+                (_, Some(abandoned)) => at(abandoned)?,
+                (Some(completed), None) => OffsetDateTime::parse(
+                    &completed,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .map_err(invalid)?,
+                (None, None) => continue,
+            };
+            latest = latest.max(Some(finished));
+        }
+        Ok(latest)
+    }
+
     pub fn tasks_held_by(&self, machine: &MachineId) -> StoreResult<Vec<TaskId>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;
@@ -297,7 +327,7 @@ impl SqliteStore {
             params![
                 ondemand.name,
                 ondemand.provider.as_str(),
-                serde_json::to_string(&ondemand.template)?,
+                serde_json::to_string(&ondemand.hardware)?,
                 ondemand.max_machines,
                 ondemand.max_usd_per_hour.to_decimal(),
                 ondemand.hours,
@@ -357,7 +387,6 @@ impl SqliteStore {
     pub fn admit_rental(
         &self,
         ondemand: &str,
-        quote: &Quote,
         hours: Option<f64>,
         max_usd: Option<Usd>,
         by_hand: bool,
@@ -367,8 +396,7 @@ impl SqliteStore {
         let ondemand = ondemand_in(&tx, ondemand)?.ok_or(StoreError::NotFound)?;
         let live = live_in(&tx, &ondemand.name)?;
         let now = at(now_unix())?;
-        let admission =
-            rental::admit(&ondemand, live, quote, hours, max_usd, now).map_err(invalid)?;
+        let admission = rental::admit(&ondemand, live, hours, max_usd, now).map_err(invalid)?;
         let id = RentalId::new();
         tx.execute(
             "INSERT INTO rentals(id,ondemand,provider,provider_name,by_hand,hardware,usd_per_hour,

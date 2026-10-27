@@ -440,7 +440,7 @@ struct DesktopPerformanceTests {
             model.navigation.sidebarFilter = .working
             try await wait(window, render: true) { hasRendered(window, "work-task-perf-task-0") }
             try await sample("filter", population, attempt, journal, window, action: {
-                model.navigation.sidebarFilter = .running
+                model.navigation.sidebarFilter = .busy
             }, ready: { model.sidebarTaskIDs.isEmpty && !hasRendered(window, "work-task-perf-task-0") })
             try #require(model.selection == .task(id: "perf-task-0"))
             model.navigation.sidebarFilter = .working

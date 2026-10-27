@@ -22,8 +22,8 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
                         .accessibilityIdentifier("task-lifecycle-status")
                 }
-                if task.runtime?.status == .paused {
-                    Text("Paused").foregroundStyle(palette.textSecondary)
+                if task.runtime?.status == .deferred {
+                    Text("Deferred").foregroundStyle(palette.textSecondary)
                 } else if task.task.terminalLabel == nil, let state = task.task.state {
                     Text(state.capitalized).foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-lifecycle-status")
@@ -33,15 +33,13 @@ struct TaskWorkflowHeader: View {
                         .lineLimit(1)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
-                    ForEach(workflow.outgoing, id: \.self) { index in
-                        if workflow.edges.indices.contains(index) {
-                            let edge = workflow.edges[index]
-                            Button(edge.launchName) { Task { await model.startTask(edge.launchName, task: task) } }
-                                .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
-                                .disabled(unavailable != nil)
-                                .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.launchName)")
-                                .accessibilityIdentifier("task-workflow-action-\(index)")
-                        }
+                    ForEach(routes(workflow), id: \.self) { index in
+                        let edge = workflow.edges[index]
+                        Button(edge.name) { Task { await model.startTask(edge.name, task: task) } }
+                            .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
+                            .disabled(unavailable != nil)
+                            .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.name)")
+                            .accessibilityIdentifier("task-workflow-action-\(index)")
                     }
                     Spacer(minLength: 0)
                     // Put the Task at a node without running anything.
@@ -85,11 +83,11 @@ struct TaskWorkflowHeader: View {
                     Button("Complete") { Task { await model.completeTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.status == .paused ? "Resume" : "Pause") {
-                        Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
+                    Button(task.runtime?.status == .deferred ? "Resume" : "Defer") {
+                        Task { await model.deferTask(task, deferred: task.runtime?.status != .deferred) }
                     }
                     .disabled(acting || readingUnavailable != nil)
-                    .accessibilityIdentifier("task-pause-resume")
+                    .accessibilityIdentifier("task-defer-resume")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-abandon")
@@ -124,9 +122,10 @@ struct TaskWorkflowHeader: View {
                 if let workflow = work.value?.workflow {
                     WorkflowDiagram(
                         nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
-                        choices: workflow.outgoing, unavailable: unavailable, fits: true,
-                        hint: { "lf task run \(task.task.identifier) \($0.launchName) · to \($0.to)" },
-                        choose: { edge in Task { await model.startTask(edge.launchName, task: task) } })
+                        choices: routes(workflow),
+                        unavailable: unavailable, fits: true,
+                        hint: { "lf task run \(task.task.identifier) \($0.name) · to \($0.to)" },
+                        choose: { edge in Task { await model.startTask(edge.name, task: task) } })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)
@@ -167,7 +166,7 @@ struct TaskWorkflowHeader: View {
                 Task { await model.abandonTask(task) }
             }
         } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Pause instead to keep its work for later.")
+            Text("Cancels the Task, closes its PRs and deletes its branches. Defer instead to keep its work for later.")
         }
         .font(Typography.body(12))
         .padding(.horizontal, 14)
@@ -196,6 +195,12 @@ struct TaskWorkflowHeader: View {
         }
     }
 
+    /// The routes a person can start here. Auto-Ship, in the Workflow bar, is
+    /// the one way into `end`.
+    private func routes(_ workflow: Workflow) -> [Int] {
+        workflow.outgoing.filter { workflow.edges.indices.contains($0) && workflow.edges[$0].to != "end" }
+    }
+
     private func positionLabel(_ workflow: Workflow) -> String {
         switch workflow.position {
         case .node(let name): return "\(workflow.name) · \(name)"
@@ -220,17 +225,321 @@ struct TaskWorkflowHeader: View {
     }
 }
 
+/// Auto-Ship at the right end of the Workflow bar, always visible; while
+/// shipping the same spot holds Stop Auto-Ship. Rust decides whether shipping
+/// can start. Sidebar rows and menus carry no ship control.
+struct TaskShipControl: View {
+    let model: WorkModel
+    let task: RoadmapTask
+
+    @State private var hovered = false
+    @State private var confirmingAbandon = false
+
+    private var acting: Bool { model.navigation.taskRunDrafts[task.id]?.acting == true }
+
+    private var readingUnavailable: String? {
+        if let error = model.roadmap.errorMessage { return error }
+        if model.showsSavedPlanning { return WorkCache.savedReason }
+        return nil
+    }
+
+    var body: some View {
+        Group {
+            if task.shipping != nil {
+                Button("Stop Auto-Ship") { Task { await model.stopShipping(task) } }
+                    .buttonStyle(WorkOutlineButtonStyle())
+                    .disabled(acting || readingUnavailable != nil)
+                    .help("lf --task \(task.task.identifier) ship --stop: withdraw it and disarm auto-merge")
+                    .accessibilityIdentifier("task-ship-stop")
+            } else if !(task.task.isTerminal || task.runtime?.status.isTerminal == true) {
+                let refusal = readingUnavailable ?? task.shipControl.unavailable
+                HStack(spacing: Spacing.sm) {
+                    // Hovering Auto-Ship offers the other ways out of this Task.
+                    if hovered {
+                        let deferred = task.runtime?.status == .deferred
+                        Button(deferred ? "Resume" : "Defer") {
+                            Task { await model.deferTask(task, deferred: !deferred) }
+                        }
+                        .buttonStyle(WorkOutlineButtonStyle())
+                        .disabled(acting || readingUnavailable != nil)
+                        .help(deferred ? "lf task resume: let it run again"
+                                     : "lf task defer: hold it, keeping its checkout, PR and stage")
+                        .accessibilityIdentifier("task-defer")
+                        Button("Abandon…", role: .destructive) { confirmingAbandon = true }
+                            .buttonStyle(WorkOutlineButtonStyle(destructive: true))
+                            .disabled(acting || readingUnavailable != nil)
+                            .accessibilityIdentifier("task-ship-abandon")
+                    }
+                    Button("Auto-Ship") { Task { await model.shipTask(task) } }
+                        .buttonStyle(WorkShipButtonStyle())
+                        .disabled(acting || refusal != nil)
+                        .help(refusal ?? "lf --task \(task.task.identifier) ship: run every remaining step and land it")
+                        .accessibilityIdentifier("task-ship")
+                }
+                .onHover { inside in withAnimation(.easeOut(duration: 0.12)) { hovered = inside } }
+            }
+        }
+        .fixedSize()
+        .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
+            Button("Abandon Task", role: .destructive) {
+                Task { await model.abandonTask(task) }
+            }
+        } message: {
+            Text("Cancels the Task, closes its PRs and deletes its branches. Defer instead to keep its work for later.")
+        }
+    }
+}
+
+/// The selected Task's Workflow under the jump bar: its stages as dots, what
+/// is happening now, and Auto-Ship or Stop Auto-Ship. Clicking the dots opens a
+/// row with each stage, who takes part there and what happened. Rust owns the
+/// graph, the position and the shipping reason; this only arranges them.
+struct TaskWorkflowBar: View {
+    let model: WorkModel
+    let task: RoadmapTask
+    /// The Task part of the workspace stream, as last read.
+    let work: WorkReading<TaskOverview>
+    /// Per viewer: the bar opens to its stage cells.
+    @State private var expanded = false
+    @Environment(\.palette) private var palette
+
+    /// One dot: a stage where a person takes part, or `end`.
+    struct Stage: Equatable {
+        enum Place: Equatable { case passed, here, going, ahead }
+        let name: String
+        let place: Place
+        /// You, or a stand-in while shipping; `end` has no one.
+        let who: String?
+        let note: String
+        /// Where the Task stands now or is headed.
+        var current: Bool { place == .here || place == .going }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: Spacing.md) {
+                if let workflow = work.value?.workflow {
+                    Text(workflow.name).fontWeight(.semibold).fixedSize()
+                        .accessibilityIdentifier("task-workflow-bar-name")
+                    dots(stages)
+                }
+                Text(live)
+                    .lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(task.shipping?.state == .restarting ? palette.warning : palette.textSecondary)
+                    .help(live)
+                    .accessibilityIdentifier("task-workflow-bar-live")
+                Spacer(minLength: 0)
+                TaskShipControl(model: model, task: task)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 34)
+            if expanded, work.value?.workflow != nil {
+                cells(stages)
+            }
+        }
+        .font(Typography.body(12))
+        .background(palette.background)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("task-workflow-bar")
+    }
+
+    private func dots(_ stages: [Stage]) -> some View {
+        Button { expanded.toggle() } label: {
+            HStack(spacing: 5) {
+                ForEach(stages, id: \.name) { stage in
+                    Circle()
+                        .fill(fill(stage.place))
+                        .overlay(Circle().strokeBorder(stage.place == .ahead ? palette.borderStrong : .clear))
+                        .frame(width: stage.current ? 9 : 7, height: stage.current ? 9 : 7)
+                        .help(stage.who.map { "\(stage.name) (\($0))" } ?? stage.name)
+                }
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(palette.textTertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help(expanded ? "Hide stages" : "Show stages")
+        .accessibilityLabel("Stages")
+        .accessibilityIdentifier("task-workflow-bar-dots")
+    }
+
+    private func cells(_ stages: [Stage]) -> some View {
+        HStack(alignment: .top, spacing: Spacing.sm) {
+            ForEach(stages, id: \.name) { stage in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stage.who ?? " ").font(Typography.caption(10)).foregroundStyle(palette.textTertiary)
+                    Text(stage.name).fontWeight(.semibold)
+                    Text(stage.note).foregroundStyle(palette.textSecondary).lineLimit(2)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(
+                    stage.current ? palette.surfaceElement : palette.surface))
+                .accessibilityIdentifier("task-workflow-bar-stage-\(stage.name)")
+            }
+        }
+        .padding(.horizontal, 14).padding(.bottom, 8)
+    }
+
+    private func fill(_ place: Stage.Place) -> Color {
+        switch place {
+        case .passed: palette.textTertiary
+        case .here: palette.text
+        case .going: task.shipping != nil ? palette.success : palette.working
+        case .ahead: .clear
+        }
+    }
+
+    private var stages: [Stage] {
+        work.value?.workflow.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
+    }
+
+    /// What is happening now, in one line.
+    var live: String {
+        if let shipping = task.shipping { return shipping.reason }
+        guard let workflow = work.value?.workflow else {
+            if let error = work.errorMessage { return "Workflow could not be read: \(error)" }
+            if work.value == nil { return "Reading workflow…" }
+            return task.workflowName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
+        }
+        switch workflow.position {
+        case .node("start"): return "Not started"
+        case .node("end"): return "At its end"
+        case .node(let node): return "At \(node) · yours"
+        case .edge(let index, let process, let running):
+            guard workflow.edges.indices.contains(index) else { return "Workflow position unavailable" }
+            let edge = workflow.edges[index]
+            guard running else { return "\(edge.name) stopped before \(edge.to)" }
+            let step = model.graphProcesses[process]?.presentation.reason
+            return [edge.name + " → " + edge.to, step].compactMap { $0 }.joined(separator: " · ")
+        }
+    }
+
+    /// The Workflow's stages in order, then `end`, each placed against the
+    /// Task's position. While shipping, stand-ins take the stages ahead.
+    static func stages(_ workflow: Workflow, shipping: Bool) -> [Stage] {
+        let names = workflow.nodes.map(\.name) + ["end"]
+        let (at, going): (String, Bool) = switch workflow.position {
+        case .node(let node): (node, false)
+        case .edge(let index, _, let running):
+            workflow.edges.indices.contains(index) ? (workflow.edges[index].to, running) : ("start", false)
+        }
+        let here = names.firstIndex(of: at) ?? -1
+        let arrived = Dictionary(workflow.history.filter { $0.kind == .arrived || $0.kind == .set }
+            .map { ($0.to, $0.at) }) { _, later in later }
+        return names.enumerated().map { index, name in
+            let place: Stage.Place = index < here ? .passed : index == here ? (going ? .going : .here) : .ahead
+            let who: String? = name == "end" ? nil : (shipping && index >= here ? "stand-in" : "you")
+            let note: String = switch place {
+            case .here: "here now"
+            case .going: "on the way"
+            case .passed: arrived[name].map { "arrived " + Date(timeIntervalSince1970: TimeInterval($0))
+                .formatted(.dateTime.month(.abbreviated).day()) } ?? "passed"
+            case .ahead: shipping ? "agents will run it" : "ahead"
+            }
+            return Stage(name: name, place: place, who: who, note: note)
+        }
+    }
+}
+
+/// What the last Auto-Ship or Stop Auto-Ship did, shown briefly.
+struct ShipNotice: Equatable {
+    let id = UUID()
+    let taskID: String
+    let issue: String
+    let shipped: Bool
+
+    init(task: RoadmapTask, shipped: Bool) {
+        taskID = task.id
+        issue = task.task.identifier
+        self.shipped = shipped
+    }
+}
+
+/// The toast after Auto-Ship; its Undo is Stop Auto-Ship.
+struct ShipNoticeToast: View {
+    let notice: ShipNotice
+    let undo: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: Spacing.md) {
+            Text(notice.shipped
+                 ? "\(notice.issue) is shipping"
+                 : "\(notice.issue) is back in Working · auto-merge disarmed")
+                .accessibilityIdentifier("task-ship-notice")
+            if notice.shipped {
+                Button("Undo", action: undo)
+                    .buttonStyle(.plain)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(palette.success)
+                    .help("Stop Auto-Ship")
+                    .accessibilityIdentifier("task-ship-undo")
+            }
+        }
+        .font(Typography.body(12))
+        .foregroundStyle(palette.text)
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 9).fill(palette.surfaceElement))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(palette.border, lineWidth: 1))
+        .shadow(color: palette.shadow, radius: 8, y: 2)
+    }
+}
+
+/// The window's ship toast, shown for six seconds after Auto-Ship or Stop
+/// Auto-Ship; its Undo is Stop Auto-Ship.
+struct ShipNoticeOverlay: View {
+    let model: WorkModel
+
+    var body: some View {
+        let navigation = model.navigation
+        ZStack {
+            if let notice = navigation.shipNotice {
+                ShipNoticeToast(notice: notice) {
+                    guard let task = model.task(id: notice.taskID)?.task else { return }
+                    Task { await model.stopShipping(task) }
+                }
+                .padding(.bottom, 18)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .zIndex(ZIndex.toast)
+        .animation(.easeOut(duration: 0.18), value: navigation.shipNotice)
+        .task(id: navigation.shipNotice) {
+            guard navigation.shipNotice != nil else { return }
+            try? await Task.sleep(for: .seconds(6))
+            if !Task.isCancelled { navigation.shipNotice = nil }
+        }
+    }
+}
+
 /// A Task's identity wherever it heads Work: the window trail and Dashboard tiles.
 /// Its container sets the primary and secondary text styles.
 struct TaskHeading: View {
     let task: RoadmapTask
 
-    /// Started is durable Task evidence, the definition Working Tasks lists by;
-    /// Linear's planning state never overrides it.
+    /// The Task's lifecycle, the state Working Tasks and Shipping list by;
+    /// Linear's planning state never overrides it. What shipping is doing
+    /// now reads in the Workflow bar.
     var state: String {
-        if let label = task.task.terminalLabel { return label }
-        if task.runtime?.status == .paused { return "Paused" }
-        return task.runtime?.owner != nil ? "Started" : "Unstarted"
+        switch task.runtime?.status {
+        case .deferred: return "Deferred"
+        case .idle: return "Idle"
+        case .active: return "Active"
+        case .moving: return "Moving"
+        case .shipping: return "Shipping"
+        case .done: return "Done"
+        case .abandoned: return "Abandoned"
+        case .unstarted, nil:
+            guard task.task.isTerminal else { return "Unstarted" }
+            return task.task.isSuccessful ? "Done" : "Abandoned"
+        }
     }
 
     var body: some View {
@@ -309,8 +618,8 @@ struct TaskActionItems: View {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
             Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
-            Button(task.runtime?.status == .paused ? "Resume Task" : "Pause Task") {
-                Task { await model.pauseTask(task, paused: task.runtime?.status != .paused) }
+            Button(task.runtime?.status == .deferred ? "Resume Task" : "Defer Task") {
+                Task { await model.deferTask(task, deferred: task.runtime?.status != .deferred) }
             }.disabled(unavailable)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }

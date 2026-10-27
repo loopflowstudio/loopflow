@@ -36,12 +36,18 @@ pub fn run(
     if context {
         // Oldest first: a Task's steps read in the order they ran.
         let home = crate::store::lf_home_dir();
-        let report = crate::context_usage::ContextReport::new(
+        let steps = if runs.is_empty() {
+            Vec::new()
+        } else {
+            let store = crate::store::sqlite::SqliteStore::open_processes_read_only(
+                &crate::store::database_path_from_env()?,
+            )?;
             runs.iter()
                 .rev()
-                .map(|run| crate::context_usage::step_context(&home, run))
-                .collect(),
-        );
+                .map(|run| crate::context_usage::step_context(&home, &store, run))
+                .collect()
+        };
+        let report = crate::context_usage::ContextReport::new(steps);
         if json {
             println!("{}", serde_json::to_string(&report)?);
         } else {

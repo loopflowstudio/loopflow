@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -12,9 +12,11 @@ use tokio::task::JoinHandle;
 
 use crate::agent::{build_session_command, AgentConfig, ProviderInvocation};
 use crate::chat::types::{ConversationEvent, Lifecycle};
-use crate::harness::claude_mapping::ReaderState;
+use crate::harness::claude_decode::ClaudeDecoder;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
-use crate::harness::{claude_mapping, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
+use crate::harness::fact::{Decoded, ProviderFact};
+use crate::harness::fact_writer::{FactWriter, RequestOrigins};
+use crate::harness::{Harness, HarnessError, SendCurrentOutcome};
 use crate::id::AgentSessionId;
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
@@ -29,7 +31,6 @@ use crate::store::ProviderAccountId;
 /// boundary per `send_input`.
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
-    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
     capture: Option<crate::agent::AgentCapture>,
     should_seed_task_prompt: bool,
@@ -47,7 +48,10 @@ pub struct ClaudeHarness {
     /// The runner turn id every provider turn in the current coalesced boundary
     /// reports under. Set by `send_input`, read by the reader.
     current_turn_id: Arc<Mutex<Option<String>>>,
-    requests: Arc<Mutex<HashMap<String, crate::session::SessionTurnOrigin>>>,
+    requests: RequestOrigins,
+    /// Decoder for the running process's stream; the sending side registers
+    /// each request it writes so the echo can be correlated.
+    decoder: Arc<Mutex<ClaudeDecoder>>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
@@ -75,7 +79,6 @@ impl ClaudeHarness {
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
         Self {
             events,
-            raw_provider: None,
             config: None,
             capture: None,
             should_seed_task_prompt: true,
@@ -87,6 +90,7 @@ impl ClaudeHarness {
             pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
             requests: Arc::new(Mutex::new(HashMap::new())),
+            decoder: Arc::new(Mutex::new(ClaudeDecoder::default())),
             child: None,
             stdin: None,
             reader_task: None,
@@ -94,6 +98,18 @@ impl ClaudeHarness {
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             interrupt_requested: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Remember a request's origin before writing it, so its echo can claim it.
+    fn register_request(&self, request: &str, origin: crate::session::SessionTurnOrigin) {
+        self.requests
+            .lock()
+            .expect("Claude request lock poisoned")
+            .insert(request.to_owned(), origin);
+        self.decoder
+            .lock()
+            .expect("claude decoder lock poisoned")
+            .outbound(request);
     }
 
     fn turn_origin(&self) -> Result<crate::session::SessionTurnOrigin> {
@@ -177,14 +193,17 @@ impl ClaudeHarness {
             .take()
             .ok_or_else(|| anyhow!("failed to capture claude stderr"))?;
 
+        let (store, session, attachment) = owner;
+        self.decoder = Arc::new(Mutex::new(ClaudeDecoder::default()));
         self.spawn_reader(
             stdout,
-            super::claude_history::History {
-                owner,
-                requests: self.requests.clone(),
-                pending: VecDeque::new(),
-                activity: Default::default(),
-            },
+            FactWriter::new(
+                store,
+                session,
+                Some(attachment),
+                self.account_route.clone(),
+                self.requests.clone(),
+            ),
         );
         self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
         self.stdin = Some(stdin);
@@ -194,24 +213,19 @@ impl ClaudeHarness {
 
     /// The persistent NDJSON reader: maps events for the whole process lifetime
     /// and emits one `TurnCompleted` per coalesced runner turn.
-    fn spawn_reader(
-        &mut self,
-        stdout: tokio::process::ChildStdout,
-        mut history: super::claude_history::History,
-    ) {
+    fn spawn_reader(&mut self, stdout: tokio::process::ChildStdout, mut writer: FactWriter) {
         let events = self.events.clone();
-        let raw_provider = self.raw_provider.clone();
         let turn_in_progress = self.turn_in_progress.clone();
         let pending_results = self.pending_results.clone();
         let current_turn_id = self.current_turn_id.clone();
         let shutdown = self.shutdown_requested.clone();
         let interrupted = self.interrupt_requested.clone();
         let session_slot = self.agent_session.clone();
-        let account_route = self.account_route.clone();
+        let fails_on_limit = self.account_route.is_some();
+        let decoder = self.decoder.clone();
         self.reader_task = Some(tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
-            let mut state = ReaderState::default();
             let turn_id = || {
                 current_turn_id
                     .lock()
@@ -221,12 +235,6 @@ impl ClaudeHarness {
             };
 
             while let Ok(Some(line)) = lines.next_line().await {
-                if let Some(raw_provider) = &raw_provider {
-                    let _ = raw_provider.send(RawProviderEvent {
-                        stream: "stdout",
-                        line: line.clone(),
-                    });
-                }
                 if shutdown.load(Ordering::Relaxed) {
                     break;
                 }
@@ -234,67 +242,68 @@ impl ClaudeHarness {
                     continue;
                 }
 
-                if let (Some(route), Some(signal)) = (
-                    account_route.as_ref(),
-                    claude_mapping::rate_limit_signal(&line),
-                ) {
-                    if let Err(error) = route.record_rate_limit(&signal).await {
-                        tracing::warn!(%error, "failed to record Claude account rate limit");
-                    }
-                    if signal.limited {
+                let decoded = decoder
+                    .lock()
+                    .expect("claude decoder lock poisoned")
+                    .decode(&line, &turn_id());
+                let written = match decoded {
+                    Ok(decoded) => writer.write(&decoded).await.map(|()| decoded),
+                    Err(error) => Err(error),
+                };
+                let decoded = match written {
+                    Ok(decoded) => decoded,
+                    Err(error) => {
                         let _ = events.send(ConversationEvent::Error {
-                            code: "provider_rate_limited".to_string(),
-                            message: signal.reason,
+                            code: "claude_history".into(),
+                            message: error.to_string(),
                             evidence: None,
                         });
-                        pending_results.store(0, Ordering::SeqCst);
-                        let _ = events.send(ConversationEvent::TurnCompleted {
-                            turn_id: turn_id(),
-                            status: Lifecycle::Failed,
-                        });
-                        turn_in_progress.store(false, Ordering::SeqCst);
-                        state = ReaderState::default();
-                        continue;
+                        break;
                     }
-                }
-
-                if let Err(error) = history.record(&line) {
-                    let _ = events.send(ConversationEvent::Error {
-                        code: "claude_history".into(),
-                        message: error.to_string(),
-                        evidence: None,
-                    });
-                    break;
-                }
-                let result = claude_mapping::process_line(&line, &turn_id(), &events, &mut state);
-                if let Some(session_id) = state.take_agent_session() {
-                    let (store, session, attachment) = &history.owner;
-                    if let Err(error) =
-                        store.record_session_agent_session(session, attachment, &session_id)
-                    {
-                        tracing::warn!(%error, "could not select Claude native conversation");
-                    }
-                    *session_slot
-                        .lock()
-                        .expect("claude provider session id lock poisoned") =
-                        Some(session_id.clone());
-                    if let Some(route) = &account_route {
-                        if let Err(error) = route.pin_session(&session_id).await {
-                            tracing::warn!(%error, "failed to pin Claude provider session account");
+                };
+                for item in decoded {
+                    match item {
+                        Decoded::Display(event) => {
+                            let _ = events.send(event);
                         }
-                    }
-                }
-                if let Some(status) = result {
-                    // One provider turn ended. Only close the runner turn once
-                    // every queued steer turn has also drained.
-                    state = ReaderState::default();
-                    if pending_results.fetch_sub(1, Ordering::SeqCst) <= 1 {
-                        pending_results.store(0, Ordering::SeqCst);
-                        let _ = events.send(ConversationEvent::TurnCompleted {
-                            turn_id: turn_id(),
-                            status,
-                        });
-                        turn_in_progress.store(false, Ordering::SeqCst);
+                        Decoded::Fact(ProviderFact::SessionObserved(session_id)) => {
+                            *session_slot
+                                .lock()
+                                .expect("claude provider session id lock poisoned") =
+                                Some(session_id);
+                        }
+                        Decoded::Fact(ProviderFact::RateLimit(signal))
+                            if signal.limited && fails_on_limit =>
+                        {
+                            let _ = events.send(ConversationEvent::Error {
+                                code: "provider_rate_limited".to_string(),
+                                message: signal.reason,
+                                evidence: None,
+                            });
+                            pending_results.store(0, Ordering::SeqCst);
+                            let _ = events.send(ConversationEvent::TurnCompleted {
+                                turn_id: turn_id(),
+                                status: Lifecycle::Failed,
+                            });
+                            turn_in_progress.store(false, Ordering::SeqCst);
+                            decoder
+                                .lock()
+                                .expect("claude decoder lock poisoned")
+                                .reset_turn();
+                        }
+                        // One provider turn ended. Only close the runner turn
+                        // once every queued steer turn has also drained.
+                        Decoded::Fact(ProviderFact::TurnCompleted { status, .. }) => {
+                            if pending_results.fetch_sub(1, Ordering::SeqCst) <= 1 {
+                                pending_results.store(0, Ordering::SeqCst);
+                                let _ = events.send(ConversationEvent::TurnCompleted {
+                                    turn_id: turn_id(),
+                                    status,
+                                });
+                                turn_in_progress.store(false, Ordering::SeqCst);
+                            }
+                        }
+                        Decoded::Fact(_) => {}
                     }
                 }
             }
@@ -308,7 +317,11 @@ impl ClaudeHarness {
                     tracing::warn!("claude stream ended without a final result");
                     Lifecycle::Failed
                 };
-                for item in state.drain_open_items(status) {
+                let open = decoder
+                    .lock()
+                    .expect("claude decoder lock poisoned")
+                    .drain_open_items(status);
+                for item in open {
                     let _ = events.send(ConversationEvent::ItemCompleted {
                         turn_id: turn_id(),
                         item,
@@ -393,13 +406,6 @@ impl Harness for ClaudeHarness {
     }
     fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
-    }
-
-    fn set_raw_provider_sender(
-        &mut self,
-        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
-    ) {
-        self.raw_provider = raw_provider;
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {
@@ -489,10 +495,7 @@ impl Harness for ClaudeHarness {
 
         let origin = self.turn_origin()?;
         let turn_id = uuid::Uuid::new_v4().to_string();
-        self.requests
-            .lock()
-            .expect("Claude request lock poisoned")
-            .insert(turn_id.clone(), origin);
+        self.register_request(&turn_id, origin);
         *self
             .current_turn_id
             .lock()
@@ -557,10 +560,7 @@ impl Harness for ClaudeHarness {
             }
         };
         let request = uuid::Uuid::new_v4().to_string();
-        self.requests
-            .lock()
-            .expect("Claude request lock poisoned")
-            .insert(request.clone(), origin);
+        self.register_request(&request, origin);
         if let Err(error) = self.send_line(user_message_line(content, &request)).await {
             self.pending_results.fetch_sub(1, Ordering::SeqCst);
             return SendCurrentOutcome::Failed {
@@ -621,20 +621,15 @@ impl Harness for ClaudeHarness {
 
 #[cfg(test)]
 mod activity_tests {
-    use std::time::Duration;
-
     use tokio::process::Command;
     use tokio::sync::mpsc;
 
     use super::ClaudeHarness;
     use crate::harness::Harness;
-    use crate::session_record::{
-        activity, CaptureHandle, SessionCaptureSpec, SessionGraphMembership,
-    };
+    use crate::session_record::activity;
 
     #[tokio::test]
     async fn claude_body_activity_does_not_require_process_group_authority() {
-        let home = tempfile::tempdir().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = ClaudeHarness::new(tx);
         harness.child = Some(
@@ -644,35 +639,10 @@ mod activity_tests {
                 .spawn()
                 .unwrap(),
         );
-        let capture = CaptureHandle::begin_at(
-            home.path(),
-            SessionCaptureSpec {
-                harness: "claude".into(),
-                model: None,
-                surface: "headless".into(),
-                cwd: home.path().into(),
-                repo: None,
-                worktree: None,
-                skill: None,
-                subjects: vec![],
-                graph: SessionGraphMembership::Independent,
-                work: None,
-            },
-        )
-        .unwrap();
-        capture.observe_activity(harness.pid()).await;
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if activity::read(home.path(), &capture.artifact_key()).await
-                    == activity::Activity::Running
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("a live Claude child must have observable CPU without a process group");
+        assert!(
+            activity::sample(harness.pid()).await.is_some(),
+            "a live Claude child must have observable CPU without a process group"
+        );
         assert_eq!(harness.process_group_id(), None);
         // The injected child was never admitted; kill_on_drop ends it.
     }

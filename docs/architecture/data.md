@@ -67,11 +67,12 @@ LfProcess can die while it continues. History retains the original Process and
 AgentProcess when a later attachment recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
-A capture's `events.jsonl` holds every provider event verbatim. SQLite history
-keeps what streaming increments add up to: a run of deltas is one event at the
-first delta's position, a Turn keeps its last cumulative diff, and the raw
-notification behind each increment stays in the file. Complete items, usage,
-input and outcomes are kept in both.
+The provider's own transcript holds the conversation; Loopflow keeps no copy
+of the stream. SQLite history keeps only Session facts: provider attempts,
+accounts and sessions, how each turn ended, and silences longer than ten
+minutes. Usage is the provider's native `usage` row, one per turn, updated as
+receipts arrive; each turn's `completed` receipt carries its prompt context.
+`session_activity` holds the latest CPU sample for Running/Stalled.
 
 A Graph is one lf process and the step processes it starts, and its ID is the
 Graph process's. The Graph process keeps the cursor in memory and appends GraphProcess: the

@@ -129,21 +129,10 @@ exit 0
     )
 }
 
-fn gh_finite_land_script(log_path: &str, awaiting_queue: bool, merge_race: bool) -> String {
-    let merge_state = if awaiting_queue { "behind" } else { "blocked" };
+fn gh_finite_land_script(log_path: &str, merge_race: bool) -> String {
     let checks = support::github_checks_page("$head", &[("fixture-check", "FAILURE", true)]);
     let unarmed = support::github_merge_response(1, "$head", "OPEN", "CLEAN", None);
-    let armed = support::github_merge_response(
-        1,
-        "$head",
-        "OPEN",
-        merge_state,
-        Some(if awaiting_queue {
-            "awaiting_queue"
-        } else {
-            "auto"
-        }),
-    );
+    let armed = support::github_merge_response(1, "$head", "OPEN", "blocked", Some("auto"));
     let merged = support::github_merge_response(1, "$head", "MERGED", "UNKNOWN", None)
         .replace("\"oid\":\"$head\"", "\"oid\":\"merge-head\"");
     format!(
@@ -196,34 +185,10 @@ if [ "$1 $2" = "pr merge" ]; then
   touch "$auto_state"
   exit 0
 fi
-if [ "$1 $2" = "api --include" ]; then
-  # The CI watcher's REST reads: one open PR whose required check failed.
-  for path do :; done
-  head="$(git rev-parse watched-land 2>/dev/null || git rev-parse HEAD)"
-  case "$path" in
-    */pulls\?*)
-      if [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; then
-        body="[{{\"number\":1,\"head\":{{\"ref\":\"watched-land\",\"sha\":\"$head\"}},\"base\":{{\"ref\":\"main\",\"sha\":\"base\"}}}}]"
-      else
-        body='[]'
-      fi ;;
-    */rules/branches/*)
-      body='[{{"type":"required_status_checks","parameters":{{"required_status_checks":[{{"context":"fixture-check"}}]}}}}]' ;;
-    */check-runs*)
-      body='{{"total_count":1,"check_runs":[{{"name":"fixture-check","status":"completed","conclusion":"failure","details_url":null,"started_at":"2026-08-21T00:00:00Z","completed_at":"2026-08-21T00:05:00Z","check_suite":{{"id":1}}}}]}}' ;;
-    */status*)
-      body='{{"statuses":[]}}' ;;
-    *)
-      printf 'HTTP/2.0 404 Not Found\r\n\r\n{{}}'
-      exit 1 ;;
-  esac
-  printf 'HTTP/2.0 200 OK\r\nX-Ratelimit-Remaining: 4999\r\nX-Ratelimit-Reset: 0\r\n\r\n%s' "$body"
-  exit 0
-fi
 if [ "$1" = "api" ]; then
   head="$(git rev-parse HEAD)"
   if [ "{merge_race}" = true ] || {{ [ -n "$LF_TEST_REPAIR_PROOF" ] && [ ! -f "$LF_TEST_REPAIR_PROOF" ]; }}; then
-    echo "{{\"merged\":false,\"state\":\"open\",\"mergeable_state\":\"{merge_state}\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
+    echo "{{\"merged\":false,\"state\":\"open\",\"mergeable_state\":\"blocked\",\"draft\":false,\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
     exit 0
   fi
   echo "{{\"merged\":true,\"state\":\"closed\",\"draft\":false,\"merge_commit_sha\":\"merge-head\",\"merged_at\":\"2026-08-21T00:00:00Z\",\"number\":1,\"html_url\":\"https://example.com/pr/1\",\"head\":{{\"sha\":\"$head\"}}}}"
@@ -1713,16 +1678,8 @@ fn pr_arm_publishes_without_create_flag_and_leaves_worktree_in_place() {
 }
 
 #[test]
-fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
-    for (repair, blocked, awaiting_queue, merge_race, graph, fail_start) in [
-        (false, false, false, true, false, false),
-        (false, false, false, false, false, false),
-        (true, false, false, false, false, false),
-        (true, false, false, false, false, true),
-        (true, true, false, false, false, false),
-        (true, false, true, false, false, false),
-        (true, false, false, false, true, false),
-    ] {
+fn lf_pr_land_returns_before_a_later_check_observes_merge() {
+    for (merge_race, graph) in [(true, false), (false, false), (false, true)] {
         let repo = TestRepo::new();
         let github_remote = "https://github.com/loopflowstudio/loopflow.git";
         let local_remote = repo.bare_path().to_string_lossy().to_string();
@@ -1743,42 +1700,14 @@ fn lf_pr_land_returns_before_later_checks_repair_and_observe_merge() {
             .unwrap();
         assert!(status.success());
         let log_path = repo.bare_path().join("watched-gh.log");
-        let script = gh_finite_land_script(
-            log_path.to_string_lossy().as_ref(),
-            awaiting_queue,
-            merge_race,
-        );
-        let repair_commands = r#"if [ -n "$LF_TEST_REPAIR_PROOF" ]; then
-  export LF_AGENT_CALLER="$(printf '%s' "$thread_start" | python3 -c 'import json,sys; print(json.load(sys.stdin)["params"]["config"]["shell_environment_policy.set"]["LF_AGENT_CALLER"])')"
-  while [ ! -f "$LF_TEST_REPAIR_LAUNCHES.release" ]; do sleep 0.05; done
-  echo repair >>"$LF_TEST_REPAIR_LAUNCHES"
-  if [ "$(wc -l <"$LF_TEST_REPAIR_LAUNCHES")" -gt 1 ]; then exit 1; fi
-  "$LF_TEST_BIN" sync --manual >"$LF_TEST_SYNC_LOG" 2>&1 || exit 1
-  if [ "$LF_TEST_REPAIR_BLOCKED" != "1" ]; then
-    git rev-parse HEAD >"$LF_TEST_REPAIR_PROOF"
-  fi
-fi"#;
-        let codex = codex_app_server_script(
-            if blocked {
-                r#"{"status":"blocked","summary":"GitHub credential revoked; reconnect it before retrying."}"#
-            } else {
-                r#"{"status":"published","summary":"Synced the linked worktree; the same head can now merge."}"#
-            },
-            "",
-        )
-        .replace(
-            "read -r turn_start\n",
-            &format!("read -r turn_start\n{repair_commands}\n"),
-        );
-        let _env = EnvGuard::new(&[
-            ("gh", script.as_str()),
-            ("codex", codex.as_str()),
-            ("open", noop_open_script()),
-        ]);
+        let script = gh_finite_land_script(log_path.to_string_lossy().as_ref(), merge_race);
+        let _env = EnvGuard::new(&[("gh", script.as_str()), ("open", noop_open_script())]);
         let worktree = repo.create_named_worktree("watched-land");
         fs::write(worktree.join("feature.txt"), "feature").unwrap();
         fs::create_dir_all(worktree.join(".lf")).unwrap();
         fs::write(worktree.join(".lf/config.yaml"), "agent: codex\n").unwrap();
+        // A ci-fix run is an ordinary skill run, which keeps its prompt log ignored.
+        fs::write(worktree.join(".gitignore"), ".lf/prompts/\n").unwrap();
         if graph {
             fs::create_dir_all(worktree.join(".lf/graphs")).unwrap();
             fs::write(
@@ -1787,25 +1716,18 @@ fi"#;
             )
             .unwrap();
         }
-        let status = Command::new("git")
-            .args(["add", "."])
-            .current_dir(&worktree)
-            .status()
-            .unwrap();
-        assert!(status.success());
-        let status = Command::new("git")
-            .args(["commit", "-m", "feature work"])
-            .current_dir(&worktree)
-            .status()
-            .unwrap();
-        assert!(status.success());
+        for args in [vec!["add", "."], vec!["commit", "-m", "feature work"]] {
+            let status = Command::new("git")
+                .args(args)
+                .current_dir(&worktree)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
 
         let lf_home = repo.path().join("lf-home");
         let database = lf_home.join("loopflow.db");
         initialize_landing_store(&database);
-        let repair_proof = repo.path().join(".git/landing-repair-proof");
-        let sync_log = repo.bare_path().join("repair-sync.log");
-        let repair_launches = repo.bare_path().join("repair-launches.log");
         let command = || {
             let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
             command
@@ -1813,19 +1735,7 @@ fi"#;
                 .env_remove("LF_GIT_OPERATION_ID")
                 .env_remove("LF_TRACE_ID")
                 .env_remove("LF_PROCESS_ID")
-                .env("LF_HOME", &lf_home)
-                .env("LF_TEST_BIN", env!("CARGO_BIN_EXE_lf"))
-                .env("LF_TEST_SYNC_LOG", &sync_log)
-                .env("LF_TEST_REPAIR_LAUNCHES", &repair_launches)
-                .env("LF_TEST_REPAIR_BLOCKED", if blocked { "1" } else { "0" })
-                .env(
-                    "LF_TEST_REPAIR_PROOF",
-                    if repair {
-                        repair_proof.as_os_str()
-                    } else {
-                        std::ffi::OsStr::new("")
-                    },
-                );
+                .env("LF_HOME", &lf_home);
             command
         };
         let handed_off = if graph {
@@ -1856,224 +1766,40 @@ fi"#;
         if graph {
             assert!(String::from_utf8_lossy(&handed_off.stderr).contains("still being watched"));
         }
-        assert!(!repair_launches.exists());
         let conn = rusqlite::Connection::open(&database).unwrap();
-        let initial: Option<(String, i64)> = conn
+        let initial: Option<i64> = conn
             .query_row(
-                "SELECT id,exit_code FROM processes WHERE parent_lf_process_id IS NULL",
+                "SELECT exit_code FROM processes WHERE parent_lf_process_id IS NULL",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .optional()
             .unwrap();
         // A Graph stopped short of its end exits 3, which no caller retries.
         // A direct land nothing references is forgotten at exit.
-        assert_eq!(initial.as_ref().map(|row| row.1), graph.then_some(3));
+        assert_eq!(initial, graph.then_some(3));
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
         assert_eq!(state, "watching");
-        // The scheduled check observes delivery; the watcher starts repairs.
-        let check: &[&str] = if repair {
-            &["repo", "ci", "watch", "--once"]
-        } else {
-            &["pr", "reconcile"]
-        };
-        if repair {
-            let observed = command().args(["pr", "reconcile"]).output().unwrap();
-            assert!(
-                observed.status.success(),
-                "{}",
-                String::from_utf8_lossy(&observed.stderr)
-            );
-            let repairs: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM ci_incidents WHERE repair_lf_process_id IS NOT NULL",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(
-                repairs, 0,
-                "a delivery check records failures without repairing"
-            );
-        }
-        let transport_log = lf_home.join("logs/transport.log");
-        if fail_start {
-            fs::create_dir_all(&transport_log).unwrap();
-        }
-        let mut output = command().args(check).output().unwrap();
-        if fail_start {
-            fs::remove_dir(&transport_log).unwrap();
-            let reserved: String = conn
-                .query_row("SELECT repair_session_id FROM ci_incidents", [], |row| {
-                    row.get(0)
-                })
-                .unwrap();
-            assert!(
-                !repair_launches.exists(),
-                "failed launch performed no repair"
-            );
-            output = command().args(check).output().unwrap();
-            let recovered: (String, i64) = conn
-                .query_row(
-                    "SELECT repair_session_id,repair_retries FROM ci_incidents",
-                    [],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            assert_eq!(
-                recovered,
-                (reserved, 1),
-                "recovery retains the reserved conversation"
-            );
-        }
-        if repair {
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-            let finished: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.id=c.repair_lf_process_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL)",[],|row|row.get(0)).unwrap();
-            assert!(
-                !finished,
-                "check must return before the provider turn finishes"
-            );
-            let overlap = command().args(check).output().unwrap();
-            assert!(
-                overlap.status.success(),
-                "{}",
-                String::from_utf8_lossy(&overlap.stderr)
-            );
-            fs::write(format!("{}.release", repair_launches.display()), "").unwrap();
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-            loop {
-                // Checkout cleanup waits for the transport's final output drain
-                // as well as the repair executor, both real Processes.
-                let done: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM ci_incidents c JOIN processes e ON e.id=c.repair_lf_process_id JOIN agent_sessions s ON s.id=c.repair_session_id JOIN processes transport ON transport.id=s.transport_lf_process_id WHERE c.repair_finished_at IS NOT NULL AND e.exit_code IS NOT NULL AND transport.completed_at IS NOT NULL)",[],|row|row.get(0)).unwrap();
-                if done {
-                    break;
-                }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "detached repair did not finish: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            let detected: bool = conn
-                .query_row(
-                    "SELECT provider_completed_at IS NOT NULL FROM ci_incidents",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(detected, "the watcher records when the provider finished");
-            let owner: String = conn
-                .query_row(
-                    "SELECT DISTINCT lf_process_id FROM session_events WHERE kind='started'",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or_else(|error| {
-                    let reason: Option<String> = conn
-                        .query_row("SELECT repair_error FROM ci_incidents", [], |row| {
-                            row.get(0)
-                        })
-                        .unwrap();
-                    panic!(
-                        "repair never started: {error}; {reason:?}; sync: {}",
-                        fs::read_to_string(&sync_log).unwrap_or_default()
-                    );
-                });
-            assert_ne!(
-                Some(&owner),
-                initial.as_ref().map(|row| &row.0),
-                "repair belongs to the later reconcile process"
-            );
-            let parent: (Option<String>, i64) = conn
-                .query_row(
-                    "SELECT parent_lf_process_id,exit_code FROM processes WHERE id=?1",
-                    [&owner],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .unwrap();
-            assert_eq!(
-                parent.1,
-                i64::from(blocked),
-                "{}\nNested sync: {}",
-                String::from_utf8_lossy(&output.stderr),
-                fs::read_to_string(&sync_log).unwrap_or_default()
-            );
-            let via_agent: bool = conn
-                .query_row(
-                    // The repair agent's own AgentProcess shares this parent.
-                    "SELECT via_agent FROM processes WHERE parent_lf_process_id=?1 AND kind='lf'",
-                    [&owner],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert!(via_agent, "the repair agent invokes the nested sync");
-            let check = parent
-                .0
-                .expect("repair has a separate checking parent Process");
-            assert_ne!(check, owner);
-            let exit: i64 = conn
-                .query_row(
-                    "SELECT exit_code FROM processes WHERE id=?1",
-                    [&check],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(exit, 0, "checking process exited independently");
-            assert_eq!(
-                fs::read_to_string(&repair_launches)
-                    .unwrap()
-                    .lines()
-                    .count(),
-                1
-            );
-        }
-        if blocked {
-            let error: String = conn
-                .query_row("SELECT repair_error FROM ci_incidents", [], |row| {
-                    row.get(0)
-                })
-                .unwrap();
-            assert!(error.contains("GitHub credential revoked; reconnect it before retrying."));
-            assert!(!repair_proof.exists());
-            let repeated = command().args(check).output().unwrap();
-            assert!(
-                repeated.status.success(),
-                "a useful blocked check is not a failed observation"
-            );
-            assert_eq!(
-                fs::read_to_string(&repair_launches)
-                    .unwrap()
-                    .lines()
-                    .count(),
-                1
-            );
-            continue;
-        }
+        // A later check observes delivery; only a ship process repairs.
+        let output = command().args(["pr", "reconcile"]).output().unwrap();
         assert!(
             output.status.success(),
-            "{}\nNested sync: {}",
-            String::from_utf8_lossy(&output.stderr),
-            fs::read_to_string(&sync_log).unwrap_or_default()
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
         );
-        if repair {
-            let state: String = conn
-                .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
-                .unwrap();
-            assert_eq!(state, "watching");
-            let output = command().args(["pr", "reconcile"]).output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+        let repairs: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ci_incidents WHERE repair_lf_process_id IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            repairs, 0,
+            "a delivery check records failures without repairing"
+        );
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();
@@ -2095,20 +1821,11 @@ fi"#;
         }
         assert!(
             !worktree.exists(),
-            "repair={repair}, graph={graph}, merge_race={merge_race}: {}",
+            "graph={graph}, merge_race={merge_race}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(!local_branch_exists(&repo, "watched-land"));
         assert!(!remote_branch_exists(&repo, "watched-land"));
-        if repair {
-            let repaired_head = fs::read_to_string(&repair_proof).unwrap();
-            let merged_head: String = conn
-                .query_row("SELECT observed_head_sha FROM pr_landings", [], |row| {
-                    row.get(0)
-                })
-                .unwrap();
-            assert_eq!(repaired_head.trim(), merged_head);
-        }
     }
 }
 
@@ -2171,7 +1888,7 @@ fn waited_task_landing_completes_at_workflow_end_without_another_command() {
 }
 
 #[test]
-fn waited_task_landing_reports_repair_exit_before_reservation_handoff() {
+fn waited_task_landing_reports_a_repair_run_that_opened_no_session() {
     waited_task_landing("review", true);
 }
 
@@ -2205,16 +1922,19 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     }
     repo.create_branch("waited-repair");
     let worktree = repo.path().canonicalize().unwrap();
-    let workflow = if destination == "end" {
-        "nodes: {}\nedges:\n  - {from: start, to: end, graph: delivery-proof}\n"
-    } else {
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: delivery-proof}\n  - {from: review, to: end}\n"
-    };
+    // The graph lands, then reaches a stage or its end.
+    let mut graph = "- cmd: graph show deliver\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n".to_string();
+    if destination != "end" {
+        graph.push_str("- interactive: {name: demo, id: review}\n");
+    }
     for (path, contents) in [
         ("feature.txt", "keep the feature"),
-        (".lf/config.yaml", "agent: codex\nplanning:\n  provider: linear\n  team: team-task-pr-tests\n"),
-        (".lf/workflows/delivery-proof.yaml", workflow),
-        (".lf/graphs/delivery-proof.yaml", "- cmd: graph show ship\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n"),
+        (
+            ".lf/config.yaml",
+            "agent: codex\nplanning:\n  provider: linear\n  team: team-task-pr-tests\n",
+        ),
+        (".gitignore", ".lf/prompts/\n"),
+        (".lf/graphs/delivery-proof.yaml", graph.as_str()),
     ] {
         let path = worktree.join(path);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2234,7 +1954,7 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     let home = tempfile::tempdir().unwrap();
     let proof = home.path().join("repair-proof");
     let launches = home.path().join("repair-launches");
-    let gh = gh_finite_land_script(home.path().join("gh.log").to_str().unwrap(), false, false)
+    let gh = gh_finite_land_script(home.path().join("gh.log").to_str().unwrap(), false)
         .replace("merge-head", "$head")
         .replace("watched-land", "waited-repair");
     let repair = r#"read -r turn_start
@@ -2255,18 +1975,19 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         &[("gh", &gh), ("codex", &codex), ("open", noop_open_script())],
         home.path(),
     );
-    let launcher = home.path().join("lf-delayed-repair");
+    let launcher = home.path().join("lf-failing-repair");
     fs::write(
         &launcher,
         if failed_startup {
-            "#!/bin/sh\nif [ \"$1\" = task ] && [ \"$2\" = __repair ]; then exit 17; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            "#!/bin/sh\nif [ \"$4 $5\" = 'skill ci-fix' ]; then exit 17; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         } else {
-            "#!/bin/sh\nif [ \"$1\" = task ] && [ \"$2\" = __repair ]; then sleep 12; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            "#!/bin/sh\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         },
     )
     .unwrap();
     fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
+    support::managed_codex_account(home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let unrelated = loopflow::id::LfProcessId::new();
     db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'independent-edit',?5)",
@@ -2286,49 +2007,80 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
             .env("LF_TEST_REPAIR_LAUNCHES", &launches);
         cmd
     };
-    let run = || {
-        let out = home.path().join("run.stdout");
-        let err = home.path().join("run.stderr");
-        let mut child = command()
+    // The waiter never gives up on its own, and its run is owned by a detached
+    // transport server. Reap that run's process group (the Graph and its landing
+    // step) when the test returns early or an assertion fails; otherwise it
+    // polls the fake `gh` forever.
+    struct Waiter(std::process::Child, std::path::PathBuf);
+    impl Drop for Waiter {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+            let Ok(db) = rusqlite::Connection::open(&self.1) else {
+                return;
+            };
+            let pids: Vec<i64> = db
+                .prepare("SELECT pid FROM processes WHERE completed_at IS NULL AND pid IS NOT NULL")
+                .and_then(|mut rows| rows.query_map([], |row| row.get(0))?.collect())
+                .unwrap_or_default();
+            for pid in pids {
+                // Only a process still running this build's `lf`, never a reused pid.
+                let ours = Command::new("ps")
+                    .args(["-o", "args=", "-p", &pid.to_string()])
+                    .output()
+                    .is_ok_and(|ps| {
+                        String::from_utf8_lossy(&ps.stdout).starts_with(env!("CARGO_BIN_EXE_lf"))
+                    });
+                if !ours {
+                    continue;
+                }
+                let pid = pid as libc::pid_t;
+                // SAFETY: kill has no memory preconditions. The pid runs this
+                // build's `lf` for this home, and a run's leader heads its own group.
+                unsafe {
+                    libc::kill(-pid, libc::SIGKILL);
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+    let out = home.path().join("run.stdout");
+    let err = home.path().join("run.stderr");
+    let mut waiter = Waiter(
+        command()
             .args(["-b", "task", "run", "INF-123", "delivery-proof"])
             .stdout(fs::File::create(&out).unwrap())
             .stderr(fs::File::create(&err).unwrap())
             .spawn()
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(60);
-        let status = loop {
-            if let Some(status) = child.try_wait().unwrap() {
-                break status;
-            }
-            if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!(
-                    "waited Task did not finish: {}\n{}",
-                    fs::read_to_string(out).unwrap(),
-                    fs::read_to_string(err).unwrap()
-                );
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
+            .unwrap(),
+        home.path().join("loopflow.db"),
+    );
+    let read = || {
         (
-            status,
-            fs::read_to_string(out).unwrap(),
-            fs::read_to_string(err).unwrap(),
+            fs::read_to_string(&out).unwrap(),
+            fs::read_to_string(&err).unwrap(),
         )
     };
-    let (status, _, error) = run();
-    assert_eq!(status.code(), Some(3), "{error}");
-    assert!(error.contains(unrelated.as_str()), "{error}");
+    let wait_for = |reported: &str| {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !read().1.contains(reported) {
+            let (output, error) = read();
+            assert!(
+                Instant::now() < deadline,
+                "waited Task never reported {reported:?}: {output}\n{error}"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    };
+    // Unrelated live work holds repair; the waiter reports it and keeps checking.
+    wait_for(unrelated.as_str());
     assert!(!launches.exists(), "unrelated work must prevent repair");
-    assert_eq!(
-        support::recorded_graphs(home.path()).len(),
-        1,
-        "held land must not replay gate"
-    );
-    // A concurrent watcher reports other work without poisoning the delivery
-    // that a foreground waiter will continue. Neither caller starts a repair.
-    let watched = command().args(["ci", "watch", "--once"]).output().unwrap();
+    // A read runs lazy recovery, which leaves the held delivery for the
+    // waiter to continue and starts no repair.
+    let watched = command()
+        .args(["task", "status", "INF-123", "--json"])
+        .output()
+        .unwrap();
     assert!(
         watched.status.success(),
         "{}",
@@ -2340,33 +2092,42 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         .unwrap();
     assert_eq!(landing_state, "watching");
     db.execute("UPDATE processes SET completed_at=started_at+1,outcome='succeeded',exit_code=0 WHERE id=?1", [&unrelated]).unwrap();
-    // Even a later observation of this old request cannot turn the next
-    // Graph's read-only first command into a landing handoff.
-    db.execute(
-        "UPDATE pr_landings SET updated_at=?1",
-        [time::OffsetDateTime::now_utc().unix_timestamp() + 60],
-    )
-    .unwrap();
     let original_head = repo.head_sha();
-    let (status, output, error) = run();
     if failed_startup {
-        assert_eq!(status.code(), Some(3), "{output}\n{error}");
-        assert!(
-            error.contains("repair owner exited before claiming its reservation"),
-            "{error}"
-        );
+        wait_for("exited before opening a Session");
         assert!(!launches.exists());
         assert_eq!(repo.head_sha(), original_head);
-        let retained: (String, String, Option<String>) = db
-            .query_row(
-                "SELECT state,requested_head_sha,merge_commit FROM pr_landings",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(retained, ("blocked".into(), original_head, None));
+        // The attempt ended; the next one backs off rather than blocking.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let retained = loop {
+            let retained: (String, String, Option<String>) = db
+                .query_row(
+                    "SELECT state,requested_head_sha,merge_commit FROM pr_landings",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            if retained.0 == "repairing" || Instant::now() > deadline {
+                break retained;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        assert_eq!(retained, ("repairing".into(), original_head, None));
         return;
     }
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let status = loop {
+        if let Some(status) = waiter.0.try_wait().unwrap() {
+            break status;
+        }
+        let (output, error) = read();
+        assert!(
+            Instant::now() < deadline,
+            "waited Task did not finish: {output}\n{error}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    let (output, error) = read();
     assert!(status.success(), "{output}\n{error}");
     assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
     let repaired_head = fs::read_to_string(&proof).unwrap();
@@ -2404,6 +2165,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         )
         .unwrap();
     assert_eq!(node, destination);
+    // Short of `end` the Task waits at a stage with nothing running.
     let expected_state = if destination == "end" {
         "done"
     } else {
@@ -2432,7 +2194,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         status["execution"]["status"], expected_state,
         "only an edge reaching end authorizes Task completion"
     );
-    assert_eq!(support::recorded_graphs(home.path()).len(), 2);
+    assert_eq!(support::recorded_graphs(home.path()).len(), 1);
 }
 
 #[test]
@@ -2564,7 +2326,7 @@ esac
         );
         let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         let status = &status["execution"];
-        assert_eq!(status["status"], "not_ready", "{status}");
+        assert_eq!(status["status"], "idle", "{status}");
         assert_eq!(
             fs::read_to_string(worktree.join("feature.txt")).unwrap(),
             "retain until completion\n"

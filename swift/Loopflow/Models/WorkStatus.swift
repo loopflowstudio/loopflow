@@ -43,13 +43,20 @@ public enum WorkStatus: Codable, Sendable, Hashable {
     }
 }
 
-/// Durable completion and abandonment, with Workflow readiness for unfinished Tasks.
+/// A Task's state, derived in Rust from its checkout, stage, a running Graph
+/// and the Auto-Ship approval. A Session's available/busy is a separate axis.
 public enum TaskState: String, Codable, Sendable, Hashable {
-    case paused
-    /// The Task has taken up no Workflow.
-    case notReady = "not_ready"
-    case ready
+    case deferred
+    /// No checkout yet.
+    case unstarted
+    /// A checkout, no Graph running, not at a stage.
+    case idle
+    /// At an interactive stage, in its Task Session.
     case active
+    /// A Graph runs, with a stage ahead that stops for a person.
+    case moving
+    /// A Graph runs and no stage ahead stops it; it finishes on its own to merge.
+    case shipping
     case done
     case abandoned
 

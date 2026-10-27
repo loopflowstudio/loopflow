@@ -180,7 +180,8 @@ public final class MultiplexerStore {
     /// Change this slot's content without disturbing its companions or split ratios.
     /// Content keeps the slot's designated kind.
     public func replace(_ paneId: String, with content: PaneContent) {
-        guard let pane = layout.pane(for: paneId), pane.kind == content.kind else { return }
+        // Swift 6.2.3's -O CopyPropagation crashes on a bound `pane` here.
+        guard layout.pane(for: paneId)?.kind == content.kind else { return }
         layout = layout.replacingContent(of: paneId, with: content)
         collapsedPaneIds.remove(paneId)
         setFocusedPane(paneId)

@@ -216,6 +216,10 @@
           "run_control": {
             "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
           },
+          "ship_control": {
+            "unavailable": "Agent execution unavailable: agent \"opencode:opencode/test-model\" uses harness \"opencode\", which does not support a managed execution boundary; select codex or claude"
+          },
+          "shipping": null,
           "runtime": {
             "completion_pending": null,
             "provider": "opencode",
@@ -228,7 +232,7 @@
                 "label": "mini"
               }
             },
-            "status": "not_ready",
+            "status": "unstarted",
             "updated_at": "2026-10-11T22:28:08Z",
             "work_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
           },
@@ -239,7 +243,6 @@
               "state": "available"
             },
             "assignee": null,
-            "completed": false,
             "completed_at": null,
             "description": "Exercise the persisted lifecycle.",
             "due_date": null,

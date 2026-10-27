@@ -316,7 +316,7 @@ def test_generator_runs_with_current_tables_and_current_run_projection(
             str(database),
             "--history",
             str(runs),
-            "--envelope",
+            "--json",
         ]
     )
     if missing is not None:
@@ -326,13 +326,11 @@ def test_generator_runs_with_current_tables_and_current_run_projection(
         assert "lifecycle-scorecard:" in output.err
         return
     assert result == 0
-    envelope = json.loads(capsys.readouterr().out)
-    rows = {row["id"]: row for row in envelope["report"]["rows"]}
+    report = json.loads(capsys.readouterr().out)
+    rows = {row["id"]: row for row in report["rows"]}
     assert rows["session_elapsed_seconds"]["p50"] == 59
     assert rows["session_total_input_tokens"]["p50"] == 100
     attempt = rows["recorded_attempt_to_merge_seconds"]
     assert (attempt["eligible"], attempt["measured"], attempt["p50"]) == (1, 1, 40)
-    assert "Observed lower bound" in envelope["text"]
     # The accepted chapter retired task-loop-trust; reporting needs no metric contract.
     assert not (tmp_path / ".lf/wave/product/metrics/task-loop-trust.md").exists()
-    assert envelope["metric_observations"] == []

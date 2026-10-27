@@ -62,7 +62,7 @@
           "work_id": "task_40fbeeaadfbca5367aa7391432ae84ff",
           "task_id": "linear-task-w2-127",
           "task_identifier": "W2-127",
-          "status": "ready",
+          "status": "unstarted",
           "owner": "wave",
           "reason": "Task's owning Project is absent from the current PM snapshot",
           "recovery": "lf task status task_40fbeeaadfbca5367aa7391432ae84ff --json"
@@ -160,7 +160,6 @@
           "name": "Make lf roadmap the machine-wide view",
           "description": "Envelope over the per-wave join.",
           "rank": 4,
-          "completed": false,
           "assignee": null,
           "state": "unstarted",
           "completed_at": null,
@@ -193,7 +192,7 @@
         },
         "runtime": {
           "work_id": "ts_now00000000000000000000000000000",
-          "status": "ready",
+          "status": "shipping",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-14T23:44:00Z",
@@ -244,7 +243,7 @@
                 "id": "design",
                 "label": "task-design",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature"
@@ -256,7 +255,7 @@
                 "id": "implement",
                 "label": "implement",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -269,7 +268,7 @@
                 "id": null,
                 "label": "realign",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -282,7 +281,7 @@
                 "id": "decide",
                 "label": "loop-or-next",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": 1,
                 "sources": [
                   "feature",
@@ -295,7 +294,7 @@
                 "id": "demo",
                 "label": "demo",
                 "kind": "skill",
-                "human": true,
+                "interactive": true,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -308,7 +307,7 @@
                 "id": "decide_delivery",
                 "label": "loop-or-next",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": 1,
                 "sources": [
                   "feature",
@@ -321,7 +320,7 @@
                 "id": null,
                 "label": "xor-route",
                 "kind": "xor",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature"
@@ -336,7 +335,7 @@
                         "id": "patch",
                         "label": "patch",
                         "kind": "skill",
-                        "human": false,
+                        "interactive": false,
                         "returns_to": null,
                         "sources": [],
                         "paths": []
@@ -355,7 +354,7 @@
                 "id": null,
                 "label": "pr land -c",
                 "kind": "op",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -531,6 +530,14 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": "Task is already shipping"
+        },
+        "shipping": {
+          "shipped_at": 1792600000,
+          "state": "landing",
+          "reason": "CI running on #1650"
+        },
         "pr": null,
         "workflow_source": "task"
       },
@@ -541,7 +548,6 @@
           "name": "Show the all-wave roadmap and launch or attach",
           "description": "Consume the shared roadmap DTO.",
           "rank": 1,
-          "completed": false,
           "assignee": null,
           "state": "unstarted",
           "completed_at": null,
@@ -574,7 +580,7 @@
         },
         "runtime": {
           "work_id": "ts_review00000000000000000000000000",
-          "status": "ready",
+          "status": "unstarted",
           "completion_pending": null,
           "reason": "ready",
           "updated_at": "2026-07-14T22:00:00Z",
@@ -632,7 +638,7 @@
                 "id": "design",
                 "label": "task-design",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature"
@@ -644,7 +650,7 @@
                 "id": "implement",
                 "label": "implement",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -657,7 +663,7 @@
                 "id": null,
                 "label": "realign",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -670,7 +676,7 @@
                 "id": "decide",
                 "label": "loop-or-next",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": 1,
                 "sources": [
                   "feature",
@@ -683,7 +689,7 @@
                 "id": "demo",
                 "label": "demo",
                 "kind": "skill",
-                "human": true,
+                "interactive": true,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -696,7 +702,7 @@
                 "id": "decide_delivery",
                 "label": "loop-or-next",
                 "kind": "skill",
-                "human": false,
+                "interactive": false,
                 "returns_to": 1,
                 "sources": [
                   "feature",
@@ -709,7 +715,7 @@
                 "id": null,
                 "label": "xor-route",
                 "kind": "xor",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature"
@@ -724,7 +730,7 @@
                         "id": "patch",
                         "label": "patch",
                         "kind": "skill",
-                        "human": false,
+                        "interactive": false,
                         "returns_to": null,
                         "sources": [],
                         "paths": []
@@ -743,7 +749,7 @@
                 "id": null,
                 "label": "pr land -c",
                 "kind": "op",
-                "human": false,
+                "interactive": false,
                 "returns_to": null,
                 "sources": [
                   "feature",
@@ -921,6 +927,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": {
           "id": "pr-review",
           "sequence": 1,
@@ -958,7 +968,6 @@
           "name": "Wave Chat consumes the roadmap snapshot",
           "description": "Derive Now/Available from one read.",
           "rank": 6,
-          "completed": false,
           "assignee": null,
           "state": "unstarted",
           "completed_at": null,
@@ -1017,6 +1026,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": null,
         "workflow_source": "task"
       },
@@ -1027,7 +1040,6 @@
           "name": "Now + Available work views — research",
           "description": "Research delivered in merged PR.",
           "rank": 0,
-          "completed": true,
           "assignee": null,
           "state": "completed",
           "completed_at": null,
@@ -1109,6 +1121,10 @@
         "run_control": {
           "unavailable": null
         },
+        "ship_control": {
+          "unavailable": null
+        },
+        "shipping": null,
         "pr": null,
         "workflow_source": "task"
       }

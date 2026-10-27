@@ -1,6 +1,9 @@
 //! Command observation is durable even when no agent work starts.
 #![cfg(unix)]
 
+#[allow(dead_code)] // Linked for its inherited provider-home scrub.
+mod support;
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, Command};
@@ -14,11 +17,10 @@ use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::{RunningParent, TestRepo};
 
 #[tokio::test]
-async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_without_losing_history()
-{
+async fn agent_settlement_on_read_reports_failed_observation_and_recovers_without_losing_history() {
     use std::os::unix::process::CommandExt;
 
-    use loopflow::lf::commands::top::{ActivityNodeKind, ActivitySnapshot};
+    use loopflow::lf::commands::top::ActivitySnapshot;
 
     struct Agent(Child);
     impl Drop for Agent {
@@ -93,10 +95,10 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
         serde_json::from_slice::<ActivitySnapshot>(&output.stdout).unwrap()
     };
     let id = format!("process:{}", attachment.agent_process_id);
-    let live = snapshot();
-    let row = live.nodes.iter().find(|row| row.id == id).unwrap();
-    assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
-    assert_eq!(row.pid, Some(agent.0.id()));
+    // Every read of this Machine's processes recovers first, so the orphan is
+    // checked in the store here rather than in a `monitor ps` row.
+    assert!(before.completed_at.is_none());
+    assert!(agent.0.try_wait().unwrap().is_none());
 
     // Only the portable reader invokes ps; macOS observes the kernel directly.
     #[cfg(not(target_os = "macos"))]
@@ -105,11 +107,10 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
         std::fs::create_dir(&bin).unwrap();
         let ps = bin.join("ps");
         for (args, single_pid_reads) in [
-            (["task", "reconcile", "--json"], false),
             (["monitor", "prune", "--json"], false),
             // Exact leader observation succeeds, but descendant inventory fails.
             // The reaper must refuse before signaling, not assume no descendants.
-            (["task", "reconcile", "--json"], true),
+            (["monitor", "prune", "--json"], true),
         ] {
             let forward = if single_pid_reads {
                 "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"
@@ -134,18 +135,6 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
                 String::from_utf8_lossy(&output.stderr).contains("fixture sampling unavailable"),
                 "{output:?}"
             );
-            if args[0] == "task" {
-                let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-                assert!(
-                    result["errors"].as_array().unwrap().iter().any(|error| {
-                        error
-                            .as_str()
-                            .unwrap()
-                            .contains(attachment.agent_process_id.as_str())
-                    }),
-                    "{result}"
-                );
-            }
             assert!(agent.0.try_wait().unwrap().is_none());
             assert_eq!(
                 store.process(&attachment.agent_process_id).unwrap(),
@@ -159,14 +148,11 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
         }
     }
 
-    // This is the same operation the schedule invokes, not evidence of an
-    // installed schedule firing. It must settle a detached row without receipts.
-    let output = command(home.path(), repo.path(), &["task", "reconcile", "--json"])
+    // An ordinary read of this Machine's Tasks settles a detached row without receipts.
+    let output = command(home.path(), repo.path(), &["task", "list"])
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(result["errors"], serde_json::json!([]));
     assert!(!agent
         .0
         .try_wait()
@@ -911,7 +897,15 @@ struct Attached {
 
 impl Attached {
     fn start(home: &Path, repo: &Path, name: &str) -> Self {
-        Self::spawn(command(home, repo, &["__telemetry-scorecard"]), home, name)
+        let script = attached_script(repo);
+        let args = [
+            "session",
+            "serve",
+            "--",
+            "python3",
+            script.to_str().unwrap(),
+        ];
+        Self::spawn(command(home, repo, &args), home, name)
     }
 
     fn spawn(mut command: Command, home: &Path, name: &str) -> Self {
@@ -949,12 +943,17 @@ impl Drop for Attached {
     }
 }
 
-fn write_scorecard(repo: &Path) {
-    std::fs::create_dir(repo.join("scripts")).unwrap();
+fn attached_script(repo: &Path) -> std::path::PathBuf {
+    repo.canonicalize().unwrap().join("attached.py")
+}
+
+/// What an `Attached` execution runs: one nested lf command, then it announces
+/// the owning LfProcessId and waits for its stop file.
+fn write_attached_script(repo: &Path) {
     std::fs::write(
-        repo.join("scripts/lifecycle_scorecard.py"),
+        attached_script(repo),
         r#"
-import json, os, pathlib, subprocess, time
+import os, pathlib, subprocess, time
 home = pathlib.Path(os.environ['LF_HOME'])
 name = os.environ['LF_TEST_ATTACHED']
 subprocess.run([os.environ['LF_TEST_BINARY'], 'session', 'list', '--all', '--json'],
@@ -964,7 +963,6 @@ subprocess.run([os.environ['LF_TEST_BINARY'], 'session', 'list', '--all', '--jso
 os.replace(home / (name + '.ready.tmp'), home / (name + '.ready'))
 while not (home / (name + '.stop')).exists():
     time.sleep(.02)
-print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
 "#,
     )
     .unwrap();
@@ -978,7 +976,7 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
-    write_scorecard(repo.path());
+    write_attached_script(repo.path());
     // Hold the existing cleanup hook after killing its owned group. Without
     // exit coordination the awakened command returns 1 while Process already says
     // interrupted/130. A passing ordinary timing alone does not cover this race.
@@ -1000,10 +998,17 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
     #[cfg(not(target_os = "linux"))]
     let preload: Option<std::path::PathBuf> = None;
     let parent = RunningParent::insert(&database);
+    let script = attached_script(repo.path());
     let mut command = child(
         home.path(),
         repo.path(),
-        &["__telemetry-scorecard"],
+        &[
+            "session",
+            "serve",
+            "--",
+            "python3",
+            script.to_str().unwrap(),
+        ],
         &parent,
     );
     if let Some(preload) = &preload {
@@ -1035,15 +1040,10 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
             .unwrap()
             .contains("test ordering: owned group killed before interrupt hook returns"));
     }
-    let scorecard_pid = std::fs::read_to_string(home.path().join("interrupt.pid")).unwrap();
-    let script = repo
-        .path()
-        .canonicalize()
-        .unwrap()
-        .join("scripts/lifecycle_scorecard.py");
+    let script_pid = std::fs::read_to_string(home.path().join("interrupt.pid")).unwrap();
     let alive = || {
         let output = Command::new("ps")
-            .args(["-p", scorecard_pid.trim(), "-o", "command="])
+            .args(["-p", script_pid.trim(), "-o", "command="])
             .output()
             .unwrap();
         String::from_utf8_lossy(&output.stdout).contains(script.to_str().unwrap())
@@ -1055,8 +1055,8 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
     let survived = alive();
     if survived {
         eprintln!(
-            "owned scorecard survived interrupted lf: pid={} script={}",
-            scorecard_pid.trim(),
+            "owned script survived interrupted lf: pid={} script={}",
+            script_pid.trim(),
             script.display()
         );
         // Keep fixture cleanup distinct from the interruption result. Release
@@ -1066,12 +1066,9 @@ async fn interruption_records_the_process_without_a_fabricated_signal_name() {
         while alive() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(!alive(), "owned scorecard failed fixture cleanup");
+        assert!(!alive(), "owned script failed fixture cleanup");
     }
-    assert!(
-        !survived,
-        "interrupted command left its owned scorecard alive"
-    );
+    assert!(!survived, "interrupted command left its owned script alive");
 }
 
 #[tokio::test]
@@ -1084,7 +1081,7 @@ async fn actual_agent_process_children_follow_attachment_handoff_but_not_provide
         .await
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
-    write_scorecard(repo.path());
+    write_attached_script(repo.path());
     let original = Attached::start(home.path(), repo.path(), "original");
     let original_id = original.id.clone();
     let replacement = Attached::start(home.path(), repo.path(), "replacement");
@@ -1221,7 +1218,7 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
         .await
         .unwrap();
     let store = SqliteStore::new(&database).unwrap();
-    write_scorecard(repo.path());
+    write_attached_script(repo.path());
     let original = Attached::start(home.path(), repo.path(), "original");
     let replacement = Attached::start(home.path(), repo.path(), "replacement");
     let session = "native-client-transfer";

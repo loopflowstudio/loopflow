@@ -167,7 +167,8 @@ mod tests {
                 "{name}"
             );
         }
-        for name in ["pursue", "incident", "vsm-operate"] {
+        // A Task's workflow is a graph like any other.
+        for name in ["pursue", "incident", "vsm-operate", "feature", "code"] {
             assert!(
                 matches!(
                     resolve_definition(tmp.path(), name, None).unwrap(),
@@ -175,11 +176,6 @@ mod tests {
                 ),
                 "{name}"
             );
-        }
-        // A workflow is traversed by `lf task run`, never run as a Graph.
-        for name in ["feature", "code"] {
-            let error = resolve_definition(tmp.path(), name, None).unwrap_err();
-            assert!(matches!(error, crate::error::LoadError::Workflow(_)));
         }
     }
 }

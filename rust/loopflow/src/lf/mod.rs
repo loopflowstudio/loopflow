@@ -57,11 +57,11 @@ pub struct Cli {
     #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
 
-    /// Captured skill and arguments supplied by the invoking Graph process.
-    #[arg(long, hide = true)]
+    /// Read the skill and its arguments from this captured invocation file, as a Graph step does
+    #[arg(long, value_name = "PATH")]
     pub skill_input: Option<std::path::PathBuf>,
-    /// Native final-answer schema supplied by a deciding step.
-    #[arg(long, hide = true, value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
+    /// Require the final answer to match this JSON schema, as a deciding Graph step does
+    #[arg(long, value_name = "JSON", value_parser = |text: &str| serde_json::from_str::<serde_json::Value>(text))]
     pub output_schema: Option<serde_json::Value>,
     #[arg(skip)]
     pub resolved_invocation: Option<crate::skills::invocation::SkillInvocation>,
@@ -149,9 +149,9 @@ pub struct Cli {
     #[arg(long, value_name = "NAME", conflicts_with = "task")]
     pub wt: Option<String>,
 
-    /// Keep a Work-bound internal launch in this exact checkout.
-    #[arg(long = "__cwd", value_name = "PATH", hide = true)]
-    pub bound_cwd: Option<PathBuf>,
+    /// Run in this directory; Work still comes from `--task` or `--wave`
+    #[arg(long, value_name = "PATH", conflicts_with = "wt")]
+    pub cwd: Option<PathBuf>,
 
     /// The conversation `lf -b connect ID --message TEXT` continues.
     #[arg(skip)]
@@ -196,13 +196,6 @@ impl Cli {
                     cmd: ReleaseCommand::Run { .. }
                         | ReleaseCommand::Bump { .. }
                         | ReleaseCommand::Notes { .. }
-                } | RepoCommand::Ci {
-                    cmd: Some(CiCommand::Watch {
-                        status: false,
-                        uninstall: false,
-                        ..
-                    }),
-                    ..
                 }
             ),
             Some(_) => false,
@@ -231,6 +224,21 @@ impl Cli {
             connection.target(&self, id.as_deref()).map_err(|error| {
                 clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
             })?;
+        }
+        // `lf ship ISSUE` selects its Task as `--task` does.
+        if let Some(Commands::Ship { issue, .. }) = &mut self.command {
+            if let Some(issue) = issue.take() {
+                if self.task.as_ref().is_some_and(|task| task != &issue) {
+                    return Err(clap::Error::raw(
+                        clap::error::ErrorKind::ArgumentConflict,
+                        format!(
+                            "conflicting Task selections: {} and {issue}\n",
+                            self.task.as_deref().unwrap_or_default()
+                        ),
+                    ));
+                }
+                self.task = Some(issue);
+            }
         }
         // Work routing consumes the same explicit selector in either flag position.
         if let Some(Commands::Session {
@@ -352,7 +360,7 @@ impl Cli {
             wave: self.wave.clone(),
             task: self.task.clone(),
             wt: self.wt.clone(),
-            bound_cwd: self.bound_cwd.clone(),
+            cwd: self.cwd.clone(),
             resume: self.resume.clone(),
         }
     }
@@ -407,6 +415,24 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WtCommand,
     },
+    /// Ship the Task: run every remaining step to merge and completion, standing in at each stage
+    ///
+    /// Returns once the Task is shipping and runs on to its end (`-b` waits for
+    /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
+    /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
+    /// `--stop` withdraws the approval and takes back its merge request.
+    Ship {
+        issue: Option<String>,
+        /// Take up this graph in place of the Task's remaining steps
+        #[arg(long, conflicts_with = "stop")]
+        graph: Option<String>,
+        /// Why, kept in the Task's history
+        #[arg(long)]
+        reason: Option<String>,
+        /// Stop Auto-Ship: end the ship process and disarm auto-merge it armed
+        #[arg(long)]
+        stop: bool,
+    },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
     /// Manage working notes
@@ -452,32 +478,24 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         prompt: Vec<String>,
     },
-    /// Internal detached owner for an execution, launched by its delegating command.
-    #[command(name = "__transport-serve", hide = true)]
-    TransportServe {
-        #[arg(long)]
-        terminal: bool,
-        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
-        argv: Vec<String>,
-    },
     /// Internal provider turn-boundary hook: context at startup and compaction,
-    /// steers at tool and prompt boundaries, Linear acquisition at turn end.
+    /// steers at tool and prompt boundaries, Linear acquisition at turn end,
+    /// Pi's native lifecycle events and its bash tool groups.
     #[command(name = "__context-block", hide = true)]
     ContextBlock {
         #[arg(long)]
         delivery: Option<std::path::PathBuf>,
         #[arg(long, value_enum)]
         moment: crate::context_block::ContextMoment,
-    },
-    /// Owned Pi native lifecycle callback.
-    #[command(name = "__pi-event", hide = true)]
-    PiEvent,
-    /// Arm the existing watchdog for an owned detached tool group.
-    #[command(name = "__tool-lifeline", hide = true)]
-    ToolLifeline {
-        path: std::path::PathBuf,
-        #[arg(long)]
-        provider_pid: u32,
+        /// The FIFO Pi holds open while a `tool-group` command runs
+        #[arg(
+            long,
+            required_if_eq("moment", "tool-group"),
+            requires = "provider_pid"
+        )]
+        lifeline: Option<std::path::PathBuf>,
+        #[arg(long, requires = "lifeline")]
+        provider_pid: Option<u32>,
     },
     /// Inspect and continue Sessions
     Session {
@@ -573,13 +591,6 @@ pub enum Commands {
         /// Inspect a Task's checkout and Wave context
         #[arg(long)]
         task: Option<String>,
-    },
-    /// Internal: render the repository maintainer scorecard for telemetry-daily
-    #[command(name = "__telemetry-scorecard", hide = true)]
-    TelemetryScorecard {
-        /// Emit structured JSON for operator automation
-        #[arg(long)]
-        json: bool,
     },
     /// Discover commands, skills, and graphs
     List {
@@ -942,9 +953,9 @@ impl WavePlanTarget {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveWorkflowCommand {
-    /// Print a definition from `.lf/workflows/` or the builtins
+    /// Print a graph from `.lf/graphs/` or the builtins
     Source { name: String },
-    /// List Workflow definitions, including unavailable local files
+    /// List graphs, including unavailable local files
     List {
         #[arg(long)]
         json: bool,
@@ -955,8 +966,8 @@ pub enum WaveWorkflowCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Select the Workflow future Tasks take up; captured Tasks stay unchanged.
-    /// Definitions are committed `.lf/workflows/<name>.yaml` files or builtins.
+    /// Select the graph future Tasks take up; captured Tasks stay unchanged.
+    /// Graphs are committed `.lf/graphs/<name>.yaml` files or builtins.
     Set { name: String, wave: Option<String> },
 }
 
@@ -965,8 +976,8 @@ pub enum TaskWorkflowCommand {
     /// Move Workflow position without running anything; `end` requests completion
     Move {
         issue: String,
-        /// `start`, `end` or one of the workflow's nodes
-        node: String,
+        /// `start`, `end` or one of the graph's stages
+        stage: String,
         /// Why, kept in the Task's workflow history
         #[arg(long)]
         reason: Option<String>,
@@ -1002,6 +1013,8 @@ pub enum GraphCommand {
     /// Print the repository file that defines a Graph, creating
     /// it from the builtin when the repository has none
     Customize { name: String },
+    /// Run the slice of the Task's graph its current route names; `lf task run` starts it
+    Route,
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -1079,6 +1092,15 @@ impl SessionConnectionArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
+    /// Run the process a Session lives in while terminals come and go
+    Serve {
+        /// Relay the execution to an attached terminal
+        #[arg(long)]
+        terminal: bool,
+        /// The command this process executes
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+        argv: Vec<String>,
+    },
     /// Attach to the current execution without restarting or submitting input
     Attach {
         id: String,
@@ -1359,9 +1381,9 @@ pub enum TaskCommand {
         json: bool,
     },
 
-    /// Pause future Task execution without stopping live processes
-    Pause { issue: String },
-    /// Clear a Task pause without starting execution
+    /// Defer future Task execution without stopping live processes
+    Defer { issue: String },
+    /// Resume a deferred Task without starting execution
     Resume { issue: String },
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
@@ -1378,25 +1400,6 @@ pub enum TaskCommand {
         #[command(subcommand)]
         cmd: TaskWorkflowCommand,
     },
-    /// Inspect delivery scheduling and Task CI repair settings
-    Automation {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Check authorized deliveries once, then exit
-    Reconcile {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Enable or hold CI repair for a Task without interrupting running work
-    Automate {
-        issue: String,
-        #[arg(value_parser = ["on", "off"])]
-        state: String,
-    },
-    /// Run a reserved CI repair in its own process
-    #[command(name = "__repair", hide = true)]
-    Repair { incident: String, launcher: String },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
         issue: Option<String>,
@@ -1420,8 +1423,9 @@ pub enum TaskCommand {
     /// returns once it runs (`-b` waits for its end)
     Run {
         issue: Option<String>,
-        /// The edge's Graph, or a workflow to take up; the Task's only edge or its
-        /// Wave or repository default when omitted
+        /// A route from the Task's stage, or a graph to take up; the Task's only
+        /// route or its Wave or repository default when omitted
+        #[arg(value_name = "ROUTE")]
         graph: Option<String>,
         #[arg(long)]
         name: Option<String>,
@@ -1645,19 +1649,13 @@ pub enum TaskCommand {
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::List { .. }
-            | Self::Create { .. }
-            | Self::Sweep { .. }
-            | Self::Reconcile { .. }
-            | Self::Repair { .. }
-            | Self::Automation { .. } => None,
+            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Workflow {
                 cmd:
                     TaskWorkflowCommand::Show { issue, .. }
                     | TaskWorkflowCommand::Restart { issue }
                     | TaskWorkflowCommand::Move { issue, .. },
             } => Some(issue),
-            Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
@@ -1670,7 +1668,7 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Pause { issue }
+            | Self::Defer { issue }
             | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
@@ -1687,19 +1685,13 @@ impl TaskCommand {
 
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::List { .. }
-            | Self::Create { .. }
-            | Self::Sweep { .. }
-            | Self::Reconcile { .. }
-            | Self::Repair { .. }
-            | Self::Automation { .. } => None,
+            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
             Self::Workflow {
                 cmd:
                     TaskWorkflowCommand::Show { issue, .. }
                     | TaskWorkflowCommand::Restart { issue }
                     | TaskWorkflowCommand::Move { issue, .. },
             } => Some(issue),
-            Self::Automate { issue, .. } => Some(issue),
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
@@ -1712,7 +1704,7 @@ impl TaskCommand {
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Pause { issue }
+            | Self::Defer { issue }
             | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
@@ -1963,14 +1955,7 @@ pub enum CronCommand {
         wave: Option<String>,
     },
     /// Reinstall this Machine's jobs with the current lf
-    Sync {
-        /// Install the finite repository Task check on this Machine
-        #[arg(long)]
-        repo: bool,
-        /// Remove the repository schedule; running work retains its authority
-        #[arg(long, requires = "repo")]
-        disable: bool,
-    },
+    Sync,
     /// Execute one installed cron job and persist its terminal receipt
     #[command(hide = true)]
     Run {
@@ -2023,31 +2008,6 @@ pub enum CronCommand {
         /// Graph or skill name to remove
         #[arg(long = "graph")]
         graph: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum CiCommand {
-    /// Watch this repository's PR checks and start a ci-fix when a recorded landing fails
-    Watch {
-        /// Check every open PR once and exit
-        #[arg(long)]
-        once: bool,
-        /// Keep the watcher running in the background as a launchd service
-        #[arg(long, conflicts_with_all = ["once", "uninstall", "status"])]
-        install: bool,
-        /// Remove the background service
-        #[arg(long, conflicts_with_all = ["once", "status"])]
-        uninstall: bool,
-        /// Show whether a watcher is live, its last poll, and what it started
-        #[arg(long, conflicts_with = "once")]
-        status: bool,
-        /// Emit the status as JSON
-        #[arg(long, requires = "status")]
-        json: bool,
-        /// Stop when this process exits
-        #[arg(long = "parent-pid", hide = true)]
-        parent_pid: Option<u32>,
     },
 }
 
@@ -2142,8 +2102,6 @@ pub enum RepoCommand {
     },
     /// Show how failed CI is detected, repaired, and landed across this Machine
     Ci {
-        #[command(subcommand)]
-        cmd: Option<CiCommand>,
         /// Relative window (7d, 24h, 30m) or RFC3339 start
         #[arg(long, default_value = "7d")]
         since: String,
@@ -2182,8 +2140,8 @@ pub enum SelfCommand {
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
-    /// Export skills and Graphs into native vendor Skills directories.
-    #[command(name = "sync-skills", hide = true)]
+    /// Export skills and Graphs into native vendor Skills directories
+    #[command(name = "sync-skills")]
     SyncSkills {
         /// Confirm writes under ~/ without prompting
         #[arg(short = 'y', long = "yes")]
@@ -2325,22 +2283,22 @@ pub enum OndemandCommand {
         name: String,
         #[arg(long, value_enum)]
         provider: crate::rental::Provider,
-        /// A GPU type; without one, the cheapest CPU pod covering vCPUs and memory
-        #[arg(long)]
-        gpu: Option<String>,
         #[arg(long)]
         vcpus: u32,
         #[arg(long)]
         memory_gb: u32,
+        /// Modal and Fly size disk themselves
+        #[arg(long, default_value_t = 10)]
+        disk_gb: u32,
+        /// One GPU, on runpod (A40, A6000, L4, RTX4090, L40S, A100, H100),
+        /// aws (L4, A10G) or modal (T4, L4, A10G, L40S, A100, H100)
         #[arg(long)]
-        disk_gb: Option<u32>,
-        /// Image, pinned by digest when added (default: RunPod's stock Ubuntu)
+        gpu: Option<String>,
+        /// Interruptible capacity on aws or runpod, bid at the admitted price;
+        /// the provider may end it early, losing unpushed work
         #[arg(long)]
-        image: Option<String>,
-        /// A data center (US-IL-1) or a region prefix (US); rents where it is in stock
-        #[arg(long)]
-        data_center: Option<String>,
-        /// Hard deadline for each machine it rents
+        spot: bool,
+        /// Hard deadline for each machine it rents, at most 24
         #[arg(long, default_value_t = crate::rental::DEFAULT_HOURS)]
         hours: f64,
         /// Machines rented at once
@@ -2352,12 +2310,6 @@ pub enum OndemandCommand {
     },
     /// Templates, budgets and the machines each has rented
     List {
-        #[arg(long)]
-        json: bool,
-    },
-    /// What it would rent now and at what price; rents nothing
-    Availability {
-        name: String,
         #[arg(long)]
         json: bool,
     },
@@ -2741,8 +2693,8 @@ mod tests {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
         assert!(matches!(
-            Cli::try_parse_from(["lf", "task", "pause", "LOO-1"]).unwrap().command,
-            Some(Commands::Task { cmd: TaskCommand::Pause { issue } }) if issue == "LOO-1"
+            Cli::try_parse_from(["lf", "task", "defer", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Defer { issue } }) if issue == "LOO-1"
         ));
         assert!(matches!(
             Cli::try_parse_from(["lf", "task", "resume", "LOO-1"]).unwrap().command,
@@ -2888,7 +2840,6 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Repo { cmd: RepoCommand::Ci {
-                cmd: None,
                 since,
                 wave: Some(wave),
                 repo: Some(repo),
@@ -2940,17 +2891,33 @@ mod tests {
     }
 
     #[test]
-    fn telemetry_scorecard_is_parseable_but_hidden() {
-        let cli = Cli::try_parse_from(["lf", "__telemetry-scorecard", "--json"])
-            .expect("parse internal telemetry scorecard");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::TelemetryScorecard { json: true })
-        ));
-        assert!(!Cli::command()
-            .render_long_help()
-            .to_string()
-            .contains("__telemetry-scorecard"));
+    fn the_provider_hook_is_the_only_hidden_command_and_the_root_hides_no_flag() {
+        let root = Cli::command();
+        let hidden = root
+            .get_subcommands()
+            .filter(|command| command.is_hide_set())
+            .map(|command| command.get_name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(hidden, ["__context-block"]);
+        fn internal(command: &clap::Command) -> Vec<String> {
+            command
+                .get_subcommands()
+                .flat_map(|child| {
+                    let mut names = internal(child);
+                    if child.get_name().starts_with("__") {
+                        names.push(child.get_name().to_string());
+                    }
+                    names
+                })
+                .collect()
+        }
+        assert_eq!(internal(&root), ["__context-block"]);
+        let hidden_flags = root
+            .get_arguments()
+            .filter(|arg| arg.is_hide_set())
+            .map(|arg| arg.get_id().to_string())
+            .collect::<Vec<_>>();
+        assert!(hidden_flags.is_empty(), "{hidden_flags:?}");
     }
 
     #[test]
@@ -3242,8 +3209,8 @@ mod tests {
         ])
         .unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Workflow { cmd: TaskWorkflowCommand::Move { issue, node, reason } } })
-                if issue == "LOO-42" && node == "end" && reason.as_deref() == Some("Delivered")));
+            Some(Commands::Task { cmd: TaskCommand::Workflow { cmd: TaskWorkflowCommand::Move { issue, stage, reason } } })
+                if issue == "LOO-42" && stage == "end" && reason.as_deref() == Some("Delivered")));
         let cli =
             Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])
                 .unwrap();

@@ -1,25 +1,35 @@
-"""Delete this RunPod pod at its deadline, or sooner when its budget runs out.
+"""Hold a rented machine's deadline when no lf is alive.
 
-Standard library only; runs first inside the pod and depends on nothing else
-that starts there. It uses the pod-scoped key RunPod injects as RUNPOD_API_KEY,
-which can only touch this pod. The deadline it was given always stands; a
-budget only shortens it. A clock set backwards buys no time.
+Standard library only; it starts before anything else on the machine. It runs
+the machine's command as its child and returns at the deadline, or sooner when
+the child exits. What returning means is the provider's:
+
+- Exit: the machine ends when its main process does (Fly's `auto_destroy`,
+  AWS's terminate-on-shutdown).
+- Delete: on RunPod it then deletes its own pod with the pod-scoped key RunPod
+  injects as RUNPOD_API_KEY, which can only touch this pod, and first reads the
+  price actually charged so the budget can shorten the deadline.
+
+The deadline it was given always stands; a budget only shortens it. A clock
+set backwards buys no time.
+
+    LF_DEADLINE=<iso> LF_CREATED=<iso> LF_MAX_USD=<usd> python3 guardian.py [-- command ...]
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, Callable
 
-BASE = "https://api.runpod.io/v2/"
-READY = Path("/run/lf/guardian-ready")
+RUNPOD = "https://rest.runpod.io/v1/"
 
 
 class Unavailable(Exception):
@@ -34,6 +44,7 @@ def _send(key: str) -> Send:
         request = urllib.request.Request(
             url,
             method=method,
+            # RunPod's front door refuses default agent names.
             headers={"Authorization": f"Bearer {key}", "User-Agent": "loopflow-guardian"},
         )
         try:
@@ -47,7 +58,7 @@ def _send(key: str) -> Send:
 
 def _ask(send: Send, method: str, path: str) -> Any:
     try:
-        status, raw = send(method, BASE + path)
+        status, raw = send(method, RUNPOD + path)
     except OSError:
         raise Unavailable(f"{method} {path}: no reply") from None
     if status == 404:
@@ -60,38 +71,32 @@ def _ask(send: Send, method: str, path: str) -> Any:
         raise Unavailable(f"{method} {path}: unreadable reply") from None
 
 
-def budget_deadline(send: Send, pod: str, max_usd: Decimal) -> datetime | None:
-    """When the budget runs out at the price actually charged."""
+def budget_deadline(send: Send, pod: str, created: datetime, max_usd: Decimal) -> datetime | None:
+    """When the budget runs out at the price RunPod actually charges."""
     raw = _ask(send, "GET", f"pods/{pod}")
     if raw is None:
         return None
-    price = Decimal(str(raw["cost"]))
+    price = Decimal(str(raw["costPerHr"]))
     if price <= 0:
         return None
-    created = datetime.fromisoformat(str(raw["createdAt"]).replace("Z", "+00:00"))
     return created + timedelta(hours=float(max_usd / price))
 
 
 def guard(
-    send: Send,
-    pod: str,
     deadline: datetime,
-    max_usd: Decimal,
+    done: Callable[[], bool] = lambda: False,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Wait for the deadline, then delete this pod, for as long as that takes."""
+    """Return at the deadline, or sooner once `done`."""
     latest = monotonic() + max(0.0, (deadline - now()).total_seconds())
-    try:
-        paid_until = budget_deadline(send, pod, max_usd)
-        if paid_until is not None:
-            deadline = min(deadline, paid_until)
-    except (Unavailable, KeyError, TypeError, ValueError, ArithmeticError):
-        pass  # the deadline it was given still stands
-    latest = min(latest, monotonic() + max(0.0, (deadline - now()).total_seconds()))
-    while now() < deadline and monotonic() < latest:
+    while now() < deadline and monotonic() < latest and not done():
         sleep(min(30.0, max(0.0, latest - monotonic())))
+
+
+def delete_pod(send: Send, pod: str, sleep: Callable[[float], None] = time.sleep) -> None:
+    """Delete this pod, for as long as that takes."""
     while True:
         try:
             _ask(send, "DELETE", f"pods/{pod}")
@@ -100,16 +105,51 @@ def guard(
             sleep(2.0)
 
 
+def _exited(child: subprocess.Popen) -> bool:
+    """Whether the child exited. As a container's PID 1 the guardian inherits
+    every orphan on the machine, so it reaps them all."""
+    while True:
+        try:
+            pid, _ = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return True
+        if pid == 0:
+            return False
+        if pid == child.pid:
+            return True
+
+
+def _at(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
 def main() -> None:
-    READY.parent.mkdir(parents=True, exist_ok=True)
-    pod = os.environ["RUNPOD_POD_ID"]
-    deadline = datetime.fromisoformat(os.environ["LF_DEADLINE"].replace("Z", "+00:00"))
-    max_usd = Decimal(os.environ["LF_MAX_USD"])
-    send = _send(os.environ["RUNPOD_API_KEY"])
-    READY.touch()
-    print(f"guardian: pod {pod} ends by {deadline.isoformat()} or ${max_usd}", flush=True)
-    guard(send, pod, deadline, max_usd)
-    print("guardian: deleted", flush=True)
+    deadline = _at(os.environ["LF_DEADLINE"])
+    pod = os.environ.get("RUNPOD_POD_ID")
+    # The child never sees the pod's key.
+    key = os.environ.pop("RUNPOD_API_KEY", None)
+    command = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
+    child = subprocess.Popen(command) if command else None
+    send = _send(key) if pod and key else None
+    if send is not None:
+        try:
+            created = _at(os.environ["LF_CREATED"])
+            paid_until = budget_deadline(send, pod, created, Decimal(os.environ["LF_MAX_USD"]))
+            if paid_until is not None:
+                deadline = min(deadline, paid_until)
+        except (Unavailable, KeyError, TypeError, ValueError, ArithmeticError):
+            pass  # the deadline it was given still stands
+    print(f"guardian: ends by {deadline.isoformat()}", flush=True)
+    guard(deadline, done=lambda: child is not None and _exited(child))
+    if child is not None and child.poll() is None:
+        child.terminate()
+        try:
+            child.wait(10)
+        except subprocess.TimeoutExpired:
+            child.kill()
+    if send is not None:
+        delete_pod(send, pod)
+        print("guardian: deleted", flush=True)
 
 
 if __name__ == "__main__":

@@ -195,25 +195,26 @@ fi
     let mut paths = vec![bin];
     paths.extend(std::env::split_paths(&path));
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-    for (path, contents) in [
-        (
-            ".lf/graphs/delivery.yaml",
-            "- cmd: __telemetry-scorecard\n- cmd: task complete FIX-1\n",
-        ),
-        (
-            "scripts/lifecycle_scorecard.py",
-            r#"import json, os, time
+    // The delivery edge holds in an ordinary owned execution until released.
+    let hold = home.path().join("hold.py");
+    fs::write(
+        &hold,
+        r#"import os, time
 from pathlib import Path
 home = Path(os.environ['LF_HOME'])
 (home / 'ready').touch()
 while not (home / 'release').exists():
     time.sleep(.02)
-print(json.dumps({'report': {'ok': True}, 'metric_observations': [], 'text': ''}))
 "#,
+    )
+    .unwrap();
+    repo.create_file(
+        ".lf/graphs/delivery.yaml",
+        &format!(
+            "- cmd: session serve -- python3 {}\n- cmd: task complete FIX-1\n",
+            hold.display()
         ),
-    ] {
-        repo.create_file(path, contents);
-    }
+    );
     let provider = Arc::new(Mutex::new(Linear::default()));
     let (url, server) = runtime.block_on(async {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -363,10 +364,7 @@ fn fixture(
         "---\nlinear:\n  initiative: initiative-1\n---\nProduct\n",
     )
     .unwrap();
-    repo.create_file(
-        ".lf/workflows/delivery.yaml",
-        "edges:\n  - {from: start, to: end, graph: delivery}\n",
-    );
+    repo.create_file(".lf/graphs/delivery.yaml", "- cmd: sync --plan\n");
     let now = time::OffsetDateTime::now_utc();
     let wave = Wave::new(
         WaveId::new(),
@@ -387,7 +385,6 @@ fn fixture(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
@@ -411,14 +408,12 @@ fn fixture(
         base_commit: repo.head_sha(),
         parent_pr_id: None,
         agent: None,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
         rank: 0,
         assignee: None,
         due_date: None,
         state: None,
-        completed: false,
         completed_at: None,
         observation: Observation::NotRequired,
     };

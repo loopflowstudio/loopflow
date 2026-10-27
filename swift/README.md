@@ -40,18 +40,22 @@ the Machine. Durations and command names only; the files stay on this machine.
 Working Tasks lists every started, uncompleted Task, on any Machine this store
 records, in the repository plan's order (waiting first, then rank). It is the
 repository's built-in query, so opening a Task neither adds nor reorders it.
-Click a Wave to scope the sidebar to its uncompleted Tasks and subwaves;
-**‹ Repo** returns to Working Tasks. Unstarted Tasks open their brief beside
-**Start**, which runs the Task's Workflow; opening alone starts nothing. Waves
-follow Tasks in the same scrolling sidebar, with counts from the planning inventory.
+Click a Wave to scope the sidebar to its started Tasks and subwaves; its board
+keeps the unstarted ones. **‹ Repo** returns to Working Tasks. Unstarted Tasks
+open their brief beside **Start**, which runs the Task's Workflow; opening alone
+starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
+from the planning inventory.
 
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
 **Sidebar shows** picker filters Working tasks / Available / Running without
-changing the selected Work. **⌘1–9** selects Working Tasks by position regardless of the
-filter; **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing.
+changing the selected Work. Click a Wave or Dashboard and its name moves into the
+sidebar header; the rows below are its Tasks, in plan or arrangement order, until
+**‹ repo** returns to Working Tasks. **⌘1–9** selects the sidebar's Task rows by
+position and **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing. Selecting a
+Dashboard's Task, from any of these, keeps the Dashboard in the path, as its tile does.
 With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
 widens the same navigator. **Shift-F10** opens the focused Task's actions without
 changing the open workspace.
@@ -141,14 +145,10 @@ Unreadable app/default/selection/cursor text prevents Apply; ANSI colors keep
 their source values. Personal non-color Ghostty settings still load; its `theme =` is ignored and its file never written.
 Source and license notices ship offline with the catalogue.
 
-Choose **Settings → Delivery**, select a repository, and enable minute
-checks, enroll or hold Tasks, and inspect the last check and blockers. Checks
-continue with the app closed on the selected Machine. Disabling stops scheduled
-admission; already-running work and requested GitHub merges continue.
-
-While a repository is open, the app runs `lf ci watch` for it and stops it on
-quit. The watcher starts a ci-fix when a recorded landing fails its required
-checks; `lf ci watch --status` shows its last poll and what it started.
+**Auto-Ship** hands a Task off; it leaves Working tasks and its ship process lands it.
+It sits at the right end of the Workflow bar under the jump bar, beside the Task's
+stages as dots (click them for each stage) and what is running now. While shipping,
+the same spot holds Stop Auto-Ship, and the toast's Undo is Stop Auto-Ship. Open a Dashboard with `state:shipping` to watch it.
 
 ```text
 ⌘T          new shell tab in the Task’s Shell tool
@@ -594,7 +594,7 @@ codebase tree, and registry health.
   it has no separate operator.
 - **Task workspace presentation** reads `lf diff --files --json`,
   `lf diff --json` and `lf file --json`.
-  Lifecycle mutations remain `lf task run` and `lf interrupt`; review nodes use
+  Lifecycle mutations remain `lf task run` and `lf interrupt`; review stages use
   the Task's persisted graph position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
   `lf wave list/show/status`, `lf monitor`, and `lf history` JSON commands; the app does not

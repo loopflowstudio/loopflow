@@ -98,6 +98,21 @@ impl super::SqliteStore {
             .optional()?)
     }
 
+    /// The Task's newest landing that still awaits its merge.
+    pub(crate) fn pending_task_landing(&self, task: &TaskId) -> StoreResult<Option<PrLanding>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                &format!(
+                    "SELECT {LANDING_COLUMNS} FROM pr_landings WHERE task_id=?1
+                     AND state NOT IN ('merged','closed') ORDER BY updated_at DESC LIMIT 1"
+                ),
+                [task.as_str()],
+                map_landing,
+            )
+            .optional()?)
+    }
+
     pub fn pending_pr_landings(&self, repo: &str) -> StoreResult<Vec<PrLanding>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare(&format!(

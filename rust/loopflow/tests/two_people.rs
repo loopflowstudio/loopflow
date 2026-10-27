@@ -1,6 +1,10 @@
 //! LOO-555 acceptance: Maya and Lee, each on their own Home, share one
 //! repository's Git planning. Built by `lf-world build two-people`; every step
 //! runs the real `lf` as one of them, with the World's `gh` and `launchctl`.
+
+#[allow(dead_code)] // Linked for its inherited provider-home scrub.
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -187,11 +191,9 @@ fn two_people_share_one_repository() {
     // A takeover Workflow whose only Graph runs no agent.
     let maya = pair.repo(Maya);
     std::fs::create_dir_all(maya.join(".lf/graphs")).unwrap();
-    std::fs::create_dir_all(maya.join(".lf/workflows")).unwrap();
-    std::fs::write(maya.join(".lf/graphs/look.yaml"), "- cmd: task status\n").unwrap();
     std::fs::write(
-        maya.join(".lf/workflows/takeover.yaml"),
-        "nodes: {review: demo}\nedges:\n  - {from: start, to: review, graph: look}\n  - {from: review, to: end}\n",
+        maya.join(".lf/graphs/takeover.yaml"),
+        "- cmd: task status\n- interactive: {name: demo, id: review}\n",
     )
     .unwrap();
     pair.git(&maya, &["add", ".lf"]);
@@ -337,11 +339,11 @@ fn two_people_share_one_repository() {
     );
     assert_eq!(rejected.status.code(), Some(2));
     std::fs::write(
-        maya.join(".lf/workflows/review.yaml"),
-        "nodes: {review: demo}\nedges:\n  - {from: start, to: review, graph: implement}\n  - {from: review, to: end}\n",
+        maya.join(".lf/graphs/review.yaml"),
+        "- implement\n- interactive: {name: demo, id: review}\n",
     )
     .unwrap();
-    pair.git(&maya, &["add", ".lf/workflows"]);
+    pair.git(&maya, &["add", ".lf/graphs"]);
     pair.git(
         &maya,
         &[

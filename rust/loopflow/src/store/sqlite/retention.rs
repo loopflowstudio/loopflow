@@ -1,55 +1,38 @@
 //! Retention: the store keeps facts, and streams stay in files.
 //!
-//! The recorder retains only the stream events history reads, and one usage
-//! row per stream or native turn. Captures it recorded before those rules kept
-//! every provider line and usage observation; this prune brings them to the
-//! same shape and records the silences their lines implied. It closes Processes
-//! whose OS process is gone without recording its exit, then forgets finished
-//! Processes nothing needs, as exit does.
-//! Each step is one short transaction on its own connection, so live writers
-//! wait well under their busy timeout.
+//! Captures write only Session facts, and native usage keeps one row per
+//! turn; this prune merges native usage an earlier lf recorded per receipt.
+//! It closes Processes whose OS process is gone without recording its exit,
+//! then forgets finished Processes nothing needs, as exit does. Each step is
+//! one short transaction on its own connection, so live writers wait well
+//! under their busy timeout.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde::Serialize;
 
 use crate::journal::{OsProcess, ProcessIdentityEvidence};
-use crate::session_record::{
-    late_usage_key, merge_native_usage, merge_usage_observation, native_usage_key, usage_identity,
-    SILENCE_SECONDS,
-};
+use crate::session_record::{late_usage_key, merge_native_usage, native_usage_key};
 use crate::store::{StoreError, StoreResult};
 
-/// Captures younger than this may still be written by an earlier lf.
-const CAPTURE_SETTLE_SECONDS: i64 = 24 * 3600;
 const PROCESS_BATCH: i64 = 10_000;
 /// Every live writer waits this long; each prune transaction stays well under.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Stream events history keeps; must match `session_record::retained_in_history`.
-const RETAINED: &str = "CASE WHEN json_valid(payload) THEN
-        json_extract(payload,'$.evidence.type') IN ('provider_attempt_started',
-            'provider_attempt_finished','provider_account_selected','provider_session_observed','usage')
-        OR (json_extract(payload,'$.evidence.type')='conversation'
-            AND json_extract(payload,'$.evidence.event.type') IN ('turn_completed','error'))
-    ELSE 0 END";
-
 #[derive(Debug, Default, Serialize, PartialEq, Eq)]
 pub struct RetentionReport {
-    pub captures: u64,
-    pub stream_rows: u64,
     pub usage_rows: u64,
     pub closed_processes: u64,
     pub processes: u64,
     pub vacuumed: bool,
 }
 
-/// Prune `database` once. A cursor file beside it holds the last settled
-/// capture already visited, so a pass after the first reads only new captures
-/// and a draft-build copy keeps its own.
+/// Prune `database` once. Cursor files beside it hold the last row each pass
+/// visited, so a pass after the first reads only new rows and a draft-build
+/// copy keeps its own.
 ///
 /// # Errors
 /// When the store cannot be opened or a prune transaction fails.
@@ -60,12 +43,9 @@ pub(crate) fn prune(database: &Path, now: i64) -> StoreResult<RetentionReport> {
     // per-row foreign-key probes would scan session_events for each delete.
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
     let mut report = RetentionReport::default();
-    prune_captures(
-        &conn,
-        &Cursor::beside(database, "retention"),
-        now,
-        &mut report,
-    )?;
+    // The capture pass this cursor followed ended when migration converted
+    // every capture to facts.
+    let _ = std::fs::remove_file(Cursor::beside(database, "retention").0);
     report.usage_rows = compact_usage(&conn, &Cursor::beside(database, "usage"))?;
     let home = database.parent().unwrap_or(Path::new("."));
     report.closed_processes = close_dead_processes(&conn, home, now)?;
@@ -98,84 +78,8 @@ impl Cursor {
     }
 }
 
-fn prune_captures(
-    conn: &Connection,
-    cursor: &Cursor,
-    now: i64,
-    report: &mut RetentionReport,
-) -> StoreResult<()> {
-    let mut after = cursor.read();
-    loop {
-        let next: Option<(i64, String, String, i64)> = conn
-            .query_row(
-                "SELECT seq,session_id,receipt_key,observed_at FROM session_events
-                 WHERE kind='captured' AND seq>?1 ORDER BY seq LIMIT 1",
-                [after],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .optional()?;
-        let Some((captured, session, input, observed_at)) = next else {
-            return Ok(());
-        };
-        if observed_at > now - CAPTURE_SETTLE_SECONDS {
-            return Ok(());
-        }
-        let deleted = prune_capture(conn, captured, &session, &input)?;
-        if deleted > 0 {
-            report.captures += 1;
-            report.stream_rows += deleted;
-        }
-        after = captured;
-        cursor.write(after)?;
-    }
-}
-
-/// Bring one capture to the recorder's shape. Only a capture with stream rows
-/// the recorder no longer keeps is touched: its silences come from every line
-/// it retained, which a capture recorded under the current rule never has.
-fn prune_capture(conn: &Connection, captured: i64, session: &str, input: &str) -> StoreResult<u64> {
-    let stream = "session_id=?3 AND captured_event=?2 AND kind='observed'
-        AND substr(receipt_key,1,length(?1)+14)=?1||':events.jsonl:'";
-    let tx = conn.unchecked_transaction()?;
-    let legacy: bool = tx.query_row(
-        &format!("SELECT EXISTS(SELECT 1 FROM session_events WHERE {stream} AND NOT ({RETAINED}))"),
-        params![input, captured, session],
-        |row| row.get(0),
-    )?;
-    if !legacy {
-        return Ok(0);
-    }
-    tx.execute(
-        &format!(
-            "INSERT OR IGNORE INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
-             SELECT session_id,'observed',?1||':silence:'||ordinal,task_id,wave_id,observed_at,
-                 json_object('input_id',?1,'source','silence:'||ordinal,
-                     'evidence',json_object('since',since,'observed_at',observed_at)),?2
-             FROM (SELECT session_id,task_id,wave_id,observed_at,
-                       CAST(substr(receipt_key,length(?1)+15) AS INTEGER) AS ordinal,
-                       LAG(observed_at) OVER (ORDER BY CAST(substr(receipt_key,length(?1)+15) AS INTEGER),seq) AS since
-                   FROM session_events WHERE {stream})
-             WHERE observed_at-since>{SILENCE_SECONDS}"
-        ),
-        params![input, captured, session],
-    )?;
-    let deleted = tx.execute(
-        &format!("DELETE FROM session_events WHERE {stream} AND NOT ({RETAINED})"),
-        params![input, captured, session],
-    )?;
-    // Replay reads the prompt from the capture's own manifest file.
-    tx.execute(
-        "UPDATE session_events SET payload=json_set(payload,'$.evidence.exec',json('null'))
-         WHERE session_id=?3 AND captured_event=?2 AND kind='observed' AND receipt_key=?1||':manifest.json'
-           AND json_valid(payload) AND json_extract(payload,'$.evidence.exec') IS NOT NULL",
-        params![input, captured, session],
-    )?;
-    tx.commit()?;
-    Ok(deleted as u64)
-}
-
-/// Merge usage recorded as one row per observation into one row per stream or
-/// native turn, as the recorder now writes it. Returns the rows removed.
+/// Merge native usage recorded as one row per receipt into one row per turn,
+/// as the store now writes it. Returns the rows removed.
 fn compact_usage(conn: &Connection, cursor: &Cursor) -> StoreResult<u64> {
     let after = cursor.read();
     let last: Option<i64> =
@@ -196,23 +100,9 @@ fn compact_usage(conn: &Connection, cursor: &Cursor) -> StoreResult<u64> {
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let inputs = conn
-        .prepare(
-            "SELECT DISTINCT e.session_id,c.receipt_key FROM session_events e
-             JOIN session_events c ON c.seq=e.captured_event AND c.kind='captured'
-             WHERE e.seq>?1 AND e.seq<=?2 AND e.kind='observed' AND instr(e.receipt_key,':events.jsonl:')>0
-               AND json_valid(e.payload) AND json_extract(e.payload,'$.evidence.type')='usage'",
-        )?
-        .query_map([after, last], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
     let mut removed = 0;
     for (session, thread, turn) in turns {
         removed += compact_native_turn(conn, &session, &thread, &turn)?;
-    }
-    for (session, input) in inputs {
-        removed += compact_input_usage(conn, &session, &input)?;
     }
     cursor.write(last)?;
     Ok(removed)
@@ -281,61 +171,6 @@ fn compact_native_turn(
         tx.execute(
             "UPDATE session_events SET receipt_key=?2,payload=?3 WHERE seq=?1",
             params![kept, key, serde_json::to_string(&merged)?],
-        )?;
-    }
-    tx.commit()?;
-    Ok(removed)
-}
-
-/// One row per usage stream and turn of a captured input, at its first observation.
-fn compact_input_usage(conn: &Connection, session: &str, input: &str) -> StoreResult<u64> {
-    let tx = conn.unchecked_transaction()?;
-    let rows = tx
-        .prepare(
-            "SELECT seq,payload FROM session_events
-             WHERE session_id=?1 AND kind='observed'
-               AND receipt_key>=?2||':events.jsonl:' AND receipt_key<?2||':events.jsonl;'
-               AND json_valid(payload) AND json_extract(payload,'$.evidence.type')='usage'",
-        )?
-        .query_map([session, input], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut streams = BTreeMap::<String, Vec<(u64, i64, serde_json::Value)>>::new();
-    for (seq, payload) in rows {
-        let payload: serde_json::Value = serde_json::from_str(&payload)?;
-        let (Some(identity), Some(position)) = (
-            usage_identity(&payload["evidence"]),
-            payload["source"]
-                .as_str()
-                .and_then(|source| source.strip_prefix("events.jsonl:"))
-                .and_then(|position| position.parse().ok()),
-        ) else {
-            continue;
-        };
-        streams
-            .entry(identity)
-            .or_default()
-            .push((position, seq, payload));
-    }
-    let mut removed = 0;
-    for mut observations in streams.into_values().filter(|rows| rows.len() > 1) {
-        observations.sort_by_key(|(position, ..)| *position);
-        // A stream with an unreadable observation stays as it was recorded.
-        let merged = observations[1..]
-            .iter()
-            .try_fold(observations[0].2.clone(), |merged, (.., later)| {
-                merge_usage_observation(&merged, later)
-            });
-        let Some(merged) = merged else {
-            continue;
-        };
-        for (_, seq, _) in &observations[1..] {
-            removed += tx.execute("DELETE FROM session_events WHERE seq=?1", [seq])? as u64;
-        }
-        tx.execute(
-            "UPDATE session_events SET payload=?2 WHERE seq=?1",
-            params![observations[0].1, serde_json::to_string(&merged)?],
         )?;
     }
     tx.commit()?;
@@ -455,42 +290,17 @@ fn is_busy(error: &rusqlite::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
-    use serde_json::json;
 
     use super::prune;
     use crate::store::sqlite::SqliteStore;
 
-    const INPUT: &str = "run_00000000000000000000000000000001";
-
     #[test]
-    fn prune_keeps_facts_records_silences_and_forgets_unneeded_processes() {
+    fn prune_forgets_unneeded_processes_and_retires_the_capture_cursor() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        let session = store.test_session("conversation", INPUT);
-        let line = |seq: u64, at: i64, evidence: serde_json::Value| {
-            let source = format!("events.jsonl:{seq}");
-            store
-                .retain_session_observation(
-                    &session,
-                    &crate::session::SessionObservation {
-                        artifact_key: INPUT.into(),
-                        source: source.clone(),
-                        observed_at: at,
-                        task_id: None,
-                        wave_id: None,
-                        payload: json!({"input_id":INPUT,"source":source,"evidence":evidence}),
-                    },
-                )
-                .unwrap();
-        };
-        let output =
-            json!({"schema_version":1,"type":"provider_output","stream":"stdout","line":"{}"});
-        let finished = json!({"schema_version":1,"type":"conversation",
-            "event":{"type":"turn_completed","turn_id":"t","status":"completed"}});
-        line(0, 1_000, output.clone());
-        line(1, 1_100, output);
-        line(2, 1_800, finished.clone());
+        SqliteStore::open_ephemeral(&path).unwrap();
+        let cursor = home.path().join("store.db.retention-cursor");
+        std::fs::write(&cursor, "7").unwrap();
 
         let now = time::OffsetDateTime::now_utc().unix_timestamp() + 2 * 86_400;
         let conn = Connection::open(&path).unwrap();
@@ -519,15 +329,10 @@ mod tests {
         process(3, Some(2), false, false);
         process(4, Some(3), true, false);
         process(5, None, true, true);
-        let report = prune(&path, now).unwrap();
-        assert_eq!(
-            (report.captures, report.stream_rows, report.processes),
-            (1, 2, 3)
-        );
 
-        let events = store.input_events(INPUT).unwrap();
-        assert_eq!(events, [finished]);
-        assert_eq!(store.input_silences(INPUT).unwrap(), [(1_100, 1_800)]);
+        assert_eq!(prune(&path, now).unwrap().processes, 3);
+        assert!(!cursor.exists());
+
         let left: Vec<String> = conn
             .prepare("SELECT id FROM processes ORDER BY id")
             .unwrap()
@@ -542,83 +347,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(violations, 0);
-
-        // A second pass finds nothing left to do.
-        assert_eq!(prune(&path, now).unwrap().stream_rows, 0);
-    }
-
-    #[test]
-    fn prune_merges_usage_recorded_per_observation_without_changing_it() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("store.db");
-        let store = SqliteStore::open_ephemeral(&path).unwrap();
-        store.test_session("conversation", INPUT);
-        let conn = Connection::open(&path).unwrap();
-        // As earlier recorders kept it: one row per observation.
-        for (seq, total, peak) in [(1, 100, 100), (2, 400, 300), (3, 500, 100)] {
-            let source = format!("events.jsonl:{seq}");
-            let evidence = json!({"schema_version":1,"seq":seq,"observed_at":"2026-09-29T00:00:00Z",
-                "type":"usage","provider":"claude","model":null,"attempt_key":"attempt","turn_key":"turn",
-                "usage_stream_id":"stream","observation_seq":seq,"counter_kind":"cumulative","start_known":true,
-                "final_receipt":seq == 3,"usage":{"total_input_tokens":total,"output_tokens":total / 10,
-                "peak_input_tokens":peak}});
-            conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                 SELECT 'conversation','observed',?1||':'||?2,1,?3,seq FROM session_events
-                 WHERE kind='captured' AND receipt_key=?1",
-                rusqlite::params![
-                    INPUT,
-                    source,
-                    json!({"input_id":INPUT,"source":source,"evidence":evidence}).to_string()
-                ],
-            )
-            .unwrap();
-        }
-        let counts = |input: u64| json!({"inputTokens":input,"outputTokens":0,"cachedInputTokens":0,"reasoningOutputTokens":0});
-        for (total, last) in [(20, 20), (60, 40), (70, 10)] {
-            let payload = json!({"total":counts(total),"last":counts(last)}).to_string();
-            conn.execute(
-                "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-                 VALUES('conversation','thread','native','usage',?1,1,?2)",
-                rusqlite::params![format!("{:064}", total), payload],
-            )
-            .unwrap();
-        }
-        let before = store.input_history(INPUT).unwrap();
-
-        let report = prune(&path, time::OffsetDateTime::now_utc().unix_timestamp()).unwrap();
-        assert_eq!(report.usage_rows, 4);
-
-        let rows: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM session_events WHERE kind='usage'
-                 OR (kind='observed' AND json_extract(payload,'$.evidence.type')='usage')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(rows, 2);
-        let native: serde_json::Value = conn
-            .query_row(
-                "SELECT payload FROM session_events WHERE kind='usage' AND receipt_key=''",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .map(|payload| serde_json::from_str(&payload).unwrap())
-            .unwrap();
-        assert_eq!(native["total"]["inputTokens"], 70);
-        assert_eq!(native["peakInputTokens"], 40);
-        assert_eq!(native["baseline"]["inputTokens"], 0);
-        // Only the gap a falling per-request peak counted between rows is gone.
-        let after = store.input_history(INPUT).unwrap();
-        assert_eq!(
-            crate::session_record::SessionUsage {
-                gaps: before.usage.gaps,
-                ..after.usage.clone()
-            },
-            before.usage
-        );
-        assert_eq!(after.usage.peak_input_tokens, Some(300));
     }
 
     #[test]

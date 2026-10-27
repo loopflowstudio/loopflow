@@ -829,11 +829,12 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
             .unwrap(),
         "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
     );
+    // `ship_it` drops Workflows short of `end`; the next run re-places them.
     assert_eq!(
-        conn.query_row("SELECT node FROM task_workflows", [], |r| r
-            .get::<_, String>(0))
+        conn.query_row("SELECT count(*) FROM task_workflows", [], |r| r
+            .get::<_, i64>(0))
             .unwrap(),
-        "start"
+        0
     );
     assert_eq!(
         conn.query_row("SELECT count(*) FROM task_workflow_moves", [], |r| r
@@ -923,7 +924,12 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         .to_string()
         .contains("canonical identity"));
     // References need no trigger: the store's foreign keys match canonical owners exactly.
-    conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys=ON;
+         INSERT INTO task_workflows(task_id,graph,node,updated_at)
+         SELECT id,'{\"name\":\"code\",\"steps\":[]}','end',1 FROM tasks LIMIT 1",
+    )
+    .unwrap();
     assert!(conn
         .execute("UPDATE task_workflows SET task_id=upper(task_id)", [])
         .unwrap_err()

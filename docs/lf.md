@@ -361,7 +361,7 @@ recorded repository; outside a repository, ticket aliases must be globally uniqu
 lf task edit <id> --rank 0 --assignee <person-id>
 lf task edit <id> --unassign
 lf wave edit-plan WAVE --name "Parser" --summary "Retain quoted input"
-lf wave workflow set review WAVE      # .lf/workflows/review.yaml or a builtin
+lf wave workflow set review WAVE      # .lf/graphs/review.yaml or a builtin
 lf wave edit-plan WAVE --description "Preserve quoted text across machines."
 lf wave update-plan --wave parser --plan /tmp/plan.json
 ```
@@ -587,6 +587,9 @@ lf history                         # durable Work, delivery and steering facts
 lf history list --json              # bounded Process history with a next cursor
 lf mon active --watch --json        # NDJSON until stdin closes
 lf history show SESSION --final     # provider conclusion
+lf history show SESSION --transcript   # the conversation, as its providers kept it
+lf history search "cleanupPeriodDays" --since 30d   # text across recent conversations
+lf history retention                # what providers still keep, and what goes next
 lf usage --days 30                  # measured consumption and missing evidence
 lf usage --task LOO-265 --context   # each step's input by source, flagged over budget
 lf history show SESSION --context       # input cost by source
@@ -603,8 +606,17 @@ lf wt timing                        # how long real `lf wt list` runs took here
 
 Usage covers Sessions recorded on this Machine; a teammate's runs appear on theirs.
 
+Conversation text stays with its provider. `lf history show SESSION` prints each
+provider conversation the Session used, read from Claude, Codex or Pi transcript
+files or `opencode session export`. Loopflow stores none of it. When a transcript
+is gone, it prints the recorded turns (time, status, final answer) and why: Claude
+removes conversations idle longer than `cleanupPeriodDays` (30 days unless set in
+its `settings.json`); Codex, OpenCode and Pi keep everything. Raise
+`cleanupPeriodDays` to keep more Claude history. `lf history retention` counts
+what is readable by provider, account and age, and lists the next removals.
+
 `lf history show SESSION` also prints private Codex relay failures with their
-AgentProcess identity. `--events` includes the diagnostic JSON. Retention keeps
+AgentProcess identity. Retention keeps
 the first 16 failures per captured input, with each error capped at 2048 bytes;
 explicit client closes stay quiet. These observations never settle a turn.
 
@@ -759,8 +771,8 @@ Task PR with no new work succeeds and reports whether Task completion remains.
 With new work, the same command prepares its next PR.
 `lf pr reconcile` checks recorded landings once. In a Task checkout it can also
 recover an existing PR whose GitHub identity is missing, without publishing.
-Ambiguous provider evidence remains unresolved. `lf ci watch` repairs actionable
-CI failures while it runs.
+Ambiguous provider evidence remains unresolved. It repairs nothing; the
+waiting landing does.
 
 ```bash
 lf land --wait-and-fix
@@ -825,38 +837,19 @@ teammate's published crons as theirs, not installed here. When the fetch fails,
 it shows the last observed state and when it was published. Existing job names
 and Wave selectors retain installed identities and receipt history.
 
-## Check authorized deliveries in the background
+## Repair failed CI until merge
 
 ```bash
-lf cron sync --repo                 # install this Machine's minute delivery check
-lf task reconcile --json            # check recorded deliveries once
-lf task automation --json           # schedule coverage and CI repair holds
-lf cron sync --repo --disable       # remove the schedule
+lf ship                   # a Task: the remaining steps, then land and repair
+lf land --wait-and-fix    # this PR: land and repair in the foreground
 ```
 
-Checks continue with Desktop closed while this Machine's user is logged in.
-They record CI failures and settle verified merges. Graph recovery belongs to its
-caller: inspect execution and effect history before launching fresh work.
-
-## Repair failed CI
-
-```bash
-lf ci watch               # watch this repository's PR checks until you stop it
-lf ci watch --once        # check every open PR once and exit
-lf ci watch --install     # keep it running as a launchd service
-lf ci watch --uninstall
-lf ci watch --status      # live or not, last poll, what it started and why
-```
-
-The watcher polls GitHub about once a minute and starts one ci-fix when a PR
-with a recorded landing (`lf arm`, `lf land`) fails its required checks. A
-failing PR nobody armed is reported, not repaired; so is a PR with no Task.
-Loopflow Desktop runs the same command for each open repository and stops it
-on quit. A second copy stands by behind a live one. Nothing depends on the
-watcher running during `land --wait-and-fix`: waited landing admits the same repair.
-After bare land returns, failures wait for a watcher or another waited landing.
-An idle check launches no provider. Existing work and GitHub merge requests
-continue when the schedule is disabled or a Task is held.
+The waiting process is the only one that repairs. It starts one ci-fix when its
+PR fails a required check or GitHub drops its merge request, stops when a
+person removes that request, and returns on merge or closure. A shipping Task whose ship process died starts
+again on the next read of this Machine's work (`lf task status`, `lf ps`,
+Desktop); a Machine nothing reads recovers when it is next read. After bare
+`lf land` returns, nothing repairs its PR. `lf task defer` holds repair.
 
 Set repository defaults in `.lf/config.yaml`:
 
@@ -864,10 +857,9 @@ Set repository defaults in `.lf/config.yaml`:
 automation: {retries: 1}
 ```
 
-Use `lf task automate EXP-12 off` to hold future CI repair, and
-`lf task automate EXP-12 on` to enable it again. These settings never resume a
-Graph. One failed repair startup may retry; a completed blocked repair waits for
-changed evidence.
+`retries` caps startup retries within one repair attempt. A finished attempt
+that leaves the PR blocked is followed by a fresh one after a backoff that grows
+from 1 to 30 minutes, so repair never gives up on an open PR.
 Pending or missing CI checks keep waiting; elapsed time alone never starts repair.
 Use an always-available Machine for progress through laptop logout or shutdown.
 
@@ -944,7 +936,7 @@ CLI aliases and captured Graph steps use the same resolved-skill decision.
 `--explain` reads selected Work without executing the invocation. Task commands,
 Desktop opening, Session connection and exact Process history lookup are supported;
 other command shapes fail before effects. Combine both flags for identity plus input.
-`task run --explain` also reports the intended Workflow edge (or ad-hoc Graph),
+`task run --explain` also reports the intended Workflow route (or ad-hoc Graph),
 selected execution Machine, observed impediments and missing evidence. Omit the Task
 to use its checkout or `--task`. JSON separates `resolution`, `action`, `impediments`
 and `unavailable`; no Workflow is taken up or moved. Owned Tasks route to the
@@ -1402,32 +1394,43 @@ See [machine connections](architecture/machines.md) for repository paths and ver
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab        # machines you own
 lf account token claude jack@example.com                      # once a year: Claude for rented machines
-lf ondemand add code --provider runpod --vcpus 8 --memory-gb 16 --max 1 --max-usd-per-hour 0.40
+lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
+lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote            # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code                    # a free lab machine, else rent one
+lf machine use code infrastructure                            # the Wave's new Tasks rent from code
 lf machine end code-1                                         # give a rented machine back now
 ```
 
-Renting reads `RUNPOD_API_KEY` from the environment (`doppler run -- lf …`).
-A rented machine gets GitHub forwarded and every Claude account with a stored
-long-lived token (`claude setup-token`, approved once in the account's Chrome
-profile; API keys are refused). A rented machine's own guardian deletes it at
-its deadline or when its budget runs out. The end of a forwarded `lf task run`,
-and the scheduled `lf task reconcile`, give back drained machines: first their
-Sessions and Processes are copied here (`lf session list` shows them "from
-code-1", `lf history show` opens one), then the pod is deleted. A failed copy or
-unpushed work refuses every give-back but `--force`. `lf ondemand list` never
-ends a machine. See [own and rent Machines](architecture/machines.md#own-and-rent-machines)
+Providers read their keys from the environment (`doppler run -- lf …`):
+Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
+`~/.modal.toml`; RunPod `RUNPOD_API_KEY`; AWS `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` and `AWS_REGION`; Fly `FLY_API_TOKEN` (and `FLY_ORG`,
+default `personal`). Each runs under `uv`. `--gpu` rents one GPU on RunPod, AWS
+or Modal, on a machine with at least `--vcpus` and `--memory-gb`. `--spot` rents
+interruptible capacity on AWS or RunPod, never charged above the admitted price;
+the provider may end it early, losing unpushed work. EC2 prices are us-east-1's,
+so AWS names the region it rents in and the region it priced. A rented machine gets GitHub forwarded and every Claude account with a
+stored long-lived token (`claude setup-token`, approved once in the account's
+Chrome profile; API keys are refused). Its provider deletes it at its deadline.
+`lf machine use code infrastructure` (or `--repo`) sends a scope's unowned
+Tasks to `code` when they run; the Wave Session stays where it is. The end of a
+forwarded `lf task run`, and the scheduled `lf task reconcile`, give back a
+machine 15 minutes after its last Task finished: first its Sessions and
+Processes are copied here (`lf session list` shows them "from code-1", `lf
+history show` opens one), then the sandbox is deleted. A failed copy or unpushed
+work refuses every give-back but `--force`. `lf ondemand list` never ends a
+machine. See [own and rent Machines](architecture/machines.md#own-and-rent-machines)
 for pools, rentals and give-back.
 
-### Pause a Task without discarding work
+### Defer a Task without discarding work
 
 ```sh
-lf task pause LOO-389
+lf task defer LOO-389
 lf task resume LOO-389
 ```
 
-Paused Tasks stay in the Wave plan but leave the default active sidebar. Their
-checkout, conversations and Workflow remain. Pause holds future Task runs and CI
+Deferred Tasks stay in the Wave plan but leave the default active sidebar. Their
+checkout, conversations and Workflow remain. Defer holds future Task runs and CI
 repair; it does not stop an already-running process. Resume starts nothing.
-In Desktop, use the Task header's context menu to pause or resume.
+In Desktop, use the Task header's context menu to defer or resume.

@@ -92,6 +92,8 @@ mod tests {
         "project_binding_imports",
         "auth_browser_bindings",
         "blob_tokens",
+        // Desktop reads GitHub people once per repository through `lf ops people`.
+        "github_people",
         // Acquisition attempts and watermarks do not change displayed Work.
         "linear_team_checks",
         "machines",

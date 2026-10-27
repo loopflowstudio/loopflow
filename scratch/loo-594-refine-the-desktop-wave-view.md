@@ -248,7 +248,7 @@ zoomable and resizable through the one `lf desktop hide|zoom|resize` state that
 `view_parts` reports. The board is one Task-state vocabulary shown one section at a
 time: Backlog (unstarted, deferred) · Working (idle, active, moving) · Autonomous
 (shipping) · Done. Session Available/Busy is a row marker on its own axis, as AGENTS.md
-puts it. People are one per email, named by GitHub once `lf repo people` resolves them.
+puts it. People are one per email, named by GitHub once `lf ops people` resolves them.
 Nothing here needs a design change: the Task-state axis, the Session axis and the
 view-part grammar each have one owner.
 
@@ -263,10 +263,11 @@ Next implement work is unchanged: `focus -p N/…` turning the strip.
 
 ## Check results
 
-- Oct 26 (items 1–7, 12): `cargo test -p loopflow --lib -- desktop:: selection ops::people` 79 pass; `--test integration` dto/desktop/repo_people/reference/documented 48 pass; clippy clean; `scripts/test_desktop.sh --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests'` 156 pass. Part routing of `zoom`/`resize -p board` through the CLI has no live-Desktop test (gate/demo); `lf repo people` against GitHub ran by hand only.
+- Oct 26 (items 1–7, 12): `cargo test -p loopflow --lib -- desktop:: selection ops::people` 79 pass; `--test integration` dto/desktop/repo_people/reference/documented 48 pass; clippy clean; `scripts/test_desktop.sh --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests'` 156 pass. Part routing of `zoom`/`resize -p board` through the CLI has no live-Desktop test (gate/demo); `lf ops people` against GitHub ran by hand only.
 - Oct 26 compress (section vocabulary, `Person.github`): `scripts/test_desktop.sh --filter 'WaveStandupTests|DesktopPaneControlTests'` 35 pass.
 - Oct 27 kickoff: plan unchanged; steer 677bb5cf (no code for canceled/merged-upstream leftovers) verified in `WaveStandupBoard.swift`, no new state or filter remains. Remaining: `focus -p N/…` turning the strip; Done via `lf task list --done --since` after LOO-604.
 - Oct 27 demo answers (after removing the leftover override, rerun after merging main 54932fc255): `scripts/test_desktop.sh --filter 'WaveStandupTests|WorkModelTests|WorkObservationTransportTests|TerminalPaneLayoutTests' -Xswiftc -gnone` 49 pass; `xcodebuild build-for-testing -scheme LoopflowMac` (TESTING.md) TEST BUILD SUCCEEDED; 60 s startup limit under load and board fill are for demo (Jack Heart).
+- Oct 27 gate: the `github_people` draft migration was lost when merge 10d5bb0f9e dropped `graph_node_interactive.sql`; restored as `drafts/github_people.sql`, listed never-displayed in `revisions.rs`. `cargo fmt --check`, `cargo clippy --all-targets -D warnings` clean; `cargo test -p loopflow --test integration -- dto desktop repo_people people reference documented cli_discovery` 82 pass; `--lib -- desktop:: selection ops::people` 80/81 before the restore (`no such table: github_people`), `--lib -- store::` showed the one revisions coverage failure, and after both fixes `--lib -- store::sqlite::revisions ops::people migration` 147 pass (807 s, while two other worktrees ran `cargo test` on the same Mac); `scripts/test_desktop.sh -Xswiftc -gnone --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests|WorkModelTests|WorkObservationTransportTests|TaskHistoryFilterTests|WorkDestinationTests|WorkOpeningCLITests'` 259 pass. Board fill and 60 s startup limit remain for review (Jack Heart).
 
 ## Direction added October 26, 2026, after acceptance (binding; supersedes conflicts above)
 
@@ -315,7 +316,7 @@ Built (items 1–7 and 12 of the October 26 notes):
    (board/strip only) zoom out; `zoom -p board|tiles` and `-p session` (its pane) agree;
    `view_parts[].zoomed`.
 6. One person per email, name-only owners join by name; GitHub login/name/avatar from
-   `lf repo people --json` (Rust caches per email in `github_people`, in the one draft
+   `lf ops people --json` (Rust caches per email in `github_people`, in the one draft
    migration), read once per repository by Desktop; initials until resolved.
 7. Strip = Working Tasks: Rust's `wave:` expression now lists idle/active/moving, as the
    repository does; Swift's sidebar re-filter deleted.

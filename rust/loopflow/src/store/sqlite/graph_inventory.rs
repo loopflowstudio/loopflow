@@ -237,9 +237,10 @@ impl SqliteStore {
         )
     }
 
-    /// The Process `parent`'s child `pid` registered. Exits delete forgotten rows
-    /// and SQLite reuses the highest freed rowid, so a child can land at or below
-    /// `mark`; its pid finds it there. Without a pid, the first child after `mark`.
+    /// The newest Process `parent` started after `mark`. Exits delete forgotten
+    /// rows and SQLite reuses the highest freed rowid, so a child can land at or
+    /// below `mark`; `pid` finds it there when the spawned child is the lf that
+    /// registered, not a wrapper around it.
     pub(crate) fn child_process_after(
         &self,
         parent: &LfProcessId,
@@ -250,7 +251,7 @@ impl SqliteStore {
         Ok(conn
             .query_row(
                 "SELECT id FROM processes WHERE parent_lf_process_id=?1
-                 AND (pid=?3 OR (?3 IS NULL AND rowid>?2)) ORDER BY rowid DESC LIMIT 1",
+                 AND (rowid>?2 OR pid=?3) ORDER BY rowid DESC LIMIT 1",
                 params![parent, mark, pid],
                 |row| row.get(0),
             )

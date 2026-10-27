@@ -559,11 +559,11 @@ mod tests {
         project_position(&CompiledGraph::new("", steps), key, &iterations, false)
     }
 
-    fn skill(name: &str, id: Option<&str>, human: bool, returns: Option<usize>) -> ConcreteStep {
+    fn skill(name: &str, id: Option<&str>, interactive: bool, returns: Option<usize>) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             id: id.map(str::to_string),
-            interactive: human,
+            interactive,
             returns,
             sources: Vec::new(),
         })
@@ -616,7 +616,7 @@ mod tests {
             ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
         ];
-        for (name, labels, humans, returns) in cases {
+        for (name, labels, interactive, returns) in cases {
             let graph = load_graph(name, repo.path()).unwrap();
             let compiled = CompiledGraph::new(*name, &compile_graph(&graph, repo.path()).unwrap());
             assert_eq!(
@@ -635,7 +635,7 @@ mod tests {
                     .enumerate()
                     .filter_map(|(i, s)| s.interactive.then_some(i))
                     .collect::<Vec<_>>(),
-                *humans,
+                *interactive,
                 "{name}"
             );
             assert_eq!(

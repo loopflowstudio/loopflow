@@ -405,6 +405,7 @@ Refresh live Loopflow call trees on a terminal; print once when redirected
 | Argument | What it does |
 |---|---|
 | `--json` | Emit one versioned activity snapshot as JSON Default: false. |
+| `--watch` | Print a JSON line now and each time the call trees change, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor prune
@@ -2463,7 +2464,7 @@ Explain a command, skill, or graph without launching it
 
 ## lf history
 
-Read durable Work history, recorded commands and provider usage
+Read what Sessions did, tagged with their Work: turns, commands and provider usage
 
 | Argument | What it does |
 |---|---|

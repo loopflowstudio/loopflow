@@ -322,15 +322,6 @@ impl std::fmt::Display for Author {
     }
 }
 
-/// A steer comment surfaced for the cross-Work `lf history` timeline: the read
-/// model plus the Work it targets and when it was issued.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SteerComment {
-    pub work: WorkRef,
-    pub steer: Steer,
-    pub issued_at: OffsetDateTime,
-}
-
 pub fn render_steers(steers: &[Steer]) -> String {
     if steers.is_empty() {
         return String::new();

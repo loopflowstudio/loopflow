@@ -150,6 +150,19 @@ pub fn run_top(json: bool) -> Result<()> {
     }
 }
 
+/// Stream the call trees: Process rows change with the store, liveness and
+/// activity state only on the clock.
+pub fn watch_top() -> Result<()> {
+    super::watch::run(
+        (),
+        super::watch::Watched {
+            stamp: Some("observed_at"),
+            ..super::watch::Watched::work(super::watch::ACTIVITY_CLOCK)
+        },
+        |_, ()| async { load_snapshot() },
+    )
+}
+
 pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let lf_home = crate::store::lf_home_dir();

@@ -73,6 +73,8 @@ pub(crate) struct Watched {
     pub changed: fn(StoreRevisions, StoreRevisions) -> bool,
     /// Facts outside the store are read again this often.
     pub clock: Duration,
+    /// A top-level field of the result that restates when it was read.
+    pub stamp: Option<&'static str>,
 }
 
 impl Watched {
@@ -83,6 +85,7 @@ impl Watched {
                 StoreRevisions { usage: 0, ..old } != StoreRevisions { usage: 0, ..new }
             },
             clock,
+            stamp: None,
         }
     }
 }
@@ -198,7 +201,7 @@ where
             };
             drop(snapshot);
             cost = began.elapsed();
-            let identity = identity(&unavailable, &body)?;
+            let identity = identity(&unavailable, &body, watched.stamp)?;
             if force || sent != Some(identity) {
                 let frame = WatchFrame {
                     answers,
@@ -277,9 +280,16 @@ pub(super) fn strip_reading_time(value: &mut serde_json::Value) {
     }
 }
 
-fn identity<T: Serialize>(unavailable: &Option<String>, body: &Option<T>) -> Result<[u8; 32]> {
+fn identity<T: Serialize>(
+    unavailable: &Option<String>,
+    body: &Option<T>,
+    stamp: Option<&str>,
+) -> Result<[u8; 32]> {
     let mut value = serde_json::to_value(body)?;
     strip_reading_time(&mut value);
+    if let (Some(stamp), Some(fields)) = (stamp, value.as_object_mut()) {
+        fields.remove(stamp);
+    }
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(unavailable)?);
     hash.update(serde_json::to_vec(&value)?);

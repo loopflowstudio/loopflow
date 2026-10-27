@@ -10,7 +10,8 @@ lf task list --watch                   # a JSON line each time the list changes
 lf capture-tasks                       # talk it through; the session files the Tasks
 ```
 
-`--watch` also works on `lf task status <id>` and `lf session list`. Each line is
+`--watch` also works on `lf task status <id>`, `lf session list` and
+`lf monitor top --json`. Each line is
 `{"answers", "revisions", "unavailable", "body"}`, where `body` is what `--json`
 prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to change what
 it reads; the next line answers `1`. It stops when stdin closes.

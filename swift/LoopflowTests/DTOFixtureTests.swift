@@ -534,35 +534,27 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Work Activity fixture preserves proof links and typed facts")
-    func workActivityFixturePreservesProof() throws {
+    @Test("Work Activity fixture carries Session records tagged with Work")
+    func workActivityFixtureCarriesSessionRecords() throws {
         let data = try loadFixtureData("work_activity_snapshot.json")
         let snapshot = try JSONDecoder().decode(WorkActivitySnapshot.self, from: data)
 
         #expect(snapshot.limit == 50)
-        #expect(snapshot.items.map(\.subject) == [
-            "W2-144", "W2-144", "W2-144", "product", "mac-surface-ux",
-        ])
+        #expect(snapshot.items.map(\.subject) == ["W2-144", "W2-144", "product"])
         if case .inputCompletionRecorded(_, let captured, let status) = snapshot.items[0].fact {
             #expect(captured == 12)
             #expect(status == "ok")
         } else {
             Issue.record("expected a recorded Session outcome")
         }
-        #expect(snapshot.items[1].fact.github?.number == 1144)
-        #expect(snapshot.items[1].fact.github?.url.host == "github.com")
-        if case .prMergeRequested(_, let request, _) = snapshot.items[2].fact {
-            #expect(request.requestedAt == "2026-07-21T18:35:51Z")
+        if case .providerHistoryRecorded(_, _, _, let process, let status) = snapshot.items[1].fact {
+            #expect(process == "00000001-0000-4000-8000-000000000000")
+            #expect(status == "completed")
         } else {
-            Issue.record("expected a typed PR merge request")
+            Issue.record("expected a provider turn")
         }
-        #expect(snapshot.items[3].work.kind == .wave)
-        if case .steerIssued(_, .imported(let id)) = snapshot.items[3].fact {
-            #expect(id == "run_00000000000000000000000000000001")
-        } else {
-            Issue.record("expected a Run-authored Steer")
-        }
-        #expect(snapshot.items[4].fact == .workCreated)
+        #expect(snapshot.items[2].work.kind == .wave)
+        #expect(snapshot.items[2].fact == .inputCaptured(sessionId: "run_00000000000000000000000000000002", captured: 4))
     }
 
     @Test("unplaced Wave fixture retains planning without a Machine")

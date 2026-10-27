@@ -58,8 +58,10 @@ on the shared plan. Each Task carries one semantic condition — clear,
 waiting, blocked, or unknown — while `lf session list` is the separate list of
 unresolved conversations. Add `--all` for the machine-wide projection.
 
-`lf history` orders durable Work creation, execution, Task PR, and Steer facts.
-Filter with `--wave`, `--project`, or `--task`; filters apply before `--limit`.
+`lf history` orders what Sessions did — input captured, provider turns, recorded
+outcomes — each tagged with its Task or Wave. Filter with `--wave`, `--project`,
+or `--task`; filters apply before `--limit`. Changes no Session made (PRs,
+Steers, Workflow moves, sync) are on the Task: `lf task status`.
 It is history, not another live process model: `lf ps` owns current motion.
 
 ## Drill down

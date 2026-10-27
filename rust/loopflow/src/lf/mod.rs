@@ -606,7 +606,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Read durable Work history, recorded commands and provider usage
+    /// Read what Sessions did, tagged with their Work: turns, commands and provider usage
     #[command(args_conflicts_with_subcommands = true)]
     History {
         #[command(flatten)]

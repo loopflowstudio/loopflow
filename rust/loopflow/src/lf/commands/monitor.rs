@@ -39,6 +39,9 @@ pub enum MonitorCommand {
         /// Emit one versioned activity snapshot as JSON
         #[arg(long)]
         json: bool,
+        /// Print a JSON line now and each time the call trees change, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
     },
     /// Reap registered orphan providers and remove dead process receipts
     Prune {
@@ -58,7 +61,8 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
         }
         MonitorCommand::Work { watch, .. } => super::work_watch::run(*watch),
         MonitorCommand::Ps { json } => super::top::run_ps(*json),
-        MonitorCommand::Top { json } => super::top::run_top(*json),
+        MonitorCommand::Top { watch: true, .. } => super::top::watch_top(),
+        MonitorCommand::Top { json, .. } => super::top::run_top(*json),
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
     }
 }

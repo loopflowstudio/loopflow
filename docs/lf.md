@@ -583,7 +583,7 @@ Project have Linear mappings. The same active connection exports unmapped record
 ```bash
 lf ps                              # one live process snapshot
 lf top                             # refresh on a terminal
-lf history                         # durable Work, delivery and steering facts
+lf history                         # what Sessions did, tagged with their Work
 lf history list --json              # bounded Process history with a next cursor
 lf mon active --watch --json        # NDJSON until stdin closes
 lf history show SESSION --final     # provider conclusion

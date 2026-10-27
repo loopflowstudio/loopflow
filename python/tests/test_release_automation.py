@@ -287,7 +287,8 @@ esac
 
     env = {
         "HOME": str(home),
-        "PATH": f"{tools}:/usr/bin:/bin",
+        # A host PATH longer than the 999 bytes cron reads of a command.
+        "PATH": f"{tools}:{root / ('p' * 1500)}:/usr/bin:/bin",
         "LF_HOME": str(home / ".lf"),
         "TMPDIR": str(root),
     }
@@ -319,12 +320,30 @@ def test_cron_bootstrap_installs_jobs_for_a_wave_running_on_its_local_default(tm
     assert jobs["release-run"].startswith("0 10 * * * ")
     assert not list((home / "Library/LaunchAgents").glob("loopflow.cron.*"))
 
-    # cron hands the line to sh; it runs the installed gate, not PATH's lf.
+    # cron hands sh the first 999 bytes of the command; it runs the wrapper,
+    # which runs the installed gate, not PATH's lf.
     (home / "ran").unlink()
-    command = jobs["release-run"].split(" ", 5)[5]
-    assert " && env -i HOME=" in command
+    command = jobs["release-run"].split(" ", 5)[5][:999]
+    assert command.startswith("/bin/sh ")
     subprocess.run(["/bin/sh", "-c", command], env={}, check=True)
     assert (home / "ran").read_text() == "--wave infrastructure --batch graph release-run\n"
+
+
+def test_cron_bootstrap_refuses_a_line_cron_would_truncate(tmp_path):
+    # A checkout path near macOS's 1,024-byte limit leaves no room in the line.
+    deep = tmp_path.resolve()
+    while len(str(deep / "loopflow")) < 930:
+        deep /= "d" * min(200, 930 - len(str(deep / "loopflow")))
+    deep.mkdir(parents=True)
+    repo, env = _cron_host(deep, wave_machine=None)
+
+    result = _bootstrap(repo, env)
+
+    assert result.returncode == 1
+    assert "cron runs only the first 999" in result.stderr
+    assert (Path(env["HOME"]) / "crontab").read_text() == "*/5 * * * * unrelated-job\n"
+    agents = Path(env["HOME"]) / "Library/LaunchAgents"
+    assert len(list(agents.glob("loopflow.cron.infrastructure.*.plist"))) == 2
 
 
 def test_cron_bootstrap_keeps_launchd_jobs_when_the_crontab_write_fails(tmp_path):

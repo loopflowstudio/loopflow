@@ -22,6 +22,9 @@ Evidence: `scratch/database-locked-5-whys.md` (Why 1).
 
 - Rust work between `BEGIN` and the first statement that ticks or changes a row
   goes unmeasured. A plain commit's WAL write isn't counted either.
+- A hold reports when it ends. A writer that never commits or rolls back stays unnamed;
+  its victims' identified `database is locked` lines and `lf doctor` still show the contention.
+  Concept review (2026-10-26) accepted this: the incident's holds ended (2–9 s each).
 - The call site depends on the symbol table. Release keeps it (`strip` is the default
   `debuginfo`). Inlined helpers report their caller.
 
@@ -41,7 +44,14 @@ read. `store/contention.rs` keeps the write-hold hooks and `read_contention`.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- contention doctor`, fmt, clippy `--all-targets -D warnings`: pass after compress (2026-10-26). Full suites: gate.
+- `cargo test -p loopflow --lib -- contention diagnostic_log doctor` (repeated), fmt, clippy `--all-targets -D warnings`: pass after the diagnostic_log extraction and the slow-writer test repair (2026-10-26). Full suites: gate.
+
+## Lessons
+
+- The slow-writer test failed ~1 in 8 runs alongside the doctor tests (12/12 alone) while its
+  transaction opened with `CREATE TABLE`: DDL changes no user row and starts the clock only if a
+  1000-step progress tick happens to land inside it. The test now opens with an `INSERT`. Production
+  writes that open with DDL or a pure read share that documented gap.
 
 ## Delete — do not maintain
 

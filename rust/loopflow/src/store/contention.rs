@@ -222,9 +222,11 @@ mod tests {
 
     fn slow_write_in_named_function(store: &SqliteStore) {
         let mut conn = store.conn.lock().unwrap();
-        let tx = conn.transaction().unwrap();
-        tx.execute("CREATE TABLE IF NOT EXISTS held(x)", [])
+        conn.execute("CREATE TABLE IF NOT EXISTS held(x)", [])
             .unwrap();
+        let tx = conn.transaction().unwrap();
+        // A changed row starts the clock; DDL alone may never tick the progress handler.
+        tx.execute("INSERT INTO held VALUES (0)", []).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
         tx.execute("INSERT INTO held VALUES (1)", []).unwrap();
         tx.commit().unwrap();

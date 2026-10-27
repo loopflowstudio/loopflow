@@ -196,7 +196,7 @@ lf wave graph set feature billing        # the graph its new Tasks take up
 ```
 
 ```json
-{"workflow":"feature","metric_targets":[],"krs":[{"text":"A customer's invoice matches metered usage to the cent.","holds":false}]}
+{"metric_targets":[],"krs":[{"text":"A customer's invoice matches metered usage to the cent.","holds":false}]}
 ```
 
 The goal names who benefits; KRs prove it, observably, across a window. A

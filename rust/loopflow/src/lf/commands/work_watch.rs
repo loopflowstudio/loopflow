@@ -1212,7 +1212,7 @@ mod tests {
             .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         // Inject a planning-only failure after upgrading retained work, then
-        // prove the independent Workflow read needs no repair or writer.
+        // prove the independent Task read needs no repair or writer.
         let reader = super::Reader {
             store: Some(std::sync::Arc::new(crate::store::Store {
                 sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),

@@ -126,7 +126,7 @@ impl<'a> WorkSelection<'a> {
     }
 }
 
-/// Planning identity is readable before a Task has a checkout, PR, or Workflow.
+/// Planning identity is readable before a Task has a checkout, PR, or Graph.
 /// Launch binding adds those requirements only after selecting the same records.
 #[derive(Debug)]
 pub(crate) struct SelectedWork {

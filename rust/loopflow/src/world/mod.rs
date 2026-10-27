@@ -334,7 +334,7 @@ impl World {
         self.push_authored("Configure the project")
     }
 
-    /// Commit everything under `.lf/` (Wave goals, Workflows, config) and push it.
+    /// Commit everything under `.lf/` (Wave goals, Graphs, config) and push it.
     pub fn push_authored(&self, message: &str) -> Result<()> {
         git(Some(&self.repo), &["add", ".lf"])?;
         git(Some(&self.repo), &["commit", "-m", message])?;

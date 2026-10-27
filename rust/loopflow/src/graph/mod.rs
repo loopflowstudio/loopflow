@@ -105,7 +105,7 @@ pub struct Command {
 
 // Authored and saved invocations outlive CLI spellings. Both take the current
 // operation owner, keeping their arguments and topology, so a fresh Graph and a
-// captured Workflow route record the same step.
+// retained Graph record the same step.
 impl<'de> Deserialize<'de> for Command {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
@@ -755,7 +755,8 @@ fn parse_graph_mapping(
     if let Some(skill_value) = map.get(key("interactive")) {
         if map.len() != 1 {
             return Err(LoadError::InvalidGraph(
-                "an interactive item takes only the skill, or {name, id}".to_string(),
+                "step metadata belongs inside the interactive mapping: `interactive: {name, id, agent}`"
+                    .to_string(),
             ));
         }
         return parse_skill_value(skill_value, true);
@@ -852,9 +853,15 @@ fn parse_skill_value(value: &Value, interactive: bool) -> Result<Step, LoadError
                     "step repeat is retired; follow the work with `- loop: <target>`".to_string(),
                 ));
             }
-            if map.contains_key(key("human")) || map.contains_key(key("interactive")) {
+            if map.contains_key(key("human")) {
                 return Err(LoadError::InvalidGraph(
                     "`human:` is retired; write the item as `interactive: <skill>`".to_string(),
+                ));
+            }
+            if map.contains_key(key("interactive")) {
+                return Err(LoadError::InvalidGraph(
+                    "a step is interactive by its item; write it as `interactive: <skill>`"
+                        .to_string(),
                 ));
             }
             let mut step: SkillMapping =
@@ -1308,16 +1315,20 @@ mod tests {
     }
 
     #[test]
-    fn interactive_items_are_stages_named_by_their_skill_or_id() {
+    fn interactive_items_are_steps_named_by_their_skill_or_id() {
         let tmp = TempDir::new().unwrap();
         let graphs = tmp.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("review.yaml"),
-            "- interactive: explore\n- interactive: {name: demo, id: final-demo}\n",
+            "- interactive: explore\n- interactive: {name: demo, id: final-demo, agent: codex}\n",
         )
         .unwrap();
         let graph = load_graph("review", tmp.path()).unwrap();
+        let Target::Skill(demo) = &graph.items[1].target else {
+            panic!("demo is a skill step");
+        };
+        assert_eq!(demo.agent.as_deref(), Some("codex"));
         let items = compile_graph(&graph, tmp.path()).unwrap();
         let steps: Vec<_> = items
             .iter()
@@ -1327,6 +1338,10 @@ mod tests {
             })
             .collect();
         assert_eq!(steps, ["explore", "final-demo"]);
+        let ConcreteStep::Skill(demo) = &items[1] else {
+            panic!("demo compiles to a skill step");
+        };
+        assert_eq!(demo.skill.agent.as_deref(), Some("codex"));
 
         fs::write(
             graphs.join("retired.yaml"),

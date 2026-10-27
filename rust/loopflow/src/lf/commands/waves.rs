@@ -152,7 +152,7 @@ pub struct DirectionSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRuntimeSnapshot {
     pub work_id: String,
-    /// Completion and abandonment are independent of Workflow position.
+    /// Completion and abandonment are independent of Graph position.
     pub status: TaskState,
     /// A durable completion request awaiting settlement.
     pub completion_pending: Option<String>,

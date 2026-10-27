@@ -50,7 +50,7 @@ pub(crate) fn workspace_name(identifier: &str, title: &str) -> String {
 }
 
 /// Where a Task stands, for terminal titles: `Available` when its
-/// conversation is, then the Workflow node where a person takes part, such as
+/// conversation is, then the interactive step where its Graph waits, such as
 /// `Available · Design`. Both come from their shared readers; nothing new is judged.
 fn standing(
     store: &SqliteStore,

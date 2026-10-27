@@ -133,7 +133,7 @@ impl<E: SkillExecutor> GraphRunner<E> {
     ) -> Result<Option<GraphOutcome>> {
         let (body, leaf) = cursor.current_body(items);
         let Some(item) = body.get(leaf.index) else {
-            // Older saved human settlements can leave a completed child
+            // Older saved interactive settlements can leave a completed child
             // waiting to return to its parent.
             return settle_step(items, cursor);
         };

@@ -510,7 +510,7 @@ manager; Skills and Graphs are introduced early, as what you launch. Every
 example must visibly do something only lf does (`lf resume` alone shows
 nothing; `lf resume --all`, `--task`, a provider ID do).
 
-### Docs map (proposed; drafts in scratch/, moved into place after the CLI run lands)
+### Docs map (in place)
 
 **Staged, not all at once (Jack Heart, 2026-10-26).** Teach in stages, one idea
 per page. Superseded for the README opening by **Task first** (Jack Heart,
@@ -620,23 +620,12 @@ LOO-594 (Desktop Wave view as a standup board, accepted):
 
 ## Decided additions to LOO-610 (Jack Heart, 2026-10-26)
 
-4. **`code` is the default workflow.** `lf task run <ID>` with no workflow named
-   by the Task, its Wave or `.lf/config.yaml` takes up the builtin `code`
-   workflow instead of failing with "No workflow selected"
-   (`ops/task.rs` ~607, `task_workflow_default`). Test: a fresh repository with
-   no `workflow:` runs `lf -b task run <ID>` to its first edge.
-5. **Agents hand off changes as Tasks by default.** Replace
-   `skills/loopflow/SKILL.md` and `rust/loopflow/src/builtins/LOOPFLOW.md` with
-   `scratch/skill-draft/SKILL.md` and `scratch/skill-draft/LOOPFLOW.md`; add
-   `skills/loopflow/README.md` from `scratch/skill-draft/README.md`. Update any
-   test that pins LOOPFLOW.md text.
-7. **Builtin `auto` workflow** (Jack Heart, 2026-10-26: sell auto mode now).
-   Done: `builtins/task/graph/auto.yaml` is `graph: pursue` then
-   `graph: deliver` (main #1652 deleted `ship`); no stages, so one route runs
-   it to `end`, approving Auto-Ship. Interim until LOO-622 makes auto mode
-   "any Graph, run past its interactive stages"; then this builtin goes.
-6. **Docs and README** move into place from `scratch/README.draft.md` and
-   `scratch/docs-draft/` after items 1–5 verify (see "Docs and README redo").
+Built: (4) builtin `code` is the default Workflow when the Task, its Wave and
+`.lf/config.yaml` name none; (5) agents hand off changes as Tasks
+(`skills/loopflow/`, `builtins/LOOPFLOW.md`); (6) docs and README in place;
+(7) builtin `auto` = `graph: pursue` then `graph: deliver`, no stages, one
+route to `end` approving Auto-Ship. `auto` is interim until LOO-622 makes auto
+mode "any Graph, run past its interactive stages"; then this builtin goes.
 
 ## Story, auto mode and configuration (Jack Heart, 2026-10-26)
 
@@ -703,3 +692,5 @@ root; see questions).
   verb (`session_steers`, `global_commands` 45/45, clippy clean); pillar order
   (`documented_commands` 4/4, `reference_matches_the_compiled_cli` pass).
   Gate owes integration, lib and Swift since the merge.
+- Compress after `auto`: dropped redundant auto checks (definition list,
+  catalog lookup); `local_planning::{auto_workflow,wave_workflow_set,unconfigured}` 3/3.

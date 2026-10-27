@@ -3893,7 +3893,7 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_workflow() {
 }
 
 #[test]
-fn auto_workflow_runs_a_task_past_demo_to_end() {
+fn auto_workflow_runs_a_task_to_end() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     repo.create_file(".lf/config.yaml", "workflow: auto\n");
@@ -3923,18 +3923,6 @@ fn auto_workflow_runs_a_task_past_demo_to_end() {
 fn wave_workflow_set_selects_the_builtin_auto() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let catalog = lf(
-        repo.path(),
-        home.path(),
-        &["wave", "workflow", "list", "--json"],
-    );
-    let auto = catalog
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|entry| entry["name"] == "auto")
-        .unwrap();
-    assert!(auto["source"].is_null());
     lf(
         repo.path(),
         home.path(),

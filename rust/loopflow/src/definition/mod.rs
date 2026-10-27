@@ -168,14 +168,7 @@ mod tests {
             );
         }
         // A Task's workflow is a graph like any other.
-        for name in [
-            "pursue",
-            "incident",
-            "vsm-operate",
-            "feature",
-            "code",
-            "auto",
-        ] {
+        for name in ["pursue", "incident", "vsm-operate", "feature", "code"] {
             assert!(
                 matches!(
                     resolve_definition(tmp.path(), name, None).unwrap(),

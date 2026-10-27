@@ -1026,9 +1026,41 @@ pub(crate) fn release_run_with_cron(
             })
             .and_then(|a| a.selection.as_ref());
         let mut replacement_version = None;
+        let mut superseded = false;
         if let Some(selection) = saved.filter(|_| !target.publisher.is_empty()) {
             let candidate = ReleaseCandidate::new(&target, &selection.tag, &selection.commit);
             checked_candidate_tag(&main_repo, &candidate)?;
+            // A candidate published outside this attempt and followed by a newer
+            // tag is finished: its source predates main's release history, and the
+            // publisher refuses to reconcile anything but the latest release.
+            if let Some(latest_tag) = superseding_tag(&main_repo, &target, &candidate)? {
+                let proof = persist_verification(
+                    &main_repo,
+                    "superseded-release-selection",
+                    &candidate.commit,
+                    &serde_json::json!({
+                        "tag": candidate.tag, "commit": candidate.commit,
+                        "published": true, "latest_tag": latest_tag,
+                    }),
+                )?;
+                verification.push(proof.clone());
+                accounting::authorize_replacement(
+                    &home,
+                    &main_repo,
+                    cron_receipt.expect("saved selection has receipt"),
+                    selection,
+                    proof,
+                )?;
+                progress.status(&format!(
+                    "Saved release {} was published and superseded by {latest_tag}; releasing from current main...",
+                    candidate.tag
+                ));
+                superseded = true;
+            }
+        }
+        let saved = saved.filter(|_| !superseded);
+        if let Some(selection) = saved.filter(|_| !target.publisher.is_empty()) {
+            let candidate = ReleaseCandidate::new(&target, &selection.tag, &selection.commit);
             let inspection = inspect_release_source(&main_repo, &target, &candidate, true, &lock)?;
             let proof = persist_verification(
                 &main_repo,
@@ -1529,6 +1561,19 @@ fn checked_candidate_tag(repo: &Path, candidate: &ReleaseCandidate) -> OpsResult
         )));
     }
     Ok(tagged)
+}
+
+/// The newer release tag that leaves a published candidate nothing to finish.
+fn superseding_tag(
+    repo: &Path,
+    target: &ReleaseTarget,
+    candidate: &ReleaseCandidate,
+) -> OpsResult<Option<String>> {
+    let latest = latest_tag_optional(repo, target)?.filter(|tag| tag != &candidate.tag);
+    if latest.is_none() || !github_release_exists(repo, &candidate.tag)? {
+        return Ok(None);
+    }
+    Ok(latest)
 }
 
 fn finish_candidate(

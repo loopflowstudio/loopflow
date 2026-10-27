@@ -341,6 +341,11 @@ fn saved_candidate_recovers_only_with_affirmative_unpublished_source_evidence() 
 }
 
 #[test]
+fn published_superseded_candidate_settles_without_reverifying_its_source() {
+    run_scenarios(&["superseded-candidate"]);
+}
+
+#[test]
 fn replacement_schedule_resumes_candidate_with_predecessor_and_successor_dues() {
     run_scenarios(&["candidate-valid-closed"]);
 }
@@ -349,6 +354,8 @@ fn run_scenarios(scenarios: &[&str]) {
     for &scenario in scenarios {
         let recovering = scenario.starts_with("candidate-");
         let valid_candidate = scenario.starts_with("candidate-valid");
+        // A saved selection whose tag was published by hand, then superseded.
+        let superseded = scenario == "superseded-candidate";
         let expected_tag = "v0.9.1";
         let baseline_tag = if recovering && !valid_candidate {
             "v0.9.0"
@@ -358,7 +365,7 @@ fn run_scenarios(scenarios: &[&str]) {
         let home = tempfile::tempdir().unwrap();
         let state = tempfile::tempdir().unwrap();
         let published = state.path().join("published");
-        if scenario == "no-change" {
+        if scenario == "no-change" || superseded {
             fs::write(&published, "already published").unwrap();
         }
         let gh = format!(
@@ -450,7 +457,7 @@ esac
         repo.create_file(
             ".lf/config.yaml",
             &format!(
-                "release:\n  targets:\n    default:\n      workflow: release.yml\n      completion: github-release\n      verify: ['test -f README.md']\n      publisher: ['sh', '{}']\n",
+                "release:\n  targets:\n    default:\n      workflow: release.yml\n      completion: github-release\n      verify: ['test -f .lf/graphs/release-run.yaml']\n      publisher: ['sh', '{}']\n",
                 publisher.display()
             ),
         );
@@ -462,6 +469,9 @@ esac
         repo.stage_all();
         repo.commit("Release fixture");
         repo.push();
+        if superseded {
+            git(repo.path(), &["tag", "v0.9.0", "HEAD~1"]);
+        }
         for args in [["tag", baseline_tag], ["push", "--tags"]] {
             git(repo.path(), &args);
         }
@@ -902,7 +912,7 @@ exit 0
             None
         };
         let mut seeded_attempt = None;
-        if recovering {
+        if recovering || superseded {
             let directory = repo_path.join(".lf/locks");
             fs::create_dir_all(&directory).unwrap();
             let held = fs::File::create(directory.join(format!(
@@ -957,7 +967,11 @@ exit 0
                                 attempt["finished_at"] = (finished - 86400).into();
                             }
                         }
-                        attempt["selection"] = serde_json::json!({"tag":"v0.9.1", "commit": rejected_commit, "workflow_run_id":42});
+                        attempt["selection"] = if superseded {
+                            serde_json::json!({"tag":"v0.9.0", "commit": git(&repo_path, &["rev-parse", "v0.9.0"]), "workflow_run_id":41})
+                        } else {
+                            serde_json::json!({"tag":"v0.9.1", "commit": rejected_commit, "workflow_run_id":42})
+                        };
                         attempt["outcome"] = serde_json::json!({"status":"failed", "cause":"packaged install preflight rejected"});
                         attempt["target"] = "default".into();
                         let evidence = b"packaged install preflight rejected";
@@ -1163,7 +1177,7 @@ exit 0
             attempts.len(),
             if interrupted.is_some() {
                 3
-            } else if recovering || killed_attempt.is_some() {
+            } else if recovering || superseded || killed_attempt.is_some() {
                 2
             } else {
                 1
@@ -1318,12 +1332,13 @@ exit 0
             | "reconcile-branch"
             | "reconcile-missing"
             | "no-change"
+            | "superseded-candidate"
             | "telemetry-recovered"
             | "telemetry-missing"
             | "telemetry-history"
             | "telemetry-interrupted" => {
                 assert!(result.is_ok(), "{scenario}: {result:?}\n{log}");
-                if scenario != "no-change" {
+                if scenario != "no-change" && !superseded {
                     assert!(
                         matches!(attempt.outcome, ScheduledReleaseOutcome::Published { .. }),
                         "{attempt:?}"
@@ -1349,6 +1364,16 @@ exit 0
                     } else {
                         assert!(attempt.replacement.is_none());
                     }
+                }
+                if superseded {
+                    let replacement = attempt.replacement.as_ref().unwrap();
+                    assert_eq!(replacement.rejected.tag, "v0.9.0");
+                    let proof: serde_json::Value = serde_json::from_slice(
+                        &fs::read(&replacement.inspection.evidence_path).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(proof["latest_tag"], "v0.9.1");
+                    assert!(log.contains("superseded by v0.9.1"), "{log}");
                 }
                 assert!(attempt
                     .verification

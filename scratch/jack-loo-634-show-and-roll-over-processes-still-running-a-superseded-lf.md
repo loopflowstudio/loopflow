@@ -1,7 +1,7 @@
 # LOO-634: show and roll over processes on a superseded lf
 
-Status: implemented and committed on this branch, rebased onto origin/main
-66ad233139 (2026-10-27). Source: the Task definition and cbda52's `scratch/database-locked-5-whys.md`
+Status: implemented and committed on this branch, current with origin/main
+4a85fb3a5a (2026-10-27; that merge touched only Graph/workflow files). Source: the Task definition and cbda52's `scratch/database-locked-5-whys.md`
 (Why 5). Jack asked for it to ship without stopping for review.
 
 ## Problem
@@ -51,8 +51,9 @@ busy turns).
   remainder is `owner_waits_for_person` + saved provider session. Rollover reuses
   that rule rather than adding a third classifier.
 - #1708 (LOO-610) merged on main (142e096fea) and keeps `monitor` top-level, so
-  `lf monitor rollover` beside `ps`/`prune` stands. The branch needs a rebase; expect
-  a `docs/lf-reference.md` conflict — regenerate it, don't hand-merge.
+  `lf monitor rollover` beside `ps`/`prune` stands; the Task's "`lf ps`" is
+  `lf monitor ps` (there is no top-level `ps`). #1656 is still open; nothing here
+  touches its helper-activation path.
 - Graph steps are pinned through `LF_BIN` (`os_process::resolve_lf_binary`), and the
   Graph process holds its cursor in memory. Stopping a Graph and relaunching its
   route replays effects; architecture forbids resuming a stopped Graph. Moving a Graph
@@ -100,6 +101,7 @@ busy turns).
   reference pass. 2026-10-26: branch `lf doctor` here showed
   `29 processes on Loopflow.app lf (0.14.16)` with floor 0.14.16 (correctly no flag).
 - 2026-10-27, after compress: clippy and focused lib tests (13) pass.
+- 2026-10-27 realign: no rerun; the 4a85fb3a5a merge left every rollover file unchanged.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).
 

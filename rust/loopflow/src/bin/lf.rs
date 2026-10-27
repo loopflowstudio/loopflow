@@ -2451,6 +2451,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         graph,
         reason,
         stop,
+        recover,
         ..
     }) = &cli.command
     {
@@ -2472,6 +2473,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             &issue,
             graph.as_deref(),
             reason.as_deref(),
+            *recover,
         );
     }
     if let Some(Commands::Session { cmd }) = &cli.command {

@@ -1,0 +1,45 @@
+{
+  "from_machine_id": "home_00000000000040008000000000000001",
+  "session": {
+    "id": "session_00000000000040008000000000000001",
+    "title": "Move demo",
+    "title_source": "human",
+    "provider": "claude",
+    "model": null,
+    "primary": null
+  },
+  "checkout": {
+    "repository_id": "repo_00000000000040008000000000000001",
+    "origin": "git@github.com:jack-heart/loopflow.git",
+    "branch": "jack/move-demo",
+    "commit": "0123456789abcdef0123456789abcdef01234567"
+  },
+  "history": {
+    "agent_session_id": "0199a213-81c0-7800-8aa1-bbab2a035a53",
+    "files": [
+      { "path": "0199a213-81c0-7800-8aa1-bbab2a035a53.jsonl", "content": "e30K" }
+    ],
+    "log": "## Jack\n\nkeep going\n"
+  },
+  "task": {
+    "task_id": "task_00000000000040008000000000000001",
+    "identifier": "LOO-12",
+    "ownership_marker": "Jack handed this off to home_00000000000040008000000000000002\n\n<!-- loopflow-ownership:{} -->",
+    "workflow": {
+      "graph": { "name": "code", "steps": [] },
+      "node": "explore",
+      "edge": 1,
+      "moves": [
+        {
+          "workflow": "code",
+          "kind": "took_up",
+          "from": "start",
+          "to": "explore",
+          "edge": null,
+          "note": null,
+          "at": 1792600000
+        }
+      ]
+    }
+  }
+}

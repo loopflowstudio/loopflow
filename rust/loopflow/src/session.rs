@@ -279,6 +279,8 @@ pub(crate) struct SessionSummary {
     pub cwd: std::path::PathBuf,
     pub skill: Option<String>,
     pub provider: Option<String>,
+    /// The login its current conversation is pinned to.
+    pub account: Option<crate::store::ProviderAccountId>,
     pub model: Option<String>,
     pub node: Option<u32>,
     pub iterations: Option<Vec<Vec<u32>>>,

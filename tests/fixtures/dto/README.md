@@ -111,3 +111,8 @@ members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
 base recovery. Shell identity is independent of its tool pane; saved intent never
 asserts a live native process. `view_plan.json` includes query discovery
 metadata, independent Dashboard identity and portable tile-face intent.
+
+`retention_summary.json` pins `lf history retention --json`: Sessions by harness,
+account, age and retention state (`provider`, `facts`, `unknown`), the soonest
+removals ahead, and each home's expiry policy. Rust and Swift decode it; the
+Desktop Retention card renders it.

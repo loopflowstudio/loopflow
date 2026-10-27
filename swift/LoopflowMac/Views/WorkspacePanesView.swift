@@ -181,6 +181,10 @@ enum PaneGeometry {
     static let cornerRadius = CornerRadius.md
     // Nested curves share a center at the workspace's lower corners.
     static let workspaceCornerRadius = cornerRadius + spacing
+    /// Square where the workspace meets the sidebar under the titlebar.
+    static let workspaceShape = UnevenRoundedRectangle(
+        topLeadingRadius: 0, bottomLeadingRadius: workspaceCornerRadius,
+        bottomTrailingRadius: workspaceCornerRadius, topTrailingRadius: workspaceCornerRadius)
 }
 
 private struct MultiplexerNodeView: View {
@@ -350,7 +354,7 @@ struct SessionPaneView: View {
     @State private var copyConfirmation: String?
 
     private var item: SessionItem? {
-        guard case .session(let id, _, _) = pane.content else { return nil }
+        guard case .session(let id?, _, _) = pane.content else { return nil }
         return sessions.sessions.first { $0.id == id }
     }
 
@@ -442,6 +446,7 @@ struct SessionPaneView: View {
                     disabled: changingSession) { changeSession(session, agent: nil) }
             }
             if case .shell = pane.content { shellTabs }
+            if case .browser = pane.content { browserTabs }
             if workspace.key.kind != .task || pane.content.location != workspace.location {
                 Text(programHeading.context)
                     .font(Typography.code(11)).foregroundStyle(theme.palette.textSecondary)
@@ -515,30 +520,23 @@ struct SessionPaneView: View {
         if let taskId = paneTaskId {
             ForEach(TaskFilesStore.Page.allCases, id: \.self) { page in
                 Button(page.rawValue, systemImage: page == .task ? "doc.text" : page == .pullRequest ? "arrow.triangle.pull" : "folder") {
-                    let content = PaneContent.files(taskId: taskId, location: pane.content.location,
-                        execution: pane.executionLocation)
+                    guard let browser = workspace.showBrowser(.files, from: pane) else { return }
                     do {
-                        let files = try workspace.files(for: content, task: model.task(id: taskId)?.task, query: sessions.query)
+                        let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
                         files.page = page
-                        try workspace.selectContent(content, in: pane)
                     } catch { shellError = error.localizedDescription }
                 }
             }
             Button("lf process", systemImage: "list.bullet.rectangle") {
-                selectContent(.graphLog(taskId: taskId, location: pane.content.location,
-                    execution: pane.executionLocation))
+                workspace.showBrowser(.graphLog, from: pane)
             }
         }
         if workspace.key.kind == .task {
             Button("Shell", systemImage: "terminal") {
-                selectContent(.shell(location: pane.content.location, execution: pane.executionLocation))
+                if let shell = store.shellPane, shell.content.selectedShell != nil { store.setFocusedPane(shell.id) }
+                else { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
             }
         }
-    }
-
-    private func selectContent(_ content: PaneContent) {
-        do { try workspace.selectContent(content, in: pane) }
-        catch { shellError = error.localizedDescription }
     }
 
     private var primarySession: SessionItem? {
@@ -549,7 +547,7 @@ struct SessionPaneView: View {
 
     private var paneTaskId: String? {
         switch pane.content {
-        case .files(let task, _, _), .graphLog(let task, _, _): return task
+        case .browser(let task, _, _, _, _): return task
         default:
             if let work = primarySession?.record.work, work.kind == .task { return work.id }
             return workspace.key.kind == .task ? workspace.key.id : nil
@@ -653,11 +651,26 @@ struct SessionPaneView: View {
         }
     }
 
+    @ViewBuilder private var browserTabs: some View {
+        if case .browser(_, let tabs, let selected, _, _) = pane.content {
+            ScrollView(.horizontal) {
+                HStack(spacing: 4) {
+                    ForEach(tabs) { tab in
+                        Button(tab.title) { workspace.showBrowser(tab, from: pane) }
+                            .lineLimit(1)
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(tab.id == selected ? theme.palette.surfaceElement : .clear,
+                                        in: RoundedRectangle(cornerRadius: 4))
+                            .accessibilityIdentifier("browser-tab-\(tab.id)")
+                    }
+                }.buttonStyle(.plain).font(Typography.body(11))
+            }.fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     @ViewBuilder
     private var content: some View {
         switch pane.content {
-        case .empty:
-            emptyWorkspace
         case .session:
             if let item {
                 if let surface = item.surface {
@@ -690,21 +703,35 @@ struct SessionPaneView: View {
                     Text("Shell location is unavailable. Add a new shell in this Work.")
                 }
             }
-        case .graphLog(let taskId, let location, let execution):
-            GraphProcessLog(model: model, taskId: taskId, location: location, execution: execution,
-                query: sessions.query)
-                .id(pane.incarnation)
-                .background(PaneFocusTarget(isFocused: isFocused))
-                .simultaneousGesture(TapGesture().onEnded { focusPane() })
-        case .files(let taskId, _, _):
-            let task = model.task(id: taskId)?.task
-            switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
-            case .success(let files):
-                TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
-                    checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
-                    .simultaneousGesture(TapGesture().onEnded { focusPane() })
-            case .failure(let error):
-                Text(error.localizedDescription).textSelection(.enabled)
+        case .browser(let taskId, _, _, let location, let execution):
+            VStack(spacing: 0) {
+                if !showsStrip { browserTabs.padding(4) }
+                switch pane.content.selectedBrowserTab {
+                case .graphLog:
+                    GraphProcessLog(model: model, taskId: taskId, location: location, execution: execution,
+                        query: sessions.query)
+                        .id(pane.incarnation)
+                        .background(PaneFocusTarget(isFocused: isFocused))
+                        .simultaneousGesture(TapGesture().onEnded { focusPane() })
+                case .files:
+                    let task = model.task(id: taskId)?.task
+                    switch Result(catching: { try workspace.files(for: pane.content, task: task, query: sessions.query) }) {
+                    case .success(let files):
+                        TaskFilesView(store: files, prURL: task?.pr?.publication?.github?.url,
+                            checkoutBase: task?.reference.workspace?.baseCommit, task: task, isFocused: isFocused)
+                            .simultaneousGesture(TapGesture().onEnded { focusPane() })
+                    case .failure(let error):
+                        Text(error.localizedDescription).textSelection(.enabled)
+                    }
+                case .url(let id, let url):
+                    BrowserPageView(pages: workspace.pages, id: id, url: url).id(id)
+                        .simultaneousGesture(TapGesture().onEnded { focusPane() })
+                case nil:
+                    PaneEmptyState(title: "Nothing open", systemImage: "globe",
+                                   description: "Open this Task’s Files or Graph processes.") {
+                        Button("Files") { workspace.showBrowser(.files, from: pane) }
+                    }
+                }
             }
         }
     }
@@ -854,21 +881,17 @@ struct SessionPaneView: View {
         let title = terminalTitle ?? _terminalIdentity.flatMap { sessions.surfaces.title(for: $0) }
         if let title, !title.isEmpty { return title }
         return switch pane.content {
-        case .empty: "Workspace"
         case .session: item?.record.detail ?? "Workspace"
         case .shell: "Shell"
-        case .graphLog: "Graph processes"
-        case .files: "Files"
+        case .browser: pane.content.selectedBrowserTab?.title ?? "Browser"
         }
     }
 
     private var programHeading: PaneProgramHeading {
         let fallback: String = switch pane.content {
-        case .empty: "Workspace"
         case .session: "Session"
         case .shell: "Shell"
-        case .graphLog: "Graph processes"
-        case .files: "Files"
+        case .browser: pane.content.selectedBrowserTab?.title ?? "Browser"
         }
         return PaneProgramHeading(provider: paneSessions.count == 1 ? paneSessions.first?.presentationProvider : nil,
             title: paneSessions.count == 1 ? paneSessions.first?.record.title ?? _title : _title,
@@ -896,7 +919,7 @@ struct SessionPaneView: View {
             }
         case .shell:
             pane.terminal
-        case .empty, .graphLog, .files:
+        case .browser:
             nil
         }
     }

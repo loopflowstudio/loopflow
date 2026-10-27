@@ -660,7 +660,7 @@ async fn conversation_launch_args(store: &SharedStore, session: &LfSession) -> R
         "-i".to_string(),
         "--agent".to_string(),
         config.agent().to_owned(),
-        "--__cwd".to_string(),
+        "--cwd".to_string(),
         session.cwd.display().to_string(),
     ];
     // The conversation's prompt carries its Work only while launch can resolve
@@ -2262,8 +2262,7 @@ mod tests {
         fn skill(name: &str, human: bool) -> ConcreteStep {
             ConcreteStep::Skill(ConcreteSkill {
                 skill: Skill::named(name),
-
-                human,
+                interactive: human,
                 id: None,
                 returns: None,
                 sources: Vec::new(),

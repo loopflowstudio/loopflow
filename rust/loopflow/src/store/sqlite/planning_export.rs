@@ -404,7 +404,7 @@ mod tests {
     use super::{attach_in, retain_filing_export_in, PlanningExport};
     use crate::durable::{ProjectId, TaskId};
     use crate::store::migrations::{
-        apply_before_current_draft, current_draft_sql, seed_peer_planning,
+        apply_before_current_draft, convert_released_data, current_draft_sql,
     };
     use crate::store::sqlite::planning_changes::PlanningChanges;
     use crate::store::sqlite::task_history::RetainedFiling;
@@ -420,7 +420,7 @@ mod tests {
         .unwrap();
         let sql = current_draft_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
-        seed_peer_planning(&conn, &sql).unwrap();
+        convert_released_data(&conn, &sql).unwrap();
         conn.execute("UPDATE task_creation_intents SET export_json=NULL", [])
             .unwrap();
         let intent = RetainedFiling {
@@ -493,7 +493,7 @@ mod tests {
         let tx = conn.transaction().unwrap();
         let sql = current_draft_sql("planning_peers");
         tx.execute_batch(&sql).unwrap();
-        assert!(seed_peer_planning(&tx, &sql).is_err());
+        assert!(convert_released_data(&tx, &sql).is_err());
         tx.rollback().unwrap();
         assert_eq!(receipt(&conn), before);
         assert!(conn.prepare("SELECT body FROM pm_items").is_ok());
@@ -543,7 +543,7 @@ mod tests {
                 let before: Value = serde_json::from_str(&receipt()).unwrap();
                 let sql = current_draft_sql("planning_peers");
                 conn.execute_batch(&sql).unwrap();
-                seed_peer_planning(&conn, &sql).unwrap();
+                convert_released_data(&conn, &sql).unwrap();
                 let after: Value = serde_json::from_str(&receipt()).unwrap();
                 for key in ["id", "input", "through", "initiative", "link_id"] {
                     assert_eq!(after[key], before[key]);

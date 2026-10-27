@@ -68,6 +68,7 @@ struct RepoView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .bottom) { ShipNoticeOverlay(model: model) }
         .background(palette.background)
         .accessibilityElement(children: .contain)
         .navigationTitle(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work")
@@ -81,7 +82,7 @@ struct RepoView: View {
             if let taskLinks, let repository {
                 WorkLinkReceiver(router: taskLinks, repository: repository, openingRequests: openingRequests, inspect: { repository, incarnation in
                     model.inspectDesktop(repository: repository, window: incarnation, workspaces: sessionWorkspaces)
-                }, controlPane: { try sessionWorkspaces.controlPane($0, model: model) },
+                }, perform: { try DesktopAction.perform($0, model: model, workspaces: sessionWorkspaces) },
                    readText: { try sessionWorkspaces.readText($0) }) { link in
                     if sessionWorkspaces.localMachineId == nil { await sessionWorkspaces.refreshMachine(query: query) }
                     if let machine = sessionWorkspaces.localMachineId {
@@ -121,14 +122,5 @@ struct RepoView: View {
             if let path { model.relocateRepository(to: path) }
         }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
-        .task(id: model.repoPath) {
-            // Fixture and UI-test runs render without background helpers.
-            guard let repo = model.repoPath, AppTestMode.current() == nil else { return }
-            CIWatchers.shared.open(repo)
-            defer { CIWatchers.shared.close(repo) }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(3600))
-            }
-        }
     }
 }

@@ -84,20 +84,33 @@ pub(crate) fn collect_history(
     )?)
 }
 
-pub fn inspect(
-    selector: &str,
-    events: bool,
-    final_answer: bool,
-    context: bool,
-    instructions: bool,
-    json: bool,
-) -> Result<()> {
+/// The part of a Session's evidence `lf history show` prints. Its flags
+/// conflict pairwise, so a command asks for one at most.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionView {
+    Summary,
+    Final,
+    Context,
+    Instructions,
+    Transcript,
+}
+
+pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
     let home = crate::store::lf_home_dir();
     let database = crate::store::database_path_from_env()?;
     let store = crate::store::sqlite::SqliteStore::open_processes_read_only(&database)?;
     let snapshot = store
         .input_history(selector)
         .map_err(|error| anyhow!("Session capture unavailable: {error}"))?;
+    if view == SessionView::Transcript {
+        let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;
+        if json {
+            println!("{}", serde_json::to_string(&conversation)?);
+        } else {
+            print!("{}", super::history_transcript::render(&conversation));
+        }
+        return Ok(());
+    }
     let input = crate::session_record::parse_artifact_key(snapshot.selector())?;
     let dir = crate::session_record::record_dir(&home, &input)
         .ok_or_else(|| anyhow!("Input {} has no artifact path", snapshot.selector()))?;
@@ -106,21 +119,7 @@ pub fn inspect(
         .into_iter()
         .filter(|event| event.payload["source"] == "codex_relay")
         .collect();
-    if events {
-        match std::fs::read_to_string(dir.join("events.jsonl")) {
-            Ok(stream) => print!("{stream}"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                eprintln!("stream file rotated; retained facts only");
-                print_retained_events(&store, &input)?;
-            }
-            Err(error) => return Err(anyhow!("Capture stream unavailable: {error}")),
-        }
-        for event in &diagnostics {
-            println!("{}", serde_json::to_string(event)?);
-        }
-        return Ok(());
-    }
-    if final_answer {
+    if view == SessionView::Final {
         let answer = store
             .input_final_answer(&input)
             .map_err(|error| anyhow!("Capture final answer unavailable: {error}"))?;
@@ -140,7 +139,7 @@ pub fn inspect(
             )),
         };
     }
-    if instructions {
+    if view == SessionView::Instructions {
         let decisions = crate::context_usage::read_instructions(&dir)
             .map_err(|error| anyhow!("Instruction evidence unavailable: {error}"))?;
         if json {
@@ -150,8 +149,8 @@ pub fn inspect(
         }
         return Ok(());
     }
-    if context {
-        let step = crate::context_usage::step_context(&home, &snapshot);
+    if view == SessionView::Context {
+        let step = crate::context_usage::step_context(&home, &store, &snapshot);
         if json {
             println!("{}", serde_json::to_string(&step)?);
         } else {
@@ -205,19 +204,12 @@ pub fn inspect(
     println!("Evidence gaps: {}", snapshot.evidence_gaps);
     println!(
         "{}",
-        crate::context_usage::render_step(&crate::context_usage::step_context(&home, &snapshot))
+        crate::context_usage::render_step(&crate::context_usage::step_context(
+            &home, &store, &snapshot
+        ))
     );
-    Ok(())
-}
-
-/// The facts history retained for an input whose stream file is gone.
-fn print_retained_events(store: &crate::store::sqlite::SqliteStore, input: &str) -> Result<()> {
-    for event in store.input_events(input)? {
-        match event.get("unparsed").and_then(serde_json::Value::as_str) {
-            Some(bytes) => println!("{bytes}"),
-            None => println!("{}", serde_json::to_string(&event)?),
-        }
-    }
+    let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;
+    print!("\n{}", super::history_transcript::render(&conversation));
     Ok(())
 }
 

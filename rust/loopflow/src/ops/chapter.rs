@@ -515,7 +515,7 @@ async fn disposition(store: &Store, task: Task) -> OpsResult<ChapterTask> {
                 .map(|head| !clean || head != pr.base_commit)
         });
     }
-    let (disposition, reason) = classify_task(task.state.as_deref(), task.completed, &evidence);
+    let (disposition, reason) = classify_task(task.state.as_deref(), &evidence);
     Ok(ChapterTask {
         task,
         disposition,
@@ -534,12 +534,8 @@ pub struct TaskStartEvidence {
     pub completed: bool,
 }
 
-fn classify_task(
-    state: Option<&str>,
-    completed: bool,
-    evidence: &TaskStartEvidence,
-) -> (TaskDisposition, String) {
-    let terminal = matches!(state, Some("completed" | "canceled" | "duplicate")) || completed;
+fn classify_task(state: Option<&str>, evidence: &TaskStartEvidence) -> (TaskDisposition, String) {
+    let terminal = matches!(state, Some("completed" | "canceled" | "duplicate"));
     if evidence.abandoned
         && !terminal
         && (state == Some("started")

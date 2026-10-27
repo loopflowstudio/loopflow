@@ -170,7 +170,7 @@ pub(crate) fn prepare_clone_sqlite(conn: &rusqlite::Connection) -> StoreResult<(
                 super::canonical_ids::preflight(conn, guards)?;
             }
             conn.execute_batch(draft.sql)?;
-            seed_peer_planning(conn, draft.sql)?;
+            convert_released_data(conn, draft.sql)?;
         }
         validate_foreign_keys(conn)?;
         validate_persisted_json(conn)?;
@@ -210,7 +210,7 @@ fn _initialize_experiment_in(
     apply_set(conn, MIGRATIONS, guards)?;
     for draft in drafts {
         conn.execute_batch(draft.sql)?;
-        seed_peer_planning(conn, draft.sql)?;
+        convert_released_data(conn, draft.sql)?;
     }
     validate_foreign_keys(conn)?;
     validate_persisted_json(conn)?;
@@ -814,7 +814,7 @@ fn apply_set(
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
         migration_preflight(conn, migration, guards)?;
         conn.execute_batch(migration.sql)?;
-        seed_peer_planning(conn, migration.sql)?;
+        convert_released_data(conn, migration.sql)?;
         backfill_known_checksums(conn, set)?;
         insert_applied_migration(conn, migration, &parent_history)?;
     }
@@ -823,7 +823,9 @@ fn apply_set(
     validate_schema(conn, set)
 }
 
-pub(crate) fn seed_peer_planning(conn: &rusqlite::Connection, sql: &str) -> StoreResult<()> {
+/// Convert stored rows whose shape a migration's SQL changes. Released
+/// migrations and drafts both run it after their SQL, keyed on that SQL.
+pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> StoreResult<()> {
     if sql.contains("CREATE TABLE planning_peer_changes (") {
         convert_project_content(conn)?;
         let mut query = conn.prepare(
@@ -1822,7 +1824,7 @@ mod tests {
             apply_set(conn, MIGRATIONS, guards)?;
             for draft in crate::build_info::migration_draft_manifest() {
                 conn.execute_batch(draft.sql)?;
-                super::seed_peer_planning(conn, draft.sql)?;
+                super::convert_released_data(conn, draft.sql)?;
             }
             super::validate_persisted_json(conn)
         })
@@ -1975,7 +1977,7 @@ mod tests {
         let sql = current_draft_sql("planning_peers");
         super::_migration_transaction(&conn, |conn, _guards| {
             conn.execute_batch(&sql)?;
-            super::seed_peer_planning(conn, &sql)
+            super::convert_released_data(conn, &sql)
         })
         .unwrap();
         for (table, expected) in tables.iter().zip(before) {
@@ -2075,7 +2077,7 @@ mod tests {
         let before = receipt(&conn);
         let sql = current_draft_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
-        super::seed_peer_planning(&conn, &sql).unwrap();
+        super::convert_released_data(&conn, &sql).unwrap();
         for (id, field, expected) in [
             (
                 "project-proof",
@@ -2149,14 +2151,15 @@ mod tests {
                 {"metric_id":"recovery","target":{"kind":"at_least","value":1.0}}
             ])
         );
+        // `ship_it` drops Workflows short of `end`; the next run re-places them.
         assert_eq!(
             conn.query_row(
-                "SELECT node FROM task_workflows WHERE task_id='retained-task'",
+                "SELECT count(*) FROM task_workflows WHERE task_id='retained-task'",
                 [],
-                |r| r.get::<_, String>(0)
+                |r| r.get::<_, i64>(0)
             )
             .unwrap(),
-            "review"
+            0
         );
         assert_eq!(
             conn.query_row(
@@ -2261,7 +2264,7 @@ mod tests {
             .unwrap();
         conn.execute_batch(&current_draft_sql("task_checkout_machine"))
             .unwrap();
-        super::seed_peer_planning(&conn, &current_draft_sql("task_checkout_machine")).unwrap();
+        super::convert_released_data(&conn, &current_draft_sql("task_checkout_machine")).unwrap();
         conn.execute(
             "UPDATE work_placements SET machine_id='machine-b' WHERE task_id='t'",
             [],
@@ -2448,11 +2451,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, ("completed".into(), 1, 0));
-        let execution: (String, i64, String, Option<i64>) = conn.query_row(
+        let execution: Option<(String, i64, String, Option<i64>)> = conn.query_row(
             "SELECT w.node,w.edge,w.lf_process_id,p.completed_at FROM task_workflows w JOIN processes p ON p.id=w.lf_process_id WHERE w.task_id='single'",
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
-        ).unwrap();
-        assert_eq!(execution, ("start".into(), 0, "held".into(), None));
+        ).optional().unwrap();
+        // A released `ship_it` drops Workflow rows short of `end`; the next run re-places them.
+        if _draft_is_canonical("ship_it") {
+            assert_eq!(execution, None);
+        } else {
+            assert_eq!(execution, Some(("start".into(), 0, "held".into(), None)));
+        }
         assert_eq!(
             conn.query_row(
                 "SELECT task_id FROM agent_sessions WHERE id='conversation'",
@@ -3319,6 +3327,26 @@ mod tests {
     }
 
     #[test]
+    fn designated_panes_resets_released_free_trees() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "designated_panes");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/pane_layouts_released.sql"
+        ))
+        .unwrap();
+        let sql = current_draft_sql("designated_panes");
+        conn.execute_batch(&sql).unwrap();
+        super::convert_released_data(&conn, &sql).unwrap();
+        super::validate_persisted_json(&conn).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM work_pane_layouts", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
     fn session_preview_upgrades_released_activity_without_inventing_output() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "session_preview");
@@ -3332,6 +3360,143 @@ mod tests {
             "SELECT observed_at,pending_input,preview FROM session_activity WHERE session_id='retained'", [],
             |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).unwrap();
         assert_eq!(activity, (100, 1, None));
+    }
+
+    #[test]
+    fn session_facts_only_folds_stream_usage_into_native_turns_and_keeps_facts() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "session_facts_only");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/session_facts_only_released.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("session_facts_only"))
+            .unwrap();
+        let usage = |thread: &str, turn: &str| -> (serde_json::Value, Option<i64>) {
+            conn.query_row(
+                "SELECT payload,captured_event FROM session_events
+                 WHERE kind='usage' AND provider_thread=?1 AND provider_turn=?2",
+                [thread, turn],
+                |row| {
+                    Ok((
+                        serde_json::from_str(&row.get::<_, String>(0)?).unwrap(),
+                        row.get(1)?,
+                    ))
+                },
+            )
+            .unwrap()
+        };
+        // A matched Claude receipt takes the stream's final usage, with cost.
+        let (matched, _) = usage("claude-thread", "matched");
+        assert_eq!(matched["final"], true);
+        assert_eq!(matched["usage"]["cost_usd"], 0.25);
+        assert_eq!(matched["usage"]["context_window_tokens"], 200000);
+        // An unmatched one is converted from Claude's raw result usage.
+        let (raw, _) = usage("claude-thread", "raw");
+        assert_eq!(
+            raw,
+            serde_json::json!({"provider":"claude","final":true,"usage":{"input_tokens":3,
+                "output_tokens":4,"total_input_tokens":10,"cache_read_tokens":5,"cache_write_tokens":2}})
+        );
+        // Stream-only turns get their native row, kept with their capture.
+        let (stream_only, captured) = usage("claude-thread", "stream-only");
+        assert_eq!(stream_only["usage"]["cost_usd"], 0.5);
+        assert_eq!(captured, Some(1));
+        let (codex, _) = usage("codex-thread", "codex-turn");
+        assert_eq!(codex["provider"], "codex");
+        assert_eq!(codex["usage"]["input_tokens"], 40);
+        let (native_codex, _) = usage("codex-thread", "native-codex");
+        assert_eq!(native_codex["total"]["inputTokens"], 30);
+        let usage_rows: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM session_events WHERE kind='usage'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(usage_rows, 5, "usage without a provider thread is dropped");
+
+        let stream: Vec<i64> = conn
+            .prepare(
+                "SELECT seq FROM session_events WHERE kind='observed'
+                 AND instr(receipt_key,':events.jsonl:')>0 ORDER BY seq",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(stream, [3, 8, 10, 31, 32]);
+        let silences: Vec<(String, String)> = conn
+            .prepare(
+                "SELECT receipt_key,json_extract(payload,'$.evidence') FROM session_events
+                 WHERE instr(receipt_key,':silence:')>0",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            silences,
+            [(
+                "run_00000000000000000000000000000001:silence:3".to_string(),
+                r#"{"since":1020,"observed_at":1900}"#.to_string()
+            )]
+        );
+        let exec: Option<String> = conn
+            .query_row(
+                "SELECT json_extract(payload,'$.evidence.exec') FROM session_events
+                 WHERE receipt_key LIKE '%:manifest.json'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exec, None);
+
+        let triggers: String = conn
+            .query_row(
+                "SELECT group_concat(sql,char(10)) FROM sqlite_master WHERE type='trigger'
+                 AND (name LIKE 'store_revision_session_events_%' OR name='store_revision_usage_insert')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(triggers.matches("CREATE TRIGGER").count(), 4);
+        for transcript in [
+            "events.jsonl",
+            "provider_output",
+            "conversation",
+            "evidence",
+        ] {
+            assert!(!triggers.contains(transcript), "{transcript} in {triggers}");
+        }
+        let revision = |domain: &str| -> i64 {
+            conn.query_row(
+                "SELECT revision FROM store_revisions WHERE domain=?1",
+                [domain],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let (sessions, usage_revision) = (revision("sessions"), revision("usage"));
+        conn.execute(
+            "UPDATE session_events SET payload=payload WHERE provider_turn='raw'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            revision("sessions"),
+            sessions,
+            "usage is not a Session change"
+        );
+        conn.execute(
+            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
+             VALUES('conversation','claude-thread','next','usage','',3000,'{}')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(revision("usage"), usage_revision + 1);
     }
 
     pub(crate) fn apply_before_current_draft(conn: &rusqlite::Connection, name: &str) {
@@ -3348,7 +3513,7 @@ mod tests {
             if _draft_is_canonical(name) {
                 let (index, sql, offset) = draft_location(name);
                 conn.execute_batch(&sql[offset..])?;
-                super::seed_peer_planning(conn, sql)?;
+                super::convert_released_data(conn, sql)?;
                 super::insert_applied_migration(
                     conn,
                     &MIGRATIONS[index],
@@ -3370,7 +3535,7 @@ mod tests {
     fn _apply_build_drafts_in(conn: &rusqlite::Connection) -> crate::store::StoreResult<()> {
         for draft in crate::build_info::migration_draft_manifest() {
             conn.execute_batch(draft.sql)?;
-            super::seed_peer_planning(conn, draft.sql)?;
+            super::convert_released_data(conn, draft.sql)?;
         }
         Ok(())
     }
@@ -3648,9 +3813,10 @@ mod tests {
                 },
             )
             .unwrap();
+        // That release's Workflow shape; `ship_it` later empties it to a graph.
         assert_eq!(
-            serde_json::from_str::<crate::workflow::WorkflowDefinition>(&placed.0).unwrap(),
-            crate::workflow::unplanned()
+            serde_json::from_str::<serde_json::Value>(&placed.0).unwrap(),
+            serde_json::json!({"name":"unplanned","nodes":[],"edges":[{"from":"start","to":"end","flow":null}]})
         );
         assert_eq!((placed.1, placed.2, placed.3, placed.4), (25, None, 25, 1));
         assert_eq!(
@@ -4018,7 +4184,9 @@ mod tests {
     async fn retired_home_landings_remain_readable_and_fence_old_supervisors() {
         use std::sync::Arc;
 
-        use crate::ops::pr_landing::{reconcile_pr_landing, LandingObservation, ObservePr};
+        use crate::ops::pr_landing::{
+            reconcile_pr_landing, LandingIo, LandingObservation, ObservePr,
+        };
         use crate::pr_landing::{LandingPlacement, LandingSupervisor, PrLandingId, PrLandingState};
         use crate::store::sqlite::SqliteStore;
         use time::OffsetDateTime;
@@ -4179,15 +4347,22 @@ mod tests {
         );
         let id = PrLandingId::from_raw("home_taskless");
         let landing = store.get_pr_landing(&id).await.unwrap().unwrap();
-        let merged = reconcile_pr_landing(store.clone(), landing, merged_observation.clone(), None)
-            .await
-            .unwrap();
+        let merged = reconcile_pr_landing(
+            store.clone(),
+            landing,
+            LandingIo::scripted(merged_observation.clone(), None),
+        )
+        .await
+        .unwrap();
         assert_eq!(merged.state, PrLandingState::Merged);
         assert_eq!(merged.merge_commit.as_deref(), Some("merge"));
-        let repeated =
-            reconcile_pr_landing(store.clone(), merged.clone(), merged_observation, None)
-                .await
-                .unwrap();
+        let repeated = reconcile_pr_landing(
+            store.clone(),
+            merged.clone(),
+            LandingIo::scripted(merged_observation, None),
+        )
+        .await
+        .unwrap();
         assert_eq!(repeated, merged);
         assert_eq!(
             store.pending_pr_landings("owner/repo").await.unwrap().len(),

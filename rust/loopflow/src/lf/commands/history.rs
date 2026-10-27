@@ -3,6 +3,7 @@ use std::num::NonZeroU32;
 use anyhow::Context;
 use clap::Subcommand;
 
+use crate::lf::commands::session_history::SessionView;
 use crate::lf::output::print_process;
 use crate::process::{
     LfProcessCursor, LfProcessFilter, LfProcessOutcomeFilter, LfProcessWorkFilter,
@@ -67,11 +68,8 @@ pub enum HistoryCommand {
     /// Inspect a process or Session by identity
     Show {
         id: String,
-        #[arg(long, conflicts_with_all = ["events", "final_answer"])]
-        json: bool,
-        /// Print a Session's retained raw input events
         #[arg(long, conflicts_with = "final_answer")]
-        events: bool,
+        json: bool,
         /// Print a Session's last recorded provider conclusion
         #[arg(long = "final")]
         final_answer: bool,
@@ -79,11 +77,39 @@ pub enum HistoryCommand {
         #[arg(long)]
         input: Option<String>,
         /// Print only what the step's submitted input was made of, by source
-        #[arg(long, conflicts_with_all = ["events", "final_answer", "instructions"])]
+        #[arg(long, conflicts_with_all = ["final_answer", "instructions"])]
         context: bool,
         /// Explain recorded instruction inclusion and omission
-        #[arg(long, conflicts_with_all = ["events", "final_answer", "context"])]
+        #[arg(long, conflicts_with_all = ["final_answer", "context"])]
         instructions: bool,
+        /// Print only the Session's conversation, as its providers kept it
+        #[arg(long, conflicts_with_all = ["final_answer", "context", "instructions", "input"])]
+        transcript: bool,
+    },
+    /// Show how much Session history providers still keep, and what they remove next
+    Retention {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find text in the conversations of recent Sessions
+    Search {
+        text: String,
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "7d")]
+        since: String,
+        /// Scope to one Wave by name
+        #[arg(long)]
+        wave: Option<String>,
+        /// Scope to one Project by slug
+        #[arg(long)]
+        project: Option<String>,
+        /// Scope to one Task by Linear identifier
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
     },
     /// Show direct provider-authored usage from recorded Session inputs
     Usage {
@@ -153,6 +179,26 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     match command {
         HistoryCommand::Replay { run } => super::replay::run(run),
         HistoryCommand::Export { since } => export(since),
+        HistoryCommand::Retention { json } => super::history_transcript::retention(*json),
+        HistoryCommand::Search {
+            text,
+            since,
+            wave,
+            project,
+            task,
+            limit,
+            json,
+        } => super::history_transcript::search(
+            text,
+            since,
+            super::WorkFilter {
+                wave: wave.as_deref(),
+                project: project.as_deref(),
+                task: task.as_deref(),
+            },
+            *limit,
+            *json,
+        ),
         HistoryCommand::Usage {
             json, binds: true, ..
         } => super::bind_attribution::run(*json),
@@ -193,20 +239,23 @@ pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
         HistoryCommand::Show {
             id,
             json,
-            events,
             final_answer,
             input,
             context,
             instructions,
-        } => show(
-            id,
-            *json,
-            *events,
-            *final_answer,
-            input.as_deref(),
-            *context,
-            *instructions,
-        ),
+            transcript,
+        } => {
+            let view = [
+                (*final_answer, SessionView::Final),
+                (*context, SessionView::Context),
+                (*instructions, SessionView::Instructions),
+                (*transcript, SessionView::Transcript),
+            ]
+            .into_iter()
+            .find_map(|(asked, view)| asked.then_some(view))
+            .unwrap_or(SessionView::Summary);
+            show(id, *json, input.as_deref(), view)
+        }
         HistoryCommand::List {
             json,
             all,
@@ -289,15 +338,7 @@ enum Shown {
     Copied(crate::machine_records::CopiedHistory),
 }
 
-fn show(
-    id: &str,
-    json: bool,
-    events: bool,
-    final_answer: bool,
-    input: Option<&str>,
-    context: bool,
-    instructions: bool,
-) -> anyhow::Result<()> {
+fn show(id: &str, json: bool, input: Option<&str>, view: SessionView) -> anyhow::Result<()> {
     let shown = tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
         let process = store.resolve_process(id).await?;
@@ -327,25 +368,19 @@ fn show(
         Shown::Local(process) => process,
         Shown::Copied(copied) => {
             anyhow::ensure!(
-                !json && !final_answer && !context && !instructions && input.is_none(),
-                "Session {id} is a copy from {}; it reads as text, or as raw rows with --events",
+                !json && input.is_none() && view == SessionView::Summary,
+                "Session {id} is a copy from {}; it reads as text",
                 copied.session.origin_name()
             );
-            if events {
-                for event in &copied.events {
-                    println!("{}", serde_json::to_string(&event.row)?);
-                }
-            } else {
-                println!("{}", copied.render(&crate::store::lf_home_dir()));
-            }
+            println!("{}", copied.render(&crate::store::lf_home_dir()));
             return Ok(());
         }
     };
     match process {
         Some(process) => {
             anyhow::ensure!(
-                !events && !final_answer && !context && !instructions,
-                "--events, --final, --context and --instructions inspect Session evidence; Processes record command outcomes"
+                view == SessionView::Summary,
+                "--final, --context, --instructions and --transcript inspect Session evidence; Processes record command outcomes"
             );
             if !json {
                 print_process(&process);
@@ -353,13 +388,6 @@ fn show(
             println!("{}", serde_json::to_string_pretty(&process)?);
             Ok(())
         }
-        None => super::session_history::inspect(
-            input.unwrap_or(id),
-            events,
-            final_answer,
-            context,
-            instructions,
-            json,
-        ),
+        None => super::session_history::inspect(input.unwrap_or(id), view, json),
     }
 }

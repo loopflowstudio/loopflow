@@ -1,15 +1,22 @@
 //! What a Task's most recently launched Graph is doing, read from its Processes and
-//! their processes. Observation only: no Graph is selected, claimed or resumed.
+//! their processes, and whether anything recorded for a Task still executes.
+//! Observation only: no Graph is selected, claimed or resumed.
+
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
 use crate::durable::TaskId;
-use crate::journal::ProcessIdentityEvidence;
+use crate::journal::{process_evidence, ProcessIdentityEvidence};
 use crate::ops::graph_process::GraphProcess;
+use crate::process::LfProcess;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
+use crate::store::sqlite::SqliteStore;
 use crate::store::{SharedStore, StoreResult};
+
+use super::error::{OpsError, OpsResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -82,8 +89,8 @@ pub(crate) async fn execution_of_latest_graph(
     );
     snapshot.captured = input.as_ref().map(|(_, _, captured)| *captured);
     if snapshot.state == TaskExecutionState::Running {
-        if let Some((_, input, captured)) = &input {
-            match activity::read(&crate::store::lf_home_dir(), input).await {
+        if let (Some((session, _, captured)), Some(step)) = (&input, step) {
+            match activity::read(&store.sqlite, session, step.started_at) {
                 Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
                     snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, inspect its effects, then launch fresh work.");
@@ -159,6 +166,61 @@ fn project_execution(
         step: Some(label.clone()),
         captured: None,
     }
+}
+
+// ---- Whether anything is executing
+
+fn error(error: impl std::fmt::Display) -> OpsError {
+    OpsError::Message(error.to_string())
+}
+
+/// Whether anything is executing is asked only of the OS, about recorded
+/// Processes. Unknown evidence blocks. The caller's lineage waits on the caller,
+/// so it never does; that exempts waiting and grants no authority.
+pub(crate) fn execution_blockers(
+    store: &SqliteStore,
+    processes: &[LfProcess],
+) -> OpsResult<Vec<String>> {
+    Ok(unresolved_processes(store, processes)?
+        .into_iter()
+        .map(|(process, _)| {
+            format!(
+                "Process {} has live or unresolved execution; inspect `lf history show {}`",
+                process.id, process.id
+            )
+        })
+        .collect())
+}
+
+/// Open Processes outside the caller's own lineage that are not known dead,
+/// with their liveness evidence.
+pub(crate) fn unresolved_processes<'a>(
+    store: &SqliteStore,
+    processes: &'a [LfProcess],
+) -> OpsResult<Vec<(&'a LfProcess, ProcessIdentityEvidence)>> {
+    let mut lineage = HashSet::new();
+    let mut next = crate::journal::current_lf_process_id();
+    while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
+        next = store
+            .process(&id)
+            .map_err(error)?
+            .and_then(|process| process.parent_lf_process_id);
+    }
+    Ok(processes
+        .iter()
+        .filter(|process| process.completed_at.is_none() && !lineage.contains(&process.id))
+        .map(|process| (process, process_evidence(store, &process.id)))
+        .filter(|(_, evidence)| *evidence != ProcessIdentityEvidence::Dead)
+        .collect())
+}
+
+/// A Task's work is every Process in its checkout or bound through a Session.
+pub(crate) fn task_execution_blockers(
+    store: &SqliteStore,
+    task: &TaskId,
+) -> OpsResult<Vec<String>> {
+    let processes = store.task_open_processes(task).map_err(error)?;
+    execution_blockers(store, &processes)
 }
 
 #[cfg(test)]

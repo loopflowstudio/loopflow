@@ -8,7 +8,7 @@ use crate::definition::{resolve_definition, DefinitionKind, Target};
 use crate::graph::compiled::{CompiledGraph, GraphNode, GraphNodeKind};
 use crate::graph::output::GraphOutput;
 use crate::graph::{compile_graph, GraphDefinition};
-use crate::lf::commands::{graph, run};
+use crate::lf::commands::run;
 use crate::lf::Cli;
 use crate::ops::WorkBinding;
 use crate::skills::invocation::SkillInvocation;
@@ -80,13 +80,13 @@ pub fn assemble(
     })?;
     let mut launch = cli.process_options();
     launch.context = true;
-    if let (Some(binding), Some(cwd)) = (&mut binding, &cli.bound_cwd) {
+    if let (Some(binding), Some(cwd)) = (&mut binding, &cli.cwd) {
         binding.cwd = cwd.clone();
     }
     let cwd = binding
         .as_ref()
         .map(|binding| binding.cwd.as_path())
-        .or(cli.bound_cwd.as_deref())
+        .or(cli.cwd.as_deref())
         .unwrap_or(repo);
     if let Some(name) = skill {
         let invocation = if let Some(path) = &cli.skill_input {
@@ -205,7 +205,6 @@ fn preview_graph(
     binding: Option<&WorkBinding>,
 ) -> Result<GraphContextPreview> {
     let items = compile_graph(graph, repo)?;
-    graph::require_autonomous_steps(&items)?;
     let compiled = CompiledGraph::new(&graph.name, &items);
     let mut current = if let Some(skill) = match items.first() {
         Some(crate::graph::ConcreteStep::Skill(skill)) => Some(skill.clone()),

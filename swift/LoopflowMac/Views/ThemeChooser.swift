@@ -189,15 +189,16 @@ struct ThemeChooser: View {
 }
 
 struct KeyboardShortcutsView: View {
-    private let shortcuts = [
-        ("Navigate", "⌘K"), ("Toggle sidebar", "⌘\\"),
-        ("Working Task 1–9", "⌘1…9"), ("Next / previous Task", "⌃Tab / ⌃⇧Tab"),
-        ("Back / Forward", "⌘[ / ⌘]"), ("Task actions", "⌘/"),
-        ("Show / hide Shell", "⌃`"), ("Show / hide Files", "⇧⌘E"),
-        ("New shell tab", "⌘T"), ("Close pane / shell tab", "⌘W"),
-        ("Reopen pane", "⇧⌘T"), ("Choose Task file", "⌘P"), ("Save Task file", "⌘S"),
-        ("Open repository", "⇧⌘O"), ("Settings", "⌘,")
-    ]
+    /// Window chrome, then every registry action with a default key.
+    private var shortcuts: [(String, String)] {
+        [("Navigate", "⌘K"), ("Toggle sidebar", "⌘\\"), ("Task actions", "⌘/")]
+            + DesktopAction.all.filter { !$0.keys.isEmpty }.map { action in
+                let keys = action.keys.map(\.display)
+                let display = keys.count > 2 ? "\(keys[0])…\(keys[keys.count - 1])" : keys.joined(separator: " / ")
+                return (action.title, display)
+            }
+            + [("Choose Task file", "⌘P"), ("Save Task file", "⌘S"), ("Open repository", "⇧⌘O"), ("Settings", "⌘,")]
+    }
     var body: some View {
         ScrollView {
             Grid(alignment: .leading, horizontalSpacing: 32, verticalSpacing: 12) {

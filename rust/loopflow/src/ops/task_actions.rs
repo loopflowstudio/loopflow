@@ -42,16 +42,12 @@ pub struct TaskActionEvidence<'a> {
     pub resume_refusal: Option<&'a str>,
     pub ci: Option<&'a CiObservation>,
     pub predecessor_phase: Option<PrPhase>,
-    pub abandon_intent: bool,
     pub launch_refusal: Option<&'a str>,
 }
 
 pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     if matches!(evidence.status, WorkStatus::Done | WorkStatus::Abandoned) {
         return action(TaskAction::NoAction, "Task is terminal");
-    }
-    if evidence.abandon_intent {
-        return action(TaskAction::NoAction, "Task is being abandoned");
     }
     if evidence.latest_pr_phase != Some(PrPhase::Merged) {
         if let Some(execution) = evidence
@@ -183,21 +179,18 @@ mod tests {
             resume_refusal: None,
             ci,
             predecessor_phase: None,
-            abandon_intent: false,
             launch_refusal: None,
         }
     }
 
     #[test]
     fn abandoned_parent_never_recommends_resuming_terminal_or_canceling_tasks() {
-        for (status, abandon_intent, reason) in [
-            (WorkStatus::Done, false, "Task is terminal"),
-            (WorkStatus::Abandoned, false, "Task is terminal"),
-            (WorkStatus::Ready, true, "Task is being abandoned"),
+        for (status, reason) in [
+            (WorkStatus::Done, "Task is terminal"),
+            (WorkStatus::Abandoned, "Task is terminal"),
         ] {
             let mut evidence = evidence(PrPhase::Working, None);
             evidence.status = status;
-            evidence.abandon_intent = abandon_intent;
             evidence.predecessor_phase = Some(PrPhase::Abandoned);
             let model = derive_task_actions(&evidence);
             assert_eq!(model.recommended, Some(TaskAction::NoAction));

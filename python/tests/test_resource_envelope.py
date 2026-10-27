@@ -115,7 +115,7 @@ def test_snapshot_measures_home_session_captures_and_names_retention(
     run_dir = home / "runs" / "12" / "run_1234"
     run_dir.mkdir(parents=True)
     (run_dir / "manifest.json").write_text('{"id":"run_1234"}\n')
-    (run_dir / "events.jsonl").write_text('{"type":"usage"}\n')
+    (run_dir / "context.json").write_text('{"context":null}\n')
     monkeypatch.setenv("LF_HOME", str(home))
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "uv-cache"))
     monkeypatch.setenv("CARGO_HOME", str(tmp_path / "cargo-home"))

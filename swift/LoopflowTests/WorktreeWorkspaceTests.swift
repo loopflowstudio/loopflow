@@ -35,7 +35,7 @@ struct WorktreeWorkspaceTests {
         let panes = workspace.multiplexer
         panes.load(sessionId: "retained")
         let sessionPane = panes.focusedPaneId
-        panes.show(.files(taskId: "task"))
+        panes.showBrowser(.files)
         let filesPane = panes.focusedPaneId
         panes.setCollapsed(paneId: filesPane, collapsed: true)
         panes.toggleZoom(sessionPane)
@@ -47,27 +47,31 @@ struct WorktreeWorkspaceTests {
         let reading = try #require(registry.inspect().first)
         #expect(reading.focusedPane == sessionPane)
         #expect(reading.zoomedPane == sessionPane)
-        #expect(reading.hiddenPanes == [filesPane])
-        #expect(reading.layout.children.map(\.content) == ["session", "files"])
-        #expect(reading.layout.children.map(\.subject) == ["retained", "task"])
+        #expect(reading.hiddenPanes == [filesPane, "shell"])
+        #expect(reading.layout.children.first?.content == "session")
+        #expect(reading.layout.children.first?.subject == "retained")
+        #expect(reading.layout.children.last?.children.map(\.content) == ["browser", "shell"])
         #expect(registry.keys == before)
         #expect(panes.layout == layout)
         #expect(panes.focusedPaneId == sessionPane)
         #expect(document.editor.string == "unfinished draft")
     }
 
-    @Test("Files and the Graph process log open as panes beside a Session and are revealed, not duplicated")
-    func taskPanes() {
+    @Test("Files and the Graph process log open as browser tabs beside a Session and are revealed, not duplicated")
+    func taskPanes() throws {
         let panes = fixtureWork(fixtureWorkspace("/repo")).multiplexer
-        panes.show(.files(taskId: "task"))
-        #expect(panes.layout.allPanes.map(\.content) == [.files(taskId: "task")])
+        panes.showBrowser(.files)
         panes.load(sessionId: "design")
-        panes.show(.graphLog(taskId: "task"))
-        #expect(panes.layout.allPanes.map(\.content)
-            == [.files(taskId: "task"), .session(id: "design"), .graphLog(taskId: "task")])
+        panes.showBrowser(.graphLog)
+        panes.showBrowser(.files)
+        panes.showBrowser(.graphLog)
+        guard case .browser(_, let tabs, let selected, _, _)? = panes.browserPane?.content else { throw RegistryQueryError("No browser") }
+        #expect(tabs == [.files, .graphLog])
+        #expect(selected == "graph-log")
+        #expect(panes.sessionPane?.sessionId == "design")
         let log = panes.focusedPaneId
         panes.setCollapsed(paneId: log, collapsed: true)
-        panes.show(.graphLog(taskId: "task"))
+        panes.showBrowser(.graphLog)
         #expect(panes.layout.allPanes.count == 3)
         #expect(panes.focusedPaneId == log)
         #expect(!panes.collapsedPaneIds.contains(log))
@@ -184,21 +188,23 @@ struct WorktreeWorkspaceTests {
         #expect(registry.key(containingShell: design.multiplexer.focusedPane.content.selectedShell?.id ?? "", machineId: fixtureMachineId) == fixtureWorkKey(fixtureWorkspace("/repo.design")))
     }
 
-    @Test("Conversation launch adds a tab and undo never replays its command")
+    @Test("Conversation launch adds a tab and undo keeps the same shell")
     func launchingPreservesExistingPanes() throws {
-        let store = MultiplexerStore()
+        let store = MultiplexerStore(taskId: "task")
         store.newShell()
         let shell = store.focusedPaneId
         let first = store.focusedPane.content.selectedShell!
         store.newShell(command: ["lf", "--interactive", ":", "hello"])
-        #expect(store.layout.allPanes.count == 1)
+        #expect(store.layout.allPanes.count == 3)
         #expect(store.shell(first.id) == first)
         #expect(store.layout.pane(for: shell)?.content.selectedShell != nil)
         #expect(store.shell(first.id)?.command == [])
         #expect(store.layout.pane(for: store.focusedPaneId)?.content.selectedShell?.command?.last == "hello")
+        let launched = try #require(store.focusedPane.content.selectedShell)
         store.close(store.focusedPaneId)
         store.undoClose()
-        #expect(store.layout.pane(for: store.focusedPaneId)?.content.selectedShell?.command == nil)
+        // Closing hides the pane; its running shell keeps its identity, so nothing replays.
+        #expect(store.shell(launched.id) == launched)
     }
 
 }

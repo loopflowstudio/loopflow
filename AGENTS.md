@@ -10,8 +10,9 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
 - Project = one Wave's Linear plan: status, Tasks, KRs and targets
 - A Task's work is every Session, Graph and Process in its checkout, plus explicit binds; no Graph is selected over another
-- Workflow = a Task's nodes (a person, in its conversation) joined by edges (Graphs), with its stored position; `lf task run` chooses an edge, `lf task workflow move` sets a node
-- Task completion, Workflow position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the edge
+- Workflow = the graph a Task took up, with its stored position; its `interactive:` steps are stages (a person, in its conversation) and routes between them run slices of it; `lf task run` chooses a route, `lf task workflow move` sets a stage
+- Task completion, Workflow position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the route
+- Task state = `unstarted · idle · active · moving · shipping · deferred · done · abandoned`, derived from checkout, stage, a running Graph and the Auto-Ship approval; Session state (`available · busy`) is a separate axis. Working Tasks are idle, active or moving. `lf ship` or any route into `end` approves; `lf ship --stop` withdraws
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -170,6 +171,7 @@ When editing `*.rs` files:
 - Avoid `use super::*` in submodules; use explicit imports so dependencies between modules are visible
 - Derive `Debug` on all public types; add `Clone`, `PartialEq`, `Default` where sensible
 - Canonicalize Clap command aliases in shared navigation so help, remote routing and execution resolve the same owner.
+- `lf help <path>` renders Clap's short help; text it must show (exit statuses, caveats) goes in `after_help`, not a second doc-comment paragraph.
 - Give nested global Clap flags a distinct argument `id` when a root flag shares their name; otherwise their values can propagate into the root command.
 - Use `thiserror` for library error types callers need to match on
 - Use `expect("why this is safe")` over `unwrap()` outside tests
@@ -245,21 +247,21 @@ Graph authority and never rewrites historical usage. Every Graph naming the Task
 is equally its work; a stopped Graph is history its caller inspects, never a
 position to resume. A Task with no Workflow takes up its Wave's default, then repository `workflow:`
 on its first `lf task run`; one that named its own keeps it.
-WorkflowDefinition and GraphDefinition occupy separate `.lf/workflows/` and
-`.lf/graphs/` namespaces. `lf wave workflow` owns definition discovery,
+A Workflow's definition is a graph from `.lf/graphs/`; there is no separate
+workflow definition kind. `lf wave workflow` owns graph discovery,
 customization and Wave selection. `lf task workflow show` reads the captured
 instance; `restart` moves it to `start` without reloading or executing anything.
 `lf graph` handles autonomous definitions and `--processes` inspects execution.
 Task projections expose Workflow selection, latest GraphProcessDetail, execution
 evidence and TaskRunControl separately; latest never grants primary authority.
-A Workflow is the Task's outer shape: the workflow definition it took up,
-whose nodes are where a person takes part in the Task conversation and whose
-edges each run one Graph, plus the Task's stored position on it. The graph is
-fixed when taken up. `lf task run` chooses an edge, starts its Graph as a child
-`lf graph`, again when a Graph process fails, and writes the arrival when one
-succeeds; a stopped Graph leaves the Task on its edge;
-`lf task workflow move` sets a node. `lf task move --wave/--no-wave` changes membership without transferring execution. Each Workflow move is appended to the Task's history. It
-executes nothing, and no command approves or completes a node.
+A Workflow is the Task's outer shape: the graph it took up, whose `interactive:`
+steps are stages where a person takes part in the Task conversation and whose
+routes between stages each run a slice of it, plus the Task's stored position on
+it. The graph is fixed when taken up. `lf task run` chooses a route, starts its
+slice as a child `lf graph`, again when a Graph process fails, and writes the
+arrival when one succeeds; a stopped Graph leaves the Task on its route;
+`lf task workflow move` sets a stage. `lf task move --wave/--no-wave` changes membership without transferring execution. Each Workflow move is appended to the Task's history. It
+executes nothing, and no command approves or completes a stage.
 Taskless execution uses the same Graph runner. A Graph is one lf process and the step
 Processes it starts; its id is the Graph process ID. The Graph process holds the cursor and
 return counts in memory and writes GraphProcess, append-only: the Graph's name and

@@ -74,7 +74,7 @@ public struct WorkSelection: Codable, Equatable, Sendable {
 }
 
 public enum WorkSelectionState: String, Codable, Sendable {
-    case open, available, running, blocked, paused, idle, backlog, done
+    case open, available, busy, blocked, unstarted, idle, active, moving, shipping, deferred, backlog, done
 }
 
 public struct WorkMemberRef: Codable, Hashable, Sendable {
@@ -197,12 +197,12 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
 public struct WorkPaneLayout: Codable, Equatable, Sendable {
     public let work: WorkWorkspaceKey
     public let revision: Int64
-    public let tree: WorkPaneTree?
+    public let tree: WorkPaneTree
     public let focused: String?
     public let zoomed: String?
     public let hidden: [String]
     public let drafts: [WorkFileDraft]
-    public init(work: WorkWorkspaceKey, revision: Int64, tree: WorkPaneTree?, focused: String?, zoomed: String?, hidden: [String], drafts: [WorkFileDraft]) {
+    public init(work: WorkWorkspaceKey, revision: Int64, tree: WorkPaneTree, focused: String?, zoomed: String?, hidden: [String], drafts: [WorkFileDraft]) {
         self.work = work; self.revision = revision; self.tree = tree; self.focused = focused
         self.zoomed = zoomed; self.hidden = hidden; self.drafts = drafts
     }
@@ -233,37 +233,67 @@ public indirect enum WorkPaneTree: Codable, Equatable, Sendable {
 }
 
 public enum WorkPaneIntent: Codable, Equatable, Sendable {
-    case empty
-    case session(id: String, location: WorkViewPlan.Location?)
-    case shell(tabs: [WorkShellTab], selected: String)
-    case files(location: WorkViewPlan.Location?, tabs: [WorkFileTab], selected: String?)
-    case log(location: WorkViewPlan.Location?)
+    case session(id: String?, location: WorkViewPlan.Location?)
+    case shell(tabs: [WorkShellTab], selected: String?)
+    case browser(location: WorkViewPlan.Location?, tabs: [WorkBrowserTab], selected: String?)
     private enum Keys: String, CodingKey { case kind, sessionID = "session_id", location, tabs, selected }
-    private enum Kind: String, Codable { case empty, session, shell, files, log }
+    private enum Kind: String, Codable { case session, shell, browser }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
-        let kind = try c.decode(Kind.self, forKey: .kind)
-        let location = try c.decodeIfPresent(WorkViewPlan.Location.self, forKey: .location)
-        switch kind {
-        case .empty: self = .empty
-        case .session: self = .session(id: try c.decode(String.self, forKey: .sessionID), location: location)
-        case .shell: self = .shell(tabs: try c.decode([WorkShellTab].self, forKey: .tabs), selected: try c.decode(String.self, forKey: .selected))
-        case .files: self = .files(location: location, tabs: try c.decode([WorkFileTab].self, forKey: .tabs), selected: try c.decodeIfPresent(String.self, forKey: .selected))
-        case .log: self = .log(location: location)
+        switch try c.decode(Kind.self, forKey: .kind) {
+        case .session: self = .session(id: try c.decode(String?.self, forKey: .sessionID),
+                                       location: try c.decode(WorkViewPlan.Location?.self, forKey: .location))
+        case .shell: self = .shell(tabs: try c.decode([WorkShellTab].self, forKey: .tabs),
+                                   selected: try c.decode(String?.self, forKey: .selected))
+        case .browser: self = .browser(location: try c.decode(WorkViewPlan.Location?.self, forKey: .location),
+                                       tabs: try c.decode([WorkBrowserTab].self, forKey: .tabs),
+                                       selected: try c.decode(String?.self, forKey: .selected))
         }
     }
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Keys.self)
         switch self {
-        case .empty: try c.encode(Kind.empty, forKey: .kind)
         case .session(let id, let location):
             try c.encode(Kind.session, forKey: .kind); try c.encode(id, forKey: .sessionID); try c.encode(location, forKey: .location)
         case .shell(let tabs, let selected):
             try c.encode(Kind.shell, forKey: .kind); try c.encode(tabs, forKey: .tabs); try c.encode(selected, forKey: .selected)
-        case .files(let location, let tabs, let selected):
-            try c.encode(location, forKey: .location)
-            try c.encode(Kind.files, forKey: .kind); try c.encode(tabs, forKey: .tabs); try c.encode(selected, forKey: .selected)
-        case .log(let location): try c.encode(Kind.log, forKey: .kind); try c.encode(location, forKey: .location)
+        case .browser(let location, let tabs, let selected):
+            try c.encode(Kind.browser, forKey: .kind); try c.encode(location, forKey: .location)
+            try c.encode(tabs, forKey: .tabs); try c.encode(selected, forKey: .selected)
+        }
+    }
+}
+
+public enum WorkBrowserTab: Codable, Equatable, Sendable, Identifiable {
+    case files(id: String, tabs: [WorkFileTab], selected: String?)
+    case graphLog(id: String)
+    case url(id: String, url: String)
+    public var id: String {
+        switch self {
+        case .files(let id, _, _), .graphLog(let id), .url(let id, _): id
+        }
+    }
+    private enum Keys: String, CodingKey { case kind, id, tabs, selected, url }
+    private enum Kind: String, Codable { case files, url; case graphLog = "graph_log" }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        let id = try c.decode(String.self, forKey: .id)
+        switch try c.decode(Kind.self, forKey: .kind) {
+        case .files: self = .files(id: id, tabs: try c.decode([WorkFileTab].self, forKey: .tabs),
+                                   selected: try c.decode(String?.self, forKey: .selected))
+        case .graphLog: self = .graphLog(id: id)
+        case .url: self = .url(id: id, url: try c.decode(String.self, forKey: .url))
+        }
+    }
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        switch self {
+        case .files(let id, let tabs, let selected):
+            try c.encode(Kind.files, forKey: .kind); try c.encode(id, forKey: .id)
+            try c.encode(tabs, forKey: .tabs); try c.encode(selected, forKey: .selected)
+        case .graphLog(let id): try c.encode(Kind.graphLog, forKey: .kind); try c.encode(id, forKey: .id)
+        case .url(let id, let url):
+            try c.encode(Kind.url, forKey: .kind); try c.encode(id, forKey: .id); try c.encode(url, forKey: .url)
         }
     }
 }

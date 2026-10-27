@@ -232,7 +232,7 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     // The Task waits at explore: the workspace name says so.
-    let graph = serde_json::json!({"name": "feature", "nodes": [{"name": "explore", "skill": "explore", "description": null}], "edges": [{"from": "explore", "to": "end", "graph": null}]});
+    let graph = serde_json::json!({"name": "feature", "steps": [{"Skill": {"skill": {"name": "explore"}, "id": null, "interactive": true, "returns": null, "sources": []}}]});
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
@@ -925,7 +925,7 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     // Its execution owner keeps running after the last viewer's terminal closed.
     let owner = loopflow::id::LfProcessId::new();
     db.execute(
-        "INSERT INTO processes(id,trace_id,started_at,viewed,detached_at) VALUES(?1,'fixture',1,0,2)",
+        "INSERT INTO processes(id,trace_id,started_at,viewed) VALUES(?1,'fixture',1,0)",
         [&owner],
     )
     .unwrap();

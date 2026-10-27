@@ -9,13 +9,10 @@ pub(crate) use runtime::finish_session_attachment;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
-#[cfg(test)]
-use std::io::BufRead;
 use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -198,16 +195,6 @@ pub struct TerminalReceipt {
     pub result_ref: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct EventEnvelope {
-    schema_version: u32,
-    seq: u64,
-    #[serde(with = "time::serde::rfc3339")]
-    observed_at: OffsetDateTime,
-    #[serde(flatten)]
-    event: CaptureEvent,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ProviderSessionRef {
     schema_version: u32,
@@ -235,12 +222,14 @@ struct SessionContextArtifact<'a> {
     context: &'a crate::trace::PreparedTurnContext,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+/// What SQLite history keeps of a capture: its provider attempts, accounts and
+/// sessions, how each turn ended, and each silence longer than
+/// [`SILENCE_SECONDS`]. Provider text and usage have no variant: the provider's
+/// transcript holds the conversation and native rows hold usage. Facts keep the
+/// `events.jsonl:{seq}` source their receipt keys and migrations already index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum CaptureEvent {
-    Activity {
-        observation: activity::Observation,
-    },
+pub(crate) enum CaptureFact {
     ProviderAttemptStarted {
         provider: String,
         model: Option<String>,
@@ -260,45 +249,69 @@ enum CaptureEvent {
         #[serde(rename = "provider_session_id")]
         agent_session: AgentSessionId,
     },
-    Handoff {
-        surface: String,
-    },
-    Usage {
-        usage_stream_id: String,
-        provider: String,
-        model: Option<String>,
-        attempt_key: String,
-        turn_key: String,
-        observation_seq: u64,
-        counter_kind: String,
-        start_known: bool,
-        final_receipt: bool,
-        usage: Box<TurnUsage>,
-    },
-    UserInput {
-        op: String,
-        text: String,
-    },
     Conversation {
-        event: Box<ConversationEvent>,
+        event: TurnEnd,
     },
-    Text {
-        text: String,
+    /// Stored under its own source; see [`CaptureFact::observation`].
+    #[serde(skip)]
+    Silence {
+        since: OffsetDateTime,
     },
-    ToolUse {
-        name: String,
-        summary: String,
+}
+
+/// How a provider turn ended, stored as the conversation event it was.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum TurnEnd {
+    TurnCompleted {
+        turn_id: String,
+        status: crate::chat::types::Lifecycle,
     },
-    Result {
-        outcome: String,
-        duration_secs: Option<f64>,
+    Error {
+        code: String,
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        evidence: Option<Box<crate::chat::types::FailureEvidence>>,
     },
-    ProviderOutput {
-        stream: String,
-        line: String,
-    },
-    #[serde(other)]
-    Unknown,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct FactEnvelope {
+    schema_version: u32,
+    seq: u64,
+    #[serde(with = "time::serde::rfc3339")]
+    observed_at: OffsetDateTime,
+    #[serde(flatten)]
+    fact: CaptureFact,
+}
+
+impl CaptureFact {
+    /// The history observation of this fact at stream position `seq`, as
+    /// `(source, evidence)`.
+    pub(crate) fn observation(&self, seq: u64, at: OffsetDateTime) -> (String, serde_json::Value) {
+        match self {
+            Self::Silence { since } => (
+                format!("silence:{seq}"),
+                serde_json::json!({"since": since.unix_timestamp(), "observed_at": at.unix_timestamp()}),
+            ),
+            fact => (
+                format!("events.jsonl:{seq}"),
+                serde_json::json!(FactEnvelope {
+                    schema_version: SCHEMA_VERSION,
+                    seq,
+                    observed_at: at,
+                    fact: fact.clone(),
+                }),
+            ),
+        }
+    }
+}
+
+/// A history row's fact, or `None` for a stream event an earlier lf stored.
+fn read_fact(evidence: &serde_json::Value) -> Option<FactEnvelope> {
+    serde_json::from_value::<FactEnvelope>(evidence.clone())
+        .ok()
+        .filter(|envelope| envelope.schema_version == SCHEMA_VERSION)
 }
 
 /// Provider-authored cumulative usage reduced once per independent stream.
@@ -449,137 +462,6 @@ impl SessionHistory {
 /// A gap between consecutive provider events long enough to count as a silence.
 pub(crate) const SILENCE_SECONDS: i64 = 600;
 
-/// What SQLite history keeps of one capture's stream. `events.jsonl` holds
-/// every event verbatim; history keeps the facts its readers use: attempts,
-/// accounts, provider sessions, usage, how each turn ended, and each silence
-/// longer than [`SILENCE_SECONDS`]. Provider text already lives in the
-/// provider's own transcript.
-///
-/// A usage stream is cumulative, so history keeps one row per stream and turn
-/// at its first event's position; the store merges each later observation in.
-#[derive(Debug, Default)]
-struct RetainedHistory {
-    previous: Option<OffsetDateTime>,
-    usage_streams: HashMap<String, u64>,
-}
-
-impl RetainedHistory {
-    /// The observations `event` adds, as `(source, evidence)` at its time.
-    fn admit(&mut self, event: &EventEnvelope) -> Vec<(String, serde_json::Value)> {
-        let at = event.observed_at;
-        let silence = self
-            .previous
-            .replace(at)
-            .filter(|since| (at - *since).whole_seconds() > SILENCE_SECONDS)
-            .map(|since| {
-                (
-                    format!("silence:{}", event.seq),
-                    serde_json::json!({"since": since.unix_timestamp(), "observed_at": at.unix_timestamp()}),
-                )
-            });
-        let position = match &event.event {
-            CaptureEvent::Usage {
-                provider,
-                attempt_key,
-                turn_key,
-                usage_stream_id,
-                ..
-            } => *self
-                .usage_streams
-                .entry(identity([provider, attempt_key, turn_key, usage_stream_id]))
-                .or_insert(event.seq),
-            _ => event.seq,
-        };
-        let fact = retained_in_history(&event.event)
-            .then(|| (format!("events.jsonl:{position}"), serde_json::json!(event)));
-        silence.into_iter().chain(fact).collect()
-    }
-}
-
-/// What one retained usage row measures: a provider's stream within one
-/// attempt's turn. A provider can continue one stream across turns.
-pub(crate) fn usage_identity(evidence: &serde_json::Value) -> Option<String> {
-    (evidence["type"] == "usage").then(|| {
-        identity(
-            ["provider", "attempt_key", "turn_key", "usage_stream_id"]
-                .map(|field| evidence[field].as_str().unwrap_or_default()),
-        )
-    })
-}
-
-fn identity(parts: [&str; 4]) -> String {
-    parts.join("\u{0}")
-}
-
-/// Merge a later observation of one usage stream into the retained one, as
-/// `{input_id, source, evidence}` observations. The reducer reads each stream's
-/// counters as their maximum, so the merged row keeps exactly what every
-/// observation added. `None` when either is not usage of the same
-/// [`usage_identity`].
-pub(crate) fn merge_usage_observation(
-    saved: &serde_json::Value,
-    later: &serde_json::Value,
-) -> Option<serde_json::Value> {
-    let read = |observation: &serde_json::Value| {
-        serde_json::from_value::<EventEnvelope>(observation["evidence"].clone()).ok()
-    };
-    let identity = usage_identity(&saved["evidence"])?;
-    if usage_identity(&later["evidence"])? != identity {
-        return None;
-    }
-    let (mut kept, next) = (read(saved)?, read(later)?);
-    let (
-        CaptureEvent::Usage {
-            model,
-            observation_seq,
-            start_known,
-            final_receipt,
-            usage,
-            ..
-        },
-        CaptureEvent::Usage {
-            model: next_model,
-            observation_seq: next_seq,
-            start_known: next_start_known,
-            final_receipt: next_final,
-            usage: next_usage,
-            ..
-        },
-    ) = (&mut kept.event, next.event)
-    else {
-        return None;
-    };
-    let max = |kept: &mut Option<u64>, next: Option<u64>| *kept = (*kept).max(next);
-    max(&mut usage.input_tokens, next_usage.input_tokens);
-    max(&mut usage.output_tokens, next_usage.output_tokens);
-    max(&mut usage.total_input_tokens, next_usage.total_input_tokens);
-    max(&mut usage.peak_input_tokens, next_usage.peak_input_tokens);
-    max(
-        &mut usage.context_window_tokens,
-        next_usage.context_window_tokens,
-    );
-    max(&mut usage.reasoning_tokens, next_usage.reasoning_tokens);
-    max(&mut usage.cache_read_tokens, next_usage.cache_read_tokens);
-    max(&mut usage.cache_write_tokens, next_usage.cache_write_tokens);
-    usage.cost_usd = match (usage.cost_usd, next_usage.cost_usd) {
-        (Some(kept), Some(next)) => Some(kept.max(next)),
-        (kept, next) => kept.or(next),
-    };
-    if next_usage.model.is_some() {
-        usage.model = next_usage.model;
-    }
-    if next_model.is_some() {
-        *model = next_model;
-    }
-    *observation_seq = (*observation_seq).max(next_seq);
-    *start_known &= next_start_known;
-    *final_receipt |= next_final;
-    kept.observed_at = kept.observed_at.max(next.observed_at);
-    let mut merged = saved.clone();
-    merged["evidence"] = serde_json::json!(kept);
-    Some(merged)
-}
-
 /// The key of a native usage receipt within its turn. OpenCode reports one
 /// counter per assistant message; every other provider one per turn.
 pub(crate) fn native_usage_key(payload: &serde_json::Value) -> String {
@@ -654,152 +536,25 @@ fn native_peak(receipt: &serde_json::Value) -> Option<u64> {
         .or(receipt["last"]["inputTokens"].as_u64())
 }
 
-/// The store's retention prune applies the same rule to earlier captures.
-fn retained_in_history(event: &CaptureEvent) -> bool {
-    match event {
-        CaptureEvent::ProviderAttemptStarted { .. }
-        | CaptureEvent::ProviderAttemptFinished { .. }
-        | CaptureEvent::ProviderAccountSelected { .. }
-        | CaptureEvent::ProviderSessionObserved { .. }
-        | CaptureEvent::Usage { .. } => true,
-        CaptureEvent::Conversation { event } => matches!(
-            **event,
-            ConversationEvent::TurnCompleted { .. } | ConversationEvent::Error { .. }
-        ),
-        _ => false,
-    }
-}
-
+/// One reading of a native usage counter: a provider turn's cumulative usage so
+/// far, or an OpenCode message's.
 #[derive(Debug)]
-enum RecorderMessage {
-    Event(EventEnvelope),
-    Drain(mpsc::Sender<()>),
+struct UsageReading {
+    thread: AgentSessionId,
+    turn: String,
+    /// The counter this reading belongs to; later readings of it supersede it.
+    counter: String,
+    seq: u64,
+    start_known: bool,
+    final_receipt: bool,
+    usage: TurnUsage,
 }
 
-#[derive(Debug)]
-struct SessionRecorder {
-    sender: Option<SyncSender<RecorderMessage>>,
-}
-
-impl SessionRecorder {
-    fn start(dir: &Path, manifest: &SessionCaptureManifest) -> Self {
-        let artifact_key = &manifest.artifact_key;
-        let history = if manifest.harness == "loopflow" {
-            Ok(None)
-        } else {
-            row_store(dir).and_then(|store| {
-                let session = store.session_for_artifact(artifact_key)?;
-                Ok(session.map(|session| (store, session)))
-            })
-        };
-        let manifest = manifest.clone();
-        let (sender, receiver) = mpsc::sync_channel(256);
-        let writer_dir = dir.to_path_buf();
-        let writer_artifact_key = artifact_key.clone();
-        let thread = std::thread::Builder::new()
-            .name(format!("lf-session-recorder-{}", &artifact_key.as_str()[..8]))
-            .spawn(move || {
-                let mut warned = false;
-                let history = match history {
-                    Ok(history) => history,
-                    Err(error) => {
-                        tracing::warn!(%error, "Session history unavailable");
-                        None
-                    }
-                };
-                let observe = |source: String, at: OffsetDateTime, evidence: serde_json::Value| {
-                    let Some((store, session)) = &history else { return Ok(()) };
-                    store.retain_session_observation(session, &crate::session::SessionObservation {
-                        artifact_key: writer_artifact_key.clone(), source: source.clone(),
-                        observed_at: at.unix_timestamp(), task_id: session.task_id.clone(),
-                        wave_id: session.wave_id.clone(),
-                        payload: serde_json::json!({"input_id": writer_artifact_key, "source": source, "evidence": evidence}),
-                    }).map_err(std::io::Error::other)
-                };
-                // Replay reads the prompt from the capture's own manifest file.
-                let retained = SessionCaptureManifest { process: None, ..manifest };
-                if let Err(error) = observe("manifest.json".into(), retained.created_at, serde_json::json!(retained)) {
-                    tracing::warn!(%error, "Session capture observation unavailable");
-                }
-                let mut retained = RetainedHistory::default();
-                let mut retain = |event: &EventEnvelope| {
-                    retained.admit(event).into_iter().try_for_each(|(source, evidence)| {
-                        observe(source, event.observed_at, evidence)
-                    })
-                };
-                while let Ok(message) = receiver.recv() {
-                    let result = match message {
-                        RecorderMessage::Event(event) => {
-                            append_json_line(&writer_dir.join("events.jsonl"), &event).and(retain(&event))
-                        }
-                        RecorderMessage::Drain(acknowledge) => {
-                            let result = sync_telemetry(&writer_dir);
-                            let _ = acknowledge.send(());
-                            result
-                        }
-                    };
-                    if let Err(error) = result {
-                        if !warned {
-                            tracing::warn!(
-                                %error,
-                                artifact_key = %writer_artifact_key,
-                                "Session recorder lost telemetry; harness execution continues"
-                            );
-                            warned = true;
-                        } else {
-                            tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
-                        }
-                    }
-                }
-            });
-        match thread {
-            Ok(_) => Self {
-                sender: Some(sender),
-            },
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    artifact_key = %artifact_key,
-                    "Session recorder unavailable; harness execution continues"
-                );
-                Self { sender: None }
-            }
-        }
-    }
-
-    fn record(&self, message: RecorderMessage) -> std::io::Result<()> {
-        let Some(sender) = &self.sender else {
-            return Err(std::io::Error::other("Session recorder is unavailable"));
-        };
-        sender.try_send(message).map_err(|error| match error {
-            TrySendError::Full(_) => std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                "Session recorder queue is full",
-            ),
-            TrySendError::Disconnected(_) => {
-                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Session recorder stopped")
-            }
-        })
-    }
-
-    fn drain_after_settlement(&self) {
-        let Some(sender) = &self.sender else {
-            return;
-        };
-        let (acknowledge, drained) = mpsc::channel();
-        if sender.try_send(RecorderMessage::Drain(acknowledge)).is_ok() {
-            let _ = drained.recv_timeout(std::time::Duration::from_millis(250));
-        }
-    }
-}
-
-/// Native notifications and recorder checkpoints describe the same turn. Prefer
-/// a final recorder receipt; otherwise supplement its stream instead of adding
-/// the provider's thread lifetime total as another measurement.
-fn recover_native_usage(
-    events: &mut Vec<EventEnvelope>,
-    history: &[crate::session::SessionEvent],
-) -> usize {
+/// Every native usage row in `history`, as readings of its counters, and the
+/// rows that could not be read. A row is read by its shape: a `usage` object is
+/// a turn's [`TurnUsage`]; `total`/`last` is Codex's thread-cumulative counter;
+/// `message.tokens` is an OpenCode message.
+fn native_usage(history: &[crate::session::SessionEvent]) -> (Vec<UsageReading>, usize) {
     use crate::session::SessionEventKind;
 
     let mut turns = BTreeMap::<(&AgentSessionId, &str), Vec<&crate::session::SessionEvent>>::new();
@@ -812,17 +567,7 @@ fn recover_native_usage(
             }
         }
     }
-    let threads: HashMap<_, _> = events
-        .iter()
-        .filter_map(|event| match &event.event {
-            CaptureEvent::ProviderSessionObserved {
-                attempt_key,
-                agent_session,
-            } => Some((attempt_key.clone(), agent_session.clone())),
-            _ => None,
-        })
-        .collect();
-    let recorder_len = events.len();
+    let mut readings = Vec::new();
     let mut gaps = 0;
     for ((thread, turn), native) in turns {
         let receipts: Vec<_> = native
@@ -832,91 +577,33 @@ fn recover_native_usage(
         let Some(first) = receipts.first() else {
             continue;
         };
-        let provider = match first.payload["provider"].as_str() {
-            Some("opencode") => "opencode",
-            Some("pi") => "pi",
-            _ => "codex",
-        };
-        let matching: Vec<_> = events[..recorder_len]
-            .iter()
-            .filter_map(|event| match &event.event {
-                CaptureEvent::Usage {
-                    provider: recorded_provider,
-                    attempt_key,
-                    turn_key,
-                    usage_stream_id,
-                    observation_seq,
-                    final_receipt,
-                    ..
-                } if recorded_provider == provider
-                    && turn_key == turn
-                    && threads.get(attempt_key).is_none_or(|known| known == thread) =>
-                {
-                    Some((
-                        usage_stream_id.clone(),
-                        *observation_seq,
-                        *final_receipt,
-                        threads.get(attempt_key) == Some(thread),
-                    ))
-                }
-                _ => None,
-            })
-            .collect();
-        // A turn label alone cannot correlate a different or unknown thread.
-        if matching.iter().any(|receipt| !receipt.3)
-            || matching.iter().any(|receipt| receipt.0 != matching[0].0)
-        {
-            gaps += 1;
-            continue;
-        }
-        if matching.iter().any(|receipt| receipt.2) {
-            continue;
-        }
-        if provider == "pi" {
-            // Both transports report cumulative usage for the complete adapter turn.
-            let stream = matching
-                .first()
-                .map(|r| r.0.clone())
-                .unwrap_or_else(|| format!("native:{thread}:{turn}"));
-            let last_observation = matching.iter().map(|r| r.1).max().unwrap_or(0);
-            let start_known = native.iter().any(|e| e.kind == SessionEventKind::Started);
-            let mut seq = events.iter().map(|e| e.seq).max().map_or(0, |s| s + 1);
+        let start_known = native.iter().any(|e| e.kind == SessionEventKind::Started);
+        let reading =
+            |counter: String, seq: i64, final_receipt: bool, usage: TurnUsage| UsageReading {
+                thread: thread.clone(),
+                turn: turn.into(),
+                counter,
+                seq: seq as u64,
+                start_known,
+                final_receipt,
+                usage,
+            };
+        if first.payload["usage"].is_object() {
             for receipt in receipts {
-                let Ok(usage) =
-                    serde_json::from_value::<TurnUsage>(receipt.payload["usage"].clone())
-                else {
-                    gaps += 1;
-                    continue;
-                };
-                let Ok(observed_at) = OffsetDateTime::from_unix_timestamp(receipt.observed_at)
-                else {
-                    gaps += 1;
-                    continue;
-                };
-                events.push(EventEnvelope {
-                    schema_version: SCHEMA_VERSION,
-                    seq,
-                    observed_at,
-                    event: CaptureEvent::Usage {
-                        usage_stream_id: stream.clone(),
-                        provider: provider.into(),
-                        model: usage.model.clone(),
-                        attempt_key: String::new(),
-                        turn_key: turn.into(),
-                        observation_seq: last_observation + receipt.seq as u64,
-                        counter_kind: "cumulative".into(),
-                        start_known,
-                        final_receipt: receipt.payload["final"] == true,
-                        usage: Box::new(usage),
-                    },
-                });
-                seq += 1;
+                match serde_json::from_value::<TurnUsage>(receipt.payload["usage"].clone()) {
+                    Ok(usage) => readings.push(reading(
+                        format!("native:{thread}:{turn}"),
+                        receipt.seq,
+                        receipt.payload["final"] == true,
+                        usage,
+                    )),
+                    Err(_) => gaps += 1,
+                }
             }
             continue;
         }
-        if provider == "opencode" {
-            // Each completed assistant message owns a native usage counter.
-            // Preserve snapshots for the existing max/missingness reducer;
+        if first.payload["message"]["tokens"].is_object() {
+            // Each completed assistant message owns a native usage counter;
             // tool-call and terminal assistants are distinct model calls.
             for receipt in receipts {
                 let info = &receipt.payload["message"];
@@ -947,41 +634,17 @@ fn recover_native_usage(
                         .map(str::to_owned),
                     cost_usd: info["cost"].as_f64(),
                 };
-                let Ok(observed_at) = OffsetDateTime::from_unix_timestamp(receipt.observed_at)
-                else {
-                    gaps += 1;
-                    continue;
-                };
-                // A recorder's partial request total cannot be combined with
-                // independent message totals without double counting.
-                if !matching.is_empty() {
-                    gaps += 1;
-                    break;
-                }
-                events.push(EventEnvelope {
-                    schema_version: SCHEMA_VERSION,
-                    seq: events
-                        .iter()
-                        .map(|event| event.seq)
-                        .max()
-                        .map_or(0, |seq| seq + 1),
-                    observed_at,
-                    event: CaptureEvent::Usage {
-                        usage_stream_id: format!("native:{thread}:{turn}:{message}"),
-                        provider: provider.into(),
-                        model: usage.model.clone(),
-                        attempt_key: String::new(),
-                        turn_key: turn.into(),
-                        observation_seq: receipt.seq as u64,
-                        counter_kind: "cumulative".into(),
-                        start_known: native
-                            .iter()
-                            .any(|event| event.kind == SessionEventKind::Started),
-                        final_receipt: true,
-                        usage: Box::new(usage),
-                    },
-                });
+                readings.push(reading(
+                    format!("native:{thread}:{turn}:{message}"),
+                    receipt.seq,
+                    true,
+                    usage,
+                ));
             }
+            continue;
+        }
+        if first.payload.get("total").is_none() {
+            gaps += receipts.len();
             continue;
         }
         let field = |value: &serde_json::Value, part: &str, key: &str| value[part][key].as_u64();
@@ -1039,16 +702,7 @@ fn recover_native_usage(
             ]
             .iter()
             .all(|key| prior_total(key).is_some() || baseline(key) == Some(0));
-        let (stream, seq) = matching
-            .iter()
-            .max_by_key(|receipt| receipt.1)
-            .map(|receipt| (receipt.0.clone(), receipt.1 + 1))
-            .unwrap_or_else(|| (format!("native:{thread}:{turn}"), 0));
-        for (index, last) in receipts.iter().enumerate() {
-            let Ok(observed_at) = OffsetDateTime::from_unix_timestamp(last.observed_at) else {
-                gaps += 1;
-                continue;
-            };
+        for last in receipts {
             if last.payload["regressed"] == true {
                 gaps += 1;
             }
@@ -1069,31 +723,13 @@ fn recover_native_usage(
                 model: None,
                 cost_usd: None,
             };
-            events.push(EventEnvelope {
-                schema_version: SCHEMA_VERSION,
-                seq: events
-                    .iter()
-                    .map(|event| event.seq)
-                    .max()
-                    .map_or(0, |seq| seq + 1),
-                observed_at,
-                event: CaptureEvent::Usage {
-                    usage_stream_id: stream.clone(),
-                    provider: "codex".into(),
-                    model: None,
-                    attempt_key: String::new(),
-                    turn_key: turn.into(),
-                    observation_seq: seq + index as u64,
-                    counter_kind: "cumulative".into(),
-                    start_known: known,
-                    // Completion does not include a final usage receipt in the native schema.
-                    final_receipt: false,
-                    usage: Box::new(usage),
-                },
-            });
+            // Completion does not include a final usage receipt in the native schema.
+            let mut reading = reading(format!("native:{thread}:{turn}"), last.seq, false, usage);
+            reading.start_known = known;
+            readings.push(reading);
         }
     }
-    gaps
+    (readings, gaps)
 }
 
 fn providers_first_start(history: &[crate::session::SessionEvent]) -> Option<i64> {
@@ -1107,7 +743,8 @@ fn providers_first_start(history: &[crate::session::SessionEvent]) -> Option<i64
 fn project_provider_history(
     captured: Option<i64>,
     input: Option<&str>,
-    envelopes: &[EventEnvelope],
+    facts: &[FactEnvelope],
+    readings: &[UsageReading],
     history: &[crate::session::SessionEvent],
 ) -> std::io::Result<Vec<ProviderHistory>> {
     use crate::session::SessionEventKind;
@@ -1122,21 +759,6 @@ fn project_provider_history(
             native.entry((thread, turn)).or_default().push(event);
         }
     }
-    let threads: HashMap<_, _> = envelopes
-        .iter()
-        .filter_map(|event| match &event.event {
-            CaptureEvent::ProviderSessionObserved {
-                attempt_key,
-                agent_session,
-            } => Some((attempt_key.as_str(), agent_session)),
-            _ => None,
-        })
-        .collect();
-    let matches_native = |attempt: &str, turn: &str| {
-        threads
-            .get(attempt)
-            .is_some_and(|thread| native.contains_key(&(*thread, turn)))
-    };
     let mut records = Vec::new();
     for ((thread, turn), events) in &native {
         let start = events
@@ -1145,20 +767,11 @@ fn project_provider_history(
         let completed = events
             .iter()
             .find(|event| event.kind == SessionEventKind::Completed);
-        let usage = reduce_usage_events(envelopes.iter().filter(|event| match &event.event {
-            CaptureEvent::Usage {
-                attempt_key,
-                turn_key,
-                usage_stream_id,
-                ..
-            } => turn_key.as_str() == *turn
-                && (threads.get(attempt_key.as_str()) == Some(thread)
-                    || (attempt_key.is_empty()
-                        && (usage_stream_id == &format!("native:{thread}:{turn}")
-                            || usage_stream_id.starts_with(&format!("native:{thread}:{turn}:"))))),
-            _ => false,
-        }))
-        .usage;
+        let usage = reduce_usage(
+            readings
+                .iter()
+                .filter(|reading| &reading.thread == *thread && reading.turn == *turn),
+        );
         records.push(ProviderHistory {
             reference: ProviderHistoryReference::NativeTurn {
                 thread: (*thread).clone(),
@@ -1189,14 +802,14 @@ fn project_provider_history(
             usage,
         });
     }
-    // Old provider records have no reliable Process or native-turn identity. Keep
+    // Provider attempts have no reliable Process or native-turn identity. Keep
     // their own key and result, never substitute the enclosing recorder exit.
-    let mut attempts = BTreeMap::<&str, Vec<&EventEnvelope>>::new();
-    for event in envelopes {
-        let key = match &event.event {
-            CaptureEvent::ProviderAttemptStarted { attempt_key, .. }
-            | CaptureEvent::ProviderAttemptFinished { attempt_key, .. }
-            | CaptureEvent::Usage { attempt_key, .. }
+    // Their usage is on the native turns they drove.
+    let mut attempts = BTreeMap::<&str, Vec<&FactEnvelope>>::new();
+    for event in facts {
+        let key = match &event.fact {
+            CaptureFact::ProviderAttemptStarted { attempt_key, .. }
+            | CaptureFact::ProviderAttemptFinished { attempt_key, .. }
                 if !attempt_key.is_empty() =>
             {
                 attempt_key
@@ -1206,23 +819,15 @@ fn project_provider_history(
         attempts.entry(key).or_default().push(event);
     }
     for (attempt, events) in attempts {
-        // The recorded attempt's outcome remains evidence even with native history;
-        // its usage excludes exactly correlated native streams to avoid double count.
         let start = events
             .iter()
-            .find(|event| matches!(event.event, CaptureEvent::ProviderAttemptStarted { .. }));
-        let finished = events.iter().find_map(|event| match &event.event {
-            CaptureEvent::ProviderAttemptFinished { outcome, .. } => {
+            .find(|event| matches!(event.fact, CaptureFact::ProviderAttemptStarted { .. }));
+        let finished = events.iter().find_map(|event| match &event.fact {
+            CaptureFact::ProviderAttemptFinished { outcome, .. } => {
                 Some((event.observed_at.unix_timestamp(), outcome.clone()))
             }
             _ => None,
         });
-        let usage =
-            reduce_usage_events(events.iter().copied().filter(|event| match &event.event {
-                CaptureEvent::Usage { turn_key, .. } => !matches_native(attempt, turn_key),
-                _ => false,
-            }))
-            .usage;
         let origin = history.iter().find(|event| {
             event.kind == SessionEventKind::Observed
                 && event.payload["input_id"].as_str() == input
@@ -1249,7 +854,7 @@ fn project_provider_history(
             started_at: start.map(|event| event.observed_at.unix_timestamp()),
             completed_at: finished.as_ref().map(|(at, _)| *at),
             outcome: finished.map(|(_, outcome)| outcome),
-            usage,
+            usage: reduce_usage(std::iter::empty()),
         });
     }
     records.sort_by_key(|record| record.started_at.or(record.completed_at));
@@ -1264,7 +869,7 @@ pub(crate) fn project_input_history(
     history: &[crate::session::SessionEvent],
     names: (Option<String>, Option<String>),
 ) -> std::io::Result<SessionHistory> {
-    let mut events = Vec::new();
+    let mut facts = Vec::new();
     let mut terminal: Option<TerminalReceipt> = None;
     let mut manifest: Option<SessionCaptureManifest> = None;
     let mut gaps = 0;
@@ -1285,23 +890,16 @@ pub(crate) fn project_input_history(
                 Ok(saved) => manifest = Some(saved),
                 Err(_) => gaps += 1,
             }
-        } else if let Some(ordinal) = source.strip_prefix("events.jsonl:") {
-            match (
-                ordinal.parse::<u64>(),
-                serde_json::from_value::<EventEnvelope>(evidence.clone()),
-            ) {
-                (Ok(ordinal), Ok(envelope)) => events.push((ordinal, envelope)),
-                _ => gaps += 1,
-            }
+        } else if source.starts_with("events.jsonl:") {
+            facts.extend(read_fact(evidence));
         }
     }
-    // Keep event order for first-attempt timing and cumulative evidence.
-    events.sort_by_key(|(ordinal, _)| *ordinal);
-    let mut events: Vec<_> = events.into_iter().map(|(_, envelope)| envelope).collect();
-    gaps += recover_native_usage(&mut events, history);
-    let providers = project_provider_history(session.captured, artifact_key, &events, history)?;
-    let evidence = reduce_usage_events(&events);
-    gaps += evidence.gaps + usize::from(manifest.is_none());
+    facts.sort_by_key(|fact| fact.seq);
+    let (readings, unread) = native_usage(history);
+    let providers =
+        project_provider_history(session.captured, artifact_key, &facts, &readings, history)?;
+    let usage = reduce_usage(&readings);
+    gaps += unread + usage.gaps + usize::from(manifest.is_none());
     let current = session.captured.is_some() && session.current_capture == session.captured;
     Ok(SessionHistory {
         session_id: session.id.clone(),
@@ -1339,9 +937,12 @@ pub(crate) fn project_input_history(
         observed_at: session.observed_at,
         first_provider_attempt_at: providers_first_start(history)
             .into_iter()
-            .chain(evidence.first_provider_attempt_at)
+            .chain(facts.iter().find_map(|fact| {
+                matches!(fact.fact, CaptureFact::ProviderAttemptStarted { .. })
+                    .then(|| fact.observed_at.unix_timestamp())
+            }))
             .min(),
-        usage: evidence.usage,
+        usage,
         evidence_gaps: gaps,
         harness: manifest
             .as_ref()
@@ -1460,28 +1061,20 @@ fn provider_session_from_events(
 ) -> std::io::Result<Option<ProviderSessionRef>> {
     let mut provider_session = None;
     let mut accounts = HashMap::new();
-    for event in events {
-        let envelope: EventEnvelope =
-            serde_json::from_value(event).map_err(std::io::Error::other)?;
-        if envelope.schema_version != SCHEMA_VERSION {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "unsupported capture event schema",
-            ));
-        }
-        match envelope.event {
-            CaptureEvent::ProviderAttemptStarted {
+    for envelope in events.iter().filter_map(read_fact) {
+        match envelope.fact {
+            CaptureFact::ProviderAttemptStarted {
                 attempt_key,
                 account_id,
                 ..
             }
-            | CaptureEvent::ProviderAccountSelected {
+            | CaptureFact::ProviderAccountSelected {
                 attempt_key,
                 account_id,
             } => {
                 accounts.insert(attempt_key, account_id);
             }
-            CaptureEvent::ProviderSessionObserved {
+            CaptureFact::ProviderSessionObserved {
                 attempt_key,
                 agent_session,
             } => {
@@ -1611,106 +1204,29 @@ pub(crate) fn read_manifest(dir: &Path) -> std::io::Result<SessionCaptureManifes
     Ok(manifest)
 }
 
-#[derive(Debug)]
-struct CaptureEvidence {
-    usage: SessionUsage,
-    gaps: usize,
-    first_provider_attempt_at: Option<i64>,
-}
-
-#[cfg(test)]
-fn reduce_usage_reader(mut reader: impl BufRead) -> std::io::Result<CaptureEvidence> {
-    let mut events = Vec::new();
-    let mut trailing_gap = 0;
-    loop {
-        let mut line = Vec::new();
-        if reader.read_until(b'\n', &mut line)? == 0 {
-            break;
-        }
-        if line.iter().all(u8::is_ascii_whitespace) {
-            continue;
-        }
-        if line.last() != Some(&b'\n') {
-            trailing_gap += 1;
-            break;
-        }
-        events.push(
-            serde_json::from_slice::<EventEnvelope>(&line).map_err(|error| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("malformed complete capture event: {error}"),
-                )
-            })?,
-        );
-    }
-    let mut evidence = reduce_usage_events(&events);
-    evidence.gaps += trailing_gap;
-    Ok(evidence)
-}
-
-fn reduce_usage_events<'a>(events: impl IntoIterator<Item = &'a EventEnvelope>) -> CaptureEvidence {
-    let mut streams = BTreeMap::<String, UsageStream>::new();
+/// Reduce usage readings once per counter: each counter's largest values,
+/// summed across counters.
+fn reduce_usage<'a>(readings: impl IntoIterator<Item = &'a UsageReading>) -> SessionUsage {
+    let mut streams = BTreeMap::<&str, UsageStream>::new();
     let mut gaps = 0;
-    let mut envelope_seq = None;
-    let mut first_provider_attempt_at = None;
-    for envelope in events {
-        if envelope.schema_version != SCHEMA_VERSION {
+    for reading in readings {
+        if !reading.start_known {
             gaps += 1;
         }
-        if envelope_seq.is_some_and(|previous| envelope.seq <= previous) {
-            gaps += 1;
-        }
-        envelope_seq = Some(envelope_seq.map_or(envelope.seq, |seen| seen.max(envelope.seq)));
-        if first_provider_attempt_at.is_none()
-            && envelope.schema_version == SCHEMA_VERSION
-            && matches!(&envelope.event, CaptureEvent::ProviderAttemptStarted { .. })
-        {
-            first_provider_attempt_at = Some(envelope.observed_at.unix_timestamp());
-        }
-        let (usage_stream_id, observation_seq, counter_kind, start_known, final_receipt, usage) =
-            match &envelope.event {
-                CaptureEvent::Usage {
-                    usage_stream_id,
-                    observation_seq,
-                    counter_kind,
-                    start_known,
-                    final_receipt,
-                    usage,
-                    ..
-                } => (
-                    usage_stream_id.clone(),
-                    *observation_seq,
-                    counter_kind.as_str(),
-                    *start_known,
-                    *final_receipt,
-                    usage,
-                ),
-                CaptureEvent::Unknown => {
-                    gaps += 1;
-                    continue;
-                }
-                _ => continue,
-            };
-        if counter_kind != "cumulative" {
-            gaps += 1;
-            continue;
-        }
-        if !start_known {
-            gaps += 1;
-        }
-        let stream = streams.entry(usage_stream_id).or_default();
+        let stream = streams.entry(reading.counter.as_str()).or_default();
         if stream
             .observation_seq
-            .is_some_and(|previous| observation_seq <= previous)
+            .is_some_and(|previous| reading.seq <= previous)
         {
             gaps += 1;
         }
         stream.observation_seq = Some(
             stream
                 .observation_seq
-                .map_or(observation_seq, |seen| seen.max(observation_seq)),
+                .map_or(reading.seq, |seen| seen.max(reading.seq)),
         );
-        stream.final_receipt |= final_receipt;
+        stream.final_receipt |= reading.final_receipt;
+        let usage = &reading.usage;
         observe_u64(&mut stream.input_tokens, usage.input_tokens, &mut gaps);
         observe_u64(&mut stream.output_tokens, usage.output_tokens, &mut gaps);
         observe_u64(
@@ -1796,11 +1312,7 @@ fn reduce_usage_events<'a>(events: impl IntoIterator<Item = &'a EventEnvelope>) 
         cache_write_tokens,
         cost_usd,
     };
-    CaptureEvidence {
-        usage,
-        gaps,
-        first_provider_attempt_at,
-    }
+    usage
 }
 
 fn observe_u64(current: &mut Option<u64>, observed: Option<u64>, gaps: &mut usize) {
@@ -2076,19 +1588,6 @@ impl CaptureHandle {
             process,
             Some(context),
         )
-    }
-
-    pub(crate) fn begin_reserved_with_context(
-        spec: SessionCaptureSpec,
-        artifact_key: String,
-        process: Option<AgentProcessRequest>,
-        context: &crate::trace::PreparedTurnContext,
-        publish: impl FnOnce(&String) -> StoreResult<()>,
-    ) -> StoreResult<Self> {
-        let home = crate::store::lf_home_dir();
-        crate::disk::rotate_when_due(&home);
-        let caller = inherited_capture_key()?;
-        Self::begin_reserved_at(&home, spec, artifact_key, caller, process, context, publish)
     }
 
     fn begin_reserved_at(
@@ -2369,21 +1868,8 @@ impl CaptureHandle {
         self.with_capture(SessionCapture::start_attempt);
     }
 
-    pub(crate) fn record_raw(&self, stream: &str, line: &str) {
-        self.with_capture(|capture| capture.record_raw(stream, line));
-    }
-
     pub(crate) fn record_conversation(&self, event: ConversationEvent) {
         self.with_capture(|capture| capture.record_conversation(event));
-    }
-
-    pub(crate) fn record_input(&self, op: &str, text: &str) {
-        self.with_capture(|capture| {
-            capture.append_event(CaptureEvent::UserInput {
-                op: op.to_string(),
-                text: text.to_string(),
-            })
-        });
     }
 
     pub(crate) fn retry_agent_process(
@@ -2430,7 +1916,7 @@ impl CaptureHandle {
         self.with_capture(|capture| {
             let account_changed = !capture.account_observed || capture.account_id != account_id;
             if account_changed {
-                capture.append_event(CaptureEvent::ProviderAccountSelected {
+                capture.record_fact(CaptureFact::ProviderAccountSelected {
                     attempt_key: capture.attempt_key(),
                     account_id: account_id.clone(),
                 })?;
@@ -2444,7 +1930,7 @@ impl CaptureHandle {
                 return Ok(());
             }
             write_provider_session(&capture.dir, &session_id, capture.account_id.clone())?;
-            capture.append_event(CaptureEvent::ProviderSessionObserved {
+            capture.record_fact(CaptureFact::ProviderSessionObserved {
                 attempt_key: capture.attempt_key(),
                 agent_session: session_id.clone(),
             })?;
@@ -2508,11 +1994,11 @@ struct SessionCapture {
     agent_session: Option<AgentSessionId>,
     attempt: u32,
     attempt_started: bool,
-    turn_key: String,
-    usage_stream_id: String,
     event_seq: u64,
-    usage_seq: u64,
-    recorder: SessionRecorder,
+    /// Where facts are kept; none for a mechanical command's capture.
+    history: Option<(crate::store::sqlite::SqliteStore, crate::session::LfSession)>,
+    /// When the stream's previous event arrived, to record silences.
+    previous_event: Option<OffsetDateTime>,
     telemetry_warned: bool,
     settled_outcome: Option<String>,
     activity: activity::Observer,
@@ -2582,7 +2068,39 @@ impl SessionCapture {
     }
 
     fn from_manifest(manifest: SessionCaptureManifest, dir: PathBuf) -> Self {
-        let recorder = SessionRecorder::start(&dir, &manifest);
+        let history = if manifest.harness == "loopflow" {
+            Ok(None)
+        } else {
+            row_store(&dir).and_then(|store| {
+                let session = store.session_for_artifact(&manifest.artifact_key)?;
+                Ok(session.map(|session| (store, session)))
+            })
+        };
+        let history = history.unwrap_or_else(|error| {
+            tracing::warn!(%error, "Session history unavailable");
+            None
+        });
+        if let Some((store, session)) = &history {
+            // Replay reads the prompt from the capture's own manifest file.
+            let retained = SessionCaptureManifest {
+                process: None,
+                ..manifest.clone()
+            };
+            let input = &manifest.artifact_key;
+            if let Err(error) = store.retain_session_observation(
+                session,
+                &crate::session::SessionObservation {
+                    artifact_key: input.clone(),
+                    source: "manifest.json".into(),
+                    observed_at: retained.created_at.unix_timestamp(),
+                    task_id: session.task_id.clone(),
+                    wave_id: session.wave_id.clone(),
+                    payload: serde_json::json!({"input_id": input, "source": "manifest.json", "evidence": retained}),
+                },
+            ) {
+                tracing::warn!(%error, "Session capture observation unavailable");
+            }
+        }
         Self {
             attachment: None,
             provider: manifest.harness.clone(),
@@ -2597,11 +2115,9 @@ impl SessionCapture {
             dir,
             attempt: 1,
             attempt_started: false,
-            turn_key: Uuid::new_v4().to_string(),
-            usage_stream_id: Uuid::new_v4().to_string(),
             event_seq: 0,
-            usage_seq: 0,
-            recorder,
+            history,
+            previous_event: None,
             telemetry_warned: false,
             settled_outcome: None,
             activity: activity::Observer::default(),
@@ -2617,7 +2133,7 @@ impl SessionCapture {
             return Ok(());
         }
         self.attempt_started = true;
-        self.append_event(CaptureEvent::ProviderAttemptStarted {
+        self.record_fact(CaptureFact::ProviderAttemptStarted {
             provider: self.provider.clone(),
             model: self.model.clone(),
             account_id: self.account_id.clone(),
@@ -2632,7 +2148,7 @@ impl SessionCapture {
         account_id: Option<crate::store::ProviderAccountId>,
     ) -> std::io::Result<()> {
         let finish_error = if self.attempt_started {
-            self.append_event(CaptureEvent::ProviderAttemptFinished {
+            self.record_fact(CaptureFact::ProviderAttemptFinished {
                 attempt_key: self.attempt_key(),
                 outcome: "failed".to_string(),
             })
@@ -2647,9 +2163,6 @@ impl SessionCapture {
         self.agent_session = None;
         self.attempt += 1;
         self.attempt_started = false;
-        self.turn_key = Uuid::new_v4().to_string();
-        self.usage_stream_id = Uuid::new_v4().to_string();
-        self.usage_seq = 0;
         let start_error = self.start_attempt().err();
         match (finish_error, start_error) {
             (None, None) => Ok(()),
@@ -2660,55 +2173,24 @@ impl SessionCapture {
         }
     }
 
-    fn record_raw(&mut self, stream: &str, line: &str) -> std::io::Result<()> {
-        self.append_event(CaptureEvent::ProviderOutput {
-            stream: stream.to_string(),
-            line: line.to_string(),
-        })
-    }
-
+    /// Keep how a turn ended; any other event only ticks the silence clock.
     fn record_conversation(&mut self, event: ConversationEvent) -> std::io::Result<()> {
-        match event {
-            ConversationEvent::TurnStarted { turn_id } => {
-                self.turn_key = turn_id.clone();
-                self.usage_stream_id = Uuid::new_v4().to_string();
-                self.usage_seq = 0;
-                self.append_event(CaptureEvent::Conversation {
-                    event: Box::new(ConversationEvent::TurnStarted { turn_id }),
-                })
+        let end = match event {
+            ConversationEvent::TurnCompleted { turn_id, status } => {
+                TurnEnd::TurnCompleted { turn_id, status }
             }
-            ConversationEvent::UsageCheckpoint {
-                turn_id,
-                usage,
-                final_receipt,
-            } => {
-                self.turn_key = turn_id;
-                self.append_usage(usage, final_receipt)
-            }
-            event => self.append_event(CaptureEvent::Conversation {
-                event: Box::new(event),
-            }),
-        }
-    }
-
-    fn append_usage(&mut self, usage: TurnUsage, final_receipt: bool) -> std::io::Result<()> {
-        if !usage.is_reported() {
-            return Ok(());
-        }
-        self.usage_seq += 1;
-        self.append_event(CaptureEvent::Usage {
-            usage_stream_id: self.usage_stream_id.clone(),
-            provider: self.provider.clone(),
-            model: self.model.clone(),
-            attempt_key: self.attempt_key(),
-            turn_key: self.turn_key.clone(),
-            observation_seq: self.usage_seq,
-            counter_kind: "cumulative".to_string(),
-            start_known: true,
-            final_receipt,
-            usage: Box::new(usage),
-        })?;
-        Ok(())
+            ConversationEvent::Error {
+                code,
+                message,
+                evidence,
+            } => TurnEnd::Error {
+                code,
+                message,
+                evidence: evidence.map(Box::new),
+            },
+            _ => return self.next_position().map(drop),
+        };
+        self.record_fact(CaptureFact::Conversation { event: end })
     }
 
     fn finish(&mut self, outcome: &str) -> std::io::Result<()> {
@@ -2761,7 +2243,7 @@ impl SessionCapture {
         }
         self.settled_outcome = Some(outcome.to_string());
         if self.attempt_started {
-            if let Err(error) = self.append_event(CaptureEvent::ProviderAttemptFinished {
+            if let Err(error) = self.record_fact(CaptureFact::ProviderAttemptFinished {
                 attempt_key: self.attempt_key(),
                 outcome: outcome.to_string(),
             }) {
@@ -2772,7 +2254,6 @@ impl SessionCapture {
                 );
             }
         }
-        self.recorder.drain_after_settlement();
         if let Some((session, attachment)) = self.attachment.take() {
             match row_store(&self.dir)
                 .and_then(|store| finish_session_attachment(&store, &session, &attachment, outcome))
@@ -2784,18 +2265,38 @@ impl SessionCapture {
         Ok(())
     }
 
-    fn append_event(&mut self, event: CaptureEvent) -> std::io::Result<()> {
-        if !matches!(&event, CaptureEvent::Activity { .. }) {
-            self.activity.note_event(OffsetDateTime::now_utc());
-        }
-        let envelope = EventEnvelope {
-            schema_version: SCHEMA_VERSION,
-            seq: self.event_seq,
-            observed_at: OffsetDateTime::now_utc(),
-            event,
-        };
+    /// Keep `fact` in history.
+    fn record_fact(&mut self, fact: CaptureFact) -> std::io::Result<()> {
+        let (seq, observed_at) = self.next_position()?;
+        self.keep_fact(seq, observed_at, &fact)
+    }
+
+    /// The next stream position, after keeping the silence that preceded it.
+    /// Every provider event the capture hears takes one.
+    fn next_position(&mut self) -> std::io::Result<(u64, OffsetDateTime)> {
+        let seq = self.event_seq;
+        let at = OffsetDateTime::now_utc();
+        self.activity.note_event(at);
         self.event_seq += 1;
-        self.recorder.record(RecorderMessage::Event(envelope))
+        let silence = self
+            .previous_event
+            .replace(at)
+            .filter(|since| (at - *since).whole_seconds() > SILENCE_SECONDS);
+        match silence {
+            Some(since) => self
+                .keep_fact(seq, at, &CaptureFact::Silence { since })
+                .map(|()| (seq, at)),
+            None => Ok((seq, at)),
+        }
+    }
+
+    fn keep_fact(&self, seq: u64, at: OffsetDateTime, fact: &CaptureFact) -> std::io::Result<()> {
+        let Some((store, session)) = &self.history else {
+            return Ok(());
+        };
+        store
+            .record_capture_fact(session, &self.manifest.artifact_key, seq, at, fact)
+            .map_err(std::io::Error::other)
     }
 
     fn warn_telemetry(&mut self, error: std::io::Error) {
@@ -3137,26 +2638,6 @@ fn write_private_exclusive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.sync_all()
 }
 
-fn append_json_line<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
-    let mut bytes = serde_json::to_vec(value).map_err(std::io::Error::other)?;
-    bytes.push(b'\n');
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(path)?;
-    file.write_all(&bytes)
-}
-
-fn sync_telemetry(dir: &Path) -> std::io::Result<()> {
-    let path = dir.join("events.jsonl");
-    match OpenOptions::new().read(true).open(&path) {
-        Ok(file) => file.sync_data(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
 #[cfg(unix)]
 fn sync_dir(path: &Path) -> std::io::Result<()> {
     File::open(path)?.sync_all()
@@ -3174,84 +2655,68 @@ fn record_error(error: std::io::Error) -> StoreError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::fs::{self, OpenOptions};
-    use std::io::Write;
+    use std::fs;
 
     use super::{
-        read_provider_session, AgentProcessRequest, CaptureEvent, CaptureHandle, EventEnvelope,
-        RetainedHistory, SessionCaptureManifest, SessionCaptureSpec, SubjectAttribution,
-        TerminalReceipt, SCHEMA_VERSION,
+        read_provider_session, AgentProcessRequest, CaptureHandle, SessionCaptureManifest,
+        SessionCaptureSpec, SubjectAttribution, TerminalReceipt,
     };
     use crate::agent::AgentConfig;
     use crate::chat::types::{ConversationEvent, TurnUsage};
     use time::OffsetDateTime;
 
     #[test]
-    fn pi_usage_recovery_finishes_the_existing_counter_without_double_counting() {
-        let thread = crate::id::AgentSessionId::from("/pi/conversation.jsonl");
-        let usage = TurnUsage {
-            input_tokens: Some(20),
-            output_tokens: Some(6),
-            ..Default::default()
-        };
-        let history = vec![crate::session::SessionEvent {
-            seq: 3,
+    fn native_usage_reads_each_providers_counter_once_by_its_shape() {
+        use crate::session::SessionEventKind::{Started, Usage};
+        let event = |seq, thread: &str, kind, payload| crate::session::SessionEvent {
+            seq,
             session_id: "session".into(),
-            agent_session: Some(thread.clone()),
+            agent_session: Some(crate::id::AgentSessionId::from(thread)),
             provider_turn: Some("turn".into()),
-            kind: crate::session::SessionEventKind::Usage,
+            kind,
             agent_process_id: None,
             lf_process_id: None,
             task_id: None,
             wave_id: None,
             observed_at: 1,
-            payload: serde_json::json!({"provider":"pi", "usage":usage, "final":true}),
-        }];
-        let envelope = |seq, event| super::EventEnvelope {
-            schema_version: super::SCHEMA_VERSION,
-            seq,
-            observed_at: time::OffsetDateTime::UNIX_EPOCH,
-            event,
+            payload,
         };
-        let mut events = vec![
-            envelope(
-                0,
-                super::CaptureEvent::ProviderSessionObserved {
-                    attempt_key: "attempt".into(),
-                    agent_session: thread,
-                },
+        let tokens = |id: &str, input: u64, output: u64| {
+            serde_json::json!({"provider":"opencode","message":{"id":id,
+                "tokens":{"input":input,"output":output,"reasoning":0,"cache":{"read":0,"write":0}}}})
+        };
+        let codex = serde_json::json!({"inputTokens":30,"outputTokens":5,"cachedInputTokens":0,"reasoningOutputTokens":0});
+        let history = vec![
+            event(1, "pi", Started, serde_json::json!({})),
+            event(
+                2,
+                "pi",
+                Usage,
+                serde_json::json!({"provider":"pi","usage":{"input_tokens":10},"final":false}),
             ),
-            envelope(
-                1,
-                super::CaptureEvent::Usage {
-                    usage_stream_id: "stream".into(),
-                    provider: "pi".into(),
-                    model: None,
-                    attempt_key: "attempt".into(),
-                    turn_key: "turn".into(),
-                    observation_seq: 1,
-                    counter_kind: "cumulative".into(),
-                    start_known: true,
-                    final_receipt: false,
-                    usage: Box::new(TurnUsage {
-                        input_tokens: Some(10),
-                        ..Default::default()
-                    }),
-                },
+            event(
+                3,
+                "pi",
+                Usage,
+                serde_json::json!({"provider":"pi","usage":{"input_tokens":20,"output_tokens":6},"final":true}),
+            ),
+            event(4, "opencode", Started, serde_json::json!({})),
+            event(5, "opencode", Usage, tokens("m1", 3, 1)),
+            event(6, "opencode", Usage, tokens("m2", 4, 2)),
+            event(7, "codex", Started, serde_json::json!({})),
+            event(
+                8,
+                "codex",
+                Usage,
+                serde_json::json!({"total":codex,"last":codex}),
             ),
         ];
-        assert_eq!(super::recover_native_usage(&mut events, &history), 0);
-        assert_eq!(events.len(), 3);
-        assert!(matches!(&events[2].event, super::CaptureEvent::Usage {
-            usage_stream_id, usage, final_receipt: true, ..
-        } if usage_stream_id == "stream" && usage.input_tokens == Some(20)));
-
-        if let super::CaptureEvent::Usage { final_receipt, .. } = &mut events[1].event {
-            *final_receipt = true;
-        }
-        events.truncate(2);
-        assert_eq!(super::recover_native_usage(&mut events, &history), 0);
-        assert_eq!(events.len(), 2);
+        let (readings, unread) = super::native_usage(&history);
+        assert_eq!(unread, 0);
+        let usage = super::reduce_usage(&readings);
+        assert_eq!((usage.streams, usage.final_streams, usage.gaps), (4, 3, 0));
+        assert_eq!(usage.input_tokens, Some(20 + 3 + 4 + 30));
+        assert_eq!(usage.output_tokens, Some(6 + 1 + 2 + 5));
     }
 
     #[test]
@@ -3433,24 +2898,9 @@ mod tests {
     }
 
     #[test]
-    fn prepared_run_projects_its_first_provider_attempt_separately_from_creation() {
-        let _lock = crate::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+    fn history_times_provider_work_from_its_first_recorded_attempt() {
         let home = tempfile::tempdir().unwrap();
-        let id = CaptureHandle::prepare_at(home.path(), spec(home.path()), None).unwrap();
-        let (dir, mut manifest) = super::resolve_manifest(home.path(), id.as_str()).unwrap();
-        manifest.created_at = time::OffsetDateTime::from_unix_timestamp(1).unwrap();
-        fs::write(
-            dir.join("manifest.json"),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
-        assert!(!dir.join("events.jsonl").exists());
-        let context = crate::trace::PreparedTurnContext::from_prompts("system", "review");
-        let capture =
-            CaptureHandle::start_prepared(home.path(), &id, spec(home.path()), &context, None)
-                .unwrap();
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         capture.mark_spawn_requested();
         capture
             .0
@@ -3460,41 +2910,25 @@ mod tests {
             .unwrap();
         capture.finish("completed").unwrap();
 
-        // Fixed recorded times distinguish preparation, first attempt and retry
-        // without making the proof wait for the wall clock to advance.
-        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
-        let mut attempt = 0;
-        let events = events
-            .lines()
-            .map(|line| {
-                let mut envelope: super::EventEnvelope = serde_json::from_str(line).unwrap();
-                if matches!(
-                    envelope.event,
-                    super::CaptureEvent::ProviderAttemptStarted { .. }
-                ) {
-                    attempt += 1;
-                    envelope.observed_at =
-                        time::OffsetDateTime::from_unix_timestamp(attempt * 10).unwrap();
-                }
-                serde_json::to_string(&envelope).unwrap()
+        let history = super::row_store(&capture.artifact_dir())
+            .unwrap()
+            .input_history(capture.artifact_key().as_str())
+            .unwrap();
+        let attempts = history
+            .providers
+            .iter()
+            .filter(|provider| {
+                matches!(
+                    provider.reference,
+                    super::ProviderHistoryReference::RecordedAttempt { .. }
+                )
             })
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert_eq!(attempt, 2);
-        fs::write(dir.join("events.jsonl"), format!("{events}\n")).unwrap();
-
-        let evidence = super::reduce_usage_reader(std::io::BufReader::new(
-            fs::File::open(dir.join("events.jsonl")).unwrap(),
-        ))
-        .unwrap();
-        assert_eq!(
-            super::read_manifest(&dir)
-                .unwrap()
-                .created_at
-                .unix_timestamp(),
-            1
-        );
-        assert_eq!(evidence.first_provider_attempt_at, Some(10));
+            .collect::<Vec<_>>();
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0].outcome.as_deref(), Some("failed"));
+        assert_eq!(attempts[1].outcome.as_deref(), Some("completed"));
+        assert!(attempts[0].started_at.is_some());
+        assert_eq!(history.first_provider_attempt_at, attempts[0].started_at);
     }
 
     #[test]
@@ -3877,7 +3311,6 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
             .expect("publish Session capture manifest");
-        capture.record_input("initial", "do the work");
         let dir = capture.artifact_dir();
         let artifact_key = capture.artifact_key().to_string();
 
@@ -3894,7 +3327,6 @@ mod tests {
         assert!(!dir.join("terminal.json").exists());
 
         capture.mark_spawn_requested();
-        capture.record_raw("stderr", "provider diagnostic");
         capture.record_conversation(ConversationEvent::TextDelta {
             turn_id: "provider-turn".to_string(),
             content: "provider response".to_string(),
@@ -3910,14 +3342,6 @@ mod tests {
         });
         capture.finish("completed").expect("settle capture");
 
-        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"type\":\"usage\""));
-        assert!(events.contains("\"counter_kind\":\"cumulative\""));
-        assert!(events.contains("\"final_receipt\":false"));
-        assert!(!events.contains("\"final_receipt\":true"));
-        assert!(events.contains("\"type\":\"user_input\""));
-        assert!(events.contains("\"type\":\"provider_output\""));
-        assert!(events.contains("\"type\":\"text_delta\""));
         let terminal = fs::read(dir.join("terminal.json")).unwrap();
         let terminal: TerminalReceipt = serde_json::from_slice(&terminal).unwrap();
         assert_eq!(terminal.outcome, "completed");
@@ -3928,7 +3352,7 @@ mod tests {
         files.sort();
         assert_eq!(
             files,
-            ["events.jsonl", "manifest.json", "terminal.json"].map(std::ffi::OsString::from)
+            ["manifest.json", "terminal.json"].map(std::ffi::OsString::from)
         );
 
         let error = capture.finish("failed").unwrap_err();
@@ -3939,17 +3363,12 @@ mod tests {
     }
 
     #[test]
-    fn history_keeps_facts_and_the_file_keeps_the_stream() {
+    fn history_keeps_only_how_a_turn_ended() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let turn = || "turn-1".to_string();
         capture.record_conversation(ConversationEvent::TurnStarted { turn_id: turn() });
         for word in ["streamed ", "one ", "token ", "at a time"] {
-            capture.record_raw(
-                "notification",
-                &serde_json::json!({"method": "item/agentMessage/delta", "params": {"delta": word}})
-                    .to_string(),
-            );
             capture.record_conversation(ConversationEvent::TextDelta {
                 turn_id: turn(),
                 content: word.to_string(),
@@ -3961,10 +3380,14 @@ mod tests {
                 diff: diff.to_string(),
             });
         }
-        capture.record_raw(
-            "notification",
-            &serde_json::json!({"method": "item/completed", "params": {}}).to_string(),
-        );
+        capture.record_conversation(ConversationEvent::UsageCheckpoint {
+            turn_id: turn(),
+            usage: TurnUsage {
+                input_tokens: Some(10),
+                ..TurnUsage::default()
+            },
+            final_receipt: true,
+        });
         capture.record_conversation(ConversationEvent::TurnCompleted {
             turn_id: turn(),
             status: crate::chat::types::Lifecycle::Completed,
@@ -3973,11 +3396,7 @@ mod tests {
 
         // Capture prose remains readable, but cannot substitute for native turn output.
         assert_eq!(capture.final_answer().unwrap(), None);
-        let file = fs::read_to_string(capture.artifact_dir().join("events.jsonl")).unwrap();
-        assert_eq!(file.matches("item/agentMessage/delta").count(), 4);
-        assert_eq!(file.matches("\"type\":\"text_delta\"").count(), 4);
-        assert_eq!(file.matches("\"type\":\"diff_updated\"").count(), 2);
-        assert_eq!(file.matches("item/completed").count(), 1);
+        assert!(!capture.artifact_dir().join("events.jsonl").exists());
 
         let history = super::row_store(&capture.artifact_dir())
             .unwrap()
@@ -3995,107 +3414,28 @@ mod tests {
 
     #[test]
     fn history_records_a_long_gap_as_a_silence() {
-        let at =
-            |seconds: i64| OffsetDateTime::from_unix_timestamp(1_790_000_000 + seconds).unwrap();
-        let envelope = |seq, seconds, event| EventEnvelope {
-            schema_version: SCHEMA_VERSION,
-            seq,
-            observed_at: at(seconds),
-            event,
-        };
-        let text = || CaptureEvent::Text {
-            text: "thinking".into(),
-        };
-        let finished = CaptureEvent::ProviderAttemptFinished {
-            attempt_key: "attempt".into(),
-            outcome: "completed".into(),
-        };
-        let mut history = RetainedHistory::default();
-        let sources: Vec<_> = [
-            envelope(0, 0, text()),
-            envelope(1, 100, text()),
-            envelope(2, 800, finished),
-        ]
-        .iter()
-        .flat_map(|event| history.admit(event))
-        .collect();
-        assert_eq!(sources.len(), 2);
-        assert_eq!(sources[0].0, "silence:2");
-        assert_eq!(
-            sources[0].1,
-            serde_json::json!({"since": 1_790_000_100, "observed_at": 1_790_000_800})
-        );
-        assert_eq!(sources[1].0, "events.jsonl:2");
-    }
-
-    #[test]
-    fn history_keeps_one_row_per_usage_stream_with_what_every_observation_added() {
         let home = tempfile::tempdir().unwrap();
-        let store =
-            crate::store::sqlite::SqliteStore::open_ephemeral(&home.path().join("store.db"))
-                .unwrap();
-        let input = super::new_artifact_key();
-        let session = store.test_session("conversation", &input);
-        let usage = |seq: u64, total: u64, peak: u64| EventEnvelope {
-            schema_version: SCHEMA_VERSION,
-            seq,
-            observed_at: OffsetDateTime::from_unix_timestamp(1_790_000_000 + seq as i64).unwrap(),
-            event: CaptureEvent::Usage {
-                usage_stream_id: "stream".into(),
-                provider: "claude".into(),
-                model: None,
-                attempt_key: "attempt".into(),
-                turn_key: "turn".into(),
-                observation_seq: seq,
-                counter_kind: "cumulative".into(),
-                start_known: true,
-                final_receipt: seq == 6,
-                usage: Box::new(TurnUsage {
-                    total_input_tokens: Some(total),
-                    output_tokens: Some(total / 10),
-                    peak_input_tokens: Some(peak),
-                    ..TurnUsage::default()
-                }),
-            },
+        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
+        let say = |content: &str| {
+            capture.record_conversation(ConversationEvent::TextDelta {
+                turn_id: "turn-1".into(),
+                content: content.into(),
+            })
         };
-        let mut history = RetainedHistory::default();
-        // The middle request is the turn's largest; the last carries its totals.
-        for event in [usage(2, 100, 100), usage(4, 400, 300), usage(6, 500, 100)] {
-            for (source, evidence) in history.admit(&event) {
-                assert_eq!(source, "events.jsonl:2");
-                store
-                    .retain_session_observation(
-                        &session,
-                        &crate::session::SessionObservation {
-                            artifact_key: input.clone(),
-                            source: source.clone(),
-                            observed_at: 1,
-                            task_id: None,
-                            wave_id: None,
-                            payload: serde_json::json!({"input_id":input,"source":source,"evidence":evidence}),
-                        },
-                    )
-                    .unwrap();
-            }
-        }
-        assert_eq!(store.input_events(&input).unwrap().len(), 1);
-        // A provider can continue the stream into the next turn: that turn keeps its own row.
-        let mut next_turn = usage(8, 600, 100);
-        if let CaptureEvent::Usage { turn_key, .. } = &mut next_turn.event {
-            *turn_key = "next".into();
-        }
-        assert_eq!(history.admit(&next_turn)[0].0, "events.jsonl:8");
-        let usage = store.input_history(&input).unwrap().usage;
-        assert_eq!(
-            (
-                usage.streams,
-                usage.final_streams,
-                usage.total_input_tokens,
-                usage.output_tokens,
-                usage.peak_input_tokens
-            ),
-            (1, 1, Some(500), Some(50), Some(300))
-        );
+        say("thinking");
+        let since = OffsetDateTime::now_utc() - time::Duration::seconds(700);
+        capture.0.lock().unwrap().previous_event = Some(since);
+        say("still thinking");
+        say("done");
+
+        let store = super::row_store(&capture.artifact_dir()).unwrap();
+        let silences = store.input_silences(&capture.artifact_key()).unwrap();
+        assert_eq!(silences.len(), 1);
+        assert_eq!(silences[0].0, since.unix_timestamp());
+        assert!(store
+            .input_events(&capture.artifact_key())
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -4454,32 +3794,20 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();
-        // Production settlement has a bounded telemetry budget. This fixture
-        // needs the recorder's acknowledgement, not a scheduling deadline.
-        let drain = || {
-            let (acknowledge, drained) = std::sync::mpsc::channel();
-            capture
-                .0
-                .lock()
+        let facts = || {
+            super::row_store(&dir)
                 .unwrap()
-                .recorder
-                .sender
-                .as_ref()
+                .input_events(&capture.artifact_key())
                 .unwrap()
-                .send(super::RecorderMessage::Drain(acknowledge))
-                .unwrap();
-            drained.recv().unwrap();
         };
         let first = crate::store::ProviderAccountId::parse("primary").unwrap();
         let second = crate::store::ProviderAccountId::parse("fallback").unwrap();
         capture.mark_spawn_requested();
         capture.observe_provider(None, Some(first.clone()));
-        drain();
 
         assert!(!dir.join("terminal.json").exists());
         assert!(read_provider_session(&dir).unwrap().is_none());
-        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"account_id\":\"primary\""));
+        assert!(facts().iter().any(|fact| fact["account_id"] == "primary"));
 
         capture.observe_provider(Some("first-session".into()), Some(first.clone()));
         capture.observe_provider(Some("first-session".into()), Some(first.clone()));
@@ -4494,7 +3822,6 @@ mod tests {
             .fail_and_begin_attempt("proof".into(), None, Some(second.clone()))
             .unwrap();
         capture.observe_provider(Some("second-session".into()), Some(second.clone()));
-        drain();
         assert!(!dir.join("provider-session.json").exists());
         rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap().execute(
             "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
@@ -4511,13 +3838,8 @@ mod tests {
             .unwrap();
         capture.observe_provider(Some("ambient-session".into()), None);
         capture.finish("completed").unwrap();
-        drain();
 
-        let events: Vec<serde_json::Value> = fs::read_to_string(dir.join("events.jsonl"))
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
+        let events = facts();
         let accounts: Vec<_> = events
             .iter()
             .filter(|event| event["type"] == "provider_account_selected")
@@ -4576,47 +3898,6 @@ mod tests {
     }
 
     #[test]
-    fn telemetry_failure_does_not_gate_terminal_settlement() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
-            .expect("publish Session capture manifest");
-        let dir = capture.artifact_dir();
-        fs::create_dir(dir.join("events.jsonl")).unwrap();
-
-        capture.mark_spawn_requested();
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(10),
-                ..TurnUsage::default()
-            },
-            final_receipt: true,
-        });
-        capture
-            .finish("completed")
-            .expect("settle without telemetry");
-
-        assert!(dir.join("terminal.json").is_file());
-    }
-
-    #[test]
-    fn terminal_history_survives_an_unavailable_telemetry_recorder() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.0.lock().unwrap().recorder.sender = None;
-
-        capture.finish("completed").unwrap();
-        capture.finish("completed").unwrap();
-        let store = super::row_store(&capture.artifact_dir()).unwrap();
-        fs::remove_dir_all(capture.artifact_dir()).unwrap();
-
-        let history = store
-            .input_history(capture.artifact_key().as_str())
-            .unwrap();
-        assert_eq!(history.recorded_outcome.as_deref(), Some("completed"));
-    }
-
-    #[test]
     fn dropping_the_last_capture_settles_unexpected_control_flow_as_failed() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
@@ -4628,281 +3909,6 @@ mod tests {
         let terminal: TerminalReceipt =
             serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
         assert_eq!(terminal.outcome, "failed");
-    }
-
-    #[test]
-    fn retry_usage_keeps_provider_cumulative_values_in_distinct_streams() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
-            .expect("publish Session capture manifest");
-        capture.record_input("initial", "do the work");
-        let dir = capture.artifact_dir();
-
-        capture.mark_spawn_requested();
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(10),
-                output_tokens: Some(4),
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture
-            .0
-            .lock()
-            .unwrap()
-            .fail_and_begin_attempt(
-                "proof-fallback".to_string(),
-                None,
-                Some(crate::store::ProviderAccountId::parse("fallback-account").unwrap()),
-            )
-            .unwrap();
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(12),
-                output_tokens: Some(5),
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.finish("completed").expect("settle capture");
-
-        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"account_id\":\"fallback-account\""));
-        let usage = events
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .filter(|event| event["type"] == "usage")
-            .collect::<Vec<_>>();
-        assert_eq!(usage.len(), 2);
-        assert_eq!(usage[0]["usage"]["input_tokens"], 10);
-        assert_eq!(usage[1]["usage"]["input_tokens"], 12);
-        assert_ne!(usage[0]["usage_stream_id"], usage[1]["usage_stream_id"]);
-        assert_eq!(usage[0]["observation_seq"], 1);
-        assert_eq!(usage[1]["observation_seq"], 1);
-        assert_eq!(usage[0]["final_receipt"], false);
-        assert_eq!(usage[1]["final_receipt"], false);
-    }
-
-    #[test]
-    fn telemetry_loss_cannot_keep_retry_evidence_on_the_prior_attempt() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        let prior_stream = {
-            let mut state = capture.0.lock().unwrap();
-            let stream = state.usage_stream_id.clone();
-            state.recorder.sender = None;
-            stream
-        };
-
-        capture.mark_spawn_requested();
-        capture
-            .0
-            .lock()
-            .unwrap()
-            .fail_and_begin_attempt("fallback".to_string(), Some("next".to_string()), None)
-            .unwrap_err();
-
-        let state = capture.0.lock().unwrap();
-        assert_eq!(state.attempt, 2);
-        assert_eq!(state.provider, "fallback");
-        assert_eq!(state.model.as_deref(), Some("next"));
-        assert!(state.attempt_started);
-        assert_ne!(state.usage_stream_id, prior_stream);
-    }
-
-    #[test]
-    fn usage_keeps_omissions_and_resets_sequence_for_each_provider_turn() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
-            .expect("publish Session capture manifest");
-        let dir = capture.artifact_dir();
-
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(10),
-                output_tokens: None,
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: None,
-                output_tokens: Some(4),
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.record_conversation(ConversationEvent::TurnStarted {
-            turn_id: "provider-turn-2".to_string(),
-        });
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn-2".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(3),
-                output_tokens: None,
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.finish("completed").unwrap();
-
-        let usage = fs::read_to_string(dir.join("events.jsonl"))
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .filter(|event| event["type"] == "usage")
-            .collect::<Vec<_>>();
-        assert_eq!(usage.len(), 3);
-        assert_eq!(usage[1]["usage"]["input_tokens"], serde_json::Value::Null);
-        assert_eq!(
-            usage[1]["usage"]["total_input_tokens"],
-            serde_json::Value::Null
-        );
-        assert_ne!(usage[1]["usage_stream_id"], usage[2]["usage_stream_id"]);
-        assert_eq!(usage[1]["observation_seq"], 2);
-        assert_eq!(usage[2]["observation_seq"], 1);
-    }
-
-    #[test]
-    fn reader_reduces_each_cumulative_stream_once_and_keeps_provider_finality() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(10),
-                output_tokens: None,
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(15),
-                output_tokens: Some(4),
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture
-            .0
-            .lock()
-            .unwrap()
-            .fail_and_begin_attempt("fallback".to_string(), None, None)
-            .unwrap();
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(12),
-                output_tokens: Some(3),
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                cost_usd: Some(0.25),
-                ..TurnUsage::default()
-            },
-            final_receipt: true,
-        });
-        capture.finish("completed").unwrap();
-
-        let run = super::row_store(&capture.artifact_dir())
-            .unwrap()
-            .input_history(capture.artifact_key().as_str())
-            .unwrap();
-        assert_eq!(run.recorded_outcome.as_deref(), Some("completed"));
-        assert_eq!(run.usage.streams, 2);
-        assert_eq!(run.usage.final_streams, 1);
-        assert_eq!(run.usage.input_tokens, Some(27));
-        assert_eq!(run.usage.output_tokens, Some(7));
-        assert_eq!(run.usage.cost_usd, Some(0.25));
-        assert_eq!(run.usage.gaps, 0);
-    }
-
-    #[test]
-    fn reader_rejects_a_malformed_complete_event() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        let dir = capture.artifact_dir();
-        capture.finish("completed").unwrap();
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("events.jsonl"))
-            .unwrap()
-            .write_all(b"{malformed}\n")
-            .unwrap();
-
-        let error = super::reduce_usage_reader(std::io::BufReader::new(
-            fs::File::open(dir.join("events.jsonl")).unwrap(),
-        ))
-        .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("malformed complete capture event"));
-    }
-
-    #[test]
-    fn reader_ignores_a_valid_final_event_without_its_newline() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        let dir = capture.artifact_dir();
-        capture.mark_spawn_requested();
-        capture.finish("completed").unwrap();
-        let path = dir.join("events.jsonl");
-        let mut events = fs::read(&path).unwrap();
-        assert_eq!(events.pop(), Some(b'\n'));
-        fs::write(&path, events).unwrap();
-
-        let snapshot =
-            super::reduce_usage_reader(std::io::BufReader::new(fs::File::open(&path).unwrap()))
-                .unwrap();
-        assert_eq!(snapshot.gaps, 1);
-        assert!(snapshot.first_provider_attempt_at.is_some());
-    }
-
-    #[test]
-    fn reader_does_not_invent_an_attempt_from_incomplete_or_unsupported_evidence() {
-        let mut attempt = super::EventEnvelope {
-            schema_version: 1,
-            seq: 0,
-            observed_at: time::OffsetDateTime::from_unix_timestamp(10).unwrap(),
-            event: super::CaptureEvent::ProviderAttemptStarted {
-                provider: "codex".into(),
-                model: None,
-                account_id: None,
-                attempt_key: "first".into(),
-            },
-        };
-        // An otherwise valid attempt without a final newline is not committed evidence.
-        let incomplete = serde_json::to_vec(&attempt).unwrap();
-        let snapshot = super::reduce_usage_reader(incomplete.as_slice()).unwrap();
-        assert_eq!(snapshot.first_provider_attempt_at, None);
-        assert_eq!(snapshot.gaps, 1);
-        attempt.schema_version = 999;
-        let unsupported = format!("{}\n", serde_json::to_string(&attempt).unwrap());
-        let snapshot = super::reduce_usage_reader(unsupported.as_bytes()).unwrap();
-        assert_eq!(snapshot.first_provider_attempt_at, None);
-        assert_eq!(snapshot.gaps, 1);
     }
 
     #[test]

@@ -7,7 +7,7 @@ private func enrichProcessPathForGUILaunch() {
     let existing = ProcessInfo.processInfo.environment
     let enriched = GUIProcessEnvironment.enriched(existing)
     for key in existing.keys where enriched[key] == nil { unsetenv(key) }
-    for key in ["PATH", "LF_BIN"] {
+    for key in ["PATH", "LF_BIN", "LF_DESKTOP"] {
         if let value = enriched[key] { setenv(key, value, 1) }
     }
 }
@@ -24,6 +24,8 @@ struct LoopflowApp: App {
     @State private var didOpenCaptureView = false
     @AppStorage("taskFilesAutosave") private var taskFilesAutosave = true
     @State private var appearance: AppearanceStore
+    /// `lf desktop`'s socket, held for the app's lifetime.
+    @State private var desktopServer: DesktopServer?
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -52,6 +54,9 @@ struct LoopflowApp: App {
         // Ghostty borrows the process environment when appearance initializes it.
         // Finish environment changes before publishing the initial theme.
         _appearance = State(initialValue: AppearanceStore.shared)
+        if AppTestMode.current() == nil {
+            _desktopServer = State(initialValue: DesktopServer.start())
+        }
     }
 
     var body: some Scene {
@@ -171,8 +176,6 @@ struct LoopflowApp: App {
                 ThemeChooser(appearance: appearance).tabItem { Label("Appearance", systemImage: "paintpalette") }
                 Form { Toggle("Autosave Task Files", isOn: $taskFilesAutosave) }
                     .padding(24).tabItem { Label("Editing", systemImage: "pencil") }
-                DeliverySettingsView(query: registryQuery, portfolio: portfolioService)
-                    .tabItem { Label("Delivery", systemImage: "checkmark.circle") }
                 KeyboardShortcutsView().tabItem { Label("Keyboard Shortcuts", systemImage: "keyboard") }
             }.modifier(AppAppearance(appearance: appearance))
         }

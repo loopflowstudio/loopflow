@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use base64::prelude::*;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
@@ -513,12 +512,9 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
     fixture
         .repo
         .create_file(".lf/skills/inspect-parser.md", "Inspect the parser.");
-    fixture
-        .repo
-        .create_file(".lf/graphs/proof.yaml", "- inspect-parser\n");
     fixture.repo.create_file(
-        ".lf/workflows/proof.yaml",
-        "nodes:\n  review: demo\nedges:\n  - {from: start, to: review, graph: proof}\n  - {from: review, to: end}\n",
+        ".lf/graphs/proof.yaml",
+        "- inspect-parser\n- interactive: {name: demo, id: review}\n",
     );
     fixture.repo.stage_all();
     fixture.repo.commit("Native lifecycle fixture");
@@ -595,7 +591,7 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
             .unwrap(),
         native
     );
-    managed_codex_account(&fixture);
+    support::managed_codex_account(fixture.home.path());
     let run = fixture
         .command(&["-b", "--agent", "codex", "task", "run", task_id, "proof"])
         .env("LF_ACCOUNT_ISOLATION", "isolated")
@@ -1818,14 +1814,14 @@ fn declared_agent_can_start_another_tasks_graph() {
     std::fs::create_dir_all(y.join(".lf/graphs")).unwrap();
     std::fs::write(
         y.join(".lf/graphs/switch-proof.yaml"),
-        "- cmd: sync --plan\n",
+        "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
-    // The Wave default reads the repository's committed definitions.
-    std::fs::create_dir_all(fixture.repo.path().join(".lf/workflows")).unwrap();
+    // The Wave default reads the repository's committed graphs.
+    std::fs::create_dir_all(fixture.repo.path().join(".lf/graphs")).unwrap();
     std::fs::write(
-        fixture.repo.path().join(".lf/workflows/switch-proof.yaml"),
-        "nodes:\n  demo: demo\nedges:\n  - { from: start, to: demo, graph: switch-proof }\n  - { from: demo, to: end }\n",
+        fixture.repo.path().join(".lf/graphs/switch-proof.yaml"),
+        "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
@@ -2035,60 +2031,10 @@ fn unavailable_store_starts_no_provider() {
     );
 }
 
-fn managed_codex_account(fixture: &Fixture) {
-    // Managed skill execution needs an agent account, independently of planning.
-    let account_home = fixture.home.path().join("fixture-codex");
-    std::fs::create_dir(&account_home).unwrap();
-    let claims =
-        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
-    std::fs::write(
-        account_home.join("auth.json"),
-        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
-            .to_string(),
-    )
-    .unwrap();
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
-    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
-    store
-        .upsert_provider_account(&loopflow::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: account_id.clone(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
-            ),
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow::store::CredentialState::Connected,
-            routing_state: loopflow::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
-    store
-        .set_provider_route(&loopflow::profile::ProviderRoute {
-            scope: loopflow::profile::RouteScope::Default,
-            provider: loopflow::provider_auth::Provider::Codex,
-            accounts: vec![account_id],
-            created_at: 1,
-            updated_at: 1,
-        })
-        .unwrap();
-}
-
 #[test]
 fn headless_history_is_discoverable_without_entering_the_interactive_list() {
     let fixture = Fixture::new(false);
-    managed_codex_account(&fixture);
+    support::managed_codex_account(fixture.home.path());
     let provider = fixture.home.path().join("bin/codex");
     std::fs::write(
         &provider,

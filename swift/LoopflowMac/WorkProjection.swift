@@ -198,10 +198,21 @@ final class WorkNavigation {
     enum SidebarFilter: String, CaseIterable {
         case working = "Working tasks"
         case available = "Available"
-        case running = "Running"
+        case busy = "Busy"
     }
     /// The Wave the sidebar lists; nil lists Working Tasks. Selecting a Task keeps it.
     var sidebarWaveID: String?
+    /// What the sidebar lists: a saved Dashboard while it is shown or zoomed from,
+    /// else the stored Wave, else the repository's Working Tasks.
+    enum SidebarScope: Hashable {
+        case repository
+        case wave(String)
+        case dashboard(String)
+    }
+    var sidebarScope: SidebarScope {
+        if case .saved(let id) = trailBoard { return .dashboard(id) }
+        return sidebarWaveID.map(SidebarScope.wave) ?? .repository
+    }
     var showsSlotHints = false
     var sidebarFilter: SidebarFilter = .working
     var sidebarFocusRequested = false
@@ -250,6 +261,8 @@ final class WorkNavigation {
     var binding: SessionBindingDraft?
     /// Graph drafts by planning Task id; they survive Task and Session navigation.
     var taskRunDrafts: [String: TaskRunDraft] = [:]
+    /// What the last Auto-Ship or Stop Auto-Ship on the window heading did.
+    var shipNotice: ShipNotice?
     var startingTaskSessions: Set<String> = []
     var taskSessionErrors: [String: String] = [:]
     /// Successful `task prepare` receipts, available before the next roadmap read.
@@ -269,12 +282,13 @@ final class WorkNavigation {
         /// The default Dashboard: the Working Tasks plan as a grid of slots.
         case workingTasks
         /// One Dashboard member shown as full Work; the trail returns through its Dashboard.
-        case zoomed(from: Board, work: WorkReference)
+        case entered(from: Board, work: WorkReference)
     }
-    /// A Dashboard a member can be zoomed from: a saved one or Working Tasks.
+    /// A view a tile can be entered from: a saved Dashboard, Working Tasks or a Wave view.
     enum Board: Equatable {
         case saved(String)
         case workingTasks
+        case wave(String)
     }
     static let workingTasksTitle = "Working Tasks"
     var destination: Destination = .work(nil)
@@ -282,7 +296,7 @@ final class WorkNavigation {
         get {
             switch destination {
             case .work(let work): work
-            case .zoomed(_, let work): work
+            case .entered(_, let work): work
             case .dashboard, .view, .workingTasks: nil
             }
         }
@@ -290,23 +304,23 @@ final class WorkNavigation {
     }
     var showsSelection: Bool {
         switch destination {
-        case .work, .zoomed: false
+        case .work, .entered: false
         case .dashboard, .view, .workingTasks: true
         }
     }
     var dashboardID: String? {
         if case .dashboard(let id) = destination { return id }; return nil
     }
-    /// The Dashboard the breadcrumb passes through, shown or zoomed from.
+    /// The Dashboard the breadcrumb passes through, shown or entered from.
     var trailBoard: Board? {
         switch destination {
         case .dashboard(let id): .saved(id)
         case .workingTasks: .workingTasks
-        case .zoomed(let board, _): board
+        case .entered(let board, _): board
         case .work, .view: nil
         }
     }
-    /// Where the zoomed member's tile sat, in `ZoomFromTile.space`; read once
+    /// Where the entered member's tile sat, in `ZoomFromTile.space`; read once
     /// by the transition that grows the full Work out of it.
     @ObservationIgnored var zoomOrigin: CGRect?
     /// Repository-local visits; nil names the repository conversation.
@@ -320,6 +334,8 @@ final class WorkNavigation {
         showsNavigator.toggle()
     }
     var sidebarWidth: CGFloat = 240
+    /// The pinned Waves section's height; it starts at about three rows.
+    var sidebarWavesHeight: CGFloat = 130
     /// Restores the sidebar when it is rebuilt. Written every scrolled frame, so
     /// unobserved: tracking it re-rendered every sidebar row per frame.
     @ObservationIgnored var sidebarScrollOffset: CGFloat = 0

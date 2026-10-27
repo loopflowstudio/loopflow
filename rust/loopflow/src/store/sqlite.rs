@@ -19,10 +19,9 @@ use crate::store::{
 use crate::work::wave::{Wave, WaveLocator};
 
 mod admission;
-mod automation;
 mod chapters;
 mod children;
-mod ci_incidents;
+pub(crate) mod ci_incidents;
 mod durable;
 mod graph_inventory;
 #[cfg(test)]
@@ -49,7 +48,7 @@ mod repositories;
 pub(crate) mod retention;
 mod revisions;
 mod scope_defaults;
-mod selections;
+pub(crate) mod selections;
 mod session_events;
 pub(crate) mod sessions;
 pub(crate) mod task_ownership;
@@ -64,7 +63,7 @@ pub(crate) mod wave_definitions;
 
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
-pub(crate) use task_work::EndMove;
+pub(crate) use task_work::{EndMove, TaskShipping};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable

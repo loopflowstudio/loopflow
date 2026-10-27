@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import pytest
+
+from scripts import context_ablation
 from scripts.context_ablation import ARMS, applicable_arms, census, observe
 
 _PROMPT = """<lf:wave-memory>
@@ -70,8 +73,26 @@ def test_trimmed_memory_keeps_both_ends_and_small_memory_is_not_an_arm():
     assert "trim-memory" in applicable_arms(manifest)
 
 
-def test_census_weighs_sources_and_keeps_missing_usage_absent(tmp_path: Path):
-    directory = tmp_path / "ab" / "run_ab"
+def _shown(transcript_turns: list | None):
+    """Stand in for `lf history show`: one Session, its usage and its transcript."""
+    command = {"type": "command", "command": ["/bin/zsh -c 'cargo test && lf graph advance'"]}
+
+    def history(_directory: Path, _lf: str, selector: str, *args: str):
+        if args == ("--json",):
+            return {"session_id": "ses_1", "usage": {"cost_usd": 1.5}, "providers": [{}]}
+        if args == ("--transcript", "--json"):
+            turns = [{"items": [command]}] if transcript_turns is None else transcript_turns
+            return {"conversations": [{"turns": turns}]}
+        return "Done."
+
+    return history
+
+
+def test_census_weighs_sources_and_keeps_missing_usage_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(context_ablation, "_history", _shown(None))
+    directory = tmp_path / "runs" / "ab" / "run_ab"
     directory.mkdir(parents=True)
     manifest = _manifest()
     task = manifest["launch"]["task_prompt"]
@@ -86,15 +107,8 @@ def test_census_weighs_sources_and_keeps_missing_usage_absent(tmp_path: Path):
     ]
     context = {"system": None, "task": {"text": task, "tokens": 1_000, "assets": assets}}
     (directory / "context.json").write_text(json.dumps({"context": context}))
-    command = {"type": "command", "command": ["/bin/zsh -c 'cargo test && lf graph advance'"]}
-    events = [
-        {"type": "user_input", "op": "initial"},
-        {"type": "conversation", "event": {"type": "item_completed", "item": command}},
-        {"type": "usage", "usage": {"cost_usd": 1.5}},
-    ]
-    (directory / "events.jsonl").write_text("\n".join(json.dumps(event) for event in events))
 
-    step = census(tmp_path)["steps"]["implement"]
+    step = census(tmp_path / "runs")["steps"]["implement"]
     assert step["records"] == 1
     assert step["sources"]["memory"]["share_of_submitted"] == 0.6
     assert step["sources"]["scratch_own"]["sum"] == 100
@@ -106,3 +120,17 @@ def test_census_weighs_sources_and_keeps_missing_usage_absent(tmp_path: Path):
     assert turn["decision"] == "advance"
     assert len(turn["checks"]) == 1
     assert turn["peak_input_tokens"] is None
+
+
+def test_expired_transcript_reports_commands_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(context_ablation, "_history", _shown([]))
+    directory = tmp_path / "runs" / "ab" / "run_ab"
+    directory.mkdir(parents=True)
+    (directory / "manifest.json").write_text(json.dumps(_manifest()))
+
+    turn = observe(directory)
+    assert turn["commands"] is None and turn["checks"] == []
+    assert turn["final_text"] == "Done."
+    assert census(tmp_path / "runs")["steps"]["implement"]["transcript_unavailable"] == 1

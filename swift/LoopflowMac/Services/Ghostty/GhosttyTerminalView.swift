@@ -195,6 +195,25 @@ final class GhosttySurfacePool {
         return view
     }
 
+    /// Type `line` and Enter into a shell, as a person would: at once when its
+    /// surface runs, else as the surface's initial input when it starts.
+    func submit(_ line: String, terminal id: TerminalIdentity) throws {
+        try validateDesktopLiteralText(line)
+        let view = view(for: id)
+        view.submitted += 1
+        if let surface = view.surface {
+            ghostty_surface_text(surface, line + "\r", UInt(line.utf8.count + 1))
+        } else {
+            view.pendingInput = (view.pendingInput ?? "") + line + "\r"
+        }
+    }
+
+    /// Never allocates a view; a shell without a live surface reports nothing.
+    func commandStatus(for id: TerminalIdentity) -> DesktopCommandStatus? {
+        guard let view = views[id], view.surface != nil || view.submitted > 0 else { return nil }
+        return DesktopCommandStatus(submitted: view.submitted, finished: view.finished, exitStatus: view.lastExitStatus)
+    }
+
     /// Inspection never allocates a view or retires an exited child. The
     /// surface owner supplies its lifetime, independently of pane occurrences.
     func surfaceIncarnation(for id: TerminalIdentity) -> String? {
@@ -409,6 +428,12 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var onSurfaceFailed: (String) -> Void = { _ in }
     var onFocus: () -> Void = {}
     weak var pool: GhosttySurfacePool?
+    /// Typed into the surface when it starts (`lf desktop run` before the tab is drawn).
+    var pendingInput: String?
+    /// Lines `lf desktop run` submitted, and commands the shell reported finished.
+    var submitted = 0
+    var finished = 0
+    var lastExitStatus: Int?
     /// Set when the surface's child ended; blocks implicit relaunch — reopening
     /// a Session or shell is an explicit action that mints a fresh view.
     private(set) var childExited = false
@@ -518,8 +543,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         surface = manager.createSurface(
             workingDirectory: workingDirectory,
             command: surfaceCommand,
+            initialInput: pendingInput,
             view: self
         )
+        if surface != nil { pendingInput = nil }
 
         if surface != nil {
             updateContentScale()
@@ -1534,6 +1561,10 @@ final class GhosttySurfacePool {
     func sendKey(_ key: DesktopKey, terminal: TerminalIdentity, surface: String) throws {
         throw RegistryQueryError("This Desktop build has no native terminal; no input was sent.")
     }
+    func submit(_ line: String, terminal: TerminalIdentity) throws {
+        throw RegistryQueryError("This Desktop build has no native terminal; no input was sent.")
+    }
+    func commandStatus(for id: TerminalIdentity) -> DesktopCommandStatus? { nil }
     func hasSurface(_ id: TerminalIdentity) -> Bool { false }
     func programStatus(for id: TerminalIdentity) -> ProgramStatusSurface? { nil }
     func associateProgramStatus(_ records: [SessionRecord]) {}

@@ -70,7 +70,7 @@ impl Fixture {
         line.trim().to_owned()
     }
     fn serve(&self, terminal: bool, argv: &[&str]) -> Command {
-        let mut command = self.command(&["__transport-serve"]);
+        let mut command = self.command(&["session", "serve"]);
         if terminal {
             command.arg("--terminal");
         }
@@ -1071,14 +1071,6 @@ read -r answer < /dev/tty
     let viewed = viewers.remove(1);
     drop(viewers);
     ends(&owners[0]);
-    let detached_at: Option<i64> = sql
-        .query_row(
-            "SELECT detached_at FROM processes WHERE id=?1",
-            [&owners[0]],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert!(detached_at.is_some(), "detach time was not recorded");
     // Several judgments later, everything else still runs.
     std::thread::sleep(Duration::from_secs(4));
     for owner in &owners[1..] {

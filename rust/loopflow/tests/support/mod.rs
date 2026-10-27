@@ -19,6 +19,17 @@ use time::OffsetDateTime;
 
 pub mod ambient;
 
+/// Agent shells such as Codex export the developer's real provider home
+/// (`CODEX_HOME=~/.codex`). An `lf` fixture child that inherits it would swap
+/// fixture logins into that home, so every test binary drops both variables
+/// before `main`, while no other thread can read the environment. Fixtures
+/// that need a provider home set one explicitly.
+#[ctor::ctor(unsafe)]
+fn scrub_inherited_provider_homes() {
+    env::remove_var("CODEX_HOME");
+    env::remove_var("CLAUDE_CONFIG_DIR");
+}
+
 #[cfg(unix)]
 #[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
 pub fn install_native_codex(bin: &Path) {
@@ -204,8 +215,6 @@ pub struct EnvGuard {
     previous_home: Option<String>,
     previous_lf_home: Option<OsString>,
     previous_lf_bin: Option<OsString>,
-    previous_codex_home: Option<OsString>,
-    previous_claude_home: Option<OsString>,
     _ambient: ambient::EnvGuard,
     _bin: TempDir,
     _lf_home: TempDir,
@@ -263,9 +272,7 @@ impl EnvGuard {
         }
         // A shared launch signs its provider's native home in as the routed
         // account; that home must never be the developer's own.
-        let previous_codex_home = env::var_os("CODEX_HOME");
         env::set_var("CODEX_HOME", lf_home.path().join("native-codex"));
-        let previous_claude_home = env::var_os("CLAUDE_CONFIG_DIR");
         env::set_var("CLAUDE_CONFIG_DIR", lf_home.path().join("native-claude"));
         Self {
             _lock: lock,
@@ -273,8 +280,6 @@ impl EnvGuard {
             previous_home,
             previous_lf_home,
             previous_lf_bin,
-            previous_codex_home,
-            previous_claude_home,
             _ambient: ambient,
             _bin: bin,
             _lf_home: lf_home,
@@ -309,14 +314,9 @@ impl Drop for EnvGuard {
             Some(prev) => env::set_var("LF_HOME", prev),
             None => env::remove_var("LF_HOME"),
         }
-        match &self.previous_codex_home {
-            Some(prev) => env::set_var("CODEX_HOME", prev),
-            None => env::remove_var("CODEX_HOME"),
-        }
-        match &self.previous_claude_home {
-            Some(prev) => env::set_var("CLAUDE_CONFIG_DIR", prev),
-            None => env::remove_var("CLAUDE_CONFIG_DIR"),
-        }
+        // The pre-main scrub left no provider home to restore.
+        env::remove_var("CODEX_HOME");
+        env::remove_var("CLAUDE_CONFIG_DIR");
     }
 }
 
@@ -402,7 +402,6 @@ fn register_task_fixture(
         pm_snapshot_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
     };
@@ -429,14 +428,12 @@ fn register_task_fixture(
         base_commit: base_commit.to_string(),
         parent_pr_id: None,
         agent: None,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
         rank: 0,
         assignee: None,
         due_date: None,
         state: None,
-        completed: false,
         completed_at: None,
         observation: loopflow::work::task::Observation::NotRequired,
     };
@@ -626,7 +623,7 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
         &[ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(label),
             id: None,
-            human: false,
+            interactive: false,
             returns: None,
             sources: Vec::new(),
         })],
@@ -709,4 +706,54 @@ pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Valu
             (outcome, steps)
         })
         .collect()
+}
+
+/// Managed skill execution in a Task checkout needs a connected agent account.
+#[allow(dead_code)] // Shared fixture compiled into multiple test crates.
+pub fn managed_codex_account(home: &Path) {
+    let account_home = home.join("fixture-codex");
+    std::fs::create_dir(&account_home).unwrap();
+    let claims =
+        BASE64_URL_SAFE_NO_PAD.encode(r#"{"email":"fixture@example.com","sub":"fixture"}"#);
+    std::fs::write(
+        account_home.join("auth.json"),
+        serde_json::json!({"tokens":{"access_token":"fixture","id_token":format!("h.{claims}.s")}})
+            .to_string(),
+    )
+    .unwrap();
+    let store = loopflow::store::sqlite::SqliteStore::new(&home.join("loopflow.db")).unwrap();
+    let account_id = loopflow::store::ProviderAccountId::parse("fixture").unwrap();
+    store
+        .upsert_provider_account(&loopflow::store::ProviderAccount {
+            provider: "codex".into(),
+            account_id: account_id.clone(),
+            home: Some(account_home),
+            login_email: Some(
+                loopflow::profile::EmailAddress::parse("fixture@example.com").unwrap(),
+            ),
+            observed_email: None,
+            observed_subject: None,
+            observed_credential_digest: None,
+            observed_plan: None,
+            credential_state: loopflow::store::CredentialState::Connected,
+            routing_state: loopflow::store::RoutingState::Automatic,
+            plan: None,
+            paid_through: None,
+            utilization_percent: None,
+            cooldown_until: None,
+            cooldown_reason: None,
+            last_selected_at: None,
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
+    store
+        .set_provider_route(&loopflow::profile::ProviderRoute {
+            scope: loopflow::profile::RouteScope::Default,
+            provider: loopflow::provider_auth::Provider::Codex,
+            accounts: vec![account_id],
+            created_at: 1,
+            updated_at: 1,
+        })
+        .unwrap();
 }

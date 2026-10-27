@@ -1,0 +1,11 @@
+# Explore, build, deliver and verify. You choose what to build, try the change and
+# check it on main in the Task conversation; everything between runs on its own.
+- kickoff
+- loop: kickoff
+  interactive: explore
+- graph: pursue
+- loop: implement
+  interactive: demo
+- graph: deliver
+- loop: implement
+  interactive: verify

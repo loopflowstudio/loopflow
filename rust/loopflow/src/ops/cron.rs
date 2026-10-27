@@ -68,15 +68,15 @@ pub fn command_matches_scope(
 
 impl CronSpec {
     fn target_kind(&self) -> OpsResult<CronTargetKind> {
-        use crate::lf::{Commands, GraphCommand, TaskCommand};
+        use crate::lf::{Commands, GraphCommand};
+        if self.command == RETIRED_REPOSITORY_CHECK {
+            return Ok(CronTargetKind::Repository);
+        }
         Ok(match parse_cron_command(&self.command)?.command {
             Some(Commands::Graph {
                 cmd: GraphCommand::External(_),
             }) => CronTargetKind::Graph,
             Some(Commands::Skill { .. }) => CronTargetKind::Skill,
-            Some(Commands::Task {
-                cmd: TaskCommand::Reconcile { .. },
-            }) => CronTargetKind::Repository,
             _ => CronTargetKind::Command,
         })
     }
@@ -123,6 +123,8 @@ pub enum CronTargetKind {
     #[serde(alias = "flow")]
     Graph,
     Skill,
+    /// The retired every-minute repository check, which lazy recovery replaced.
+    /// Installed copies are only recognized so `lf cron sync` removes them.
     Repository,
     Command,
 }
@@ -541,6 +543,10 @@ pub fn reinstall_crons(
             continue;
         }
         let mut spec = read_cron_spec(&existing.path)?;
+        if existing.target_kind == CronTargetKind::Repository {
+            remove_cron(launch_agents_dir, &spec.wave, &spec.graph, launchctl)?;
+            continue;
+        }
         spec.lf_path = lf_path.to_path_buf();
         spec.host = host.clone();
         installed.push(add_cron(launch_agents_dir, &spec, launchctl)?);
@@ -1018,9 +1024,7 @@ fn read_cron_spec(path: &Path) -> OpsResult<CronSpec> {
             serde_json::from_str(&json).map_err(|error| OpsError::Parse(error.to_string()))?
         }
         None => match required("LoopflowTargetKind")?.parse()? {
-            CronTargetKind::Repository => {
-                vec!["task".into(), "reconcile".into(), "--json".into()]
-            }
+            CronTargetKind::Repository => RETIRED_REPOSITORY_CHECK.map(String::from).to_vec(),
             kind @ (CronTargetKind::Graph | CronTargetKind::Skill) => vec![
                 "--wave".into(),
                 wave.clone(),
@@ -1398,14 +1402,8 @@ fn plist_path(dir: &Path, wave: &str, graph: &str) -> PathBuf {
     dir.join(format!("{}.plist", label(wave, graph).replace('/', ".")))
 }
 
-pub fn repository_cron_key(repo: &Path, home: &MachineId) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hash = Sha256::new();
-    hash.update(repo.as_os_str().as_encoded_bytes());
-    hash.update([0]);
-    hash.update(home.as_str());
-    format!("repository-{}", &hex::encode(hash.finalize())[..24])
-}
+/// What the retired repository check ran; released lf installed it per Machine.
+const RETIRED_REPOSITORY_CHECK: [&str; 3] = ["task", "reconcile", "--json"];
 
 fn label(wave: &str, graph: &str) -> String {
     format!("loopflow.cron.{wave}.{graph}").replace('/', ".")
@@ -1686,18 +1684,14 @@ mod tests {
             wave: wave.to_string(),
             published: false,
             graph: graph.to_string(),
-            command: if target_kind == CronTargetKind::Repository {
-                vec!["task".into(), "reconcile".into(), "--json".into()]
-            } else {
-                vec![
-                    "--wave".into(),
-                    wave.into(),
-                    "--batch".into(),
-                    target_kind.as_str().into(),
-                    "--".into(),
-                    graph.into(),
-                ]
-            },
+            command: vec![
+                "--wave".into(),
+                wave.into(),
+                "--batch".into(),
+                target_kind.as_str().into(),
+                "--".into(),
+                graph.into(),
+            ],
             schedule: parse_schedule(schedule).unwrap(),
             working_directory: root.join("repo"),
             lf_path: lf_path.to_path_buf(),
@@ -2273,36 +2267,40 @@ mod tests {
     }
 
     #[test]
-    fn repository_tick_runs_each_minute_with_no_agent_or_wave() {
+    fn sync_removes_the_retired_repository_check() {
         let temp = tempfile::TempDir::new().unwrap();
-        let executable = temp.path().join("fake-lf");
-        fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
-        let mut cron = spec(temp.path(), &executable);
-        cron.wave.clear();
-        cron.graph = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
-        cron.command = vec!["task".into(), "reconcile".into(), "--json".into()];
-        cron.schedule = parse_schedule("every-minute").unwrap();
-        fs::create_dir_all(&cron.working_directory).unwrap();
-        let plist = super::render_plist(&cron, 0).unwrap();
-        assert_eq!(plist.matches("<key>Minute</key>").count(), 60);
-        assert!(!plist.contains("<key>Hour</key>"));
-        assert!(!plist.contains("KeepAlive"));
-        let receipt =
-            super::new_receipt(&cron, &cron.host.machine_id, CronSource::Scheduled).unwrap();
-        assert!(super::spawn_cron_target(&cron, None, &receipt)
-            .unwrap()
-            .wait()
-            .unwrap()
-            .success());
+        let agents = temp.path().join("agents");
+        let launchctl = FakeLaunchctl::default();
+        let kept = spec(temp.path(), Path::new("/usr/bin/true"));
+        let mut retired = kept.clone();
+        retired.wave.clear();
+        retired.graph = "repository-retired".into();
+        retired.command = super::RETIRED_REPOSITORY_CHECK.map(String::from).to_vec();
+        retired.schedule = parse_schedule("every-minute").unwrap();
+        fs::create_dir_all(&kept.working_directory).unwrap();
+        add_cron(&agents, &kept, &launchctl).unwrap();
+        // Released lf wrote it; this build no longer parses its command.
+        fs::write(
+            super::plist_path(&agents, &retired.wave, &retired.graph),
+            super::render_plist(&retired, 0).unwrap(),
+        )
+        .unwrap();
+        let installed = super::reinstall_crons(
+            &agents,
+            &kept.working_directory,
+            &kept.lf_path,
+            &kept.host,
+            &launchctl,
+        )
+        .unwrap();
         assert_eq!(
-            fs::read_to_string(cron.log_path()).unwrap(),
-            "task\nreconcile\n--json\n"
+            installed
+                .iter()
+                .map(|cron| cron.graph.as_str())
+                .collect::<Vec<_>>(),
+            ["wave-report"]
         );
-        assert_ne!(
-            cron.graph,
-            super::repository_cron_key(&cron.working_directory, &MachineId::new())
-        );
+        assert_eq!(list_crons(&agents, &launchctl).unwrap().len(), 1);
     }
 
     #[test]
@@ -2311,16 +2309,14 @@ mod tests {
         let agents = temp.path().join("agents");
         let launchctl = FakeLaunchctl::default();
         let mut cron = spec(temp.path(), Path::new("/usr/bin/true"));
-        cron.wave.clear();
-        cron.graph = super::repository_cron_key(&cron.working_directory, &cron.host.machine_id);
-        cron.command = vec!["task".into(), "reconcile".into(), "--json".into()];
+        cron.graph = "minute-proof".into();
         cron.schedule = parse_schedule("every-minute").unwrap();
         fs::create_dir_all(&cron.working_directory).unwrap();
         add_cron(&agents, &cron, &launchctl).unwrap();
         let run = || {
             run_cron(
                 &agents,
-                "",
+                &cron.wave,
                 &cron.graph,
                 &cron.host.machine_id,
                 &cron.host.machine_id,
@@ -2331,7 +2327,7 @@ mod tests {
             run().unwrap();
         }
         let root = receipt_root(&cron.host.lf_home);
-        let receipts = list_cron_receipts(&root, "", Some(&cron.graph), 1).unwrap();
+        let receipts = list_cron_receipts(&root, &cron.wave, Some(&cron.graph), 1).unwrap();
         assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 1);
         assert_eq!(receipts[0].outcome, CronOutcome::Succeeded);
 
@@ -2341,7 +2337,7 @@ mod tests {
         for _ in 0..14 {
             assert!(run().is_err());
         }
-        let receipts = list_cron_receipts(&root, "", Some(&cron.graph), 1).unwrap();
+        let receipts = list_cron_receipts(&root, &cron.wave, Some(&cron.graph), 1).unwrap();
         assert!(receipts.len() <= super::MINUTE_RECEIPTS_KEPT + 2);
         assert!(receipts
             .iter()

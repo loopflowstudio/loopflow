@@ -55,19 +55,22 @@
     "run_control": {
       "unavailable": null
     },
+    "ship_control": {
+      "unavailable": null
+    },
+    "shipping": null,
     "runtime": {
       "completion_pending": null,
       "provider": "codex",
       "reason": "No Task Graph has run; independent Sessions may still be active",
       "owner": null,
-      "status": "not_ready",
+      "status": "unstarted",
       "updated_at": "2026-10-08T00:00:00Z",
       "work_id": "task_0123456789ab40008000000000000001"
     },
     "section": "waiting",
     "task": {
       "assignee": null,
-      "completed": false,
       "completed_at": null,
       "description": "Keep the escaped quote",
       "due_date": null,

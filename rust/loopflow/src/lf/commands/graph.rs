@@ -1,4 +1,3 @@
-use crate::definition::{resolve_definition, Target};
 use crate::durable::WorkRef;
 use crate::graph::compile_graph;
 use crate::graph::output::GraphOutput;
@@ -44,7 +43,6 @@ pub fn run(
     };
     let binding = binding.or(checkout.as_ref());
     let items = compile_graph(graph, repo)?;
-    require_autonomous_steps(&items)?;
     if let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) {
         block_on(async {
             let store = open_graph_store().await?;
@@ -59,6 +57,7 @@ pub fn run(
     execute(
         &graph.name,
         &items,
+        ExecutionCursor::default(),
         bound_message.as_deref().or(message),
         cli,
         repo,
@@ -66,21 +65,22 @@ pub fn run(
     )
 }
 
-pub(crate) fn require_autonomous_steps(items: &[ConcreteStep]) -> Result<()> {
-    for item in items {
-        match item {
-            ConcreteStep::Skill(skill) if skill.human => anyhow::bail!(
-                "Human step {} belongs in the Task conversation; operational Graphs cannot launch review Sessions", skill.skill.name
-            ),
-            ConcreteStep::Xor(branch) => {
-                for path in branch.paths.values() {
-                    require_autonomous_steps(&path.steps)?;
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(())
+/// `lf --task ISSUE graph route`: run the slice of the Task's captured graph
+/// that its current edge names, from the route's first step to the next
+/// stage. The Task run that chose the edge is this process's parent; it
+/// writes the arrival when this process succeeds.
+pub fn run_task_edge(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
+    let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) else {
+        anyhow::bail!("`lf graph route` runs a Task's route; name the Task with --task");
+    };
+    let store = block_on(open_graph_store())?;
+    store.sqlite.require_task_launch(task)?;
+    let (graph, start, edge, _) = store
+        .sqlite
+        .workflow_edge_slice(task)?
+        .context("the Task is not on a route that runs steps; `lf task run` chooses one")?;
+    print_pipeline_header(&format!("{} · {edge}", graph.name), &graph.steps);
+    execute(&graph.name, &graph.steps, start, None, cli, repo, binding)
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
@@ -111,77 +111,45 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Graph before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
-/// Carry one Task run: resolve the edge to an explicit skill or Graph child,
-/// and start it again while a Graph process fails. Each Graph attempt records its
-/// own GraphProcess beneath this process; a single skill remains a skill launch. A Graph held for a person or a watcher, an interrupted
-/// one, and a launch refused before any Graph started are returned as they
-/// ended. Once someone interrupts the Task, nothing is started again.
+/// Carry one Task run: start the Task's current edge as a child Graph process,
+/// and start it again while a Graph process fails. Each attempt records its own
+/// GraphProcess beneath this process. A Graph held for a person or a watcher, an
+/// interrupted one, and a launch refused before any Graph started are returned
+/// as they ended. Once someone interrupts the Task, nothing is started again.
+/// `edge` names the edge for messages.
 ///
-/// A bare run inside its execution owner lets its launcher go once the first
-/// attempt has registered, and carries on with its output in that attempt's log.
-pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
+/// With `release`, a bare run inside its execution owner lets its launcher go
+/// once the first attempt has registered, and carries on with its output in
+/// that attempt's log.
+pub fn run_task_edge_for(cli: &Cli, task: &Task, edge: &str, release: bool) -> Result<()> {
     let checkout = task.worktree()?;
-    let owner = match resolve_definition(checkout, graph, None)? {
-        Target::Graph(_) => "graph",
-        Target::Skill(_) => "skill",
-        Target::Command(_) | Target::Xor(_) => {
-            unreachable!("named definitions are skills or Graphs")
-        }
-    };
-    let args = task_run_args(cli, task.id.as_str(), owner, graph);
-    let lf = crate::os_process::resolve_lf_binary()?;
+    let args = task_run_args(cli, task.id.as_str(), &["graph", "route"]);
     let store = block_on(open_graph_store())?;
     let store = &store.sqlite;
     let process =
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
     let work = WorkRef::Task(task.id.clone());
     let cursor = store.latest_interrupt_id(&work)?;
-    // An interrupted Task run takes its running attempt with it.
-    static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    crate::agent::register_interrupt_cleanup(|| {
-        let pid = ATTEMPT_PID.load(std::sync::atomic::Ordering::Acquire);
-        if pid != 0 {
-            crate::platform::kill_process(pid);
-        }
-    });
-    let letting_go = !cli.batch && !cli.interactive && crate::transport::current().is_some();
+    let letting_go =
+        release && !cli.batch && !cli.interactive && crate::transport::current().is_some();
     let mut released = false;
     let mut attempt = 1;
     loop {
         let mark = store.process_mark()?;
-        let mut command = std::process::Command::new(&lf);
-        command.args(&args).current_dir(checkout);
-        // A skill's agent shell must never inherit the cursor.
-        if owner == "graph" {
-            command.env(graph_process::TASK_INTERRUPT_CURSOR_ENV, cursor.to_string());
-        }
-        crate::transport::configure_child(&mut command);
-        let log = letting_go
-            .then(|| PendingLog::open(&process, attempt))
+        let mut log = letting_go
+            .then(|| PendingLog::open(&format!("pending-{process}-{attempt}")))
             .transpose()?;
-        let output = match &log {
-            Some(log) => {
-                log.configure_child(&mut command)?;
-                None
-            }
-            None => crate::terminal_output::TerminalOutput::for_child(&mut command)?,
-        };
-        let mut child = command
-            .spawn()
-            .context("could not start the Task's Graph")?;
-        ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
-        if let Some(mut log) = log {
-            match registration(store, &process, mark, owner, &mut child)? {
+        let sink = log.as_ref().map(|log| log.file.try_clone()).transpose()?;
+        let status = spawn_task_child(&args, checkout, sink, Some(cursor), |child| {
+            let Some(mut log) = log.take() else {
+                return Ok(());
+            };
+            match registration(store, &process, mark, child)? {
                 Some(registered) => {
                     log.settle(&registered)?;
                     if !released {
-                        let noun = if owner == "graph" {
-                            "Graph process"
-                        } else {
-                            "Process"
-                        };
                         println!(
-                            "{} · {graph} running as {noun} {registered}\n  follow: lf task status {}\n  log:    {}",
+                            "{} · {edge} running as Graph process {registered}\n  follow: lf task status {}\n  log:    {}",
                             task.identifier,
                             task.identifier,
                             log.path.display()
@@ -192,16 +160,13 @@ pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
                 }
                 None => log.replay(),
             }
-        }
-        let status = child.wait();
-        drop(output);
-        ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
-        let status = status.context("could not wait for the Task's Graph")?;
+            Ok(())
+        })?;
         if status.success() {
             return Ok(());
         }
         if store.latest_interrupt_id(&work)? > cursor {
-            eprintln!("Task run interrupted; not starting {graph} again.");
+            eprintln!("Task run interrupted; not starting {edge} again.");
             return Err(crate::process::CommandExit(130).into());
         }
         // Only a Graph process that failed is started again.
@@ -209,43 +174,132 @@ pub fn run_for_task(cli: &Cli, task: &Task, graph: &str) -> Result<()> {
         if failed {
             if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
-                    "Graph {graph} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
+                    "Route {edge} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
                 );
                 return Err(crate::process::CommandExit(1).into());
             }
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
-                eprintln!("Graph {graph} failed {attempt} times; this Task run stops here.");
+                eprintln!("Route {edge} failed {attempt} times; this Task run stops here.");
             }
-            let code = status.code().and_then(|code| u8::try_from(code).ok());
-            return Err(crate::process::CommandExit(code.unwrap_or(130)).into());
+            return Err(exit_of(status).into());
         }
         eprintln!(
-            "Graph {graph} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
+            "Route {edge} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
         );
         attempt += 1;
     }
 }
 
-/// Where a Task run that let its launcher go keeps its Graph or skill Process's output.
+/// Run `skill` for the Task as a headless child, `message` as its first turn,
+/// and read the structured answer `output` asks for. `None` when the skill
+/// runs with no contract or answers outside it; the caller decides without.
+pub(crate) fn run_task_skill(
+    cli: &Cli,
+    issue: &str,
+    checkout: &Path,
+    skill: &str,
+    message: &str,
+    output: Option<&GraphOutput>,
+) -> Result<Option<SkillOutcome>> {
+    let mut step_cli = cli.process_options();
+    step_cli.output_schema = output.map(GraphOutput::schema);
+    step_cli.wave = cli.wave.clone();
+    let mut args = task_run_args(&step_cli, issue, &["skill", "--", skill]);
+    args.push(message.to_owned());
+    let store = block_on(open_graph_store())?;
+    let store = &store.sqlite;
+    let process =
+        journal::current_lf_process_id().context("a Task run requires a registered Process")?;
+    let mark = store.process_mark()?;
+    let status = spawn_task_child(&args, checkout, None, None, |_| Ok(()))?;
+    if !status.success() {
+        return Err(exit_of(status).into());
+    }
+    let Some(output) = output else {
+        return Ok(None);
+    };
+    let Some(step) = store.child_process_after(&process, mark)? else {
+        return Ok(None);
+    };
+    let Some((_, input, _)) = store.process_input(&step)? else {
+        return Ok(None);
+    };
+    Ok(store
+        .input_final_answer(&input)?
+        .and_then(|text| answer_value(&text).ok())
+        .and_then(|value| output.decode(&value).ok()))
+}
+
+fn exit_of(status: std::process::ExitStatus) -> crate::process::CommandExit {
+    let code = status.code().and_then(|code| u8::try_from(code).ok());
+    crate::process::CommandExit(code.unwrap_or(130))
+}
+
+/// Start `lf <args>` in `checkout` and wait for it, writing to `log` when given
+/// and to this terminal otherwise. A Graph child receives the Task's interrupt
+/// cursor; a skill's agent shell must never inherit it. `started` runs once the
+/// child is up. An interrupted caller takes the running child with it.
+fn spawn_task_child(
+    args: &[String],
+    checkout: &Path,
+    log: Option<std::fs::File>,
+    interrupt: Option<i64>,
+    started: impl FnOnce(&mut std::process::Child) -> Result<()>,
+) -> Result<std::process::ExitStatus> {
+    static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    crate::agent::register_interrupt_cleanup(|| {
+        let pid = ATTEMPT_PID.load(std::sync::atomic::Ordering::Acquire);
+        if pid != 0 {
+            crate::platform::kill_process(pid);
+        }
+    });
+    let lf = crate::os_process::resolve_lf_binary()?;
+    let mut command = std::process::Command::new(&lf);
+    command.args(args).current_dir(checkout);
+    if let Some(cursor) = interrupt {
+        command.env(graph_process::TASK_INTERRUPT_CURSOR_ENV, cursor.to_string());
+    }
+    crate::transport::configure_child(&mut command);
+    let output = match log {
+        Some(log) => {
+            command
+                .stdin(std::process::Stdio::null())
+                .stdout(log.try_clone()?)
+                .stderr(log);
+            None
+        }
+        None => crate::terminal_output::TerminalOutput::for_child(&mut command)?,
+    };
+    let mut child = command.spawn().context("could not start the Task's step")?;
+    ATTEMPT_PID.store(child.id(), std::sync::atomic::Ordering::Release);
+    started(&mut child)?;
+    let status = child.wait();
+    drop(output);
+    ATTEMPT_PID.store(0, std::sync::atomic::Ordering::Release);
+    status.context("could not wait for the Task's step")
+}
+
+/// Where a Task run that let its launcher go keeps its Graph process's output.
 pub fn graph_log_path(id: &str) -> std::path::PathBuf {
     crate::store::lf_home_dir()
         .join("logs")
         .join(format!("graph-{id}.log"))
 }
 
-/// The attempt's output until it registers; it then becomes that Process's log.
+/// A run's output once its launcher lets go: an attempt's until it registers,
+/// when it becomes that Graph process's log, or a ship's for its whole run.
 #[derive(Debug)]
-struct PendingLog {
-    file: std::fs::File,
-    path: std::path::PathBuf,
+pub(crate) struct PendingLog {
+    pub(crate) file: std::fs::File,
+    pub(crate) path: std::path::PathBuf,
 }
 
 impl PendingLog {
-    fn open(process: &LfProcessId, attempt: u32) -> Result<Self> {
+    pub(crate) fn open(name: &str) -> Result<Self> {
         use std::os::unix::fs::OpenOptionsExt;
-        let path = graph_log_path(&format!("pending-{process}-{attempt}"));
+        let path = graph_log_path(name);
         std::fs::create_dir_all(path.parent().expect("graph logs live in a directory"))?;
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -256,14 +310,6 @@ impl PendingLog {
             .open(&path)
             .with_context(|| format!("could not open the Graph log {}", path.display()))?;
         Ok(Self { file, path })
-    }
-
-    fn configure_child(&self, command: &mut std::process::Command) -> Result<()> {
-        command
-            .stdin(std::process::Stdio::null())
-            .stdout(self.file.try_clone()?)
-            .stderr(self.file.try_clone()?);
-        Ok(())
     }
 
     /// Name the log for the registered Process; open descriptors follow the rename.
@@ -297,21 +343,16 @@ fn attempt_graph(
         .filter(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_)))))
 }
 
-/// Wait until the attempt registers — a Graph its GraphProcess, a skill its
-/// Process — or ends first. No deadline: the child's own exit bounds it.
+/// Wait until the attempt records its GraphProcess or ends first. No deadline:
+/// the child's own exit bounds it.
 fn registration(
     store: &SqliteStore,
     process: &LfProcessId,
     mark: i64,
-    owner: &str,
     child: &mut std::process::Child,
 ) -> Result<Option<LfProcessId>> {
     loop {
-        let registered = if owner == "graph" {
-            attempt_graph(store, process, mark)?
-        } else {
-            store.child_process_after(process, mark)?
-        };
+        let registered = attempt_graph(store, process, mark)?;
         if registered.is_some() {
             return Ok(registered);
         }
@@ -324,7 +365,7 @@ fn registration(
 
 /// Hand the launcher its last lines, end its view, and keep this run's own
 /// output in the log from here on.
-fn release_launcher(log: &std::fs::File) -> Result<()> {
+pub(crate) fn release_launcher(log: &std::fs::File) -> Result<()> {
     use std::io::Write;
     std::io::stdout().flush()?;
     std::io::stderr().flush()?;
@@ -334,20 +375,22 @@ fn release_launcher(log: &std::fs::File) -> Result<()> {
     Ok(())
 }
 
-/// The Graph child a Task run starts.
-fn task_run_args(cli: &Cli, issue: &str, owner: &str, graph: &str) -> Vec<String> {
+/// The child a Task run starts: this launcher's options, the Task, then `tail`.
+pub(crate) fn task_run_args(cli: &Cli, issue: &str, tail: &[&str]) -> Vec<String> {
     let mut args = cli.step_args();
     if let Some(wave) = &cli.wave {
         args.extend(["--wave".to_owned(), wave.clone()]);
     }
-    args.extend(["--task", issue, owner, "--", graph].map(str::to_owned));
+    args.extend(["--task", issue].map(str::to_owned));
+    args.extend(tail.iter().map(|arg| arg.to_string()));
     args
 }
 
-/// Drive the Graph in this process, bracketed by graph journal events.
+/// Drive the Graph in this process from `start`, bracketed by graph journal events.
 fn execute(
     graph_name: &str,
     items: &[ConcreteStep],
+    start: ExecutionCursor,
     message: Option<&str>,
     cli: &Cli,
     repo: &Path,
@@ -376,7 +419,7 @@ fn execute(
             message,
             cwd: repo,
             launcher: cli,
-            position: Mutex::new(ExecutionCursor::default()),
+            position: Mutex::new(start.clone()),
             task,
             interrupt,
         };
@@ -395,7 +438,7 @@ fn execute(
             )
             .context("could not record the Graph; no steps launched")?;
         drop(admission);
-        let outcome = drive(&running, accounts).await?;
+        let outcome = drive(&running, start, accounts).await?;
         // A step that completed its Task could not clean up under its own live
         // Graph; the finished Graph can.
         if let (GraphOutcome::Completed, Some(task)) = (&outcome, &running.task) {
@@ -442,6 +485,10 @@ async fn open_graph_store() -> Result<SharedStore> {
 fn report_outcome(outcome: GraphOutcome) -> Result<()> {
     match outcome {
         GraphOutcome::Completed => Ok(()),
+        GraphOutcome::Staged(stage) => {
+            eprintln!("Reached {stage}, where a person takes part; a Task carries the graph on from there.");
+            Ok(())
+        }
         GraphOutcome::Interrupted => Err(crate::process::CommandExit(130).into()),
         GraphOutcome::Waiting => Err(crate::process::GraphHeld(
             "Graph stopped before its last step; inspect its history and effects".into(),
@@ -457,6 +504,7 @@ fn report_outcome(outcome: GraphOutcome) -> Result<()> {
 /// A Graph process that dies leaves its Processes as history; nothing resumes it.
 async fn drive(
     running: &RunningGraph<'_>,
+    start: ExecutionCursor,
     accounts: crate::provider_account::selection::AccountSelection,
 ) -> Result<GraphOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
@@ -472,14 +520,14 @@ async fn drive(
     let result = async {
         let _graph_env = EnvVarGuard::set("LOOPFLOW_GRAPH_NAME", running.graph);
         let _accounts = accounts.activate()?;
-        let mut cursor = ExecutionCursor::default();
+        let mut cursor = start;
         GraphRunner::new(running)
             .run_with_cursor(running.steps, &mut cursor)
             .await
     }
     .await;
     let (event, error) = match &result {
-        Ok(GraphOutcome::Completed) => (LfEventType::Completed, None),
+        Ok(GraphOutcome::Completed | GraphOutcome::Staged(_)) => (LfEventType::Completed, None),
         Ok(_) => (LfEventType::Escalated, None),
         Err(error) => (LfEventType::Errored, Some(error.to_string())),
     };
@@ -523,15 +571,13 @@ fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
     let mut lines = Vec::new();
     for item in items {
         match item {
-            ConcreteStep::Skill(skill) if skill.human => lines.push(format!(
-                "{} [review:{}]",
-                skill.skill.name,
-                skill
-                    .id
-                    .as_deref()
-                    .expect("validated review node has an id"),
-            )),
-            ConcreteStep::Skill(skill) => lines.push(skill.skill.name.clone()),
+            ConcreteStep::Skill(skill) => match skill.stage() {
+                Some(stage) if stage != skill.skill.name => {
+                    lines.push(format!("{} [stage {stage}]", skill.skill.name))
+                }
+                Some(_) => lines.push(format!("{} [stage]", skill.skill.name)),
+                None => lines.push(skill.skill.name.clone()),
+            },
             ConcreteStep::Command(command) => lines.push(command.item.to_string()),
             ConcreteStep::Xor(branch) => lines.extend(render_branch_lines(branch)),
         }
@@ -939,8 +985,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let label = ops.item.display_name();
         eprintln!("op: {label}");
-        // Authored spellings outlive the CLI's; the step runs today's.
-        let argv = ops.item.clone().current().argv();
+        let argv = ops.item.argv();
         let parsed = crate::lf::navigation::normalize_args(argv.clone())
             .and_then(Cli::try_parse_from)
             .ok();
@@ -1027,7 +1072,7 @@ mod tests {
             let skill = ConcreteSkill {
                 skill: Skill::named("probe"),
                 id: None,
-                human: false,
+                interactive: false,
                 returns: None,
                 sources: Vec::new(),
             };
@@ -1115,7 +1160,7 @@ mod tests {
             let skill = ConcreteStep::Skill(ConcreteSkill {
                 skill: Skill::named("probe"),
                 id: None,
-                human: false,
+                interactive: false,
                 returns: None,
                 sources: Vec::new(),
             });
@@ -1194,33 +1239,41 @@ mod tests {
     }
 
     #[test]
-    fn builtin_task_graphs_launch_as_operational_work() {
+    fn builtin_task_graphs_compile_and_the_stageless_ones_run_whole() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        for name in ["task-design", "pursue", "queue", "ship"] {
+        for name in ["task-design", "pursue", "queue", "deliver"] {
             let graph = crate::graph::load_graph(name, &repo).unwrap();
             let items = crate::graph::compile_graph(&graph, &repo).unwrap();
-            super::require_autonomous_steps(&items)
-                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert!(
+                items
+                    .iter()
+                    .all(|item| !matches!(item, ConcreteStep::Skill(skill) if skill.interactive)),
+                "{name} has a stage"
+            );
+        }
+        for name in ["feature", "code", "research"] {
+            let definition = crate::workflow::load_workflow(name, &repo)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{name} is a builtin graph"));
+            assert!(!definition.nodes.is_empty(), "{name} has stages");
         }
     }
 
     #[test]
-    fn validation_lists_human_nodes_hidden_in_xor_paths() {
+    fn pipeline_lines_mark_stages_hidden_in_xor_paths() {
         let repo = tempdir().unwrap();
         let graphs = repo.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("choice.yaml"),
-            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - step:\n              id: review_choice\n              name: explore\n              human: true\n",
+            "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - step:\n              id: revise_choice\n              name: implement\n          - interactive:\n              id: review_choice\n              name: explore\n",
         )
         .unwrap();
         let graph = crate::graph::load_graph("choice", repo.path()).unwrap();
-        let human = crate::graph::human_occurrence_ids(&graph, repo.path()).unwrap();
-        assert_eq!(human, vec!["review_choice"]);
         let items = crate::graph::compile_graph(&graph, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
-            .any(|line| line.contains("explore [review:review_choice]")));
+            .any(|line| line.contains("explore [stage review_choice]")));
     }
 
     #[test]
@@ -1228,10 +1281,8 @@ mod tests {
         use clap::Parser;
         let mode = |argv: &[&str]| {
             let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
-            let args = task_run_args(&cli, "INF-1", "graph", "autonomous");
-            assert!(
-                args.ends_with(&["--task", "INF-1", "graph", "--", "autonomous"].map(String::from))
-            );
+            let args = task_run_args(&cli, "INF-1", &["graph", "route"]);
+            assert!(args.ends_with(&["--task", "INF-1", "graph", "route"].map(String::from)));
             (
                 args.contains(&"--batch".to_owned()),
                 args.contains(&"--interactive".to_owned()),

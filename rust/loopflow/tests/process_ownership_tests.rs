@@ -17,11 +17,10 @@ use loopflow::store::{open_ephemeral_store, StorageConfig};
 use loopflow_test_support::TestRepo;
 
 #[tokio::test]
-async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_without_losing_history()
-{
+async fn agent_settlement_on_read_reports_failed_observation_and_recovers_without_losing_history() {
     use std::os::unix::process::CommandExt;
 
-    use loopflow::lf::commands::top::{ActivityNodeKind, ActivitySnapshot};
+    use loopflow::lf::commands::top::ActivitySnapshot;
 
     struct Agent(Child);
     impl Drop for Agent {
@@ -96,10 +95,10 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
         serde_json::from_slice::<ActivitySnapshot>(&output.stdout).unwrap()
     };
     let id = format!("process:{}", attachment.agent_process_id);
-    let live = snapshot();
-    let row = live.nodes.iter().find(|row| row.id == id).unwrap();
-    assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
-    assert_eq!(row.pid, Some(agent.0.id()));
+    // Every read of this Machine's processes recovers first, so the orphan is
+    // checked in the store here rather than in a `monitor ps` row.
+    assert!(before.completed_at.is_none());
+    assert!(agent.0.try_wait().unwrap().is_none());
 
     // Only the portable reader invokes ps; macOS observes the kernel directly.
     #[cfg(not(target_os = "macos"))]
@@ -108,11 +107,10 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
         std::fs::create_dir(&bin).unwrap();
         let ps = bin.join("ps");
         for (args, single_pid_reads) in [
-            (["task", "reconcile", "--json"], false),
             (["monitor", "prune", "--json"], false),
             // Exact leader observation succeeds, but descendant inventory fails.
             // The reaper must refuse before signaling, not assume no descendants.
-            (["task", "reconcile", "--json"], true),
+            (["monitor", "prune", "--json"], true),
         ] {
             let forward = if single_pid_reads {
                 "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"
@@ -137,18 +135,6 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
                 String::from_utf8_lossy(&output.stderr).contains("fixture sampling unavailable"),
                 "{output:?}"
             );
-            if args[0] == "task" {
-                let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-                assert!(
-                    result["errors"].as_array().unwrap().iter().any(|error| {
-                        error
-                            .as_str()
-                            .unwrap()
-                            .contains(attachment.agent_process_id.as_str())
-                    }),
-                    "{result}"
-                );
-            }
             assert!(agent.0.try_wait().unwrap().is_none());
             assert_eq!(
                 store.process(&attachment.agent_process_id).unwrap(),
@@ -162,14 +148,11 @@ async fn scheduled_agent_settlement_reports_failed_observation_and_recovers_with
         }
     }
 
-    // This is the same operation the schedule invokes, not evidence of an
-    // installed schedule firing. It must settle a detached row without receipts.
-    let output = command(home.path(), repo.path(), &["task", "reconcile", "--json"])
+    // An ordinary read of this Machine's Tasks settles a detached row without receipts.
+    let output = command(home.path(), repo.path(), &["task", "list"])
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
-    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(result["errors"], serde_json::json!([]));
     assert!(!agent
         .0
         .try_wait()

@@ -35,7 +35,7 @@ struct TaskHistoryFilterTests {
             return row
         }
         if let index = rows.firstIndex(where: { ($0["task"] as? [String: Any])?["id"] as? String == "unresolved" }) {
-            rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "ready", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
+            rows[index]["runtime"] = ["work_id": "task-unresolved", "status": "moving", "reason": "Running", "updated_at": "2026-10-02T12:00:00Z", "provider": "codex", "owner": ["person": "Jack Heart", "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]] as [String: Any]
             var condition = try #require(rows[index]["condition"] as? [String: Any])
             condition["unresolved_execution"] = true
             rows[index]["condition"] = condition
@@ -58,7 +58,7 @@ struct TaskHistoryFilterTests {
         }
         row["condition"] = ["state": missing ? "blocked" : "clear", "reason": "historical checkout", "observed_at": "2026-10-02T12:00:00Z", "evidence_age_secs": 0,
             "local_progress": ["state": missing ? "missing" : "not_applicable", "unsettled": missing, "dirty": NSNull(), "authored_commits": NSNull(), "recovery_required": missing, "reason": "checkout removed"],
-            "unresolved_execution": runtime == "ready" || review] as [String: Any]
+            "unresolved_execution": runtime == "moving" || review] as [String: Any]
         return try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
     }
 
@@ -100,7 +100,7 @@ struct TaskHistoryFilterTests {
         #expect(!visible(row, filter))
         filter.editDays("30")
         #expect(visible(row, filter))
-        #expect(visible(try task("canceled", date: nil, runtime: "ready", missing: true), TaskHistoryFilter()))
+        #expect(visible(try task("canceled", date: nil, runtime: "moving", missing: true), TaskHistoryFilter()))
     }
 
     @Test func unresolvedGraphAndRetainedSessionSurviveHiddenHistory() throws {

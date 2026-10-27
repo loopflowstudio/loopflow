@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use time::OffsetDateTime;
 
-use crate::child::AbandonIntent;
 use crate::durable::{Author, TaskState};
 use crate::id::WaveId;
 use crate::linear::{LinearIssueId, LinearProjectId};
@@ -101,14 +100,12 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         base_commit: String::new(),
         parent_pr_id: None,
         agent: None,
-        abandon_intent: None,
         created_at: now,
         updated_at: now,
         rank,
         assignee: None,
         due_date: input.due_date.clone(),
         state: Some("unstarted".into()),
-        completed: false,
         completed_at: None,
         observation: crate::work::task::Observation::NotRequired,
     };
@@ -349,21 +346,21 @@ impl SqliteStore {
     }
 
     /// Change the explicit planning hold, never execution or Workflow position.
-    pub(crate) fn set_task_paused(&self, id: &TaskId, paused: bool) -> StoreResult<()> {
+    pub(crate) fn set_task_deferred(&self, id: &TaskId, deferred: bool) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
         require_task_not_deleted(&tx, &task)?;
         if super::durable::task_state_in(&tx, id)?.is_terminal() {
             return Err(StoreError::InvalidAuthority(
-                "Reopen the Task before changing its pause state".into(),
+                "Reopen the Task before deferring or resuming it".into(),
             ));
         }
         super::planning_write::local(
             &tx,
             &crate::work::edit::WorkEdit::for_target(
                 id.as_str(),
-                &[crate::work::edit::WorkValue::TaskPaused(paused)],
+                &[crate::work::edit::WorkValue::TaskDeferred(deferred)],
             ),
         )?;
         tx.commit()?;
@@ -392,6 +389,8 @@ impl SqliteStore {
                 [id.as_str()],
             )?;
             super::task_state_delivery::queue_in(&tx, id, "unstarted")?;
+            // Reopening withdraws Auto-Ship: the approval ended with the Task.
+            super::task_work::unship_in(&tx, id)?;
             insert_task_event_in(
                 &tx,
                 id,
@@ -931,9 +930,15 @@ impl SqliteStore {
                 ],
             ),
         )?;
-        transaction.execute("UPDATE projects SET pm_snapshot_synced_at=?2,abandon_requested_at=?3,abandon_reason=?4,created_at=?5,updated_at=?6 WHERE id=?1",params![
-            project.id.as_str(),project.pm_snapshot_synced_at,project.abandon_intent.as_ref().map(|i|i.requested_at.unix_timestamp()),
-            project.abandon_intent.as_ref().map(|i|i.reason.as_str()),project.created_at.unix_timestamp(),project.updated_at.unix_timestamp()])?;
+        transaction.execute(
+            "UPDATE projects SET pm_snapshot_synced_at=?2,created_at=?3,updated_at=?4 WHERE id=?1",
+            params![
+                project.id.as_str(),
+                project.pm_snapshot_synced_at,
+                project.created_at.unix_timestamp(),
+                project.updated_at.unix_timestamp()
+            ],
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -1121,19 +1126,31 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 /// evidence still applies; missing inventory cannot erase the saved Task.
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_planning_identity(conn, task)?;
-    let (state, completed): (Option<String>, bool) = conn.query_row(
-        "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
+    let state: Option<String> = conn.query_row(
+        "SELECT COALESCE(planning_state,CASE WHEN planning_completed=1 THEN 'completed' END) FROM tasks WHERE id=?1",
         [task.id.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
+        |row| row.get(0),
     )?;
-    if crate::linear::terminal_reason(state.as_deref(), completed).is_some()
-        && super::durable::task_state_in(conn, &task.id)? != crate::durable::TaskState::Active
-    {
+    // Upstream cancellation stops a Task that hasn't set out; one under way keeps going.
+    if crate::linear::terminal_reason(state.as_deref()).is_some() && !under_way(conn, task)? {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),
         ));
     }
     Ok(())
+}
+
+/// Open, not deferred, and past its Workflow's `start`.
+fn under_way(conn: &Connection, task: &Task) -> StoreResult<bool> {
+    Ok(!matches!(
+        super::durable::task_state_in(conn, &task.id)?,
+        TaskState::Deferred | TaskState::Done | TaskState::Abandoned
+    ) && conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1 \
+             AND NOT (node='start' AND edge IS NULL))",
+        [task.id.as_str()],
+        |row| row.get(0),
+    )?)
 }
 
 /// Planning ownership remains relevant when finishing already completed work.
@@ -1249,15 +1266,14 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
                 Edit::TaskDueDate(task.due_date.clone()),
                 Edit::Disposition(crate::work::edit::Disposition {
                     planning_state: task.state.clone(),
-                    planning_completed: i64::from(task.completed),
+                    planning_completed: i64::from(task.state.as_deref() == Some("completed")),
                     planning_completed_at: task.completed_at.clone(),
                 }),
             ],
         ),
     )?;
-    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,abandon_requested_at=?5,abandon_reason=?6,created_at=?7,updated_at=?8,agent=?9,branch=?10,base_commit=?11,parent_pr_id=?12,checkout_machine_id=?13 WHERE id=?1",params![
+    conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,worktree=?3,workspace_slug=?4,created_at=?5,updated_at=?6,agent=?7,branch=?8,base_commit=?9,parent_pr_id=?10,checkout_machine_id=?11 WHERE id=?1",params![
         task.id.as_str(),task.pm_snapshot_synced_at,task.worktree.as_ref().map(|p|p.display().to_string()),task.workspace_slug,
-        task.abandon_intent.as_ref().map(|i|i.requested_at.unix_timestamp()),task.abandon_intent.as_ref().map(|i|i.reason.as_str()),
         task.created_at.unix_timestamp(),task.updated_at.unix_timestamp(),task.agent,task.branch,task.base_commit,task.parent_pr_id.as_ref().map(TaskPrId::as_str),task.worktree.as_ref().map(|_|super::durable::map_local_machine(conn).map(|m|m.id.to_string())).transpose()?])?;
     Ok(())
 }
@@ -1387,8 +1403,8 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
             AND t.external_issue_id IS NOT NULL
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
         json_object('state','current')),
-    t.project_id, t.abandon_requested_at, t.abandon_reason, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed,t.planning_completed_at,t.repository_id
+    t.project_id, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
+    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id";
 const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -1810,20 +1826,10 @@ fn map_task_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<
     let identifier = short_task_id(conn, &id)
         .map_err(|error| invalid_column(0, error))?
         .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-    let abandon_intent = match (
-        row.get::<_, Option<i64>>(12)?,
-        row.get::<_, Option<String>>(13)?,
-    ) {
-        (Some(requested_at), Some(reason)) => Some(AbandonIntent {
-            requested_at: crate::store::rows::unix_to_datetime(requested_at),
-            reason,
-        }),
-        _ => None,
-    };
     Ok(Task {
         id,
 
-        revision: row.get::<_, i64>(15)? as u64,
+        revision: row.get::<_, i64>(13)? as u64,
         linear_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearIssueId::from_raw),
@@ -1836,23 +1842,21 @@ fn map_task_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
-        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(25)?)
-            .map_err(|error| invalid_column(25, error))?,
+        repository_id: crate::durable::RepositoryId::parse(&row.get::<_, String>(22)?)
+            .map_err(|error| invalid_column(22, error))?,
         worktree: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
         workspace_slug: row.get(6)?,
-        branch: row.get(16)?,
-        base_commit: row.get(17)?,
-        parent_pr_id: row.get::<_, Option<String>>(18)?.map(TaskPrId::from_raw),
-        agent: row.get(14)?,
-        abandon_intent,
+        branch: row.get(14)?,
+        base_commit: row.get(15)?,
+        parent_pr_id: row.get::<_, Option<String>>(16)?.map(TaskPrId::from_raw),
+        agent: row.get(12)?,
         created_at: crate::store::rows::unix_to_datetime(row.get(7)?),
         updated_at: crate::store::rows::unix_to_datetime(row.get(8)?),
-        rank: row.get(19)?,
-        assignee: row.get(20)?,
-        due_date: row.get(21)?,
-        state: row.get(22)?,
-        completed: row.get(23)?,
-        completed_at: row.get(24)?,
+        rank: row.get(17)?,
+        assignee: row.get(18)?,
+        due_date: row.get(19)?,
+        state: row.get(20)?,
+        completed_at: row.get(21)?,
         // Runtime freshness is derived when reconciliation decides whether the
         // durable GitHub observation can be reused.
         observation: crate::work::task::Observation::NotRequired,
@@ -2013,12 +2017,12 @@ pub(super) fn task_events_after_in(
 
 const PROJECT_COLUMNS: &str = "SELECT
     id, external_project_id, project_slug, project_name, description,
-    wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
+    wave_id, pm_snapshot_synced_at,
     created_at, updated_at, status, project_summary, krs, metric_targets
     FROM projects";
 pub(super) const PROJECT_SELECT: &str = "SELECT
     id, external_project_id, project_slug, project_name, description,
-    wave_id, pm_snapshot_synced_at, abandon_requested_at, abandon_reason,
+    wave_id, pm_snapshot_synced_at,
     created_at, updated_at, status, project_summary, krs, metric_targets
     FROM projects WHERE id=?1";
 pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> rusqlite::Result<Project> {
@@ -2026,38 +2030,27 @@ pub(super) fn project_in(conn: &Connection, id: &ProjectId) -> rusqlite::Result<
 }
 
 pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
-    let abandon_intent = match (
-        row.get::<_, Option<i64>>(7)?,
-        row.get::<_, Option<String>>(8)?,
-    ) {
-        (Some(requested_at), Some(reason)) => Some(AbandonIntent {
-            requested_at: crate::store::rows::unix_to_datetime(requested_at),
-            reason,
-        }),
-        _ => None,
-    };
     Ok(Project {
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
 
-        summary: row.get(12)?,
+        summary: row.get(10)?,
         linear_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearProjectId::from_raw),
         slug: row.get(2)?,
         name: row.get(3)?,
         description: row.get(4)?,
-        krs: serde_json::from_str(&row.get::<_, String>(13)?)
-            .map_err(|error| invalid_column(13, error))?,
-        metric_targets: serde_json::from_str(&row.get::<_, String>(14)?)
-            .map_err(|error| invalid_column(14, error))?,
-        pm_snapshot_synced_at: row.get(6)?,
-        status: serde_json::from_value(serde_json::Value::String(row.get(11)?))
+        krs: serde_json::from_str(&row.get::<_, String>(11)?)
             .map_err(|error| invalid_column(11, error))?,
+        metric_targets: serde_json::from_str(&row.get::<_, String>(12)?)
+            .map_err(|error| invalid_column(12, error))?,
+        pm_snapshot_synced_at: row.get(6)?,
+        status: serde_json::from_value(serde_json::Value::String(row.get(9)?))
+            .map_err(|error| invalid_column(9, error))?,
 
         wave_id: row.get(5)?,
-        abandon_intent,
-        created_at: crate::store::rows::unix_to_datetime(row.get(9)?),
-        updated_at: crate::store::rows::unix_to_datetime(row.get(10)?),
+        created_at: crate::store::rows::unix_to_datetime(row.get(7)?),
+        updated_at: crate::store::rows::unix_to_datetime(row.get(8)?),
     })
 }
 
@@ -2566,7 +2559,6 @@ mod local_planning_tests {
         assert_eq!(saved.rank, 7);
         assert_eq!(saved.assignee.as_deref(), Some("assignee-1"));
         assert_eq!(saved.state.as_deref(), Some("completed"));
-        assert!(saved.completed);
         assert_eq!(saved.completed_at.as_deref(), Some("2026-10-10T12:00:00Z"));
         assert_eq!(saved.due_date, task.due_date);
         assert_eq!(saved.worktree, task.worktree);
@@ -2597,7 +2589,6 @@ mod local_planning_tests {
             assert_eq!(imported.assignee, saved.assignee);
             assert_eq!(imported.due_date, saved.due_date);
             assert_eq!(imported.state, saved.state);
-            assert_eq!(imported.completed, saved.completed);
             assert_eq!(imported.completed_at, saved.completed_at);
             assert!(imported.worktree.is_none());
             assert!(peer.task_prs(&task.id).unwrap().is_empty());

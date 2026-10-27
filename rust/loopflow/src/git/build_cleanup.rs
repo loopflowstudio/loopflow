@@ -98,7 +98,7 @@ fn ownership(worktree: &Path, registries: &[PathBuf]) -> Result<()> {
             .context("execution inspection unavailable")?;
         for owner in associated {
             let task = crate::durable::TaskId::parse(&owner.task)?;
-            let blockers = crate::ops::task_automation::task_execution_blockers(&store, &task)
+            let blockers = crate::ops::task_execution::task_execution_blockers(&store, &task)
                 .context("execution inspection unavailable")?;
             if !blockers.is_empty() {
                 bail!("live or unresolved Task execution");

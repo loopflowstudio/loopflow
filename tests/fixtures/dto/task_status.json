@@ -15,7 +15,6 @@
     "assignee": null,
     "due_date": null,
     "state": "unstarted",
-    "completed": false,
     "completed_at": null,
     "linear_id": "issue-gmail",
     "pm_snapshot_synced_at": 1790683200,
@@ -30,7 +29,6 @@
     "base_commit": "",
     "parent_pr_id": null,
     "agent": null,
-    "abandon_intent": null,
     "created_at": [
       2026,
       272,
@@ -72,7 +70,6 @@
     "linear_id": "project-gmail",
     "pm_snapshot_synced_at": 1790683200,
     "wave_id": "11111111-1111-4111-8111-111111111111",
-    "abandon_intent": null,
     "created_at": [
       2026,
       272,

@@ -144,9 +144,8 @@ impl Selection {
                         SelectionState::Open => item.open,
                         _ if item.states.contains(state) => Some(true),
                         SelectionState::Available
-                        | SelectionState::Running
+                        | SelectionState::Busy
                         | SelectionState::Blocked
-                        | SelectionState::Idle
                             if !item.activity_known =>
                         {
                             None
@@ -382,10 +381,14 @@ impl Parser {
             "state" => SelectionFilter::State(match value {
                 "open" => SelectionState::Open,
                 "available" => SelectionState::Available,
-                "running" => SelectionState::Running,
+                "busy" => SelectionState::Busy,
                 "blocked" => SelectionState::Blocked,
-                "paused" => SelectionState::Paused,
+                "unstarted" => SelectionState::Unstarted,
                 "idle" => SelectionState::Idle,
+                "active" => SelectionState::Active,
+                "moving" => SelectionState::Moving,
+                "shipping" => SelectionState::Shipping,
+                "deferred" => SelectionState::Deferred,
                 "backlog" => SelectionState::Backlog,
                 "done" => SelectionState::Done,
                 _ => return Err(invalid(format!("unknown state {value}"))),

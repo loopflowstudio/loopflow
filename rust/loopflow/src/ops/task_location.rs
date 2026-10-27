@@ -48,6 +48,7 @@ async fn observe_peer(
                 request.into(),
                 "--json".into(),
             ],
+            None,
         )
         .await?;
         let [reading]: [TaskLocationObservation; 1] = serde_json::from_slice(&bytes)

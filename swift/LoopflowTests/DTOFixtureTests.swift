@@ -448,6 +448,7 @@ struct DTOFixtureTests {
         let page = try JSONDecoder().decode(SessionPage.self, from: data)
         #expect(page.entries.count == 1)
         #expect(page.entries[0].agentProcessId == "44444444-4444-4444-8444-444444444444")
+        #expect(page.entries[0].account == "work")
         #expect(page.entries[0].programStatus?.summary?.state == .blocked)
         #expect(page.entries[0].programStatus?.summary?.kind == .question)
         #expect(page.entries[0].programStatus?.summary?.msg == "Use **literal** text?")

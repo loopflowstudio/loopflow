@@ -618,14 +618,35 @@ pub fn place(
             super::machine_credentials::require_unattended_logins(&accounts).await
         })?;
     }
-    let (_, machine) = rent(&runtime, sqlite, name, None, None, false)?;
+    let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine
         .label
         .clone()
         .unwrap_or_else(|| machine.id.to_string());
-    prepare(&runtime, &label, repo, sqlite, batch)?;
+    if let Err(error) = prepare(&runtime, &label, repo, sqlite, batch) {
+        // Nothing ran on it yet, so nothing is lost by giving it back now.
+        let cleanup = Sandboxes::from_env(rental.provider)
+            .and_then(|api| delete_sandbox(sqlite, &api, &rental));
+        if let Err(cleanup) = cleanup {
+            eprintln!("{label}: {cleanup:#}");
+        }
+        return Err(error);
+    }
     hand_off(&runtime, repo, issue, &label)?;
     Ok(false)
+}
+
+/// `owner/name` for a GitHub origin in any of its URL forms.
+fn github_repo(origin: &str) -> Option<String> {
+    let path = [
+        "git@github.com:",
+        "ssh://git@github.com/",
+        "https://github.com/",
+    ]
+    .iter()
+    .find_map(|prefix| origin.strip_prefix(prefix))?;
+    let slug = path.trim_end_matches('/').trim_end_matches(".git");
+    (slug.split('/').count() == 2).then(|| slug.to_string())
 }
 
 /// An unowned Task whose Wave or repository names a pool or on-demand goes
@@ -725,11 +746,16 @@ fn prepare(
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow!("{} has no directory name", repo.display()))?;
     let q = super::ssh::sh_quote;
+    // gh clones `owner/name` over HTTPS with the GitHub login just connected;
+    // handed an SSH origin it would use SSH, which a fresh machine cannot verify.
+    let clone = match github_repo(&origin) {
+        Some(slug) => format!("gh repo clone {}", q(&slug)),
+        None => format!("git clone {}", q(&origin)),
+    };
     let script = format!(
-        "{} && mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || gh repo clone {origin} {dir} || git clone {origin} {dir}; }} && cd {dir} && lf repository --bind {id}",
+        "{} && mkdir -p ~/src && cd ~/src && {{ [ -d {dir} ] || {clone} {dir}; }} && cd {dir} && lf repository --bind {id}",
         super::machine::REMOTE_PATH,
         dir = q(directory),
-        origin = q(&origin),
     );
     let status = Command::new("ssh")
         .args(crate::machine_route::bounded_ssh_args(
@@ -1128,7 +1154,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::{end_rental, read_holdings, reconcile, refresh, Ended};
+    use super::{end_rental, github_repo, read_holdings, reconcile, refresh, Ended};
     use crate::durable::MachineId;
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
@@ -1266,6 +1292,21 @@ mod tests {
         assert!(refresh(&store, &api, &rental).unwrap().is_none());
         assert!(deleted(&log));
         assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+    }
+
+    #[test]
+    fn a_github_origin_clones_by_owner_and_name() {
+        for origin in [
+            "git@github.com:loopflowstudio/loopflow.git",
+            "ssh://git@github.com/loopflowstudio/loopflow",
+            "https://github.com/loopflowstudio/loopflow.git",
+        ] {
+            assert_eq!(
+                github_repo(origin).as_deref(),
+                Some("loopflowstudio/loopflow")
+            );
+        }
+        assert_eq!(github_repo("git@gitlab.com:team/repo.git"), None);
     }
 
     #[test]

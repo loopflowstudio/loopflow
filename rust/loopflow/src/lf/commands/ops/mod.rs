@@ -305,8 +305,8 @@ pub(crate) fn run_sync_in(
     if !plan_only {
         crate::git::fetch_tracking_ref(repo_root, target)?;
     }
-    // Classify once, against the tree holding the caller's edits. This plan
-    // runs and is the one the metric records.
+    // Classify against the tree holding the caller's edits. The plan that
+    // runs is the one the metric records.
     let mut plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     if plan_only {
         print_sync_plan(&plan);
@@ -315,6 +315,7 @@ pub(crate) fn run_sync_in(
     // A merge over stashed edits can conflict only when restoring them, after
     // the resolver is gone. Committing them first turns that into an ordinary
     // merge conflict the resolver handles, and the edits never live in a stash.
+    // The checkpoint moves HEAD, so plan again against it.
     if !manual
         && !on_main
         && matches!(plan.strategy, crate::ops::SyncStrategy::MergeTarget)

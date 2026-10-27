@@ -28,14 +28,20 @@ MergeTarget sync, then re-plans so the recorded plan is the one that runs.
 Conflicts become ordinary merge conflicts handled by the existing
 `sync-conflicts` resolver inside the owned sequencer. The index layout is not
 preserved separately: everything the step produced is committed together.
+The checkpoint stages everything except `.lf/tmp/` (telemetry is not work even
+where a repository doesn't ignore it; the parent-sync test caught this).
 
 Unchanged: ResetToBase plans (scratch-only/stale branches) keep their stash
 boundary; `refresh_main` and `restart_landed_branch` keep `with_preserved_edits`;
 `retained_edits` still stops a Task retry when one of those leaves a stash.
 
+## Remaining
+
+- Full sync suite and affected gate (gate).
+- Proposed infrastructure Wave memory (not written; standalone realign): a sync
+  that restores stashed edits after merging fails once the resolver is gone;
+  commit step edits before merging so conflicts reach the resolver.
+
 ## Checks
 
 - `sync_tests::uncommitted_edits_that_conflict_with_main_reach_the_resolver_not_a_stash`, `saved_graph_sync_follows_task_parent…`, two dirty-branch sync tests: pass; clippy clean. Full sync suite left to gate.
-
-The checkpoint stages everything except `.lf/tmp/` (telemetry is not work even
-where a repository doesn't ignore it; the parent-sync test caught this).

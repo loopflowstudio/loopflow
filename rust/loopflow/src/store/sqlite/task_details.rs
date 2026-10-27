@@ -1,6 +1,6 @@
 //! What a plan reads about each of its Tasks, one statement per concern over
 //! every Task in scope, so a reading's cost does not grow a statement per Task.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 
@@ -30,6 +30,10 @@ pub struct TaskDetailFacts {
     pub steers: HashMap<TaskId, Vec<Steer>>,
     /// The name of each Task's own Workflow.
     pub workflow_names: HashMap<TaskId, String>,
+    /// Tasks whose Workflow stands at `end`.
+    pub at_end: HashSet<TaskId>,
+    /// Tasks handed off to Auto-Ship.
+    pub shipped: HashSet<TaskId>,
     pub planning_sync: HashMap<TaskId, PlanningSyncStatus>,
     pub repository_paths: HashMap<RepositoryId, String>,
 }
@@ -100,6 +104,18 @@ impl SqliteStore {
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
+            at_end: task_set(
+                &snapshot,
+                "SELECT task_id FROM task_workflows
+                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND node='end' AND edge IS NULL",
+                &json,
+            )?,
+            shipped: task_set(
+                &snapshot,
+                "SELECT id FROM tasks
+                 WHERE id IN (SELECT value FROM json_each(?1)) AND shipped_at IS NOT NULL",
+                &json,
+            )?,
             planning_sync: super::planning_sync::task_planning_syncs_in(&snapshot, &ids)?,
             repository_paths: repository_paths_in(&snapshot)?,
         };
@@ -116,6 +132,13 @@ fn keyed<K: std::hash::Hash + Eq, V>(
 ) -> StoreResult<HashMap<K, V>> {
     let mut statement = conn.prepare(sql)?;
     let rows = statement.query_map([ids], map)?;
+    rows.collect::<rusqlite::Result<_>>()
+        .map_err(StoreError::from)
+}
+
+fn task_set(conn: &Connection, sql: &str, ids: &str) -> StoreResult<HashSet<TaskId>> {
+    let mut statement = conn.prepare(sql)?;
+    let rows = statement.query_map([ids], |row| Ok(TaskId::from_raw(row.get::<_, String>(0)?)))?;
     rows.collect::<rusqlite::Result<_>>()
         .map_err(StoreError::from)
 }

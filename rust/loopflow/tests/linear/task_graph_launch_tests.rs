@@ -561,13 +561,22 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
 #[test]
 fn failed_placement_is_observed_without_starting_a_task() {
     let task = WorkflowTask::new();
-    let output = task.run(&["--task", "missing-task", "graph", "proof"]);
-    assert!(!output.status.success());
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let parent =
+        loopflow_test_support::RunningParent::insert(&task.home.path().join("loopflow.db"));
+    let output = parent
+        .adopt(&mut command(
+            task.repo.path(),
+            task.home.path(),
+            &["--task", "missing-task", "graph", "proof"],
+        ))
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
     let (cwd, outcome): (String, String) = db
         .query_row(
-            "SELECT cwd,outcome FROM processes ORDER BY rowid DESC LIMIT 1",
-            [],
+            "SELECT cwd,outcome FROM processes WHERE parent_lf_process_id=?1",
+            [&parent.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
@@ -2508,4 +2517,228 @@ fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
         .unwrap_or_else(|| panic!("no failed shipping reason in {shown}"));
     assert!(reason.starts_with("agent exited with code 1"), "{reason}");
     assert!(reason.ends_with("; retrying within a minute"), "{reason}");
+}
+
+/// The Process now carrying the Task's Auto-Ship approval.
+fn ship_carrier(task: &WorkflowTask) -> Option<String> {
+    rusqlite::Connection::open(task.home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT ship_lf_process_id FROM tasks WHERE id=?1",
+            [task.registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn task_ship_takes_up_a_graph_at_a_multi_route_stage_and_stands_in() {
+    let task = shipping_task();
+    // From review: back through proof, or on to `end`.
+    task.repo.create_file(
+        ".lf/graphs/reviewed.yaml",
+        "- graph: proof\n- loop: proof\n  interactive: {name: demo, id: review}\n",
+    );
+    task.ok(&["-b", "task", "run", "INF-123", "reviewed"]);
+    assert_eq!(task.workflow()["position"], at("review"));
+    // A release migration dropped the captured Workflow and kept its history.
+    rusqlite::Connection::open(task.home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "DELETE FROM task_workflows WHERE task_id=?1",
+            [task.registered.task.id.as_str()],
+        )
+        .unwrap();
+    assert!(task.workflow().is_null());
+    let output = task.run(&["-b", "ship", "INF-123", "--graph", "reviewed"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Taken up again at review, where the stand-in chose the route on.
+    let turns = stand_ins(&task);
+    assert_eq!(turns.len(), 1);
+    assert!(turns[0].contains("at review"), "{}", turns[0]);
+    assert_eq!(task.state(), "done");
+    let workflow = task.workflow();
+    assert_eq!(workflow["position"], at("end"));
+    let history = workflow["history"].as_array().unwrap();
+    assert_eq!(
+        moves(&workflow),
+        [
+            ("took_up".into(), None),
+            ("chose".into(), Some(0)),
+            ("arrived".into(), Some(0)),
+            ("took_up".into(), None),
+            ("chose".into(), Some(2)),
+        ]
+    );
+    assert_eq!(history[3]["to"], "review");
+    // proof ran once; nothing before review ran again.
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+}
+
+#[test]
+fn task_ship_delivers_an_unmerged_pr_left_at_end() {
+    let task = shipping_task();
+    task.repo
+        .create_file(".lf/graphs/final.yaml", "- graph: proof\n");
+    let hold = hold_script(task.home.path(), true);
+    task.repo.create_file(
+        ".lf/graphs/deliver.yaml",
+        &format!("- cmd: session serve -- python3 {}\n", hold.display()),
+    );
+    task.select_workflow("final");
+    task.publish(false);
+    // The route into `end` approved running it; completion was refused unmerged.
+    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "final"]));
+    assert!(task.status()["completion_pending"].is_string(), "{error}");
+    assert_eq!(task.workflow()["position"], at("end"));
+    assert!(ship_carrier(&task).is_some());
+    // Automatic restart recovers that approval with its authority: it grants
+    // no landing, so shipping ends with the reason instead of delivering.
+    let restart = task.run(&["-b", "--task", "INF-123", "ship", "--recover"]);
+    let stdout = String::from_utf8_lossy(&restart.stdout);
+    assert!(restart.status.success(), "{stdout}");
+    assert!(stdout.contains("Shipping reached end"), "{stdout}");
+    assert!(
+        stdout.contains("`lf ship INF-123` hands PR #42 off"),
+        "{stdout}"
+    );
+    assert_eq!(ship_carrier(&task), None);
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    assert_ne!(task.state(), "done");
+    let published = task.workflow();
+    assert_eq!(
+        published["history"].as_array().unwrap().last().unwrap()["workflow"],
+        "final"
+    );
+
+    // Someone hands it off with `lf ship`: that grants landing the PR.
+
+    let log_path = task.home.path().join("ship.log");
+    let mut held = HeldGraph {
+        child: command(
+            task.repo.path(),
+            task.home.path(),
+            &["-b", "--task", "INF-123", "ship"],
+        )
+        .stdin(std::process::Stdio::null())
+        .stdout(fs::File::create(&log_path).unwrap())
+        .stderr(fs::File::create(task.home.path().join("ship.err")).unwrap())
+        .spawn()
+        .unwrap(),
+        release: task.home.path().join("release"),
+        caller: task.home.path().join("unused"),
+    };
+    wait_for("deliver to start", || {
+        task.home.path().join("ready").exists()
+    });
+    let delivering = task.workflow();
+    assert_eq!(
+        delivering["history"].as_array().unwrap().last().unwrap()["workflow"],
+        "deliver"
+    );
+    // Never completed before its merge.
+    assert_ne!(task.state(), "done");
+    task.publish(true);
+    fs::write(&held.release, "").unwrap();
+    assert!(
+        held.child.wait().unwrap().success(),
+        "{}",
+        fs::read_to_string(task.home.path().join("ship.err")).unwrap()
+    );
+    assert_eq!(task.state(), "done");
+    assert_eq!(
+        moves(&task.workflow()),
+        [
+            ("took_up".into(), None),
+            ("chose".into(), Some(0)),
+            ("arrived".into(), Some(0)),
+            ("took_up".into(), None),
+            ("chose".into(), Some(0)),
+            ("arrived".into(), Some(0)),
+        ]
+    );
+    // final's proof is not replayed; deliver ran once.
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    assert!(stand_ins(&task).is_empty());
+}
+
+#[test]
+fn task_ship_restart_that_fails_becomes_the_carrier() {
+    let task = WorkflowTask::with_tools(&[("claude", FAILING_CLAUDE)]);
+    connect_fixture_claude(task.home.path(), &task.registered.store);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(
+            task.registered
+                .store
+                .set_task_agent(&task.registered.task.id, "claude"),
+        )
+        .unwrap();
+    assert!(!task
+        .run(&["-b", "--task", "INF-123", "ship"])
+        .status
+        .success());
+    let first = ship_carrier(&task).expect("the first ship carried it");
+    let workflow = task.workflow();
+    // A restart that fails before running anything carries its own failure.
+    let error = refusal(task.run(&["-b", "ship", "INF-123", "--graph", "no-such-graph"]));
+    assert!(error.contains("no-such-graph"), "{error}");
+    let second = ship_carrier(&task).expect("the restart carries it");
+    assert_ne!(second, first);
+    assert_eq!(task.state(), "idle");
+    assert_eq!(handoffs(&task).len(), 1);
+    assert_eq!(task.workflow(), workflow);
+}
+
+#[test]
+fn task_ship_leaves_a_live_edge_graph_alone() {
+    let task = shipping_task();
+    let hold = hold_script(task.home.path(), true);
+    task.repo.create_file(
+        ".lf/graphs/proof.yaml",
+        &format!("- cmd: session serve -- python3 {}\n", hold.display()),
+    );
+    let mut held = HeldGraph {
+        child: command(
+            task.repo.path(),
+            task.home.path(),
+            &["-b", "task", "run", "INF-123"],
+        )
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap(),
+        release: task.home.path().join("release"),
+        caller: task.home.path().join("unused"),
+    };
+    wait_for("the edge Graph", || task.home.path().join("ready").exists());
+    let before = task.workflow();
+    assert_eq!(before["position"]["running"], true);
+    let output = task.run(&["-b", "--task", "INF-123", "ship"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{stdout}");
+    assert!(stdout.contains("INF-123 is already shipping"), "{stdout}");
+    // Approved and carried by the edge's Graph; nothing else started.
+    assert_eq!(
+        ship_carrier(&task).as_deref(),
+        before["position"]["lf_process_id"].as_str()
+    );
+    assert_eq!(task.state(), "shipping");
+    assert_eq!(task.workflow(), before);
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    assert!(stand_ins(&task).is_empty());
+    // Once that Graph arrives, the next read ships on from review.
+    fs::write(&held.release, "").unwrap();
+    assert!(held.child.wait().unwrap().success());
+    task.ok(&["task", "list"]);
+    wait_for("the ship to reach end", || {
+        task.workflow()["position"] == at("end")
+    });
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(handoffs(&task).len(), 1);
 }

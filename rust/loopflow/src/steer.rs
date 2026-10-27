@@ -37,6 +37,23 @@ pub struct SteerAdapter {
     pub capability: String,
 }
 
+/// Where a provider context callback fires, which decides whether it may move
+/// the Session's selected native conversation.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum NativeBoundary<'a> {
+    /// The provider declares the conversation it now runs (Claude/Codex
+    /// `SessionStart`: startup, resume, clear, compact).
+    Select {
+        source: &'a str,
+    },
+    /// Fires on every request, including subagents', so it only fills a
+    /// missing selection (OpenCode transforms, Pi).
+    Activate {
+        source: &'a str,
+    },
+    Turn,
+}
+
 impl std::fmt::Debug for SteerAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SteerAdapter")

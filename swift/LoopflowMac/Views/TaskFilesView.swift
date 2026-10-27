@@ -199,7 +199,7 @@ struct TaskFilesView: View {
             if store.page == .files, let document = store.selectedDocument, document.snapshot?.state == .text {
                 Button {
                     Task {
-                        await document.save(issue: store.issue, cwd: store.cwd, query: store.query)
+                        await document.save(issue: store.issue, query: store.query)
                         await store.refresh()
                     }
                 } label: {

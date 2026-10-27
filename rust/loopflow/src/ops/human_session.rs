@@ -24,6 +24,7 @@ use crate::store::SharedStore;
 use crate::work::task::Task;
 
 pub(crate) mod conversation_log;
+pub(crate) mod moves;
 pub(crate) mod primary;
 pub(crate) mod restore;
 pub(crate) use primary::ensure_scope_worktree;
@@ -340,6 +341,9 @@ pub struct SessionRecord {
     /// The provider its current input launched with; absent until a review's
     /// first launch records one.
     pub provider: Option<String>,
+    /// The login its conversation is pinned to; absent for a shared or
+    /// unrouted conversation.
+    pub account: Option<crate::store::ProviderAccountId>,
     pub cwd: String,
     pub state: SessionState,
     pub ready_summary: Option<String>,
@@ -582,6 +586,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
             .as_ref()
             .map_or(provider.clone(), |model| format!("{provider}:{model}")),
         provider: session.provider.clone(),
+        account: session.account.clone(),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -778,8 +783,38 @@ pub(crate) async fn open(
         session
     };
     drop(progress);
+    // Naming another login moves the conversation: its agent on the old login
+    // stops, and it relaunches here rather than attaching to that one.
+    let moving = match (&provider_session, session.provider.as_deref()) {
+        (Some(native), Some(provider)) if resume => match provider.parse() {
+            Ok(provider) => {
+                crate::provider_account::names_another_account(
+                    store,
+                    provider,
+                    &native.agent_session,
+                )
+                .await?
+            }
+            Err(_) => false,
+        },
+        _ => false,
+    };
+    // An agent that already exited, whose identity was never recorded, has
+    // nothing to stop.
+    let running = || -> Result<bool> {
+        Ok(store
+            .sqlite
+            .session_attachment(&session.id)?
+            .is_some_and(|attachment| {
+                crate::journal::process_evidence(&store.sqlite, &attachment.agent_process_id)
+                    == crate::journal::ProcessIdentityEvidence::Live
+            }))
+    };
+    if moving && running()? {
+        crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+    }
     if resume {
-        if session.interactive {
+        if session.interactive && !moving {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
                     && owner_running(&store.sqlite, &owner)?
@@ -1044,7 +1079,7 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 }
 
 /// A Session as its row and its current input describe it.
-async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionRecord> {
+pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionRecord> {
     let work = match (&session.task_id, &session.wave_id) {
         (Some(task), _) => Some(WorkRef::Task(task.clone())),
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
@@ -1107,6 +1142,7 @@ async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionReco
         graph_membership,
         detail: launch_model(session),
         provider: session.provider.clone(),
+        account: metadata.account.clone(),
         cwd: session.cwd.display().to_string(),
         state,
         ready_summary: session.ready_summary.clone(),
@@ -1255,8 +1291,8 @@ pub(crate) async fn spawn_session_process(
     };
     let database = crate::store::database_path_from_env()?;
     // Capture the child before it parses arguments. Its own Session recorder may
-    // never start; the opening Process must retain enough evidence to diagnose it.
-    // Arguments and environment values can contain prompts or credentials.
+    // never start; the opening command's error must carry enough evidence to
+    // diagnose it. Arguments and environment values can contain prompts or credentials.
     let launch = format!(
         "Session input {artifact_key}: executable {} (sha256 {digest}), cwd {}, Machine {}, database {}",
         executable.display(),
@@ -1771,6 +1807,7 @@ mod tests {
             cwd: "/unavailable".into(),
             skill: Some("review".into()),
             provider: None,
+            account: None,
             model: None,
             node: Some(2),
             iterations: None,

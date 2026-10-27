@@ -70,14 +70,7 @@ pub fn resolve_selection(selection: &str) -> Result<PathBuf> {
             !selection.is_empty() && !selection.contains('/'),
             "repository names must be a single name; use ./ or an absolute path for {selection:?}"
         );
-        let root = crate::config::repository_root()?.unwrap_or_else(|| "~/src".into());
-        let root = expand_home(&root)?;
-        anyhow::ensure!(
-            root.is_absolute(),
-            "repo_root must be absolute or start with ~/: {}",
-            root.display()
-        );
-        root.join(selection)
+        checkouts_root()?.join(selection)
     };
     let path = if path.is_absolute() {
         path
@@ -87,6 +80,18 @@ pub fn resolve_selection(selection: &str) -> Result<PathBuf> {
     discover_repo_root(&path)
         .with_context(|| format!("resolve repository {}", path.display()))?
         .ok_or_else(|| anyhow!("not a Git repository: {}", path.display()))
+}
+
+/// Where named checkouts live: `repo_root`, else `~/src`.
+pub fn checkouts_root() -> Result<PathBuf> {
+    let root = crate::config::repository_root()?.unwrap_or_else(|| "~/src".into());
+    let root = expand_home(&root)?;
+    anyhow::ensure!(
+        root.is_absolute(),
+        "repo_root must be absolute or start with ~/: {}",
+        root.display()
+    );
+    Ok(root)
 }
 
 fn expand_home(path: &Path) -> Result<PathBuf> {

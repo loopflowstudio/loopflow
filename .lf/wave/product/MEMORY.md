@@ -41,15 +41,13 @@
 Jack folded LOO-430/431/432 into LOO-427: identity, window
 control and terminal I/O in one diff.
 
-October 8: LOO-427 leaves unknown checkout location unavailable. `92cafe61d`
-removes copied placements, preserves legacy overrides and routes known Tasks
-without rewriting Machine defaults. Gate retains placement suites;
-seeded IDs prove routing, not exchange/admission.
+October 8: LOO-427 leaves unknown checkout location unavailable; `92cafe61d`
+routes known Tasks without rewriting Machine defaults. Seeded IDs prove routing,
+not exchange/admission.
 
 `desktop text/key` reuse existing owners: Jack selected cursor insertion into
 drafts with Enter separate; control-text/IME limits are reversible. Verified lf3
-enables bounded reads. Headless builds skip native I/O diagnostics;
-extraction/input remains unproved. Reads grant no input authority.
+enables bounded reads; extraction/input remains unproved. Reads grant no input authority.
 
 Jack's October 8 API: `--context` previews input, `--explain` is broader,
 `--chrome` controls execution. Root `run`, `--max-turns` and `--no-loopflow` are
@@ -59,7 +57,7 @@ Sessions use `connect`. October 9 local Task/Session-plus-Changes opening bypass
 execution routing and CLI preparation. Session/companion intent travels together; a partial Session inventory must not
 retire other panes. Opening generations follow Session/Files/pane readiness and failures. Wave-owned `show`, `workflow` and `edit-plan` replace root roadmap/Project locally;
 retained Project IDs and the snapshot/writer owners survive. Desktop sends Wave identity.
-Flow previews expose initial input; future/loop input stays unavailable. Broader explanation remains. Discord is unchanged;
+Flow previews expose initial input; future/loop input stays unavailable. Discord is unchanged;
 `--steers-after` filters nodes, not restarts.
 `repo_root` (default `~/src`) and paths resolve on the selected Machine, never as
 portable identity; remembered names remain open. Scoped IDs survive dispatch.
@@ -220,15 +218,12 @@ Jack authorized shipping #1499 October 9; native acceptance was not established.
 Observed provider conflicts win; matching readback does not guarantee atomic writes
 against an unseen reopening. LOO-385 overlap does not establish closure.
 
-## Terminal-host adoption (2026-10-07)
+## Historical pointers
 
-Jack Heart authorized landing after cmux/herdr trials, without full adoption proof.
-LOO-421's failures and limits: `27613222eb:.lf/wave/product/MEMORY.md`, this heading.
-
-## Live Home reconciliation
-
-LOO-380 proof and unresolved LOO-367/366/343/test-Wave findings:
-`314095b00:wave/product/MEMORY.md`, this heading. Unrechecked; no new cleanup authority.
+- Terminal-host adoption (2026-10-07): Jack Heart authorized landing after cmux/herdr
+  trials without full adoption proof; LOO-421 limits at `27613222eb`, same file.
+- LOO-380 Live Home proof, unresolved LOO-367/366/343/test-Wave findings:
+  `314095b00:wave/product/MEMORY.md`; no cleanup authority.
 
 ## Reactive workspace (2026-10-05)
 
@@ -662,14 +657,17 @@ cross-machine continuity remain unproved with 416.
 Pane ownership follows Task.repository_id, not optional Project/Wave membership;
 leaving a Project must preserve the same saved panes and drafts.
 
-October 15, LOO-492: Jack Heart clarified that nested corner curves need even
-clearance; text padding alone does not satisfy the defect. The implementation
-derives workspace radius from pane radius plus inset. Terminal clearance sits
-outside Ghostty's measurement; native grid padding remains because block hit
-testing shares it. Focused headless checks cover radius/inset relationships,
-not the conditional outer stroke or native frames. Geometry proof with visible
-workspace borders and visual acceptance remain pending. AGENTS.md records the
-ViewInspector Observation limitation; fallback builds do not prove Ghostty behavior.
+October 15, LOO-492: Jack Heart required even nested-corner clearance; text
+padding alone is insufficient. Lower workspace radii derive from pane radius
+plus inset. Terminal clearance stays outside Ghostty's measurement; native grid
+padding remains for block hit testing. October 26, LOO-608: Jack requested square
+top corners and a shadow-like fading edge. The October 27 implementation replaces
+the hard workspace stroke with a noninteractive blurred theme-shadow stroke;
+its tuning awaits demo. Headless tests cover both square top radii, matching lower
+radii and at least five points between pane outlines and the workspace clip.
+Fading decoration no longer defines clearance. Light/Dark split-axis cases prove
+geometry, not rendered shadow quality or native terminal continuity; visual
+acceptance remains pending. Fallback builds do not prove Ghostty behavior.
 
 LOO-298/299/300 retain their historical allocations; the archive does not close
 them. Rust owns grouping and binding; September 30's primary repo conversation

@@ -240,7 +240,8 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
          AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         p.started_at,
-        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0)
+        COALESCE((SELECT o.viewed=0 FROM processes o WHERE o.id=a.transport_lf_process_id AND o.completed_at IS NULL),0),
+        (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread)
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
@@ -347,6 +348,11 @@ fn read_summary(
             cwd: row.get::<_, String>(10)?.into(),
             skill: row.get(11)?,
             provider: row.get(12)?,
+            account: row
+                .get::<_, Option<String>>(39)?
+                .map(|id| crate::store::ProviderAccountId::parse(&id))
+                .transpose()
+                .map_err(invalid)?,
             model: row.get(13)?,
             node: row.get(14)?,
             iterations: row
@@ -1179,19 +1185,6 @@ impl SqliteStore {
         primary_session_in(&conn, scope)
     }
 
-    /// Complete the scope's primary here without a successor; the scope's
-    /// conversation now lives on another Machine.
-    pub(crate) fn complete_primary_session(
-        &self,
-        scope: &PrimaryScope,
-    ) -> StoreResult<Option<LfSession>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = complete_primary_session_in(&tx, scope)?;
-        tx.commit()?;
-        Ok(current)
-    }
-
     /// Find the scope's uncompleted primary, or admit `session` as it. When the
     /// current primary is `replacing`, complete it and admit its successor in
     /// the same transaction; a repeat naming a replaced predecessor finds the
@@ -1478,6 +1471,89 @@ impl SqliteStore {
         let session = session_in(&tx, id)?.ok_or(StoreError::NotFound)?;
         rename_session_in(&tx, &session, title, source, None)?;
         tx.commit()?;
+        Ok(())
+    }
+
+    /// The Session continues on `machine`: complete it here, naming where it went.
+    pub(crate) fn complete_moved_session(
+        &self,
+        id: &str,
+        machine: &crate::durable::MachineId,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let updated = conn.execute(
+            "UPDATE agent_sessions SET completed_at=COALESCE(completed_at,?3),moved_to_machine_id=?2 WHERE id=?1",
+            params![id, machine.as_str(), crate::store::rows::now_unix()],
+        )?;
+        if updated != 1 {
+            return Err(StoreError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// The Machine a Session here moved to; `None` when it never left.
+    pub fn session_moved_to(&self, id: &str) -> StoreResult<Option<crate::durable::MachineId>> {
+        let canonical = crate::id::canonical_session(id);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT moved_to_machine_id FROM agent_sessions WHERE id=?1",
+            [canonical.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .map(|machine| crate::durable::MachineId::parse(&machine).map_err(invalid))
+        .transpose()
+    }
+
+    /// Where a Task's conversation went when it moved without its Task: the
+    /// latest of its Sessions that moved, while none is open here.
+    pub fn task_conversation_moved_to(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<Option<(String, crate::durable::MachineId)>> {
+        let ids = super::task_work::session_ids("?1");
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            &format!(
+                "SELECT id,moved_to_machine_id FROM agent_sessions
+                 WHERE id IN ({ids}) AND moved_to_machine_id IS NOT NULL
+                 AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE id IN ({ids}) AND completed_at IS NULL)
+                 ORDER BY completed_at DESC LIMIT 1"
+            ),
+            [task.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+        .map(|(id, machine)| {
+            Ok((
+                id,
+                crate::durable::MachineId::parse(&machine).map_err(invalid)?,
+            ))
+        })
+        .transpose()
+    }
+
+    /// `repository` or `wave` for a scope's ongoing conversation.
+    pub(crate) fn session_primary_scope(&self, id: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT primary_scope FROM agent_sessions WHERE id=?1",
+                [id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    /// A Session that moved away comes back: open again, in `cwd`.
+    pub(crate) fn reopen_moved_session(&self, id: &str, cwd: &Path) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "UPDATE agent_sessions SET completed_at=NULL,moved_to_machine_id=NULL,cwd=?2 WHERE id=?1",
+            params![id, cwd.to_string_lossy()],
+        )?;
         Ok(())
     }
 }

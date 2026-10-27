@@ -61,6 +61,11 @@ fetching. That reference may be stale, and merged source may be newer than the
 latest published release. `lf install` installs that published release; Doctor
 itself installs nothing.
 
+Contention reads the last day of `logs/lf.log`: `database is locked` failures
+and any write that held the store lock for 3 s or more, grouped by the lf
+binary that logged them, with the holder's pids and the function that held the
+lock. Lines from binaries older than this check group as `unidentified (older lf)`.
+
 ## A Task stopped advancing
 
 **Symptom:** the Task is not done, but nothing is moving, or its agent
@@ -153,10 +158,15 @@ lf disk clean              # remove it; each removal is logged to ~/.lf/logs/dis
 ```
 
 `lf disk clean` removes worktrees `lf wt prune` would, finished Tasks' build
-output, dead process receipts, every database backup but the newest, and
-captures and logs older than `--keep-days` (7). The database, account homes, the
-newest backup, anything written in the last day and anything a process holds
-open are never removed.
+output, dead process receipts, every database backup but the newest,
+captures and logs older than `--keep-days` (7), and snapshot staging
+directories a killed draft build left in `~/.lf/copies`, however recent.
+It also forgets finished
+Processes nothing needs: every lf process is listed while it runs, and at exit
+its row goes unless an agent issued it, its parent is still running, or
+something references it. The database, account homes, the newest backup,
+anything else written in the last day and anything a process holds open are
+never removed.
 
 Starting a Session rotates `~/.lf` at most hourly: backups, draft store copies,
 captures and logs older than 30 days go, the same window Claude Code keeps its

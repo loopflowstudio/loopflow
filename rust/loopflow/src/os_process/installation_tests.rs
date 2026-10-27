@@ -349,6 +349,7 @@ fn selection(binary: &Path, database: &Path) -> ActiveInstall {
         source: InstallSource::Published,
         source_revision: "fixture".into(),
         source_identity: "fixture".into(),
+        build_label: None,
         content_sha256: installation::artifact_set_sha256(binary, None, None).unwrap(),
         artifacts: vec![artifact],
     };

@@ -96,10 +96,10 @@ fn task_link_resolves_by_folder_name_without_preparing_anything() {
     ));
     let link = &links[0];
     assert_eq!(link["url"], url.as_str());
-    assert_eq!(link["label"], "INF-123 · Prove Task PR transitions");
+    assert_eq!(link["label"], "Prove Task PR transitions · INF-123");
     assert_eq!(
         link["markdown"],
-        format!("[INF-123 · Prove Task PR transitions]({url})").as_str()
+        format!("[Prove Task PR transitions · INF-123]({url})").as_str()
     );
     assert_eq!(
         link["fallback_argv"],
@@ -120,7 +120,7 @@ fn task_link_resolves_by_folder_name_without_preparing_anything() {
         !text.contains('\x1b'),
         "piped text carries no escapes: {text:?}"
     );
-    assert!(text.starts_with("INF-123 · Prove Task PR transitions  lf open "));
+    assert!(text.starts_with("Prove Task PR transitions · INF-123  lf open "));
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn standalone_task_link_resolves_by_folder_name() {
     assert_eq!(links[0]["target"]["task_id"], created["id"]);
     assert_eq!(
         links[0]["label"],
-        format!("{identifier} · Stand alone").as_str()
+        format!("Stand alone · {identifier}").as_str()
     );
 }
 
@@ -231,7 +231,7 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
     let bin = tempfile::tempdir().unwrap();
     let _env = EnvGuard::with_lf_home(&[], home.path());
     let registered = register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    // The Task waits at explore: the workspace name says so.
+    // The Task waits at explore; its workspace name stays the Task title.
     let graph = serde_json::json!({"name": "feature", "steps": [{"Skill": {"skill": {"name": "explore"}, "id": null, "interactive": true, "returns": null, "sources": []}}]});
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
@@ -254,9 +254,7 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
     assert_eq!(receipt["destination"], "workspace:7");
     let call = std::fs::read_to_string(log).unwrap();
     assert!(
-        call.starts_with(
-            "workspace create --name INF-123 · Prove Task PR transitions · Explore --cwd "
-        ),
+        call.starts_with("workspace create --name Prove Task PR transitions · INF-123 --cwd "),
         "{call}"
     );
     assert!(
@@ -299,7 +297,7 @@ fn herdr_types_connect_into_a_newly_created_pane() {
     let calls: Vec<&str> = calls.lines().collect();
     assert!(calls[0].starts_with("workspace create --cwd "), "{calls:?}");
     assert!(
-        calls[0].ends_with("--label INF-123 · Prove Task PR transitions --focus"),
+        calls[0].ends_with("--label Prove Task PR transitions · INF-123 --focus"),
         "{calls:?}"
     );
     assert!(calls[1].starts_with("pane run w9:p1 "), "{calls:?}");
@@ -331,7 +329,7 @@ fn tmux_opens_a_named_window_after_the_callers() {
     let call = std::fs::read_to_string(log).unwrap();
     assert!(
         call.starts_with(
-            "new-window -a -t %3 -P -F #{pane_id} -n INF-123 · Prove Task PR transitions -c "
+            "new-window -a -t %3 -P -F #{pane_id} -n Prove Task PR transitions · INF-123 -c "
         ),
         "{call}"
     );
@@ -359,7 +357,7 @@ fn refused_host_reports_cause_and_the_usable_command() {
     assert!(!output.status.success());
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(
-        text.contains("Could not open INF-123 · Prove Task PR transitions: cmux"),
+        text.contains("Could not open Prove Task PR transitions · INF-123: cmux"),
         "{text}"
     );
     assert!(text.contains(&format!("Run: lf open {url}")), "{text}");

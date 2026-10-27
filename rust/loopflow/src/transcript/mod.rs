@@ -229,6 +229,51 @@ pub(crate) fn transcript(harness: HarnessKind, home: &Path, id: &str) -> Option<
     })
 }
 
+/// Copy conversation `id`'s transcript from home `from` into home `to` at the
+/// same place, with Claude's sibling `<id>/` directory, so the provider
+/// resumes it there. A copy at `to` at least as new as `from`'s is kept.
+/// `None` when `from` holds no transcript of `id`.
+pub(crate) fn copy_between(
+    harness: HarnessKind,
+    id: &str,
+    from: &Path,
+    to: &Path,
+) -> Result<Option<PathBuf>> {
+    let Some(source) = transcript(harness, from, id) else {
+        return Ok(None);
+    };
+    let relative = source
+        .strip_prefix(from)
+        .expect("a transcript is found under its home");
+    let target = to.join(relative);
+    if modified(&target) >= modified(&source) {
+        return Ok(Some(target));
+    }
+    copy_entry(&source, &target)?;
+    let sibling = source.with_extension("");
+    if harness == HarnessKind::Claude && sibling.is_dir() {
+        copy_entry(&sibling, &target.with_extension(""))?;
+    }
+    Ok(Some(target))
+}
+
+fn copy_entry(source: &Path, target: &Path) -> Result<()> {
+    if source.is_dir() {
+        fs::create_dir_all(target).with_context(|| format!("create {}", target.display()))?;
+        for entry in fs::read_dir(source)? {
+            let entry = entry?;
+            copy_entry(&entry.path(), &target.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    fs::copy(source, target)
+        .with_context(|| format!("copy {} to {}", source.display(), target.display()))?;
+    Ok(())
+}
+
 /// A transcript file and when it was last written, in Unix seconds.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Indexed {
@@ -544,6 +589,35 @@ mod tests {
         let found = transcript(HarnessKind::Claude, home.path(), ID).unwrap();
         assert_eq!(recorded_cwd(&found), Some(PathBuf::from("/work/repo")));
         assert_eq!(scan(HarnessKind::Claude, home.path())[ID].path, found);
+    }
+
+    #[test]
+    fn a_copied_transcript_lands_at_the_same_place_and_never_replaces_a_newer_one() {
+        let from = tempfile::tempdir().unwrap();
+        let to = tempfile::tempdir().unwrap();
+        let project = from.path().join("projects/-work-repo");
+        fs::create_dir_all(project.join(format!("{ID}/subagents"))).unwrap();
+        fs::write(project.join(format!("{ID}.jsonl")), "{\"type\":\"user\"}\n").unwrap();
+        fs::write(project.join(format!("{ID}/subagents/a.jsonl")), "{}\n").unwrap();
+
+        let copied = copy_between(HarnessKind::Claude, ID, from.path(), to.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            copied,
+            to.path().join(format!("projects/-work-repo/{ID}.jsonl"))
+        );
+        assert!(to
+            .path()
+            .join(format!("projects/-work-repo/{ID}/subagents/a.jsonl"))
+            .is_file());
+
+        fs::write(&copied, "newer\n").unwrap();
+        copy_between(HarnessKind::Claude, ID, from.path(), to.path()).unwrap();
+        assert_eq!(fs::read_to_string(&copied).unwrap(), "newer\n");
+        assert!(copy_between(HarnessKind::Codex, ID, from.path(), to.path())
+            .unwrap()
+            .is_none());
     }
 
     #[test]

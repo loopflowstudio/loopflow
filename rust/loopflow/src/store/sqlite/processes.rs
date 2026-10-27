@@ -21,6 +21,28 @@ pub(super) const PROCESS_SELECT: &str =
     e.caller_agent_process_id,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
+/// A finished `lf` Process nothing needs any more, over alias `p`: no agent
+/// issued it, no running parent may still read its result, and no row
+/// references it. Exit and prune both forget exactly these rows. Agent-side
+/// references (steers, Session activity, `caller_agent_process_id`) name only
+/// `kind='agent'` rows, which are never forgotten.
+pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
+    AND p.via_agent IS NOT 1
+    AND NOT EXISTS(SELECT 1 FROM processes r WHERE r.id=p.parent_lf_process_id AND r.completed_at IS NULL)
+    AND NOT EXISTS(SELECT 1 FROM processes c WHERE c.parent_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM processes a WHERE a.kind='agent' AND a.attached_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM session_events WHERE lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM task_workflow_moves WHERE lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)";
+
 pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfProcess> {
     Ok(LfProcess {
         id: row.get(0)?,
@@ -2334,5 +2356,124 @@ mod attachment_tests {
         assert_eq!(retained.pid, Some(4242));
         assert_eq!(retained.parent_lf_process_id, Some(a));
         assert!(retained.completed_at.is_some());
+    }
+}
+
+#[cfg(test)]
+mod forget_tests {
+    use rusqlite::params;
+
+    use crate::id::{LfProcessId, TraceId};
+    use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn an_exit_forgets_the_process_unless_something_still_needs_it() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let session = store.test_session("session", &crate::session_record::new_artifact_key());
+        let start = |parent: Option<&LfProcessId>, via_agent: bool| {
+            let process = crate::process::LfProcess {
+                id: LfProcessId::new(),
+                pid: None,
+                kind: crate::process::ProcessKind::Lf,
+                agent_session_id: None,
+                os_started_at: None,
+                trace_id: TraceId::new(),
+                parent_lf_process_id: parent.cloned(),
+                via_agent: Some(via_agent),
+                caller_session_id: None,
+                caller_agent_process_id: None,
+                command: None,
+                repo: None,
+                cwd: None,
+                started_at: 1,
+                completed_at: None,
+                outcome: None,
+                exit_code: None,
+                signal: None,
+                error: None,
+            };
+            store.record_process(&process).unwrap();
+            process
+        };
+        let finish = |process: &crate::process::LfProcess| {
+            store
+                .record_process(&crate::process::LfProcess {
+                    completed_at: Some(2),
+                    outcome: Some("succeeded".into()),
+                    ..process.clone()
+                })
+                .unwrap();
+        };
+        let kept = |process: &crate::process::LfProcess| {
+            store.process_is_recorded(process.id.as_str()).unwrap()
+        };
+
+        let human = start(None, false);
+        let agent_issued = start(None, true);
+        let graph = start(None, false);
+        let step = start(Some(&graph.id), false);
+        let narrated = start(None, false);
+        let holder = start(None, false);
+        let running_child = start(Some(&holder.id), false);
+        let shipper = start(None, false);
+        let task = crate::durable::TaskId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/repo").unwrap(),
+                id: task.clone(),
+                project_id: None,
+                title: "Shipped Task".into(),
+                description: "Brief".into(),
+                due_date: None,
+            })
+            .unwrap();
+        store.ship_task(&task, &shipper.id, "proof", false).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,lf_process_id)
+                 VALUES(?1,'observed','narrated',1,'{}',?2)",
+                params![session.id, narrated.id],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'g','{}')",
+                [&graph.id],
+            )
+            .unwrap();
+        }
+        for process in [&human, &agent_issued, &step, &narrated, &holder, &shipper] {
+            finish(process);
+        }
+        assert!(kept(&shipper), "the Task names its ship process");
+        assert!(!kept(&human));
+        assert!(kept(&agent_issued));
+        assert!(kept(&narrated));
+        // A running Graph may still read its step's result.
+        assert!(kept(&step));
+        assert!(kept(&holder), "a running child names it");
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+                 VALUES(?1,?2,0,'{}')",
+                [&graph.id, &step.id],
+            )
+            .unwrap();
+
+        finish(&running_child);
+        assert!(!kept(&running_child), "its parent had already finished");
+        finish(&graph);
+        assert!(kept(&graph) && kept(&step), "the Graph records its step");
+        // Without a step record, finishing the parent forgets its finished child.
+        let parent = start(None, false);
+        let child = start(Some(&parent.id), false);
+        finish(&child);
+        assert!(kept(&child));
+        finish(&parent);
+        assert!(!kept(&child) && !kept(&parent));
     }
 }

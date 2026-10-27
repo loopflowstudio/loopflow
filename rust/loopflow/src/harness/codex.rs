@@ -368,18 +368,12 @@ impl Harness for CodexHarness {
         self.shutdown_requested.store(false, Ordering::Relaxed);
         self.launch = Some(config.clone());
         self.should_seed_prompt = true;
-        let requested_session = self.resume_agent_session.clone();
         let account_route = resolve_provider_account_exact(
             Provider::Codex,
-            requested_session.as_ref(),
+            self.resume_agent_session.as_ref(),
             self.requested_account_id.as_ref(),
         )
         .await?;
-        self.resume_agent_session = match &account_route {
-            Some(route) if route.resume_requested_session() => requested_session,
-            Some(_) => None,
-            None => requested_session,
-        };
         self.account_route = account_route;
         *self
             .agent_session

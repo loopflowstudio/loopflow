@@ -112,6 +112,8 @@ pub struct ArtifactSet {
     pub source: InstallSource,
     pub source_revision: String,
     pub source_identity: String,
+    /// An unreleased build's provenance, e.g. `hotfix e9b2c2eac on v0.14.16`.
+    pub build_label: Option<String>,
     pub content_sha256: String,
     pub artifacts: Vec<ArtifactIdentity>,
 }
@@ -1502,6 +1504,7 @@ mod tests {
             source,
             source_revision: format!("revision-{id}"),
             source_identity: format!("identity-{id}"),
+            build_label: None,
             content_sha256: artifact_set_sha256(&cli, Some(&daemon), None).unwrap(),
             artifacts: vec![
                 ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),
@@ -1756,6 +1759,7 @@ mod tests {
             source: InstallSource::Published,
             source_revision: "revision".to_string(),
             source_identity: "release".to_string(),
+            build_label: None,
             content_sha256: artifact_set_sha256(&cli, Some(&daemon), Some(&app)).unwrap(),
             artifacts: vec![
                 ArtifactIdentity::capture(ArtifactRole::Cli, &cli).unwrap(),

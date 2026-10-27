@@ -279,17 +279,17 @@ personal choice, never committed repository content:
 ```bash
 lf machine use <machine-label> <wave>        # this Wave's default, copied to their other Machines
 lf --repo <repo> machine use <machine-label> # this repository's default
-lf machine use <machine-label> --task <issue> # hand one Task to that Machine
+lf task move <issue> --machine <machine-label> # move one Task there with its Session
 lf machine list                              # each Machine with the defaults naming it
 ```
 
-Bare `lf machine use <machine-label>` applies to the worktree's Task, else its
-Wave, else the repository. Resolution for a new Task is Wave → parent Waves →
+Bare `lf machine use <machine-label>` applies to the worktree's Wave, else the
+repository. Resolution for a new Task is Wave → parent Waves →
 repository → the Machine running the command, so one Machine needs no setup.
 An unreachable Machine gets a warning; rerun later. Setting a default moves the
-user's Wave or repository Session to that Machine with fresh context. Scheduled
+user's Wave or repository Session to that Machine with its history. Scheduled
 commands are ordinary crontab lines on the Machine that runs them. Existing Tasks
-stay on the Machine in their claim until handed off.
+stay on the Machine in their claim until `lf task move` moves them.
 
 `lf --machine` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
 commands. Connect required logins with `lf machine connect` in a foreground

@@ -1,0 +1,21 @@
+-- draft: drop_steer_adapter_thread
+-- The Session's agent_sessions.provider_thread is the one selected native
+-- conversation; context callbacks follow it, so the adapter keeps no copy.
+ALTER TABLE steer_adapters DROP COLUMN provider_thread;
+
+-- draft: forget_processes
+-- A finished Process is deleted at exit unless a row references it. Each
+-- reference probe needs an index, or every exit and every prune candidate
+-- scans the referencing table.
+CREATE INDEX agent_sessions_agent_process ON agent_sessions(agent_process_id)
+    WHERE agent_process_id IS NOT NULL;
+CREATE INDEX task_workflows_process ON task_workflows(lf_process_id)
+    WHERE lf_process_id IS NOT NULL;
+CREATE INDEX task_workflow_moves_process ON task_workflow_moves(lf_process_id)
+    WHERE lf_process_id IS NOT NULL;
+CREATE INDEX waves_project_activation_process ON waves(project_activation_lf_process_id)
+    WHERE project_activation_lf_process_id IS NOT NULL;
+CREATE INDEX ci_incidents_repair_process ON ci_incidents(repair_lf_process_id)
+    WHERE repair_lf_process_id IS NOT NULL;
+CREATE INDEX tasks_ship_process ON tasks(ship_lf_process_id)
+    WHERE ship_lf_process_id IS NOT NULL;

@@ -8,6 +8,7 @@
   "title_source": "generated",
   "detail": "review-design",
   "provider": "codex",
+  "account": "work",
   "cwd": "/src/loopflow.task",
   "state": "unknown",
   "ready_summary": "The design now reflects Jack's requested changes.",

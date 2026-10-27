@@ -17,11 +17,3 @@
   disk itself (`--disk-gb` ignored). `FLY_ORG` defaults to `personal`.
 - **RunPod GPU pods:** `--vcpus`/`--memory-gb` are not sent with `--gpu`; the
   GPU type decides them.
-- **DigitalOcean (assumed):** REST instead of `pydo`, like RunPod and Fly.
-  Dedicated-CPU sizes only (c-, g-, m-; basic shared-CPU Droplets left out for
-  builds), cheapest that holds the request; prices are monthly ÷ 672 h from
-  memory, unverified. Each size has its own disk, so `--disk-gb` is ignored.
-  Region from `DIGITALOCEAN_REGION`, default `nyc3`. Names map `_` to `-`.
-  No account SSH key is registered: cloud-init admits `lf` and turns sshd
-  key-only, but DigitalOcean may still email a root password at create.
-  No guardian (Jack, open): a Droplet lf loses lives until the next reconcile.

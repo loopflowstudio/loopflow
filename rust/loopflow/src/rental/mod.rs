@@ -10,7 +10,7 @@
 //! unknown reply keeps it; the create is never resent. At the hard deadline
 //! the provider deletes the machine whatever else fails: its own lifetime
 //! (Daytona, Modal) or the guardian on the machine (`guardian.py`: RunPod,
-//! AWS, Fly). DigitalOcean has neither yet: only lf deletes a Droplet.
+//! AWS, Fly).
 
 pub mod sandbox;
 
@@ -152,7 +152,6 @@ pub enum Provider {
     Modal,
     Runpod,
     Aws,
-    Digitalocean,
     Fly,
 }
 
@@ -163,7 +162,6 @@ impl Provider {
             Self::Modal => "modal",
             Self::Runpod => "runpod",
             Self::Aws => "aws",
-            Self::Digitalocean => "digitalocean",
             Self::Fly => "fly",
         }
     }
@@ -174,20 +172,18 @@ impl Provider {
             "modal" => Some(Self::Modal),
             "runpod" => Some(Self::Runpod),
             "aws" => Some(Self::Aws),
-            "digitalocean" => Some(Self::Digitalocean),
             "fly" => Some(Self::Fly),
             _ => None,
         }
     }
 
-    /// The SDK the bridge runs with, pinned; RunPod, DigitalOcean and Fly
-    /// speak plain HTTP.
+    /// The SDK the bridge runs with, pinned; RunPod and Fly speak plain HTTP.
     pub fn sdk(self) -> Option<&'static str> {
         match self {
             Self::Daytona => Some("daytona==0.226.1"),
             Self::Modal => Some("modal==1.6.2"),
             Self::Aws => Some("boto3==1.40.55"),
-            Self::Runpod | Self::Digitalocean | Self::Fly => None,
+            Self::Runpod | Self::Fly => None,
         }
     }
 
@@ -216,17 +212,14 @@ impl Provider {
                     "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_REGION are not all",
                 ))
             }
-            Self::Digitalocean if !set("DIGITALOCEAN_TOKEN") => {
-                Some(doppler("DIGITALOCEAN_TOKEN is"))
-            }
             Self::Fly if !set("FLY_API_TOKEN") => Some(doppler("FLY_API_TOKEN is")),
             _ => None,
         }
     }
 
     /// What this provider rents for the hardware, at its published price.
-    /// Where it sells fixed shapes (RunPod CPU flavors, EC2 instance types,
-    /// Droplet sizes), the smallest one holding the hardware.
+    /// Where it sells fixed shapes (RunPod CPU flavors, EC2 instance types),
+    /// the smallest one holding the hardware.
     pub fn offer(self, hardware: &Hardware) -> Result<Offer, String> {
         let vcpus = i64::from(hardware.vcpus);
         let memory = i64::from(hardware.memory_gb);
@@ -237,7 +230,7 @@ impl Provider {
         let per_size = |vcpu: i64, gib: i64, extra: i64| vcpu * vcpus + gib * memory + extra;
         let no_shape = || format!("{self} rents nothing with {hardware}");
         match (self, hardware.gpu.as_deref()) {
-            (Self::Daytona | Self::Digitalocean | Self::Fly, Some(_)) => Err(format!(
+            (Self::Daytona | Self::Fly, Some(_)) => Err(format!(
                 "{self} rents no GPUs; --gpu works on runpod, aws and modal"
             )),
             (Self::Daytona, None) => Ok(offer(
@@ -287,12 +280,6 @@ impl Provider {
                     .map(|(_, _, size, usd)| offer(Some(format!("{family}.{size}")), *usd))
                     .ok_or_else(no_shape)
             }
-            (Self::Digitalocean, None) => DIGITALOCEAN_SIZES
-                .iter()
-                .filter(|(_, size_vcpus, size_gib, _)| *size_vcpus >= vcpus && *size_gib >= memory)
-                .min_by_key(|(_, _, _, usd)| *usd)
-                .map(|(slug, _, _, usd)| offer(Some((*slug).to_string()), *usd))
-                .ok_or_else(no_shape),
         }
     }
 
@@ -379,25 +366,6 @@ const AWS_GPUS: &[(&str, &str, GpuSizes)] = &[
             (16, 64, "4xlarge", 1_624_000),
         ],
     ),
-];
-
-/// Dedicated-CPU Droplets: slug, vCPUs, GiB, price (monthly ÷ 672 hours).
-/// Each size carries its own disk, so `--disk-gb` is not sent.
-const DIGITALOCEAN_SIZES: &[(&str, i64, i64, i64)] = &[
-    ("c-2", 2, 4, 62_500),
-    ("c-4", 4, 8, 125_000),
-    ("c-8", 8, 16, 250_000),
-    ("c-16", 16, 32, 500_000),
-    ("c-32", 32, 64, 1_000_000),
-    ("g-2vcpu-8gb", 2, 8, 93_750),
-    ("g-4vcpu-16gb", 4, 16, 187_500),
-    ("g-8vcpu-32gb", 8, 32, 375_000),
-    ("g-16vcpu-64gb", 16, 64, 750_000),
-    ("g-32vcpu-128gb", 32, 128, 1_500_000),
-    ("m-2vcpu-16gb", 2, 16, 125_000),
-    ("m-4vcpu-32gb", 4, 32, 250_000),
-    ("m-8vcpu-64gb", 8, 64, 500_000),
-    ("m-16vcpu-128gb", 16, 128, 1_000_000),
 ];
 
 /// Fly bills performance vCPUs at $21/month beside 2 GiB at $6/GiB-month, and

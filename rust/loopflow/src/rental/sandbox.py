@@ -1,5 +1,4 @@
-"""Create, find and delete one rented machine on Daytona, Modal, RunPod, AWS,
-DigitalOcean or Fly.
+"""Create, find and delete one rented machine on Daytona, Modal, RunPod, AWS or Fly.
 
 lf runs this as `python -c <this> <provider> <op>` inside
 `uv run --no-project [--with <sdk>]`, with one JSON request on stdin, and reads
@@ -9,10 +8,9 @@ config), and never appears in a request or a reply.
 
 Every machine is named by lf before it is created, ends by itself when its
 lifetime passes, and answers SSH: as root on Daytona, as `lf` elsewhere.
-Daytona and Modal build an image with the tools; RunPod, AWS, DigitalOcean
-and Fly boot stock Ubuntu 24.04 and install them before sshd admits `lf`,
-under the guardian that holds the deadline (`guardian.py`, sent in each
-create). DigitalOcean has no guardian yet: until lf deletes a Droplet, it runs.
+Daytona and Modal build an image with the tools; RunPod, AWS and Fly boot
+stock Ubuntu 24.04 and install them before sshd admits `lf`, under the
+guardian that holds the deadline (`guardian.py`, sent in each create).
 """
 
 import base64
@@ -443,87 +441,6 @@ def _aws(op, request):
 
 
 # ---------------------------------------------------------------------------
-# DigitalOcean: a Droplet from its Ubuntu 24.04 image, found by its name.
-# No guardian: a powered-off Droplet still bills, and deleting itself would
-# need an account token on the box that can delete every Droplet.
-# ---------------------------------------------------------------------------
-
-DIGITALOCEAN = "https://api.digitalocean.com/v2/"
-DIGITALOCEAN_TAG = "loopflow"
-DIGITALOCEAN_GONE = {"off", "archive"}
-
-# DigitalOcean's image allows root password logins and mails a password when
-# a Droplet has no account key; sshd here admits keys only.
-DIGITALOCEAN_SSHD = """printf 'PasswordAuthentication no\\nKbdInteractiveAuthentication no\\nPermitRootLogin no\\n' \\
-  > /etc/ssh/sshd_config.d/00-loopflow.conf
-systemctl reload ssh
-"""
-
-
-def _digitalocean_name(name):
-    """Droplet names take letters, digits, dots and dashes."""
-    return name.replace("_", "-")
-
-
-def _digitalocean(op, request):
-    authorization = "Bearer " + os.environ["DIGITALOCEAN_TOKEN"]
-
-    def ask(method, path, body=None):
-        return _http(method, DIGITALOCEAN + path, authorization, body)
-
-    def described(droplet, route=None):
-        return {
-            "id": str(droplet["id"]),
-            "gone": droplet.get("status") in DIGITALOCEAN_GONE,
-            "route": route,
-        }
-
-    def public_ip(droplet):
-        addresses = (droplet.get("networks") or {}).get("v4") or []
-        return next((a["ip_address"] for a in addresses if a.get("type") == "public"), None)
-
-    if op == "create":
-        user_data = (
-            "#!/bin/bash\n"
-            + DIGITALOCEAN_SSHD
-            + f"export LF_PUBLIC_KEY={shlex.quote(request['public_key'])}\n"
-            + SETUP
-        )
-        droplet = ask(
-            "POST",
-            "droplets",
-            {
-                "name": _digitalocean_name(request["name"]),
-                "region": os.environ.get("DIGITALOCEAN_REGION", "nyc3"),
-                "size": request["type"],
-                "image": "ubuntu-24-04-x64",
-                "user_data": user_data,
-                "tags": [DIGITALOCEAN_TAG],
-            },
-        )["droplet"]
-        # The public address arrives once the Droplet is active.
-        for _ in range(120):
-            address = public_ip(droplet)
-            if droplet.get("status") == "active" and address:
-                return described(droplet, f"ssh://lf@{address}")
-            time.sleep(5)
-            droplet = (ask("GET", f"droplets/{droplet['id']}") or {}).get("droplet", droplet)
-        raise RuntimeError(f"droplet {droplet['id']} has no public IP")
-    if op == "get":
-        if request.get("id"):
-            reply = ask("GET", f"droplets/{request['id']}")
-            return reply and described(reply["droplet"])
-        name = _digitalocean_name(request["name"])
-        reply = ask("GET", "droplets?" + urllib.parse.urlencode({"name": name})) or {}
-        named = [d for d in reply.get("droplets", []) if d.get("name") == name]
-        return described(named[0]) if named else None
-    if op == "delete":
-        ask("DELETE", f"droplets/{request['id']}")
-        return None
-    raise ValueError(f"unknown op {op}")
-
-
-# ---------------------------------------------------------------------------
 # Fly: one app per rental, holding one Machine and a dedicated IPv4 for SSH.
 # Fly's proxy balances across an app's Machines, so each needs its own app.
 # The app's name is the rental's, and it is the provider id.
@@ -613,7 +530,6 @@ PROVIDERS = {
     "modal": _modal,
     "runpod": _runpod,
     "aws": _aws,
-    "digitalocean": _digitalocean,
     "fly": _fly,
 }
 

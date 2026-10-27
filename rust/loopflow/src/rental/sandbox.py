@@ -146,17 +146,20 @@ def _http(method, url, authorization, body=None):
 GONE_DAYTONA = {"destroyed", "destroying", "error", "build_failed"}
 
 
+def _daytona_state(sandbox):
+    return str(getattr(sandbox.state, "value", sandbox.state)).lower()
+
+
 def _daytona(op, request):
     import daytona
 
     client = daytona.Daytona()
 
     def described(sandbox, route=None):
-        state = str(getattr(sandbox.state, "value", sandbox.state)).lower()
         return {
             "id": sandbox.id,
             "name": sandbox.name,
-            "gone": state in GONE_DAYTONA,
+            "gone": _daytona_state(sandbox) in GONE_DAYTONA,
             "route": route,
         }
 
@@ -186,7 +189,10 @@ def _daytona(op, request):
             return None
     if op == "delete":
         try:
-            client.delete(client.get(request["id"]))
+            sandbox = client.get(request["id"])
+            # Refresh deletes every ended sandbox; a destroyed one already is.
+            if _daytona_state(sandbox) not in {"destroyed", "destroying"}:
+                client.delete(sandbox)
         except daytona.DaytonaNotFoundError:
             pass
         return None

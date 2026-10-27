@@ -1232,6 +1232,25 @@ mod tests {
     }
 
     #[test]
+    fn refreshing_an_ended_machine_deletes_what_it_left() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, _, _) = running(dir.path());
+        let log: Log = Rc::default();
+        let kept = log.clone();
+        // A Fly app whose Machine exited still holds its IPv4.
+        let api = Sandboxes::with_call(
+            Provider::Fly,
+            Box::new(move |op, _| {
+                kept.borrow_mut().push(op.to_string());
+                Ok(br#"{"id": "sb-1", "gone": true, "route": null}"#.to_vec())
+            }),
+        );
+        assert!(refresh(&store, &api, &rental).unwrap().is_none());
+        assert!(deleted(&log));
+        assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
+    }
+
+    #[test]
     fn holdings_count_agents_and_name_unpushed_work() {
         let holdings = read_holdings(
             "1\n2\nunpushed /home/lf/src/loopflow/ uncommitted changes\n\

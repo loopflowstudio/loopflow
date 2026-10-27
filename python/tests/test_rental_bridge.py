@@ -244,6 +244,20 @@ def test_aws_reuses_its_security_group(aws):
     assert "create_security_group" not in dict(aws.calls)
 
 
+# --- Daytona --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("state, deletes", [("started", True), ("destroyed", False)])
+def test_daytona_deletes_only_a_sandbox_not_yet_destroyed(monkeypatch, state, deletes):
+    deleted = []
+    sandbox = types.SimpleNamespace(id="sb-1", name="lf-rent_0b5c", state=state)
+    client = types.SimpleNamespace(get=lambda _: sandbox, delete=deleted.append)
+    daytona = types.SimpleNamespace(Daytona=lambda: client, DaytonaNotFoundError=LookupError)
+    monkeypatch.setitem(sys.modules, "daytona", daytona)
+    assert bridge._daytona("delete", {"id": "sb-1"}) is None
+    assert bool(deleted) == deletes
+
+
 # --- Fly ------------------------------------------------------------------
 
 

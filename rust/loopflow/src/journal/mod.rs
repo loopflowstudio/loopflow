@@ -112,11 +112,19 @@ static PROCESS_STARTED_AT: OnceLock<i64> = OnceLock::new();
 static PROCESS_START: OnceLock<Instant> = OnceLock::new();
 static EFFECT_FREE_READ: AtomicBool = AtomicBool::new(false);
 
-/// Effect-free reads, previews and provider hooks never become Processes: neither
-/// admission nor exit observation records them. The executable selects this
-/// before any command admission; environment cannot.
+/// A command that touches no store never becomes a Process: neither admission
+/// nor exit observation records it. The executable selects this before any
+/// command admission; environment cannot.
 pub fn mark_effect_free_read() {
     EFFECT_FREE_READ.store(true, Ordering::Relaxed);
+}
+
+/// The harness issued this command: a provider hook inherits the agent's caller
+/// and the launching lf's Process, but neither the model nor that lf ran it.
+/// Call before admission.
+pub fn harness_issued() {
+    std::env::remove_var(AGENT_CALLER_ENV);
+    std::env::remove_var(LF_PROCESS_ID_ENV);
 }
 // An actual lf process keeps one identity across async and blocking workers.
 // Library callers retain the thread-scoped with_runtime lifetime above.
@@ -290,7 +298,13 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
         .set(Instant::now())
         .expect("one lf entry point per process");
     let result = run();
-    observe_process(&std::env::args().collect::<Vec<_>>());
+    // Nothing can reference a Process no one saw running, so exit observation
+    // writes only a row the rule may keep: one an agent issued, or one a
+    // running lf parent may still read.
+    if std::env::var_os(AGENT_CALLER_ENV).is_some() || std::env::var_os(LF_PROCESS_ID_ENV).is_some()
+    {
+        observe_process(&std::env::args().collect::<Vec<_>>());
+    }
     crate::agent::wait_for_interrupt_cleanup();
     let receipts = if let Some(context) = current_context() {
         finish_runtime(&context.cwd, &result);
@@ -1414,7 +1428,7 @@ mod tests {
     };
     use crate::git::is_clean;
     use crate::id::{LfProcessId, TraceId};
-    use loopflow_test_support::TestRepo;
+    use loopflow_test_support::{RunningParent, TestRepo};
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
 
@@ -1507,6 +1521,14 @@ mod tests {
         std::env::remove_var(super::LF_TRACE_ID_ENV);
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         guard
+    }
+
+    /// Export a [`RunningParent`] as the parent of the next Process.
+    fn adopt_by_running_parent(guard: &TestLedgerGuard) {
+        super::open_ledger().unwrap();
+        let parent = RunningParent::insert(&guard.home().join("loopflow.db"));
+        std::env::set_var(super::LF_PROCESS_ID_ENV, &parent.id);
+        std::env::set_var(super::LF_TRACE_ID_ENV, &parent.trace);
     }
 
     #[test]
@@ -1768,14 +1790,14 @@ mod tests {
     }
 
     #[test]
-    fn a_detached_body_inherits_a_recorded_parent_across_its_launcher() {
+    fn a_detached_body_keeps_its_trace_after_its_launcher_is_forgotten() {
         let _guard = journal_test_guard();
         let repo = TestRepo::new();
         let fields = started_fields(&["lf".to_string(), "task".to_string()], repo.path(), "main");
 
         // A detached body inherits LF_TRACE_ID/LF_PROCESS_ID from a launcher that
-        // has already exited. The launcher's row outlives it, so the parent
-        // still resolves and must survive the drop rule.
+        // has already exited. Nothing referenced the launcher, so its exit forgot
+        // it: the body keeps the trace and drops the parent edge.
         super::emit(
             repo.path(),
             LfNode::Process,
@@ -1800,7 +1822,7 @@ mod tests {
             .expect("body context")
             .expect("body");
 
-        assert_eq!(body.parent_lf_process_id, Some(launcher.lf_process_id));
+        assert_eq!(body.parent_lf_process_id, None);
         assert_eq!(body.trace_id, launcher.trace_id);
 
         super::clear_context();
@@ -1990,6 +2012,8 @@ mod tests {
     fn attachment_receipt_failures_never_invent_process_identity() {
         let guard = journal_test_guard();
         let repo = TestRepo::new();
+        // Its finished row stays for the final Dead answer.
+        adopt_by_running_parent(&guard);
         emit(
             repo.path(),
             LfNode::Process,
@@ -2218,6 +2242,8 @@ mod tests {
         // An initialized Machine, as every real listing has.
         run(&|| {});
 
+        // A running parent keeps the finished row a landed receipt writes.
+        adopt_by_running_parent(&guard);
         let ledger = guard.home().join("loopflow.db");
         let foreign = rusqlite::Connection::open(&ledger).unwrap();
         foreign.execute_batch("BEGIN IMMEDIATE").unwrap();

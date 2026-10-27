@@ -1950,10 +1950,11 @@ fn failed_process_observation_cannot_admit_a_provider() {
             "a writable Session store cannot replace Process admission"
         );
     }
+    // The earlier inspection finished unreferenced and was forgotten at exit.
     assert_eq!(
         fixture.count("processes"),
-        1,
-        "retain the earlier inspection only"
+        0,
+        "no refused observation reaches the store"
     );
 }
 

@@ -2130,8 +2130,30 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Record a Process start or exit. An exit forgets this Process and the
+    /// finished children it was keeping when nothing else needs them
+    /// ([`processes::FORGETTABLE`]). Each statement commits on its own so a
+    /// writer holds the lock only briefly; a row an interrupted exit leaves is
+    /// forgotten by the retention prune.
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
-        record_process_in(&self.conn.lock().expect("store mutex poisoned"), process)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        record_process_in(&conn, process)?;
+        if process.completed_at.is_some() {
+            let forget = |scope: &str| {
+                conn.execute(
+                    &format!(
+                        "DELETE FROM processes WHERE id IN (SELECT p.id FROM processes p
+                         WHERE {scope} AND {})",
+                        processes::FORGETTABLE
+                    ),
+                    [&process.id],
+                )
+            };
+            // Children first: any child left would keep this Process.
+            forget("p.parent_lf_process_id=?1")?;
+            forget("p.id=?1")?;
+        }
+        Ok(())
     }
 
     /// Record a process, waiting at most `wait` for another writer; a zero wait

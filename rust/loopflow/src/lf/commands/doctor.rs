@@ -409,18 +409,6 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
     }
 }
 
-/// `repairable` counts the AgentProcesses `lf monitor prune` would repair.
-pub fn audit(events: &[LfProcess], repairable: usize) -> Vec<Check> {
-    if events.is_empty() {
-        return vec![Check::warn("ledger", "ledger is empty")];
-    }
-    vec![
-        check_attribution(events),
-        check_identity(events),
-        check_lineage(events, repairable),
-    ]
-}
-
 /// A process may name only one command, and its terminal row names that work.
 fn check_attribution(events: &[LfProcess]) -> Check {
     let unnamed = events
@@ -463,7 +451,7 @@ fn check_identity(events: &[LfProcess]) -> Check {
     )
 }
 
-fn check_lineage(events: &[LfProcess], repairable: usize) -> Check {
+pub(crate) fn check_lineage(events: &[LfProcess], repairable: usize) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
         .map(|event| (event.id.as_str(), event.trace_id.as_str()))
@@ -534,7 +522,9 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit, check_contention, inspect_store, Status};
+    use super::{
+        check_attribution, check_contention, check_identity, check_lineage, inspect_store, Status,
+    };
     use crate::process::LfProcess;
 
     const DAY: i64 = 86_400;
@@ -595,11 +585,15 @@ mod tests {
     }
 
     fn status_of(rows: &[LfProcess], name: &str) -> Status {
-        audit(rows, 0)
-            .into_iter()
-            .find(|check| check.name == name)
-            .expect("check exists")
-            .status
+        [
+            check_attribution(rows),
+            check_identity(rows),
+            check_lineage(rows, 0),
+        ]
+        .into_iter()
+        .find(|check| check.name == name)
+        .expect("check exists")
+        .status
     }
 
     #[test]

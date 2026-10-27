@@ -1,6 +1,6 @@
 # LOO-643: Repair retained Process ancestry without losing Session history
 
-Status: slices 1–3 implemented (2026-10-27); slice 4 (ship) remains. Jack Heart authorized an end-to-end
+Status: slices 1–3 implemented and synced with main (2026-10-27); gate and ship remain. Jack Heart authorized an end-to-end
 autonomous fix, local hotfix and patch release. No ad-hoc SQL writes to the live store.
 
 ## Problem
@@ -152,9 +152,9 @@ without the hint and prune leaves it alone.
 
 ## Coordination
 
-#1718 (LOO-615) merged to main on 2026-10-27 (`8bf860806c`). Syncing conflicts in
-`lf/commands/doctor.rs` and `store/sqlite.rs`; `journal/mod.rs` and `processes.rs`
-auto-merge. Keep #1718's `FORGETTABLE` predicate and its doctor test reshaping.
+#1718 (LOO-615) merged to main on 2026-10-27 (`8bf860806c`) and is merged into this
+branch: `record_process` calls `record_process_in` and then forgets per `FORGETTABLE`;
+doctor's `audit` is gone (main inlined it), so the repair test calls `check_lineage`.
 Its predicate already retains what this change relies on (kickoff, 2026-10-27):
 the prevention row is named by its agent child (`parent_lf_process_id`) and as
 `attached_lf_process_id`, and the repairing prune Process is named by the repair's
@@ -166,8 +166,9 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
 2. Done: `repair_unrecorded_ancestry` in `lf monitor prune` (`UNRECORDED_ANCESTRY`
    predicate in processes.rs).
 3. Done: doctor's remedy count reads `unrecorded_agent_ancestry`.
-4. Remaining: sync with main (#1718 conflicts above), gate, PR, land, patch release (Jack's authorization), `lf install`, then
-   live `lf monitor prune` and readback.
+4. Done: sync with main (#1718).
+5. Remaining: gate, PR, land. The root operator owns the shared patch release,
+   `lf install`, and the live `lf monitor prune` readback after merge (Jack's steer, 2026-10-27).
 
 ## Done when
 
@@ -192,4 +193,4 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
   never reaches the resume claim, so it proves nothing here. Resuming Jack's MTG-159
   conversation is his call; the store test carries the resumability proof.
 
-Check results: `cargo test --lib doctor harness::agent_process` → 25 passed; clippy `--all-targets` clean; full lib and integration suites deferred to gate.
+Check results (after main sync): `cargo test --lib doctor harness::agent_process store::sqlite::processes retention` → 47 passed; clippy `--all-targets` clean; full lib and integration suites deferred to gate.

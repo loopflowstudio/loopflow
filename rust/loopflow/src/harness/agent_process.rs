@@ -735,13 +735,10 @@ mod tests {
     }
 
     fn lineage(store: &SqliteStore) -> crate::lf::commands::doctor::Check {
-        crate::lf::commands::doctor::audit(
+        crate::lf::commands::doctor::check_lineage(
             &store.processes_since(0).unwrap(),
             store.unrecorded_agent_ancestry().unwrap().len(),
         )
-        .into_iter()
-        .find(|check| check.name == "lineage")
-        .unwrap()
     }
 
     #[test]

@@ -9,6 +9,38 @@ pub fn env_lock() -> &'static std::sync::Mutex<()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
 }
 
+/// An unfinished `lf` Process row. A running parent keeps its finished
+/// children, so a child command's row stays readable after it exits.
+#[derive(Debug)]
+pub struct RunningParent {
+    pub id: String,
+    pub trace: String,
+}
+
+impl RunningParent {
+    pub fn insert(database: &Path) -> Self {
+        let parent = Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            trace: uuid::Uuid::new_v4().to_string(),
+        };
+        rusqlite::Connection::open(database)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?2,'caller',1)",
+                [&parent.id, &parent.trace],
+            )
+            .unwrap();
+        parent
+    }
+
+    /// Run `command` as this Process's child.
+    pub fn adopt<'a>(&self, command: &'a mut Command) -> &'a mut Command {
+        command
+            .env("LF_PROCESS_ID", &self.id)
+            .env("LF_TRACE_ID", &self.trace)
+    }
+}
+
 /// Use the runner's prepared CLI, or build it with Cargo's target-directory selection.
 pub fn lf_binary() -> &'static str {
     static BINARY: std::sync::OnceLock<String> = std::sync::OnceLock::new();

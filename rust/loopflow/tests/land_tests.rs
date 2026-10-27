@@ -10,6 +10,7 @@ use loopflow::ops::{
 };
 use loopflow::work::task::PrMergeMode;
 use loopflow_test_support::TestRepo;
+use rusqlite::OptionalExtension;
 use support::{
     codex_app_server_script, counting_open_script, presentation_attempts, register_task_with_pr,
     EnvGuard,
@@ -1764,15 +1765,17 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
             assert!(String::from_utf8_lossy(&handed_off.stderr).contains("still being watched"));
         }
         let conn = rusqlite::Connection::open(&database).unwrap();
-        let initial: i64 = conn
+        let initial: Option<i64> = conn
             .query_row(
                 "SELECT exit_code FROM processes WHERE parent_lf_process_id IS NULL",
                 [],
                 |row| row.get(0),
             )
+            .optional()
             .unwrap();
         // A Graph stopped short of its end exits 3, which no caller retries.
-        assert_eq!(initial, if graph { 3 } else { 0 });
+        // A direct land nothing references is forgotten at exit.
+        assert_eq!(initial, graph.then_some(3));
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
             .unwrap();

@@ -155,22 +155,36 @@ death releases the kernel lock even if metadata remains.
 ### Sync operation
 
 Provider launches receive no durable Git writer token. Independent agents may
-coexist in the shared worktree. A sync locks `rebase-owner.json` for the Git
-merge lifetime; new agent launches refuse while that operation is live. The
-existing receipt filename stays stable so older executables share the same lock.
+coexist in the shared worktree. A sync locks `rebase-owner.json` from its merge
+through publication; fetching and planning happen before, unfenced. New agent
+launches refuse only while that lock is held, and the refusal names the holder,
+its target and how long it has held the lock:
+
+```text
+refusing to mutate Git: lf sync pid 4121 has held the sync lock for 14 min (feature onto origin/main); retry when it stops, or kill pid 4121 to continue
+```
+
+A live sync keeps the lock however long it runs; there is no Loopflow timeout.
+The push passes `http.lowSpeedLimit`/`http.lowSpeedTime` so Git aborts a
+stalled HTTP transfer. The existing receipt filename stays stable so older
+executables share the same lock.
 
 | Concurrent work | Result |
 | --- | --- |
 | agent + independent agent | allowed; use distinct output paths |
 | read/build/test + agent | allowed |
-| live sync + new agent launch | blocked |
-| sync + its exact recovery child | allowed |
+| live sync (merge or push) + new agent launch | blocked, naming the holder |
+| sync stopped on conflicts or errors + agent launch | allowed; continuation adopts the existing merge |
+| sync whose conflict resolver is running + agent launch | allowed; the sync retakes the lock to verify and push |
 | stale sync record without a kernel lock | adopted or removed through the sync path |
-| unowned or stopped merge + agent launch | allowed; continuation adopts the existing merge |
 
-The sync owner authorizes only its exact sequencer and recovery child. It does
-not make a provider the worktree owner or serialize ordinary edits, conversation
-recording, tests, or planning writes.
+The lock does not make a provider the worktree owner or serialize ordinary
+edits, conversation recording, tests, or planning writes. Verification checks
+only what the push publishes: no active merge, the expected branch, the pinned
+target and original head as ancestors, and no unmerged paths. Another writer's
+tracked edits beside the resolution leave the sync verified; a path that writer
+stages with `git add` while a resolver works lands in the merge commit. That
+follows from allowing concurrent writes and loses nothing.
 
 A supervisor-started merge can be handed to an agent in the same checkout.
 `lf sync --continue --adopt` claims a raw merge after resolution. For a stopped

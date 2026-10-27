@@ -1814,7 +1814,7 @@ impl SqliteStore {
         let mut account = match resumed {
             Some(index) => available.remove(index),
             None => {
-                crate::provider_account::order_accounts_by_strain(&mut available, &limits, now);
+                crate::provider_account::order_accounts_by_room(&mut available, &limits, now);
                 match available.into_iter().next() {
                     Some(selection) => selection,
                     None => {

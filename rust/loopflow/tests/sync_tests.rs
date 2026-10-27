@@ -2,8 +2,8 @@ use crate::support;
 
 use loopflow::ops::task::task_stack;
 use loopflow::ops::{
-    continue_sync_for_resolution, plan_sync, recover_sync, sync_with_recovery, NullProgress,
-    OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
+    continue_sync_for_resolution, plan_sync, recover_sync, sync_with_plan, sync_with_recovery,
+    NullProgress, OpsError, SyncClass, SyncOptions, SyncRecovery, SyncStrategy,
 };
 use loopflow::work::task::{GithubPr, PrPublication};
 use loopflow_test_support::TestRepo;
@@ -363,7 +363,7 @@ fn sync_conflict_returns_error() {
     assert_eq!(
         loopflow::git::intervention_state(repo.path()).unwrap(),
         Some("merge"),
-        "the owned conflict must remain available to the recovery child"
+        "the owned conflict must remain for whoever continues it"
     );
 }
 
@@ -373,7 +373,7 @@ fn second_identical_conflict_reuses_resolution_without_recovery() {
     let repo = create_conflicting_repo();
     let original_head = repo.head_sha();
     let recovery = start_conflicting_recovery(&repo);
-    recover_sync(recovery, |_context| {
+    recover_sync(recovery, || {
         repo.create_file("conflict.txt", "reviewed resolution\n");
         let result = loopflow::git::continue_merge(repo.path(), None)?;
         assert!(result.success, "the reviewed resolution must complete");
@@ -442,7 +442,7 @@ fn zero_exit_recovery_is_rejected_while_sequencer_remains() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| Ok(()));
+    let result = recover_sync(recovery, || Ok(()));
 
     assert!(
         matches!(result, Err(OpsError::Message(ref message)) if message.contains("still reports an active merge")),
@@ -460,7 +460,7 @@ fn recovery_abort_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| {
+    let result = recover_sync(recovery, || {
         git(repo.path(), &["merge", "--abort"]);
         Ok(())
     });
@@ -477,7 +477,7 @@ fn recovery_on_wrong_branch_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| {
+    let result = recover_sync(recovery, || {
         git(repo.path(), &["merge", "--abort"]);
         git(repo.path(), &["checkout", "main"]);
         Ok(())
@@ -495,7 +495,7 @@ fn recovery_with_detached_head_cannot_masquerade_as_success() {
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| {
+    let result = recover_sync(recovery, || {
         git(repo.path(), &["merge", "--abort"]);
         git(repo.path(), &["checkout", "--detach"]);
         Ok(())
@@ -508,25 +508,56 @@ fn recovery_with_detached_head_cannot_masquerade_as_success() {
 }
 
 #[test]
-fn recovery_with_new_tracked_dirt_cannot_masquerade_as_success() {
+fn an_edit_beside_a_committed_resolution_leaves_the_sync_verified() {
     let _env = EnvGuard::new(&[]);
     let repo = create_conflicting_repo();
     let recovery = start_conflicting_recovery(&repo);
 
-    let result = recover_sync(recovery, |_context| {
+    let result = recover_sync(recovery, || {
         repo.create_file("conflict.txt", "resolved\n");
         git(repo.path(), &["add", "conflict.txt"]);
         git(
             repo.path(),
             &["-c", "core.editor=true", "commit", "--no-edit"],
         );
-        repo.create_file("conflict.txt", "dirty after resolution\n");
+        repo.create_file("README.md", "another writer's edit\n");
         Ok(())
     });
 
-    assert!(
-        matches!(result, Err(OpsError::Message(ref message)) if message.contains("new tracked dirty state")),
-        "expected dirty-state postcondition failure, got {result:?}"
+    result.expect("another writer's edit does not fail the sync");
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("README.md")).unwrap(),
+        "another writer's edit\n"
+    );
+}
+
+#[test]
+fn continue_completes_beside_existing_tracked_edits() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_conflicting_repo();
+    repo.create_file("README.md", "edit in progress\n");
+    let result = sync_with_recovery(
+        repo.path(),
+        &SyncOptions {
+            onto: "origin/main".to_string(),
+            push: false,
+            fork_base: None,
+        },
+        &NullProgress,
+    );
+    assert!(matches!(result, Err(OpsError::SyncConflict { .. })));
+    drop(result);
+
+    repo.create_file("conflict.txt", "main and feature\n");
+    continue_sync_for_resolution(repo.path(), false).expect("continue beside existing edits");
+
+    assert_eq!(
+        loopflow::git::intervention_state(repo.path()).unwrap(),
+        None
+    );
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("README.md")).unwrap(),
+        "edit in progress\n"
     );
 }
 
@@ -873,6 +904,33 @@ fn explicit_onto_is_the_only_alternate_base() {
 }
 
 #[test]
+fn a_commit_after_planning_is_never_reset_away() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_file("main.txt", "main");
+    repo.stage_all();
+    repo.commit("main work");
+    repo.push();
+    repo.create_branch("feature");
+    git(repo.path(), &["reset", "--hard", "HEAD^"]);
+    let plan = plan_sync(repo.path(), Some("origin/main"), None).expect("plan sync");
+    assert_eq!(plan.strategy, SyncStrategy::ResetToBase);
+
+    repo.create_file("late.txt", "late");
+    repo.stage_all();
+    repo.commit("landed while the fetch ran");
+    let head = git(repo.path(), &["rev-parse", "HEAD"]);
+
+    let options = SyncOptions {
+        onto: "origin/main".to_string(),
+        push: false,
+        fork_base: None,
+    };
+    assert!(sync_with_plan(repo.path(), &options, &plan, &NullProgress).is_err());
+    assert_eq!(git(repo.path(), &["rev-parse", "HEAD"]), head);
+}
+
+#[test]
 fn untracked_scratch_is_not_assumed_to_be_disposable() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();
@@ -929,7 +987,7 @@ fn long_branch_resolves_one_merge_and_keeps_the_resolution() {
     }
     let original = repo.head_sha();
     let recovery = start_conflicting_recovery(&repo);
-    recover_sync(recovery, |_| {
+    recover_sync(recovery, || {
         assert_eq!(
             repo.head_sha(),
             original,

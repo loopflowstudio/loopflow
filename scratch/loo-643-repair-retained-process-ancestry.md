@@ -147,7 +147,8 @@ parents keep the generic failure. No allowlist and no acknowledgement table.
 ## Coordination
 
 #1718 (LOO-615) edits `journal/mod.rs`, `processes.rs`, `doctor.rs` and
-`retention.rs`, and its landing is live. Do not interrupt it. If it lands first,
+`retention.rs`. It was still open on 2026-10-27 (realign); this branch carries no
+`FORGETTABLE` yet. Do not interrupt its landing. If it lands first,
 sync and keep its `FORGETTABLE` predicate and doctor test reshaping. Prevention
 must keep the attaching lf row referenced: an agent child names it, so
 `FORGETTABLE` already retains it.
@@ -183,6 +184,4 @@ must keep the attaching lf row referenced: an agent child names it, so
   never reaches the resume claim, so it proves nothing here. Resuming Jack's MTG-159
   conversation is his call; the store test carries the resumability proof.
 
-Check results: clone repro `lf clone run /tmp/loo643/home -- lf self doctor` → FAIL lineage (1).
-Implement: focused lib modules (harness, session_record, human_session, sqlite processes/sessions/selections/session_events, doctor, top) pass with CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2; clippy --all-targets clean. Full lib run hit its time limit at load ~200 (unrelated ops::chapter/linear timeouts) → gate.
-Compress: fixtures use `test_lf_process`; `cargo test --lib harness::agent_process` → 17 passed.
+Check results: `cargo test --lib harness::agent_process` → 17 passed (compress; covers repair/resume, untouched-failure and prevention tests); clone repro → FAIL lineage (1) before repair; full lib run and integration suites deferred to gate.

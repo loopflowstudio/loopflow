@@ -543,14 +543,6 @@ pub enum Commands {
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
-    #[command(args_conflicts_with_subcommands = true)]
-    Disk {
-        #[arg(long)]
-        json: bool,
-        #[command(subcommand)]
-        cmd: Option<commands::disk::DiskCommand>,
-    },
     /// Manage working notes
     Scratch {
         #[command(subcommand)]

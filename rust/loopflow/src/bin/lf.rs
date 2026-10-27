@@ -2726,9 +2726,6 @@ fn execute_command(
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),
             None => loopflow::lf::commands::monitor::overview(*json, *all),
         },
-        Some(Commands::Disk { json, cmd }) => {
-            loopflow::lf::commands::disk::run(*json, cmd.as_ref())
-        }
         Some(Commands::History { feed, cmd }) => match cmd {
             Some(cmd) => loopflow::lf::commands::history::run(cmd),
             None => loopflow::lf::commands::activity::run(feed),

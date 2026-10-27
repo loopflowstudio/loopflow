@@ -1458,11 +1458,11 @@ Refresh live Loopflow call trees on a terminal; print once when redirected
 
 ## lf monitor prune
 
-Reap registered orphan providers and remove dead process receipts
+Reap orphan providers, remove dead receipts and forget finished Process rows
 
 | Argument | What it does |
 |---|---|
-| `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
+| `--dry-run` | Show exact targets without changing processes, receipts or the store Default: false. |
 | `--json` | Emit the versioned prune report as JSON Default: false. |
 | `--help / -h` | Print help |
 
@@ -2395,26 +2395,6 @@ Import previous Desktop membership only when no selection has been saved
 | Argument | What it does |
 |---|---|
 | `<paths>` | paths |
-| `--help / -h` | Print help |
-
-## lf disk
-
-Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf disk clean
-
-Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
-
-| Argument | What it does |
-|---|---|
-| `--dry-run` | Show what would be removed without removing anything Default: false. |
-| `--json` | json Default: false. |
-| `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
 | `--help / -h` | Print help |
 
 ## lf scratch

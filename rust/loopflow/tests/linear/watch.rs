@@ -496,15 +496,14 @@ fn offline_completion_and_reopening_reach_an_open_watch() {
         home.run(&["task", operation, "FIX-1"]);
         tasks.body(Duration::from_secs(10), |body| listed(body, open));
         // The tracker is unreachable: the saved decision shows with its failed delivery.
-        let body = status.body(Duration::from_secs(10), |body| {
-            body["task"]["completed"] == completed
+        status.body(Duration::from_secs(10), |body| {
+            body["task"]["completed_at"].is_null() != completed
                 && body["sync"]["changes"].as_array().is_some_and(|changes| {
                     changes
                         .iter()
                         .any(|change| change["field"] == "state" && !change["error"].is_null())
                 })
         });
-        assert_eq!(body["task"]["completed_at"].is_null(), !completed);
     }
     let reopened = home.watch(&["task", "list"]);
     reopened.body(Duration::from_secs(30), |body| listed(body, true));
@@ -544,7 +543,7 @@ fn peer_planning_receipts_reach_an_open_watch() {
     use loopflow::store::PeerPlanningStatus;
 
     let home = Machine::new();
-    let watch = home.watch(&["repo", "planning", "status"]);
+    let watch = home.watch(&["planning", "status"]);
     let repo = home.wave.repo();
     let read = |accept: &dyn Fn(&[PeerPlanningStatus]) -> bool| {
         let body = watch.body(Duration::from_secs(10), |body| {

@@ -23,6 +23,7 @@ use crate::agent::AgentConfig;
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::id::AgentSessionId;
 use crate::process::SessionAttachment;
+use crate::steer::NativeBoundary;
 
 #[derive(Debug)]
 struct Response {
@@ -525,7 +526,14 @@ fn observe_native(
     );
     let thread = AgentSessionId::from(file);
     let startup = value["type"] == "session_start";
-    store.with_provider_context(adapter, file, startup, || {
+    let boundary = if startup {
+        NativeBoundary::Activate {
+            source: "pi_session_start",
+        }
+    } else {
+        NativeBoundary::Turn
+    };
+    store.with_provider_context(adapter, file, boundary, || {
         let attachment = store.session_attachment(&adapter.session)?.ok_or_else(|| {
             crate::store::StoreError::InvalidAuthority("Pi has no attachment".into())
         })?;

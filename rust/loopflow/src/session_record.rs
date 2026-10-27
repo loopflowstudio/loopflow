@@ -1107,16 +1107,34 @@ pub(crate) fn write_provider_session(
         .session_for_artifact(&input)
         .map_err(std::io::Error::other)?
         .ok_or_else(|| std::io::Error::other("provider history has no admitted Session"))?;
+    store
+        .retain_session_observation(
+            &session,
+            &provider_session_observation(&session, &input, agent_session, account_id),
+        )
+        .map_err(std::io::Error::other)
+}
+
+/// The resume reference: the newest one names the native conversation and
+/// account `lf session connect` reopens.
+pub(crate) fn provider_session_observation(
+    session: &crate::session::LfSession,
+    input: &str,
+    agent_session: &AgentSessionId,
+    account_id: Option<crate::store::ProviderAccountId>,
+) -> crate::session::SessionObservation {
     let source = format!("provider-session:{}", Uuid::new_v4());
-    store.retain_session_observation(&session, &crate::session::SessionObservation {
-        artifact_key: input.clone(), source: source.clone(),
+    crate::session::SessionObservation {
+        artifact_key: input.to_owned(),
+        source: source.clone(),
         observed_at: OffsetDateTime::now_utc().unix_timestamp(),
-        task_id: session.task_id.clone(), wave_id: session.wave_id.clone(),
+        task_id: session.task_id.clone(),
+        wave_id: session.wave_id.clone(),
         payload: serde_json::json!({"input_id":input,"source":source,"evidence":ProviderSessionRef {
             schema_version: SCHEMA_VERSION,
             agent_session: agent_session.clone(), account_id,
         }}),
-    }).map_err(std::io::Error::other)
+    }
 }
 
 /// A terminal marker is valid only on the PTY where the shell installed it.

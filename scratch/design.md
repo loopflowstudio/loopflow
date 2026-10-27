@@ -130,4 +130,4 @@ Remaining:
   README rental row only after each passes.
 - LOO-527 is PR #1704; publish stacked on it when Jack asks.
 
-Check: `cargo test -p loopflow --lib rental` 29 passed, clippy and ruff clean, bridge+guardian pytest 19 passed (2026-10-26).
+Check: `cargo test -p loopflow --lib rental` 29 passed and clippy clean after compress folded `CreateSandbox` into `Sandboxes::create(&Rental, key)`; bridge+guardian pytest 19 passed, untouched since (2026-10-26).

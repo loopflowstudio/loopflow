@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use super::{Hardware, Provider, Usd};
+use super::{Provider, Rental, Usd};
 
 const BRIDGE: &str = include_str!("sandbox.py");
 const GUARDIAN: &str = include_str!("guardian.py");
@@ -45,27 +45,6 @@ pub struct Sandbox {
     pub route: Option<String>,
     /// The price the provider charges, where it reports one (RunPod).
     pub usd_per_hour: Option<Usd>,
-}
-
-/// One create, exactly as admitted.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateSandbox {
-    /// Our identity, sent before any reply.
-    pub name: String,
-    pub hardware: Hardware,
-    /// The provider's own name for what to rent (`Offer::machine_type`).
-    pub machine_type: Option<String>,
-    /// The admitted price: the most a spot machine may be charged.
-    pub usd_per_hour: Usd,
-    /// The provider deletes it this long after creation, whatever else fails.
-    pub lifetime_minutes: u32,
-    /// The hard deadline and what the budget allows from `created_at`, for
-    /// the guardian, which only ever shortens the deadline.
-    pub deadline: OffsetDateTime,
-    pub created_at: OffsetDateTime,
-    pub cap_usd: Usd,
-    /// Authorized for `lf` where the provider runs our own sshd.
-    pub public_key: String,
 }
 
 pub struct Sandboxes {
@@ -145,31 +124,42 @@ impl Sandboxes {
             .map_err(|_| self.unavailable(format!("{op}: a sandbox was missing its fields")))
     }
 
-    /// Ask for one sandbox, once, and wait until it has an SSH route.
-    pub fn create(&self, request: &CreateSandbox) -> Result<Sandbox> {
+    /// Ask once for the admitted rental's machine, authorizing `public_key`
+    /// for `lf`, and wait until it has an SSH route. The provider deletes it at
+    /// the deadline whatever else fails; the guardian may only shorten that,
+    /// by what the cap buys from `created_at`.
+    pub fn create(&self, rental: &Rental, public_key: &str) -> Result<Sandbox> {
+        let offer = self
+            .provider
+            .offer(&rental.hardware)
+            .map_err(|reason| self.unavailable(format!("create: {reason}")))?;
         let utc = |at: OffsetDateTime| {
             at.to_offset(time::UtcOffset::UTC)
                 .format(&Rfc3339)
                 .expect("UTC formats")
         };
+        let lifetime_minutes = (rental.deadline - OffsetDateTime::now_utc())
+            .whole_minutes()
+            .clamp(1, i64::from(u32::MAX));
         let sandbox = self
             .ask(
                 "create",
                 json!({
-                    "name": request.name,
-                    "vcpus": request.hardware.vcpus,
-                    "memory_gb": request.hardware.memory_gb,
-                    "disk_gb": request.hardware.disk_gb,
-                    "gpu": request.hardware.gpu,
-                    "spot": request.hardware.spot,
-                    "type": request.machine_type,
-                    "usd_per_hour": request.usd_per_hour.to_decimal(),
-                    "lifetime_minutes": request.lifetime_minutes,
-                    "deadline": utc(request.deadline),
-                    "created_at": utc(request.created_at),
-                    "max_usd": request.cap_usd.to_decimal(),
+                    "name": rental.provider_name,
+                    "vcpus": rental.hardware.vcpus,
+                    "memory_gb": rental.hardware.memory_gb,
+                    "disk_gb": rental.hardware.disk_gb,
+                    "gpu": rental.hardware.gpu,
+                    "spot": rental.hardware.spot,
+                    "type": offer.machine_type,
+                    // The most a spot machine may be charged.
+                    "usd_per_hour": rental.usd_per_hour.to_decimal(),
+                    "lifetime_minutes": lifetime_minutes,
+                    "deadline": utc(rental.deadline),
+                    "created_at": utc(rental.created_at),
+                    "max_usd": rental.cap_usd.to_decimal(),
                     "guardian": GUARDIAN,
-                    "public_key": request.public_key.trim(),
+                    "public_key": public_key.trim(),
                 }),
             )?
             .ok_or_else(|| self.unavailable("create: no sandbox in the reply"))?;
@@ -227,24 +217,8 @@ mod tests {
 
     #[test]
     fn a_create_without_a_route_is_not_a_machine() {
-        let created =
-            replying(r#"{"id": "sb-1", "gone": false, "route": null}"#).create(&CreateSandbox {
-                name: "lf-rent_1".into(),
-                hardware: Hardware {
-                    vcpus: 4,
-                    memory_gb: 8,
-                    disk_gb: 10,
-                    gpu: None,
-                    spot: false,
-                },
-                machine_type: None,
-                usd_per_hour: Usd::ZERO,
-                lifetime_minutes: 60,
-                deadline: OffsetDateTime::UNIX_EPOCH,
-                created_at: OffsetDateTime::UNIX_EPOCH,
-                cap_usd: Usd::ZERO,
-                public_key: "ssh-ed25519 AAAA".into(),
-            });
+        let created = replying(r#"{"id": "sb-1", "gone": false, "route": null}"#)
+            .create(&crate::rental::tests::rented(false), "ssh-ed25519 AAAA");
         assert!(created.is_err());
     }
 }

@@ -248,7 +248,7 @@ impl Provider {
             )),
             (Self::Modal, None) => Ok(offer(None, per_size(70_956, 24_012, 0))),
             (Self::Modal, Some(gpu)) => {
-                let (_, name, usd) = find_gpu(self, MODAL_GPUS, |row| row.0, gpu)?;
+                let (name, usd) = find_gpu(self, MODAL_GPUS, gpu)?;
                 Ok(offer(
                     Some(name.to_string()),
                     per_size(70_956, 24_012, *usd),
@@ -261,7 +261,7 @@ impl Provider {
                 .map(|(flavor, _, usd)| offer(Some((*flavor).to_string()), usd * vcpus))
                 .ok_or_else(no_shape),
             (Self::Runpod, Some(gpu)) => {
-                let (_, id, usd) = find_gpu(self, RUNPOD_GPUS, |row| row.0, gpu)?;
+                let (id, usd) = find_gpu(self, RUNPOD_GPUS, gpu)?;
                 Ok(offer(Some(id.to_string()), *usd))
             }
             (Self::Aws, None) => AWS_CPUS
@@ -276,7 +276,7 @@ impl Provider {
                 })
                 .ok_or_else(no_shape),
             (Self::Aws, Some(gpu)) => {
-                let (_, family, sizes) = find_gpu(self, AWS_GPUS, |row| row.0, gpu)?;
+                let (family, sizes) = find_gpu(self, AWS_GPUS, gpu)?;
                 sizes
                     .iter()
                     .find(|(size_vcpus, size_gib, _, _)| {
@@ -397,17 +397,20 @@ const AWS_GPUS: &[(&str, &str, GpuSizes)] = &[
 /// $2/month for the app's dedicated IPv4.
 const FLY_IPV4_MICROS: i64 = 2_778;
 
-/// The row of a provider's GPU table for a `--gpu` name.
-fn find_gpu<R>(
+/// The provider's name for a `--gpu` name and what its table holds beside it.
+fn find_gpu<T>(
     provider: Provider,
-    table: &'static [R],
-    name: fn(&R) -> &str,
+    table: &'static [(&'static str, &'static str, T)],
     gpu: &str,
-) -> Result<&'static R, String> {
-    table.iter().find(|row| name(row) == gpu).ok_or_else(|| {
-        let known: Vec<&str> = table.iter().map(name).collect();
-        format!("{provider} rents no {gpu}; it rents {}", known.join(", "))
-    })
+) -> Result<(&'static str, &'static T), String> {
+    table
+        .iter()
+        .find(|(name, _, _)| *name == gpu)
+        .map(|(_, id, rest)| (*id, rest))
+        .ok_or_else(|| {
+            let known: Vec<&str> = table.iter().map(|(name, _, _)| *name).collect();
+            format!("{provider} rents no {gpu}; it rents {}", known.join(", "))
+        })
 }
 
 impl fmt::Display for Provider {

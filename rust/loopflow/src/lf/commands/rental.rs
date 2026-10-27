@@ -14,7 +14,7 @@ use time::OffsetDateTime;
 use crate::durable::{CapacityDefault, Machine, MachineId};
 use crate::lf::{OndemandCommand, PoolCommand};
 use crate::machine_records::CopyCounts;
-use crate::rental::sandbox::{CreateSandbox, Sandboxes};
+use crate::rental::sandbox::Sandboxes;
 use crate::rental::{
     self, GiveBack, Hardware, Holdings, OnDemand, Pool, PoolMachine, Provider, Rental, RentalState,
     Resolution, Usd,
@@ -391,23 +391,7 @@ pub(crate) fn rent(
         rental.usd_per_hour,
         clock(rental.deadline)
     );
-    let offer = ondemand
-        .provider
-        .offer(&rental.hardware)
-        .map_err(|reason| anyhow!(reason))?;
-    let request = CreateSandbox {
-        name: rental.provider_name.clone(),
-        hardware: rental.hardware.clone(),
-        machine_type: offer.machine_type,
-        usd_per_hour: rental.usd_per_hour,
-        lifetime_minutes: u32::try_from((rental.deadline - now()).whole_minutes().max(1))
-            .unwrap_or(u32::MAX),
-        deadline: rental.deadline,
-        created_at: rental.created_at,
-        cap_usd: rental.cap_usd,
-        public_key,
-    };
-    let sandbox = match api.create(&request) {
+    let sandbox = match api.create(&rental, &public_key) {
         Ok(sandbox) => sandbox,
         Err(error) => {
             sqlite.set_rental_state(&rental.id, RentalState::Unconfirmed)?;

@@ -21,6 +21,18 @@ pub enum MonitorCommand {
     },
     /// Refresh live Loopflow call trees on a terminal; print once when redirected
     Top,
+    /// Move idle Sessions still running a superseded lf onto the selected install
+    #[command(
+        after_help = "A Session moves when nobody is viewing it, no turn, Graph step or headless Run is in progress, and its provider history is saved. Its owner is ended and the Session resumes on the selected lf. A running Graph isn't stopped: its next step launches on the selected lf, and its runner exits with the Graph. Every other process on a superseded lf is listed with why it stays.\n\nExit status: 0 when every movable Session resumed; 1 otherwise."
+    )]
+    Rollover {
+        /// List what would move and what stays without stopping anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Emit the rollover report as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Reap registered orphan providers and remove dead process receipts
     Prune {
         /// Show exact targets without changing process or receipt state
@@ -37,6 +49,7 @@ pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
         MonitorCommand::Ps { watch: true, .. } => super::top::watch_ps(),
         MonitorCommand::Ps { json, .. } => super::top::run_ps(*json),
         MonitorCommand::Top => super::top::run_top(),
+        MonitorCommand::Rollover { dry_run, json } => super::rollover::run(*dry_run, *json),
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
     }
 }

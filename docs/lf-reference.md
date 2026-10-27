@@ -1526,6 +1526,16 @@ Refresh live Loopflow call trees on a terminal; print once when redirected
 |---|---|
 | `--help / -h` | Print help |
 
+## lf monitor rollover
+
+Move idle Sessions still running a superseded lf onto the selected install
+
+| Argument | What it does |
+|---|---|
+| `--dry-run` | List what would move and what stays without stopping anything Default: false. |
+| `--json` | Emit the rollover report as JSON Default: false. |
+| `--help / -h` | Print help |
+
 ## lf monitor prune
 
 Reap registered orphan providers and remove dead process receipts

@@ -773,7 +773,7 @@ pub(crate) fn desktop_helper() -> Option<PathBuf> {
 }
 
 /// `<App>.app/Contents/MacOS/lf`.
-fn is_app_helper(path: &Path) -> bool {
+pub(crate) fn is_app_helper(path: &Path) -> bool {
     let tail: Vec<_> = path
         .iter()
         .rev()
@@ -936,15 +936,21 @@ pub fn read_state(root: &Path) -> Result<InstallationState> {
 
 /// Ordinary launches use published artifacts even if an old development
 /// installation is still selected. Its store never participates in routing.
-pub(crate) fn installed_cli(root: &Path) -> Result<Option<ArtifactIdentity>> {
+pub(crate) fn installed_artifacts(root: &Path) -> Result<Option<ArtifactSet>> {
     let active = match read_state(root)? {
         InstallationState::Legacy => return Ok(None),
         InstallationState::Settled(active) => *active,
         InstallationState::Switching(receipt) => startup_active_during_switch(&receipt)?,
     };
-    let artifacts = match active.selection.source {
+    Ok(Some(match active.selection.source {
         InstallSource::Published => active.selection.artifact_set,
         InstallSource::Development => active.published_fallback,
+    }))
+}
+
+pub(crate) fn installed_cli(root: &Path) -> Result<Option<ArtifactIdentity>> {
+    let Some(artifacts) = installed_artifacts(root)? else {
+        return Ok(None);
     };
     artifacts
         .artifact(&ArtifactRole::Cli)
@@ -1277,7 +1283,7 @@ fn require_schema(schema_version: u32) -> Result<()> {
     Ok(())
 }
 
-fn file_sha256(path: &Path) -> Result<String> {
+pub(crate) fn file_sha256(path: &Path) -> Result<String> {
     let bytes = fs::read(path).with_context(|| format!("read artifact {}", path.display()))?;
     Ok(hex::encode(Sha256::digest(bytes)))
 }

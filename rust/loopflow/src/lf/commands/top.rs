@@ -110,7 +110,14 @@ fn activity_state(
 
 pub fn run_ps(json: bool) -> Result<()> {
     let snapshot = load_snapshot()?;
-    print_snapshot(&snapshot, json)
+    print_snapshot(&snapshot, json)?;
+    if !json {
+        match super::rollover::inventory() {
+            Ok(inventory) => print!("{}", super::rollover::render_binaries(&inventory)),
+            Err(error) => tracing::warn!(%error, "lf binary inventory unavailable"),
+        }
+    }
+    Ok(())
 }
 
 pub fn run_top() -> Result<()> {
@@ -275,7 +282,7 @@ fn collect_activity(
     Ok(ActivitySnapshot { nodes })
 }
 
-fn command_label(command: Option<&str>, kind: crate::process::ProcessKind) -> String {
+pub(crate) fn command_label(command: Option<&str>, kind: crate::process::ProcessKind) -> String {
     if kind == crate::process::ProcessKind::Agent {
         let argv = command.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok());
         let program = argv

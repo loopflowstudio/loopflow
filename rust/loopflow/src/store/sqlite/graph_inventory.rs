@@ -239,6 +239,16 @@ impl SqliteStore {
         Ok(Some((graph, entry)))
     }
 
+    /// Whether `process` is a Graph process.
+    pub(crate) fn runs_graph(&self, process: &LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=?1)",
+            [process],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Graphs run from `cwd`, oldest first.
     pub(crate) fn graphs_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

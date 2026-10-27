@@ -6,7 +6,9 @@
 //! open the store any more. Rollover moves what can be proven resumable: an idle,
 //! unviewed Session execution owner with saved provider history is ended the way
 //! the detached-Session policy ends it, then each of its Sessions resumes on the
-//! selected lf. Everything else is listed with why it stays.
+//! selected lf. A Graph runner isn't stopped: each step resolves the installed
+//! entry when it launches, so its next step already runs on the selected lf and
+//! the runner leaves with the Graph. Everything else is listed with why it stays.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -332,6 +334,8 @@ pub struct RolloverReport {
     pub dry_run: bool,
     pub selected: Option<SelectedBinary>,
     pub moved: Vec<MovedOwner>,
+    /// Graph runners whose next step launches on the selected lf.
+    pub next_step: Vec<StayingProcess>,
     pub stays: Vec<StayingProcess>,
 }
 
@@ -356,11 +360,28 @@ pub struct StayingProcess {
 enum Disposition {
     /// An idle, unviewed owner and the Sessions it holds.
     Moves(Vec<String>),
+    /// A Graph runner, left running; its next step launches on the selected lf.
+    NextStep,
     Stays(String),
 }
 
 /// Whether a superseded Process can move, and why not when it can't.
-async fn disposition(shared: &SharedStore, process: &RunningLfProcess) -> Result<Disposition> {
+async fn disposition(
+    shared: &SharedStore,
+    binary: &RunningBinary,
+    process: &RunningLfProcess,
+) -> Result<Disposition> {
+    if shared.sqlite.runs_graph(&process.id)? {
+        return Ok(graph_runner(binary));
+    }
+    owner_disposition(shared, process).await
+}
+
+/// A Session execution owner moves when it is idle, unviewed and resumable.
+async fn owner_disposition(
+    shared: &SharedStore,
+    process: &RunningLfProcess,
+) -> Result<Disposition> {
     let store = &shared.sqlite;
     let stays = |reason: &str| Ok(Disposition::Stays(reason.into()));
     let sessions = store.owner_sessions(&process.id)?;
@@ -393,6 +414,64 @@ async fn disposition(shared: &SharedStore, process: &RunningLfProcess) -> Result
     Ok(Disposition::Moves(sessions))
 }
 
+/// A Graph runner's steps resolve the installed entry at each launch, except
+/// in Desktop's helper, which keeps itself; a runner below the store floor
+/// fails at its next step instead.
+fn graph_runner(binary: &RunningBinary) -> Disposition {
+    if binary
+        .path
+        .as_deref()
+        .is_some_and(crate::installation::is_app_helper)
+    {
+        return Disposition::Stays(
+            "its steps follow Loopflow.app's bundled lf; update Desktop".into(),
+        );
+    }
+    if binary.cannot_open_store {
+        return Disposition::Stays(
+            "can't open the store; it fails at its next step and `lf task run` retries its route"
+                .into(),
+        );
+    }
+    Disposition::NextStep
+}
+
+impl RolloverReport {
+    /// File a non-moving disposition; a moving one returns its Sessions.
+    fn place(
+        &mut self,
+        binary: &RunningBinary,
+        process: &RunningLfProcess,
+        disposition: Disposition,
+    ) -> Option<Vec<String>> {
+        let listed = |reason: String| StayingProcess {
+            process: process.clone(),
+            binary: binary.describe(),
+            reason,
+        };
+        match disposition {
+            Disposition::Moves(sessions) => return Some(sessions),
+            Disposition::NextStep => self.next_step.push(listed(
+                "launches its next step on the selected lf; the runner exits with the Graph".into(),
+            )),
+            Disposition::Stays(reason) => self.stays.push(listed(reason)),
+        }
+        None
+    }
+}
+
+impl MovedOwner {
+    fn new(binary: &RunningBinary, process: &RunningLfProcess, session_ids: Vec<String>) -> Self {
+        Self {
+            process: process.clone(),
+            binary: binary.describe(),
+            sessions: Vec::new(),
+            session_ids,
+            error: None,
+        }
+    }
+}
+
 pub fn run(dry_run: bool, json: bool) -> Result<()> {
     let report = tokio::runtime::Runtime::new()?.block_on(rollover(dry_run))?;
     if json {
@@ -420,51 +499,39 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
         dry_run,
         selected: inventory.selected.clone(),
         moved: Vec::new(),
+        next_step: Vec::new(),
         stays: Vec::new(),
     };
+    let mut movable = Vec::new();
     for binary in inventory.superseded() {
         for process in &binary.processes {
-            match disposition(&store, process).await? {
-                Disposition::Stays(reason) => report.stays.push(StayingProcess {
-                    process: process.clone(),
-                    binary: binary.describe(),
-                    reason,
-                }),
-                Disposition::Moves(session_ids) => report.moved.push(MovedOwner {
-                    session_ids,
-                    process: process.clone(),
-                    binary: binary.describe(),
-                    sessions: Vec::new(),
-                    error: None,
-                }),
+            let disposition = disposition(&store, binary, process).await?;
+            if let Some(sessions) = report.place(binary, process, disposition) {
+                movable.push((binary, process, sessions));
             }
         }
     }
     let (Some(selected), false) = (&inventory.selected, dry_run) else {
+        report.moved = movable
+            .into_iter()
+            .map(|(binary, process, session_ids)| MovedOwner::new(binary, process, session_ids))
+            .collect();
         return Ok(report);
     };
     // Earlier resumes take seconds each, so a person may have started a turn or
     // attached a terminal since classification; the owner may also have exited.
-    let classified = std::mem::take(&mut report.moved);
-    for mut owner in classified {
-        let still_running = crate::journal::process_evidence(&store.sqlite, &owner.process.id)
+    for (binary, process, _) in movable {
+        let still_running = crate::journal::process_evidence(&store.sqlite, &process.id)
             == ProcessIdentityEvidence::Live;
         let now = if still_running {
-            disposition(&store, &owner.process).await?
+            disposition(&store, binary, process).await?
         } else {
             Disposition::Stays("exited before rollover reached it".into())
         };
-        match now {
-            Disposition::Moves(session_ids) => owner.session_ids = session_ids,
-            Disposition::Stays(reason) => {
-                report.stays.push(StayingProcess {
-                    process: owner.process,
-                    binary: owner.binary,
-                    reason,
-                });
-                continue;
-            }
-        }
+        let Some(session_ids) = report.place(binary, process, now) else {
+            continue;
+        };
+        let mut owner = MovedOwner::new(binary, process, session_ids);
         if let Err(error) = stop_owner(&store.sqlite, &owner.process) {
             owner.error = Some(format!("{error:#}"));
             report.moved.push(owner);
@@ -516,7 +583,7 @@ fn render_report(report: &RolloverReport) -> String {
         selected.path.display(),
         selected.version.as_deref().unwrap_or("version unknown")
     );
-    if report.moved.is_empty() && report.stays.is_empty() {
+    if report.moved.is_empty() && report.next_step.is_empty() && report.stays.is_empty() {
         return format!("Every live lf process runs the selected {target}.\n");
     }
     let verb = if report.dry_run {
@@ -538,6 +605,18 @@ fn render_report(report: &RolloverReport) -> String {
         }
         for session in &owner.sessions {
             lines.push(format!("  {}", restore::describe(session)));
+        }
+    }
+    if !report.next_step.is_empty() {
+        lines.push(format!(
+            "Moving at their next step ({}):",
+            report.next_step.len()
+        ));
+        for runner in &report.next_step {
+            lines.push(format!(
+                "  pid {} {} on {}: {}",
+                runner.process.pid, runner.process.label, runner.binary, runner.reason
+            ));
         }
     }
     if !report.stays.is_empty() {
@@ -582,8 +661,12 @@ pub fn report_after_promote() {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{group, parse_version, superseded_summary, BinaryInventory, RunningLfProcess};
+    use super::{
+        disposition, group, parse_version, superseded_summary, BinaryInventory, Disposition,
+        RunningBinary, RunningLfProcess,
+    };
     use crate::id::LfProcessId;
+    use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 
     fn process(pid: u32) -> RunningLfProcess {
         RunningLfProcess {
@@ -647,5 +730,62 @@ mod tests {
             Some(true)
         );
         assert_eq!(release_meets_floor("dev", "0.14.16"), None);
+    }
+
+    #[tokio::test]
+    async fn a_graph_runner_moves_at_its_next_step_unless_its_steps_cannot_follow() {
+        let directory = tempfile::tempdir().unwrap();
+        let store: SharedStore = std::sync::Arc::new(
+            open_ephemeral_store(&StorageConfig::sqlite(directory.path().join("lf.db")))
+                .await
+                .unwrap(),
+        );
+        let [runner, plain] = [process(1), process(2)];
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            for (process, argv) in [(&runner, ["lf", "graph"]), (&plain, ["lf", "inspect"])] {
+                conn.execute(
+                    "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,'fixture',?2,1)",
+                    rusqlite::params![process.id, serde_json::to_string(&argv).unwrap()],
+                )
+                .unwrap();
+            }
+            conn.execute(
+                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'two-steps','{}')",
+                [&runner.id],
+            )
+            .unwrap();
+        }
+        let binary = |path: &str, cannot_open_store| RunningBinary {
+            path: Some(PathBuf::from(path)),
+            version: Some("0.14.16".into()),
+            selected: false,
+            cannot_open_store,
+            processes: Vec::new(),
+        };
+        let installed = binary("/home/.lf/bin/lf-d49c57c", false);
+        let below_floor = binary("/home/.lf/bin/lf-270110a", true);
+        let helper = binary("/Applications/Loopflow.app/Contents/MacOS/lf", false);
+
+        let of = |binary, process| {
+            let store = store.clone();
+            async move { disposition(&store, binary, process).await.unwrap() }
+        };
+        assert!(matches!(
+            of(&installed, &runner).await,
+            Disposition::NextStep
+        ));
+        let Disposition::Stays(reason) = of(&below_floor, &runner).await else {
+            panic!("a runner below the floor stays");
+        };
+        assert!(reason.contains("`lf task run` retries"), "{reason}");
+        let Disposition::Stays(reason) = of(&helper, &runner).await else {
+            panic!("a Desktop helper runner stays");
+        };
+        assert!(reason.contains("update Desktop"), "{reason}");
+        assert!(matches!(
+            of(&installed, &plain).await,
+            Disposition::Stays(_)
+        ));
     }
 }

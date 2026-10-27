@@ -1,8 +1,7 @@
 # LOO-634: show and roll over processes on a superseded lf
 
-Status: Session rollover implemented and committed (PR #1729), current with
-origin/main 4a85fb3a5a. Graph-boundary slice planned below (2026-10-27 kickoff);
-Task acceptance waits on it. Source: the Task definition and cbda52's `scratch/database-locked-5-whys.md`
+Status: Session rollover and the Graph-boundary slice implemented (PR #1729),
+current with origin/main 4a85fb3a5a. Remaining: the live demo after install. Source: the Task definition and cbda52's `scratch/database-locked-5-whys.md`
 (Why 5). Jack asked for it to ship without stopping for review.
 
 ## Problem
@@ -100,33 +99,27 @@ One action (`rollover`), three concepts (running binary, selected install, store
 floor), one per-owner Disposition; surfaces reuse doctor, `monitor ps` and promote.
 Nothing to rename or merge.
 
-## This slice: Graph steps at a boundary
+## Graph steps at a boundary (implemented 2026-10-27)
 
-1. **Disposition** (`rollover.rs`): before the Session checks, a superseded Process
-   with an unfinished `graph_processes` row resolves to
-   - `NextStep` when its executable isn't a Desktop helper and its release can open
-     the store: "launches its next step on the selected lf; the runner exits with the
-     Graph";
-   - `Stays("its steps follow Loopflow.app's bundled lf; update Desktop")` for a
-     helper runner;
-   - `Stays("can't open the store; it fails at its next step and `lf task run`
-     retries its route")` below the floor.
-   Step Processes keep today's rule (busy turn / operation → stays until it exits).
-   Report gains `next_step: Vec<StayingProcess>` (reason = the line above); text
-   renders a "MOVES AT ITS NEXT STEP" section; `--dry-run` identical (nothing is
-   signalled either way). Unit tests on the disposition with seeded Process +
-   GraphProcess rows.
-2. **Proof** (new ignored disposable-install test beside the existing one,
-   `graph_live_across_switch_runs_next_step_on_selected_install`): select a prior
-   CLI that is a wrapper waiting on a fifo before exec'ing the real lf; start
-   `lf graph two-steps --batch` (two `cmd:` steps); while step 1 blocks, write and
-   settle a switch to the replacement; release the fifo. Assert one
-   `graph_processes` row, two successful steps (each node once — no replay), step 2's
-   Process command contains the replacement path and step 1's doesn't, and the
-   runner's pid was never signalled. Run by `uv run python
-   scripts/test_task_installation.py --test <name>` (Docker; CI `task-installation`).
-3. **Docs**: `lf monitor rollover` help/after_help mentions Graph runners; regenerate
-   `docs/lf-reference.md`.
+- `rollover::disposition` checks `SqliteStore::runs_graph` first; a Graph runner
+  resolves to `NextStep` (listed under "Moving at their next step") unless it runs
+  a Desktop helper ("update Desktop") or is below the store floor ("fails at its
+  next step and `lf task run` retries its route"). Nothing is signalled. Session
+  owners keep the earlier rule, and re-checks before each stop reuse the same
+  `disposition`. JSON gains `next_step`.
+- Proof `graph_live_across_switch_runs_next_step_on_selected_install`
+  (`os_process/installation_tests.rs`, registered in
+  `scripts/test_task_installation.py`): the prior install is a real lf copy (trailing
+  bytes give it its own digest); a `git` on PATH holds step 1's first git call
+  (only processes carrying `LF_GRAPH_ID`) at a fifo while a compatible switch
+  settles; the Graph finishes with one
+  `graph_processes` row, two successful steps on distinct nodes, step 1 on the
+  prior binary, step 2 on the replacement, the runner recorded on the prior binary
+  and exiting 0 on its own. A script wrapper can't stand in for the prior CLI:
+  `dispatch_default_cli` re-execs any non-selected lf into the selected one, so a
+  wrapper that execs the real binary loops forever (first attempt hung).
+- `lf monitor rollover` after_help names Graph runners (`docs/lf-reference.md`
+  doesn't render after_help; no regen).
 
 ## Exclusions
 
@@ -137,7 +130,6 @@ Nothing to rename or merge.
 
 ## Remaining
 
-- Graph-boundary slice (above).
 - Demo against the live store after install (see Checks).
 
 ## Done when
@@ -168,6 +160,10 @@ Nothing to rename or merge.
   `29 processes on Loopflow.app lf (0.14.16)` with floor 0.14.16 (correctly no flag).
 - 2026-10-27, after compress: clippy and focused lib tests (13) pass.
 - 2026-10-27 realign: no rerun; the 4a85fb3a5a merge left every rollover file unchanged.
+- 2026-10-27 Graph slice: clippy, `cargo test --lib -- rollover` (4) and the CLI
+  reference pass. Docker proof: first wrapper design hung (above, fixed); reruns of
+  the fixed test never reached it because OrbStack's VM crashed during compile and
+  OrbStack.app then left /Applications. Deferred to CI `task-installation`.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).
 

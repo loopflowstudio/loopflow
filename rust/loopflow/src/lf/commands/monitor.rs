@@ -42,7 +42,7 @@ pub enum MonitorCommand {
     },
     /// Move idle Sessions still running a superseded lf onto the selected install
     #[command(
-        after_help = "A Session moves when nobody is viewing it, no turn, Graph step or headless Run is in progress, and its provider history is saved. Its owner is ended and the Session resumes on the selected lf. Every other process on a superseded lf is listed with why it stays.\n\nExit status: 0 when every movable Session resumed; 1 otherwise."
+        after_help = "A Session moves when nobody is viewing it, no turn, Graph step or headless Run is in progress, and its provider history is saved. Its owner is ended and the Session resumes on the selected lf. A running Graph isn't stopped: its next step launches on the selected lf, and its runner exits with the Graph. Every other process on a superseded lf is listed with why it stays.\n\nExit status: 0 when every movable Session resumed; 1 otherwise."
     )]
     Rollover {
         /// List what would move and what stays without stopping anything

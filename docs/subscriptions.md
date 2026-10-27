@@ -190,7 +190,9 @@ route order decides ties. In shared
 mode the signed-in account also wins ties, so a launch switches every running
 Claude only when another account has more room. A provider session stays
 pinned to the account that created it so a resume does not silently switch
-identities.
+identities. Naming another login moves the conversation there and re-pins it:
+`lf resume --account <email> -a claude`. A named login that cannot launch
+fails rather than falling back to another account.
 
 Claude's cached identity is bound to the credential bytes checked by the profile
 endpoint. Cached status reports changed or previously unverified credentials as

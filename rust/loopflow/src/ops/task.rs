@@ -515,7 +515,8 @@ pub fn task_place(
         reason,
         ..
     } = options.clone();
-    let mut task = prepare_task(repo, issue, options, None)?;
+    let source = remote::source_for_task(issue)?;
+    let mut task = prepare_task(repo, issue, options, None, source)?;
     block_on_task(async {
         let store = task_store().await?;
         let reason = reason
@@ -777,6 +778,7 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
             ..Default::default()
         },
         options.recover_from.as_deref(),
+        remote::source_for_task(issue)?,
     )?;
     if let Some(design) = design {
         handoff::write_design(&task, &design)?;
@@ -784,16 +786,29 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     Ok(task)
 }
 
+/// Check out a Task that moved here on its carried branch and commit.
+pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> OpsResult<Task> {
+    let issue = source.task_id.to_string();
+    prepare_task(
+        repo,
+        &issue,
+        TaskProcessOptions::default(),
+        None,
+        Some(source),
+    )
+}
+
+/// `source` is the branch and commit another Machine pushed for this Task.
 fn prepare_task(
     repo: &Path,
     issue: &str,
     options: TaskProcessOptions,
     recover_from: Option<&str>,
+    source: Option<remote::TaskSource>,
 ) -> OpsResult<Task> {
     options.validate_directive(None)?;
     block_on_task(async {
         let store = task_store().await?;
-        let source = remote::source_for_task(issue)?;
         if let Some(source) = &source {
             source.require_pushed(repo)?;
         }

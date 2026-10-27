@@ -198,6 +198,16 @@ pub(crate) struct TaskGraphRow {
     pub run: Option<(ExecutionCursor, LfProcess)>,
 }
 
+/// A Task's Graph as another Machine takes it up: the graph it took up, the
+/// step it stands at, and the cursor its run began from, if it is on one. The
+/// run's Process stays behind.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct TaskGraphRecord {
+    pub graph: CapturedGraph,
+    pub step: String,
+    pub run_start: Option<ExecutionCursor>,
+}
+
 fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
     use rusqlite::OptionalExtension;
     let Some((graph, step, start, process)) = conn
@@ -570,6 +580,59 @@ impl SqliteStore {
             interactive_steps: row.graph.interactive_summary(),
             position,
         }
+    }
+
+    /// The Task's Graph as it moves to another Machine.
+    pub(crate) fn task_graph_record(&self, task: &TaskId) -> StoreResult<Option<TaskGraphRecord>> {
+        use rusqlite::OptionalExtension;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some((graph, step, run_start)) = conn
+            .query_row(
+                "SELECT graph,step,run_start FROM task_graphs WHERE task_id=?1",
+                [task.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(TaskGraphRecord {
+            graph: serde_json::from_str(&graph)?,
+            step,
+            run_start: run_start.as_deref().map(serde_json::from_str).transpose()?,
+        }))
+    }
+
+    /// Take up a Graph that moved here. A Task on a run stays on it, carried
+    /// by `by`, the receiving Process: it ends with the move, so the run reads
+    /// as stopped and the next `lf task run` starts it again from where it began.
+    pub(crate) fn place_moved_task_graph(
+        &self,
+        task: &TaskId,
+        record: &TaskGraphRecord,
+        by: Option<&LfProcessId>,
+    ) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let run = record.run_start.as_ref().zip(by);
+        conn.execute(
+            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6)",
+            rusqlite::params![
+                task.as_str(),
+                serde_json::to_string(&record.graph)?,
+                record.step,
+                run.map(|(start, _)| serde_json::to_string(start)).transpose()?,
+                run.map(|(_, by)| by.as_str()),
+                crate::store::rows::now_unix()
+            ],
+        )?;
+        Ok(())
     }
 
     /// Take up `graph` for the Task as it is defined now, at `start`. It

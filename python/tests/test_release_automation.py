@@ -287,8 +287,9 @@ esac
 
     env = {
         "HOME": str(home),
-        # A host PATH longer than the 999 bytes cron reads of a command.
-        "PATH": f"{tools}:{root / ('p' * 1500)}:/usr/bin:/bin",
+        # A host PATH longer than the 999 bytes cron reads of a command, in
+        # components under NAME_MAX: glibc's execvp stops at ENAMETOOLONG.
+        "PATH": f"{tools}:{root.joinpath(*['p' * 250] * 6)}:/usr/bin:/bin",
         "LF_HOME": str(home / ".lf"),
         "TMPDIR": str(root),
     }

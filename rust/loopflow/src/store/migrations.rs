@@ -3363,6 +3363,27 @@ mod tests {
     }
 
     #[test]
+    fn graph_node_interactive_renames_recorded_human_steps() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "graph_node_interactive");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/graph_node_interactive_released.sql"
+        ))
+        .unwrap();
+        conn.execute_batch(&current_draft_sql("graph_node_interactive"))
+            .unwrap();
+        let compiled: String = conn
+            .query_row("SELECT compiled FROM graph_processes", [], |row| row.get(0))
+            .unwrap();
+        let graph: crate::graph::compiled::CompiledGraph = serde_json::from_str(&compiled).unwrap();
+        let path = &graph.steps[1].paths[0];
+        assert!(path.steps[0].interactive, "XOR path steps are renamed too");
+        assert_eq!(path.description, r#"Quote: ,"human":true"#);
+        let rewrite = conn.execute("UPDATE graph_processes SET graph='other'", []);
+        assert!(rewrite.is_err(), "the record is append-only again");
+    }
+
+    #[test]
     fn session_facts_only_folds_stream_usage_into_native_turns_and_keeps_facts() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_current_draft(&conn, "session_facts_only");

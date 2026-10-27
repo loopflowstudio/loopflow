@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install the release jobs as ordinary crontab lines on the Wave's placed
-# Machine. Each line runs a plain lf command; cron itself owns the schedule.
+# Machine. Each line runs a generated wrapper around a plain lf command; cron
+# itself owns the schedule.
 #
 # Run this from the placed Machine after promoting a release `lf`. The script
 # reconstructs the unattended environment from non-secret host-local paths;
@@ -46,7 +47,7 @@ else
 fi
 
 lf_home="${LF_HOME:-$HOME/.lf}"
-# The checks below and both cron lines run in this one environment.
+# The checks below and both cron wrappers run in this one environment.
 minimal_env=(
   env -i
   "HOME=$HOME"
@@ -86,16 +87,30 @@ step "configured publisher authority"
 
 step "install release schedules"
 log_dir="$repo_root/.lf/logs"
-mkdir -p "$log_dir"
+# cron reads only 999 bytes of a command (Vixie MAX_COMMAND) and runs the cut
+# prefix; the host PATH alone can exceed that. Each line runs a wrapper that
+# holds the full command.
+cron_dir="$repo_root/.lf/cron"
+mkdir -p "$log_dir" "$cron_dir"
 cron_env="$(printf '%q ' "${minimal_env[@]}")"
 job() {
-  printf '%s cd %q && %s%q --wave %q --batch graph %s >> %q 2>&1 # loopflow:%s:%s\n' \
-    "$1" "$repo_root" "$cron_env" "$lf_bin" "$wave" "$2" "$log_dir/$2.log" "$wave" "$2"
+  local wrapper="$cron_dir/$wave.$2.sh" line bytes
+  printf '#!/bin/sh\ncd %q && exec %s%q --wave %q --batch graph %s >> %q 2>&1\n' \
+    "$repo_root" "$cron_env" "$lf_bin" "$wave" "$2" "$log_dir/$2.log" >"$wrapper"
+  chmod 0755 "$wrapper"
+  line="$(printf '%s /bin/sh %q # loopflow:%s:%s' "$1" "$wrapper" "$wave" "$2")"
+  bytes="$(printf '%s' "$line" | wc -c)"
+  if [ "$bytes" -ge 1000 ]; then
+    printf 'crontab line for %s is %d bytes; cron runs only the first 999\n' "$2" "$bytes" >&2
+    return 1
+  fi
+  printf '%s\n' "$line"
 }
+telemetry_line="$(job "0 9 * * *" telemetry-daily)"
+release_line="$(job "0 10 * * *" release-run)"
 {
   crontab -l 2>/dev/null | grep -v "# loopflow:$wave:" || true
-  job "0 9 * * *" telemetry-daily
-  job "0 10 * * *" release-run
+  printf '%s\n' "$telemetry_line" "$release_line"
 } | crontab -
 installed="$(crontab -l | grep "# loopflow:$wave:")"
 printf '%s\n' "$installed"
@@ -117,8 +132,11 @@ for plist in "$HOME"/Library/LaunchAgents/loopflow.cron."$wave".*.plist; do
 done
 
 step "configured-path telemetry run"
-if ! "${minimal_env[@]}" "$lf_bin" --wave "$wave" --batch graph telemetry-daily; then
-  printf '\nbootstrap installed the jobs, but the telemetry run is red; inspect the output above\n' >&2
+# Run the same wrapper cron runs.
+if ! /bin/sh "$cron_dir/$wave.telemetry-daily.sh"; then
+  tail -n 40 "$log_dir/telemetry-daily.log" >&2 || true
+  printf '\nbootstrap installed the jobs, but the telemetry run is red; inspect the log above\n' >&2
   exit 1
 fi
+tail -n 20 "$log_dir/telemetry-daily.log"
 printf '\nbootstrap complete: this Machine runs Wave %s release jobs from crontab\n' "$wave"

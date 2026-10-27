@@ -673,8 +673,10 @@ New Session names use a short excerpt of the request, or the invoked skill when
 no request was supplied. Task conversations use the Task title when no specific
 purpose was supplied. Names you assign survive reconnects and suggestions.
 Interactive terminal titles use the Session name, with the Task identifier first
-and a short purpose for Task work. In cmux, the attached workspace and tab follow
-`lf session rename`; other terminals pick up a changed name on reconnect.
+and a short purpose for Task work. In cmux, the tab follows `lf session rename`
+and a Task's workspace is named `<Task title> · <identifier>`, changing only when
+the Task title does; renames made in cmux stay in cmux. Other terminals pick up a
+changed name on reconnect.
 
 Bind assigns an unbound conversation to one Task permanently, including a done Task.
 Headless continuation reads the saved workspace's context and native history,

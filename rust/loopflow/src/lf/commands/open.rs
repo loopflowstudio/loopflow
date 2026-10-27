@@ -163,8 +163,6 @@ struct Resolved {
     execution_machine: Option<String>,
     /// Why the Task's execution owner could not be read; opening refuses.
     execution_unavailable: Option<String>,
-    /// Where the Task stands, such as `Available · Design`; links omit it.
-    standing: Option<String>,
 }
 
 impl Resolved {
@@ -172,11 +170,11 @@ impl Resolved {
         self.session.as_deref().or(self.primary.as_deref())
     }
 
-    /// What a host names the destination it creates: the label, then where
-    /// the Task stands. Destinations are found by their IDs, never this name.
+    /// What a host names the destination it creates: a Task's workspace name,
+    /// otherwise the label. Destinations are found by their IDs, never this name.
     fn destination_name(&self) -> String {
-        match &self.standing {
-            Some(standing) => format!("{} · {standing}", self.label),
+        match &self.task {
+            Some(task) => crate::terminal_title::workspace_name(&task.identifier, &task.title),
             None => self.label.clone(),
         }
     }
@@ -515,14 +513,6 @@ fn describe(
         }
         None => (None, None),
     };
-    let standing = match (store, &task) {
-        (Some(store), Some(task)) => crate::terminal_title::standing(
-            &store.sqlite,
-            &task.id,
-            session.as_deref().or(primary.as_deref()),
-        )?,
-        _ => None,
-    };
     let label = match (&task, &wave) {
         (Some(task), _) => format!("{} · {}", task.identifier, task.title),
         (None, Some(wave)) => format!("{short_name} · {wave} Wave"),
@@ -541,7 +531,6 @@ fn describe(
         primary_machine,
         execution_machine,
         execution_unavailable,
-        standing,
     })
 }
 

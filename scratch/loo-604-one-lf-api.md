@@ -2,7 +2,8 @@
 
 Status: implementing; core rebuilt (watches, open-Task scope, batched details,
 live reads). Jack Heart (2026-10-27) asked to finish the design and publish the
-PR; Remaining 1–5 continue after it. Jack Heart requested the Task;
+PR; Remaining 1–5 continue after it. Client API docs done (surfaces "Build
+your own view" is the watch list); next: publish the PR. Jack Heart requested the Task;
 his LOO-602 steer (same day) sets the data the API reads: a facts-only store
 (LOO-611 Session facts + one usage record per turn, LOO-612 ProviderFact,
 LOO-615 Process rows deleted at exit unless referenced). Transcript reads
@@ -201,16 +202,6 @@ unless "Work needed" says otherwise.
 
 ## Remaining work
 
-0. Concept review (2026-10-27), implied by the Task's outcome ("plainly the
-   API a herdr/tmux/other-GUI client uses"): the page that client's author
-   reads, `docs/surfaces.md` "Build your own view", lists one-shot reads only
-   and never mentions `--watch`; the watch protocol sits in `docs/work.md`.
-   Make that section the client API: the reads Desktop watches (`wave show
-   --all`, `task list`, `task status <id>`, `session list`, `history --since`,
-   `ps`, `planning status`, `desktop plans`), each `--watch --json`, one frame
-   example and the stdin request, linking `docs/work.md` instead of repeating
-   it. Docs name the live-process read `lf ps` (shortest form), not
-   `lf monitor ps`. No open product choice.
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 2. `lf task status`: flat in Graphs; measure what still grows on Jack's store
@@ -251,3 +242,4 @@ unless "Work needed" says otherwise.
 - Live reads (`lf ps --watch`, `monitor active` deleted): clippy clean; integration `cli_reference`, `session_list_watch`, `dto_fixtures`, `cli_discovery`, `world_recipes::session_list_task_status_and_top_watch`, `boundary_launch_and_resume`, process_ownership `monitor_does_not_treat`, lib `graph_tests` (2), `test_desktop.sh --filter WorkObservationTransportTests` (9) passed.
 - Compress (live reads): reference preamble names `--watch` instead of the deleted `monitor active`; one `EVERY_SESSION` argv in session tests. clippy clean; `--test integration session_cli_tests cli_reference` 20 passed (`available_lists_only_conversations_ready_for_input` failed once under the parallel suite, passes alone twice; untouched: gate).
 - Realign (2026-10-27): plan reconciled to code (watch argv, clocks, history filters); prose only, no checks rerun.
+- Client API docs (surfaces watch list, work.md `lf ps`): `--test integration documented_commands` 4 passed.

@@ -83,13 +83,32 @@ real shell tab, so the tab outlives the command.
 
 ## Build your own view
 
-Every read is JSON, and the shapes are published:
+Desktop is one client of the reads below; a herdr, tmux or other GUI pane uses
+the same ones. Each streams with `--watch --json`: one JSON line now, another
+each time its answer changes, until stdin closes.
 
 ```bash
-lf monitor --json                         # waiting, blocked, active and finished work, with next actions
-lf task list --json                       # open Tasks, as your sidebar would list them
-lf task status LOO-12 --json              # one Task: its plan, PR, Graph steps and conversations
-lf session list --json                    # conversations, with which ones are available for you
+lf wave show --all --watch --json         # every Wave's plan and Tasks
+lf task list --watch --json               # open Tasks, as your sidebar would list them
+lf task status LOO-12 --watch --json      # one Task: its plan, PR, Graph steps and conversations
+lf session list --watch --json            # conversations, with which ones are available for you
+lf history --since 7d --watch --json      # what Sessions did, tagged with their Task and Wave
+lf ps --watch --json                      # live lf call trees
+lf planning status --watch --json         # planning sync; keeps it exchanged while it runs
+lf desktop plans --watch --json           # every plan a repository window shows
+```
+
+```json
+{"answers": null, "home": "/Users/you/.lf", "copy": null, "revisions": {…}, "unavailable": null, "body": {…}}
+```
+
+`body` is what the same command prints with `--json` alone. Write
+`{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the
+next line answers `1`. The protocol is in [Work](work.md#see-where-it-stands).
+
+One-shot reads for everything else:
+
+```bash
 lf desktop view 'wave:product' --plan     # what a Dashboard would show, for your own host; opens nothing
 lf --task LOO-12 open --link --json       # the target, its fallback command and the route it would take
 lf desktop events --json                  # Desktop's window and pane changes, one line each

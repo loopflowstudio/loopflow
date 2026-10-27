@@ -96,6 +96,9 @@ pub(crate) struct PlanningState {
     lose_completion: bool,
     reopen_during_completion: bool,
     lose_comment: bool,
+    comment_moves_issue: bool,
+    slow_team_check: bool,
+    history_unavailable: bool,
     completion_writes: usize,
     current_project_id: Option<String>,
     initial_project_id: Option<String>,
@@ -105,10 +108,18 @@ pub(crate) struct PlanningState {
     move_on_attachment_read: bool,
 }
 
+/// Every issue edit enters its Linear history with the state it left behind.
 pub(crate) fn mark_issue_updated(issue: &mut serde_json::Value) {
     issue["updatedAt"] = json!(time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap());
+    if !issue["state"].is_null() {
+        let entry = json!({"updatedAt": issue["updatedAt"], "toState": issue["state"]});
+        match issue["_history"].as_array_mut() {
+            Some(history) => history.push(entry),
+            None => issue["_history"] = json!([entry]),
+        }
+    }
 }
 
 fn planning_project(id: &str, current: &str) -> serde_json::Value {
@@ -150,7 +161,12 @@ async fn planning_graphql(
             .contains("query FindExportIssue")
             && provider.slow_export_id.as_deref() == request["variables"]["id"].as_str()
     };
-    if slow_export {
+    let slow_team_check = request["query"]
+        .as_str()
+        .unwrap()
+        .contains("query TeamChanges")
+        && state.lock().await.slow_team_check;
+    if slow_export || slow_team_check {
         tokio::time::sleep(std::time::Duration::from_secs(6)).await;
     }
     planning_response(axum::extract::State(state), axum::Json(request))
@@ -512,6 +528,14 @@ async fn planning_response(
                 .unwrap_or(project);
         }
         json!({"issue":issue})
+    } else if query.contains("query IssueStateHistory") {
+        if state.history_unavailable {
+            return axum::Json(json!({"errors":[{"message":"history unavailable"}]}));
+        }
+        let issue = state.issues.iter().find(|issue| issue["id"] == vars["id"]);
+        json!({"issue":issue.map(|issue| json!({"history":page(
+            issue["_history"].as_array().cloned().unwrap_or_default()
+        )}))})
     } else if query.contains("query IssueTeam") {
         json!({"issue":{"team":{"id":"team-1"}}})
     } else if query.contains("query WorkflowStates") {
@@ -607,6 +631,14 @@ async fn planning_response(
             json!({"id":id,"body":vars["body"],"user":null,"issue":{"id":vars["issueId"]},
             "createdAt":"2026-10-08T12:00:01Z","updatedAt":"2026-10-08T12:00:01Z"}),
         );
+        if state.comment_moves_issue {
+            let issue = state
+                .issues
+                .iter_mut()
+                .find(|issue| issue["id"] == vars["issueId"])
+                .unwrap();
+            mark_issue_updated(issue);
+        }
         if std::mem::take(&mut state.lose_comment) {
             return axum::Json(json!({"errors":[{"message":"lost comment response"}]}));
         }
@@ -1320,7 +1352,8 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
         assert!(!crate::linear::acceptance::observe_task_state(
             &fixture.store.sqlite,
             &delivery,
-            &late
+            &late,
+            crate::linear::StateHistory::Unknown
         )
         .unwrap());
         fixture
@@ -1454,7 +1487,8 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
         assert!(!crate::linear::acceptance::observe_task_state(
             &fixture.store.sqlite,
             &completed,
-            &late
+            &late,
+            crate::linear::StateHistory::Unknown
         )
         .unwrap());
         assert_eq!(
@@ -1907,7 +1941,8 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
         assert!(!crate::linear::acceptance::observe_task_state(
             &fixture.store.sqlite,
             &original,
-            &late
+            &late,
+            crate::linear::StateHistory::Unknown
         )
         .unwrap());
         assert!(fixture
@@ -1945,6 +1980,277 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             )
             .unwrap();
         assert!(retained.contains("unstarted"));
+    });
+}
+
+fn adoption_events(conn: &rusqlite::Connection, task: &Task) -> i64 {
+    conn.query_row(
+        "SELECT count(*) FROM task_events WHERE task_id=?1 AND kind_json LIKE '%Adopted Linear state%'",
+        [task.id.as_str()],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+/// A completion saved during a Linear outage, with a verification comment queued.
+fn complete_during_outage(
+    runtime: &tokio::runtime::Runtime,
+    fixture: &Fixture,
+    repo: &Path,
+    task: &Task,
+    state: &Arc<tokio::sync::Mutex<PlanningState>>,
+) -> crate::store::sqlite::task_state_delivery::TaskStateDelivery {
+    runtime.block_on(async { state.lock().await.field_outage = true });
+    crate::ops::task::task_complete(repo, task.id.as_str(), Some("Verified")).unwrap();
+    crate::ops::task::append_task_comment(&fixture.store, task, "Verified on main", false).unwrap();
+    runtime.block_on(async {
+        let mut provider = state.lock().await;
+        provider.field_outage = false;
+        provider.comment_moves_issue = true;
+    });
+    fixture
+        .store
+        .sqlite
+        .pending_task_state(&task.id)
+        .unwrap()
+        .unwrap()
+}
+
+#[test]
+fn task_completion_survives_rate_limit_and_unrelated_comment_revision() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(async {
+            state.lock().await.rate_limit_query = Some("mutation SetIssueState");
+        });
+        crate::ops::task::task_complete(repo, task.id.as_str(), Some("Verified")).unwrap();
+        crate::ops::task::append_task_comment(&fixture.store, task, "Verified on main", false)
+            .unwrap();
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        runtime.block_on(async {
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert!(
+                !fixture
+                    .store
+                    .sqlite
+                    .pending_task_state(&task.id)
+                    .unwrap()
+                    .unwrap()
+                    .attempted
+            );
+            // After the reset, the pre-write Linear check outlives the delivery
+            // deadline. Nothing was sent, so nothing is uncertain.
+            tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+            conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
+                .unwrap();
+            state.lock().await.slow_team_check = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let pending = fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap();
+            assert!(!pending.attempted);
+            let mut provider = state.lock().await;
+            assert_eq!(provider.completion_writes, 0);
+            provider.slow_team_check = false;
+            provider.comment_moves_issue = true;
+            drop(provider);
+            // The queued comment publishes first and moves the issue revision.
+            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+                .await
+                .unwrap();
+            crate::ops::linear_observe::sync_repository_deliveries(
+                &fixture.store,
+                repo.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["state"]["type"], "completed");
+            assert_eq!(provider.completion_writes, 1);
+        });
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task(&task.id)
+                .unwrap()
+                .unwrap()
+                .state
+                .as_deref(),
+            Some("completed")
+        );
+        assert_eq!(adoption_events(&conn, task), 0);
+        let graphs: i64 = conn
+            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(graphs, 0);
+    });
+}
+
+#[test]
+fn task_completion_uncertain_write_retries_after_unrelated_revision() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        let original = complete_during_outage(runtime, fixture, repo, task, &state);
+        runtime.block_on(async {
+            // The request is lost before Linear applies it.
+            state.lock().await.fail_completion = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            assert!(
+                fixture
+                    .store
+                    .sqlite
+                    .pending_task_state(&task.id)
+                    .unwrap()
+                    .unwrap()
+                    .attempted
+            );
+            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+                .await
+                .unwrap();
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["state"]["type"], "completed");
+            assert_eq!(provider.completion_writes, 1);
+        });
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let receipt: (bool, bool, Option<String>) = conn
+            .query_row(
+                "SELECT attempted,settled,conflict_json FROM task_state_deliveries WHERE id=?1",
+                [&original.id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(receipt, (true, true, None));
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task(&task.id)
+                .unwrap()
+                .unwrap()
+                .state
+                .as_deref(),
+            Some("completed")
+        );
+        assert_eq!(adoption_events(&conn, task), 0);
+    });
+}
+
+#[test]
+fn task_completion_unknown_history_stays_pending_until_explicit_retry() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        complete_during_outage(runtime, fixture, repo, task, &state);
+        runtime.block_on(async {
+            state.lock().await.fail_completion = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+                .await
+                .unwrap();
+            state.lock().await.history_unavailable = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            let pending = fixture
+                .store
+                .sqlite
+                .pending_task_state(&task.id)
+                .unwrap()
+                .unwrap();
+            assert!(pending.attempted);
+            assert_eq!(state.lock().await.completion_writes, 0);
+            assert_eq!(
+                fixture
+                    .store
+                    .sqlite
+                    .task(&task.id)
+                    .unwrap()
+                    .unwrap()
+                    .state
+                    .as_deref(),
+                Some("completed"),
+                "unknown evidence neither adopts nor delivers"
+            );
+            // A person's explicit retry overrides only unknown evidence.
+            crate::ops::linear_observe::deliver_task_state(&fixture.store, task, true)
+                .await
+                .unwrap();
+            assert_eq!(state.lock().await.completion_writes, 1);
+        });
+        assert!(fixture
+            .store
+            .sqlite
+            .pending_task_state(&task.id)
+            .unwrap()
+            .is_none());
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        assert_eq!(adoption_events(&conn, task), 0);
+    });
+}
+
+#[test]
+fn task_completion_explicit_retry_adopts_reopening_proved_by_history() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        let original = complete_during_outage(runtime, fixture, repo, task, &state);
+        runtime.block_on(async {
+            // The write lands, its reply is lost, and someone reopens the issue.
+            state.lock().await.lose_completion = true;
+            crate::ops::linear_observe::sync_task_state(&fixture.store, task)
+                .await
+                .unwrap();
+            {
+                let mut provider = state.lock().await;
+                provider.issues[0]["state"] = json!({"type":"unstarted"});
+                mark_issue_updated(&mut provider.issues[0]);
+            }
+            crate::ops::linear_observe::sync_task_comments(&fixture.store, task)
+                .await
+                .unwrap();
+            crate::ops::linear_observe::deliver_task_state(&fixture.store, task, true)
+                .await
+                .unwrap();
+            let provider = state.lock().await;
+            assert_eq!(provider.issues[0]["state"]["type"], "unstarted");
+            assert_eq!(provider.completion_writes, 1);
+        });
+        assert_eq!(
+            fixture
+                .store
+                .sqlite
+                .task(&task.id)
+                .unwrap()
+                .unwrap()
+                .state
+                .as_deref(),
+            Some("unstarted")
+        );
+        let conn = rusqlite::Connection::open(&fixture.database).unwrap();
+        let conflict: String = conn
+            .query_row(
+                "SELECT conflict_json FROM task_state_deliveries WHERE id=?1 AND settled=1",
+                [&original.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(conflict.contains("unstarted"));
+        assert_eq!(adoption_events(&conn, task), 1);
     });
 }
 

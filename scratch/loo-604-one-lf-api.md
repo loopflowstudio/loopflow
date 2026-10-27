@@ -178,7 +178,7 @@ unless "Work needed" says otherwise.
 | `session list` | watch | R | page or diff (Remaining 1) |
 | `task status <id>` | watch | T | flat in Graphs; Sessions/Processes unmeasured (Remaining 2) |
 | `history --since 7d` | watch | W/P/T | |
-| `monitor top` | watch | M | shrinks with LOO-615 |
+| `monitor top` | watch | M | becomes `lf ps --watch` (Remaining 4); shrinks with LOO-615 |
 | `planning status` | watch | R | holds the repository's planning sync |
 | `desktop plans` | watch | R | |
 | `wave status` per Wave | `openHistoricalReference`, `ProjectHistoryView`; user action | W | check historical Projects are in the plan |
@@ -200,12 +200,29 @@ unless "Work needed" says otherwise.
    recovery, rental check and journal admission.
 3. Delete remaining Desktop duplicates; catalog and machine reads
    (`wave workflow list`, `graph list`, `portfolio`, `machine id/list`).
-4. Known differences from the monitor: usage alone no longer refreshes Wave
+4. Live reads under `lf monitor`, from option B (one read per answer; the
+   one-shot command is the streamed one). Concept review, 2026-10-27:
+   - `lf ps --json` and `lf top --json`/redirected print the same
+     `ActivitySnapshot` (`run_top` calls `run_ps`). Make `lf ps --json
+     [--watch]` the live-process read (skills, `docs/`, `activity_snapshot.json`
+     already name it); `lf top` keeps only the terminal view. Desktop's
+     `.activity` watch moves to `["monitor", "ps"]`.
+   - Session state has three derivations: `session list` (availability),
+     `monitor active` (Sessions joined to observed provider processes, plus
+     gaps) and bare `lf monitor` (re-derives active/available/unknown/finished
+     from both). A client should get a Session's liveness from its `session
+     list` row, as Tasks come only as `RoadmapTask`. Next: carry the observed
+     provider processes on `session list` rows, have `lf monitor` render those
+     rows, and delete `monitor active` (callers: tests only; plus
+     `lf monitor`'s "next" hint). Check first that `session list --watch` can
+     take the ACTIVITY clock without exceeding item 1's budget; if not, keep
+     `monitor active` as the narrow live read and record why.
+5. Known differences from the monitor: usage alone no longer refreshes Wave
    detail token totals (next change or 300 s clock); a store that cannot derive
    Task state fails `lf task status` too, so the Task pane keeps its last
    reading marked unavailable (the monitor read only `task_overview`); a
    confirmation re-reads each watch (the monitor replayed unchanged parts).
-5. Live p99 A/B with an installed build: gate/demo.
+6. Live p99 A/B with an installed build: gate/demo.
 
 ## Delete — do not maintain
 

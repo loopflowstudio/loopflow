@@ -1,0 +1,80 @@
+{
+  "generated_at": 1793000000,
+  "sessions": 4,
+  "harnesses": [
+    {
+      "harness": "claude",
+      "provider": 1,
+      "facts": 2,
+      "unknown": 0,
+      "next_expiry": 1794728000
+    },
+    {
+      "harness": "codex",
+      "provider": 1,
+      "facts": 0,
+      "unknown": 0,
+      "next_expiry": null
+    }
+  ],
+  "groups": [
+    {
+      "harness": "claude",
+      "account": "engineering",
+      "age": "under_month",
+      "state": "provider",
+      "sessions": 1
+    },
+    {
+      "harness": "claude",
+      "account": "engineering",
+      "age": "under_quarter",
+      "state": "facts",
+      "sessions": 1
+    },
+    {
+      "harness": "claude",
+      "account": null,
+      "age": "under_week",
+      "state": "facts",
+      "sessions": 1
+    },
+    {
+      "harness": "codex",
+      "account": null,
+      "age": "under_week",
+      "state": "provider",
+      "sessions": 1
+    }
+  ],
+  "next_expiries": [
+    {
+      "session_id": "session_readable",
+      "title": "Fix the parser",
+      "harness": "claude",
+      "account": "engineering",
+      "after": 1794728000
+    }
+  ],
+  "expiring_within_week": 0,
+  "homes": [
+    {
+      "harness": "claude",
+      "home": "/Users/fixture/.lf/accounts/claude/engineering",
+      "policy": {
+        "kind": "claude_cleanup",
+        "days": 30,
+        "settings": null
+      },
+      "transcripts": 1
+    },
+    {
+      "harness": "codex",
+      "home": "/Users/fixture/.codex",
+      "policy": {
+        "kind": "kept"
+      },
+      "transcripts": 9731
+    }
+  ]
+}

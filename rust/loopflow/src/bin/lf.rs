@@ -1369,9 +1369,9 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(code)
 }
 
-/// Diagnostics go to `logs/lf.log` in the selected home; the terminal shows
-/// what commands print and the errors they return. `-v` or `RUST_LOG` shows
-/// diagnostics on stderr instead.
+/// Diagnostics go to `logs/lf.log` in the selected home, each line ending with
+/// the pid and binary that wrote it; the terminal shows what commands print and
+/// the errors they return. `-v` or `RUST_LOG` shows diagnostics on stderr instead.
 fn init_tracing(verbose: bool) {
     let filter = EnvFilter::try_from_default_env().ok();
     if verbose || filter.is_some() {
@@ -1386,6 +1386,9 @@ fn init_tracing(verbose: bool) {
         .with_env_filter(EnvFilter::new("warn"))
         .with_ansi(false)
         .with_writer(|| DiagnosticLog)
+        .event_format(loopflow::store::contention::IdentifiedLines(
+            tracing_subscriber::fmt::format(),
+        ))
         .init();
 }
 
@@ -1404,13 +1407,16 @@ struct DiagnosticLog;
 
 impl std::io::Write for DiagnosticLog {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        let directory = loopflow::store::lf_home_dir().join("logs");
-        let log = std::fs::create_dir_all(&directory).and_then(|()| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(directory.join("lf.log"))
-        });
+        let path = loopflow::store::contention::log_path();
+        let log = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+            });
         match log {
             Ok(mut log) => log.write_all(bytes),
             // An unwritable home still runs; its diagnostics stay visible.

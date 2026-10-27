@@ -264,13 +264,8 @@ Decisions made while building slice 3 (2026-10-27, reversible):
 
 ### Concept review against the build (2026-10-27, headless)
 
-Every accepted decision is built. `lf --machine M resume --task X` refuses
-and points to `lf task move` (`ssh.rs` route check), which matches Jack's
-"people should use the task move API". `lf session receive --check` is
-plumbing behind the pre-handoff check; no user learns it.
-
-(Superseded by the second pass below: `--task` with `--machine` runs the
-Task move instead of refusing.)
+Every accepted decision is built. `lf session receive --check` is plumbing
+behind the pre-handoff check; no user learns it.
 
 Built 2026-10-27: `lf help resume` lists the account move, the
 conversation-only Machine move and `lf task move`; `docs/subscriptions.md`
@@ -284,8 +279,8 @@ No open product choice; `scratch/questions.md` holds only demo-decided risks.
 Built 2026-10-27: `lf --machine M resume --task X` naming a Task owned
 elsewhere runs `session_move::move_task` (the `lf task move` path), then
 forwards `resume --task X` to M. The refusal stays for other forwarded
-commands, where `--machine` is transport; `lf resume <session>` moves only
-the conversation. Test: `resume_task_on_another_machine_moves_the_task_there`.
+commands and for `--context`/`--explain` previews, which move nothing;
+`lf resume <session>` moves only the conversation. Test: `resume_task_on_another_machine_moves_the_task_there`.
 
 `lf resume --machine M` already parses like `--account` (`reorder_args`
 lifts any non-local global flag). Nothing else changes.

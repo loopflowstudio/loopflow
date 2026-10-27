@@ -89,19 +89,19 @@ pub fn run(
         None if cli.repo.is_some() => None,
         None => super::work_route::resolve(cli)?,
     };
-    if let Some(route) = &work_route {
-        if route.machine_id != target.id {
-            // `resume --task X` continues the Task where it is addressed, so it moves there.
-            if let Some(task) = resumed_task(cli) {
-                super::session_move::move_task(task, target.id.as_str())?;
-            } else {
-                return Err(anyhow!(
+    if let Some(route) = work_route
+        .as_ref()
+        .filter(|route| route.machine_id != target.id)
+    {
+        // `resume --task X` continues the Task on M, so the Task moves there first.
+        let Some(task) = super::work_route::resumed_task(cli).filter(|_| !preview) else {
+            return Err(anyhow!(
                 "Task is owned on Machine {}, not {}; `lf task move <task> --machine <machine>` moves it",
-                    route.machine_id,
-                    target.id
-                ));
-            }
-        }
+                route.machine_id,
+                target.id
+            ));
+        };
+        super::session_move::move_task(task, target.id.as_str())?;
     }
     // A Machine names no checkout: the destination resolves the repository's
     // own checkout from its identity. A path/name stays the caller's selection.
@@ -208,20 +208,6 @@ pub fn run(
     }
     let preamble = build_preamble(&cmd, &extra_env);
     run_ssh(&target.route, forward_agent, &preamble)
-}
-
-fn resumed_task(cli: &Cli) -> Option<&str> {
-    match &cli.command {
-        Some(crate::lf::Commands::Session {
-            cmd:
-                crate::lf::SessionCommand::Connect {
-                    id: None,
-                    connection,
-                    ..
-                },
-        }) => connection.task.as_deref(),
-        _ => None,
-    }
 }
 
 fn resident_args(

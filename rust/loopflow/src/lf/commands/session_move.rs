@@ -1,7 +1,7 @@
 //! `lf --machine M resume <session>` moves the conversation before resuming
-//! it there, and `lf task move X --machine M` or `lf --machine M resume
-//! --task X` moves a Task with its conversation. `send` runs where the work lives and `receive` on M, each
-//! locally when that side is this Machine, otherwise over one SSH request, so
+//! it there; `lf task move X --machine M` and `lf --machine M resume --task X`
+//! move a Task with its conversation. `send` runs where the work lives and
+//! `receive` on M, each locally when that side is this Machine, otherwise over one SSH request, so
 //! laptop → mini, rental → laptop and rental → mini are the same relay.
 
 use anyhow::{anyhow, Context, Result};

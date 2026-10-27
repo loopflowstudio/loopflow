@@ -260,6 +260,21 @@ pub(super) fn resumed_session(cli: &Cli) -> Option<&str> {
     }
 }
 
+/// `lf resume --task X` names the Task rather than one of its Sessions.
+pub(super) fn resumed_task(cli: &Cli) -> Option<&str> {
+    match &cli.command {
+        Some(Commands::Session {
+            cmd:
+                SessionCommand::Connect {
+                    id: None,
+                    connection,
+                    ..
+                },
+        }) => connection.task.as_deref(),
+        _ => None,
+    }
+}
+
 /// A Session that moved to another Machine resumes there.
 fn dispatch_moved_session(cli: &Cli, args: &[String]) -> Result<bool> {
     let Some(id) = resumed_session(cli) else {

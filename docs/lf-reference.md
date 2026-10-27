@@ -1681,13 +1681,10 @@ Name what to rent and the most it may cost
 |---|---|
 | `<name>` | name |
 | `--provider` | provider |
-| `--gpu` | A GPU type; without one, the cheapest CPU pod covering vCPUs and memory |
 | `--vcpus` | vcpus |
 | `--memory-gb` | memory gb |
-| `--disk-gb` | disk gb |
-| `--image` | Image, pinned by digest when added (default: RunPod's stock Ubuntu) |
-| `--data-center` | A data center (US-IL-1) or a region prefix (US); rents where it is in stock |
-| `--hours` | Hard deadline for each machine it rents Default: 4. |
+| `--disk-gb` | Daytona only; Modal sizes disk itself Default: 10. |
+| `--hours` | Hard deadline for each machine it rents, at most 24 Default: 4. |
 | `--max` | Machines rented at once |
 | `--max-usd-per-hour` | Above this hourly price nothing is rented |
 | `--help / -h` | Print help |
@@ -1698,16 +1695,6 @@ Templates, budgets and the machines each has rented
 
 | Argument | What it does |
 |---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf ondemand availability
-
-What it would rent now and at what price; rents nothing
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

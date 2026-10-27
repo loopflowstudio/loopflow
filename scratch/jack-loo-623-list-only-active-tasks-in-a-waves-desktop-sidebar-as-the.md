@@ -109,5 +109,5 @@ the Wave's plan order, while the Wave board still offers Start on unstarted ones
 
 - Gate: `scripts/test_desktop.sh -Xswiftc -gnone` → 621/628; the 7 CLI-backed failures needed `target/debug/lf`, and after `cargo build` their rerun passed 15/15. `TaskRowMetadataTests.linksPreserveWorkspace` now supplies the repository plan too, since a Wave row must be started.
 - Realign 2026-10-26: code matches the design; no upstream change since #1669.
-- Check: `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkModelTests|TaskRowMetadataTests' -Xswiftc -gnone` → 84 passed (compress: no code change, not rerun).
+- Check (gate 2026-10-26): `scripts/test_desktop.sh --filter 'WorkNavigationTests|WorkModelTests|TaskRowMetadataTests' -Xswiftc -gnone` → 84 passed; no Swift lint in CI. `swift/README.md` sidebar wording updated.
 - Concept review 2026-10-26: no change. "Working" now means one thing at every built-in scope, read from the one Rust rule. An unstarted Task entered from the board has no sidebar row until it starts. Jack's "only the active tasks" already settles that, so it's no open choice.

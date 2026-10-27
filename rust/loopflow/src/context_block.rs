@@ -246,7 +246,7 @@ impl ContextDelivery {
             "PostToolUse": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
             "UserPromptSubmit": [{"hooks": [{"type":"command", "command": steer, "timeout":30}]}],
             "SessionStart": [
-            {"matcher": "startup|resume", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
+            {"matcher": "startup|resume|clear", "hooks": [{"type":"command", "command": format!("{command} start"), "timeout": 30}]},
             {"matcher": "compact", "hooks": [{"type":"command", "command": format!("{command} compact"), "timeout": 30}]}
         ]}))
     }

@@ -1247,13 +1247,12 @@ async fn retained_native_client_loses_writes_but_keeps_display_after_transfer() 
     let agent_process: serde_json::Value =
         serde_json::from_slice(&std::fs::read(control.join("agent_process.json")).unwrap())
             .unwrap();
-    let connection = CodexConnection {
-        store: store.clone(),
-        session_id: session.into(),
-        thread_id: Some(agent_process["thread"].as_str().unwrap().into()),
-        account_id: None,
-        attachment: Some(first.clone()),
-    };
+    let connection = CodexConnection::new(
+        store.clone(),
+        session.into(),
+        Some(agent_process["thread"].as_str().unwrap().into()),
+        Some(first.clone()),
+    );
     let endpoint = Path::new(agent_process["endpoint"].as_str().unwrap());
     let old = serve_gate(&control.join("old.sock"), endpoint, connection.clone());
     let mut passive = connection.clone();

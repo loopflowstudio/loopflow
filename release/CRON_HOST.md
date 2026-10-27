@@ -54,18 +54,29 @@ changes.
 
 ## Release schedules
 
-Each job is an ordinary crontab line running an ordinary lf command in that
-minimal environment:
+Each job is a short crontab line that runs a generated wrapper:
 
 ```
-0 9 * * *  cd ~/src/loopflow && env -i HOME=… PATH=… LF_HOME=… ~/.lf-machine/install/gates/1/lf --wave infrastructure --batch graph telemetry-daily >> .lf/logs/telemetry-daily.log 2>&1
-0 10 * * * cd ~/src/loopflow && env -i HOME=… PATH=… LF_HOME=… ~/.lf-machine/install/gates/1/lf --wave infrastructure --batch graph release-run >> .lf/logs/release-run.log 2>&1
+0 9 * * *  /bin/sh ~/src/loopflow/.lf/cron/infrastructure.telemetry-daily.sh # loopflow:infrastructure:telemetry-daily
+0 10 * * * /bin/sh ~/src/loopflow/.lf/cron/infrastructure.release-run.sh # loopflow:infrastructure:release-run
 ```
+
+The wrapper holds the ordinary lf command in that minimal environment:
+
+```bash
+cat .lf/cron/infrastructure.release-run.sh
+# cd ~/src/loopflow && exec env -i HOME=… PATH=… LF_HOME=… ~/.lf-machine/install/gates/1/lf --wave infrastructure --batch graph release-run >> .lf/logs/release-run.log 2>&1
+```
+
+cron reads only the first 999 bytes of a command and runs that prefix, and the
+host PATH alone can exceed it, so the command lives in the wrapper. The
+bootstrap refuses to write a line of 1,000 bytes or more. Its telemetry check
+runs the same wrapper cron runs.
 
 `release-run` resolves to `.lf/graphs/release-run.yaml`, whose single operation
 is `release run patch`. The release command's exit status is the job's; an
 agent's successful report cannot turn a blocked release into success. Rerun the
-bootstrap to rewrite the lines after the host path or checkout moves.
+bootstrap to rewrite the wrappers after the host path or checkout moves.
 
 Earlier lf scheduled these jobs as launchd agents named
 `loopflow.cron.<wave>.<job>`. The bootstrap unloads and deletes them before

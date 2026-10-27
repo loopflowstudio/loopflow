@@ -1076,7 +1076,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.identifier, issue.title);
+                println!("{} · {}", issue.title, issue.identifier);
             }
             if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
                 .planning_transport()
@@ -1102,7 +1102,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         .expect("planning state is a string")
                 );
                 if let Some(task) = &status.task {
-                    println!("{} · {}", task.identifier, task.title);
+                    println!("{} · {}", task.title, task.identifier);
                     println!(
                         "Planning: {} · {}",
                         task.state.as_deref().unwrap_or("unknown"),
@@ -1531,9 +1531,6 @@ fn run() -> anyhow::Result<()> {
                     cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
-        if !cli.records_process() {
-            journal::mark_effect_free_read();
-        }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
         init_tracing(false);
         if !preview {
@@ -1570,8 +1567,8 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
-    if !cli.records_process() {
-        journal::mark_effect_free_read();
+    if cli.harness_callback() {
+        journal::harness_issued();
     }
     // Provider hooks keep the callbacks their launching lf wrote. A removed
     // one must not fail: Claude treats exit 2 at Stop as "keep working".

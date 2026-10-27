@@ -286,7 +286,7 @@ pub enum PlanningConfig {
         remote: String,
         plan: GitPlan,
     },
-    /// The Linear Team's ID; `lf repo connect` finds or creates it.
+    /// The Linear Team's ID; `lf wave connect` finds or creates it.
     Linear {
         team: Option<String>,
     },
@@ -337,7 +337,7 @@ enum RawPlanningConfig {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         personal: bool,
     },
-    /// The Linear Team's ID; `lf repo connect` finds or creates it.
+    /// The Linear Team's ID; `lf wave connect` finds or creates it.
     Linear {
         #[serde(default, deserialize_with = "crate::id::deserialize_uuid_option")]
         team: Option<String>,

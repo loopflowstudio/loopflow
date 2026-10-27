@@ -418,7 +418,6 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::work::wave::context::WAVE_ID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     crate::process::AGENT_CALLER_ENV,
-    crate::ops::git_operation::LF_GIT_OPERATION_ID_ENV,
     crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
     crate::ops::graph_process::GRAPH_ID_ENV,
     crate::installation::INSTALL_SWITCH_ENV,

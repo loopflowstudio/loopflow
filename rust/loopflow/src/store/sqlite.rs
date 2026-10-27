@@ -91,6 +91,7 @@ fn configure_write_connection(conn: &mut Connection, path: &Path) -> StoreResult
         }
     }
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    super::contention::watch_write_holds(conn)?;
     // A WAL file never shrinks by itself: one migration or burst leaves its
     // high-water mark on disk forever. Truncate it whenever a checkpoint resets it.
     conn.pragma_update(None, "journal_size_limit", WAL_SIZE_LIMIT_BYTES)?;

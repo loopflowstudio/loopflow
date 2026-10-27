@@ -7,6 +7,7 @@ use anyhow::{anyhow, Result};
 
 use crate::lf::output::Colors;
 use crate::process::LfProcess;
+use crate::store::contention::read_contention;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -99,6 +100,10 @@ pub fn run(json: bool) -> Result<()> {
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
     checks.push(check_binary_freshness());
+    checks.push(check_contention(
+        &crate::diagnostic_log::log_path(),
+        time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
+    ));
     if json {
         println!(
             "{}",
@@ -116,6 +121,51 @@ pub fn run(json: bool) -> Result<()> {
         return Err(anyhow!("doctor checks failed"));
     }
     Ok(())
+}
+
+const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
+
+/// Who waited on the store's write lock and who held it, by binary, from lf.log.
+fn check_contention(log: &Path, since: i64) -> Check {
+    const NAME: &str = "contention";
+    let binaries = match read_contention(log, since) {
+        Ok(binaries) => binaries,
+        Err(error) => return Check::warn(NAME, format!("cannot read {}: {error}", log.display())),
+    };
+    if binaries.is_empty() {
+        return Check::ok(
+            NAME,
+            "no store lock failures or slow writers in the last 24h",
+        );
+    }
+    let failures: usize = binaries.values().map(|binary| binary.lock_failures).sum();
+    let slow: usize = binaries.values().map(|binary| binary.slow_writes).sum();
+    let mut detail = format!("last 24h: {failures} lock failures, {slow} slow writers");
+    for (binary, contention) in &binaries {
+        let mut parts = Vec::new();
+        if contention.slow_writes > 0 {
+            parts.push(format!(
+                "held the lock {} times, up to {:.1} s, in {}",
+                contention.slow_writes,
+                contention.longest_hold_seconds,
+                contention
+                    .call_sites
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if contention.lock_failures > 0 {
+            parts.push(format!("{} lock failures", contention.lock_failures));
+        }
+        if !contention.pids.is_empty() {
+            let pids: Vec<String> = contention.pids.iter().map(u32::to_string).collect();
+            parts.push(format!("pids {}", pids.join(" ")));
+        }
+        detail.push_str(&format!("\n{:20}{binary}: {}", "", parts.join("; ")));
+    }
+    Check::warn(NAME, detail)
 }
 
 const FRESHNESS: &str = "binary-freshness";
@@ -465,7 +515,7 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit, inspect_store, Status};
+    use super::{audit, check_contention, inspect_store, Status};
     use crate::process::LfProcess;
 
     const DAY: i64 = 86_400;
@@ -531,6 +581,32 @@ mod tests {
             .find(|check| check.name == name)
             .expect("check exists")
             .status
+    }
+
+    #[test]
+    fn contention_names_the_holding_binary_and_a_quiet_log_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("lf.log");
+        assert_eq!(check_contention(&log, 0).status, Status::Ok);
+        std::fs::write(
+            &log,
+            "2026-10-27T04:19:02.000000Z  WARN loopflow::store::contention: held the store write lock \
+             held_seconds=9.12 call_site=loopflow::store::sqlite::retention::retain_history_in \
+             pid=7 lf=0.14.16 rev=d49c57c12\n",
+        )
+        .unwrap();
+        let check = check_contention(&log, 0);
+        assert_eq!(check.status, Status::Warn);
+        assert!(
+            check.detail.contains("lf 0.14.16 (d49c57c12)"),
+            "{}",
+            check.detail
+        );
+        assert!(
+            check.detail.contains("retain_history_in"),
+            "{}",
+            check.detail
+        );
     }
 
     #[test]

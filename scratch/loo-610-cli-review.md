@@ -395,9 +395,10 @@ and `ci watch` are gone; scheduled work is a crontab line (`lf pr reconcile`).
 Decision D6: build `lf serve` now, or record the rule and ship 1.0 with the
 pollers marked experimental.
 
-## 7. Experimental for 1.0
+## 7. Experimental for 1.0 (superseded: no experimental tier)
 
-Not deleted, but outside the 1.0 promise, under `lf experimental …` or a hidden
+Jack's "promised or deleted" direction replaces this tier. Each command below
+still needs that call; none is in this Task's slice. Originally: not deleted, but outside the 1.0 promise, under `lf experimental …` or a hidden
 flag — Jack's call (D1): `repo release *`, `discord`, `machine pool/ondemand`,
 `wave plan *`, `desktop` pane control, `history replay`.
 
@@ -419,6 +420,11 @@ Part of the surface because `lf <name>` runs them.
 (Full skill-by-skill pass after D1–D3.)
 
 ## Decisions for Jack
+
+Status (2026-10-26): D1 decided (no experimental tier: promise or delete),
+D3 superseded by LOO-604, D4 decided (crontab), D5 decided (`repo` dissolved),
+D6 decided (build `lf serve`), D7 decided (chunked follow-ups, each lands real
+code). D2's new name stays with LOO-618.
 
 - **D1.** What 1.0 promises: the 16-entry root above as stable; §7 as
   experimental (namespace `lf experimental …`, or hidden)?
@@ -664,6 +670,50 @@ It edits `lf/mod.rs` (`OndemandCommand` args), `bin/lf.rs`, `machine*.rs`,
 `lf ops machine`. Whichever lands second rebases: the provider changes move into
 the `ops machine ondemand` tree. The README's rental row names no provider until
 Daytona/Modal land; then it names them.
+
+## Concept review in the Graph: one steer verb (2026-10-26, next implement)
+
+Walk: Jack wants to redirect every Session working in a scope. Today the verb
+depends on the scope:
+
+```
+lf session steer SESSION "…"            # one Session
+lf session steer --repo "…"             # this slice: the repository's Sessions
+lf wave comment WAVE "…" --steer        # a Wave's Sessions; --steer is required
+lf task comment ISSUE "…" [--steer]     # publishes to the Task's thread
+```
+
+Accepted decisions settle it: `repo comment` → Session (Jack), and `--repo` is
+a scope selector like `--wave` (Jack). This slice made `--repo` a boolean on
+`session steer` (id `repo_steer`), so `lf --repo loopflow session steer --repo
+"…"` spells the same flag with two meanings, and the Wave form kept a
+mandatory flag that carries no choice.
+
+Direction:
+
+```
+lf session steer SESSION "…"            # one Session
+lf session steer "…"                    # the current scope's Sessions: the Wave
+                                        # with --wave, else the repository
+lf --wave billing session steer "…"
+lf --repo loopflow session steer "…"
+```
+
+- Delete `wave comment` and `session steer`'s boolean `--repo`; the scope
+  comes from the global `--wave`/`--repo`/cwd, the way every other command
+  resolves it. Stores keep `save_repository_steer` and the Wave steer writer.
+- `task comment` stays: it reads and publishes the Task's thread, which is a
+  different thing from a steer; its `--steer` keeps meaning "also direct".
+- Update `docs/sessions.md:76`, `docs/architecture-reference.md:883-884`,
+  `session_steers.rs`/`global_commands.rs` callers, regenerate the reference.
+- Counterexample checked: Desktop calls neither form (`RegistryQuery.swift`
+  only reads `task comment`), so no client moves.
+
+Unresolved, outside this Task's slice (do not block publish): bare `lf` as
+front door vs. "start a conversation" (above); promise-or-delete for §7's
+commands (`discord`, `machine pool/ondemand`, `wave plan`, `desktop` pane
+control, `history replay`) and the not-yet-reviewed roots `clone`,
+`portfolio`, `disk`, `scratch`, `monitor`.
 
 ## Run notes
 

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-629 concept review</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1d1f;--bg:#fdfdfc;--mute:#6b6b70;--rule:#e2e2e0;--prop:#0a6b3d;--code:#f2f2ef}
+@media(prefers-color-scheme:dark){:root{--fg:#e8e8e6;--bg:#18181a;--mute:#9a9a9f;--rule:#333336;--prop:#5fd39a;--code:#242427}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,system-ui,sans-serif}
+main{max-width:44rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+header p{color:var(--mute);font-size:.9rem;margin:.2rem 0}
+h1{font-size:1.5rem;margin:0 0 .5rem}h2{font-size:1.1rem;margin:2.5rem 0 .5rem}
+pre{background:var(--code);padding:.9rem 1rem;overflow-x:auto;font-size:.85rem;border-radius:6px}
+code{font-family:ui-monospace,Menlo,monospace}
+.proposed{border-left:3px solid var(--prop);padding-left:1rem}
+.proposed::before{content:"proposed";display:block;color:var(--prop);font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
+ol li{margin:.4rem 0}
+</style></head><body><main>
+<header>
+<h1>Swap the schedules only after the new ones are written</h1>
+<p>LOO-629 · concept-review (in a Graph, no person) · 2026-10-27</p>
+<p>Built from <code>scripts/bootstrap-cron-host.sh</code>, <code>release/CRON_HOST.md</code>, <code>python/tests/test_release_automation.py</code>, <code>scratch/loo-629-local-placement.md</code></p>
+</header>
+
+<p>The placement model is right as built. A Wave's Machine default is the one concept, and when it is null the Wave runs on whichever Machine reads it. Implementing that needed no new flag. The mismatch is in the cutover: the script deletes the old launchd jobs <em>before</em> it writes the crontab that replaces them.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<pre><code>Jack runs:   scripts/bootstrap-cron-host.sh infrastructure
+Concept:     Wave placement  = lf wave status --json .wave.machine (null → this Machine)
+             Installed lf    = ~/.lf-machine/install/gates/1/lf (what lf re-execs to)
+             Schedule        = two crontab lines tagged # loopflow:infrastructure:*
+             Old schedule    = ~/Library/LaunchAgents/loopflow.cron.infrastructure.*.plist
+Verified by: telemetry-daily run in the same minimal env cron uses</code></pre>
+
+<h2>Before (current branch)</h2>
+<pre><code>checks pass → remove launchd plists → write crontab → telemetry run</code></pre>
+<p>If <code>crontab -</code> fails, no schedule is left. The Task allows removing launchd jobs "only as part of a verified replacement".</p>
+
+<div class="proposed">
+<h2>After</h2>
+<pre><code>checks pass → write crontab → confirm both lines → remove launchd plists → telemetry run</code></pre>
+<p>Exactly one schedule exists at every exit. If telemetry goes red, the crontab is still the only schedule, so release never fires twice at 10:00.</p>
+</div>
+
+<h2>Held, not changed</h2>
+<p>With null placement, two Machines that both bootstrap would both schedule releases. Jack accepted implicit local placement, and pinning elsewhere is <code>lf machine use</code>. The gate path's <code>gates/1</code> is the pin lf itself uses. <code>~/.local/bin/lf</code> can move with <code>LF_INSTALL_DIR</code>.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>None open. The cutover order follows from the Task's own constraint; next step is implement.</li>
+</ol>
+</main></body></html>

@@ -251,11 +251,11 @@ fn collect_activity(
             continue;
         };
         nodes.push(ActivityNode {
-            id: process_node_id(record.id.as_str()),
+            id: record.id.to_string(),
             parent_id: record
                 .parent_lf_process_id
                 .as_ref()
-                .map(|id| process_node_id(id.as_str())),
+                .map(ToString::to_string),
             kind: if agent {
                 ActivityNodeKind::AgentProcess
             } else {
@@ -410,10 +410,6 @@ fn fold_process_state(base: ActivityState, children: &[ActivityState]) -> Activi
     base
 }
 
-fn process_node_id(id: &str) -> String {
-    format!("process:{id}")
-}
-
 fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(snapshot)?);
@@ -536,7 +532,7 @@ fn render_node(
         node.pid
             .map_or_else(|| "—".to_string(), |pid| pid.to_string()),
         node.state.label(),
-        node.id.strip_prefix("process:").unwrap_or(&node.id),
+        node.id,
         prefix,
         connector,
         truncate(&node.label, COMMAND_WIDTH),
@@ -693,7 +689,7 @@ mod tests {
         let blockers = crate::ops::task_execution::task_execution_blockers(&store, &task).unwrap();
         assert_eq!(blockers.len(), 2);
         for node in &snapshot.nodes {
-            let id = node.id.strip_prefix("process:").unwrap();
+            let id = node.id.as_str();
             assert!(blockers.iter().any(|blocker| blocker.contains(id)));
             assert!(super::render_snapshot(&snapshot).contains(id));
         }
@@ -814,7 +810,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let before = ids(load_snapshot().unwrap());
-        assert_eq!(before, [(format!("process:{live}"), true)]);
+        assert_eq!(before, [(live.to_string(), true)]);
 
         for _ in 0..10_000 {
             let junk = LfProcessId::new();
@@ -871,11 +867,8 @@ mod tests {
             collect_activity(vec![record.clone()], Some(&os(100)), |_| Ok(None)).unwrap();
         assert_eq!(snapshot.nodes.len(), 1);
         assert_eq!(snapshot.nodes[0].kind, ActivityNodeKind::AgentProcess);
-        assert_eq!(snapshot.nodes[0].id, format!("process:{id}"));
-        assert_eq!(
-            snapshot.nodes[0].parent_id,
-            Some(format!("process:{parent}"))
-        );
+        assert_eq!(snapshot.nodes[0].id, id.to_string());
+        assert_eq!(snapshot.nodes[0].parent_id, Some(parent.to_string()));
         assert_eq!(snapshot.nodes[0].label, "codex app-server");
         assert!(collect_activity(vec![record], Some(&os(200)), |_| Ok(None))
             .unwrap()

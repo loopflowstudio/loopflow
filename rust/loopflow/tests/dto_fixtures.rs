@@ -17,7 +17,7 @@ fn activity_retains_unknown_record_identity_without_a_pid() {
     assert_eq!(unknown.state, ActivityState::Unknown);
     assert_eq!(unknown.pid, None);
     assert_eq!(unknown.parent_id.as_ref(), Some(&snapshot.nodes[0].id));
-    assert!(unknown.id.starts_with("process:"));
+    assert_eq!(unknown.id, "33333333-3333-4333-8333-333333333333");
     assert_eq!(
         serde_json::from_str::<ActivitySnapshot>(&serde_json::to_string(&snapshot).unwrap())
             .unwrap(),

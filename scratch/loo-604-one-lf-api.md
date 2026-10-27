@@ -244,16 +244,10 @@ unless "Work needed" says otherwise.
    `started_at` are RFC 3339; Desktop decodes them to `Date`
    (`RFC3339.swift`). `TaskSession` stays: Desktop's `TaskOverview` (via
    `lf desktop task`) still reads it.
-0c. Concept review, 2026-10-27 (streamed-JSON pass under Jack Heart's
-   minimal/maintainable rule). Next implement: `lf ps` node `id` and
-   `parent_id` are the bare `LfProcessId`, not `process:<id>`. Every node is a
-   process (`kind` says which), and `SessionRow.agent_process_id` promises a
-   join "as `lf ps` lists it" that the prefix breaks; `top.rs` strips it again
-   (`strip_prefix("process:")`). Update `activity_snapshot.json`, the top
-   tests and docs examples; no Swift reader depends on the prefix. Reviewed and
-   kept: `lf history` entries' `summary`, `subject` and `work` (Desktop renders
-   them; a readable line serves agentic clients), `planning status` rows,
-   `TaskThread`'s `pending_sync`/`conflicts` (unsynced or lost comment bodies).
+0c. Done (2026-10-27): `lf ps` node `id`/`parent_id` are the bare
+   `LfProcessId`, so `SessionRow.agent_process_id` joins `lf ps` rows directly.
+   Reviewed and kept: `lf history` entries' `summary`, `subject` and `work`,
+   `planning status` rows, `TaskThread`'s `pending_sync`/`conflicts`.
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 2. `lf task status`: flat in Graphs; measure what still grows on Jack's store
@@ -313,3 +307,4 @@ unless "Work needed" says otherwise.
 - Task status summaries + RFC 3339 history/ps (0b): clippy --all-targets clean; integration `dto_fixtures world_recipes session_cli_tests` 71 passed; lib `lf::commands::activity|top` 10 passed; `test_desktop.sh --filter 'DTOFixtureTests|WorkObservationTransportTests|WorkModelTests|RegistryQueryTests'` 105 passed.
 - Compress (0b: Unix→RFC 3339 rows use `store::rows::unix_to_datetime`): clippy --all-targets clean; `--test integration dto_fixtures` 45 passed.
 - Realign after 0b (2026-10-27): code matches 0b (`TaskDetail`, `TaskGraphRow`, `TaskThread`, `SessionFacts`; `TaskSession` kept for `TaskOverview`); prose only, no checks rerun.
+- Bare `lf ps` ids (0c): clippy clean; lib `lf::commands::top|activity` 10, `--test integration dto_fixtures` 45, `--test process_ownership_tests` 12, swift `DTOFixtureTests` 48 passed.

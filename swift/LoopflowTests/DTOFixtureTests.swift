@@ -276,7 +276,7 @@ struct DTOFixtureTests {
         #expect(unknown.state == .unknown)
         #expect(unknown.pid == nil)
         #expect(unknown.parentId == snapshot.nodes[0].id)
-        #expect(unknown.id.hasPrefix("process:"))
+        #expect(unknown.id == "33333333-3333-4333-8333-333333333333")
         #expect(try JSONDecoder().decode(ActivitySnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
     }
 

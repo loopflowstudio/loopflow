@@ -152,9 +152,7 @@ in the Task's conversation, which knows its stage and the command for each route
 
 `lf ship` returns once the Task is shipping; a headless agent stands in at each
 remaining stage, decides advance or repeat, and records why in the Task's
-history. `lf ship --stop` withdraws it. A route into `end` approves running
-that route; only `lf ship` lands its PR. `lf ship --recover` (automatic restart)
-keeps the authority it found.
+history. `lf ship --stop` withdraws it. Any route into `end` ships the same way.
 
 | Task state | When |
 |---|---|

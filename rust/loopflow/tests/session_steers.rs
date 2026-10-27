@@ -232,10 +232,21 @@ if '--version' in sys.argv:
     sys.exit(0)
 home = pathlib.Path(os.environ['LF_HOME'])
 message = json.loads(sys.stdin.readline())
+if '--resume' in sys.argv:
+    native = sys.argv[sys.argv.index('--resume') + 1]
+    (home / 'resumed').write_text(native)
+    message['session_id'] = native
+    print(json.dumps(message), flush=True)
+    print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': native}), flush=True)
+    print(json.dumps({'type': 'result', 'uuid': 'resumed-answer', 'session_id': native, 'subtype': 'success', 'is_error': False, 'result': 'RESUMED'}), flush=True)
+    sys.stdin.read()
+    sys.exit(0)
 message['session_id'] = 'handoff-native'
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'handoff-native'}), flush=True)
-(home / 'handoff.json').write_text(json.dumps({'delivery': os.environ['LF_CONTEXT_DELIVERY'], 'caller': os.environ['LF_AGENT_CALLER'], 'capture': os.environ['LF_CAPTURE_KEY'], 'capability': os.environ['LF_PROVIDER_CONTEXT']}))
+print(json.dumps({'type': 'assistant', 'session_id': 'handoff-native', 'message': {'id': 'held', 'role': 'assistant', 'content': [{'type': 'text', 'text': 'Holding'}]}}), flush=True)
+(home / 'handoff.tmp').write_text(json.dumps({'delivery': os.environ['LF_CONTEXT_DELIVERY'], 'caller': os.environ['LF_AGENT_CALLER'], 'capture': os.environ['LF_CAPTURE_KEY'], 'capability': os.environ['LF_PROVIDER_CONTEXT']}))
+os.replace(home / 'handoff.tmp', home / 'handoff.json')
 deadline = time.monotonic() + 15
 while not (home / 'finish').exists() and time.monotonic() < deadline:
     time.sleep(.01)
@@ -258,9 +269,15 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !home.path().join("handoff.json").exists() {
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!(
+                "lf exited {status} before the provider started: {}",
+                fs::read_to_string(&startup_log).unwrap()
+            );
+        }
         assert!(
-            child.try_wait().unwrap().is_none() && Instant::now() < deadline,
-            "provider did not start: {}",
+            Instant::now() < deadline,
+            "provider did not start within 10s: {}",
             fs::read_to_string(&startup_log).unwrap()
         );
         std::thread::sleep(Duration::from_millis(10));
@@ -286,6 +303,23 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
             Instant::now() < deadline,
             "native identity was not recorded"
         );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // Reconnect reopens the conversation the capture published.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let published: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
+                 AND json_extract(payload,'$.evidence.provider_session_id')='handoff-native')",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap();
+        if published {
+            break;
+        }
+        assert!(Instant::now() < deadline, "resume target was not published");
         std::thread::sleep(Duration::from_millis(10));
     }
     let first = store.session_attachment(session).unwrap().unwrap();
@@ -443,14 +477,87 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
         String::from_utf8_lossy(&failed.stderr)
     );
     assert!(String::from_utf8_lossy(&failed.stdout).contains("FAILED_TOOL_DIRECTION"));
+    // `/clear` starts another native conversation in the same provider process.
     store
-        .claim_session_attachment(session, Some(&third), &other, true)
+        .save_session_steer(session, "Fixture author", "CLEARED_DIRECTION")
         .unwrap();
-    let stale = hook(payload);
-    assert!(!stale.status.success());
-    assert!(stale.stdout.is_empty());
+    let cleared = hook(serde_json::json!({"session_id":"cleared-native",
+        "hook_event_name":"SessionStart","source":"clear"}));
+    assert!(
+        cleared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cleared.stderr)
+    );
+    let cleared = String::from_utf8_lossy(&cleared.stdout).into_owned();
+    assert!(cleared.contains("CLEARED_DIRECTION"));
+    assert!(cleared.contains("additionalContext"));
+    let old_conversation = hook(payload.clone());
+    assert!(!old_conversation.status.success());
+    store
+        .save_session_steer(session, "Fixture author", "AFTER_CLEAR_DIRECTION")
+        .unwrap();
+    let after_clear = hook(serde_json::json!({"session_id":"cleared-native",
+        "hook_event_name":"PostToolUse","tool_use_id":"cleared-tool"}));
+    assert!(
+        after_clear.status.success(),
+        "{}",
+        String::from_utf8_lossy(&after_clear.stderr)
+    );
+    assert!(String::from_utf8_lossy(&after_clear.stdout).contains("AFTER_CLEAR_DIRECTION"));
+    let selected: String = db
+        .query_row(
+            "SELECT json_extract(payload,'$.provider_thread') FROM session_events
+             WHERE session_id=?1 AND json_extract(payload,'$.type')='agent_session_selected'
+             AND json_extract(payload,'$.next_provider_thread')='cleared-native'",
+            [session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(selected, "handoff-native");
     fs::write(home.path().join("finish"), "").unwrap();
     child.wait().unwrap();
+    // The lifeline watchdog ends the provider group up to two seconds later.
+    let group: i64 = db
+        .query_row(
+            "SELECT pid FROM processes WHERE id=?1",
+            [&first.agent_process_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Command::new("/bin/kill")
+        .args(["-0", "--", &format!("-{group}")])
+        .stderr(Stdio::null())
+        .status()
+        .unwrap()
+        .success()
+    {
+        assert!(Instant::now() < deadline, "provider group outlived its run");
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let resumed = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
+        .current_dir(repo.path())
+        .args(["-b", "session", "connect", session, "--message", "AFTER"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(home.path().join("resumed")).unwrap_or_else(|_| panic!(
+            "connect did not resume: {}",
+            String::from_utf8_lossy(&resumed.stderr)
+        )),
+        "cleared-native"
+    );
+    let stale = hook(serde_json::json!({"session_id":"cleared-native",
+        "hook_event_name":"SessionStart","source":"clear"}));
+    assert!(!stale.status.success());
+    assert!(stale.stdout.is_empty());
 }
 
 #[test]

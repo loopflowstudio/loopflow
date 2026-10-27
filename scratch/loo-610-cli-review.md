@@ -637,6 +637,21 @@ LOO-594 (Desktop Wave view as a standup board, accepted):
    `scratch/skill-draft/SKILL.md` and `scratch/skill-draft/LOOPFLOW.md`; add
    `skills/loopflow/README.md` from `scratch/skill-draft/README.md`. Update any
    test that pins LOOPFLOW.md text.
+7. **Builtin `auto` workflow** (Jack Heart, 2026-10-26: sell auto mode now).
+   `code` without the demo stop: request to merged PR without a person.
+   Concept review settled the shape: `builtins/task/graph/auto.yaml` is
+   `- graph: pursue` then `- graph: deliver` (main #1652 deleted the `ship`
+   graph; `deliver` is gate + `land --wait-and-fix`). No `interactive:` steps,
+   so its only stages are `start`/`end` and one route runs it whole; no new
+   workflow kind or edge syntax. It drops `code`'s `verify` stop too ("without
+   a person"); arriving at `end` approves Auto-Ship as any route into `end`
+   does. `lf wave workflow set auto <wave>` makes a Wave's Tasks run that way
+   (arg order is `<name> <wave>`). Interim until LOO-622 makes auto mode "any
+   Graph, run past its interactive stages"; then this builtin goes. Test: a
+   fresh repo with `workflow: auto` runs `lf -b task run <ID>` past where
+   `code` would stop at `demo`, with pursue/deliver steps stubbed as in
+   `ops/task.rs` `test_graph`. Update `wave workflow list` expectations and the
+   docs that enumerate builtin workflows.
 6. **Docs and README** move into place from `scratch/README.draft.md` and
    `scratch/docs-draft/` after items 1–5 verify (see "Docs and README redo").
 

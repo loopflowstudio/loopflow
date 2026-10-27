@@ -18,6 +18,8 @@ use sha2::{Digest, Sha256};
 use super::{StoreError, StoreResult};
 
 const COPIES: &str = "copies";
+/// Names a snapshot's staging directory until it is renamed into place.
+const STAGING: &str = ".tmp";
 
 /// The copy this build works on, when it must use one: a validation-only
 /// build with drafts on the Machine's default home.
@@ -89,15 +91,58 @@ fn create(source: &Path, dir: &Path) -> StoreResult<()> {
     if dir.join("loopflow.db").exists() {
         return Ok(());
     }
-    let staging = tempfile::tempdir_in(parent).map_err(io)?;
+    // Holding the lock, every staging directory is a killed snapshot's.
+    for abandoned in abandoned_snapshots(parent) {
+        let _ = std::fs::remove_dir_all(abandoned);
+    }
+    let staging = tempfile::Builder::new()
+        .prefix(STAGING)
+        .tempdir_in(parent)
+        .map_err(io)?;
     let db = staging.path().join("loopflow.db");
     snapshot(source, &db)?;
     let conn = Connection::open(&db)?;
     super::migrations::prepare_clone_sqlite(&conn)?;
     sanitize(&conn)?;
     drop(conn);
-    std::fs::rename(staging.keep(), dir).map_err(io)?;
+    std::fs::rename(staging.path(), dir).map_err(io)?;
+    let _ = staging.keep();
     Ok(())
+}
+
+/// Hold the copies lock when no snapshot is in progress, or `None` while one
+/// is or no copy exists. A snapshot holds it from staging to rename, so while
+/// it is held here every staging directory under `copies` belongs to a process
+/// that died.
+pub(crate) fn idle_lock(copies: &Path) -> StoreResult<Option<std::fs::File>> {
+    use fs2::FileExt;
+    if !copies.is_dir() {
+        return Ok(None);
+    }
+    let file = open_lock(&copies.join(".lock"))?;
+    Ok(file.try_lock_exclusive().is_ok().then_some(file))
+}
+
+/// Whether `path` names a snapshot's staging directory.
+pub(crate) fn is_staging(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with(STAGING))
+}
+
+/// Staging directories under `copies`. Only abandoned while [`idle_lock`] is held.
+pub(crate) fn abandoned_snapshots(copies: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(copies)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| is_staging(&entry.path()))
+                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+                .map(|entry| entry.path())
+                .collect()
+        })
+        .unwrap_or_default();
+    paths.sort();
+    paths
 }
 
 /// The shared store's processes are not the copy's: forget their OS identity
@@ -170,14 +215,18 @@ fn clone_file(_source: &Path, _destination: &Path) -> std::io::Result<()> {
 
 fn lock(path: &Path) -> StoreResult<std::fs::File> {
     use fs2::FileExt;
-    let file = std::fs::OpenOptions::new()
+    let file = open_lock(path)?;
+    file.lock_exclusive().map_err(io)?;
+    Ok(file)
+}
+
+fn open_lock(path: &Path) -> StoreResult<std::fs::File> {
+    std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .open(path)
-        .map_err(io)?;
-    file.lock_exclusive().map_err(io)?;
-    Ok(file)
+        .map_err(io)
 }
 
 fn io(error: std::io::Error) -> StoreError {

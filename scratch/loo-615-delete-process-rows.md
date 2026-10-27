@@ -1,8 +1,7 @@
 # LOO-615 — Process rows live while running, kept only when referenced
 
-Status: **implemented; sweep done except two open findings** (2026-10-26).
-Slices 1–5 are in the working tree, uncommitted. Remaining: the session-connect
-diagnostic row and `store_contention` under load (slice 5 "Open findings"). Product decision
+Status: **implemented; gate remains** (2026-10-26). Remaining:
+`store_contention` measured on a quiet Machine at gate (slice 5 "Open findings"). Product decision
 accepted by Jack Heart in LOO-602 decision 5 (2026-10-26): write a Process row
 for every lf process so the live tree works; delete it at exit unless a child,
 a Session event or a Graph step references it, or an agent issued it. This
@@ -152,6 +151,11 @@ content calls (`taskChanges`, `taskDiff`, `taskFiles`, `taskFile`,
 Their callers stop passing the checkout. Their rows then sit in the live tree
 and are not Task work.
 
+Audited the other Desktop Task reads (kickoff, 2026-10-26). `taskComments`,
+`taskHistory` and `taskContext` run from `WaveOrigin.resolve(repo)`, the
+repository origin. `taskGraphProcesses` (Debug in `TaskWorkView`) now also runs
+with `nil` cwd; `graph list --processes --for-task` names the Task.
+
 ## Risk findings
 
 - **Graph step race (resolved by rule 2).** `RunningGraph::spawn` finds its step
@@ -270,39 +274,32 @@ One PR; the slices are an order of work.
 
 ### Open findings
 
-- **Session-connect diagnostic lost.**
-  `session_cli_tests::boundary_launch_and_resume_remain_openable_while_provider_waits`
-  (resume=false) reads the `processes.error` that `spawn_session_process`
-  writes ("… exited with … before becoming resumable", with run id, sha256 and
-  database path). Under the rule that row is gone. Even under a running fixture
-  parent, the only connect row is a child of the fixture with
-  `error="command exited with status 1"`. So the detailed error lives on a
-  second row that is forgotten: a separate root or a child of connect. Find
-  which row carries it. Then either keep it (it is evidence a failed launch
-  needs) or move the assertion to stderr, which already carries the same text
-  apart from the run id. Test left unchanged and failing.
 - **`store_contention` under machine load.** It failed twice inside the full
   integration run (40 and 54 of 1020 first writes `database is locked`, load
   average 28–65 from other worktrees' suites) and passed alone in 28.5 s.
   `record_process` now takes an `IMMEDIATE` transaction and runs two
   `FORGETTABLE` deletes. Base has not been run under the same load, so this
-  regression is unconfirmed. Its fixture is now agent-issued, so the row count
-  still proves exactly-once while every write still pays for the delete probe.
-- **Two journal unit tests read a forgotten root.**
-  `journal::tests::a_finish_receipt_lands_whole_once_the_write_lock_clears`
-  asserts the finished row exists. The exit now lands and forgets it, so only
-  `cost.unrecorded == 1` still tells it apart from the held-lock case. Run it
-  under a recorded running parent so the row stays. In
-  `attachment_receipt_failures_never_invent_process_identity`,
-  `process_evidence` on a completed, forgotten Process answers `Unknown`, not
-  `Dead`. Before choosing the test fix, audit which callers can ask about a
-  forgotten id and whether `Unknown` blocks them (`execution_blockers`,
-  attachment fences). If one can, it needs `Dead` for an id with no row and no
-  receipt.
+  regression is unconfirmed; gate runs base and branch back to back. Its fixture
+  is now agent-issued, so the row count still proves exactly-once while every
+  write still pays for the delete probe.
 - Flaked once under the same load and passed on rerun:
   `auth_tests::banked_resets…`, `context_launch_tests::codex_startup_failures…`,
   `release_lock_tests::surviving_release_auto_merge_child…`,
   `land_tests::waited_task_landing_completes_at_workflow_end…`.
+
+Resolved at kickoff (2026-10-26):
+
+- *Session-connect diagnostic.* The failed-launch evidence lives in the
+  `spawn_session_process` error, and stderr carries all of it, run id included
+  (`Session input {artifact_key}`). The test now asserts it on stderr. Passes.
+- *Journal tests reading a forgotten root.* They run under
+  `adopt_by_running_parent`, which rule 2 keeps. `--lib journal` passes (30).
+- *A forgotten Process answers `Unknown`.* Kept: a missing row proves nothing
+  about exit. Every durably held id is in `FORGETTABLE`'s inventory and stays.
+  The only in-memory holders are running parents: the `pr_landing` repair
+  launcher polling its `__transport-serve` owner, Graph step polls, `task run`.
+  Each child inherits `LF_PROCESS_ID`, so rule 2 keeps its finished row, and
+  its `Dead` answer, until the parent exits.
 
 ## Done when
 
@@ -329,7 +326,7 @@ With inherited `LF_*` unset and `< /dev/null`:
 - Clone probe above: row count and FK check as stated, plus the
   long-lived-parent count recorded in one line.
 
-Check (2026-10-26, load avg 28–140): touched integration/standalone suites and
-`--lib -- graph_tests task_graph_launch local_planning work_watch forget_tests retention doctor journal`
-pass except `session_cli_tests::boundary_launch…`, `store_contention` and two
-journal tests (open findings). `cargo fmt` and clippy are clean. Swift and the clone probe are deferred to gate.
+Check (2026-10-26): `swift test --filter 'RegistryQueryTests|TaskFilesTests'` 43 ok;
+`--lib journal` 30 ok. Earlier sweep: everything else touched passes except
+`store_contention` under load. The clone probe and the quiet contention
+comparison are deferred to gate.

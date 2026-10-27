@@ -317,17 +317,17 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Read a Task's captured Graphs through its content-owned transport.
-    public func taskGraphProcesses(task: String, cwd: String?) async throws -> [GraphProcessDetail] {
+    public func taskGraphProcesses(task: String) async throws -> [GraphProcessDetail] {
         struct Page: Decodable { let entries: [GraphProcessInventoryEntry]; let next: String? }
         var after: String?
         var result: [GraphProcessDetail] = []
         repeat {
             var args = ["graph", "list", "--processes", "--for-task", task, "--json"]
             if let after { args += ["--after", after] }
-            let page = try Self.decode(Page.self, from: await run(args, cwd))
+            let page = try Self.decode(Page.self, from: await run(args, nil))
             for entry in page.entries {
                 let detail = try Self.decode(GraphProcessDetail.self,
-                    from: await run(["graph", "show", entry.id, "--processes", "--json"], cwd))
+                    from: await run(["graph", "show", entry.id, "--processes", "--json"], nil))
                 result.append(detail)
             }
             after = page.next

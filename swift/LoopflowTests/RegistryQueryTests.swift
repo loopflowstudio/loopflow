@@ -24,7 +24,7 @@ struct RegistryQueryTests {
             if command == ["graph", "show", expected.entry.id, "--processes", "--json"] { return detail }
             throw RegistryQueryError("Unexpected execution")
         }
-        let graphs = try await query.onMachine("peer", repository: "plan").taskGraphProcesses(task: "task", cwd: "/peer/checkout")
+        let graphs = try await query.onMachine("peer", repository: "plan").taskGraphProcesses(task: "task")
         #expect(graphs == [expected])
     }
 

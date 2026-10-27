@@ -23,11 +23,9 @@
   Otherwise a Graph step rejected at argument parsing leaves its running Graph
   no step to record. A child of an already-finished parent is deleted in the
   same transaction.
-- **Other Desktop Task-scoped reads may still pass a checkout cwd**
-  (`taskComments`, `taskHistory`, `taskGraphProcesses`, …). Only the five
-  content calls the design named moved; if their callers pass the checkout,
-  the same `lf land` overlap applies. Not audited here.
-- **A forgotten Process answers `Unknown` liveness** (realign, 2026-10-26).
-  `process_evidence` on an id whose row the exit deleted returns `Unknown`, not
-  `Dead`. It is left open in the plan; whether any caller can ask about such an
-  id decides the fix.
+- **Other Desktop Task-scoped reads** (audited at kickoff). Comments, history
+  and context run from the repository origin. The Debug Graph-process read
+  now runs with `nil` cwd like the rest.
+- **A forgotten Process answers `Unknown` liveness.** Kept (kickoff,
+  2026-10-26): an absent row is also an unregistered child, and only running
+  parents hold such ids in memory, which rule 2 covers.

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-626 concept review</title>
+<style>
+:root{--fg:#1d1d1f;--bg:#fbfbfa;--mute:#6b6b70;--rule:#e2e2e0;--code:#f1f1ee;--new:#1f7a4a;--old:#a33}
+@media (prefers-color-scheme:dark){:root{--fg:#e8e8e6;--bg:#161617;--mute:#9a9aa0;--rule:#2c2c2e;--code:#222224;--new:#5fd39a;--old:#ff8a80}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,system-ui,sans-serif}
+main{max-width:44rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+header p{color:var(--mute);font-size:.9rem;margin:.2rem 0}
+h1{font-size:1.5rem;margin:0 0 .5rem}h2{font-size:1.1rem;margin:2.5rem 0 .6rem}
+code,pre{font:.85rem/1.5 ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}
+code{padding:.1em .3em}pre{padding:.9rem 1rem;overflow-x:auto}
+.proposed{color:var(--new)}.existing{color:var(--mute)}.gone{color:var(--old);text-decoration:line-through}
+ol li{margin:.4rem 0}hr{border:0;border-top:1px solid var(--rule);margin:2.5rem 0}
+</style></head><body><main>
+<header>
+<h1>LOO-626: the sync fence covers a network fetch</h1>
+<p>Task LOO-626 · concept-review step (headless) · 2026-10-26</p>
+<p>Built from: <code>scratch/questions.md</code>, <code>rust/loopflow/src/ops/sync.rs</code>, <code>rust/loopflow/src/ops/git_operation.rs</code>, Jack Heart's steer of 2026-10-26</p>
+</header>
+
+<p><strong>Outcome: the design changed, so this goes back to implement.</strong> There's no open product choice. Jack's accepted rule ("clear the lock when we realize sync is stuck or errored or whatever") already settles this.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<pre>Person / agent action        Concept            API
+─────────────────────        ───────            ───
+open a Session, run ci-fix → write the checkout → no gate (CheckoutBusy deleted)
+lf sync                    → history rewrite   → SyncOperation fence (flock)
+sync stops on conflicts    → resolver          → fence released; --continue adopts
+remove a checkout          → removal safety    → require_idle / cleanup_* (kept)</pre>
+
+<h2>The mismatch</h2>
+<p>The fence is supposed to exclude other writers only while history is actually being rewritten. Today it is taken <em>before</em> the fetch:</p>
+<pre><span class="existing">begin_sync_operation(repo)      // flock held</span>
+<span class="gone">fetch_target(repo, onto)        // unbounded network</span>
+<span class="existing">plan_sync(...); pin_target(...); merge(...)</span></pre>
+<p>If the fetch stalls, <code>prepare_agent_process</code> refuses every agent launch in the checkout. That is the "stuck" case Jack ruled out. The fetch rewrites nothing. <code>sync_with_plan</code> already fetches before taking the fence.</p>
+<pre class="proposed">fetch_target(repo, onto); plan_sync(...)   // no fence
+begin_sync_operation(repo)                 // fence from here
+pin_target; revalidate_start; merge; finish_sync</pre>
+
+<h2>Also</h2>
+<p>The <code>SyncOperation</code> doc comment says the fence is held "only while Git's merge, abort or commit steps run". It also covers the force-push and the Task PR range writes. The comment should say what the code does.</p>
+<p>A hung push still holds the fence until the process dies. The fence has to stay across the push, because the range record lands after <code>lock_task_pr_mutation</code> drops. This is a known limit, not a question.</p>
+
+<hr>
+<h2>Questions</h2>
+<ol>
+<li>None open. The fetch move follows from Jack's accepted rule, and implement picks it up.</li>
+</ol>
+</main></body></html>

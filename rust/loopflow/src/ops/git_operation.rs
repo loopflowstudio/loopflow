@@ -1,6 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -21,17 +22,14 @@ impl GitOperationId {
     fn new() -> Self {
         Self(format!("gitop_{}", Uuid::new_v4()))
     }
-
-    fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 /// The owner of the one sync sequencer a worktree may have in flight.
 ///
 /// The record's flock is the authority; these fields are evidence for whoever
-/// reads it during an incident — `id` and `root_pid` name the owner in
-/// refusals, and the trace ids link it to the journal.
+/// reads it during an incident — `root_pid`, `target_ref` and `locked_at` tell
+/// a refused writer who holds the fence, doing what, for how long; the trace
+/// ids link it to the journal.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct GitOperationOwner {
     id: GitOperationId,
@@ -46,6 +44,10 @@ pub(crate) struct GitOperationOwner {
     pub(crate) head: String,
     pub(crate) target_ref: String,
     pub(crate) target_sha: Option<String>,
+    /// Unix seconds when the current holder took the fence. Absent in records
+    /// an older executable wrote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    locked_at: Option<u64>,
 }
 
 /// The history-rewrite fence, held from the merge through publication, and
@@ -104,10 +106,11 @@ pub(crate) fn begin_sync_operation(worktree: &Path, target_ref: &str) -> OpsResu
 }
 
 /// Take the fence back after a resolver ran, to verify and publish the sync.
-pub(crate) fn reclaim_sync_operation(owner: GitOperationOwner) -> OpsResult<SyncOperation> {
+pub(crate) fn reclaim_sync_operation(mut owner: GitOperationOwner) -> OpsResult<SyncOperation> {
     let path = operation_path(&owner.worktree)?;
     let mut file = create_record(&path)?;
     lock_record(&mut file)?;
+    owner.locked_at = Some(now_secs());
     write_json(&mut file, &owner)?;
     Ok(SyncOperation { file, path, owner })
 }
@@ -172,6 +175,7 @@ fn adopt_operation(
     owner.root_pid = std::process::id();
     owner.trace_id = std::env::var(crate::journal::LF_TRACE_ID_ENV).ok();
     owner.lf_process_id = std::env::var(crate::journal::LF_PROCESS_ID_ENV).ok();
+    owner.locked_at = Some(now_secs());
     write_json(&mut file, &owner)?;
     Ok(SyncOperation { file, path, owner })
 }
@@ -187,7 +191,15 @@ fn new_owner(worktree: &Path, target_ref: &str) -> OpsResult<GitOperationOwner> 
         head: rev_parse(worktree, "HEAD")?,
         target_ref: target_ref.to_string(),
         target_sha: None,
+        locked_at: Some(now_secs()),
     })
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
 }
 
 /// Admit an agent to a worktree unless a sync is mid-merge in it right now.
@@ -291,21 +303,38 @@ fn lock_record(file: &mut File) -> OpsResult<()> {
 }
 
 fn live_operation_error(owner: Option<&GitOperationOwner>) -> OpsError {
-    let label = owner
-        .map(owner_label)
-        .unwrap_or_else(|| "a live integration operation".to_string());
+    let Some(owner) = owner else {
+        return OpsError::Message(
+            "refusing to mutate Git: a live sync holds this worktree's sync lock; retry when it stops"
+                .to_string(),
+        );
+    };
     OpsError::Message(format!(
-        "refusing to mutate Git: {label} is running in this worktree; retry when it stops"
+        "refusing to mutate Git: {}; retry when it stops, or kill pid {} to continue",
+        owner_label(owner, now_secs()),
+        owner.root_pid
     ))
 }
 
-fn owner_label(owner: &GitOperationOwner) -> String {
+/// Who holds the fence, what it is doing and for how long, e.g.
+/// "lf sync pid 4121 has held the sync lock for 14 min (feature onto origin/main)".
+fn owner_label(owner: &GitOperationOwner, now: u64) -> String {
+    let held = owner
+        .locked_at
+        .map(|locked_at| format!(" for {}", held_for(now.saturating_sub(locked_at))))
+        .unwrap_or_default();
     format!(
-        "sync {} (pid {}, branch {})",
-        owner.id.as_str(),
-        owner.root_pid,
-        owner.branch
+        "lf sync pid {} has held the sync lock{held} ({} onto {})",
+        owner.root_pid, owner.branch, owner.target_ref
     )
+}
+
+fn held_for(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs} s"),
+        60..=7199 => format!("{} min", secs / 60),
+        _ => format!("{} h", secs / 3600),
+    }
 }
 
 #[cfg(test)]
@@ -342,7 +371,12 @@ mod tests {
         let repo = fixture.path();
 
         let operation = begin_sync_operation(repo, "main").unwrap();
-        assert!(fence_agent_process(repo).is_err());
+        let refusal = fence_agent_process(repo).unwrap_err().to_string();
+        assert!(
+            refusal.contains(&format!("kill pid {}", std::process::id()))
+                && refusal.contains("for 0 s (feature onto main)"),
+            "{refusal}"
+        );
 
         // The sync stops on conflicts and its process lets go of the fence.
         let merge = Command::new("git")

@@ -15,7 +15,7 @@
 
 - `start_owned_sync` now refuses an existing merge, then fetches and plans, and only then takes the fence; `a_stalled_fetch_admits_other_agents` blocks upload-pack and proves `fence_agent_process` admits a launch (fails on the old order). The `SyncOperation` doc now says "held from the merge through publication".
 - A commit landing during the unfenced fetch can't be reset away: `SyncPlan.head` records the commit the plan classified, and `revalidate_start` refuses under the fence when HEAD moved since (this also closes the same gap `sync_with_plan` already had). `a_commit_after_planning_is_never_reset_away` proves it.
-- Known limit, not a product choice: a hung `git push` still holds the fence until the process dies. The push needs it, because `record_task_pr_range_after_integration` runs after `lock_task_pr_mutation` drops, and a second sync could otherwise interleave its range record. A dead process frees the flock automatically.
+- Hung sync (Jack Heart, 2026-10-26, operator reading of "imagine Mitchell Hashimoto reviews this PR"): a live sync keeps the fence with no timeout. The refusal names the holder, its target and how long it has held the lock, and says to kill the pid to continue (`owner_label`, `GitOperationOwner.locked_at`). The push passes `http.lowSpeedLimit=1`/`http.lowSpeedTime=300`. A `git add` landing in the resolver's merge commit is accepted and documented in `docs/architecture/delivery.md`.
 
 ## Notes
 

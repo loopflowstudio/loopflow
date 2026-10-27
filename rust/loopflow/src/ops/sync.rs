@@ -495,7 +495,23 @@ fn push_synced_branch(repo: &Path, branch: &str) -> OpsResult<()> {
     } else {
         "--force-with-lease".to_string()
     };
-    git(repo, &["push", &lease, "-u", "origin", &reference]).map(|_| ())
+    // The push holds the sync fence, so let Git abort an HTTP transfer that
+    // stalls below 1 B/s for five minutes rather than holding it forever.
+    git(
+        repo,
+        &[
+            "-c",
+            "http.lowSpeedLimit=1",
+            "-c",
+            "http.lowSpeedTime=300",
+            "push",
+            &lease,
+            "-u",
+            "origin",
+            &reference,
+        ],
+    )
+    .map(|_| ())
 }
 
 /// Validate the recorded comparison base before merging a squash-landed parent.

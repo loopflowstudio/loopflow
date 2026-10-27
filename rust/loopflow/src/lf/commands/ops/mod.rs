@@ -307,10 +307,27 @@ pub(crate) fn run_sync_in(
     }
     // Classify once, against the tree holding the caller's edits. This plan
     // runs and is the one the metric records.
-    let plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
+    let mut plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     if plan_only {
         print_sync_plan(&plan);
         return Ok(());
+    }
+    // A merge over stashed edits can conflict only when restoring them, after
+    // the resolver is gone. Committing them first turns that into an ordinary
+    // merge conflict the resolver handles, and the edits never live in a stash.
+    if !manual
+        && !on_main
+        && matches!(plan.strategy, crate::ops::SyncStrategy::MergeTarget)
+        && crate::git::intervention_state(repo_root)?.is_none()
+        && stage_uncommitted_work(repo_root)?
+    {
+        progress.status("Committing uncommitted edits before merging...");
+        crate::git::commit(
+            repo_root,
+            &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
+            &|_| {},
+        )?;
+        plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     }
     let options = SyncOptions {
         onto: plan.base_ref.clone(),
@@ -374,6 +391,17 @@ pub(crate) fn run_sync_in(
         }),
     );
     Ok(())
+}
+
+/// Stage every edit except local telemetry under `.lf/tmp/`, which is not
+/// work even in a repository that doesn't ignore it. True when any is staged.
+fn stage_uncommitted_work(repo: &Path) -> Result<bool> {
+    crate::git::git_stdout(repo, &["add", "-A", "--", ":/", ":(exclude,top).lf/tmp"])?;
+    Ok(
+        !crate::git::git_stdout(repo, &["diff", "--cached", "--name-only"])?
+            .trim()
+            .is_empty(),
+    )
 }
 
 fn print_sync_plan(plan: &crate::ops::SyncPlan) {

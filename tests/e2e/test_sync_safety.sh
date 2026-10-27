@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-unset LOOPFLOW_DIRECTIVE_FILE LF_GIT_OPERATION_ID
+unset LOOPFLOW_DIRECTIVE_FILE
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 LF_BIN="$ROOT_DIR/target/debug/lf"
@@ -27,7 +27,7 @@ if [ "${1:-}" = "--version" ]; then
   echo "opencode sentinel"
   exit 0
 fi
-printf '%s %s\n' "${SENTINEL_MODE:-unknown}" "${LF_GIT_OPERATION_ID:-missing}" >>"$SENTINEL_LOG"
+printf '%s\n' "${SENTINEL_MODE:-unknown}" >>"$SENTINEL_LOG"
 case "${SENTINEL_MODE:-noop}" in
   resolve|adopt)
     printf 'resolved by owned recovery\n' >conflict.txt
@@ -236,7 +236,7 @@ export SENTINEL_MODE=nested_sync SENTINEL_LOG="$TMP_ROOT/nested.log"
 : >"$SENTINEL_LOG"
 (cd "$REPO" && "$LF_BIN" : run-nested-sync >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
-grep -Eq '^nested_sync missing$' "$SENTINEL_LOG"
+grep -Eq '^nested_sync$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 
 # A live provider does not reserve the worktree. A separate sync can take the
@@ -263,8 +263,8 @@ wait "$writer_owner"
 set -e
 echo "PASS live provider held no worktree authority"
 
-# Hold the first recovery provider open. Foreign sync and skill invocations
-# must refuse while preserving the exact conflict and launching no second agent.
+# Hold the recovery provider open. The stopped merge fences no one: another
+# agent launches beside it, while a second sync refuses the existing merge.
 create_conflict_repo foreign
 export SENTINEL_MODE=hold SENTINEL_LOG="$TMP_ROOT/foreign.log"
 export SENTINEL_READY="$TMP_ROOT/foreign.ready" SENTINEL_RELEASE="$TMP_ROOT/foreign.release"
@@ -278,39 +278,34 @@ owned_head=$(git -C "$REPO" rev-parse HEAD)
 set +e
 (cd "$REPO" && "$LF_BIN" sync >"$TMP_ROOT/foreign.sync.out" 2>&1)
 foreign_sync_status=$?
-(cd "$REPO" && "$LF_BIN" implement >"$TMP_ROOT/foreign.agent.out" 2>&1)
+(cd "$REPO" && SENTINEL_MODE=noop "$LF_BIN" implement >"$TMP_ROOT/foreign.agent.out" 2>&1)
 foreign_agent_status=$?
-(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" sync --continue >"$TMP_ROOT/foreign.continue.out" 2>&1)
-foreign_continue_status=$?
-(cd "$REPO" && LF_GIT_OPERATION_ID=gitop_foreign "$LF_BIN" sync --abort >"$TMP_ROOT/foreign.abort.out" 2>&1)
-foreign_abort_status=$?
 set -e
 test "$foreign_sync_status" -ne 0
-test "$foreign_agent_status" -ne 0
-test "$foreign_continue_status" -ne 0
-test "$foreign_abort_status" -ne 0
+grep -q 'a merge operation already exists' "$TMP_ROOT/foreign.sync.out"
+test "$foreign_agent_status" -eq 0
 test "$(git -C "$REPO" rev-parse HEAD)" = "$owned_head"
 test -f "$(git -C "$REPO" rev-parse --absolute-git-dir)/MERGE_HEAD"
-test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
+test "$(sort "$SENTINEL_LOG" | tr '\n' ' ')" = "hold noop "
 : >"$SENTINEL_RELEASE"
 set +e
 wait "$foreign_owner"
 set -e
-echo "PASS foreign sync and agent launch changed no owned state"
+echo "PASS resolving sync admitted an agent and refused a second sync"
 
-# A matching recovery child continues the sequencer it inherited. The parent
-# verifies and pushes once after the sentinel exits.
+# The resolver's own sync --continue adopts the stopped merge. The parent
+# reclaims the fence, verifies and pushes once after the sentinel exits.
 create_conflict_repo authorized
 authorized_original=$(git -C "$REPO" rev-parse HEAD)
 export SENTINEL_MODE=resolve SENTINEL_LOG="$TMP_ROOT/authorized.log"
 : >"$SENTINEL_LOG"
 (cd "$REPO" && "$LF_BIN" sync >/dev/null)
 test "$(wc -l <"$SENTINEL_LOG" | tr -d ' ')" = 1
-grep -Eq '^resolve gitop_[^ ]+$' "$SENTINEL_LOG"
+grep -Eq '^resolve$' "$SENTINEL_LOG"
 test "$(git --git-dir="$REMOTE" rev-parse refs/heads/feature)" = "$(git -C "$REPO" rev-parse HEAD)"
 test ! -f "$(git -C "$REPO" rev-parse --absolute-git-dir)/MERGE_HEAD"
 
-echo "PASS authorized recovery continued the original sequencer"
+echo "PASS resolver continued the original merge"
 
 # Replaying the exact conflict reuses the reviewed resolution mechanically.
 # rerere never auto-stages: Loopflow stages only the reused unmerged paths.

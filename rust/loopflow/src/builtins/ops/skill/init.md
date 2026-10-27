@@ -183,7 +183,7 @@ lf wave status <wave>
 If PM is not bound and Linear is connected, offer the explicit binding command:
 
 ```bash
-lf repo connect <wave>
+lf wave connect <wave>
 ```
 
 The first Wave establishes the repository Team and defaults its key from the
@@ -210,12 +210,12 @@ Then offer Linear binding as above. Connection creates or links the Initiative
 and preserves existing Projects; it does not provision an initial Project.
 Inspect available Linear status/content: one In Progress Project is the current
 plan, Planned Projects hold future plans, and Completed Projects retain history.
-Tasks select an explicit Workflow, then their Wave default, then repository `workflow:`.
+Tasks select an explicit Workflow, then their Wave default, repository `workflow:`, then the builtin `code`.
 
 If no current Project exists, report that planning gap. Establishing a chapter
 requires accepted repository-wide direction and plan dispositions: preview with
-`lf repo new-chapter <name> --dry-run --json`, then apply with
-`lf repo new-chapter <name> --json` to apply those dispositions. Every Wave
+`lf wave new-chapter --all <name> --dry-run --json`, then apply with
+`lf wave new-chapter --all <name> --json` to apply those dispositions. Every Wave
 participates; do not rotate the repository merely to initialize one Wave. A Wave
 with no Projects receives an empty plan unless an authored Planned successor
 supplies its content. Workflow defaults remain on the Wave or repository. Existing successors and predecessors
@@ -278,7 +278,7 @@ personal choice, never committed repository content:
 
 ```bash
 lf machine use <machine-label> <wave>        # this Wave's default, copied to their other Machines
-lf machine use <machine-label> --repo        # this repository's default
+lf --repo <repo> machine use <machine-label> # this repository's default
 lf machine use <machine-label> --task <issue> # hand one Task to that Machine
 lf machine list                              # each Machine with the defaults naming it
 ```
@@ -287,8 +287,8 @@ Bare `lf machine use <machine-label>` applies to the worktree's Task, else its
 Wave, else the repository. Resolution for a new Task is Wave → parent Waves →
 repository → the Machine running the command, so one Machine needs no setup.
 An unreachable Machine gets a warning; rerun later. Setting a default moves the
-user's Wave or repository Session to that Machine with fresh context. Crons
-stay on the Machine that installed them; `lf cron add` there. Existing Tasks
+user's Wave or repository Session to that Machine with fresh context. Scheduled
+commands are ordinary crontab lines on the Machine that runs them. Existing Tasks
 stay on the Machine in their claim until handed off.
 
 `lf --machine` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote

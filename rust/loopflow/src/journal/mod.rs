@@ -969,6 +969,7 @@ fn append_event(trace_dir: &Path, event: &LfEvent) -> Result<(), std::io::Error>
     Ok(())
 }
 
+/// Concurrent processes append whole lines to a trace's event log.
 #[cfg(unix)]
 struct FileLock {
     fd: std::os::fd::RawFd,

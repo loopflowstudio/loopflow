@@ -289,6 +289,7 @@ const SAVE_INTERVAL: i64 = 5;
 #[derive(Debug, Default)]
 struct SessionActivityTracker {
     open_tools: BTreeSet<String>,
+    background: BTreeSet<String>,
     pending_input: BTreeSet<String>,
     yielded: bool,
     failed: bool,
@@ -325,6 +326,9 @@ impl SessionActivityTracker {
                 Signal::InputResolved(id) => {
                     self.pending_input.remove(&id);
                 }
+                Signal::Background(tasks) => {
+                    self.background = tasks;
+                }
                 Signal::Yielded(ok) => {
                     self.open_tools.clear();
                     self.failed |= !ok;
@@ -351,7 +355,7 @@ impl SessionActivityTracker {
         let reading = SessionActivity {
             preview: self.preview.clone(),
             observed_at: now,
-            open_tools: self.open_tools.len(),
+            open_tools: self.open_tools.len() + self.background.len(),
             pending_input: self.pending_input.len(),
             yielded: self.yielded,
         };

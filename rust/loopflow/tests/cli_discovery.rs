@@ -499,7 +499,7 @@ fn command_targets_compose_and_captured_operations_remain_readable() {
         panic!("expected saved command");
     };
     let canonical = normalize_args(captured.item.argv()).unwrap();
-    assert_eq!(canonical, step.item.argv());
+    assert_eq!(canonical, ["lf", "ops", "pr", "land", "--local"]);
     assert_eq!(serde_json::to_value(restored).unwrap(), saved);
 
     let legacy = serde_json::json!({"Command": {
@@ -526,11 +526,11 @@ fn shorthand_stops_at_leaf_and_passthrough_boundaries() {
         |args: &[&str]| normalize_args(args.iter().map(|arg| arg.to_string()).collect()).unwrap();
     assert_eq!(
         normalized(&["lf", "account", "rou"]),
-        ["lf", "account", "route"]
+        ["lf", "ops", "account", "route"]
     );
     assert_eq!(
         normalized(&["lf", "land", "--wait-and-fix"]),
-        ["lf", "pr", "land", "--wait-and-fix"]
+        ["lf", "ops", "pr", "land", "--wait-and-fix"]
     );
     assert_eq!(
         normalized(&["lf", "task", "comment", "status"]),
@@ -591,7 +591,7 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
     let saved: loopflow::graph::Command =
         serde_json::from_value(serde_json::json!({"command": "open", "args": []})).unwrap();
     assert_eq!(saved.clone().current().argv(), ["lf", "open"]);
-    assert!(Cli::try_parse_from(["lf", "pr", "open", "--help"])
+    assert!(Cli::try_parse_from(["lf", "ops", "pr", "open", "--help"])
         .is_err_and(|error| { error.kind() == clap::error::ErrorKind::DisplayHelp }));
 }
 
@@ -746,10 +746,14 @@ fn transitive_lookup_prefers_exact_names_and_derives_unique_prefixes() {
 }
 
 #[test]
-fn git_commands_keep_their_root_ownership() {
+fn git_commands_belong_to_ops_not_task() {
     let tree = loopflow::lf::navigation::command_tree();
     for name in ["pr", "wt", "sync", "commit"] {
-        assert!(tree.find_subcommand(name).is_some());
+        assert!(tree
+            .find_subcommand("ops")
+            .unwrap()
+            .find_subcommand(name)
+            .is_some());
         if name == "sync" {
             continue;
         } // Task planning sync is separate from Git sync.
@@ -782,29 +786,43 @@ fn account_has_one_owner_without_predecessor_aliases() {
 }
 
 #[test]
-fn repository_commands_have_one_owner_and_derived_shorthand() {
+fn moved_commands_have_one_owner_and_keep_their_short_names() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
     let tree = Cli::command();
-    for (leaf, path) in [
-        ("tokens", vec!["repo", "tokens"]),
-        ("ci", vec!["repo", "ci"]),
+    assert!(tree.find_subcommand("repo").is_none());
+    for (short, path) in [
+        (vec!["land"], vec!["ops", "pr", "land"]),
+        (vec!["pr", "land"], vec!["ops", "pr", "land"]),
+        (vec!["commit"], vec!["ops", "commit"]),
+        (vec!["sync"], vec!["ops", "sync"]),
+        (vec!["wt", "create"], vec!["ops", "wt", "create"]),
+        (vec!["account"], vec!["ops", "account"]),
+        (vec!["machine", "list"], vec!["ops", "machine", "list"]),
+        (vec!["pool"], vec!["ops", "machine", "pool"]),
+        (vec!["release", "run"], vec!["ops", "release", "run"]),
+        (vec!["ci"], vec!["ops", "ci"]),
+        (vec!["tokens"], vec!["ops", "tokens"]),
+        (vec!["repository"], vec!["config", "repository"]),
+        (vec!["planning", "key"], vec!["config", "planning", "key"]),
+        (vec!["reteam"], vec!["wave", "reteam"]),
     ] {
-        assert!(tree.find_subcommand(leaf).is_none());
-        let mut canonical = path.clone();
-        canonical.push("--help");
-        let help = success(run(repo.path(), home.path(), &canonical));
+        assert!(tree.find_subcommand(short[0]).is_none(), "{short:?}");
+        let help = success(run(
+            repo.path(),
+            home.path(),
+            &[path.clone(), vec!["--help"]].concat(),
+        ));
         assert_eq!(
-            success(run(repo.path(), home.path(), &[leaf, "--help"])),
-            help
+            success(run(
+                repo.path(),
+                home.path(),
+                &[short.clone(), vec!["--help"]].concat()
+            )),
+            help,
+            "{short:?}"
         );
         assert!(String::from_utf8_lossy(&help).contains(&format!("lf {}", path.join(" "))));
-        let command = tree
-            .find_subcommand("repo")
-            .unwrap()
-            .find_subcommand(leaf)
-            .unwrap();
-        assert_eq!(command.get_all_aliases().count(), 0);
     }
     assert!(!home.path().join(".lf").exists());
 }
@@ -823,6 +841,8 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
     }
     let tree = Cli::command();
     let mut machine_commands: Vec<_> = tree
+        .find_subcommand("ops")
+        .unwrap()
         .find_subcommand("machine")
         .unwrap()
         .get_subcommands()
@@ -838,6 +858,8 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "end",
             "id",
             "list",
+            "ondemand",
+            "pool",
             "public",
             "remove",
             "rename",

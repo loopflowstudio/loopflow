@@ -288,11 +288,6 @@ fn admit_ci_fix(
             return Ok(());
         }
         if let Some(task_id) = &landing.task_id {
-            let task = store
-                .get_task(task_id)
-                .await
-                .map_err(repair_error)?
-                .ok_or_else(|| repair_error("landing Task is missing"))?;
             if store.sqlite.task_state(task_id).map_err(repair_error)?
                 == crate::durable::TaskState::Deferred
             {
@@ -310,19 +305,9 @@ fn admit_ci_fix(
                     "Task checkout belongs to Machine {machine}"
                 )));
             }
-            if let Some(reason) =
-                super::task_execution::task_execution_blockers(&store.sqlite, &task.id)?
-                    .into_iter()
-                    .next()
-            {
-                return Err(OpsError::CheckoutBusy(reason));
-            }
-        } else if let Some(reason) = checkout_execution_blockers(&store, &landing.worktree)?
-            .into_iter()
-            .next()
-        {
-            return Err(OpsError::CheckoutBusy(reason));
         }
+        // Live work in the checkout, such as the Task's own open Session,
+        // writes alongside the repair; only a running sync fences an agent.
         let config = load_config_or_default(Some(&landing.worktree));
         let retry = reservation.process.is_some();
         if retry && reservation.retries >= config.automation.retries {
@@ -743,6 +728,8 @@ where
     .map_err(|error| OpsError::Message(format!("landing {label} panicked: {error}")))?
 }
 
+/// One observer reconciles a landing at a time; others return and leave it to
+/// that observer. It never excludes writers in the checkout.
 fn lock_landing(landing: &PrLanding) -> OpsResult<Option<Arc<File>>> {
     let lock = OpenOptions::new()
         .create(true)
@@ -1026,21 +1013,6 @@ async fn reconcile_claimed(
             })
             .await;
             if let Err(error) = repaired {
-                if matches!(error, OpsError::CheckoutBusy(_)) {
-                    // Another observer's busy checkout is not a delivery
-                    // failure. In particular, a watcher must not stop a land
-                    // command that is itself about to admit this repair.
-                    persist_landing_state(
-                        store,
-                        landing,
-                        PrLandingState::Watching,
-                        head_sha,
-                        None,
-                        None,
-                    )
-                    .await?;
-                    return Err(error);
-                }
                 return block_landing(store, landing, format!("ci-fix blocked: {error}")).await;
             }
             store

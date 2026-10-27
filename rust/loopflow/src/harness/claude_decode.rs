@@ -18,6 +18,8 @@ pub(super) struct ClaudeDecoder {
     outbound: HashSet<String>,
     /// Echoed requests whose results are still owed, oldest first.
     pending: VecDeque<ProviderTurn>,
+    /// Backgrounded tasks are still running.
+    background: bool,
     state: ReaderState,
 }
 
@@ -45,7 +47,14 @@ impl ClaudeDecoder {
         if let Some(signal) = rate_limit_signal(&value) {
             return Ok(vec![ProviderFact::RateLimit(signal).into()]);
         }
-        let mut out = fact::activity(signals(&value));
+        let signals = signals(&value);
+        if let Some(tasks) = signals.iter().find_map(|signal| match signal {
+            Signal::Background(tasks) => Some(tasks),
+            _ => None,
+        }) {
+            self.background = !tasks.is_empty();
+        }
+        let mut out = fact::activity(signals);
         if value["type"] == "user" {
             if let (Some(thread), Some(request)) =
                 (value["session_id"].as_str(), value["uuid"].as_str())
@@ -68,7 +77,10 @@ impl ClaudeDecoder {
         }
         let start = out.len();
         let ended = process_line(&value, turn_id, &mut out, &mut self.state);
-        let result = value["type"] == "result";
+        // Backgrounded tasks still running: Claude starts its own turn when
+        // they finish, and that turn's result answers the last request.
+        let deferred = value["type"] == "result" && self.background && self.pending.len() == 1;
+        let result = value["type"] == "result" && !deferred;
         let turn = result.then(|| self.pending.pop_front()).flatten();
         if let Some(turn) = &turn {
             anyhow::ensure!(
@@ -102,7 +114,9 @@ impl ClaudeDecoder {
                 .into(),
             );
         }
-        if result || ended.is_some() {
+        if deferred {
+            self.state = ReaderState::default();
+        } else if result || ended.is_some() {
             let succeeded = value["subtype"] == "success" && value["is_error"] != true;
             out.push(
                 ProviderFact::TurnCompleted {
@@ -166,6 +180,16 @@ fn signals(line: &Value) -> Vec<Signal> {
             } else {
                 results.into_iter().map(Signal::ToolResolved).collect()
             }
+        }
+        Some("system") if event["subtype"] == "background_tasks_changed" => {
+            vec![Signal::Background(
+                event["tasks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|task| task["task_id"].as_str().map(str::to_owned))
+                    .collect(),
+            )]
         }
         Some("message_start" | "content_block_start" | "content_block_delta") => {
             vec![Signal::Working]
@@ -297,6 +321,18 @@ impl ReaderState {
             .or_insert(input);
     }
 
+    /// A request's input the first time its message id appears: one request
+    /// streams several lines repeating the same usage. Call before
+    /// `observe_assistant_usage` records the id.
+    fn observe_request(&self, value: &Value) -> Option<u64> {
+        let message = value.get("message")?;
+        let id = message.get("id").and_then(Value::as_str)?;
+        if self.assistant_usage.contains_key(id) {
+            return None;
+        }
+        total_input(message.get("usage")?)
+    }
+
     fn observe_assistant_usage(&mut self, value: &Value) -> Option<TurnUsage> {
         let message = value.get("message")?;
         let message_id = message.get("id").and_then(Value::as_str)?;
@@ -308,9 +344,7 @@ impl ReaderState {
             .and_then(Value::as_u64);
         let receipt = TurnUsage {
             input_tokens,
-            total_input_tokens: input_tokens.map(|input| {
-                input + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0)
-            }),
+            total_input_tokens: total_input(usage),
             output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
             reasoning_tokens: usage.get("reasoning_tokens").and_then(Value::as_u64),
             cache_read_tokens,
@@ -456,6 +490,16 @@ fn parse_reset_timestamp(value: &Value) -> Option<i64> {
         .map(|timestamp| timestamp.unix_timestamp())
 }
 
+/// A request's whole input: fresh tokens plus cache reads and writes.
+fn total_input(usage: &Value) -> Option<u64> {
+    let tokens = |key: &str| usage.get(key).and_then(Value::as_u64);
+    Some(
+        tokens("input_tokens")?
+            + tokens("cache_read_input_tokens").unwrap_or(0)
+            + tokens("cache_creation_input_tokens").unwrap_or(0),
+    )
+}
+
 /// Map one NDJSON line to display events. Returns `Some(status)` when the
 /// line is a turn `result`; the driver owns the terminal `TurnCompleted`, so a
 /// persistent reader can coalesce a seed turn and its queued steer turns into a
@@ -472,9 +516,20 @@ fn process_line(
         .unwrap_or(value);
 
     let event_type = event.get("type").and_then(Value::as_str)?;
+    // Subagent traffic has its own context window and conversation; only lines
+    // without a parent tool use belong to this one.
+    let main = value["parent_tool_use_id"].is_null();
 
     match event_type {
         "system" => {
+            if event["subtype"] == "compact_boundary" && main {
+                out.push(
+                    ProviderFact::Compacted {
+                        pre_tokens: event["compact_metadata"]["pre_tokens"].as_u64(),
+                    }
+                    .into(),
+                );
+            }
             if let Some(session_id) = event
                 .get("session_id")
                 .or_else(|| value.get("session_id"))
@@ -595,6 +650,7 @@ fn process_line(
         // These contain tool_use blocks and text blocks.
         "assistant" => {
             state.observe_assistant_pressure(event);
+            let request = state.observe_request(event).filter(|_| main);
             if let Some(usage) = state.observe_assistant_usage(event) {
                 out.push(Decoded::from(ConversationEvent::UsageCheckpoint {
                     turn_id: turn_id.to_string(),
@@ -602,11 +658,16 @@ fn process_line(
                     final_receipt: false,
                 }));
             }
-            process_assistant_message(event, turn_id, out, state);
+            if let Some(input_tokens) = request {
+                out.push(ProviderFact::Request { input_tokens }.into());
+            }
+            if main {
+                process_assistant_message(event, turn_id, out, state);
+            }
         }
 
         // Tool result events: type "user" with tool_result content.
-        "user" => {
+        "user" if main => {
             process_user_message(event, turn_id, out, state);
         }
 

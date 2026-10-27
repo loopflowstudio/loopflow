@@ -103,7 +103,7 @@ repository content:
 ```bash
 lf machine use mini infrastructure            # this Wave's new Tasks and its Session
 lf machine use laptop infrastructure --session  # only the Wave Session
-lf machine use mini --repo --tasks             # only the repository's new Tasks
+lf --repo loopflow machine use mini --tasks    # only the repository's new Tasks
 lf machine list                               # each Machine with the defaults naming it
 ```
 
@@ -118,8 +118,8 @@ repository identity, and is copied to the
 person's other added Machines over `lf --machine`, so the laptop launches there and
 mini receives the runs. An unreachable Machine gets a warning; rerun later.
 Resolution for an unowned Task walks its Wave, its parent Waves, its repository, then this Machine,
-so single-Machine use needs no setup. Cron install and `lf wave show`'s `machine`
-field read the same resolver.
+so single-Machine use needs no setup. `lf wave show`'s `machine` field reads the
+same resolver.
 
 Setting the Session Machine moves the Wave Session: the old Machine completes its Wave primary
 Session and the new Machine admits a fresh one (fresh Wave context, as with
@@ -153,8 +153,8 @@ metrics and Session history; no process needs to be running.
 `RepositoryId` identifies the selected repository plan. `repository_plans` binds
 that ID to the Machine-local repository locator; it contains no copied Work or
 execution. Existing repository paths receive distinct opaque IDs; new Wave writes
-use the same binding, and `lf repo identity` covers repositories without Work.
-`lf repo identity --bind ID` explicitly associates even an established checkout.
+use the same binding, and `lf repository` covers repositories without Work.
+`lf repository --bind ID` explicitly associates even an established checkout.
 The same table retains prior IDs as local locators and exactly one selected ID
 per path; Work, provider mappings, pending effects and execution are untouched.
 An ID already bound to another local path is not reassigned. Binding selects no
@@ -225,29 +225,60 @@ Session bindings retain membership independently of checkout location.
 ## Own and rent Machines
 
 A **pool** names machines you own (`machines.pool`, with `cost_usd` and
-`expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a provider
-template and a budget: machines at once and the most per hour. They share one
-namespace. A **rental** (`rentals`, `rent_…` ids) is one paid window: hardware,
-price, cap, deadline, state and billed cost, separate from the Machine it
-becomes once reachable. Task execution never learns a Machine is rented.
+`expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a
+provider (Daytona, Modal, RunPod, AWS or Fly), hardware with at most one GPU
+(RunPod, AWS and Modal rent them; `--vcpus`/`--memory-gb` are floors its machine
+meets) and optionally spot (AWS and RunPod), and a budget: machines at once and the
+most per hour. They share one namespace. A **rental** (`rentals`, `rent_…` ids)
+is one paid window: hardware, price, cap, deadline, state and cost, separate
+from the Machine it becomes once reachable. Task execution never learns a
+Machine is rented.
 
 `lf task run --pool P` hands the Task to the first machine in P that holds no
 unfinished Task and has not expired; there is no queue. `--rent R` admits
-(limit, stock, price), writes the rental as `requested` with its provider name
-`lf-<id>` before the create, creates once, waits for SSH, adds the Machine,
-forwards GitHub and installs every Claude account's long-lived token, clones
-and binds the repository, then hands off. An unanswered create is `unconfirmed` until the inventory shows the name
-(adopt) or the create's window passes (`lost`); it is never resent.
-The pod installs the published `lf`; with `LF_RENT_LINUX_BIN` naming a Linux
-build, boot instead waits for the laptop to upload that binary, so a development
-build rents pods running its own code.
+(limit, then the price from the provider's published per-second rates), writes
+the rental as `requested` with its sandbox name `lf-<id>` before the create,
+creates once, waits for SSH, installs `lf`, adds the Machine, forwards GitHub
+and installs every Claude account's long-lived token, clones and binds the
+repository, then hands off. A sandbox that never answers SSH is deleted at once.
+An unanswered create is `unconfirmed` until its name finds it (then deleted,
+since it has no route) or the create's window passes (`lost`); it is never
+resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
+binary instead of the published `lf`, so a development build rents sandboxes
+running its own code.
 
-The pod's start command runs the standard-library guardian first
-(`rust/loopflow/src/rental/guardian.py`): it deletes the pod at its deadline,
-or sooner when its cap runs out at the charged price, with the pod-scoped key.
-The laptop gives back by drain (Task rentals), soft deadline (15 minutes
-before the hard one) or `lf machine end`; any of them refuses while the pod
-holds uncommitted or unpushed work. Owned machines are never deleted.
+`lf [--repo REPO] machine use R [WAVE]`, naming a pool or on-demand, sets the
+scope's Tasks capacity (`scope_defaults.tasks_capacity`) in place of a Tasks
+Machine; the nearest scope that sets either wins. `lf task run` places an
+unowned Task by that default as `--pool` or `--rent` would. Its Session stays
+where it runs, and pools and on-demands are this Machine's own, so the default
+is not copied to your other Machines.
+
+Providers are reached through one embedded bridge
+(`rust/loopflow/src/rental/sandbox.py`) under `uv`, with the provider's pinned
+SDK where it has one (RunPod and Fly speak plain HTTP). It creates, finds and
+deletes machines by the name lf gave them. Daytona and Modal build an image (an
+`lf` user, git, gh, Node and Claude Code, Rust, uv); RunPod, AWS and Fly boot
+stock Ubuntu 24.04 and install the same tools before admitting `lf`. Modal runs
+key-only sshd behind a TCP tunnel; Daytona's SSH gateway takes a token valid for
+the sandbox's life, which rides in the Machine route; RunPod maps port 22 on a
+public IP, AWS opens 22 in a `loopflow-rentals` security group, and each Fly
+rental is its own app with a dedicated IPv4.
+
+The hard deadline never needs the laptop. Daytona (`ttl_minutes`) and Modal
+(`timeout`) hold it themselves; elsewhere the guardian
+(`rust/loopflow/src/rental/guardian.py`) does, starting before anything else on
+the machine. On RunPod and Fly it is the main process and the setup its child:
+when it exits Fly destroys the Machine, and on RunPod it deletes its pod with
+the pod-scoped key RunPod injects, after reading the price charged so the
+budget can shorten the deadline. On AWS it powers the instance off, which
+terminates it. A guardian only ever shortens the deadline. A machine found
+ended is still deleted, freeing what it leaves (a Fly app's IPv4, a pod's disk).
+The laptop gives back
+when a Task rental has drained and its last Task finished 15 minutes ago, at
+the soft deadline (15 minutes before the hard one), or on `lf machine end`; any
+of them refuses while the sandbox holds uncommitted or unpushed work. Owned
+machines are never deleted.
 
 Before it deletes, the laptop pulls `lf history export --since <rental start>`:
 the worker's Process, Session, session-event and Graph rows as JSON lines, origin
@@ -256,7 +287,7 @@ row, and captures under `~/.lf/machines/<origin>/runs`, never in this Machine's
 own tables, so no reconciler, attachment or Task judgment acts on a copy. An
 export from any Machine but the one expected is refused; a failed copy deletes
 nothing. `lf session list` and `lf task status` name copies "from <machine>"
-after the pod is gone, and `lf history show <session>` opens one. The give-back
+after the sandbox is gone, and `lf history show <session>` opens one. The give-back
 pass runs at the end of a forwarded `lf task run` for its rented Machine and in
 lazy recovery (any lf read of this Machine's work) for every rental; `lf ondemand list` only
 refreshes provider state and never ends a machine.
@@ -309,7 +340,7 @@ recorded endpoints alone do not prove liveness.
 
 `lf discord serve <wave>` is a foreground bridge from a configured channel to
 bounded conversations. It has no Wave cursor or inbox authority. Cron and Task execution
-do not require a daemon or bridge. See [Discord](../waves.md#discord-bridge).
+do not require a daemon or bridge. See [Discord](../work.md#talk-to-it-from-discord).
 
 ## Move a Wave without changing its identity
 

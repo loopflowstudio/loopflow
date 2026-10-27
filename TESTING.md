@@ -1387,12 +1387,7 @@ the Session attachment references share the same database. Simulated finite-prov
 harnesses must record their owned child exit; an absent endpoint is not exit
 evidence.
 
-Launch proofs use provider-written evidence and terminal receipts. Session
-completion gives the asynchronous telemetry recorder only 250 ms to drain;
-returning successfully does not guarantee `events.jsonl` is complete. Keep
-usage and account-event assertions in the recorder tests, rather than racing
-its queue in subprocess-launch tests. Reproduce suspected races with a temporary
-recorder delay beyond that drain window; remove the delay before publication.
+Launch proofs use provider-written evidence and terminal receipts.
 
 ### Reproducing races without CPU load
 

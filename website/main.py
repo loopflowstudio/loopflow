@@ -58,7 +58,7 @@ def Navbar():
                 cls="nav-brand-group",
             ),
             Ul(
-                Li(A("Graphs", href="/docs/authoring#graphs")),
+                Li(A("Graphs", href="/docs/orchestration")),
                 Li(A("Docs", href="/docs")),
                 Li(
                     A(
@@ -191,24 +191,23 @@ DOCS_AREAS = (
         ),
     ),
     DocArea(
-        "Plan and conduct",
-        "conduct",
-        "Give Loopflow a goal to keep working on, then see where it stands and step in.",
+        "Work and sessions",
+        "work",
+        "Hand off Tasks, come back to any conversation, and land what they built.",
         (
-            DocPage("Waves", "waves", "Goals Loopflow keeps working on, and what they remember"),
-            DocPage(
-                "Conducting",
-                "conducting",
-                "See what got done, what you can pick up, and how to step in",
-            ),
+            DocPage("Work", "work", "Tasks, steering, shared plans, and Waves"),
+            DocPage("Sessions", "sessions", "Resume, steer, and file every conversation"),
+            DocPage("Ops", "ops", "Land, repair CI, release, machines, and accounts"),
         ),
     ),
     DocArea(
-        "Build and extend",
+        "See and extend",
         "extend",
-        "Change how Loopflow works: every step is a text file.",
+        "See your work wherever you are, and change how it runs.",
         (
-            DocPage("Authoring", "authoring", "Write your own steps, graphs, and goals"),
+            DocPage("Surfaces", "surfaces", "Desktop, cmux, Herdr, tmux, and your own view"),
+            DocPage("Telemetry", "telemetry", "What agents did and what it cost"),
+            DocPage("Orchestration", "orchestration", "Skills, Graphs, Workflows, and Goals"),
             DocPage(
                 "The Agent API",
                 "agent-api",
@@ -222,7 +221,7 @@ DOCS_AREAS = (
         "Look up exact words, commands, settings, and fixes.",
         (
             DocPage("Glossary", "glossary", "Every term, in one plain sentence"),
-            DocPage("lf command reference", "lf", "Commands, flags, and builtins"),
+            DocPage("lf command reference", "lf-reference", "Commands, flags, and builtins"),
             DocPage("Configuration", "config", "Context, models, profiles, and launch behavior"),
             DocPage(
                 "Subscriptions",

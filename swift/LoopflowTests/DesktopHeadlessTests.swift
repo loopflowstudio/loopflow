@@ -62,7 +62,7 @@ struct DesktopHeadlessTests {
         let status = String(decoding: data, as: UTF8.self)
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
-            if args == ["planning", "status", "--json"], cwd == "/src/loopflow" {
+            if args == ["config", "planning", "status", "--json"], cwd == "/src/loopflow" {
                 return "{\"destinations\":\(status)}"
             }
             if args.first == "roadmap" { return roadmap }

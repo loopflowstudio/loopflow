@@ -176,11 +176,11 @@ public struct RegistryQuery: Sendable {
 
     /// Explicit workspace opening binds a plain repository to its local plan.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
-        try Self.decode(RepositoryIdentity.self, from: await run(["repo", "identity", "--json"], cwd))
+        try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
     }
 
     public func repositoryPath(id: String) async throws -> String {
-        try await run(["--repository", id, "repo", "identity", "--path"], nil)
+        try await run(["--repository", id, "config", "repository", "--path"], nil)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -214,7 +214,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
-        var args = ["repo", "new-chapter", name, "--plan", "/dev/stdin", "--json"]
+        var args = ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"]
         if preview { args.append("--dry-run") }
         return try Self.decode(ProjectRotationPreview.self, from: await runWithInput(args, cwd, plan))
     }
@@ -249,7 +249,7 @@ public struct RegistryQuery: Sendable {
 
     public func peerPlanningStatus(cwd: String) async throws -> [PeerPlanningStatus] {
         struct Status: Decodable { let destinations: [PeerPlanningStatus] }
-        return try Self.decode(Status.self, from: await run(["planning", "status", "--json"], cwd)).destinations
+        return try Self.decode(Status.self, from: await run(["config", "planning", "status", "--json"], cwd)).destinations
     }
 
     public func localMachineId() async throws -> String {
@@ -552,10 +552,10 @@ public struct RegistryQuery: Sendable {
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
-    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf repo tokens` measures the
+    /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        let stdout = try await run(["repo", "tokens", "--json"], repoPath)
+        let stdout = try await run(["ops", "tokens", "--json"], repoPath)
         return try Self.decode(CodeNode.self, from: stdout)
     }
 
@@ -563,7 +563,7 @@ public struct RegistryQuery: Sendable {
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        let stdout = try await run(["repo", "tokens", "--json", "--days", String(days)], repoPath)
+        let stdout = try await run(["ops", "tokens", "--json", "--days", String(days)], repoPath)
         return try Self.decode([CodeSnapshot].self, from: stdout)
     }
 

@@ -83,7 +83,7 @@ pub fn reconcile(
                             return Err(anyhow!("repository {id} still locates the Git directory at {source}; a copy cannot replace its retained Work"));
                         }
                         if source_locator.is_none() && relocate.is_none() {
-                            return Err(anyhow!("the old address {source} is occupied without a Git locator; for a verified move, run `lf repo identity --relocate {id}` from its new location"));
+                            return Err(anyhow!("the old address {source} is occupied without a Git locator; for a verified move, run `lf repository --relocate {id}` from its new location"));
                         }
                     }
                 }
@@ -116,7 +116,7 @@ pub fn reconcile(
             ));
         } else {
             if let Some(existing) = store.repository_id(&destination)? {
-                return Err(anyhow!("Git locator {id} conflicts with retained repository {existing}; use `lf repo identity --bind {existing}` only after checking this checkout"));
+                return Err(anyhow!("Git locator {id} conflicts with retained repository {existing}; use `lf repository --bind {existing}` only after checking this checkout"));
             }
             store.bind_repository(&destination, id)?;
         }

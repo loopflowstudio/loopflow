@@ -479,13 +479,13 @@ fn public_commands_save_steers_without_launching_providers() {
         );
         String::from_utf8(output.stdout).unwrap()
     };
-    run(&["repo", "comment", "REPOSITORY_DIRECTION", "--steer"]);
+    run(&["session", "steer", "REPOSITORY_DIRECTION"]);
     run(&[
-        "wave",
-        "comment",
+        "--wave",
         task.task.wave_id.as_ref().unwrap().as_str(),
+        "session",
+        "steer",
         "WAVE_DIRECTION",
-        "--steer",
     ]);
     run(&[
         "comment",

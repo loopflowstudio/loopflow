@@ -11,16 +11,14 @@ use crate::lf::MachineCommand;
 use crate::store::Store;
 
 pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
-    if let MachineCommand::End { label, force } = cmd {
-        return super::rental::end(label, *force);
+    // Rentals own their runtimes, so they dispatch before this one opens.
+    match cmd {
+        MachineCommand::End { label, force } => return super::rental::end(label, *force),
+        MachineCommand::Pool { cmd } => return super::rental::run_pool(cmd),
+        MachineCommand::Ondemand { cmd } => return super::rental::run_ondemand(cmd, batch),
+        _ => {}
     }
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run_async(cmd, batch))?;
-    if matches!(cmd, MachineCommand::Public { .. }) {
-        // Publication runs its own runtime, so it waits until this one is done.
-        super::ops::republish_crons()?;
-    }
-    Ok(())
+    tokio::runtime::Runtime::new()?.block_on(run_async(cmd, batch))
 }
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
@@ -177,7 +175,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             };
             let mut statuses = Vec::new();
             for machine in machines {
-                // A given-back pod is gone; probing it would only time out.
+                // A given-back sandbox is gone; probing it would only time out.
                 let ended = store
                     .sqlite
                     .rental_for_machine(&machine.id)?
@@ -239,7 +237,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             unreachable!("credential commands dispatch before opening the store")
         }
         MachineCommand::Use { .. } => unreachable!("machine use dispatches with its repository"),
-        MachineCommand::End { .. } => unreachable!("machine end dispatches before the store opens"),
+        MachineCommand::End { .. }
+        | MachineCommand::Pool { .. }
+        | MachineCommand::Ondemand { .. } => {
+            unreachable!("machine end, pool and ondemand dispatch before the store opens")
+        }
     }
     Ok(())
 }
@@ -302,7 +304,7 @@ pub(super) struct Probe {
 pub(super) const REMOTE_PATH: &str = "export PATH=\"$HOME/.cargo/bin:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; if command -v npm >/dev/null 2>&1; then PATH=\"$PATH:$(npm config get prefix 2>/dev/null)/bin\"; fi";
 
 // Public installer, identical to the first-install command in README.md.
-const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh";
+pub(super) const INSTALL_COMMAND: &str = "curl -fsSL https://github.com/loopflowstudio/loopflow/releases/latest/download/install.sh | sh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FailureKind {

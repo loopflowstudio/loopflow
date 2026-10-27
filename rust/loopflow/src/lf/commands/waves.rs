@@ -561,29 +561,14 @@ fn current_wave(wave: &WaveSnapshot) -> bool {
 }
 
 /// Publication is local; Session claims and receipts never enter planning sync.
-pub fn comment(wave: Option<&str>, message: &str) -> Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
-        );
-        let author =
-            crate::config::participant_name()?.unwrap_or_else(|| "attribution unresolved".into());
-        let publication = if let Some(wave) = wave {
-            let wave = resolve_status_wave(&store, Some(wave)).await?;
-            store.sqlite.save_wave_steer(wave.id(), &author, message)?
-        } else {
-            let root = crate::repo::find_repo_root()?;
-            let repo = crate::repository::CanonicalRepo::discover(&root)?;
-            store
-                .sqlite
-                .save_repository_steer(&repo, &author, message)?
-        };
-        println!(
-            "Saved {} locally; shared planning exchange for this scope is unavailable",
-            publication.id
-        );
-        Ok(())
-    })
+pub async fn save_steer(
+    store: &SharedStore,
+    wave: &str,
+    author: &str,
+    message: &str,
+) -> Result<crate::steer::Steer> {
+    let wave = resolve_status_wave(store, Some(wave)).await?;
+    Ok(store.sqlite.save_wave_steer(wave.id(), author, message)?)
 }
 
 /// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
@@ -1469,8 +1454,12 @@ fn snapshot_task_details(
                         let Some(task) = requests.get(index) else {
                             return details;
                         };
-                        let detail =
-                            runtime.block_on(snapshot_task_detail(task, probe_pr_empty, reads));
+                        let detail = runtime.block_on(snapshot_task_detail(
+                            store,
+                            task,
+                            probe_pr_empty,
+                            reads,
+                        ));
                         details.push((index, detail));
                     }
                 })
@@ -1490,8 +1479,8 @@ fn snapshot_task_details(
 struct DetailReads<'a> {
     shared: &'a SharedTaskReads,
     facts: crate::store::sqlite::TaskDetailFacts,
-    /// Each Task's own Workflow, else its Wave's or repository's default, with
-    /// that source; a default is resolved once per Wave and repository.
+    /// Each Task's own Workflow, else its Wave's, repository's or the builtin
+    /// default, with that source; a default is resolved once per Wave and repository.
     workflows: HashMap<crate::durable::TaskId, (String, &'static str)>,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
@@ -1507,11 +1496,11 @@ impl<'a> DetailReads<'a> {
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
         let execution = store.sqlite.graph_execution_facts(graphs.values())?;
-        let mut defaults = HashMap::<_, Option<(String, &'static str)>>::new();
+        let mut defaults = HashMap::<_, (String, &'static str)>::new();
         let mut workflows = HashMap::new();
         for task in tasks {
             let selection = match facts.workflow_names.get(&task.id) {
-                Some(name) => Some((name.clone(), "task")),
+                Some(name) => (name.clone(), "task"),
                 None => match defaults.entry((task.wave_id.clone(), task.repository_id.clone())) {
                     std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
                     std::collections::hash_map::Entry::Vacant(entry) => entry
@@ -1519,9 +1508,7 @@ impl<'a> DetailReads<'a> {
                         .clone(),
                 },
             };
-            if let Some(selection) = selection {
-                workflows.insert(task.id.clone(), selection);
-            }
+            workflows.insert(task.id.clone(), selection);
         }
         let mut shipping = HashMap::new();
         for task in tasks.iter().filter(|task| facts.shipped.contains(&task.id)) {
@@ -1564,6 +1551,7 @@ fn unavailable_task(task: &Task, status: TaskState) -> UnavailableTaskEvidence {
 }
 
 async fn snapshot_task_detail(
+    store: &SharedStore,
     task: &Task,
     probe_pr_empty: bool,
     reads: &DetailReads<'_>,
@@ -1574,6 +1562,7 @@ async fn snapshot_task_detail(
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
     let (execution, graph_record) = crate::ops::task_execution::execution_of_latest_graph(
+        &store.sqlite,
         task,
         reads.graphs.get(&task.id),
         &reads.execution,
@@ -1723,10 +1712,11 @@ async fn snapshot_task_detail(
             }
         }),
     };
-    let selection = reads.workflows.get(&task.id).cloned();
-    let (workflow_name, workflow_source) = selection
-        .map(|(name, source)| (name, source.to_owned()))
-        .unzip();
+    let (workflow_name, workflow_source) = reads
+        .workflows
+        .get(&task.id)
+        .cloned()
+        .ok_or_else(|| anyhow!("Task {} has no Workflow", task.id))?;
     let section = task_section(task.state.as_deref(), Some(&runtime), &next_move);
     Ok(RoadmapTask {
         task: task_summary(
@@ -1748,8 +1738,8 @@ async fn snapshot_task_detail(
         next_move,
         condition,
         actions,
-        workflow_name,
-        workflow_source,
+        workflow_name: Some(workflow_name),
+        workflow_source: Some(workflow_source.to_owned()),
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
@@ -2824,7 +2814,7 @@ mod tests {
         let task = store.get_task(&task.id).await.unwrap().unwrap();
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
         let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
-        let detail = super::snapshot_task_detail(&task, false, &reads)
+        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();
@@ -2837,7 +2827,7 @@ mod tests {
             .unwrap();
         let shared = super::SharedTaskReads::read(&store).await.unwrap();
         let reads = super::DetailReads::read(&store, &[&task], &shared).unwrap();
-        let detail = super::snapshot_task_detail(&task, false, &reads)
+        let detail = super::snapshot_task_detail(&store, &task, false, &reads)
             .await
             .unwrap();
         let workspace = detail.reference.workspace.unwrap();

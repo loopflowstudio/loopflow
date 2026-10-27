@@ -46,14 +46,17 @@ pub(crate) async fn task_execution(
 ) -> StoreResult<TaskExecutionSnapshot> {
     let graph = store.sqlite.task_graphs(&task.id)?.pop();
     let facts = store.sqlite.graph_execution_facts(&graph)?;
-    Ok(execution_of_latest_graph(task, graph.as_ref(), &facts)
-        .await?
-        .0)
+    Ok(
+        execution_of_latest_graph(&store.sqlite, task, graph.as_ref(), &facts)
+            .await?
+            .0,
+    )
 }
 
 /// Execution and the Graph record of a Task whose latest Graph is already
 /// read, from facts read once for every Graph of the reading.
 pub(crate) async fn execution_of_latest_graph(
+    sqlite: &SqliteStore,
     task: &Task,
     graph: Option<&GraphProcess>,
     facts: &GraphExecutionFacts,
@@ -94,8 +97,8 @@ pub(crate) async fn execution_of_latest_graph(
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
     if snapshot.state == TaskExecutionState::Running {
-        if let Some((_, input, captured)) = input {
-            match activity::read(&crate::store::lf_home_dir(), input).await {
+        if let (Some((session, _, captured)), Some(step)) = (input, step) {
+            match activity::read(sqlite, session, step.started_at) {
                 Activity::Stalled => {
                     snapshot.state = TaskExecutionState::Stalled;
                     snapshot.reason = format!("Session event {captured} is stalled: no event or sampled body/tool CPU progress for five minutes. Interrupt the Task, inspect its effects, then launch fresh work.");

@@ -30,8 +30,8 @@ pub fn plans_through_git(checkout: &Path) -> Result<bool> {
     ))
 }
 
-/// `lf refresh` under Git planning: exchange the repository's planning ref now.
-/// The exchange is per repository, so a Wave selection has no effect.
+/// Exchange the repository's Git planning ref now. The exchange is per
+/// repository, so a Wave selection has no effect.
 pub fn refresh(checkout: &Path) -> Result<()> {
     let repo = crate::git::worktrees::main_repo_root(checkout)?;
     tokio::runtime::Runtime::new()?.block_on(async {
@@ -43,18 +43,12 @@ pub fn refresh(checkout: &Path) -> Result<()> {
         let destinations = crate::ops::planning_sync::peer_status(&store, &repo_key).await?;
         let Some(active) = destinations.into_iter().find(|d| d.active) else {
             return Err(anyhow!(
-                "no Git planning destination is configured; see `lf planning status`"
+                "no Git planning destination is configured; see `lf config planning status`"
             ));
         };
         if let Some(error) = active.acquisition_error {
             return Err(anyhow!("planning refresh failed: {error}"));
         }
-        println!(
-            "{}  imported {}  {} records",
-            active.reference,
-            active.imported_revision.as_deref().unwrap_or("none"),
-            active.selected_records
-        );
         Ok(())
     })
 }
@@ -88,7 +82,7 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
                 (None, Some(key), _) => key,
                 (None, None, true) => uuid::Uuid::new_v4().to_string(),
                 _ => return Err(anyhow!(
-                    "No planning user key. Use `lf planning key --new` once, then recover that key on other machines with `--recover <UUID>`."
+                    "No planning user key. Use `lf config planning key --new` once, then recover that key on other machines with `--recover <UUID>`."
                 )),
             };
             if *new || recover.is_some() {

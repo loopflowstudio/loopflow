@@ -65,7 +65,7 @@ config files.
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Planning synchronization](lf.md#choose-planning-synchronization) | — | `planning: {provider: linear, team: "<id>"}`, `planning: {provider: asana, team: "<gid-or-url>"}`, `planning: {provider: notion, team: "<page-url-or-id>"}` or `planning: {provider: git, shared: team}` |
+| [Planning synchronization](work.md#share-the-plan) | — | `planning: {provider: linear, team: "<id>"}`, `planning: {provider: asana, team: "<gid-or-url>"}`, `planning: {provider: notion, team: "<page-url-or-id>"}` or `planning: {provider: git, shared: team}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `docs: [README.md, docs/]` |
 | Include branch files | `--diff files` | `diff_files: true` |
@@ -184,7 +184,7 @@ context:
 ```
 
 Scheduled commands are personal and never configured here; see
-[Schedule ordinary commands](lf.md#schedule-ordinary-commands).
+[Schedule it yourself](ops.md#schedule-it-yourself).
 
 Example repo config:
 
@@ -457,7 +457,7 @@ frontmatter never changes scheduling.
 | **Default** | interactive for a direct TTY; headless otherwise |
 
 `lf graph` runs autonomous steps and stops at its first `interactive:` stage;
-a Task carries the graph on from there. See [Authoring](authoring.md#graphs).
+a Task carries the graph on from there. See [Orchestration](orchestration.md).
 
 ### Chrome
 
@@ -614,8 +614,8 @@ Codex uses captured instructions. Both retain the original resource directory;
 resources removed with the bundle are not preserved.
 
 ```bash
-lf sync-skills --yes       # personal skills and builtin skills/Graphs → home
-lf sync-skills --repo      # repository skills/Graphs → this checkout
+lf self sync-skills --yes   # personal skills and builtin skills/Graphs → home
+lf self sync-skills --repo  # repository skills/Graphs → this checkout
 ```
 
 Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository exports

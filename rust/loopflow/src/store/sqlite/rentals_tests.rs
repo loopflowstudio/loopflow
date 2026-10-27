@@ -2,7 +2,7 @@ use time::OffsetDateTime;
 
 use super::SqliteStore;
 use crate::durable::{MachineId, OwnershipKind, TaskId};
-use crate::rental::{Hardware, OnDemand, Ownership, Provider, Quote, RentalState, Template, Usd};
+use crate::rental::{Hardware, OnDemand, Ownership, Provider, RentalState, Usd};
 use crate::work::task::{LinearWritebackState, Observation, Task};
 
 fn store() -> (tempfile::TempDir, SqliteStore) {
@@ -18,31 +18,18 @@ fn usd(text: &str) -> Usd {
 fn code(max: u32) -> OnDemand {
     OnDemand {
         name: "code".into(),
-        provider: Provider::Runpod,
-        template: Template {
+        provider: Provider::Daytona,
+        hardware: Hardware {
+            vcpus: 4,
+            memory_gb: 8,
+            disk_gb: 10,
             gpu: None,
-            vcpus: 8,
-            memory_gb: 16,
-            disk_gb: None,
-            image: "runpod/base@sha256:ab".into(),
-            data_center: None,
+            spot: false,
         },
         max_machines: max,
         max_usd_per_hour: usd("0.40"),
         hours: 4.0,
         created_at: OffsetDateTime::from_unix_timestamp(1_792_000_000).unwrap(),
-    }
-}
-
-fn quote() -> Quote {
-    Quote {
-        hardware: Hardware::Cpu {
-            flavor: "cpu3c".into(),
-            vcpus: 8,
-        },
-        usd_per_hour: usd("0.24"),
-        available: true,
-        data_centers: Vec::new(),
     }
 }
 
@@ -62,24 +49,18 @@ fn pools_and_ondemands_share_one_namespace() {
 fn admission_records_identity_before_the_create_and_holds_the_limit() {
     let (_dir, store) = store();
     store.add_ondemand(&code(1)).unwrap();
-    let rental = store
-        .admit_rental("code", &quote(), None, None, false)
-        .unwrap();
+    let rental = store.admit_rental("code", None, None, false).unwrap();
     assert_eq!(rental.state, RentalState::Requested);
     assert_eq!(rental.provider_name, format!("lf-{}", rental.id));
-    assert_eq!(rental.cap_usd, usd("0.96"));
-    let refused = store
-        .admit_rental("code", &quote(), None, None, true)
-        .unwrap_err();
+    assert_eq!(rental.cap_usd, usd("1.32696"));
+    let refused = store.admit_rental("code", None, None, true).unwrap_err();
     assert!(refused.to_string().contains("already has 1 of 1"));
 
     // A lost create stops counting against the limit; its history stays.
     store
         .set_rental_state(&rental.id, RentalState::Lost)
         .unwrap();
-    store
-        .admit_rental("code", &quote(), None, None, true)
-        .unwrap();
+    store.admit_rental("code", None, None, true).unwrap();
     assert_eq!(store.rentals(Some("code")).unwrap().len(), 2);
 }
 
@@ -87,9 +68,7 @@ fn admission_records_identity_before_the_create_and_holds_the_limit() {
 fn a_rental_moves_from_confirmed_to_running_to_ended() {
     let (_dir, store) = store();
     store.add_ondemand(&code(2)).unwrap();
-    let rental = store
-        .admit_rental("code", &quote(), None, None, false)
-        .unwrap();
+    let rental = store.admit_rental("code", None, None, false).unwrap();
     store
         .set_rental_state(&rental.id, RentalState::Unconfirmed)
         .unwrap();
@@ -194,9 +173,7 @@ fn open_task(store: &SqliteStore) -> TaskId {
 fn an_ended_rental_hands_its_open_tasks_back_here() {
     let (_dir, store) = store();
     store.add_ondemand(&code(1)).unwrap();
-    let rental = store
-        .admit_rental("code", &quote(), None, None, false)
-        .unwrap();
+    let rental = store.admit_rental("code", None, None, false).unwrap();
     store
         .confirm_rental(&rental.id, "pod1", usd("0.24"))
         .unwrap();
@@ -235,4 +212,52 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
     );
     // This Machine writes the Task again: `lf task run` stays here.
     store.unclaim_task(&task).unwrap();
+}
+
+#[test]
+fn hardware_rented_before_spot_existed_reads_as_on_demand() {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_current_draft(&conn, "rental_spot");
+    conn.execute_batch(include_str!(
+        "../../../tests/fixtures/migrations/rental_spot_released.sql"
+    ))
+    .unwrap();
+    conn.execute_batch(&current_draft_sql("rental_spot"))
+        .unwrap();
+    for sql in [
+        "SELECT template FROM ondemands",
+        "SELECT hardware FROM rentals",
+    ] {
+        let json: String = conn.query_row(sql, [], |row| row.get(0)).unwrap();
+        let hardware: Hardware = serde_json::from_str(&json).unwrap();
+        assert!(!hardware.spot, "{sql}");
+    }
+}
+
+#[test]
+fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
+    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    apply_before_current_draft(&conn, "scope_tasks_capacity");
+    conn.execute_batch(include_str!(
+        "../../../tests/fixtures/migrations/scope_tasks_capacity_released.sql"
+    ))
+    .unwrap();
+    conn.execute_batch(&current_draft_sql("scope_tasks_capacity"))
+        .unwrap();
+    let names: Vec<String> = conn
+        .prepare("SELECT name FROM ondemands ORDER BY name")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(names, ["gpu"]);
+    let rentals: i64 = conn
+        .query_row("SELECT count(*) FROM rentals", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rentals, 0);
 }

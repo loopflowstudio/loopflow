@@ -53,12 +53,6 @@ prefixed_uuid_id!(
     DurableDataError,
     DurableDataError::InvalidId
 );
-prefixed_uuid_id!(
-    CronReceiptId,
-    "cron_",
-    DurableDataError,
-    DurableDataError::InvalidId
-);
 
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
@@ -148,7 +142,7 @@ pub enum TaskExecutionSource {
 pub enum OwningMachineSource {
     /// `lf machine use <machine> <wave>`, set on the Task's Wave or a parent Wave.
     Wave(String),
-    /// `lf machine use <machine> --repo`, set on the Task's repository.
+    /// `lf --repo <repo> machine use <machine>`, set on the Task's repository.
     Repository,
     /// No default is set: the Machine running the command.
     ThisMachine,
@@ -182,6 +176,16 @@ pub struct MachineDefault {
     pub name: String,
     pub setting: MachineSetting,
     pub machine_id: MachineId,
+}
+
+/// A scope whose new Tasks take a machine from a pool or an on-demand.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CapacityDefault {
+    pub scope: DefaultScope,
+    /// The Wave's name, or the repository's path on this Machine.
+    pub name: String,
+    /// The pool or on-demand.
+    pub capacity: String,
 }
 
 prefixed_uuid_id!(

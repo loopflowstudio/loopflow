@@ -82,7 +82,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
         if let Some(common) = common.as_ref().filter(|_| locator.is_none()) {
             if !retained_checkout_matches(conn, repo)? {
                 return Err(StoreError::InvalidData(format!(
-                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repo identity --bind {id}`, or recover the moved checkout with `lf repo identity --relocate {id}`"
+                "{repo} retains repository {id} but has no Git locator; establish the original checkout with `lf repository --bind {id}`, or recover the moved checkout with `lf repository --relocate {id}`"
                 )));
             }
             crate::repository::location::write_locator(common, &id)
@@ -98,7 +98,7 @@ pub(super) fn ensure_repository_in(conn: &Connection, repo: &str) -> StoreResult
                 .optional()?;
             if path.as_deref() != Some(repo) {
                 return Err(StoreError::InvalidData(
-                    "Git locator conflicts with retained Work; reconcile with `lf repo identity`"
+                    "Git locator conflicts with retained Work; reconcile with `lf repository`"
                         .into(),
                 ));
             }
@@ -547,6 +547,62 @@ mod tests {
             (local, TaskExecutionSource::Owner)
         );
         assert_eq!(store.machine_defaults().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_waves_capacity_takes_its_new_tasks_until_a_nearer_machine_does() {
+        use crate::durable::{DefaultScope, MachineSetting, OwningMachineSource};
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let repo = home.path().canonicalize().unwrap();
+        let repo = repo.to_str().unwrap();
+        let project = store.ensure_wave_project(repo, "infrastructure").unwrap();
+        let wave = DefaultScope::Wave(project.wave_id.clone());
+        let repository = store.ensure_repository(repo).unwrap();
+        let task = store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: repository.clone(),
+                id: TaskId::new(),
+                project_id: Some(project.id.clone()),
+                title: "Rented".into(),
+                description: String::new(),
+                due_date: None,
+            })
+            .unwrap();
+        let worker = MachineId::new();
+        store
+            .set_machine_default(
+                &DefaultScope::Repository(repository.clone()),
+                MachineSetting::Tasks,
+                &worker,
+            )
+            .unwrap();
+        assert_eq!(store.task_capacity(&task.id).unwrap(), None);
+
+        // The Wave is nearer than the repository: its Tasks rent, and until
+        // `lf task run` places one it stays on this Machine.
+        store.set_tasks_capacity(&wave, "code").unwrap();
+        assert_eq!(
+            store.task_capacity(&task.id).unwrap().as_deref(),
+            Some("code")
+        );
+        assert_eq!(
+            store
+                .wave_owning_machine(&project.wave_id, MachineSetting::Tasks)
+                .unwrap(),
+            (
+                store.local_machine().unwrap().id,
+                OwningMachineSource::Wave("infrastructure".into())
+            )
+        );
+        assert_eq!(store.capacity_defaults().unwrap().len(), 1);
+
+        // A Machine at the same scope replaces it.
+        store
+            .set_machine_default(&wave, MachineSetting::Tasks, &worker)
+            .unwrap();
+        assert_eq!(store.task_capacity(&task.id).unwrap(), None);
+        assert!(store.capacity_defaults().unwrap().is_empty());
     }
 
     #[test]

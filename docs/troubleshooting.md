@@ -1,267 +1,209 @@
 # Troubleshooting
 
-Each section: symptom, cause, fix. Commands are complete and runnable as
-written.
+Something stopped. Three questions, in order: what survived, what went wrong,
+what to run next. Every command here is complete and runnable as written.
+
+## What survives
+
+A crash, a reboot or a closed terminal loses less than it looks like.
+
+```bash
+lf resume --all                  # every conversation a crash or restart interrupted; never one you left
+```
+
+| Survives | Where it lives | Pick it up with |
+|---|---|---|
+| Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume --all`, `lf resume --task <ID>` |
+| A Task's worktree, branch, PR and comments | Beside your repository, on the code host | `lf task run <ID>` |
+| A stopped Graph | Its step Processes, as history | `lf graph list --processes --for-task <ID>` |
+| Uncommitted files | The worktree; prune never removes them | `lf wt list` |
+
+A stopped Graph never resumes. `lf task run` starts a fresh one in the same
+checkout, with the Task's comments and its open PR.
+
+## What went wrong
+
+Read before you relaunch anything.
+
+```bash
+lf doctor                                    # installation, store and process health
+lf task status <ID>                          # the Task's execution and the reason for it
+lf graph show <GRAPH_ID> --processes         # each step, its Process and how it exited
+lf history show <SESSION_ID> --final         # the agent's last word in that conversation
+lf ps                                        # what is running right now
+```
+
+`lf task status` reports execution separately from the Task's own status:
+starting, running, stalled, blocked, idle or unknown, with its reason. Unknown
+liveness stays unknown; lf never guesses a process is dead.
+
+## What to run next
+
+| You see | Run |
+|---|---|
+| A question waiting for you | `lf resume --task <ID>` |
+| The run is going the wrong way | `lf comment <ID> "address the latest feedback"` |
+| It must stop now | `lf interrupt <ID>` |
+| It stopped and should go again | `lf task run <ID> --reason "provider credentials repaired"` |
 
 ## Doctor reports a failure
 
 ```bash
-lf doctor
-lf cron list
-lf cron history --wave infrastructure --graph telemetry-daily --days 2
-lf cron sync
+lf doctor --json
 ```
 
-Doctor checks installation selection, store compatibility, Process integrity and
-scheduled receipts separately. Installation commands can have no repository; a
-recorded repository must be an absolute path. Missing scheduled receipts remain
-failures even when ordinary commands work. A receipt proves invocation, not
-successful completion of its Graph or Skill.
+Doctor checks installation selection, store compatibility and Process integrity
+separately. It reads storage without initializing it or applying migrations, so
+an incompatible store still reports readable Process evidence.
 
-For a missing receipt, inspect the executable and log path Doctor prints. Jobs
-installed before the stable entry gate may pin a superseded binary, which a
-later install removes, and fail before recording a receipt. After installing a release with this repair,
-run `lf cron sync` from the repository to reinstall your jobs; it also removes
-the retired minute repository check. New scheduled invocations
-follow the selected installation across promotions. Existing Sessions
-retain their runtime ownership.
-
-Doctor reads storage without initializing it or applying migrations. An incompatible
-store still reports readable Process evidence, scheduler obligations and installation
-selection.
-
-Binary freshness compares against locally cached `origin/main`, without fetching.
-That reference may be stale, and merged source may be newer than the latest
-published release. `lf install` installs that published release; Doctor
+Binary freshness compares against locally cached `origin/main`, without
+fetching. That reference may be stale, and merged source may be newer than the
+latest published release. `lf install` installs that published release; Doctor
 itself installs nothing.
 
-## A Wave has no active conversation
+## A Task stopped advancing
 
-Wave operations are finite. Read its plan and invoke the next pass explicitly,
-or inspect its cron schedule:
+**Symptom:** the Task is not done, but nothing is moving, or its agent
+exited.
 
 ```bash
+lf task status <ID> --json
+lf usage --days 0 --task <ID> --json        # every Session input the Task ever made
+lf session list --task <ID>
+```
+
+Dirty files under a live Graph are ongoing progress. An idle Task Graph does not
+prove helper Sessions are idle, and a finished launcher does not prove its
+interactive Session closed: check Sessions separately.
+
+`lf interrupt <ID>` stops a running Graph: an agent step ends at once, an
+operation finishes and nothing follows, and the run exits 130. With nothing
+live it records nothing and says so.
+
+If the Task's worktree never finished being created, status keeps the Task and
+names the exact path and branch to restore before launching.
+
+## The Task is idle, but waiting on something
+
+Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
+`deferred`, …). What it is waiting on (a child Task, review, CI, merge) lives in
+its condition:
+
+```bash
+lf task status <ID> --json
 lf wave status <wave> --json
-lf --wave <wave> wave-operate
-lf cron list
 ```
 
-A quiet Wave needs no service restart.
-
-## Task Work stops advancing
-
-**Symptom:** A Task is still `ready`, but no useful work is advancing or its
-provider process stopped.
-
-Read its durable state before launching anything:
-
-```bash
-lf task status INF-123 --json
-lf usage --days 0 --task INF-123 --json
-lf session list
-```
-
-`ready` means the Task is nonterminal. Status reports `execution` separately:
-starting, running, stalled, blocked, idle, or unknown. It observes the Task's
-most recently launched Graph. Read its reason before recovery. Wave status and
-roadmap use that same execution evidence for their recommendations. Dirty files
-under a live Graph are ongoing progress.
-
-Task execution history includes independent helpers, whether recorded with the public
-issue identifier or internal Task ID. An idle Task Graph does not prove those
-helpers are idle; a completed launcher does not prove its interactive Session
-is closed. Inspect Sessions separately. Reserve bound helper conversations
-for distinct contributions.
-
-Wave status shows up to 50 recent Session inputs from the last seven days.
-Read complete Task history with `lf usage --days 0 --task <task> --json`, or inspect
-one input with `lf history show <session> --input <capture>`. An empty recent list
-does not prove that no Graph or Session remains active.
-
-Answer an exact pending question, send durable direction through Steer, or
-launch fresh work for the same Task:
-
-```bash
-lf session connect <session-id>
-lf comment INF-123 "address the latest feedback"
-lf interrupt INF-123
-lf task run INF-123
-lf task run INF-123 --reason "provider credentials repaired"
-```
-
-`task run` runs a fresh Graph in the Task checkout with its Steers and
-active PR. It never continues an earlier Graph; a stopped one leaves its
-Processes as history. Unknown liveness stays
-unknown. A Task Steer is a Task comment; the running Graph receives new
-comments when possible and the next Skill seed always reads them. `task interrupt` stops a
-running Graph: an agent step ends at once, an operation finishes and nothing
-follows, and its Task run exits 130 without starting the Graph again. With
-nothing live it records nothing and says so. A Steer's receipt does not prove
-that the provider applied the direction.
-
-During new-Task placement, status reports the declared worktree as initializing.
-If creation does not finish, status keeps the Task identity and names the exact
-path and branch to restore before launching.
+Resolve the named fact: open the conversation, inspect the child, repair CI,
+merge. There is no run slot or PR-limit counter to clear.
 
 ## Rate limits
 
-**Symptom:** Tasks fail with rate limit errors.
+**Symptom:** runs fail with rate-limit or capacity errors.
 
-One-shot headless runs retry transient capacity, rate-limit, availability, and
-transport failures four times. Codex and Claude continue the same provider
-session, preserving partial work; the backoff ladder tops out at 30 seconds.
+Headless runs retry transient capacity, rate-limit, availability and transport
+failures four times, continuing the same provider conversation so partial work
+survives; the backoff tops out at 30 seconds.
 
-Managed-account subscription exhaustion takes a different path: Loopflow marks
-the account unavailable until its reported reset and immediately tries the next
-account in the grant. `--account` retains the normal route as fallback;
-`--only-account` stays inside the accounts it names.
-
-After repairing provider access, launch the Task or Project operation again:
+An exhausted subscription takes a different path: lf marks that login
+unavailable until its reported reset and moves to your next login with room.
 
 ```bash
-lf task run INF-123 --reason "provider credentials repaired"
+lf account                           # every login, its capacity and when it resets
+lf gate -a codex                     # run this one on another harness
+lf --only-account claude=work@ gate  # stay inside the logins you name
 ```
 
-Wave operation uses finite conversations. Invoke `lf --wave <wave> wave-operate`
-for another pass; there is no long-running Project process to resume.
+`--account` prefers a login and still falls back; `--only-account` never leaves
+the logins it names.
 
-Other options:
+## Agent not found
 
-- Wait and retry
-- Reduce parallel waves
-- Switch a one-shot run to a different model: `lf gate -a codex`
+**Symptom:** `'claude' is not installed.`
 
-## Disk space
-
-```bash
-lf disk                                # ~/.lf by category, plus every worktree
-lf disk clean --dry-run                # what an aggressive cleanup would remove
-lf disk clean                          # remove it; logs each removal to ~/.lf/logs/disk.log
-```
-
-`lf disk clean` removes worktrees `lf wt prune` would, completed Tasks' build
-output, dead process receipts, every database backup but the newest, and
-captures and logs older than `--keep-days` (7). It merges native usage an
-earlier lf recorded per receipt into one row per provider turn, closes
-Processes whose OS process is gone without recording an exit, and expires
-unreferenced inspection Processes older than seven days; Loopflow also does
-this hourly. Provider hooks (`lf __context-block`)
-and Desktop's file and diff polls are never recorded as Processes. It then
-removes everything else in `~/.lf` that rotates and is older than `--keep-days`.
-
-Starting a Session rotates `~/.lf` at most hourly: backups, draft store copies,
-captures and logs older than 30 days go, the same window Claude Code keeps its
-transcripts. There is no size budget. The database, account homes, the newest
-backup of each database, anything written in the last day and anything a
-process holds open are never removed. Provider transcripts follow each
-provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
-
-## Worktree issues
-
-**Symptom:** Git worktree commands fail or show stale data.
-
-List all worktrees, then clean up stale entries:
-
-```bash
-lf wt list
-lf wt prune --dry-run                  # show clean terminal or week-stale worktrees
-lf wt prune                            # remove those worktrees and their branches
-```
-
-```bash
-lf wt prune --branches --dry-run       # finished branches on origin and locally, with reasons
-lf wt prune --branches                 # delete them; exit 1 on GitHub auth, rate limit or failed delete
-```
-
-A branch goes only with evidence at its exact head: a merged or closed PR, a
-finished Task already in the default branch, or a release candidate whose tag
-exists. An open PR, a worktree, or an unfinished Task always keeps it.
-
-```bash
-lf wt timing                           # count, median, p95 and failures per lf version
-lf wt timing --json
-```
-
-Every `lf wt list` appends its durations to `~/.lf/perf/wt-list.jsonl`: total,
-startup (launch through the start receipt), local Git, the remote call, and the
-time spent writing Process receipts to SQLite. Local Git and the remote overlap.
-Interrupted runs are recorded; a run killed outright is not. The file holds
-durations, counts, the repository root and the `lf` version, and never more
-than 1,000 samples.
-
-Prune always preserves uncommitted files. Without terminal evidence, an open PR
-or branch activity in the last seven days also prevents cleanup. Use
-`lf wt delete NAME --force` only when intentionally discarding a worktree.
-
-```bash
-lf monitor prune --dry-run --json       # inspect exact process cleanup candidates
-lf monitor prune --json                 # recheck and apply
-```
-
-Pruning reports each AgentProcess it settles or retains, including the reason.
-An unlaunched reservation can be retired when its owning LfProcess is proven
-dead. A missing PID, a completed Task, or an old Session does not prove provider
-exit: unresolved records continue to protect their checkouts. Cleanup retains
-Task outcomes, provider history and unknown exit results.
-
-```bash
-lf sync
-```
-
-Refreshes the local default branch, preserving its unpublished commits and edits,
-then merges it into the feature branch. Stacked Tasks merge their live parent
-until it lands, then merge the default branch using their recorded fork.
-
-## Status says `ready`, but the Task is waiting
-
-**Symptom:** Project or Task Work is `ready`, while its condition says it is
-waiting on a child, review FlowStep, CI, or merge.
-
-Work status is deliberately small: `ready`, `done`, or `abandoned`. Task
-condition summarizes process liveness, review FlowStep, child progress, CI, and
-merge evidence; unresolved conversations appear under Sessions.
-Inspect the focused projection instead of inferring a control state from one
-field:
-
-```bash
-lf wave status <wave> --json
-lf task status INF-123 --json
-```
-
-Resolve the named fact: open the session, inspect the child, repair CI, merge, or
-resume the provider. There is no Run slot or PR-limit counter to clear.
-
-## Context too large
-
-**Symptom:** Task fails with context/token limit errors.
-
-The provider loads `AGENTS.md` natively. Loopflow adds `LOOPFLOW.md`, `scratch/`, and `.lf/wave/`. Reduce further:
-
-```bash
-lf qa --docs src/small/                # limit --docs to a narrower path or glob
-```
-
-`--docs` only adds what you pass—drop paths or narrow globs to shrink it further.
-
-For persistent docs, set `docs:` in `.lf/config.yaml`.
-
-See [Configuration](config.md) for context options.
-
-## Claude Code not found
-
-**Symptom:** `lf` fails with "'claude' is not installed" or similar.
-
-Loopflow drives an AI coding tool and needs one installed. The error names
-the install command. For Claude Code:
+The error names the install command. For Claude Code:
 
 ```bash
 npm install -g @anthropic-ai/claude-code
 lf account connect claude
 ```
 
-With no `agent` configured, Loopflow uses the first of Codex, Claude Code, and
-OpenCode it finds, so installing any one of them is enough.
+With no `agent` configured, lf uses the first of Codex, Claude Code, OpenCode
+and Pi it finds, so one is enough.
 
-## See Also
+## Context too large
 
-[Configuration](config.md) · [Waves](waves.md)
+**Symptom:** a run fails on context or token limits.
+
+```bash
+lf --context qa --docs src/small/    # see what the input is made of, launch nothing
+lf usage --context --task <ID>       # each step's input by source, against its budget
+```
+
+The provider loads `AGENTS.md` natively. lf adds `LOOPFLOW.md`, `scratch/` and
+`.lf/wave/`, plus only what you pass with `--docs`: narrow the path or glob to
+shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
+
+## Disk filling up
+
+```bash
+lf disk                    # ~/.lf by category, plus every worktree
+lf disk clean --dry-run    # what a cleanup would remove
+lf disk clean              # remove it; each removal is logged to ~/.lf/logs/disk.log
+```
+
+`lf disk clean` removes worktrees `lf wt prune` would, finished Tasks' build
+output, dead process receipts, every database backup but the newest, and
+captures and logs older than `--keep-days` (7). The database, account homes, the
+newest backup, anything written in the last day and anything a process holds
+open are never removed.
+
+Starting a Session rotates `~/.lf` at most hourly: backups, draft store copies,
+captures and logs older than 30 days go, the same window Claude Code keeps its
+transcripts. There is no size budget. Provider transcripts follow each
+provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
+
+## Stale worktrees and branches
+
+```bash
+lf wt prune --dry-run              # finished or week-stale worktrees
+lf wt prune                        # remove them and their branches
+lf wt prune --branches --dry-run   # finished branches on origin and locally, with reasons
+```
+
+A branch goes only with evidence at its exact head: a merged or closed PR, a
+finished Task already in the default branch, or a release candidate whose tag
+exists. An open PR, a worktree or an unfinished Task always keeps it. Prune
+always preserves uncommitted files; `lf wt delete <name> --force` is for when
+you mean to discard one.
+
+A branch behind `main`:
+
+```bash
+lf sync                            # refresh main, keeping its unpublished commits, then merge it in
+```
+
+## Orphaned agent processes
+
+```bash
+lf monitor prune --dry-run --json  # each candidate and why
+lf monitor prune --json            # recheck, then reap
+```
+
+Pruning reports each agent process it settles or keeps, with the reason. A
+missing PID, a completed Task or an old Session does not prove the agent
+exited: unresolved records keep protecting their checkouts.
+
+## A Wave isn't moving
+
+Wave passes are finite; nothing runs between them unless you schedule one.
+
+```bash
+lf wave status <wave> --json
+lf --wave <wave> wave-operate      # one pass, now
+crontab -l                         # passes you scheduled yourself
+```
+
+A quiet Wave needs no service restart.
+
+Next: the [`lf` reference](lf-reference.md) for every command and flag.

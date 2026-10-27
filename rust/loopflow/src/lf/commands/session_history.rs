@@ -102,7 +102,6 @@ pub(crate) fn collect_history(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionView {
     Summary,
-    Events,
     Final,
     Context,
     Instructions,
@@ -133,20 +132,6 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
         .into_iter()
         .filter(|event| event.payload["source"] == "codex_relay")
         .collect();
-    if view == SessionView::Events {
-        match std::fs::read_to_string(dir.join("events.jsonl")) {
-            Ok(stream) => print!("{stream}"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                eprintln!("stream file rotated; retained facts only");
-                print_retained_events(&store, &input)?;
-            }
-            Err(error) => return Err(anyhow!("Capture stream unavailable: {error}")),
-        }
-        for event in &diagnostics {
-            println!("{}", serde_json::to_string(event)?);
-        }
-        return Ok(());
-    }
     if view == SessionView::Final {
         let answer = store
             .input_final_answer(&input)
@@ -178,7 +163,7 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
         return Ok(());
     }
     if view == SessionView::Context {
-        let step = crate::context_usage::step_context(&home, &snapshot);
+        let step = crate::context_usage::step_context(&home, &store, &snapshot);
         if json {
             println!("{}", serde_json::to_string(&step)?);
         } else {
@@ -232,21 +217,12 @@ pub fn inspect(selector: &str, view: SessionView, json: bool) -> Result<()> {
     println!("Evidence gaps: {}", snapshot.evidence_gaps);
     println!(
         "{}",
-        crate::context_usage::render_step(&crate::context_usage::step_context(&home, &snapshot))
+        crate::context_usage::render_step(&crate::context_usage::step_context(
+            &home, &store, &snapshot
+        ))
     );
     let conversation = super::history_transcript::session(&store, &snapshot.session_id)?;
     print!("\n{}", super::history_transcript::render(&conversation));
-    Ok(())
-}
-
-/// The facts history retained for an input whose stream file is gone.
-fn print_retained_events(store: &crate::store::sqlite::SqliteStore, input: &str) -> Result<()> {
-    for event in store.input_events(input)? {
-        match event.get("unparsed").and_then(serde_json::Value::as_str) {
-            Some(bytes) => println!("{bytes}"),
-            None => println!("{}", serde_json::to_string(&event)?),
-        }
-    }
     Ok(())
 }
 

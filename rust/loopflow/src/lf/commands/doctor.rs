@@ -7,6 +7,7 @@ use anyhow::{anyhow, Result};
 
 use crate::lf::output::Colors;
 use crate::process::LfProcess;
+use crate::store::contention::read_contention;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -59,6 +60,7 @@ struct DoctorReport<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 struct StoreReport {
     build_provenance: crate::build_info::BuildProvenance,
+    build_label: Option<String>,
     migration_authority: String,
     build_source_identity: String,
     build_source_root: Option<String>,
@@ -99,6 +101,10 @@ pub fn run(json: bool) -> Result<()> {
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
     checks.push(check_binary_freshness());
+    checks.push(check_contention(
+        &crate::diagnostic_log::log_path(),
+        time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
+    ));
     if json {
         println!(
             "{}",
@@ -116,6 +122,51 @@ pub fn run(json: bool) -> Result<()> {
         return Err(anyhow!("doctor checks failed"));
     }
     Ok(())
+}
+
+const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
+
+/// Who waited on the store's write lock and who held it, by binary, from lf.log.
+fn check_contention(log: &Path, since: i64) -> Check {
+    const NAME: &str = "contention";
+    let binaries = match read_contention(log, since) {
+        Ok(binaries) => binaries,
+        Err(error) => return Check::warn(NAME, format!("cannot read {}: {error}", log.display())),
+    };
+    if binaries.is_empty() {
+        return Check::ok(
+            NAME,
+            "no store lock failures or slow writers in the last 24h",
+        );
+    }
+    let failures: usize = binaries.values().map(|binary| binary.lock_failures).sum();
+    let slow: usize = binaries.values().map(|binary| binary.slow_writes).sum();
+    let mut detail = format!("last 24h: {failures} lock failures, {slow} slow writers");
+    for (binary, contention) in &binaries {
+        let mut parts = Vec::new();
+        if contention.slow_writes > 0 {
+            parts.push(format!(
+                "held the lock {} times, up to {:.1} s, in {}",
+                contention.slow_writes,
+                contention.longest_hold_seconds,
+                contention
+                    .call_sites
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        if contention.lock_failures > 0 {
+            parts.push(format!("{} lock failures", contention.lock_failures));
+        }
+        if !contention.pids.is_empty() {
+            let pids: Vec<String> = contention.pids.iter().map(u32::to_string).collect();
+            parts.push(format!("pids {}", pids.join(" ")));
+        }
+        detail.push_str(&format!("\n{:20}{binary}: {}", "", parts.join("; ")));
+    }
+    Check::warn(NAME, detail)
 }
 
 const FRESHNESS: &str = "binary-freshness";
@@ -235,6 +286,7 @@ fn inspect_store(path: &Path) -> StoreReport {
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
+        build_label: crate::build_info::label().map(str::to_string),
         migration_authority: match crate::build_info::migration_authority() {
             crate::build_info::MigrationAuthority::Published => "published",
             crate::build_info::MigrationAuthority::ValidationOnly => "validation-only",
@@ -284,8 +336,12 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
                 Ok(Some(selection)) => Check::ok(
                     "install-selection",
                     format!(
-                        "{:?} installation {} selects {}",
-                        selection.source,
+                        "{} installation {} selects {}",
+                        selection
+                            .artifact_set
+                            .build_label
+                            .clone()
+                            .unwrap_or_else(|| format!("{:?}", selection.source)),
                         selection.installation_id,
                         selection.store.display()
                     ),
@@ -346,17 +402,6 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
         }
         Err(error) => vec![Check::fail("install-selection", error.to_string())],
     }
-}
-
-pub fn audit(events: &[LfProcess]) -> Vec<Check> {
-    if events.is_empty() {
-        return vec![Check::warn("ledger", "ledger is empty")];
-    }
-    vec![
-        check_attribution(events),
-        check_identity(events),
-        check_lineage(events),
-    ]
 }
 
 /// A process may name only one command, and its terminal row names that work.
@@ -427,9 +472,13 @@ fn check_lineage(events: &[LfProcess]) -> Check {
 
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
     let colors = Colors::default();
+    let build = store
+        .build_label
+        .clone()
+        .unwrap_or_else(|| store.build_provenance.to_string());
     println!(
-        "build: {} ({}) · migrations {}",
-        store.build_provenance, store.build_source_identity, store.migration_authority
+        "build: {build} ({}) · migrations {}",
+        store.build_source_identity, store.migration_authority
     );
     println!("revision: {}", store.build_source_revision);
     if let Some(root) = &store.build_source_root {
@@ -465,7 +514,9 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{audit, inspect_store, Status};
+    use super::{
+        check_attribution, check_contention, check_identity, check_lineage, inspect_store, Status,
+    };
     use crate::process::LfProcess;
 
     const DAY: i64 = 86_400;
@@ -526,11 +577,41 @@ mod tests {
     }
 
     fn status_of(rows: &[LfProcess], name: &str) -> Status {
-        audit(rows)
-            .into_iter()
-            .find(|check| check.name == name)
-            .expect("check exists")
-            .status
+        [
+            check_attribution(rows),
+            check_identity(rows),
+            check_lineage(rows),
+        ]
+        .into_iter()
+        .find(|check| check.name == name)
+        .expect("check exists")
+        .status
+    }
+
+    #[test]
+    fn contention_names_the_holding_binary_and_a_quiet_log_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("lf.log");
+        assert_eq!(check_contention(&log, 0).status, Status::Ok);
+        std::fs::write(
+            &log,
+            "2026-10-27T04:19:02.000000Z  WARN loopflow::store::contention: held the store write lock \
+             held_seconds=9.12 call_site=loopflow::store::sqlite::retention::retain_history_in \
+             pid=7 lf=0.14.16 rev=d49c57c12\n",
+        )
+        .unwrap();
+        let check = check_contention(&log, 0);
+        assert_eq!(check.status, Status::Warn);
+        assert!(
+            check.detail.contains("lf 0.14.16 (d49c57c12)"),
+            "{}",
+            check.detail
+        );
+        assert!(
+            check.detail.contains("retain_history_in"),
+            "{}",
+            check.detail
+        );
     }
 
     #[test]

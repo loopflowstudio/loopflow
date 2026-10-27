@@ -1291,8 +1291,8 @@ pub(crate) async fn spawn_session_process(
     };
     let database = crate::store::database_path_from_env()?;
     // Capture the child before it parses arguments. Its own Session recorder may
-    // never start; the opening Process must retain enough evidence to diagnose it.
-    // Arguments and environment values can contain prompts or credentials.
+    // never start; the opening command's error must carry enough evidence to
+    // diagnose it. Arguments and environment values can contain prompts or credentials.
     let launch = format!(
         "Session input {artifact_key}: executable {} (sha256 {digest}), cwd {}, Machine {}, database {}",
         executable.display(),

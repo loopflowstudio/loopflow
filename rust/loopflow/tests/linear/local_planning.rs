@@ -3055,7 +3055,7 @@ fn ordinary_task_creation_returns_resolvable_identifier_without_a_public_retry_t
         String::from_utf8_lossy(&output.stderr)
     );
     let output = String::from_utf8(output.stdout).unwrap();
-    let identifier = output.split_whitespace().next().unwrap();
+    let identifier = output.split_whitespace().last().unwrap();
     let status = lf(
         repo.path(),
         home.path(),

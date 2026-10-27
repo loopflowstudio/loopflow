@@ -49,7 +49,9 @@ fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
             pid: None,
             trace_id: loopflow::id::TraceId::new(),
             parent_lf_process_id: None,
-            via_agent: Some(false),
+            // A finished root nothing references is forgotten at exit; agent-issued
+            // history is what a copied store retains.
+            via_agent: Some(true),
             caller_session_id: None,
             caller_agent_process_id: None,
             command: Some(r#"["lf","graph","telemetry-daily"]"#.into()),

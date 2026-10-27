@@ -77,7 +77,7 @@ pub struct Step {
     pub id: Option<String>,
     /// A stage: a person takes part here, in the Task conversation. Written
     /// `interactive: <skill>`.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, alias = "human", skip_serializing_if = "std::ops::Not::not")]
     pub interactive: bool,
     /// A deciding occurrence's authored target: the occurrence name or skill
     /// of an earlier step it can return to.
@@ -217,6 +217,7 @@ pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
     /// A stage where a person takes part; its id is `id`, else the skill name.
+    #[serde(alias = "human")]
     pub interactive: bool,
     /// A deciding occurrence returns this many steps back in its own body.
     pub returns: Option<usize>,

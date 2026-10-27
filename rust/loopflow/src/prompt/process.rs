@@ -95,6 +95,9 @@ fn prepare_prompt(
 
     let mut docs = config.docs.clone();
     docs.extend(requested_docs);
+    if let Some(skill) = &resolved_skill {
+        docs.extend(skill.docs.iter().cloned());
+    }
     let diff_files = source_overrides.diff_files.unwrap_or(config.diff_files);
     let diff = source_overrides.diff.unwrap_or(config.diff);
     let clipboard = match source_overrides.clipboard {
@@ -894,6 +897,38 @@ Test skill body.
     }
 
     #[test]
+    fn skill_frontmatter_docs_join_the_prompt_like_requested_docs() {
+        let tmp = create_repo_fixture();
+        fs::create_dir_all(tmp.path().join("scripts")).expect("docs dir");
+        fs::write(tmp.path().join("scripts/testing.md"), "run the runner").expect("write doc");
+        fs::write(
+            tmp.path().join(".lf/skills/gate.md"),
+            "---\ndocs: scripts/testing.md\n---\nGate body.\n",
+        )
+        .expect("write skill");
+        let input = |resolved_skill| ProcessPromptInput {
+            repo_root: tmp.path().to_path_buf(),
+            skill: Some("gate".to_string()),
+            resolved_skill,
+            ..ProcessPromptInput::default()
+        };
+        let included = |prepared: PreparedProcessPrompt| {
+            prepared
+                .components
+                .docs
+                .iter()
+                .any(|doc| doc.path == "scripts/testing.md" && doc.content == "run the runner")
+        };
+
+        let by_name = prepare_process_prompt(&default_test_config(), input(None)).unwrap();
+        assert!(included(by_name));
+        let resolved = crate::graph::load_skill("gate", tmp.path()).unwrap();
+        let resolved =
+            prepare_process_prompt(&default_test_config(), input(Some(resolved))).unwrap();
+        assert!(included(resolved));
+    }
+
+    #[test]
     fn prepare_process_prompt_injects_structured_replies_for_ui_context() {
         let tmp = create_repo_fixture();
         let config = default_test_config();
@@ -945,6 +980,7 @@ Test skill body.
                     agent: Some("codex:o3".to_string()),
                     default_agent: None,
                     action_style: Some("procedural".to_string()),
+                    docs: Vec::new(),
                     content: Some("Skill body".to_string()),
                 }),
                 surface: Surface::Headless,

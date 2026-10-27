@@ -352,8 +352,8 @@ a present evidence gap. Git retains the pre-chapter memory.
 - **Fresh-db tests cannot see ledger drift.** Every migration test builds a db
   from 001 forward, so a schema that only exists on a long-lived machine is
   invisible to CI. That is why CI stayed green while the only machine holding
-  real history was broken. `TESTING.md` now names the drifted-db fixture as the
-  guard. Trace work must be exercised against a real ledger copy, not a fresh db.
+  real history was broken. `rust/loopflow/tests/README.md` owns populated
+  migration-fixture guidance. Trace work must be exercised against a real ledger copy, not a fresh db.
 - **A migration's version id is its identity, not its content.** Editing an
   already-applied migration never re-runs it; the divergence becomes permanent
   and silent. Repair forward with a new migration listed in

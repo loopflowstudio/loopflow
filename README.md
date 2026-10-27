@@ -141,8 +141,8 @@ Markdown at its `.md` URL.
 
 ## Developing Loopflow
 
-`AGENTS.md` is the style guide, `TESTING.md` covers the suites, and
-`RELEASE_NOTES.md` carries the release history.
+`AGENTS.md` is the style guide, `scripts/README.md` covers the test runner,
+and `RELEASE_NOTES.md` carries the release history.
 
 ```bash
 uv run python scripts/install.py local       # build under local-bin/

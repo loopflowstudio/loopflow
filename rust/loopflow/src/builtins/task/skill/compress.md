@@ -37,8 +37,9 @@ and change while preserving required behavior. The output is a diff.
 5. Sanity-check the reduction: build changed code and run its focused test
    when behavior changed. Reuse applicable results; no edits means no rerun.
    Fix actual failures. If a check cannot run headless, use a headless equivalent
-   or leave it to gate/CI; do not stop or block the Graph for it. Human judgment
-   belongs to demo/review. Gate owns affected suites and acceptance checks once.
+   or leave it to gate/CI; do not stop or block the Graph for it. Ask the person
+   for a judgment you need when one is in the conversation; headless, leave it
+   for demo/review. Gate owns affected suites and acceptance checks once.
 
 Keep rationale beside the code or in the plan, and one command/result line
 with any deferred owner. No pass ledger. If nothing needs reducing, say so.

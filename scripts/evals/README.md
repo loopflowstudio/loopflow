@@ -30,3 +30,27 @@ and rendering the cases is not a model evaluation. Provider execution is supplie
 by the evaluation environment; this script makes no network calls and assumes no
 account. Deterministic prompt, CLI and lifecycle tests cover the underlying
 selection and filesystem mechanics independently.
+
+## Checks
+
+```bash
+cargo test -p loopflow --lib work_guidance_is_additive
+cargo test -p loopflow --test session_cli_tests instruction_inspection
+uv run pytest python/tests/test_instruction_levels.py
+```
+
+The prompt and CLI checks verify recorded inclusion, exclusion and explanation.
+The Python tests verify evaluation scoring, not agent behavior. Render and run
+the decision cases above in a capable provider evaluation
+environment; retain model/version, inputs, replies and failures. These cases cover
+launcher work, taskless Graphs, custom Work clients, guided memory maintenance,
+explicit Task adoption, scratch ownership and instruction opt-out. They score
+proposed actions; lifecycle integration tests remain the proof of tool effects.
+
+Isolated data clones install their own inherited sandbox. Run their macOS fixtures
+directly: `cargo test -p loopflow --test integration data_clones:: < /dev/null`.
+The network wrapper's privileged `ps` exception cannot nest with this policy.
+The changed-aware runner selects this separate boundary automatically.
+CI proves clone operation on macOS 26 and early unsupported-host refusal on
+macOS 15; both hosts retain native process identity tests. An environment marker
+never substitutes for kernel confinement.

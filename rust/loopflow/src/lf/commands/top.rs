@@ -165,8 +165,7 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         read_process_receipts_at(&lf_home).context("failed to read live Process receipts")?;
     // Attached LfProcess death is proven from Process receipts, so reap before
     // pruning them.
-    let mut agents = crate::harness::agent_process::reap_agent_processes(dry_run)?;
-    crate::harness::agent_process::repair_unrecorded_ancestry(dry_run, &mut agents)?;
+    let agents = crate::harness::agent_process::prune_agent_processes(dry_run)?;
     for error in &agents.errors {
         tracing::warn!(%error, "failed to clean up AgentProcess");
     }

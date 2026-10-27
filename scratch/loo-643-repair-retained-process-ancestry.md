@@ -79,7 +79,7 @@ by pid evidence.
 ### Repair: `lf monitor prune` releases ancestry it can prove was never recorded
 
 `lf monitor prune` already owns AgentProcess cleanup (`reap_in`, with per-record
-action/reason). Add one pass, `repair_unrecorded_ancestry(store, dry_run)` in
+action/reason). Add one pass, `repair_unrecorded_ancestry_in` (entry `prune_agent_processes`) in
 `harness/agent_process.rs`, reported in `ProcessPruneReport.agent_process_records`
 with action `would_repair`/`repaired`. It runs only from `run_prune`, not from lazy
 `recovery::recover()`.
@@ -176,7 +176,7 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
 ## Slices (one PR)
 
 1. Done: prevention (start record in the attachment transaction, COALESCE deleted).
-2. Done: `repair_unrecorded_ancestry` in `lf monitor prune` (`UNRECORDED_ANCESTRY`
+2. Done: `repair_unrecorded_ancestry_in` in `lf monitor prune` (`UNRECORDED_ANCESTRY`
    predicate in processes.rs).
 3. Done: doctor's remedy count reads `unrecorded_agent_ancestry`.
 4. Done: sync with main (#1718).
@@ -220,3 +220,5 @@ through the ordinary Session path and attaches no Process itself, so prevention 
 v0.14.19 (#1735) shipped without this change; the patch release follows landing.
 
 Post-sync check: `cargo test -p loopflow --lib ancestry` → 6 passed, including `prune_releases_unrecorded_ancestry_and_the_session_resumes`; CLI reference test ok.
+
+Compress (2026-10-27): `prune_agent_processes` replaces the out-param `repair_unrecorded_ancestry` (one store, one entry); `cargo test -p loopflow --lib ancestry` → 6 passed.

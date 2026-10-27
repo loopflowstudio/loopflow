@@ -398,14 +398,11 @@ pub fn reap_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
     Ok(reap_in(&store, dry_run)?)
 }
 
-/// Release ancestry that `lf monitor prune` can prove was never recorded,
-/// adding its dispositions to `report`. Runs only from the explicit prune,
-/// never from lazy recovery.
-pub fn repair_unrecorded_ancestry(
-    dry_run: bool,
-    report: &mut AgentProcessReapReport,
-) -> Result<()> {
+/// `lf monitor prune`'s AgentProcess pass: reap orphans, then release ancestry
+/// it can prove was never recorded. Lazy recovery only reaps.
+pub fn prune_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let mut report = reap_in(&store, dry_run)?;
     let repaired = repair_unrecorded_ancestry_in(
         &store,
         crate::journal::current_lf_process_id().as_ref(),
@@ -413,7 +410,7 @@ pub fn repair_unrecorded_ancestry(
     )?;
     report.records.extend(repaired.records);
     report.errors.extend(repaired.errors);
-    Ok(())
+    Ok(report)
 }
 
 fn repair_unrecorded_ancestry_in(

@@ -1014,18 +1014,16 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             watch,
         } => {
             use loopflow::lf::commands::waves::{
-                list_closed_tasks, list_tasks, watch_tasks, TaskListArgs, TaskQuery,
+                list_closed_tasks, list_tasks, watch_tasks, TaskListArgs,
+            };
+            let args = TaskListArgs {
+                query: query.clone(),
+                wave: wave.clone(),
+                project: project.clone(),
+                state: state.clone(),
             };
             if *watch {
-                watch_tasks(
-                    repo,
-                    TaskListArgs {
-                        query: query.clone(),
-                        wave: wave.clone(),
-                        project: project.clone(),
-                        state: state.clone(),
-                    },
-                )
+                watch_tasks(repo, args)
             } else if *done {
                 list_closed_tasks(
                     repo,
@@ -1036,13 +1034,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     *json,
                 )
             } else {
-                let query = TaskQuery {
-                    text: query.as_deref().unwrap_or_default(),
-                    wave: wave.as_deref(),
-                    project: project.as_deref(),
-                    state: state.as_deref(),
-                };
-                list_tasks(repo, &query, *json)
+                list_tasks(repo, &args, *json)
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),

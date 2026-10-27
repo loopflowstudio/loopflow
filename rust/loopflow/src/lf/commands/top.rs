@@ -157,7 +157,7 @@ pub fn watch_top() -> Result<()> {
         (),
         super::watch::Watched {
             stamp: Some("observed_at"),
-            ..super::watch::Watched::work(super::watch::ACTIVITY_CLOCK)
+            ..super::watch::Watched::every(super::watch::ACTIVITY_CLOCK)
         },
         |_, ()| async { load_snapshot() },
     )

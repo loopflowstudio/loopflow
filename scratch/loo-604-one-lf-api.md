@@ -216,4 +216,5 @@ Scope: M machine, R repo, W wave, T task. "Stream" = already a part.
   work_catalog steer work_identities` passed except Pi-not-installed
   (environment) and the two monitor tests above; Swift `DTOFixtureTests` 48
   passed.
+- Compress (one `TaskListArgs` for `lf task list` and its watch requests; `Watched` keeps only clock and stamp): clippy clean; `--test integration -- task_list_query task_list_watch session_list_task_status_and_top_watch` 3 passed.
 - Live p99 A/B with an installed build: deferred to gate/demo.

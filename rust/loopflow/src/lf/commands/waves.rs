@@ -752,22 +752,23 @@ pub fn show(wave: Option<&str>, task: Option<&str>, json: bool, all: bool) -> Re
     })
 }
 
-/// What `lf task list` narrows the repository's open Tasks to. Empty text
-/// matches every Task.
-#[derive(Debug, Clone, Copy)]
-pub struct TaskQuery<'a> {
-    /// Contained in the title or identifier, ignoring case.
-    pub text: &'a str,
-    pub wave: Option<&'a str>,
+/// What `lf task list` narrows the repository's open Tasks to; the flags of
+/// the same name, which a `--watch` request can replace.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaskListArgs {
+    /// Contained in the title or identifier, ignoring case; absent matches every Task.
+    pub query: Option<String>,
+    pub wave: Option<String>,
     /// Project ID, provider ID, slug or name.
-    pub project: Option<&'a str>,
+    pub project: Option<String>,
     /// `TaskState` label: paused, not_ready, ready or active.
-    pub state: Option<&'a str>,
+    pub state: Option<String>,
 }
 
 /// `lf task list`: the repository's open Tasks matching `query`, as the plan
 /// gives them.
-pub fn list_tasks(repo: &Path, query: &TaskQuery<'_>, json: bool) -> Result<()> {
+pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let tasks = match crate::store::read_existing_registry()?.map(std::sync::Arc::new) {
@@ -790,35 +791,18 @@ pub fn list_tasks(repo: &Path, query: &TaskQuery<'_>, json: bool) -> Result<()> 
     })
 }
 
-/// What a `lf task list --watch` request can select instead; the flags of
-/// the same name.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TaskListArgs {
-    pub query: Option<String>,
-    pub wave: Option<String>,
-    pub project: Option<String>,
-    pub state: Option<String>,
-}
-
 /// `lf task list --watch`: `lf task list --json` now and each time it changes.
 pub fn watch_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
     super::watch::run(
         args,
-        super::watch::Watched::work(super::watch::PLANNING_CLOCK),
+        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
         |store, args| {
             let repo = repo.to_owned();
             async move {
                 let Some(store) = store else {
                     return Ok(Vec::new());
                 };
-                let query = TaskQuery {
-                    text: args.query.as_deref().unwrap_or_default(),
-                    wave: args.wave.as_deref(),
-                    project: args.project.as_deref(),
-                    state: args.state.as_deref(),
-                };
-                open_tasks(&store, &repo, &query).await
+                open_tasks(&store, &repo, &args).await
             }
         },
     )
@@ -836,7 +820,7 @@ struct TaskStatusArgs {
 pub fn watch_task_status(repo: &Path, issue: String) -> Result<()> {
     super::watch::run(
         TaskStatusArgs { issue },
-        super::watch::Watched::work(super::watch::ACTIVITY_CLOCK),
+        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
         |store, args| {
             let repo = repo.to_owned();
             async move {
@@ -853,16 +837,16 @@ pub fn watch_task_status(repo: &Path, issue: String) -> Result<()> {
 async fn open_tasks(
     store: &SharedStore,
     repo: &Path,
-    query: &TaskQuery<'_>,
+    query: &TaskListArgs,
 ) -> Result<Vec<RoadmapTask>> {
-    let Some(scope) = repository_scope(store, repo, query.wave).await? else {
+    let Some(scope) = repository_scope(store, repo, query.wave.as_deref()).await? else {
         return Ok(Vec::new());
     };
     let tasks = store.sqlite.open_tasks_matching(
         &scope.id,
-        query.text,
+        query.query.as_deref().unwrap_or_default(),
         scope.wave.as_ref().map(Wave::id),
-        query.project,
+        query.project.as_deref(),
     )?;
     let shared = SharedTaskReads::read(store).await?;
     let (details, _) = snapshot_tasks(
@@ -877,7 +861,7 @@ async fn open_tasks(
     Ok(details
         .into_iter()
         .filter(|task| {
-            query.state.is_none_or(|state| {
+            query.state.as_deref().is_none_or(|state| {
                 task.runtime
                     .as_ref()
                     .is_some_and(|runtime| runtime.status.label() == state)

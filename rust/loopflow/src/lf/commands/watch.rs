@@ -65,12 +65,10 @@ struct Request<A> {
     args: Option<A>,
 }
 
-/// What a watched read depends on.
+/// What a watched read depends on beyond the store: every displayed revision
+/// domain except token totals can change its result.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Watched {
-    /// Whether a commit that moved revisions from the first to the second can
-    /// change the result.
-    pub changed: fn(StoreRevisions, StoreRevisions) -> bool,
     /// Facts outside the store are read again this often.
     pub clock: Duration,
     /// A top-level field of the result that restates when it was read.
@@ -78,16 +76,14 @@ pub(crate) struct Watched {
 }
 
 impl Watched {
-    /// Every displayed domain except token totals.
-    pub(crate) fn work(clock: Duration) -> Self {
-        Self {
-            changed: |old, new| {
-                StoreRevisions { usage: 0, ..old } != StoreRevisions { usage: 0, ..new }
-            },
-            clock,
-            stamp: None,
-        }
+    pub(crate) fn every(clock: Duration) -> Self {
+        Self { clock, stamp: None }
     }
+}
+
+/// Whether a commit that moved revisions from `old` to `new` can change a result.
+fn changed(old: StoreRevisions, new: StoreRevisions) -> bool {
+    StoreRevisions { usage: 0, ..old } != StoreRevisions { usage: 0, ..new }
 }
 
 #[derive(Debug)]
@@ -172,7 +168,7 @@ where
                 None => true,
                 Some(read_on) => {
                     let changed = match (read_at, revisions) {
-                        (Some(old), Some(new)) => (watched.changed)(old, new),
+                        (Some(old), Some(new)) => changed(old, new),
                         (None, None) => false,
                         _ => true,
                     };

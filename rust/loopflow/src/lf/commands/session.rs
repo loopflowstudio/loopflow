@@ -298,7 +298,7 @@ fn watch_list(filter: crate::session::SessionFilter) -> anyhow::Result<()> {
     };
     super::watch::run(
         args,
-        super::watch::Watched::work(super::watch::ACTIVITY_CLOCK),
+        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
         |store, args| {
             let filter = crate::session::SessionFilter {
                 repo: args.repo,

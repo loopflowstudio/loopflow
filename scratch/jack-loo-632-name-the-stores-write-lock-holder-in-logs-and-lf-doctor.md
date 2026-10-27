@@ -14,7 +14,7 @@ Evidence: `scratch/database-locked-5-whys.md` (Why 1).
   `pid=… lf=<BUILD_VERSION> rev=<short revision>` to every lf.log line, so every
   busy-timeout victim line (journal, activity tracker, claude pinning, prune…)
   names its process and binary without per-site edits.
-- `lf doctor` check `contention`: reads the last 16 MiB of lf.log and groups
+- `lf doctor` check `contention` (via `contention::read_contention`): reads the last 16 MiB of lf.log and groups
   the last 24 h of `database is locked` lines and slow-writer lines by `lf (rev)`.
   Lines from older binaries group as `unidentified (older lf)`. Warn, never fail.
 
@@ -32,7 +32,7 @@ Evidence: `scratch/database-locked-5-whys.md` (Why 1).
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- contention canonical_ids doctor`, fmt, clippy `--all-targets -D warnings`: pass (2026-10-26). Full suites: gate.
+- `cargo test -p loopflow --lib -- contention doctor`, fmt, clippy `--all-targets -D warnings`: pass after compress (2026-10-26). Full suites: gate.
 
 ## Delete — do not maintain
 

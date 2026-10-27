@@ -196,11 +196,18 @@ pub struct BinaryContention {
 }
 
 /// Binary label for lines written before lf named itself in lf.log.
-pub const UNIDENTIFIED: &str = "unidentified (older lf)";
+const UNIDENTIFIED: &str = "unidentified (older lf)";
 
-/// Contention logged at or after `since` (Unix seconds), keyed by
-/// `lf <version> (<revision>)`.
-pub fn summarize(log: &str, since: i64) -> BTreeMap<String, BinaryContention> {
+/// Contention the end of `log` records at or after `since` (Unix seconds),
+/// keyed by `lf <version> (<revision>)`. A missing log records none.
+pub fn read_contention(
+    log: &Path,
+    since: i64,
+) -> std::io::Result<BTreeMap<String, BinaryContention>> {
+    Ok(summarize(&read_log_tail(log)?, since))
+}
+
+fn summarize(log: &str, since: i64) -> BTreeMap<String, BinaryContention> {
     let mut binaries: BTreeMap<String, BinaryContention> = BTreeMap::new();
     for line in log.lines() {
         let failed = line.contains(LOCK_FAILURE);
@@ -244,7 +251,7 @@ fn field<'a>(line: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// The end of lf.log, starting at a line boundary. A missing log is empty.
-pub fn read_log_tail(path: &Path) -> std::io::Result<String> {
+fn read_log_tail(path: &Path) -> std::io::Result<String> {
     let mut file = match std::fs::File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),

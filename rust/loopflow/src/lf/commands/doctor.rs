@@ -11,6 +11,7 @@ use time::{Duration, OffsetDateTime};
 use crate::lf::output::Colors;
 use crate::ops::{CronObligation, CronSource};
 use crate::process::LfProcess;
+use crate::store::contention::read_contention;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -144,13 +145,11 @@ const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
 
 /// Who waited on the store's write lock and who held it, by binary, from lf.log.
 fn check_contention(log: &Path, since: i64) -> Check {
-    use crate::store::contention::{read_log_tail, summarize};
     const NAME: &str = "contention";
-    let text = match read_log_tail(log) {
-        Ok(text) => text,
+    let binaries = match read_contention(log, since) {
+        Ok(binaries) => binaries,
         Err(error) => return Check::warn(NAME, format!("cannot read {}: {error}", log.display())),
     };
-    let binaries = summarize(&text, since);
     if binaries.is_empty() {
         return Check::ok(
             NAME,

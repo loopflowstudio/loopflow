@@ -1,4 +1,4 @@
-"""Create, find and delete one rented machine on Daytona, Modal, RunPod, AWS or Fly.
+"""Create, find and delete one rented machine on Daytona, Modal, RunPod or AWS.
 
 lf runs this as `python -c <this> <provider> <op>` inside
 `uv run --no-project [--with <sdk>]`, with one JSON request on stdin, and reads
@@ -8,7 +8,7 @@ config), and never appears in a request or a reply.
 
 Every machine is named by lf before it is created, ends by itself when its
 lifetime passes, and answers SSH: as root on Daytona, as `lf` elsewhere.
-Daytona and Modal build an image with the tools; RunPod, AWS and Fly boot
+Daytona and Modal build an image with the tools; RunPod and AWS boot
 stock Ubuntu 24.04 and install them before sshd admits `lf`, under the
 guardian that holds the deadline (`guardian.py`, sent in each create).
 """
@@ -61,8 +61,8 @@ printf '%s\\n' "$LF_PUBLIC_KEY" > /home/lf/.ssh/authorized_keys
 chown lf:lf /home/lf/.ssh/authorized_keys && chmod 600 /home/lf/.ssh/authorized_keys
 """
 
-# Key-only sshd for `lf` in the foreground: behind Modal's tunnel, RunPod's
-# mapped port and Fly's IPv4 service.
+# Key-only sshd for `lf` in the foreground: behind Modal's tunnel and RunPod's
+# mapped port.
 SSHD = """mkdir -p /run/sshd && ssh-keygen -A >/dev/null
 exec /usr/sbin/sshd -D -e -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
   -o PermitRootLogin=no -o AllowUsers=lf
@@ -78,7 +78,7 @@ SETUP = (
     + AUTHORIZE
 )
 
-# RunPod and Fly containers: the guardian is the main process and the setup
+# RunPod containers: the guardian is the main process and the setup
 # its child, so the container ends when either does. Without python3 the
 # deadline still holds through `timeout`.
 CONTAINER_BOOT = """set -u
@@ -469,110 +469,11 @@ def _aws(op, request):
     raise ValueError(f"unknown op {op}")
 
 
-# ---------------------------------------------------------------------------
-# Fly: one app per rental, holding one Machine and a dedicated IPv4 for SSH.
-# Fly's proxy balances across an app's Machines, so each needs its own app.
-# The app's name is the rental's, and it is the provider id.
-# ---------------------------------------------------------------------------
-
-FLY_MACHINES = "https://api.machines.dev/v1/"
-FLY_GRAPHQL = "https://api.fly.io/graphql"
-FLY_GONE = {"stopping", "stopped", "suspended", "destroying", "destroyed", "failed"}
-FLY_ORGS = "{ organizations { nodes { slug } } }"
-FLY_IPV4 = """mutation($input: AllocateIPAddressInput!) {
-  allocateIpAddress(input: $input) { ipAddress { address } }
-}"""
-
-
-def _fly_app(name):
-    """Fly app names take lowercase letters, digits and dashes."""
-    return name.lower().replace("_", "-")
-
-
-def _fly_org(authorization):
-    """`FLY_ORG`, else the one organization an org token reaches."""
-    if os.environ.get("FLY_ORG"):
-        return os.environ["FLY_ORG"]
-    reply = _http("POST", FLY_GRAPHQL, authorization, {"query": FLY_ORGS})
-    slugs = [org["slug"] for org in reply["data"]["organizations"]["nodes"]]
-    if len(slugs) != 1:
-        raise RuntimeError(f"FLY_RENT_TOKEN reaches {len(slugs)} organizations; set FLY_ORG")
-    return slugs[0]
-
-
-def _fly(op, request):
-    # Not FLY_API_TOKEN: deploy tokens for one app cannot create rental apps.
-    token = os.environ["FLY_RENT_TOKEN"]
-    authorization = token if token.startswith("FlyV1 ") else f"Bearer {token}"
-
-    def ask(method, path, body=None):
-        return _http(method, FLY_MACHINES + path, authorization, body)
-
-    def found(app):
-        machines = ask("GET", f"apps/{app}/machines")
-        if machines is None:
-            return None
-        # An app whose Machine ended still holds its IPv4 until deleted.
-        gone = all(machine.get("state") in FLY_GONE for machine in machines)
-        return {"id": app, "gone": gone, "route": None}
-
-    if op == "create":
-        app = _fly_app(request["name"])
-        ask("POST", "apps", {"app_name": app, "org_slug": _fly_org(authorization)})
-        reply = _http(
-            "POST",
-            FLY_GRAPHQL,
-            authorization,
-            {"query": FLY_IPV4, "variables": {"input": {"appId": app, "type": "v4"}}},
-        )
-        if reply.get("errors"):
-            raise RuntimeError(f"IPv4 for {app}: {reply['errors'][0].get('message')}")
-        address = reply["data"]["allocateIpAddress"]["ipAddress"]["address"]
-        ask(
-            "POST",
-            f"apps/{app}/machines",
-            {
-                "name": app,
-                "config": {
-                    "image": "registry-1.docker.io/library/" + BASE,
-                    "guest": {
-                        "cpu_kind": "performance",
-                        "cpus": request["vcpus"],
-                        "memory_mb": request["memory_gb"] * 1024,
-                    },
-                    "init": {"entrypoint": ["bash", "-c", CONTAINER_BOOT]},
-                    "env": _container_env(request),
-                    "services": [
-                        {
-                            "protocol": "tcp",
-                            "internal_port": 22,
-                            "ports": [{"port": 22}],
-                            "autostop": "off",
-                            "autostart": False,
-                        }
-                    ],
-                    # When the guardian exits, the Machine is deleted.
-                    "auto_destroy": True,
-                    "restart": {"policy": "no"},
-                },
-            },
-        )
-        return {"id": app, "gone": False, "route": f"ssh://lf@{address}"}
-    if op == "get":
-        return found(request.get("id") or _fly_app(request["name"]))
-    if op == "delete":
-        # Deleting the app deletes its Machine and releases its IPv4.
-        ask("DELETE", f"apps/{request['id']}?force=true")
-        return None
-    raise ValueError(f"unknown op {op}")
-
-
 PROVIDERS = {
     "daytona": _daytona,
     "modal": _modal,
     "runpod": _runpod,
     "aws": _aws,
-    "fly": _fly,
 }
 
 

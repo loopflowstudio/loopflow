@@ -1,4 +1,4 @@
-"""The rental bridge's requests to RunPod, AWS and Fly, over mocked HTTP and SDKs."""
+"""The rental bridge's requests to RunPod and AWS, over mocked HTTP and SDKs."""
 
 import base64
 import importlib.util
@@ -64,8 +64,6 @@ def http(monkeypatch):
         return fake
 
     monkeypatch.setenv("RUNPOD_API_KEY", "rp-key")
-    monkeypatch.setenv("FLY_RENT_TOKEN", "FlyV1 fm2_token")
-    monkeypatch.delenv("FLY_ORG", raising=False)
     return install
 
 
@@ -257,50 +255,3 @@ def test_daytona_deletes_only_a_sandbox_not_yet_destroyed(monkeypatch, state, de
     monkeypatch.setitem(sys.modules, "daytona", daytona)
     assert bridge._daytona("delete", {"id": "sb-1"}) is None
     assert bool(deleted) == deletes
-
-
-# --- Fly ------------------------------------------------------------------
-
-
-def test_fly_creates_an_app_with_ipv4_and_a_self_destroying_machine(http):
-    fake = http(
-        {
-            ("POST", "/v1/apps/lf-rent-0b5c/machines"): [(200, {"id": "m1"})],
-            ("POST", "/v1/apps"): [(201, {"id": "app1"})],
-            ("POST", "/graphql"): [
-                (200, {"data": {"organizations": {"nodes": [{"slug": "loopflow-studio"}]}}}),
-                (200, {"data": {"allocateIpAddress": {"ipAddress": {"address": "192.0.2.9"}}}})
-            ],
-        }
-    )
-    reply = bridge._fly("create", REQUEST)
-    assert reply == {"id": "lf-rent-0b5c", "gone": False, "route": "ssh://lf@192.0.2.9"}
-    _, app, ip, machine = (sent[2] for sent in fake.sent)
-    assert app == {"app_name": "lf-rent-0b5c", "org_slug": "loopflow-studio"}
-    assert ip["variables"]["input"] == {"appId": "lf-rent-0b5c", "type": "v4"}
-    config = machine["config"]
-    assert config["guest"] == {"cpu_kind": "performance", "cpus": 4, "memory_mb": 16384}
-    assert config["auto_destroy"] is True and config["restart"] == {"policy": "no"}
-    assert config["services"][0]["internal_port"] == 22
-    assert fake.sent[0][3]["Authorization"] == "FlyV1 fm2_token"
-
-
-def test_fly_reads_an_ended_machine_as_gone_and_a_missing_app_as_absent(http):
-    http(
-        {
-            ("GET", "/apps/lf-rent-0b5c/machines"): [(200, [{"id": "m1", "state": "destroyed"}])],
-            ("GET", "/apps/lf-rent-none/machines"): [(404, None)],
-        }
-    )
-    assert bridge._fly("get", {"name": "lf-rent_0b5c"}) == {
-        "id": "lf-rent-0b5c",
-        "gone": True,
-        "route": None,
-    }
-    assert bridge._fly("get", {"id": "lf-rent-none"}) is None
-
-
-def test_fly_delete_removes_the_app(http):
-    fake = http({("DELETE", "/apps/lf-rent-0b5c"): [(202, {})]})
-    bridge._fly("delete", {"id": "lf-rent-0b5c"})
-    assert fake.sent[0][1].endswith("/v1/apps/lf-rent-0b5c?force=true")

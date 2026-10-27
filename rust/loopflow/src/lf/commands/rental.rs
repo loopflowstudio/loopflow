@@ -22,7 +22,7 @@ use crate::rental::{
 use crate::store::sqlite::SqliteStore;
 use crate::store::Store;
 
-/// An image-built sandbox answers SSH within seconds; RunPod, AWS and Fly
+/// An image-built sandbox answers SSH within seconds; RunPod and AWS
 /// install the tools on stock Ubuntu first, which takes minutes.
 const SSH_WAIT: Duration = Duration::from_secs(20 * 60);
 
@@ -881,8 +881,7 @@ fn refresh(
         Some(sandbox) if !sandbox.gone => {}
         // Its lifetime passed, or someone deleted it.
         ended => {
-            // What an ended machine leaves behind (a Fly app's IPv4, an exited
-            // pod's disk) still bills until it is deleted.
+            // What an ended machine leaves behind (an exited pod's disk) still bills until it is deleted.
             if ended.is_some() {
                 api.delete(id)?;
             }
@@ -1293,9 +1292,9 @@ mod tests {
         let (store, rental, _, _) = running(dir.path());
         let log: Log = Rc::default();
         let kept = log.clone();
-        // A Fly app whose Machine exited still holds its IPv4.
+        // An exited pod still holds its disk.
         let api = Sandboxes::with_call(
-            Provider::Fly,
+            Provider::Runpod,
             Box::new(move |op, _| {
                 kept.borrow_mut().push(op.to_string());
                 Ok(br#"{"id": "sb-1", "gone": true, "route": null}"#.to_vec())

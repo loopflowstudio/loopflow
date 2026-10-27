@@ -44,11 +44,12 @@ enum Credential {
         subject: String,
         credential: String,
     },
-    /// A personal API key: it never expires or rotates, so every machine shares it
-    /// and none needs a browser approval.
+    /// An access token the laptop just refreshed. Its refresh grant stays on the
+    /// laptop, so no machine needs a browser approval or can rotate the grant away.
     Linear {
         login: String,
-        api_key: String,
+        access_token: String,
+        expires_at: Option<i64>,
     },
     /// One `opencode auth export` entry; `login` is its OpenCode account, or the
     /// entry itself for an API key.
@@ -143,18 +144,17 @@ pub(super) async fn connect(
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
-            let env_name = provider
-                .api_key_env_name()
-                .expect("Linear takes a personal API key");
-            let api_key = std::env::var(env_name)
-                .ok()
-                .map(|key| key.trim().to_string())
-                .filter(|key| !key.is_empty())
-                .ok_or_else(|| anyhow!("{env_name} is not set; create a personal API key in Linear (Settings → Security & access), store it with `doppler secrets set {env_name} > /dev/null`, and run under `doppler run --`"))?;
-            if linear_login(&api_key).await? != login {
-                bail!("{env_name} belongs to a different Linear account than this laptop's");
+            let renewed = crate::ops::linear::renewed_planning_token(provider)
+                .await
+                .map_err(|error| anyhow!("{error}"))?;
+            if linear_login(&renewed.access_token).await? != login {
+                bail!("renewed Linear login belongs to a different account; discarded");
             }
-            Credential::Linear { login, api_key }
+            Credential::Linear {
+                login,
+                access_token: renewed.access_token,
+                expires_at: renewed.expires_at,
+            }
         }
         Provider::OpenCodeZen => {
             let entries = opencode_export(None, "laptop")?;
@@ -640,24 +640,28 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
             }
             Ok(())
         }
-        Credential::Linear { login, api_key } => {
+        Credential::Linear {
+            login,
+            access_token,
+            expires_at,
+        } => {
             let _lock = credential_lock("linear")?;
             if installed(store, Provider::Linear, &login).await? {
                 return Ok(());
             }
-            if linear_login(&api_key).await? != login {
+            if linear_login(&access_token).await? != login {
                 bail!("Linear credential identity mismatch");
             }
             store
                 .upsert_provider_token(&ProviderToken {
                     provider: "linear".into(),
-                    access_token: api_key,
+                    access_token,
                     refresh_token: None,
                     oauth_client_id: None,
-                    expires_at: None,
+                    expires_at,
                     login: Some(login),
                     updated_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                    credential_type: CredentialType::ApiKey,
+                    credential_type: CredentialType::OAuth,
                 })
                 .await?;
             Ok(())
@@ -1068,7 +1072,7 @@ mod tests {
     use clap::Parser;
     use serde_json::json;
 
-    use super::{install, install_managed, installed, write_private, Credential, CredentialType};
+    use super::{install, install_managed, installed, write_private, Credential};
     use crate::provider_account::{account_home_path, account_id_for_login};
     use crate::provider_auth::Provider;
     use crate::store::{SharedStore, StorageConfig};
@@ -1701,7 +1705,7 @@ esac
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
-    async fn linear_installs_a_shared_api_key_that_never_refreshes() {
+    async fn linear_installs_an_access_token_without_its_refresh_grant() {
         let _lock = crate::journal::test_env_lock();
         let root = tempfile::tempdir().unwrap();
         let _environment = Environment::isolate(root.path());
@@ -1709,19 +1713,17 @@ esac
             identity_server(json!({"data":{"viewer":{"id":"viewer-123"}}})).await;
         std::env::set_var("LF_TEST_MACHINE_LINEAR_URL", endpoint);
         let store = store(root.path()).await;
-        let key = |api_key: &str| Credential::Linear {
+        let access = |token: &str| Credential::Linear {
             login: "viewer-123".into(),
-            api_key: api_key.into(),
+            access_token: token.into(),
+            expires_at: Some(4102444800),
         };
-        install(&store, key("lin_api_first")).await.unwrap();
-        install(&store, key("lin_api_ignored-retry")).await.unwrap();
+        install(&store, access("first-access")).await.unwrap();
+        install(&store, access("ignored-retry")).await.unwrap();
         let token = store.get_provider_token("linear").await.unwrap().unwrap();
-        assert_eq!(token.access_token, "lin_api_first");
-        assert_eq!(token.credential_type, CredentialType::ApiKey);
-        assert!(!crate::provider_auth::provider_token_refresh_due(
-            &token,
-            i64::MAX
-        ));
+        assert_eq!(token.access_token, "first-access");
+        assert_eq!(token.refresh_token, None);
+        assert_eq!(token.expires_at, Some(4102444800));
         let db = rusqlite::Connection::open(root.path().join("loopflow.db")).unwrap();
         let (stored, encrypted): (String, bool) = db
             .query_row(
@@ -1731,7 +1733,7 @@ esac
             )
             .unwrap();
         assert!(encrypted);
-        assert!(!stored.contains("lin_api_first"));
+        assert!(!stored.contains("first-access"));
         assert!(installed(&store, Provider::Linear, "other-person")
             .await
             .is_err());

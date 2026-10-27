@@ -10,7 +10,7 @@
 //! unknown reply keeps it; the create is never resent. At the hard deadline
 //! the provider deletes the machine whatever else fails: its own lifetime
 //! (Daytona, Modal) or the guardian on the machine (`guardian.py`: RunPod,
-//! AWS, Fly).
+//! AWS).
 
 pub mod sandbox;
 
@@ -155,7 +155,6 @@ pub enum Provider {
     Modal,
     Runpod,
     Aws,
-    Fly,
 }
 
 impl Provider {
@@ -165,7 +164,6 @@ impl Provider {
             Self::Modal => "modal",
             Self::Runpod => "runpod",
             Self::Aws => "aws",
-            Self::Fly => "fly",
         }
     }
 
@@ -175,18 +173,17 @@ impl Provider {
             "modal" => Some(Self::Modal),
             "runpod" => Some(Self::Runpod),
             "aws" => Some(Self::Aws),
-            "fly" => Some(Self::Fly),
             _ => None,
         }
     }
 
-    /// The SDK the bridge runs with, pinned; RunPod and Fly speak plain HTTP.
+    /// The SDK the bridge runs with, pinned; RunPod speaks plain HTTP.
     pub fn sdk(self) -> Option<&'static str> {
         match self {
             Self::Daytona => Some("daytona==0.226.1"),
             Self::Modal => Some("modal==1.6.2"),
             Self::Aws => Some("boto3==1.40.55"),
-            Self::Runpod | Self::Fly => None,
+            Self::Runpod => None,
         }
     }
 
@@ -215,7 +212,6 @@ impl Provider {
                     "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_REGION are not all",
                 ))
             }
-            Self::Fly if !set("FLY_RENT_TOKEN") => Some(doppler("FLY_RENT_TOKEN is")),
             _ => None,
         }
     }
@@ -238,7 +234,7 @@ impl Provider {
             ));
         }
         match (self, hardware.gpu.as_deref()) {
-            (Self::Daytona | Self::Fly, Some(_)) => Err(format!(
+            (Self::Daytona, Some(_)) => Err(format!(
                 "{self} rents no GPUs; --gpu works on runpod, aws and modal"
             )),
             (Self::Daytona, None) => Ok(offer(
@@ -257,7 +253,6 @@ impl Provider {
                     per_size(70_956, 24_012, *usd),
                 ))
             }
-            (Self::Fly, None) => Ok(offer(None, per_size(29_167, 8_333, FLY_IPV4_MICROS))),
             (Self::Runpod, None) => RUNPOD_CPUS
                 .iter()
                 .find(|(_, gib_per_vcpu, _)| gib_per_vcpu * vcpus >= memory)
@@ -395,10 +390,6 @@ const AWS_GPUS: &[(&str, &str, GpuSizes)] = &[
         ],
     ),
 ];
-
-/// Fly bills performance vCPUs at $21/month beside 2 GiB at $6/GiB-month, and
-/// $2/month for the app's dedicated IPv4.
-const FLY_IPV4_MICROS: i64 = 2_778;
 
 /// The provider's name for a `--gpu` name and what its table holds beside it.
 fn find_gpu<T>(

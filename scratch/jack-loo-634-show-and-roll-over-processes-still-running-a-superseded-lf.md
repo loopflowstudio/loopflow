@@ -104,25 +104,17 @@ Nothing to rename or merge.
 
 Second pass (2026-10-27, headless, after the Graph slice). The concepts hold:
 `NextStep` is the third disposition LOO-502 implies, and no new policy choice
-remains (Desktop helper reported, not updated, which the Outcome allows). Two
-corrections for implement:
-
-- The below-floor runner reason says "`lf task run` retries its route", but
-  `runs_graph` matches every `graph_processes` runner, taskless ones included,
-  which have no route. Say "it fails at its next step; rerun the Graph (`lf task
-  run` for a Task's route)" so the 2 a.m. reader of a taskless Graph isn't sent
-  to a command that doesn't apply.
-- `next_step` entries use `StayingProcess`, so moving runners are typed as
-  staying. Rename it `ListedProcess` (process, binary, reason), which fits both
-  lists. `--json` has no Swift mirror and no fixture, so the field names stay
-  and nothing else changes.
+remains (Desktop helper reported, not updated, which the Outcome allows). Its two
+corrections are applied: the below-floor runner reason covers taskless Graphs,
+and both lists share `ListedProcess` (JSON field names unchanged; no Swift
+mirror or fixture).
 
 ## Graph steps at a boundary (implemented 2026-10-27)
 
 - `rollover::disposition` checks `SqliteStore::runs_graph` first; a Graph runner
   resolves to `NextStep` (listed under "Moving at their next step") unless it runs
   a Desktop helper ("update Desktop") or is below the store floor ("fails at its
-  next step and `lf task run` retries its route"). Nothing is signalled. Session
+  next step; rerun the Graph (`lf task run` for a Task's route)"). Nothing is signalled. Session
   owners keep the earlier rule, and re-checks before each stop reuse
   `owner_disposition` (a classified owner is never a Graph runner). JSON gains `next_step`.
 - Proof `graph_live_across_switch_runs_next_step_on_selected_install`

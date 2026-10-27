@@ -341,8 +341,8 @@ pub struct RolloverReport {
     pub selected: Option<SelectedBinary>,
     pub moved: Vec<MovedOwner>,
     /// Graph runners whose next step launches on the selected lf.
-    pub next_step: Vec<StayingProcess>,
-    pub stays: Vec<StayingProcess>,
+    pub next_step: Vec<ListedProcess>,
+    pub stays: Vec<ListedProcess>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -356,7 +356,7 @@ pub struct MovedOwner {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct StayingProcess {
+pub struct ListedProcess {
     pub process: RunningLfProcess,
     pub binary: String,
     pub reason: String,
@@ -431,7 +431,7 @@ fn graph_runner(binary: &RunningBinary) -> Disposition {
     }
     if binary.cannot_open_store {
         return Disposition::Stays(
-            "can't open the store; it fails at its next step and `lf task run` retries its route"
+            "can't open the store; it fails at its next step; rerun the Graph (`lf task run` for a Task's route)"
                 .into(),
         );
     }
@@ -450,14 +450,14 @@ impl RolloverReport {
                 session_ids,
                 error: None,
             }),
-            Disposition::NextStep => self.next_step.push(StayingProcess {
+            Disposition::NextStep => self.next_step.push(ListedProcess {
                 process,
                 binary,
                 reason:
                     "launches its next step on the selected lf; the runner exits with the Graph"
                         .into(),
             }),
-            Disposition::Stays(reason) => self.stays.push(StayingProcess {
+            Disposition::Stays(reason) => self.stays.push(ListedProcess {
                 process,
                 binary,
                 reason,
@@ -761,7 +761,7 @@ mod tests {
         let Disposition::Stays(reason) = of(&below_floor, &runner).await else {
             panic!("a runner below the floor stays");
         };
-        assert!(reason.contains("`lf task run` retries"), "{reason}");
+        assert!(reason.contains("rerun the Graph"), "{reason}");
         let Disposition::Stays(reason) = of(&helper, &runner).await else {
             panic!("a Desktop helper runner stays");
         };

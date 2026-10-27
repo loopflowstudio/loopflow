@@ -15,6 +15,7 @@ use serde::Serialize;
 use crate::config::load_config;
 use crate::prompt::context_budget::{measure_context, ContextBudgetReport, ContextBudgets};
 use crate::prompt::{gather_documents, GatherSpec};
+use crate::steer::NativeBoundary;
 
 #[derive(Debug, Serialize)]
 struct ContextReport {
@@ -393,48 +394,47 @@ fn deliver_steers(
         })?;
         let store = crate::store::sqlite::SqliteStore::new(&delivery.home.join("loopflow.db"))?;
         store.recover_prepared_steers(&adapter.session)?;
-        store.with_provider_context(
-            adapter,
-            thread,
-            matches!(
-                event,
-                "SessionStart" | "OpenCodeMessagesTransform" | "PiContext"
-            ),
-            || {
-                let invocation = input["tool_use_id"]
-                    .as_str()
-                    .or_else(|| input["adapter_invocation_id"].as_str())
-                    .or_else(|| input["turn_id"].as_str())
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                let boundary = format!(
-                    "{event}:{}:{invocation}",
-                    input["turn_id"].as_str().unwrap_or("")
-                );
-                let emitted = store.emit_session_steers(
-                    adapter,
-                    thread,
-                    &boundary,
-                    |batch, steers, remaining| {
-                        more.set(remaining > 0);
-                        let (prefix, excerpts) =
-                            render_steers(delivery, &adapter.session, batch, steers, remaining)
-                                .map_err(|error| {
-                                    crate::store::StoreError::InvalidData(error.to_string())
-                                })?;
-                        Ok(crate::steer::SteerContext {
-                            text: render(&prefix)?,
-                            excerpts,
-                        })
-                    },
-                    write,
-                )?;
-                if !emitted {
-                    write(&render("")?)?;
-                }
-                Ok(())
+        let boundary = match event {
+            "SessionStart" => NativeBoundary::Select {
+                source: input["source"].as_str().unwrap_or("startup"),
             },
-        )?;
+            "OpenCodeMessagesTransform" | "PiContext" => NativeBoundary::Activate { source: event },
+            _ => NativeBoundary::Turn,
+        };
+        store.with_provider_context(adapter, thread, boundary, || {
+            let invocation = input["tool_use_id"]
+                .as_str()
+                .or_else(|| input["adapter_invocation_id"].as_str())
+                .or_else(|| input["turn_id"].as_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let boundary = format!(
+                "{event}:{}:{invocation}",
+                input["turn_id"].as_str().unwrap_or("")
+            );
+            let emitted = store.emit_session_steers(
+                adapter,
+                thread,
+                &boundary,
+                |batch, steers, remaining| {
+                    more.set(remaining > 0);
+                    let (prefix, excerpts) =
+                        render_steers(delivery, &adapter.session, batch, steers, remaining)
+                            .map_err(|error| {
+                                crate::store::StoreError::InvalidData(error.to_string())
+                            })?;
+                    Ok(crate::steer::SteerContext {
+                        text: render(&prefix)?,
+                        excerpts,
+                    })
+                },
+                write,
+            )?;
+            if !emitted {
+                write(&render("")?)?;
+            }
+            Ok(())
+        })?;
     } else {
         write(&render("")?)?;
     }

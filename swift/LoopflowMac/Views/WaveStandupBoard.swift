@@ -85,11 +85,9 @@ struct WaveStandup: Equatable {
         showsPeople = Set((working + autonomous + done).compactMap { $0.person?.key }).count >= 2
     }
 
-    /// A Task's state. One planning closed before anyone started it (completed,
-    /// canceled, or merged upstream) is finished, whatever its local record says.
+    /// A Task's state; a Task with no runtime has no checkout, unless planning closed it.
     private static func state(_ task: RoadmapTask) -> TaskState {
-        let status = task.runtime?.status ?? .unstarted
-        return status == .unstarted && task.task.isTerminal ? .done : status
+        task.runtime?.status ?? (task.task.isTerminal ? .done : .unstarted)
     }
 
     func rows(_ section: WaveBoardSection) -> [Row] {

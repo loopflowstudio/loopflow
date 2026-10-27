@@ -13,6 +13,7 @@ use super::session::SessionFacts;
 use super::waves::RoadmapTask;
 use crate::durable::{GraphProcessDetail, TaskState};
 use crate::session::GraphProcessSummaryState;
+use crate::store::rows::unix_to_datetime;
 use crate::store::SharedStore;
 use crate::work::task::comment::{TaskComment, TaskComments};
 use crate::work::task::PrPhase;
@@ -81,8 +82,7 @@ impl TaskGraphRow {
         let summary = detail.entry.summary;
         Self {
             step: detail.steps.last().map(|step| step.position()),
-            updated_at: OffsetDateTime::from_unix_timestamp(summary.updated_at)
-                .expect("store times are Unix seconds within the calendar"),
+            updated_at: unix_to_datetime(summary.updated_at),
             id: summary.id,
             name: summary.name,
             state: summary.state,

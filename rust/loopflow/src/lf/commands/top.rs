@@ -15,6 +15,7 @@ use crate::journal::{
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
 };
 use crate::lf::output::truncate;
+use crate::store::rows::unix_to_datetime;
 use crate::store::sqlite::SqliteStore;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -265,8 +266,7 @@ fn collect_activity(
             worktree: record.cwd,
             wave: None,
             pid: record.pid,
-            started_at: OffsetDateTime::from_unix_timestamp(record.started_at)
-                .expect("store times are Unix seconds within the calendar"),
+            started_at: unix_to_datetime(record.started_at),
             state,
         });
     }

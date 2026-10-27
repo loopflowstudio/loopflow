@@ -10,6 +10,7 @@ use crate::lf::commands::util::parse_since;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
 use crate::session_record::SessionHistory;
+use crate::store::rows::unix_to_datetime;
 use crate::store::sqlite::SqliteStore;
 
 const MAX_LIMIT: usize = 200;
@@ -189,8 +190,7 @@ fn activity_entry(
 ) -> WorkActivityEntry {
     WorkActivityEntry {
         id,
-        recorded_at: OffsetDateTime::from_unix_timestamp(recorded_at)
-            .expect("store times are Unix seconds within the calendar"),
+        recorded_at: unix_to_datetime(recorded_at),
         summary,
         work: owner.work.clone(),
         subject: owner.subject.clone(),

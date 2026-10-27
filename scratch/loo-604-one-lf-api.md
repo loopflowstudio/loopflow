@@ -298,3 +298,4 @@ unless "Work needed" says otherwise.
 - Compress (`Watched::stamp` deleted; no body restates its reading time): clippy --all-targets clean; lib `lf::commands::watch` 3 passed.
 - Realign after main merge 651ccfbe80 (main adds `account` to Desktop's `sessions.json`): `cargo test -p loopflow --test integration dto_fixtures` 45 passed.
 - Task status summaries + RFC 3339 history/ps (0b): clippy --all-targets clean; integration `dto_fixtures world_recipes session_cli_tests` 71 passed; lib `lf::commands::activity|top` 10 passed; `test_desktop.sh --filter 'DTOFixtureTests|WorkObservationTransportTests|WorkModelTests|RegistryQueryTests'` 105 passed.
+- Compress (0b: Unix→RFC 3339 rows use `store::rows::unix_to_datetime`): clippy --all-targets clean; `--test integration dto_fixtures` 45 passed.

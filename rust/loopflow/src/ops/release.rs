@@ -3140,28 +3140,21 @@ fn wait_for_pr_merge(
 
     loop {
         let observation = crate::ops::pr::observe_pr_merge(repo, pr_number)?;
-        let view = observation.pr;
-        let request = observation.request;
+        let view = &observation.pr;
+        let removal =
+            || crate::ops::pr_landing::read_merge_request_removal(repo, repo_id.as_str(), number);
 
-        if view.state == "open"
-            && crate::ops::pr::merge_needs_integration(
-                view.merge_state.as_deref(),
-                request.as_ref(),
-            )
-        {
+        if view.state == "open" && crate::ops::pr::pr_requires_resync(&observation, removal)? {
             return Ok(ReleasePrWait::NeedsIntegration(
-                view.merge_state.expect("integration state matched"),
+                view.merge_state.clone().unwrap_or_else(|| "evicted".into()),
             ));
         }
 
-        let decided = crate::ops::pr_landing::decide_merge(
-            view.clone(),
-            head_sha,
-            request,
-            || crate::ops::pr_landing::read_merge_request_removal(repo, repo_id.as_str(), number),
-            |head| merge_gate_state(repo, pr_number, head),
-        )?;
-        if let Some(wait) = release_wait(&view, decided)? {
+        let decided =
+            crate::ops::pr_landing::decide_merge(&observation, head_sha, removal, |head| {
+                merge_gate_state(repo, pr_number, head)
+            })?;
+        if let Some(wait) = release_wait(view, decided)? {
             return Ok(wait);
         }
 
@@ -4716,7 +4709,8 @@ mod tests {
     #[test]
     fn merge_request_removals_decide_landing_and_release_alike() {
         use crate::ops::pr::{
-            ManualRemoval, MergeGateReading, MergeRequestRemoval, PrInfo, RepairWindow,
+            ManualRemoval, MergeGateReading, MergeRequestRemoval, PrInfo, PrMergeObservation,
+            RepairWindow,
         };
         use crate::ops::pr_landing::{decide_merge, LandingObservation};
         use crate::work::task::CiCheck;
@@ -4887,9 +4881,8 @@ mod tests {
             let removal: MergeRequestRemoval =
                 crate::ops::pr::removal_from_timeline(&timeline, &repairs, runs).unwrap();
             let observed = decide_merge(
-                pr.clone(),
+                &PrMergeObservation::fixture(pr.clone(), None, true),
                 "head",
-                None,
                 || Ok(removal),
                 |_| {
                     Ok(Some(MergeGateReading {

@@ -388,7 +388,10 @@ fn needs_resync(repo_root: &Path, options: &LandOptions) -> OpsResult<bool> {
         return Ok(true);
     }
     match crate::ops::pr::current_pr(repo_root)? {
-        Some(pr) => crate::ops::pr::pr_requires_resync(repo_root, pr.number),
+        Some(pr) => crate::ops::pr::pr_requires_resync(
+            &crate::ops::pr::observe_pr_merge(repo_root, pr.number)?,
+            || crate::ops::pr::merge_request_removal(repo_root, pr.number, &[]),
+        ),
         None => Ok(true),
     }
 }

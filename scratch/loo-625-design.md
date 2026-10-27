@@ -136,8 +136,9 @@ tests, docs and skills moved.
 
 ## Remaining
 
-- Gate: full suites (incl. `machine_commands`, `two_people`, `auth_tests`, Swift
-  `WorkCLISubscriptionTests`), clippy, DTO fixtures.
+- Nothing outstanding before review.
+
+Publish check (LF_* unset, 2026-10-27, logs /tmp/loo625-rust): clippy `--all-targets` 0; nextest `--all` 3019/3022 (startup row budget fixed in 79604a08a4; account reconnect and Linear hook freshness passed on rerun, load timing); data_clones 4/4; focused rerun 185/185; architecture, website, Swift build/tests/boundaries 0.
 
 Check (LF_* unset, 2026-10-27, after restoring the `lf set` work from the stash `lf checkout update` left and merging main's Fly removal): `--test integration wave_setup_tests` and CLI-shape tests (`reference_matches_the_compiled_cli`, `wave_resolution_matrix`, `machine_commands`, `cli_discovery`, `documented_commands`) pass; `--lib -- setting config:: scope_defaults` pass with `harness::claude` capture passing serially (concurrency flake); fmt and clippy `--all-targets` clean. Gate owns the full suites.
 

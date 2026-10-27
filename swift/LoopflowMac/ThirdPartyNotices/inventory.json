@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "acef1e67c974bb490dafe5b4b9a6d24ae4bd5a8b60ca01e90450864369af7569",
+    "Cargo.lock": "38d962b3947919c0b6a9984a15820da440f30784ed9b653f1403cceee4048c9d",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",

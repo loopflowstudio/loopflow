@@ -544,9 +544,8 @@ pub enum TaskRunMode {
     Stop,
     /// Run each with a person in this terminal (`-i`).
     InPlace,
-    /// Stand in at each headless and hand the Task to Auto-Ship (`-b`, `lf ship`),
-    /// the only run that grants merge authority.
-    AutoShip,
+    /// Run each headless, standing in for the person (`-b`, `lf ship`).
+    Headless,
 }
 
 impl TaskRunMode {
@@ -564,6 +563,16 @@ pub(crate) struct TaskRunSelection {
     pub take_up: bool,
     /// Where the run begins; `None` when nothing remains before `end`.
     pub start: Option<crate::task_graph::Place>,
+}
+
+impl TaskRunSelection {
+    /// Whether the run reaches `end`: it runs through interactive steps, or
+    /// none lies ahead. Such a run hands the Task off, granting merge authority.
+    pub fn reaches_end(&self, mode: TaskRunMode) -> bool {
+        self.start
+            .as_ref()
+            .is_none_or(|place| mode.runs_through() || self.graph.next_interactive(place).is_none())
+    }
 }
 
 /// The graph a Task with none takes up: its Wave's, its repository's, else `code`.
@@ -684,11 +693,13 @@ async fn start_task_run(
     mode: TaskRunMode,
 ) -> OpsResult<TaskRunStart> {
     let through = mode.runs_through();
+    let selection = select_task_run(store, task, task.worktree()?, requested, from)?;
+    let ships = selection.reaches_end(mode);
     let TaskRunSelection {
         graph,
         take_up,
         start,
-    } = select_task_run(store, task, task.worktree()?, requested, from)?;
+    } = selection;
     let issue = task.identifier.clone();
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
@@ -724,13 +735,7 @@ async fn start_task_run(
     };
     if !store
         .sqlite
-        .start_task_graph_run(
-            &task.id,
-            &row,
-            &start.cursor(),
-            &process,
-            mode == TaskRunMode::AutoShip,
-        )
+        .start_task_graph_run(&task.id, &row, &start.cursor(), &process, ships)
         .map_err(task_error)?
     {
         return Err(task_error(format!(

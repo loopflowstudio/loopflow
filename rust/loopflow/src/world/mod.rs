@@ -626,10 +626,13 @@ impl World {
             .sqlite
             .task_graph_row(&task.id)?
             .expect("the Task has a graph");
-        if !store
-            .sqlite
-            .start_task_graph_run(&task.id, &row, &start.cursor(), &run.id, false)?
-        {
+        if !store.sqlite.start_task_graph_run(
+            &task.id,
+            &row,
+            &start.cursor(),
+            &run.id,
+            stops_at == END,
+        )? {
             bail!("Task {issue} moved while starting {requested}");
         }
         let name = captured.name.clone();

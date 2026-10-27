@@ -1756,11 +1756,10 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
     assert_eq!(task.graph()["position"], at("end"));
     // Nothing runs while completion waits on the PR, so the Task reads idle.
     assert_eq!(task.state(), "idle");
-    // A plain run into end requests completion but never hands the Task to
-    // Auto-Ship: only `lf ship` or `-b task run` grants merge authority.
+    // A plain run into end hands the Task to Auto-Ship, which may land it.
     let stop = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let stop = String::from_utf8_lossy(&stop.stdout);
-    assert!(stop.contains("INF-123 is not shipping"), "{stop}");
+    assert!(stop.contains("INF-123 stopped shipping"), "{stop}");
     let error = refusal(task.run(&["task", "complete", "INF-123"]));
     assert!(error.to_lowercase().contains("pull request"), "{error}");
     assert_eq!(task.graph()["position"], at("end"));

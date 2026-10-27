@@ -70,7 +70,7 @@ pub fn run(
                 reason: None,
                 ..TaskProcessOptions::default()
             },
-            crate::ops::task::TaskRunMode::AutoShip,
+            crate::ops::task::TaskRunMode::Headless,
         )?;
         if let TaskRunStart::Run(step) = start {
             // This ship has already let its launcher go, or keeps it to the end.

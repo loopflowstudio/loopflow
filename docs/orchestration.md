@@ -139,13 +139,13 @@ lf ship LOO-12                      # the same, returning once the Task is shipp
 
 `-i` makes every step of a launch interactive and `-b` every step headless. At an
 interactive step with a loop behind it, you, or the agent standing in, decide
-advance or iterate. A run that stops or fails leaves the Task where that run
-began; the next `lf task run` starts it again. `--from` takes a step's id, its
-Skill, or the Graph it was composed from; starting from an interactive step only
-puts the Task there. After the last step the Task reaches `end`, which requests
-completion. Only `lf ship` or `lf -b task run` hands the Task to Auto-Ship, which
-may merge; a plain run into `end` grants no merge authority. Other Graphs in the
-Task's worktree never move it. There is no approve command: give feedback in the
+advance or iterate; blocked there, the Task waits at that step. A run that
+otherwise stops or fails leaves the Task where that run began; the next
+`lf task run` starts it again. `--from` takes a step's id, its Skill, or the
+Graph it was composed from; starting from an interactive step only puts the Task
+there. After the last step the Task reaches `end`, which requests completion.
+`lf ship` or any run into `end` hands the Task to Auto-Ship, which may land its
+PR. Other Graphs in the Task's worktree never move it. There is no approve command: give feedback in the
 Task's conversation, which knows its step and how to go on. `lf ship --stop`
 withdraws Auto-Ship.
 

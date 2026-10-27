@@ -247,8 +247,8 @@ fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Opt
 
 /// Put the Task on a run from `start`, carried by `by`, if it still stands
 /// where the caller read it: at `step`, with `stopped` the run that last left
-/// it, if any. With `ships`, an Auto-Ship run hands the Task off; no other
-/// run gains merge authority.
+/// it, if any. With `ships`, the run reaches `end` and hands the Task off,
+/// granting merge authority.
 #[allow(clippy::too_many_arguments)]
 fn start_run_in(
     tx: &rusqlite::Transaction<'_>,

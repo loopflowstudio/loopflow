@@ -2370,7 +2370,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             if cli.interactive {
                 loopflow::ops::task::TaskRunMode::InPlace
             } else if cli.batch {
-                loopflow::ops::task::TaskRunMode::AutoShip
+                loopflow::ops::task::TaskRunMode::Headless
             } else {
                 loopflow::ops::task::TaskRunMode::Stop
             },

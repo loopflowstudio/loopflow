@@ -2549,7 +2549,6 @@ mod tests {
             Cli::try_parse_from(["lf", "wave", "new-chapter", "October", "--plan", "p.json"])
                 .is_err()
         );
-        assert!(Cli::try_parse_from(["lf", "session", "steer", "keep attribution"]).is_err());
         assert!(
             Cli::try_parse_from(["lf", "session", "steer", "session_1", "m", "--repo"]).is_err()
         );
@@ -2588,7 +2587,8 @@ mod tests {
                 "--plan",
                 "p.json",
             ],
-            vec!["lf", "session", "steer", "--repo", "keep attribution"],
+            vec!["lf", "session", "steer", "keep attribution"],
+            vec!["lf", "--repo", "loopflow", "session", "steer", "keep attribution"],
             vec!["lf", "session", "steer", "session_1", "keep attribution"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
             vec!["lf", "ops", "machine", "use", "mini"],

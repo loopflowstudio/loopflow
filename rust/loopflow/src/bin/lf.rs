@@ -3182,7 +3182,7 @@ mod tests {
             .to_vec();
         assert_eq!(
             reorder_args(loopflow::lf::navigation::normalize_args(args).unwrap()),
-            vec!["lf", "--wave", "goals", "commit", "-m", "ship it"]
+            vec!["lf", "--wave", "goals", "ops", "commit", "-m", "ship it"]
         );
     }
 

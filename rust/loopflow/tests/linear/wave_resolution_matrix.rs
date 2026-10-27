@@ -74,6 +74,9 @@ const FILTER_ONLY: &[&[&str]] = &[
     &["history", "usage"],
 ];
 
+/// Rotation names its Wave or takes `--all`; it never resolves ambient context.
+const EXPLICIT_OR_ALL: &[&[&str]] = &[&["wave", "new-chapter"]];
+
 /// Commands that require a Wave on the command line and therefore never
 /// resolve ambient context.
 const EXPLICIT_WAVE_ONLY: &[&[&str]] = &[&["wave", "rename"], &["discord", "serve"]];
@@ -517,6 +520,7 @@ fn registry_is_complete() {
         .chain(AUTHORED_CONTEXT)
         .chain(SESSION_TARGETS)
         .chain(MEMBERSHIP_TARGETS)
+        .chain(EXPLICIT_OR_ALL)
         .map(|path| path.iter().map(|s| s.to_string()).collect())
         .collect();
 
@@ -539,6 +543,7 @@ fn registry_is_complete() {
         .chain(AUTHORED_CONTEXT)
         .chain(SESSION_TARGETS)
         .chain(MEMBERSHIP_TARGETS)
+        .chain(EXPLICIT_OR_ALL)
     {
         assert!(
             find_clap_command(&root, path).is_some(),

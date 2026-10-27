@@ -440,6 +440,13 @@ mod tests {
             routes(&pursue, START),
             [("implement".to_string(), END.to_string())]
         );
+        // auto runs pursue then deliver as one route, with no stage for a person.
+        let auto = load_workflow("auto", repo.path()).unwrap().unwrap();
+        assert!(auto.nodes.is_empty());
+        assert_eq!(
+            routes(&auto, START),
+            [("pursue".to_string(), END.to_string())]
+        );
         assert!(load_workflow("no-such-graph", repo.path())
             .unwrap()
             .is_none());

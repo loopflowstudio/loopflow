@@ -43,7 +43,7 @@ fn tokens_measures_tracked_source_through_the_repo_owner() {
     let tree: Value = serde_json::from_slice(&success(run(
         repo.path(),
         home.path(),
-        &["repo", "tokens", "--json"],
+        &["ops", "tokens", "--json"],
     )))
     .unwrap();
     let source = tree["children"]
@@ -62,7 +62,7 @@ fn tokens_measures_tracked_source_through_the_repo_owner() {
     let history: Value = serde_json::from_slice(&success(run(
         repo.path(),
         home.path(),
-        &["repo", "tokens", "--days", "1", "--json"],
+        &["ops", "tokens", "--days", "1", "--json"],
     )))
     .unwrap();
     assert_eq!(history.as_array().unwrap().len(), 1);
@@ -77,7 +77,7 @@ fn ci_remains_a_read_only_home_report_outside_a_checkout() {
     let report: Value = serde_json::from_slice(&success(run(
         dir.path(),
         home.path(),
-        &["repo", "ci", "--repo", "example/repo", "--json"],
+        &["ci", "--repo", "example/repo", "--json"],
     )))
     .unwrap();
     assert_eq!(report["repo"], "example/repo");
@@ -108,11 +108,7 @@ fn release_bump_uses_the_same_operation_from_cli_and_captured_graph() {
         "Cargo.toml",
         "[package]\nname = \"fixture\"\nversion = \"0.9.0\"\n",
     );
-    success(run(
-        repo.path(),
-        home.path(),
-        &["repo", "release", "bump", "0.9.1"],
-    ));
+    success(run(repo.path(), home.path(), &["release", "bump", "0.9.1"]));
     assert!(fs::read_to_string(repo.path().join("Cargo.toml"))
         .unwrap()
         .contains("version = \"0.9.1\""));
@@ -121,8 +117,8 @@ fn release_bump_uses_the_same_operation_from_cli_and_captured_graph() {
         command: "repo".into(),
         args: ["release", "bump", "0.9.2"].map(str::to_string).to_vec(),
     };
-    // A Graph runs the operation as its own command.
-    let argv = captured.argv();
+    // A Graph runs the captured operation under its current owner.
+    let argv = captured.current().argv();
     let argv: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
     success(run(repo.path(), home.path(), &argv));
     assert!(fs::read_to_string(repo.path().join("Cargo.toml"))

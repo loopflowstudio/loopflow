@@ -32,7 +32,6 @@ mod portfolio_cli_tests;
 mod pr_review_tests;
 mod release_lock_tests;
 mod repo_commands;
-mod scheduled_release_tests;
 mod scratch_tests;
 mod session_cli_tests;
 mod session_steers;

@@ -1,6 +1,6 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
 use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
-use crate::lf::{Cli, Commands, MachineCommand, SessionCommand, TaskCommand};
+use crate::lf::{Cli, Commands, MachineCommand, OpsCommand, SessionCommand, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
 
@@ -11,7 +11,7 @@ pub fn identity(
     json: bool,
 ) -> Result<()> {
     let repo = crate::repository::CanonicalRepo::current()?
-        .ok_or_else(|| anyhow!("run `lf repo identity` in a repository"))?;
+        .ok_or_else(|| anyhow!("run `lf repository` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let identity = runtime.block_on(async {
         let store = crate::store::open_store(&crate::store::storage_config_from_env()?).await?;
@@ -36,7 +36,7 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
         .map(|store| store.repository_path(id))
         .transpose()?
         .flatten()
-        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repo identity --bind {id}` in its repository on this Machine"))?;
+        .ok_or_else(|| anyhow!("repository plan {id} has no local checkout; run `lf repository --bind {id}` in its repository on this Machine"))?;
     Ok(path.into())
 }
 
@@ -57,7 +57,7 @@ pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     ) {
         return Ok(()); // Keep the requested portable ID in the reply envelope.
     }
-    let explicit_repository = cli.repo.is_some() || cli.repository.is_some();
+    let explicit_repository = cli.selects_repository();
     let (command_task, parent_task) = match &mut cli.command {
         Some(Commands::Task {
             cmd:
@@ -119,10 +119,14 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         Some(Commands::Task {
             cmd: TaskCommand::Claim { issue, .. } | TaskCommand::Unclaim { issue, .. },
         }) => Some(issue.as_str()),
-        Some(Commands::Machine {
-            cmd: MachineCommand::Use {
-                task: Some(task), ..
-            },
+        Some(Commands::Ops {
+            cmd:
+                OpsCommand::Machine {
+                    cmd:
+                        MachineCommand::Use {
+                            task: Some(task), ..
+                        },
+                },
         }) => Some(task.as_str()),
         _ => cli.task.as_deref(),
     }
@@ -130,20 +134,23 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 
 /// Bare `lf machine use` and bare `lf connect` in a Task's worktree act on that
 /// Task, so they route to its Machine exactly as `--task` does. `--session` and
-/// `--tasks` set the worktree's Wave or repository instead.
+/// `--tasks` set the worktree's Wave or repository instead, as does a selected
+/// repository.
 fn worktree_task(cli: &Cli) -> Result<Option<String>> {
     let bare = match &cli.command {
-        Some(Commands::Machine {
+        Some(Commands::Ops {
             cmd:
-                MachineCommand::Use {
-                    wave: None,
-                    task: None,
-                    repo: false,
-                    session: false,
-                    tasks: false,
-                    ..
+                OpsCommand::Machine {
+                    cmd:
+                        MachineCommand::Use {
+                            wave: None,
+                            task: None,
+                            session: false,
+                            tasks: false,
+                            ..
+                        },
                 },
-        }) => true,
+        }) => !cli.selects_repository(),
         Some(Commands::Session {
             cmd:
                 SessionCommand::Connect {
@@ -151,7 +158,7 @@ fn worktree_task(cli: &Cli) -> Result<Option<String>> {
                     all: false,
                     ..
                 },
-        }) => cli.wave.is_none() && cli.repo.is_none() && cli.repository.is_none(),
+        }) => cli.wave.is_none() && !cli.selects_repository(),
         _ => false,
     };
     if !bare || cli.task.is_some() {
@@ -203,8 +210,10 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Claim { .. } | TaskCommand::Unclaim { .. }
-        }) | Some(Commands::Machine {
-            cmd: MachineCommand::Use { .. }
+        }) | Some(Commands::Ops {
+            cmd: OpsCommand::Machine {
+                cmd: MachineCommand::Use { .. }
+            }
         })
     ) {
         // Ownership needs no checkout on the writer; name the exact Task in place.
@@ -345,7 +354,7 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     };
     let wave = match cli.wave.clone() {
         Some(wave) => Some(wave),
-        None if cli.repo.is_some() || cli.repository.is_some() => None,
+        None if cli.selects_repository() => None,
         None => match context_scope(&registry, repo.as_deref())? {
             Some(ContextScope::Wave(name)) => Some(name),
             Some(ContextScope::Repository) => None,
@@ -397,7 +406,7 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     }
     if cli.repository.is_none() {
         let repository = repository
-        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo identity` here so it can address the repository"))?;
+        .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repository` here so it can address the repository"))?;
         forwarded.splice(0..0, ["--repository".into(), repository.to_string()]);
     }
     super::ssh::run(machine.as_str(), false, cli, &forwarded, None)?;

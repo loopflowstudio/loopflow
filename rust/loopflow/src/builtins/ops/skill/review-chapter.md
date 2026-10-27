@@ -51,7 +51,7 @@ Lead with experienced changes for users, operators, maintainers and agents,
 organized by Wave. Preserve exact claims, evidence dates, counterexamples,
 Task/PR references, changed claims and coverage gaps underneath. Report actual
 Task transfers and cancellations only where dated evidence establishes them.
-If an exact-ID plan is supplied, `lf repo new-chapter <name> --plan <plan.json> --dry-run --json`
+If an exact-ID plan is supplied, `lf wave new-chapter --all <name> --plan <plan.json> --dry-run --json`
 can supply prospective dispositions for the entire repository. Label that dated
 preview separately from historical facts; it does not apply
 rotation. Never invent a second Task classifier in prose.

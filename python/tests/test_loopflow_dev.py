@@ -38,7 +38,7 @@ def test_demo_launch_requires_work_opening_on_selected_runtime(
         "exit 2\n"
     )
     cli.chmod(0o755)
-    assert subprocess.run([str(cli), "repo", "identity", "--help"]).returncode == 0
+    assert subprocess.run([str(cli), "config", "repository", "--help"]).returncode == 0
 
     monkeypatch.setattr(loopflow_dev, "DEV_APP", app)
     monkeypatch.setattr(loopflow_dev, "REPO_ROOT", tmp_path)

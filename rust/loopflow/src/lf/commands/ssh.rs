@@ -47,8 +47,10 @@ pub fn run(
                 | crate::lf::TaskCommand::Save { .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
-        }) | Some(crate::lf::Commands::Machine {
-            cmd: crate::lf::MachineCommand::Use { .. }
+        }) | Some(crate::lf::Commands::Ops {
+            cmd: crate::lf::OpsCommand::Machine {
+                cmd: crate::lf::MachineCommand::Use { .. }
+            }
         })
     );
     let runtime = tokio::runtime::Runtime::new()?;
@@ -366,7 +368,7 @@ fn build_preamble(cmd: &[String], extra_env: &[(&str, &str)]) -> String {
 }
 
 /// The caller's repository by identity; `None` outside a repository or before
-/// `lf repo identity`, when the destination runs in its home directory.
+/// `lf repository`, when the destination runs in its home directory.
 fn current_repository() -> anyhow::Result<Option<crate::durable::RepositoryId>> {
     let Some(repo) = crate::repository::CanonicalRepo::current()? else {
         return Ok(None);

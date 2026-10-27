@@ -288,7 +288,7 @@ Next implement work is unchanged: `focus -p N/…` turning the strip.
 
 - Oct 26 (items 1–7, 12): `cargo test -p loopflow --lib -- desktop:: selection ops::people` 79 pass; `--test integration` dto/desktop/repo_people/reference/documented 48 pass; clippy clean; `scripts/test_desktop.sh --filter 'WaveStandupTests|DTOFixtureTests|DesktopPaneControlTests|WorkspacePanesTests|WorkNavigationTests|DesktopHeadlessTests|DashboardWorkspaceTests'` 156 pass. Part routing of `zoom`/`resize -p board` through the CLI has no live-Desktop test (gate/demo); `lf repo people` against GitHub ran by hand only.
 - Oct 26 compress (section vocabulary, `Person.github`): `scripts/test_desktop.sh --filter 'WaveStandupTests|DesktopPaneControlTests'` 35 pass.
-- Oct 27 demo answers: `scripts/test_desktop.sh --filter 'WaveStandupTests|WorkModelTests|WorkObservationTransportTests'` pass (silence test now sends a first frame, then expects the 10 s limit); 60 s startup limit and board fill unverified headless (demo).
+- Oct 27 demo answers: CHECKS_PENDING
 
 ## Direction added October 26, 2026, after acceptance (binding; supersedes conflicts above)
 
@@ -358,9 +358,8 @@ Jack Heart answered the demo questions:
 4. **Board paint bug:** the board part's dark background covers only the left part of its pane (to about x 1390 of 2000). The board must fill its part's frame.
 
 Built October 27: (1) no change; the strip already lists Working Tasks only.
-(2) `WaveStandup.state`: a Task planning closed (completed, canceled, duplicate) whose
-local state is still unstarted reads done, so it leaves Backlog and its count;
-Done still counts only completed. (3) `LocalLineObservation` allows 60 s of silence
+(2) nothing; a `WaveStandup.state` override briefly built in 1ccee83229 was removed the
+same day per Jack Heart's steer (no filtering, no new state). (3) `LocalLineObservation` allows 60 s of silence
 before a reader's first frame and 10 s after it; the feed itself is unchanged (its
 heartbeat already runs every 2 s once started; the stall was process startup).
 (4) The board and `WaveViewHeader` fill with `.background(_, ignoresSafeAreaEdges: [])`:

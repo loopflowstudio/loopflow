@@ -141,3 +141,7 @@ Agent observations (verified):
   board part's dark background covers only its left portion (to about x 1390 of 2000);
   the rest of the board pane shows the window background. Needs a fix: the board view
   should fill its part's frame.
+
+## Canceled leftovers fixed in the store (October 27)
+
+Jack Heart: no code for state users can't reach; edit the local store. Sixteen Tasks were `canceled` in Linear with no checkout and no `abandoned_at` (LOO-299, LOO-307/308/310, LOO-313/314/315, LOO-318, LOO-395, LOO-410, LOO-430/431/432, MTG-82, MTG-116, MTG-120). Set `abandoned_at` and `abandon_reason='canceled in Linear'` directly in `~/.lf/loopflow.db`; `lf task status LOO-299` now reads `abandoned`. Original rows saved as INSERTs in the session scratchpad (`canceled-tasks-backup.sql`).

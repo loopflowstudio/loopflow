@@ -97,7 +97,6 @@ struct WorkNavigator: View {
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
-                    if scope == .repository { DashboardSidebar(model: model, scopeTitle: scopeTitle) }
                 }.padding(8)
             }
             WaveSectionDivider(navigation: model.navigation)
@@ -332,7 +331,7 @@ struct WorkBreadcrumbs: View {
                 model.select(nil)
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()
-            WorkJumpSeparator(model: model, scope: .repository, label: "Waves and Dashboards")
+            WorkJumpSeparator(model: model, scope: .repository, label: "Waves")
             // A Wave view in the trail, or the Wave of Work outside any board, heads
             // the crumbs after the repository; the repository page adds none.
             let board = model.navigation.trailBoard
@@ -342,13 +341,12 @@ struct WorkBreadcrumbs: View {
                 waveCrumb(wave.roadmap.wave.id, name: wave.roadmap.wave.displayName)
             }
             switch board {
+            // A Dashboard opened through `lf desktop` names itself; Back returns to it.
             case .saved(let id):
-                Button(model.dashboard(id)?.name ?? id) { model.selectDashboard(id) }
-                    .lineLimit(1).fixedSize().disabled(model.navigation.dashboardID == id)
+                Text(model.dashboard(id)?.name ?? id).lineLimit(1).fixedSize()
                 if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             case .workingTasks:
-                Button(WorkNavigation.workingTasksTitle) { model.selectWorkingTasksDashboard() }
-                    .lineLimit(1).fixedSize().disabled(model.navigation.destination == .workingTasks)
+                Text(WorkNavigation.workingTasksTitle).lineLimit(1).fixedSize()
                 if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             case .wave, .repository, nil: EmptyView()
             }

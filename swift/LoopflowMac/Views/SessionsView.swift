@@ -49,8 +49,7 @@ struct ConsoleCommands: Commands {
             action("forward")
             action("next")
             action("previous")
-            Menu("Working Tasks") { action("goto") }
-            action("working-tasks")
+            Menu("Go to Task") { action("goto") }
             action("toggle-shell")
             action("toggle-browser")
             action("page-back")
@@ -1307,7 +1306,7 @@ struct SessionsContentView: View {
         navigation.restorePaletteFocus = false
         navigation.palette = nil
         switch destination {
-        case .repository, .dashboard, .openRepository, .wave, .task:
+        case .repository, .openRepository, .wave, .task:
             model.jump(to: destination, source: "palette")
             return
         case .graph(let name): navigation.palette = .graph(name)

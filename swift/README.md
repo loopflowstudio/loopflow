@@ -50,8 +50,8 @@ path follows hierarchy: click a name to go there, or the **›** after it to lis
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
 across repositories and opens another repository in its own window. Its
 **Sidebar shows** picker filters Working tasks / Available / Running without
-changing the selected Work. Click a Wave or Dashboard and its name moves into the
-sidebar header; the rows below are its Tasks, in plan or arrangement order, until
+changing the selected Work. Click a Wave and its name moves into the
+sidebar header; the rows below are its Tasks, in plan order, until
 **‹ repo** returns to Working Tasks. **⌘1–9** selects the sidebar's Task rows by
 position and **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing. Selecting a
 Dashboard's Task, from any of these, keeps the Dashboard in the path, as its tile does.
@@ -926,14 +926,16 @@ starting a provider. Waves group their full inventory as Owned and Unowned; rows
 
 ## Dashboards
 
-Use **+** beside Dashboards to name and pin a query such as
-`(wave:product state:open) or state:available`. Cmd-K finds saved Dashboards.
-Edit changes only that Dashboard; repository and Wave conversations keep their
-normal views. Unstarted Tasks show **Start** and their brief without opening a Session.
+```bash
+lf desktop view 'state:available'             # open an unsaved Dashboard
+lf desktop view 'query:attention'             # open a saved one
+```
 
-`lf desktop view 'state:available'` opens an unsaved Dashboard. Save it to name,
-pin and arrange it. Tasks appear side by side only in Dashboard query results;
-ordinary navigation, including Command-click, selects one destination and retains
+Dashboards open only through `lf desktop`; the sidebar, Cmd-K and menus offer none.
+Save an open query to name, pin and arrange it. Edit changes only that Dashboard;
+repository and Wave conversations keep their normal views. Unstarted Tasks show
+**Start** and their brief without opening a Session. Tasks appear side by side
+only in Dashboard query results; ordinary navigation, including Command-click, selects one destination and retains
 each Task's panes and drafts for its next visit.
 
 Drag tile headers to reorder, add or remove slots, or hide an occurrence and

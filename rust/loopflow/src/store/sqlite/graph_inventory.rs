@@ -227,17 +227,14 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Where `parent`'s children end now; a child started later lies beyond it.
-    /// A running parent's children are never forgotten, and SQLite gives a new
-    /// row a rowid above every remaining one, so forgetting other finished rows
-    /// cannot put a later child behind this mark.
-    pub(crate) fn process_mark(&self, parent: &LfProcessId) -> StoreResult<i64> {
+    /// Where the Process table ends now; a child started later lies beyond it.
+    pub(crate) fn process_mark(&self) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT COALESCE(MAX(rowid),0) FROM processes WHERE parent_lf_process_id=?1",
-            [parent],
-            |row| row.get(0),
-        )?)
+        Ok(
+            conn.query_row("SELECT COALESCE(MAX(rowid),0) FROM processes", [], |row| {
+                row.get(0)
+            })?,
+        )
     }
 
     /// The first Process `parent` started after `mark`.

@@ -20,14 +20,13 @@ use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact::Decoded;
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::opencode_decode::{OpenCodeDecoder, ReaderState, Snapshot};
-use crate::harness::{ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
+use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
 use crate::id::AgentSessionId;
 
 pub(crate) const OPENCODE_DISCONNECTED_CODE: &str = "opencode_disconnected";
 
 pub struct OpenCodeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
-    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     client: reqwest::Client,
     password: String,
     authorization: reqwest::header::HeaderValue,
@@ -74,7 +73,6 @@ impl OpenCodeHarness {
     ) -> Self {
         Self {
             events,
-            raw_provider: None,
             client: reqwest::Client::new(),
             password: String::new(),
             authorization: reqwest::header::HeaderValue::from_static(""),
@@ -224,7 +222,6 @@ impl OpenCodeHarness {
         let authorization = self.authorization.clone();
         let interactive = self.interactive;
         let event_tx = self.events.clone();
-        let raw_provider = self.raw_provider.clone();
         let client = self.client.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let turn_in_progress = self.turn_in_progress.clone();
@@ -303,12 +300,6 @@ impl OpenCodeHarness {
                 for payload in parser.push(&chunk) {
                     if payload.trim().is_empty() || payload.trim() == "[DONE]" {
                         continue;
-                    }
-                    if let Some(raw_provider) = &raw_provider {
-                        let _ = raw_provider.send(RawProviderEvent {
-                            stream: "sse",
-                            line: payload.clone(),
-                        });
                     }
 
                     let parsed = serde_json::from_str::<Value>(&payload);
@@ -416,13 +407,6 @@ impl OpenCodeHarness {
 impl Harness for OpenCodeHarness {
     fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
-    }
-
-    fn set_raw_provider_sender(
-        &mut self,
-        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
-    ) {
-        self.raw_provider = raw_provider;
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {

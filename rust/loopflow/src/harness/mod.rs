@@ -98,12 +98,6 @@ fn set_vendor_std_env(
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub struct RawProviderEvent {
-    pub stream: &'static str,
-    pub line: String,
-}
-
 #[cfg(test)]
 mod environment_tests {
     use std::ffi::OsString;
@@ -281,14 +275,6 @@ pub trait Harness: Send + Sync {
     /// the Run retains the runner group recorded at activation.
     fn process_group_id(&self) -> Option<u32> {
         None
-    }
-    /// Tee provider-native frames already visible to the adapter. The sender
-    /// is optional because conformance tests and callers below the production
-    /// launch gate do not own a trace capture.
-    fn set_raw_provider_sender(
-        &mut self,
-        _raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
-    ) {
     }
     /// Seed a previously persisted vendor session id so the next turn resumes
     /// it. Harnesses that take resume state at `start` instead ignore this.

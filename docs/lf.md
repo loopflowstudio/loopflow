@@ -616,7 +616,7 @@ its `settings.json`); Codex, OpenCode and Pi keep everything. Raise
 what is readable by provider, account and age, and lists the next removals.
 
 `lf history show SESSION` also prints private Codex relay failures with their
-AgentProcess identity. `--events` includes the diagnostic JSON. Retention keeps
+AgentProcess identity. Retention keeps
 the first 16 failures per captured input, with each error capped at 2048 bytes;
 explicit client closes stay quiet. These observations never settle a turn.
 

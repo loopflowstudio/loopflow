@@ -83,6 +83,15 @@ pub(crate) enum ProviderFact {
         detail: Value,
     },
     RateLimit(RateLimitSignal),
+    /// One main-conversation model request and the input it carried, counted
+    /// by the provider (cache reads and writes included).
+    Request {
+        input_tokens: u64,
+    },
+    /// The provider compacted the conversation; `pre_tokens` were in context.
+    Compacted {
+        pre_tokens: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +175,8 @@ pub(crate) fn fact_lines(decoded: &[Decoded]) -> Vec<String> {
                 t.as_ref().map_or("-".to_owned(), turn)
             ),
             ProviderFact::RateLimit(_) => "RateLimit".to_owned(),
+            ProviderFact::Request { input_tokens } => format!("Request {input_tokens}"),
+            ProviderFact::Compacted { pre_tokens } => format!("Compacted {pre_tokens:?}"),
         })
         .collect()
 }

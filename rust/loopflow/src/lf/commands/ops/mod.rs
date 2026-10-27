@@ -2655,7 +2655,6 @@ fn process_skill_agent(
             &prepared.config,
         )),
     )?;
-    capture.record_input("initial", &prepared.config.task_prompt);
 
     let launch = prepared.config;
     let process = ProcessConfig {

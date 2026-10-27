@@ -138,16 +138,13 @@ elif os.path.basename(sys.argv[0]) == 'codex':
 }
 
 /// Each OpenCode launch's private stderr log, found where it is retained.
-fn opencode_logs(dir: &Path) -> Vec<std::path::PathBuf> {
+fn files_named(dir: &Path, file: &str) -> Vec<std::path::PathBuf> {
     let mut found = Vec::new();
     for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
         let path = entry.path();
         if path.is_dir() {
-            found.extend(opencode_logs(&path));
-        } else if path
-            .file_name()
-            .is_some_and(|name| name == "opencode.stderr.log")
-        {
+            found.extend(files_named(&path, file));
+        } else if path.file_name().is_some_and(|name| name == file) {
             found.push(path);
         }
     }
@@ -247,7 +244,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
         assert!(!stderr.contains("stream error"), "{stderr}");
         assert!(!stderr.contains("background diagnostic"), "{stderr}");
         assert!(!stderr.contains("diagnostics:"), "{stderr}");
-        let logs = opencode_logs(fixture.home.path());
+        let logs = files_named(fixture.home.path(), "opencode.stderr.log");
         assert_eq!(logs.len(), 1, "{logs:?}");
         let path = &logs[0];
         let log = fs::read(path).unwrap();
@@ -288,7 +285,7 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
         stderr.contains("startup failure without a session"),
         "{stderr}"
     );
-    let logs = opencode_logs(fixture.home.path());
+    let logs = files_named(fixture.home.path(), "opencode.stderr.log");
     assert_eq!(logs.len(), 1, "{logs:?}");
     assert_eq!(
         fs::read(&logs[0]).unwrap(),
@@ -1351,6 +1348,54 @@ exit 3
             1
         );
     }
+}
+
+#[test]
+fn headless_step_keeps_prompt_context_in_the_store_without_a_stream_file() {
+    let fixture = Fixture::new("claude:sonnet");
+    let script = fixture.home.path().join("bin/claude");
+    fs::write(
+        &script,
+        r#"#!/usr/bin/python3 -I
+import json, sys
+if '--version' in sys.argv:
+    print('fixture'); sys.exit(0)
+message = json.loads(sys.stdin.readline())
+def say(line): print(json.dumps(line), flush=True)
+say({'type': 'system', 'subtype': 'init', 'session_id': 'context-fixture'})
+say({**message, 'session_id': 'context-fixture'})
+for id, fresh in [('m1', 900), ('m2', 4000)]:
+    usage = {'input_tokens': fresh, 'cache_read_input_tokens': 100, 'output_tokens': 5}
+    say({'type': 'assistant', 'session_id': 'context-fixture', 'message': {'id': id,
+        'role': 'assistant', 'content': [{'type': 'text', 'text': 'done'}], 'usage': usage}})
+say({'type': 'result', 'session_id': 'context-fixture', 'subtype': 'success', 'result': 'done'})
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    fixture.repo.create_file(".lf/skills/probe.md", "Probe.");
+
+    success(
+        &fixture
+            .command()
+            .args(["-b", "probe", "measure"])
+            .output()
+            .unwrap(),
+    );
+
+    let machine = fixture.home.path().join("machine");
+    assert_eq!(files_named(&machine.join("runs"), "manifest.json").len(), 1);
+    assert!(files_named(&machine.join("runs"), "events.jsonl").is_empty());
+    let output = fixture
+        .command()
+        .args(["history", "usage", "--context", "--json"])
+        .output()
+        .unwrap();
+    success(&output);
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let step = &report["steps"][0];
+    assert_eq!(step["first_request_tokens"], 1000, "{report}");
+    assert_eq!(step["peak_request_tokens"], 4100, "{report}");
 }
 
 fn pi_fixture() -> Fixture {

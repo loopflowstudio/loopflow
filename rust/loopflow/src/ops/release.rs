@@ -1016,7 +1016,7 @@ pub(crate) fn release_run_with_cron(
         if let Some(proof) = telemetry {
             verification.push(proof);
         }
-        let saved = context
+        let mut saved = context
             .as_ref()
             .and_then(|r| {
                 r.opportunities
@@ -1026,7 +1026,6 @@ pub(crate) fn release_run_with_cron(
             })
             .and_then(|a| a.selection.as_ref());
         let mut replacement_version = None;
-        let mut superseded = false;
         if let Some(selection) = saved.filter(|_| !target.publisher.is_empty()) {
             let candidate = ReleaseCandidate::new(&target, &selection.tag, &selection.commit);
             checked_candidate_tag(&main_repo, &candidate)?;
@@ -1055,36 +1054,34 @@ pub(crate) fn release_run_with_cron(
                     "Saved release {} was published and superseded by {latest_tag}; releasing from current main...",
                     candidate.tag
                 ));
-                superseded = true;
-            }
-        }
-        let saved = saved.filter(|_| !superseded);
-        if let Some(selection) = saved.filter(|_| !target.publisher.is_empty()) {
-            let candidate = ReleaseCandidate::new(&target, &selection.tag, &selection.commit);
-            let inspection = inspect_release_source(&main_repo, &target, &candidate, true, &lock)?;
-            let proof = persist_verification(
-                &main_repo,
-                "release-source-inspection",
-                &candidate.commit,
-                &inspection,
-            )?;
-            verification.push(proof.clone());
-            if !inspection.preparation_required.is_empty() {
-                inspection.ensure_unpublished(&candidate.tag)?;
-                if remote_tag_sha(&main_repo, &candidate.tag)?.is_some() {
-                    return Err(OpsError::Message(format!(
+                saved = None;
+            } else {
+                let inspection =
+                    inspect_release_source(&main_repo, &target, &candidate, true, &lock)?;
+                let proof = persist_verification(
+                    &main_repo,
+                    "release-source-inspection",
+                    &candidate.commit,
+                    &inspection,
+                )?;
+                verification.push(proof.clone());
+                if !inspection.preparation_required.is_empty() {
+                    inspection.ensure_unpublished(&candidate.tag)?;
+                    if remote_tag_sha(&main_repo, &candidate.tag)?.is_some() {
+                        return Err(OpsError::Message(format!(
                         "unfinished tagged release {} needs preparation; recover that version before starting another",
                         candidate.tag
                     )));
+                    }
+                    accounting::authorize_replacement(
+                        &home,
+                        &main_repo,
+                        cron_receipt.expect("saved selection has receipt"),
+                        selection,
+                        proof,
+                    )?;
+                    replacement_version = Some(version_from_tag(&candidate.tag, &target)?);
                 }
-                accounting::authorize_replacement(
-                    &home,
-                    &main_repo,
-                    cron_receipt.expect("saved selection has receipt"),
-                    selection,
-                    proof,
-                )?;
-                replacement_version = Some(version_from_tag(&candidate.tag, &target)?);
             }
         }
         let result = if let Some(selection) = saved.filter(|_| replacement_version.is_none()) {
@@ -1569,11 +1566,11 @@ fn superseding_tag(
     target: &ReleaseTarget,
     candidate: &ReleaseCandidate,
 ) -> OpsResult<Option<String>> {
-    let latest = latest_tag_optional(repo, target)?.filter(|tag| tag != &candidate.tag);
-    if latest.is_none() || !github_release_exists(repo, &candidate.tag)? {
+    let Some(latest) = latest_tag_optional(repo, target)?.filter(|tag| tag != &candidate.tag)
+    else {
         return Ok(None);
-    }
-    Ok(latest)
+    };
+    Ok(github_release_exists(repo, &candidate.tag)?.then_some(latest))
 }
 
 fn finish_candidate(

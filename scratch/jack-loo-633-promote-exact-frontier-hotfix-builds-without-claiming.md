@@ -44,7 +44,7 @@ promote output, receipt and `lf self doctor`.
 ## Delete — do not maintain
 
 - `decide()`'s unconditional validation-only rejection.
-- `promote_published_from_installation`'s published-only refusal.
+- The published-only refusal in promote (now `promote_from_installation`).
 - Authority check in `exact_published_switch_candidate`; ValidationOnly→Development
   mapping in `active_install_matches_candidate`.
 - `.lf/skills/hotfix.md` (landed on main in #1712, LOO-635) step 4's env-var build and
@@ -76,5 +76,4 @@ Kept: `LOOPFLOW_BUILD_PROVENANCE`/`LOOPFLOW_MIGRATION_AUTHORITY` (release CI nee
 Gate check: `cargo test -p loopflow --lib` (compatibility, build_info, version,
 installation) + `--test global_commands` + `--test one_machine_tests`, `cargo fmt
 --check`, `cargo clippy --all-targets -- -D warnings`.
-Check (2026-10-27, rebased on 66ad233139): focused lib tests + global_commands + fmt — pass; clippy and one_machine_tests left to gate.
-Compress (2026-10-27): doctor label formatting folded, promote fn renamed; `cargo build -p loopflow` — pass; tests left to gate.
+Check (2026-10-27, merged main 4a85fb3a5a; compress folded doctor's label and renamed the promote fn): focused lib tests + global_commands + fmt + `cargo build -p loopflow` — pass; clippy and one_machine_tests left to gate.

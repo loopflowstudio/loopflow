@@ -37,14 +37,12 @@ read. `store/contention.rs` keeps the write-hold hooks and `read_contention`.
 ## Remaining
 
 - Demo (clone the store, run the 0.14.16 delete under lf). Belongs to the demo step.
-- Rebase onto #1708 (doctor.rs layout) / #1705 (sqlite.rs), whichever lands first; both still open
-  and the branch contains origin/main (2026-10-26).
 - Demo detail: `lf doctor` reads `logs/lf.log` under `LF_HOME`, so the cloned store's
   demo runs with `LF_HOME` pointed at the clone's home.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- contention diagnostic_log doctor` (repeated), fmt, clippy `--all-targets -D warnings`: pass after the diagnostic_log extraction and the slow-writer test repair (2026-10-26). Full suites: gate.
+- `cargo test -p loopflow --lib -- contention diagnostic_log doctor` (repeated), fmt, clippy `--all-targets -D warnings`: pass after the diagnostic_log extraction and the slow-writer test repair (2026-10-26). Gate (2026-10-27): repaired `now` that the origin/main merge removed from `doctor::run`; fmt, clippy `--all-targets -D warnings` pass; focused lib 12/12, `--test integration doctor` 6/6. Full `cargo test -p loopflow` hit the 10-min limit under load from another worktree's suite; its one failure (`graph_tests::interactive_graph_keeps_input_and_advances_only_after_each_provider_exits`) passes alone (66 s) and touches no changed code. Full matrix: CI. Docs: troubleshooting + telemetry name the contention check.
 
 ## Lessons
 

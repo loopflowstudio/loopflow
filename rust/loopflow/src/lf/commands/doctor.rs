@@ -102,7 +102,7 @@ pub fn run(json: bool) -> Result<()> {
     checks.push(check_binary_freshness());
     checks.push(check_contention(
         &crate::diagnostic_log::log_path(),
-        now - CONTENTION_WINDOW_SECONDS,
+        time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
     if json {
         println!(

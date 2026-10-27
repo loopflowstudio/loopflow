@@ -2,7 +2,7 @@ Hotfix the lf installed on this Machine, then carry the fix to main.
 
 A hotfix changes code paths only. It is built on the installed commit, proven on
 a clone of the live store, tested, built once, promoted, rolled over, and opened
-as a PR to main in the same run. Each step's evidence goes in the report.
+as a PR to main in the same run.
 
 ## Limits
 
@@ -17,8 +17,8 @@ as a PR to main in the same run. Each step's evidence goes in the report.
 ## 1. Worktree from the installed commit
 
 ```bash
-python3 -c 'import json,os; s=json.load(open(os.path.expanduser("~/.lf-machine/install/active.json")))["selection"]["artifact_set"]; print(s["source_revision"], s["source_identity"])'
-lf --version
+python3 -c 'import json,os; s=json.load(open(os.path.expanduser("~/.lf-machine/install/active.json")))["selection"]["artifact_set"]; print(s["source_revision"], s["source_identity"], *(a["path"] for a in s["artifacts"] if a["role"]["kind"] == "cli"))'
+# <source_revision> <source_identity> <active CLI path>
 ```
 
 `source_revision` is the base: the installed release tag's commit, or the
@@ -95,7 +95,7 @@ LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published \
 ```
 
 This build is recorded as `source_identity: release`, which it isn't. That's
-why step 1's empty migration diff is required. Say so in the report.
+why step 1's empty migration diff is required.
 
 ## 5. Preview, then promote
 
@@ -110,22 +110,23 @@ pending migration` or `REFUSED` means the build carries schema work, so stop.
 
 ```bash
 ./target/release/lf self install promote --cli-target ~/.local/bin/lf
-lf --version
 ```
+
+Rerun step 1's `active.json` command: it now prints the hotfix commit and the
+new active CLI path.
 
 Desktop's bundled helper (`/Applications/Loopflow.app/Contents/MacOS/lf`) is
 not part of a CLI promote. Name it as stale in the report.
 
 ## 6. Roll over stale processes
 
-Running lf processes keep their binary until they exit. Count them by
-executable against the newly active artifact:
+Running lf processes keep their binary until they exit. Count them by binary:
 
 ```bash
-ps -axo pid=,lstart=,comm= | grep -E '/\.lf/bin/lf-|Loopflow\.app/Contents/MacOS/lf'
+ps -axo comm= | grep -E '/\.lf/bin/lf-|Loopflow\.app/Contents/MacOS/lf' | sort | uniq -c
 ```
 
-Anything not on the new `~/.lf/bin/lf-<sha>` path is stale. Until LOO-634 ships
+Anything not on the active CLI path from step 5 is stale. Until LOO-634 ships
 a rollover command, move only what is safe to stop by hand:
 
 - Sessions that are available (`lf session list --available --all --json`) and
@@ -160,10 +161,11 @@ whether the release must wait for it.
 
 ## Report
 
-- Base revision and hotfix commit.
+- Base revision and hotfix commit, and that the build claims
+  `source_identity: release` with an empty migration diff.
 - Clone measurement: statement, cold/warm before and after, query plan.
 - Focused tests: command and result, run before the promote.
-- Preview verdict, and `lf --version` after the promote.
+- Preview verdict, and the active revision after the promote.
 - Stale processes by binary, before and after rollover, plus what was left
   running and why.
 - PR to main, and the release PR or tag it was noted on.

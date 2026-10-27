@@ -337,10 +337,8 @@ second Task-to-Machine command beside `lf task move --machine`.
    session-dropping branches deleted, `SessionRecord.account` with DTO
    fixtures. `-a` narrowing needed no new code: resolution is already
    per-provider, so a Claude login on the same email never competes for a
-   Codex launch (asserted in the test). Remaining: the unit test
-   (`naming_another_login_moves_an_isolated_conversation_with_its_transcript`)
-   covers Codex only; a Claude counterpart is unwritten, though the Machine
-   move test places a Claude transcript through the same copy.
+   Codex launch (asserted in the test). Codex and Claude unit tests both
+   exist (the Claude one carries the sibling `<id>/` directory).
 2. **Session move.** Built 2026-10-26/27: `ops/human_session/moves.rs`
    (`send`/`receive`/`Move`), `lf/commands/session_move.rs` relay,
    `lf session send|receive`, `--machine … resume <id>`, forwarding of
@@ -379,4 +377,4 @@ second Task-to-Machine command beside `lf task move --machine`.
   (verifies the Codex cross-account risk), then `lf task move` laptop → mini
   with a real Task and keep talking to it there.
 
-Check results: 2026-10-27 — `machine_commands` (38, incl. task_move_carries_ownership_workflow_and_session, task_move_stops_a_live_graph, task_move_refuses_a_mid_merge_worktree, resume_task_follows_a_task_session_moved_alone, a_moved_session_clones_its_repository_where_none_is_checked_out), lib `moves::`/`provider_account`/`lf::tests`/`navigation`/`wave_resolution`/`local_planning::`, clippy --all-targets, CLI reference: pass. Demo (real logins, laptop → mini) unrun.
+Check results: 2026-10-27 — `provider_account` naming_another_login (Codex + Claude), `machine_commands` (38, incl. task_move_carries_ownership_workflow_and_session, task_move_stops_a_live_graph, task_move_refuses_a_mid_merge_worktree, resume_task_follows_a_task_session_moved_alone, a_moved_session_clones_its_repository_where_none_is_checked_out), lib `moves::`/`provider_account`/`lf::tests`/`navigation`/`wave_resolution`/`local_planning::`, clippy --all-targets, CLI reference: pass. Demo (real logins, laptop → mini) unrun.

@@ -70,6 +70,14 @@ step "configured publisher authority"
   uv run python scripts/publish_release.py check
 
 step "install release schedules"
+# Earlier lf scheduled these jobs as launchd agents; crontab replaces them.
+for plist in "$HOME"/Library/LaunchAgents/loopflow.cron."$wave".*.plist; do
+  [ -e "$plist" ] || continue
+  label="$(basename "$plist" .plist)"
+  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+  rm -f "$plist"
+  printf 'removed launchd job %s\n' "$label"
+done
 log_dir="$repo_root/.lf/logs"
 mkdir -p "$log_dir"
 cron_env="HOME=$HOME PATH=$PATH LF_HOME=$lf_home TMPDIR=${TMPDIR:-/tmp} LANG=${LANG:-C}"

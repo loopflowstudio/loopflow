@@ -222,6 +222,10 @@ def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():
     assert bootstrap.index("scripts/publish_release.py check") < bootstrap.index(
         "| crontab -"
     )
+    retire = bootstrap.index('LaunchAgents/loopflow.cron."$wave".*.plist')
+    assert bootstrap.index("scripts/publish_release.py check") < retire
+    assert retire < bootstrap.index("| crontab -")
+    assert 'launchctl bootout "gui/$(id -u)/$label"' in bootstrap
 
     public_contract = "\n".join(
         [

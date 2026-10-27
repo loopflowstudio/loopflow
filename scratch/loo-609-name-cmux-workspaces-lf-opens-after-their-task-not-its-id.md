@@ -61,9 +61,10 @@ it; the identifier never changes. Sessions own tabs.
 
 ### Write-back inventory
 
-No path reads a cmux name back. The only cmux invocations in the tree are
-`workspace create` and `workspace select` (open.rs) and `rename-workspace` /
-`rename-tab` (terminal_title.rs); Task titles change only through lf's Task
+No cmux name flows back into lf. The cmux invocations in the tree are
+`workspace create` and `workspace select` (open.rs), `rename-workspace` /
+`rename-tab`, and `workspace list --json`, read only to gate a workspace rename
+(terminal_title.rs); Task titles change only through lf's Task
 writers and Linear sync. Nothing to delete; the proof test pins it.
 
 ## Risk findings
@@ -114,8 +115,7 @@ is the one name both writers use; `renames_due(previous, current)` is the pure s
 what it shows). Committed as 7367f02689; the later main merge touches none of
 these files. Remaining: concept-review, gate, pr-publish.
 
-Checks: `cargo test --lib terminal_title` 5 ok (after compress); `--test integration work_open` 13 ok;
-clippy clean; `session_cli` deferred to gate.
+Checks: see Gate below.
 
 1. `terminal_title.rs`: workspace/tab split, pure due-renames step, unit test.
 2. `open.rs`: `destination_name` → `<title> · <identifier>`; delete `standing` field.
@@ -137,17 +137,17 @@ change; no open product choice. Noted, not changed:
 - tmux and cmux-tab destinations are created with the Task workspace name and
   renamed to the Session terminal title on attach. Before this change they also
   differed (`ID · title · standing`), and Herdr, with no runtime rename, keeps it.
-- Attaching a Task Session to a workspace someone named by hand renames it to
-  the Task name once (first publish); this is the accepted "no guard" rule.
-- `Resolved.label` (receipts) stays `ID · title`, like terminal titles; only the
-  workspace leads with the title, as Jack asked.
+- Superseded by Jack Heart's later steers (October 26): a hand-edited workspace
+  name is kept (`WorkspaceName::replaces` gates the rename on `cmux workspace
+  list --json`), and receipts/labels read `<title> · <identifier>` too
+  (`9e713574ba`).
 
 ## Done when
 
 - `lf open … --host cmux` for a Task creates a workspace named `<Task title> · <identifier>`.
 - A Session rename or standing change in that workspace issues no
   `rename-workspace`; a Task title change issues exactly one.
-- No lf code path reads a cmux name.
+- No cmux name reaches a store write; the one read only gates lf's own rename.
 
 Acceptance at gate (headless, `LF_*` unset, `< /dev/null`):
 

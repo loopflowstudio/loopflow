@@ -728,10 +728,13 @@ mod tests {
     }
 
     fn lineage(store: &SqliteStore) -> crate::lf::commands::doctor::Check {
-        crate::lf::commands::doctor::audit(&store.processes_since(0).unwrap())
-            .into_iter()
-            .find(|check| check.name == "lineage")
-            .unwrap()
+        crate::lf::commands::doctor::audit(
+            &store.processes_since(0).unwrap(),
+            store.unrecorded_agent_ancestry().unwrap().len(),
+        )
+        .into_iter()
+        .find(|check| check.name == "lineage")
+        .unwrap()
     }
 
     #[test]
@@ -808,13 +811,19 @@ mod tests {
     }
 
     #[test]
-    fn prune_leaves_pruned_parents_and_live_agents_failing_doctor() {
+    fn prune_leaves_pruned_parents_live_agents_and_recorded_owners_failing_doctor() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         let sql = rusqlite::Connection::open(&database).unwrap();
         let (_, _, pruned) = unrecorded_ancestry_fixture(&store, &sql, "pruned");
         let (_, _, live) = unrecorded_ancestry_fixture(&store, &sql, "live");
+        let (_, _, owned) = unrecorded_ancestry_fixture(&store, &sql, "owned");
+        sql.execute(
+            "UPDATE processes SET attached_lf_process_id=?2 WHERE id=?1",
+            [&owned, &store.test_lf_process()],
+        )
+        .unwrap();
         sql.execute(
             "UPDATE processes SET trace_id=?2 WHERE id=?1",
             [&pruned, &LfProcessId::new()],

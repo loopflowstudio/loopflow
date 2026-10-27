@@ -78,9 +78,14 @@ pub fn run(json: bool) -> Result<()> {
         Some(error) => Check::fail("store", error.clone()),
         None => Check::ok("store", "selected database is compatible with this build"),
     }];
+    // The remedy hint counts exactly what `lf monitor prune` would repair.
     let events = match crate::store::sqlite::SqliteStore::open_processes_read_only(&database_path)
-        .and_then(|store| store.processes_since(0))
-    {
+        .and_then(|store| {
+            Ok((
+                store.processes_since(0)?,
+                store.unrecorded_agent_ancestry()?.len(),
+            ))
+        }) {
         Ok(events) => Some(events),
         Err(error) => {
             checks.push(Check::fail(
@@ -90,14 +95,14 @@ pub fn run(json: bool) -> Result<()> {
             None
         }
     };
-    if let Some(events) = &events {
+    if let Some((events, repairable)) = &events {
         checks.extend([
             check_attribution(events),
             check_identity(events),
-            check_lineage(events),
+            check_lineage(events, *repairable),
         ]);
     }
-    let rows = events.as_ref().map_or(0, Vec::len);
+    let rows = events.as_ref().map_or(0, |(events, _)| events.len());
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
     checks.push(check_binary_freshness());
@@ -404,14 +409,15 @@ fn check_installation(database_path: &Path) -> Vec<Check> {
     }
 }
 
-pub fn audit(events: &[LfProcess]) -> Vec<Check> {
+/// `repairable` counts the AgentProcesses `lf monitor prune` would repair.
+pub fn audit(events: &[LfProcess], repairable: usize) -> Vec<Check> {
     if events.is_empty() {
         return vec![Check::warn("ledger", "ledger is empty")];
     }
     vec![
         check_attribution(events),
         check_identity(events),
-        check_lineage(events),
+        check_lineage(events, repairable),
     ]
 }
 
@@ -457,7 +463,7 @@ fn check_identity(events: &[LfProcess]) -> Check {
     )
 }
 
-fn check_lineage(events: &[LfProcess]) -> Check {
+fn check_lineage(events: &[LfProcess], repairable: usize) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
         .map(|event| (event.id.as_str(), event.trace_id.as_str()))
@@ -476,22 +482,9 @@ fn check_lineage(events: &[LfProcess]) -> Check {
         "{} parent process id(s) are missing or belong to another trace",
         dangling.len()
     );
-    // An ended agent rooted at its own trace was reserved before its parent had a row.
-    let unrecorded = events
-        .iter()
-        .filter(|event| {
-            event.kind == crate::process::ProcessKind::Agent
-                && event.completed_at.is_some()
-                && event.trace_id.as_str() == event.id.as_str()
-                && event
-                    .parent_lf_process_id
-                    .as_ref()
-                    .is_some_and(|parent| !processes.contains_key(parent.as_str()))
-        })
-        .count();
-    if unrecorded > 0 {
+    if repairable > 0 {
         detail.push_str(&format!(
-            "; {unrecorded} AgentProcess parent(s) were never recorded, and `lf monitor prune` repairs them"
+            "; {repairable} AgentProcess parent(s) were never recorded, and `lf monitor prune` repairs them"
         ));
     }
     Check::fail("lineage", detail)
@@ -602,7 +595,7 @@ mod tests {
     }
 
     fn status_of(rows: &[LfProcess], name: &str) -> Status {
-        audit(rows)
+        audit(rows, 0)
             .into_iter()
             .find(|check| check.name == name)
             .expect("check exists")

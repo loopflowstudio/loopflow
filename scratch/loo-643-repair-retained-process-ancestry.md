@@ -1,6 +1,6 @@
 # LOO-643: Repair retained Process ancestry without losing Session history
 
-Status: slices 1–2 implemented (2026-10-27); slice 3 (ship) remains. Jack Heart authorized an end-to-end
+Status: slices 1–3 implemented (2026-10-27); slice 4 (ship) remains. Jack Heart authorized an end-to-end
 autonomous fix, local hotfix and patch release. No ad-hoc SQL writes to the live store.
 
 ## Problem
@@ -114,6 +114,12 @@ child matches the repair signature, the detail names the remedy ("N AgentProcess
 parent(s) were never recorded; `lf monitor prune` repairs them"). Other dangling
 parents keep the generic failure. No allowlist and no acknowledgement table.
 
+Concept review (2026-10-27) found the hint re-derived the signature in Rust and
+omitted the attached-owner clause. Resolved: doctor's `run` counts
+`store.unrecorded_agent_ancestry()` (the repair's own `UNRECORDED_ANCESTRY`), and
+`audit`/`check_lineage` take that count. A recorded-owner fixture fails lineage
+without the hint and prune leaves it alone.
+
 ## Alternatives rejected
 
 - **Backfill a placeholder parent row.** Its started_at, trace and command are
@@ -157,8 +163,9 @@ must keep the attaching lf row referenced: an agent child names it, so
 
 1. Done: prevention (start record in the attachment transaction, COALESCE deleted).
 2. Done: `repair_unrecorded_ancestry` in `lf monitor prune` (`UNRECORDED_ANCESTRY`
-   predicate in processes.rs), doctor remedy detail.
-3. Remaining: gate, PR, land, patch release (Jack's authorization), `lf install`, then
+   predicate in processes.rs).
+3. Done: doctor's remedy count reads `unrecorded_agent_ancestry`.
+4. Remaining: gate, PR, land, patch release (Jack's authorization), `lf install`, then
    live `lf monitor prune` and readback.
 
 ## Done when
@@ -184,4 +191,4 @@ must keep the attaching lf row referenced: an agent child names it, so
   never reaches the resume claim, so it proves nothing here. Resuming Jack's MTG-159
   conversation is his call; the store test carries the resumability proof.
 
-Check results: `cargo test --lib harness::agent_process` → 17 passed (compress; covers repair/resume, untouched-failure and prevention tests); clone repro → FAIL lineage (1) before repair; full lib run and integration suites deferred to gate.
+Check results: `cargo test --lib doctor harness::agent_process` → 25 passed; clippy `--all-targets` clean; full lib and integration suites deferred to gate.

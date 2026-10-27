@@ -200,3 +200,5 @@ Demo/review (installed lf, real Claude): the Demo above.
   Activate. Pi switch noted under Exclusions.
 - 2026-10-27 realign: plan, code and tests agree (every Done-when case has a
   test); file list corrected. No rerun.
+- 2026-10-27 publish: steers lib 14 pass, fmt/clippy clean; integration `public_context…` flaky on startup deadline at host load ~200–300 (2/3 pass); fixture handoff write made atomic. PR #1731; broader gate → CI, installed demo → demo.
+- 2026-10-27 gate: fmt, `clippy --all-targets -D warnings`, `check_migrations.py`, steers lib (14) and context_block lib (10) pass; `--test integration session_steers` 2/3 then the third alone 1/2. Its failure is main's 10s startup deadline: lf alive, still "preparing launch prompt" at load ~300 (assertion now says exit vs deadline). Rest → CI; installed demo → demo.

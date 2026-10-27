@@ -269,9 +269,15 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !home.path().join("handoff.json").exists() {
+        if let Some(status) = child.try_wait().unwrap() {
+            panic!(
+                "lf exited {status} before the provider started: {}",
+                fs::read_to_string(&startup_log).unwrap()
+            );
+        }
         assert!(
-            child.try_wait().unwrap().is_none() && Instant::now() < deadline,
-            "provider did not start: {}",
+            Instant::now() < deadline,
+            "provider did not start within 10s: {}",
             fs::read_to_string(&startup_log).unwrap()
         );
         std::thread::sleep(Duration::from_millis(10));

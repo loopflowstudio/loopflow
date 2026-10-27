@@ -505,8 +505,7 @@ trust_level="trusted"
             json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         key = json.dumps(f"/<session-flags>/config.toml:{event_name}:0:0")
-        if wrapped:
-            states.append(f'{key}={{trusted_hash="sha256:{digest}"}}')
+        states.append(f'{key}={{trusted_hash="sha256:{digest}"}}')
     # Trust only the wrapper's declarations; Loopflow must trust its own hooks
     # on the thread. The same IDs must survive resume.
     hooks.append("state={" + ",".join(states) + "}")
@@ -643,8 +642,7 @@ trust_level="trusted"
         capture_output=True,
         check=True,
     ).stdout
-    (root / "steers.json").write_bytes(steers)
-    assert json.loads(steers)["pending"] == 0, root / "steers.json"
+    assert json.loads(steers)["pending"] == 0, steers
     assert any(b"NATIVE_TOOL_DONE" in request for request in Model.requests)
     assert answers == [("FIXTURE_DONE",), ("FOLLOWUP_DONE",)], answers
     assert completed == 2, completed

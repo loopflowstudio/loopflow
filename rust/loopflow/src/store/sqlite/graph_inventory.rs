@@ -187,6 +187,16 @@ impl SqliteStore {
         Ok(Some((graph, entry)))
     }
 
+    /// Whether `process` is a Graph process.
+    pub(crate) fn runs_graph(&self, process: &LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=?1)",
+            [process],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Graphs run from `cwd`, oldest first.
     pub(crate) fn graphs_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -227,14 +237,17 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Where the Process table ends now; a child started later lies beyond it.
-    pub(crate) fn process_mark(&self) -> StoreResult<i64> {
+    /// Where `parent`'s children end now; a child started later lies beyond it.
+    /// A running parent's children are never forgotten, and SQLite gives a new
+    /// row a rowid above every remaining one, so forgetting other finished rows
+    /// cannot put a later child behind this mark.
+    pub(crate) fn process_mark(&self, parent: &LfProcessId) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(
-            conn.query_row("SELECT COALESCE(MAX(rowid),0) FROM processes", [], |row| {
-                row.get(0)
-            })?,
-        )
+        Ok(conn.query_row(
+            "SELECT COALESCE(MAX(rowid),0) FROM processes WHERE parent_lf_process_id=?1",
+            [parent],
+            |row| row.get(0),
+        )?)
     }
 
     /// The first Process `parent` started after `mark`.

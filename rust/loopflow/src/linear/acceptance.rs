@@ -591,6 +591,7 @@ pub(crate) fn observe_task_state(
     store: &SqliteStore,
     delivery: &sqlite::task_state_delivery::TaskStateDelivery,
     observed: &crate::linear::LinearIssue,
+    history: crate::linear::StateHistory,
 ) -> StoreResult<bool> {
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -626,6 +627,7 @@ pub(crate) fn observe_task_state(
             "completed_at": observed.completed_at,
         })
         .to_string(),
+        history,
     )?;
     tx.commit()?;
     Ok(pending)
@@ -882,7 +884,14 @@ fn project_accepted_planning(
         );
         edits.push(Edit::Disposition(disposition.clone()));
         if existing.is_some() {
-            task_state_delivery::reconcile_in(tx, &id, revision.as_deref(), &disposition, &body)?;
+            task_state_delivery::reconcile_in(
+                tx,
+                &id,
+                revision.as_deref(),
+                &disposition,
+                &body,
+                crate::linear::StateHistory::Unknown,
+            )?;
             let pending: bool = tx.query_row(
                 "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1 AND settled=0
                  AND seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=?1))",

@@ -254,6 +254,57 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             suggest,
             json,
         } => rename(id, name, *suggest, *json).await,
+        SessionCommand::Send { id, task, to } => {
+            let store = open_shared_store().await?;
+            let to = crate::ops::task_ownership::resolve_machine(&store.sqlite, to)?;
+            let moved = match (id, task) {
+                (_, Some(task)) => {
+                    crate::ops::human_session::moves::send_task(&store, task, &to).await?
+                }
+                (Some(id), None) => crate::ops::human_session::moves::send(&store, id, &to).await?,
+                (None, None) => unreachable!("Clap requires a Session or a Task"),
+            };
+            println!("{}", serde_json::to_string(&moved)?);
+            Ok(())
+        }
+        SessionCommand::Receive {
+            check: true, task, ..
+        } => {
+            let store = open_shared_store().await?;
+            if let Some(task) = task {
+                let id = crate::durable::TaskId::parse(task)?;
+                crate::ops::human_session::moves::known_task(&store, &id, task).await?;
+            }
+            Ok(())
+        }
+        SessionCommand::Receive { json, .. } => {
+            let mut input = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut input)?;
+            let moved: crate::ops::human_session::moves::Move =
+                serde_json::from_str(&input).context("read the moved Session")?;
+            let store = open_shared_store().await?;
+            let task = moved.task.as_ref().map(|task| task.identifier.clone());
+            let session = crate::ops::human_session::moves::receive(&store, moved).await?;
+            let Some(session) = session else {
+                let task = task.expect("a move without a Session moves a Task");
+                if *json {
+                    println!("{}", serde_json::json!({ "task": task }));
+                } else {
+                    println!("Task {task} is here; `lf task run {task}` continues it");
+                }
+                return Ok(());
+            };
+            let record = crate::ops::human_session::surface(&store, &session).await?;
+            if *json {
+                println!("{}", serde_json::to_string(&record)?);
+            } else {
+                println!(
+                    "Session {} is here in {}; `lf resume {}` continues it",
+                    record.title, record.cwd, record.id
+                );
+            }
+            Ok(())
+        }
         SessionCommand::Bind {
             id,
             task,
@@ -345,7 +396,10 @@ async fn list(
                     SessionState::Closed => "closed",
                 },
                 session.work_path.as_deref().unwrap_or("Repository"),
-                session.title
+                match &session.account {
+                    Some(account) => format!("{}  on {account}", session.title),
+                    None => session.title.clone(),
+                }
             );
             for action in session.actions {
                 println!(

@@ -33,8 +33,7 @@ use crate::provider_auth::codex::{daemon_has_running_turn, daemon_login, restart
 use crate::provider_auth::{
     capture_claude_profile_credentials, disconnect_provider_account_auth,
     import_ambient_claude_profile_credentials, prepare_provider_account_access_token,
-    start_provider_account_auth, AuthBroker, AuthCompletion, AuthFlowResponse, Provider,
-    ProviderAuthService,
+    start_provider_account_auth, AuthCompletion, AuthFlowResponse, Provider, ProviderAuthService,
 };
 use crate::store::{
     open_store, CredentialState, CredentialType, LongLivedToken, ProviderAccount,
@@ -834,36 +833,6 @@ async fn token_account(
         account_login(&account)
     );
     Ok(())
-}
-
-pub(super) async fn fresh_linear_login(
-    store: &SharedStore,
-    chrome_profile: Option<&str>,
-) -> Result<ProviderToken> {
-    let (profiles, _) = browser_profiles(store, Provider::Linear, None, chrome_profile).await?;
-    let profile = profiles
-        .first()
-        .ok_or_else(|| anyhow!("no browser profile available"))?;
-    let chrome = verified_chrome_profile(profile)?;
-    let broker = crate::provider_auth::PmOAuthBroker::new(Provider::Linear);
-    let handle = broker.start_auth().await?;
-    let flow = handle.response.clone();
-    let url = flow
-        .verification_uri_complete
-        .as_deref()
-        .unwrap_or(&flow.verification_uri);
-    open_chrome_profile(&chrome, url)?;
-    wait_for_browser_confirmation(
-        handle.wait(),
-        flow.expires_in,
-        Provider::Linear,
-        "remote machine",
-    )
-    .await?;
-    broker
-        .extract_token()
-        .await
-        .ok_or_else(|| anyhow!("Linear login completed without a credential"))
 }
 
 /// Run OpenCode's device login in a private `home`, approved in the verified Chrome

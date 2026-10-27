@@ -195,11 +195,15 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
     assert_eq!(config["config"]["native-setting"], true);
     let hooks = &config["config"]["hooks"];
     assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
+    let state = hooks["state"].as_object().unwrap();
     assert_eq!(
-        hooks["state"],
-        serde_json::json!({"host-trust": {"trusted_hash": "unchanged"}}),
-        "Loopflow preserves provider trust without approving its own hooks"
+        state["host-trust"]["trusted_hash"], "unchanged",
+        "host trust survives"
     );
+    // Codex skips unreviewable thread hooks unless the thread trusts them.
+    // Loopflow's own SessionStart groups follow the host group's index.
+    assert!(state.contains_key("/<session-flags>/config.toml:session_start:1:0"));
+    assert!(!state.contains_key("/<session-flags>/config.toml:session_start:0:0"));
     assert!(hooks["SessionStart"].as_array().unwrap().len() > 1);
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let session: String = database

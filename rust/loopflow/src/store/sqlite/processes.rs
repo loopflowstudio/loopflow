@@ -2537,7 +2537,7 @@ mod forget_tests {
                 due_date: None,
             })
             .unwrap();
-        store.ship_task(&task, &shipper.id, "proof").unwrap();
+        store.ship_task(&task, &shipper.id, "proof", false).unwrap();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(

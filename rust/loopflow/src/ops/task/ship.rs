@@ -387,7 +387,8 @@ fn post_merge_step(graph: &crate::task_graph::CapturedGraph) -> Option<&str> {
 
 /// Act on a shipping Task's merged PR, whoever merged it, so no further
 /// build step runs on delivered work: send it to the step that checks merged
-/// work, or complete it when its graph has none.
+/// work, or complete it when its graph has none. A PR the Task already
+/// completed with is history: reopened, the Task ships its new work.
 pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
     block_on_task(async {
         let store = task_store().await?;
@@ -398,6 +399,17 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
             return Ok(ShipMerge::Open);
         };
         if pr.phase() != PrPhase::Merged {
+            return Ok(ShipMerge::Open);
+        }
+        let published_at = pr
+            .publication
+            .as_ref()
+            .map_or(0, |publication| publication.requested_at.unix_timestamp());
+        if store
+            .sqlite
+            .task_completed_since(&task.id, published_at)
+            .map_err(task_error)?
+        {
             return Ok(ShipMerge::Open);
         }
         let row = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;

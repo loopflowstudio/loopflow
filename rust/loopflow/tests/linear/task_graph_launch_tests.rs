@@ -2415,3 +2415,88 @@ fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     assert!(reason.starts_with("agent exited with code 1"), "{reason}");
     assert!(reason.ends_with("; retrying within a minute"), "{reason}");
 }
+
+#[test]
+fn task_ship_runs_new_work_on_a_reopened_task_despite_its_old_merged_pr() {
+    let task = shipping_task();
+    // The first delivery merged and completed the Task; then it was reopened.
+    task.publish(true);
+    task.ok(&["task", "complete", "INF-123"]);
+    assert_eq!(task.state(), "done");
+    task.ok(&["task", "reopen", "INF-123", "--reason", "new repair"]);
+    assert_ne!(task.state(), "done");
+    let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "feature"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The old merge settled nothing: the new graph ran, standing in at review.
+    assert!(!stdout.contains("its PR merged"), "{stdout}");
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(task.graph()["position"], at("end"));
+}
+
+/// A Claude stand-in that records its first turn and answers that the step is
+/// blocked on something only a person can do.
+const BLOCKED_CLAUDE: &str = r#"#!/usr/bin/python3
+import json, os, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+home = os.environ['LF_HOME']
+message = json.loads(sys.stdin.readline())
+with open(os.path.join(home, 'stand-ins.jsonl'), 'a') as turns:
+    turns.write(json.dumps(message['message']['content'][0]['text']) + '\n')
+message['session_id'] = 'stand-in'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
+summary = 'Main-source checks pass; the installed release must be checked first.'
+print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': summary, 'structured_output': {'decision': 'blocked', 'summary': None, 'reason': summary}}), flush=True)
+for line in sys.stdin:
+    pass
+"#;
+
+#[test]
+fn task_ship_blocked_at_verification_waits_there_without_building_again() {
+    let task = GraphTask::with_tools(&[("claude", BLOCKED_CLAUDE)]);
+    connect_fixture_claude(task.home.path(), &task.registered.store);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(
+            task.registered
+                .store
+                .set_task_agent(&task.registered.task.id, "claude"),
+        )
+        .unwrap();
+    task.repo.create_file(
+        ".lf/graphs/verifying.yaml",
+        "- graph: proof\n- loop: proof\n  interactive: {name: verify, id: check}\n",
+    );
+    let first = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "verifying"]);
+    assert!(
+        !first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    // The stand-in at check reported a dependency: the Task waits at check.
+    assert_eq!(
+        task.graph()["position"],
+        at("check"),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(stand_ins(&task).len(), 1);
+    let again = task.run(&["-b", "--task", "INF-123", "ship"]);
+    let stderr = String::from_utf8_lossy(&again.stderr);
+    assert!(!again.status.success(), "{stderr}");
+    assert!(stderr.contains("INF-123: standing in at check"), "{stderr}");
+    assert_eq!(task.graph()["position"], at("check"));
+    assert_eq!(stand_ins(&task).len(), 2);
+    // The second run set out from check: proof did not run again.
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 2);
+    assert_eq!(graphs[1].1.len(), 1, "{graphs:?}");
+}

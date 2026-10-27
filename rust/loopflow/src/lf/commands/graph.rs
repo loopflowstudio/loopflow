@@ -157,14 +157,12 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
     let mut released = false;
     let mut attempt = 1;
     loop {
-        let mark = store.process_mark()?;
+        let mark = store.process_mark(&process)?;
         let mut log = letting_go
             .then(|| PendingLog::open(&format!("pending-{process}-{attempt}")))
             .transpose()?;
         let sink = log.as_ref().map(|log| log.file.try_clone()).transpose()?;
-        let mut pid = None;
         let status = spawn_task_child(&args, checkout, sink, Some(cursor), |child| {
-            pid = Some(child.id());
             let Some(mut log) = log.take() else {
                 return Ok(());
             };
@@ -194,8 +192,7 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
             return Err(crate::process::CommandExit(130).into());
         }
         // Only a Graph process that failed is started again.
-        let failed =
-            status.code() == Some(1) && attempt_graph(store, &process, mark, pid)?.is_some();
+        let failed = status.code() == Some(1) && attempt_graph(store, &process, mark)?.is_some();
         if failed {
             if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
@@ -322,10 +319,9 @@ fn attempt_graph(
     store: &SqliteStore,
     process: &LfProcessId,
     mark: i64,
-    pid: Option<u32>,
 ) -> Result<Option<LfProcessId>> {
     Ok(store
-        .child_process_after(process, mark, pid)?
+        .child_process_after(process, mark)?
         .filter(|child| matches!(store.graph_process(child.as_str()), Ok(Some(_)))))
 }
 
@@ -338,7 +334,7 @@ fn registration(
     child: &mut std::process::Child,
 ) -> Result<Option<LfProcessId>> {
     loop {
-        let registered = attempt_graph(store, process, mark, Some(child.id()))?;
+        let registered = attempt_graph(store, process, mark)?;
         if registered.is_some() {
             return Ok(registered);
         }
@@ -428,12 +424,20 @@ fn execute(
             .context("could not record the Graph; no steps launched")?;
         drop(admission);
         let outcome = drive(&running, start, accounts, stop_at_interactive).await?;
-        // A Task run's Graph writes where it left the Task.
+        // A Task run's Graph writes where it left the Task. Blocked at an
+        // interactive step, the Task waits there: what blocks it is for a
+        // person, and nothing before it runs again.
         if let (Some(carrier), Some(task)) = (task_run, &running.task) {
+            let blocked_at = match (&outcome, running.current()) {
+                (GraphOutcome::Blocked(_), Some(ConcreteStep::Skill(skill))) => {
+                    skill.interactive_step().map(str::to_owned)
+                }
+                _ => None,
+            };
             let step = match &outcome {
                 GraphOutcome::Completed => Some(crate::task_graph::END),
                 GraphOutcome::StoppedAt(step) => Some(step.as_str()),
-                _ => None,
+                _ => blocked_at.as_deref(),
             };
             if let Some(step) = step {
                 running
@@ -702,12 +706,8 @@ impl RunningGraph<'_> {
     }
 
     /// Record the Process this Graph process's newest child registered, once it has.
-    fn record_step(&self, mark: i64, pid: Option<u32>) -> Result<Option<crate::id::LfProcessId>> {
-        let Some(step) = self
-            .store
-            .sqlite
-            .child_process_after(&self.process, mark, pid)?
-        else {
+    fn record_step(&self, mark: i64) -> Result<Option<crate::id::LfProcessId>> {
+        let Some(step) = self.store.sqlite.child_process_after(&self.process, mark)? else {
             return Ok(None);
         };
         let (key, iterations) = self.location();
@@ -755,7 +755,7 @@ impl RunningGraph<'_> {
             command.arg("--verbose");
         }
         command.args(args);
-        let mark = self.store.sqlite.process_mark()?;
+        let mark = self.store.sqlite.process_mark(&self.process)?;
         let admission = self
             .store
             .sqlite
@@ -763,8 +763,6 @@ impl RunningGraph<'_> {
         crate::transport::configure_child(command.as_std_mut());
         let output = crate::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
         let mut child = command.spawn().context("could not execute Graph step")?;
-        // Read now: a waited child no longer reports its pid.
-        let pid = child.id();
         drop(admission);
         let mut step = None;
         let mut watch = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -775,7 +773,7 @@ impl RunningGraph<'_> {
                 status = child.wait() => break status,
                 // A read can fail while a newer child migrates; the exit retries it.
                 () = tokio::time::sleep(std::time::Duration::from_millis(10)), if step.is_none() => {
-                    step = self.record_step(mark, pid).unwrap_or(None);
+                    step = self.record_step(mark).unwrap_or(None);
                 }
                 _ = watch.tick(), if kind == StepKind::Agent && !signalled => {
                     if self.interrupted() {
@@ -790,7 +788,7 @@ impl RunningGraph<'_> {
         drop(output);
         // The step ran whatever comes next, so its row is attempted first.
         if step.is_none() {
-            step = self.record_step(mark, pid).unwrap_or(None);
+            step = self.record_step(mark).unwrap_or(None);
         }
         // A new installation can select a newer child. Never read its result
         // through an older schema.

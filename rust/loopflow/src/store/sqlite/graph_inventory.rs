@@ -227,32 +227,30 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Where the Process table ends now; a child started later lies beyond it.
-    pub(crate) fn process_mark(&self) -> StoreResult<i64> {
+    /// Where `parent`'s children end now; a child started later lies beyond it.
+    /// A running parent's children are never forgotten, and SQLite gives a new
+    /// row a rowid above every remaining one, so forgetting other finished rows
+    /// cannot put a later child behind this mark.
+    pub(crate) fn process_mark(&self, parent: &LfProcessId) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(
-            conn.query_row("SELECT COALESCE(MAX(rowid),0) FROM processes", [], |row| {
-                row.get(0)
-            })?,
-        )
+        Ok(conn.query_row(
+            "SELECT COALESCE(MAX(rowid),0) FROM processes WHERE parent_lf_process_id=?1",
+            [parent],
+            |row| row.get(0),
+        )?)
     }
 
-    /// The newest Process `parent` started after `mark`. Exits delete forgotten
-    /// rows and SQLite reuses the highest freed rowid, so a child can land at or
-    /// below `mark`; `pid` finds it there when the spawned child is the lf that
-    /// registered, not a wrapper around it.
+    /// The first Process `parent` started after `mark`.
     pub(crate) fn child_process_after(
         &self,
         parent: &LfProcessId,
         mark: i64,
-        pid: Option<u32>,
     ) -> StoreResult<Option<LfProcessId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT id FROM processes WHERE parent_lf_process_id=?1
-                 AND (rowid>?2 OR pid=?3) ORDER BY rowid DESC LIMIT 1",
-                params![parent, mark, pid],
+                "SELECT id FROM processes WHERE parent_lf_process_id=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",
+                params![parent, mark],
                 |row| row.get(0),
             )
             .optional()?)
@@ -371,7 +369,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
 
     #[test]
-    fn a_step_is_found_by_its_pid_when_its_row_reuses_a_forgotten_rowid() {
+    fn a_step_lands_after_its_graphs_mark_when_an_unrelated_rowid_is_reused() {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         let process = |parent: Option<&crate::id::LfProcessId>, pid: u32| {
@@ -403,7 +401,7 @@ mod tests {
         // A concurrent `lf task status` holds the highest rowid when the Graph
         // marks, then exits and is forgotten before the step registers.
         let status = process(None, 11);
-        let mark = store.process_mark().unwrap();
+        let mark = store.process_mark(&graph.id).unwrap();
         store
             .record_process(&crate::process::LfProcess {
                 completed_at: Some(2),
@@ -412,14 +410,8 @@ mod tests {
             })
             .unwrap();
         let step = process(Some(&graph.id), 12);
-        assert!(
-            store.process_mark().unwrap() <= mark,
-            "the rowid was reused"
-        );
         assert_eq!(
-            store
-                .child_process_after(&graph.id, mark, Some(12))
-                .unwrap(),
+            store.child_process_after(&graph.id, mark).unwrap(),
             Some(step.id)
         );
     }

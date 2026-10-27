@@ -285,6 +285,18 @@ impl SqliteStore {
             [task.as_str()], |row| Ok((row.get(0)?,row.get(1)?))).optional()?)
     }
 
+    /// Whether the Task completed at or after `since` (Unix seconds), even if
+    /// it was reopened afterwards.
+    pub(crate) fn task_completed_since(&self, task: &TaskId, since: i64) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
+             AND json_extract(kind_json,'$.kind')='completed' AND created_at>=?2)",
+            params![task.as_str(), since],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn fail_task_completion(
         &self,
         task: &TaskId,

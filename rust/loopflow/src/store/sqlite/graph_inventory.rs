@@ -237,17 +237,21 @@ impl SqliteStore {
         )
     }
 
-    /// The first Process `parent` started after `mark`.
+    /// The Process `parent`'s child `pid` registered. Exits delete forgotten rows
+    /// and SQLite reuses the highest freed rowid, so a child can land at or below
+    /// `mark`; its pid finds it there. Without a pid, the first child after `mark`.
     pub(crate) fn child_process_after(
         &self,
         parent: &LfProcessId,
         mark: i64,
+        pid: Option<u32>,
     ) -> StoreResult<Option<LfProcessId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT id FROM processes WHERE parent_lf_process_id=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",
-                params![parent, mark],
+                "SELECT id FROM processes WHERE parent_lf_process_id=?1
+                 AND (pid=?3 OR (?3 IS NULL AND rowid>?2)) ORDER BY rowid DESC LIMIT 1",
+                params![parent, mark, pid],
                 |row| row.get(0),
             )
             .optional()?)
@@ -364,6 +368,60 @@ mod tests {
     use crate::durable::GraphProcessFilter;
     use crate::session::GraphProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn a_step_is_found_by_its_pid_when_its_row_reuses_a_forgotten_rowid() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let process = |parent: Option<&crate::id::LfProcessId>, pid: u32| {
+            let process = crate::process::LfProcess {
+                id: crate::id::LfProcessId::new(),
+                pid: Some(pid),
+                kind: crate::process::ProcessKind::Lf,
+                agent_session_id: None,
+                os_started_at: None,
+                trace_id: crate::id::TraceId::new(),
+                parent_lf_process_id: parent.cloned(),
+                via_agent: Some(false),
+                caller_session_id: None,
+                caller_agent_process_id: None,
+                command: None,
+                repo: None,
+                cwd: None,
+                started_at: 1,
+                completed_at: None,
+                outcome: None,
+                exit_code: None,
+                signal: None,
+                error: None,
+            };
+            store.record_process(&process).unwrap();
+            process
+        };
+        let graph = process(None, 10);
+        // A concurrent `lf task status` holds the highest rowid when the Graph
+        // marks, then exits and is forgotten before the step registers.
+        let status = process(None, 11);
+        let mark = store.process_mark().unwrap();
+        store
+            .record_process(&crate::process::LfProcess {
+                completed_at: Some(2),
+                outcome: Some("succeeded".into()),
+                ..status
+            })
+            .unwrap();
+        let step = process(Some(&graph.id), 12);
+        assert!(
+            store.process_mark().unwrap() <= mark,
+            "the rowid was reused"
+        );
+        assert_eq!(
+            store
+                .child_process_after(&graph.id, mark, Some(12))
+                .unwrap(),
+            Some(step.id)
+        );
+    }
 
     #[test]
     fn step_input_is_read_through_transport_delegation() {

@@ -33,3 +33,10 @@
 - **Proposed Wave memory updates (read-only here):** `.lf/wave/{infrastructure,
   product,growth,intelligence}/MEMORY.md` link `docs/lf.md`/`planning.md`/
   `subscriptions.md`; repoint to `work.md`, `ops.md`, `lf-reference.md`.
+- **Main merge (2026-10-26): `lf ship` stays top-level.** Main (#1652) added
+  `lf ship` and deleted `ci watch`, Task automation, `task reconcile` and the
+  `ship`/`deploy` graphs. The branch keeps `ship` as a root command beside
+  `task`/`wave` rather than under `ops`, since it advances a Task's Workflow.
+  Docs now schedule `lf pr reconcile` from crontab in place of the removed
+  `lf task reconcile`; ported main's transcript, defer and stage wording into
+  `telemetry.md`, `work.md`, `orchestration.md`, `ops.md`.

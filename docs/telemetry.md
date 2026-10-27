@@ -43,6 +43,9 @@ lf history list --task LOO-12             # every command that ran for it, newes
 lf history list --search "land" --all     # one command, across every repository
 lf history show <id> --final              # what the agent concluded
 lf history show <id> --context            # what its input was made of
+lf history show <id> --transcript         # the conversation, as its providers kept it
+lf history search "cleanupPeriodDays" --since 30d   # text across recent conversations
+lf history retention                      # what providers still keep, and what goes next
 ```
 
 `lf history` orders durable Work facts: creation, execution, PRs and steers.
@@ -53,6 +56,13 @@ with its parent and outcome. Narrow it with `--parent`, `--caller SESSION` or
 `history show` opens any process or Session by ID. `--events` prints a Session's
 raw input events, including which account it actually ran on.
 `--instructions` explains which instructions were included and which were left out.
+
+Conversation text stays with its provider: `history show` reads it from Claude,
+Codex or Pi transcript files or `opencode session export`, and lf stores none of
+it. When a transcript is gone, it prints the recorded turns (time, status, final
+answer) and why: Claude removes conversations idle longer than
+`cleanupPeriodDays` (30 days unless set in its `settings.json`); Codex, OpenCode
+and Pi keep everything. Raise `cleanupPeriodDays` to keep more Claude history.
 
 Replay a captured request as new work, with the same prompt, model, account and
 permissions; the original record is left alone:
@@ -102,7 +112,8 @@ Each check reports ok, warn or fail with its detail. `--json` returns the same a
 | `lf usage --parent SESSION` | Usage of the inputs one Session issued |
 | `lf history [--task\|--wave\|--project]` | Work facts, newest first |
 | `lf history list` | Recorded commands; filter by Task, Wave, parent, caller, text, outcome |
-| `lf history show ID` | One process or Session; `--final`, `--context`, `--events`, `--instructions` |
+| `lf history show ID` | One process or Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
+| `lf history search TEXT` / `lf history retention` | Find text in recent conversations / what providers still keep |
 | `lf replay ID` | New work from a captured request |
 | `lf ps`, `lf top` | Live process trees |
 | `lf monitor prune` | Remove dead receipts and orphaned providers |

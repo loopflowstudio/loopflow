@@ -801,7 +801,7 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
         (vec!["machine", "list"], vec!["ops", "machine", "list"]),
         (vec!["pool"], vec!["ops", "machine", "pool"]),
         (vec!["release", "run"], vec!["ops", "release", "run"]),
-        (vec!["ci", "watch"], vec!["ops", "ci", "watch"]),
+        (vec!["ci"], vec!["ops", "ci"]),
         (vec!["tokens"], vec!["ops", "tokens"]),
         (vec!["repository"], vec!["config", "repository"]),
         (vec!["planning", "key"], vec!["config", "planning", "key"]),

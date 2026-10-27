@@ -61,7 +61,7 @@ stops the Graph. A stopped Graph is history: inspect it with
 Mechanical steps ride along as commands:
 
 ```yaml
-# .lf/graphs/ship.yaml (the builtin)
+# .lf/graphs/deliver.yaml (the builtin)
 - gate
 - cmd: land --wait-and-fix    # merge, repairing CI until it lands
 ```
@@ -109,47 +109,64 @@ work. Name your own decider with `step:`:
 
 ## Workflows
 
-A Task's Workflow is its outer shape: nodes where you take part in the Task's
-conversation, joined by edges that each run one Graph.
+A Task's Workflow is a graph whose `interactive:` steps are stages: places
+where you take part in the Task's conversation. Everything between stages runs
+on its own.
 
 ```yaml
 # feature (builtin)
-nodes:
-  explore: { skill: explore, description: you choose what to build }
-  demo: { skill: demo, description: you try the change }
-edges:
-  - { from: start, to: explore, graph: task-design }
-  - { from: explore, to: explore, graph: task-design }
-  - { from: explore, to: demo, graph: pursue }
-  - { from: demo, to: demo, graph: pursue }
-  - { from: demo, to: end, graph: ship }
+- kickoff
+- loop: kickoff
+  interactive: explore      # you choose what to build; repeat or go on
+- graph: pursue
+- loop: implement
+  interactive: demo         # you try the change
+- graph: deliver            # gate, then land and stay until it merges
+- loop: implement
+  interactive: verify       # you check it on main; fix forward or finish
 ```
 
 ```bash
-lf task run LOO-12              # start: its only edge, task-design
-lf task run LOO-12 pursue       # at explore: build it
-lf task run LOO-12 ship         # at demo: land it
+lf task run LOO-12              # start: runs kickoff up to explore
+lf task run LOO-12 pursue       # at explore: build it, up to demo
+lf ship LOO-12                  # every remaining step to merge, standing in at each stage
 lf task workflow move LOO-12 explore --reason "rethink the API"   # go back, running nothing
 ```
 
-A run moves the Task onto the edge; success puts it at the next node. A failed
-or stopped Graph leaves it on the edge: run that edge again, take another, or
-`move` it. `lf task status LOO-12` shows the node, the edges you can take now
-and every move with who made it. There is no approve command; give feedback in
-the Task's conversation, which knows its node and the command for each edge.
+Routes between stages are named by what they run first (the composed graph,
+else the skill): `pursue` and `deliver` above, and `end` for a route that runs
+nothing. A run moves the Task onto the route; success puts it at the next stage.
+A failed or stopped Graph leaves it on the route: run it again, take another,
+or `move` it. `lf task status LOO-12` shows the stage, the routes you can take
+now and every move with who made it. There is no approve command; give feedback
+in the Task's conversation, which knows its stage and the command for each route.
 
-Builtins are `feature` (design, demo, land), `code` (demo, land) and `research`
-(findings, no PR). To change one, copy it, commit it, and select it for a Wave:
+`lf ship` returns once the Task is shipping; a headless agent stands in at each
+remaining stage, decides advance or repeat, and records why in the Task's
+history. `lf ship --stop` withdraws it. Any route into `end` ships the same way.
+
+| Task state | When |
+|---|---|
+| `unstarted` | no checkout yet |
+| `idle` | a checkout, no Graph running, not at a stage |
+| `active` | at a stage, in its Task Session |
+| `moving` | a Graph runs, with a stage ahead that stops for you |
+| `shipping` | a Graph runs and no stage ahead stops it |
+| `deferred` · `done` · `abandoned` | held, completed, dropped |
+
+Builtins are `feature` (explore, demo, deliver, verify), `code` (demo, deliver,
+verify) and `research` (findings, no PR). To change one, copy it, commit it, and
+select it for a Wave:
 
 ```bash
-lf wave workflow source feature > .lf/workflows/feature.yaml
+lf graph customize feature               # copies the builtin to .lf/graphs/feature.yaml
 lf wave workflow set feature product     # future product Tasks take it up
 ```
 
 A Task captures its Workflow on its first `lf task run`: the one you name, then
-its Wave's default, then repository `workflow:` in `.lf/config.yaml`. Later
-edits apply to new Tasks; `lf task workflow restart LOO-12` moves an existing
-one back to `start` without reloading it.
+its Wave's default, then repository `workflow:` in `.lf/config.yaml`, then
+builtin `code`. Later edits apply to new Tasks; `lf task workflow restart LOO-12`
+moves an existing one back to `start` without reloading it.
 
 ## Run Tasks on other machines
 

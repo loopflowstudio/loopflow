@@ -19,19 +19,19 @@ Run it in the Task's checkout, or from anywhere with `lf --task LOO-12 land --wa
 It checks the PR every 15 seconds and starts a `ci-fix` agent when a required
 check fails. Elapsed time never ends the wait; a verified merge, a closed PR, a
 blocker `ci-fix` cannot clear, or Ctrl-C does. Interrupting leaves the landing intent in
-place, so a later watcher picks it up.
+place, so a later waited landing picks it up.
 
 Bare `lf land` requests auto-merge, records that you want it landed, and returns.
-Repair then comes from the CI watcher (below) or the next waited landing.
+Nothing repairs its PR until a waited landing does.
 
-To go from review-ready to merged in one step, run the built-in `ship` Graph:
+To go from review-ready to merged in one step, ship the Task:
 
 ```bash
-lf -b task run LOO-12 ship   # gate (ready to ship and review), then land --wait-and-fix
+lf ship LOO-12               # remaining steps, then deliver: gate, land --wait-and-fix
 ```
 
-A merge doesn't complete the Task on its own; it stays open for follow-up work in
-the same checkout. Close it with `lf task complete LOO-12` once the PR has merged.
+A PR merged while shipping sends the Task to its last stage before `end`
+(`verify` in `code`): check it on `main`, then finish or fix forward as a new PR.
 
 Running `lf land` again after new commits prepares the Task's next PR; the earlier
 one stays in its history. Auto-merge uses the repository's allowed merge method
@@ -70,25 +70,25 @@ which is not a failure. `--logs` pulls failed GitHub Actions logs.
 ## When CI fails
 
 ```bash
-lf ci watch               # watch this repository's PRs; repair landings that fail
-lf ci watch --install     # keep it running as a launchd service
-lf ci watch --status      # live or not, last poll, what it started and why
+lf ship                   # a Task: the remaining steps, then land and repair until merge
+lf land --wait-and-fix    # this PR: land and repair in the foreground
 lf ci --since 7d          # how each failure was detected, repaired and landed
 ```
 
-The watcher polls about once a minute and starts one `ci-fix` when a PR you
-landed or armed fails its required checks. A failing PR nobody asked to land is
-reported, not repaired. Loopflow Desktop runs the same watcher for each open
-repository. Nothing depends on it: `land --wait-and-fix` admits the same repair
-on its own.
+The waiting process is the only one that repairs. It starts one `ci-fix` when
+its PR fails a required check or GitHub drops its merge request, stops when a
+person removes that request, and returns on merge or closure. A shipping Task
+whose ship process died starts again on the next read of this Machine's work
+(`lf task status`, `lf ps`, Desktop). After bare `lf land` returns, nothing
+repairs its PR.
 
 `lf ci` reads the local record, not GitHub: how much of CI repair happened without you.
 
-Hold repair for one Task, or set how many times a repair may retry:
+Hold repair for one Task, or cap startup retries within one repair:
 
 ```bash
-lf task automate LOO-12 off   # hold future repair; running work continues
-lf task automate LOO-12 on
+lf task defer LOO-12          # hold future runs and repair; running work continues
+lf task resume LOO-12
 ```
 
 ```yaml
@@ -96,8 +96,10 @@ lf task automate LOO-12 on
 automation: {retries: 1}
 ```
 
-Pending or missing checks keep waiting; time alone never starts a repair. For
-progress through a closed laptop, land from an always-on Machine (below).
+A finished repair that leaves the PR blocked is followed by a fresh one after a
+backoff that grows from 1 to 30 minutes. Pending or missing checks keep waiting;
+time alone never starts a repair. For progress through a closed laptop, ship
+from an always-on Machine (below).
 
 ## Schedule it yourself
 
@@ -106,12 +108,12 @@ or systemd timer:
 
 ```bash
 # crontab -e
-* * * * *  cd ~/src/product && lf task reconcile --json    # settle landings with Desktop closed
-0 9 * * 1  cd ~/src/product && lf release run patch        # Monday's release
+*/5 * * * *  cd ~/src/product && lf pr reconcile       # settle landings with Desktop closed
+0 9 * * 1    cd ~/src/product && lf release run patch  # Monday's release
 ```
 
-`lf task reconcile` checks every recorded landing once: it records CI failures and
-settles verified merges, then exits.
+`lf pr reconcile` checks every recorded landing once and settles verified
+merges, then exits. It repairs nothing.
 
 ## Release
 
@@ -229,7 +231,7 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf pr publish` / `lf pr open` | Ready PR, printed / draft PR, opened |
 | `lf pr abandon [BRANCH]` | Close the PR, remove the worktree, delete the branch |
 | `lf pr reconcile` | Check recorded landings once; recover a Task's missing PR |
-| `lf ci watch [--once\|--install\|--status]` | Repair failing landings |
+| `lf ship [ISSUE] [--stop]` | Run a Task's remaining steps to merge, repairing CI |
 | `lf ci [--since 7d]` | Report CI incidents and their repairs |
 | `lf release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |

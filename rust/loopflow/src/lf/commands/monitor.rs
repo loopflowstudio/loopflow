@@ -52,7 +52,7 @@ pub enum MonitorCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Reap registered orphan providers and remove dead process receipts
+    /// Reap orphan providers, remove dead process receipts, and release AgentProcess ancestry that was never recorded
     Prune {
         /// Show exact targets without changing process or receipt state
         #[arg(long)]

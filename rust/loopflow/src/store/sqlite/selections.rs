@@ -1617,12 +1617,7 @@ mod tests {
             conn.execute("UPDATE agent_sessions SET repo='/repo', task_id='task_22222222222222222222222222222222', wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-session'", []).unwrap();
         }
         let attachment = store
-            .claim_session_attachment(
-                "selection-session",
-                None,
-                &crate::id::LfProcessId::new(),
-                true,
-            )
+            .claim_session_attachment("selection-session", None, &store.test_lf_process(), true)
             .unwrap();
         store
             .record_agent_process_identity(
@@ -1723,7 +1718,7 @@ mod tests {
         }
         let unattached = store.resolve_selection(&repo, &running).unwrap();
         let attachment = store
-            .claim_session_attachment("before-boot", None, &crate::id::LfProcessId::new(), true)
+            .claim_session_attachment("before-boot", None, &store.test_lf_process(), true)
             .unwrap();
         let started: i64 = store
             .conn

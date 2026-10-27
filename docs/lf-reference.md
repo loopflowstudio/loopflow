@@ -1480,7 +1480,7 @@ Move idle Sessions still running a superseded lf onto the selected install
 
 ## lf monitor prune
 
-Reap registered orphan providers and remove dead process receipts
+Reap orphan providers, remove dead process receipts, and release AgentProcess ancestry that was never recorded
 
 | Argument | What it does |
 |---|---|

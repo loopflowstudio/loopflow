@@ -1402,7 +1402,7 @@ mod tests {
             let original = store.claim_session_attachment(
                 &session.id,
                 None,
-                &crate::id::LfProcessId::new(),
+                &store.test_lf_process(),
                 true,
             )?;
             let mut command = Command::new("/bin/sleep");

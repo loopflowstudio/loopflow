@@ -135,7 +135,7 @@ pub fn run_task_edge_for(cli: &Cli, task: &Task, edge: &str, release: bool) -> R
     let mut released = false;
     let mut attempt = 1;
     loop {
-        let mark = store.process_mark()?;
+        let mark = store.process_mark(&process)?;
         let mut log = letting_go
             .then(|| PendingLog::open(&format!("pending-{process}-{attempt}")))
             .transpose()?;
@@ -212,7 +212,7 @@ pub(crate) fn run_task_skill(
     let store = &store.sqlite;
     let process =
         journal::current_lf_process_id().context("a Task run requires a registered Process")?;
-    let mark = store.process_mark()?;
+    let mark = store.process_mark(&process)?;
     let status = spawn_task_child(&args, checkout, None, None, |_| Ok(()))?;
     if !status.success() {
         return Err(exit_of(status).into());
@@ -741,7 +741,7 @@ impl RunningGraph<'_> {
             command.arg("--verbose");
         }
         command.args(args);
-        let mark = self.store.sqlite.process_mark()?;
+        let mark = self.store.sqlite.process_mark(&self.process)?;
         let admission = self
             .store
             .sqlite

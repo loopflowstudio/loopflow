@@ -165,6 +165,7 @@ fn spawn_session_command_with_env(
 ) -> Result<()> {
     let _planning_sync =
         crate::ops::planning_sync::PlanningSync::start_for_directory(&command.cwd)?;
+    let pinned = pinned_account(environment, agent_session)?;
     let outcome = session_command_status_with_env(
         command,
         environment,
@@ -172,6 +173,10 @@ fn spawn_session_command_with_env(
         exact_account_id,
         launch_lock,
     )?;
+    if let Some(moved) = moved_away(environment, pinned)? {
+        eprintln!("{moved}");
+        return Ok(());
+    }
     if outcome.status.success() || outcome.interrupted {
         Ok(())
     } else if agent_session.is_some() {
@@ -186,6 +191,88 @@ fn spawn_session_command_with_env(
             outcome.status
         ))
     }
+}
+
+/// The login a resumed conversation is pinned to as this launch starts.
+type Pin = (
+    Provider,
+    AgentSessionId,
+    Option<crate::store::ProviderAccountId>,
+);
+
+fn pinned_account(
+    environment: &BTreeMap<String, String>,
+    agent_session: Option<&AgentSessionId>,
+) -> Result<Option<Pin>> {
+    let (Some(input), Some(agent_session)) = (
+        environment.get(crate::session_record::CAPTURE_KEY_ENV),
+        agent_session,
+    ) else {
+        return Ok(None);
+    };
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let provider = store
+        .session_for_artifact(input)?
+        .and_then(|session| session.provider)
+        .and_then(|provider| provider.parse::<Provider>().ok());
+    let Some(provider) = provider else {
+        return Ok(None);
+    };
+    let account = store.provider_session_account(provider, agent_session)?;
+    Ok(Some((provider, agent_session.clone(), account)))
+}
+
+/// Where this launch's conversation went, when another Machine or another
+/// login took it.
+fn moved_away(
+    environment: &BTreeMap<String, String>,
+    pinned: Option<Pin>,
+) -> Result<Option<String>> {
+    let Some(input) = environment.get(crate::session_record::CAPTURE_KEY_ENV) else {
+        return Ok(None);
+    };
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let Some(session) = store.session_for_artifact(input)? else {
+        return Ok(None);
+    };
+    let Some(machine) = store.session_moved_to(&session.id)? else {
+        let Some((provider, agent_session, before)) = pinned else {
+            return Ok(None);
+        };
+        let Some(after) = store.provider_session_account(provider, &agent_session)? else {
+            return Ok(None);
+        };
+        if before.as_ref() == Some(&after) {
+            return Ok(None);
+        }
+        let label = store
+            .get_provider_account(provider.as_str(), &after)?
+            .and_then(|account| account.login_email.map(|email| email.to_string()))
+            .unwrap_or_else(|| after.to_string());
+        return Ok(Some(format!(
+            "This conversation moved to account {label}: lf resume {}",
+            session.id
+        )));
+    };
+    let label = store
+        .machine_by_id(&machine)?
+        .map_or_else(|| machine.to_string(), |machine| machine.name());
+    // A Task that went with its conversation is resumed by its name.
+    for task in store.session_task_ids(&session.id)? {
+        let owner = store.task_ownership(&task)?.owner;
+        if owner.and_then(|owner| owner.machine.id) == Some(machine.clone()) {
+            if let Some(task) = store.task(&task)? {
+                return Ok(Some(format!(
+                    "This conversation moved to {label}: lf resume --task {}",
+                    task.identifier
+                )));
+            }
+        }
+    }
+    Ok(Some(format!(
+        "This conversation moved to {label}: lf resume {}",
+        session.id
+    )))
 }
 
 #[derive(Debug)]

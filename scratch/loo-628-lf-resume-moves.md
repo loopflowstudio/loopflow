@@ -325,6 +325,8 @@ No open product choice; `scratch/questions.md` holds only demo-decided risks.
 
 ## Delete — do not maintain
 
+All deleted as of 2026-10-27 (`rg` finds none); kept so nothing returns.
+
 - `lf machine use --task` and its hint path: replaced by `lf task move --machine`.
 - `move_primary_session`'s "completed here; it continues on M" branch:
   replaced by the Session move.

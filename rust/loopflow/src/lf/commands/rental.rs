@@ -753,9 +753,7 @@ fn prepare(
         .status()
         .context("could not run ssh")?;
     if !status.success() {
-        return Err(anyhow!(
-            "could not clone {origin} on {label}; `lf machine end {label}` gives it back"
-        ));
+        return Err(anyhow!("could not clone {origin} on {label}"));
     }
     Ok(())
 }

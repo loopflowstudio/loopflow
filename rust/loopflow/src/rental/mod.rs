@@ -587,11 +587,10 @@ impl Rental {
         self.deadline - time::Duration::seconds(SOFT_DEADLINE_SECONDS)
     }
 
-    /// Created but never made a Machine, long after admission: the lf booting
-    /// it died, and nothing ran on it.
+    /// Still booting long after admission: the lf booting it died before it
+    /// became a Machine, and nothing ran on it.
     pub fn boot_abandoned(&self, now: OffsetDateTime) -> bool {
         self.state == RentalState::Booting
-            && self.machine_id.is_none()
             && now - self.created_at >= time::Duration::seconds(BOOT_SECONDS)
     }
 }

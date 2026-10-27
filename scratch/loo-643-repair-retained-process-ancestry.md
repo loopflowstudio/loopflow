@@ -1,6 +1,6 @@
 # LOO-643: Repair retained Process ancestry without losing Session history
 
-Status: slices 1–5 implemented and synced with main `e970aec679`; gate passed (2026-10-27); PR and land remain. Jack Heart authorized an end-to-end
+Status: slices 1–5 implemented and synced with main `e3d16c5d27` (current origin/main, 2026-10-27); gate passed (2026-10-27); PR and land remain. Jack Heart authorized an end-to-end
 autonomous fix, local hotfix and patch release. No ad-hoc SQL writes to the live store.
 
 ## Problem
@@ -210,7 +210,7 @@ the prevention row is named by its agent child (`parent_lf_process_id`) and as
 
 Gate (2026-10-27, through `78a68913cc`, host load ~150–310): `cargo fmt --all -- --check` ok; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib` 2150 passed before a SIGTERM at 20:23:38 UTC, 53 s before the 90-minute tool deadline; the LOO-622 gate's `pkill -f "deps/loopflow-"` at 20:23:38.127 is the sourced, unproven explanation (no OS signal provenance; Jack Heart's correction). Then the 113 failed/unfinished tests rerun with `--exact` → 103 passed, 10 ignored, 0 failed (the 78 earlier failures, in untouched chapter/store/status/graph tests, left no panic output); `cargo test -p loopflow --test process_ownership_tests --test session_lifecycle_tests` → 12 + 29 passed. Full matrix stays with CI.
 
-LOO-647 (in flight) moves `retention::prune` into `top::run_prune`/`ProcessPruneReport`; Jack Heart sent its worker this repair's `would_repair`/`repaired`/`retained` contract so one prune path keeps both. Root owns the installed dry-run/repair/no-op/history acceptance.
+LOO-647 (PR open, `fa8a90e7f5`) moves `retention::prune` into `top::run_prune`/`ProcessPruneReport`; Jack Heart sent its worker this repair's `would_repair`/`repaired`/`retained` contract so one prune path keeps both. Realign (2026-10-27): `git merge-tree` against it conflicts only in the Prune `about` line (`monitor.rs`), generated `docs/lf-reference.md` and `scratch/questions.md`; `top.rs` and `process_ownership_tests.rs` auto-merge. Whichever lands second writes one `about` naming reap, receipts, forgetting finished rows and the ancestry repair, then regenerates the reference. Root owns the installed dry-run/repair/no-op/history acceptance.
 
 Kickoff recheck (2026-10-27, origin/main `e970aec679`, 11 commits ahead): the plan
 holds. #1729 (LOO-634) adds `lf monitor rollover` beside prune; the only merge
@@ -220,5 +220,7 @@ through the ordinary Session path and attaches no Process itself, so prevention 
 v0.14.19 (#1735) shipped without this change; the patch release follows landing.
 
 Post-sync check: `cargo test -p loopflow --lib ancestry` → 6 passed, including `prune_releases_unrecorded_ancestry_and_the_session_resumes`; CLI reference test ok.
+
+Main sync (2026-10-27, `e3d16c5d27`: #1741 Auto-Ship revert, #1745 gate scoping) merged clean; its overlap is a `ship_task` call in a `processes.rs` forget test and the `lf ship --recover` reference row, apart from this change's hunks. Post-merge `cargo test -p loopflow --lib ancestry` → 6 passed.
 
 Compress (2026-10-27): `prune_agent_processes` replaces the out-param `repair_unrecorded_ancestry` (one store, one entry); `cargo test -p loopflow --lib ancestry` → 6 passed.

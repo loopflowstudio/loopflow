@@ -58,6 +58,15 @@ is `release run patch`. The release command's exit status is the job's; an
 agent's successful report cannot turn a blocked release into success. Rerun the
 bootstrap to rewrite the lines after the host path or checkout moves.
 
+Earlier lf scheduled these jobs as launchd agents named
+`loopflow.cron.<wave>.<job>`. The bootstrap unloads and deletes them before
+writing the crontab, so one scheduler runs each job. Check which one is live:
+
+```bash
+crontab -l | grep loopflow:infrastructure   # both jobs
+launchctl list | grep loopflow.cron         # nothing
+```
+
 cron uses host-local time and skips firings while the Machine sleeps. Place the
 Wave on an always-on Machine when uninterrupted wall-clock cadence matters.
 

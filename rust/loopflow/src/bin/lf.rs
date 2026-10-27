@@ -1076,7 +1076,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&issue)?);
             } else {
-                println!("{} · {}", issue.identifier, issue.title);
+                println!("{} · {}", issue.title, issue.identifier);
             }
             if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
                 .planning_transport()
@@ -1102,7 +1102,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                         .expect("planning state is a string")
                 );
                 if let Some(task) = &status.task {
-                    println!("{} · {}", task.identifier, task.title);
+                    println!("{} · {}", task.title, task.identifier);
                     println!(
                         "Planning: {} · {}",
                         task.state.as_deref().unwrap_or("unknown"),
@@ -1451,9 +1451,9 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(code)
 }
 
-/// Diagnostics go to `logs/lf.log` in the selected home; the terminal shows
-/// what commands print and the errors they return. `-v` or `RUST_LOG` shows
-/// diagnostics on stderr instead.
+/// Diagnostics go to `logs/lf.log` in the selected home, each line ending with
+/// the pid and binary that wrote it; the terminal shows what commands print and
+/// the errors they return. `-v` or `RUST_LOG` shows diagnostics on stderr instead.
 fn init_tracing(verbose: bool) {
     let filter = EnvFilter::try_from_default_env().ok();
     if verbose || filter.is_some() {
@@ -1467,7 +1467,8 @@ fn init_tracing(verbose: bool) {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new("warn"))
         .with_ansi(false)
-        .with_writer(|| DiagnosticLog)
+        .with_writer(|| loopflow::diagnostic_log::DiagnosticLog)
+        .event_format(loopflow::diagnostic_log::IdentifiedLines)
         .init();
 }
 
@@ -1479,31 +1480,6 @@ fn desktop_intent_read(cli: &Cli) -> bool {
             cmd: DesktopCommand::View { .. } | DesktopCommand::Layout { save: false, .. }
         })
     )
-}
-
-/// Opened per event, so a command that logs nothing creates no home.
-struct DiagnosticLog;
-
-impl std::io::Write for DiagnosticLog {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        let directory = loopflow::store::lf_home_dir().join("logs");
-        let log = std::fs::create_dir_all(&directory).and_then(|()| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(directory.join("lf.log"))
-        });
-        match log {
-            Ok(mut log) => log.write_all(bytes),
-            // An unwritable home still runs; its diagnostics stay visible.
-            Err(_) => std::io::stderr().write_all(bytes),
-        }?;
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
 }
 
 fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
@@ -1555,9 +1531,6 @@ fn run() -> anyhow::Result<()> {
                     cmd: TaskCommand::Location { .. } | TaskCommand::WatchFiles { .. }
                 })
             );
-        if !cli.records_process() {
-            journal::mark_effect_free_read();
-        }
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
         init_tracing(false);
         if !preview {
@@ -1594,8 +1567,8 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
-    if !cli.records_process() {
-        journal::mark_effect_free_read();
+    if cli.harness_callback() {
+        journal::harness_issued();
     }
     // Provider hooks keep the callbacks their launching lf wrote. A removed
     // one must not fail: Claude treats exit 2 at Stop as "keep working".

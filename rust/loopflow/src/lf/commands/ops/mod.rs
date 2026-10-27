@@ -2788,7 +2788,6 @@ fn process_skill_agent(
             &prepared.config,
         )),
     )?;
-    capture.record_input("initial", &prepared.config.task_prompt);
 
     let mut launch = prepared.config;
     launch.env.extend(env.cloned().unwrap_or_default());

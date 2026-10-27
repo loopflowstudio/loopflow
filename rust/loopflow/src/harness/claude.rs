@@ -16,7 +16,7 @@ use crate::harness::claude_decode::ClaudeDecoder;
 use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
 use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::{FactWriter, RequestOrigins};
-use crate::harness::{Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
+use crate::harness::{Harness, HarnessError, SendCurrentOutcome};
 use crate::id::AgentSessionId;
 use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
@@ -31,7 +31,6 @@ use crate::store::ProviderAccountId;
 /// boundary per `send_input`.
 pub struct ClaudeHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
-    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     config: Option<AgentConfig>,
     capture: Option<crate::agent::AgentCapture>,
     should_seed_task_prompt: bool,
@@ -80,7 +79,6 @@ impl ClaudeHarness {
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
         Self {
             events,
-            raw_provider: None,
             config: None,
             capture: None,
             should_seed_task_prompt: true,
@@ -217,7 +215,6 @@ impl ClaudeHarness {
     /// and emits one `TurnCompleted` per coalesced runner turn.
     fn spawn_reader(&mut self, stdout: tokio::process::ChildStdout, mut writer: FactWriter) {
         let events = self.events.clone();
-        let raw_provider = self.raw_provider.clone();
         let turn_in_progress = self.turn_in_progress.clone();
         let pending_results = self.pending_results.clone();
         let current_turn_id = self.current_turn_id.clone();
@@ -238,12 +235,6 @@ impl ClaudeHarness {
             };
 
             while let Ok(Some(line)) = lines.next_line().await {
-                if let Some(raw_provider) = &raw_provider {
-                    let _ = raw_provider.send(RawProviderEvent {
-                        stream: "stdout",
-                        line: line.clone(),
-                    });
-                }
                 if shutdown.load(Ordering::Relaxed) {
                     break;
                 }
@@ -415,13 +406,6 @@ impl Harness for ClaudeHarness {
     }
     fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
-    }
-
-    fn set_raw_provider_sender(
-        &mut self,
-        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
-    ) {
-        self.raw_provider = raw_provider;
     }
 
     async fn start(&mut self, config: &AgentConfig) -> Result<()> {

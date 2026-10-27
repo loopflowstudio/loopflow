@@ -13,7 +13,6 @@ use std::io::Write;
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -196,16 +195,6 @@ pub struct TerminalReceipt {
     pub result_ref: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct EventEnvelope {
-    schema_version: u32,
-    seq: u64,
-    #[serde(with = "time::serde::rfc3339")]
-    observed_at: OffsetDateTime,
-    #[serde(flatten)]
-    event: CaptureEvent,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(crate) struct ProviderSessionRef {
     schema_version: u32,
@@ -233,38 +222,11 @@ struct SessionContextArtifact<'a> {
     context: &'a crate::trace::PreparedTurnContext,
 }
 
-/// A stream event the capture appends to `events.jsonl`. History never stores
-/// one: what it keeps is a [`CaptureFact`].
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum CaptureEvent {
-    Usage {
-        provider: String,
-        model: Option<String>,
-        attempt_key: String,
-        turn_key: String,
-        final_receipt: bool,
-        usage: Box<TurnUsage>,
-    },
-    UserInput {
-        op: String,
-        text: String,
-    },
-    Conversation {
-        event: Box<ConversationEvent>,
-    },
-    ProviderOutput {
-        stream: String,
-        line: String,
-    },
-    #[serde(other)]
-    Unknown,
-}
-
 /// What SQLite history keeps of a capture: its provider attempts, accounts and
 /// sessions, how each turn ended, and each silence longer than
-/// [`SILENCE_SECONDS`]. Provider text and usage have no variant; `events.jsonl`
-/// holds the stream and native rows hold usage.
+/// [`SILENCE_SECONDS`]. Provider text and usage have no variant: the provider's
+/// transcript holds the conversation and native rows hold usage. Facts keep the
+/// `events.jsonl:{seq}` source their receipt keys and migrations already index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum CaptureFact {
@@ -572,94 +534,6 @@ fn native_peak(receipt: &serde_json::Value) -> Option<u64> {
     receipt["peakInputTokens"]
         .as_u64()
         .or(receipt["last"]["inputTokens"].as_u64())
-}
-
-#[derive(Debug)]
-enum RecorderMessage {
-    Event(serde_json::Value),
-    Drain(mpsc::Sender<()>),
-}
-
-/// Appends the capture's stream to `events.jsonl` off the harness thread. It
-/// has no store: history facts are written by the capture that produces them.
-#[derive(Debug)]
-struct SessionRecorder {
-    sender: Option<SyncSender<RecorderMessage>>,
-}
-
-impl SessionRecorder {
-    fn start(dir: &Path, artifact_key: &str) -> Self {
-        let (sender, receiver) = mpsc::sync_channel(256);
-        let writer_dir = dir.to_path_buf();
-        let writer_artifact_key = artifact_key.to_owned();
-        let thread = std::thread::Builder::new()
-            .name(format!("lf-session-recorder-{}", &artifact_key[..8]))
-            .spawn(move || {
-                let mut warned = false;
-                while let Ok(message) = receiver.recv() {
-                    let result = match message {
-                        RecorderMessage::Event(event) => {
-                            append_json_line(&writer_dir.join("events.jsonl"), &event)
-                        }
-                        RecorderMessage::Drain(acknowledge) => {
-                            let result = sync_telemetry(&writer_dir);
-                            let _ = acknowledge.send(());
-                            result
-                        }
-                    };
-                    if let Err(error) = result {
-                        if !warned {
-                            tracing::warn!(
-                                %error,
-                                artifact_key = %writer_artifact_key,
-                                "Session recorder lost telemetry; harness execution continues"
-                            );
-                            warned = true;
-                        } else {
-                            tracing::debug!(%error, artifact_key = %writer_artifact_key, "Session recorder telemetry write failed");
-                        }
-                    }
-                }
-            });
-        match thread {
-            Ok(_) => Self {
-                sender: Some(sender),
-            },
-            Err(error) => {
-                tracing::warn!(
-                    %error,
-                    artifact_key = %artifact_key,
-                    "Session recorder unavailable; harness execution continues"
-                );
-                Self { sender: None }
-            }
-        }
-    }
-
-    fn record(&self, message: RecorderMessage) -> std::io::Result<()> {
-        let Some(sender) = &self.sender else {
-            return Err(std::io::Error::other("Session recorder is unavailable"));
-        };
-        sender.try_send(message).map_err(|error| match error {
-            TrySendError::Full(_) => std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                "Session recorder queue is full",
-            ),
-            TrySendError::Disconnected(_) => {
-                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Session recorder stopped")
-            }
-        })
-    }
-
-    fn drain_after_settlement(&self) {
-        let Some(sender) = &self.sender else {
-            return;
-        };
-        let (acknowledge, drained) = mpsc::channel();
-        if sender.try_send(RecorderMessage::Drain(acknowledge)).is_ok() {
-            let _ = drained.recv_timeout(std::time::Duration::from_millis(250));
-        }
-    }
 }
 
 /// One reading of a native usage counter: a provider turn's cumulative usage so
@@ -1994,21 +1868,8 @@ impl CaptureHandle {
         self.with_capture(SessionCapture::start_attempt);
     }
 
-    pub(crate) fn record_raw(&self, stream: &str, line: &str) {
-        self.with_capture(|capture| capture.record_raw(stream, line));
-    }
-
     pub(crate) fn record_conversation(&self, event: ConversationEvent) {
         self.with_capture(|capture| capture.record_conversation(event));
-    }
-
-    pub(crate) fn record_input(&self, op: &str, text: &str) {
-        self.with_capture(|capture| {
-            capture.append_event(CaptureEvent::UserInput {
-                op: op.to_string(),
-                text: text.to_string(),
-            })
-        });
     }
 
     pub(crate) fn retry_agent_process(
@@ -2133,9 +1994,7 @@ struct SessionCapture {
     agent_session: Option<AgentSessionId>,
     attempt: u32,
     attempt_started: bool,
-    turn_key: String,
     event_seq: u64,
-    recorder: SessionRecorder,
     /// Where facts are kept; none for a mechanical command's capture.
     history: Option<(crate::store::sqlite::SqliteStore, crate::session::LfSession)>,
     /// When the stream's previous event arrived, to record silences.
@@ -2209,7 +2068,6 @@ impl SessionCapture {
     }
 
     fn from_manifest(manifest: SessionCaptureManifest, dir: PathBuf) -> Self {
-        let recorder = SessionRecorder::start(&dir, &manifest.artifact_key);
         let history = if manifest.harness == "loopflow" {
             Ok(None)
         } else {
@@ -2257,9 +2115,7 @@ impl SessionCapture {
             dir,
             attempt: 1,
             attempt_started: false,
-            turn_key: Uuid::new_v4().to_string(),
             event_seq: 0,
-            recorder,
             history,
             previous_event: None,
             telemetry_warned: false,
@@ -2307,7 +2163,6 @@ impl SessionCapture {
         self.agent_session = None;
         self.attempt += 1;
         self.attempt_started = false;
-        self.turn_key = Uuid::new_v4().to_string();
         let start_error = self.start_attempt().err();
         match (finish_error, start_error) {
             (None, None) => Ok(()),
@@ -2318,63 +2173,24 @@ impl SessionCapture {
         }
     }
 
-    fn record_raw(&mut self, stream: &str, line: &str) -> std::io::Result<()> {
-        self.append_event(CaptureEvent::ProviderOutput {
-            stream: stream.to_string(),
-            line: line.to_string(),
-        })
-    }
-
+    /// Keep how a turn ended; any other event only ticks the silence clock.
     fn record_conversation(&mut self, event: ConversationEvent) -> std::io::Result<()> {
-        match event {
-            ConversationEvent::TurnStarted { turn_id } => {
-                self.turn_key = turn_id.clone();
-                self.append_event(CaptureEvent::Conversation {
-                    event: Box::new(ConversationEvent::TurnStarted { turn_id }),
-                })
-            }
-            ConversationEvent::UsageCheckpoint {
-                turn_id,
-                usage,
-                final_receipt,
-            } => {
-                self.turn_key = turn_id;
-                self.append_usage(usage, final_receipt)
-            }
+        let end = match event {
             ConversationEvent::TurnCompleted { turn_id, status } => {
-                self.record_fact(CaptureFact::Conversation {
-                    event: TurnEnd::TurnCompleted { turn_id, status },
-                })
+                TurnEnd::TurnCompleted { turn_id, status }
             }
             ConversationEvent::Error {
                 code,
                 message,
                 evidence,
-            } => self.record_fact(CaptureFact::Conversation {
-                event: TurnEnd::Error {
-                    code,
-                    message,
-                    evidence: evidence.map(Box::new),
-                },
-            }),
-            event => self.append_event(CaptureEvent::Conversation {
-                event: Box::new(event),
-            }),
-        }
-    }
-
-    fn append_usage(&mut self, usage: TurnUsage, final_receipt: bool) -> std::io::Result<()> {
-        if !usage.is_reported() {
-            return Ok(());
-        }
-        self.append_event(CaptureEvent::Usage {
-            provider: self.provider.clone(),
-            model: self.model.clone(),
-            attempt_key: self.attempt_key(),
-            turn_key: self.turn_key.clone(),
-            final_receipt,
-            usage: Box::new(usage),
-        })
+            } => TurnEnd::Error {
+                code,
+                message,
+                evidence: evidence.map(Box::new),
+            },
+            _ => return self.next_position().map(drop),
+        };
+        self.record_fact(CaptureFact::Conversation { event: end })
     }
 
     fn finish(&mut self, outcome: &str) -> std::io::Result<()> {
@@ -2438,7 +2254,6 @@ impl SessionCapture {
                 );
             }
         }
-        self.recorder.drain_after_settlement();
         if let Some((session, attachment)) = self.attachment.take() {
             match row_store(&self.dir)
                 .and_then(|store| finish_session_attachment(&store, &session, &attachment, outcome))
@@ -2450,34 +2265,18 @@ impl SessionCapture {
         Ok(())
     }
 
-    /// Append a stream event to `events.jsonl` only.
-    fn append_event(&mut self, event: CaptureEvent) -> std::io::Result<()> {
-        self.activity.note_event(OffsetDateTime::now_utc());
-        let (seq, observed_at) = self.next_position()?;
-        self.recorder
-            .record(RecorderMessage::Event(serde_json::json!(EventEnvelope {
-                schema_version: SCHEMA_VERSION,
-                seq,
-                observed_at,
-                event,
-            })))
-    }
-
-    /// Keep `fact` in history and append it to `events.jsonl`.
+    /// Keep `fact` in history.
     fn record_fact(&mut self, fact: CaptureFact) -> std::io::Result<()> {
-        self.activity.note_event(OffsetDateTime::now_utc());
         let (seq, observed_at) = self.next_position()?;
-        let (_, evidence) = fact.observation(seq, observed_at);
-        let kept = self.keep_fact(seq, observed_at, &fact);
-        self.recorder
-            .record(RecorderMessage::Event(evidence))
-            .and(kept)
+        self.keep_fact(seq, observed_at, &fact)
     }
 
     /// The next stream position, after keeping the silence that preceded it.
+    /// Every provider event the capture hears takes one.
     fn next_position(&mut self) -> std::io::Result<(u64, OffsetDateTime)> {
         let seq = self.event_seq;
         let at = OffsetDateTime::now_utc();
+        self.activity.note_event(at);
         self.event_seq += 1;
         let silence = self
             .previous_event
@@ -2837,26 +2636,6 @@ fn write_private_exclusive(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut file = options.open(path)?;
     file.write_all(bytes)?;
     file.sync_all()
-}
-
-fn append_json_line<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
-    let mut bytes = serde_json::to_vec(value).map_err(std::io::Error::other)?;
-    bytes.push(b'\n');
-    let mut options = OpenOptions::new();
-    options.create(true).append(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(path)?;
-    file.write_all(&bytes)
-}
-
-fn sync_telemetry(dir: &Path) -> std::io::Result<()> {
-    let path = dir.join("events.jsonl");
-    match OpenOptions::new().read(true).open(&path) {
-        Ok(file) => file.sync_data(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
 }
 
 #[cfg(unix)]
@@ -3532,7 +3311,6 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
             .expect("publish Session capture manifest");
-        capture.record_input("initial", "do the work");
         let dir = capture.artifact_dir();
         let artifact_key = capture.artifact_key().to_string();
 
@@ -3549,7 +3327,6 @@ mod tests {
         assert!(!dir.join("terminal.json").exists());
 
         capture.mark_spawn_requested();
-        capture.record_raw("stderr", "provider diagnostic");
         capture.record_conversation(ConversationEvent::TextDelta {
             turn_id: "provider-turn".to_string(),
             content: "provider response".to_string(),
@@ -3565,13 +3342,6 @@ mod tests {
         });
         capture.finish("completed").expect("settle capture");
 
-        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"type\":\"usage\""));
-        assert!(events.contains("\"final_receipt\":false"));
-        assert!(!events.contains("\"final_receipt\":true"));
-        assert!(events.contains("\"type\":\"user_input\""));
-        assert!(events.contains("\"type\":\"provider_output\""));
-        assert!(events.contains("\"type\":\"text_delta\""));
         let terminal = fs::read(dir.join("terminal.json")).unwrap();
         let terminal: TerminalReceipt = serde_json::from_slice(&terminal).unwrap();
         assert_eq!(terminal.outcome, "completed");
@@ -3582,7 +3352,7 @@ mod tests {
         files.sort();
         assert_eq!(
             files,
-            ["events.jsonl", "manifest.json", "terminal.json"].map(std::ffi::OsString::from)
+            ["manifest.json", "terminal.json"].map(std::ffi::OsString::from)
         );
 
         let error = capture.finish("failed").unwrap_err();
@@ -3593,17 +3363,12 @@ mod tests {
     }
 
     #[test]
-    fn history_keeps_facts_and_the_file_keeps_the_stream() {
+    fn history_keeps_only_how_a_turn_ended() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let turn = || "turn-1".to_string();
         capture.record_conversation(ConversationEvent::TurnStarted { turn_id: turn() });
         for word in ["streamed ", "one ", "token ", "at a time"] {
-            capture.record_raw(
-                "notification",
-                &serde_json::json!({"method": "item/agentMessage/delta", "params": {"delta": word}})
-                    .to_string(),
-            );
             capture.record_conversation(ConversationEvent::TextDelta {
                 turn_id: turn(),
                 content: word.to_string(),
@@ -3615,10 +3380,6 @@ mod tests {
                 diff: diff.to_string(),
             });
         }
-        capture.record_raw(
-            "notification",
-            &serde_json::json!({"method": "item/completed", "params": {}}).to_string(),
-        );
         capture.record_conversation(ConversationEvent::UsageCheckpoint {
             turn_id: turn(),
             usage: TurnUsage {
@@ -3635,12 +3396,7 @@ mod tests {
 
         // Capture prose remains readable, but cannot substitute for native turn output.
         assert_eq!(capture.final_answer().unwrap(), None);
-        let file = fs::read_to_string(capture.artifact_dir().join("events.jsonl")).unwrap();
-        assert_eq!(file.matches("item/agentMessage/delta").count(), 4);
-        assert_eq!(file.matches("\"type\":\"text_delta\"").count(), 4);
-        assert_eq!(file.matches("\"type\":\"diff_updated\"").count(), 2);
-        assert_eq!(file.matches("item/completed").count(), 1);
-        assert_eq!(file.matches("\"type\":\"usage\"").count(), 1);
+        assert!(!capture.artifact_dir().join("events.jsonl").exists());
 
         let history = super::row_store(&capture.artifact_dir())
             .unwrap()
@@ -3660,11 +3416,17 @@ mod tests {
     fn history_records_a_long_gap_as_a_silence() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.record_raw("stdout", "thinking");
+        let say = |content: &str| {
+            capture.record_conversation(ConversationEvent::TextDelta {
+                turn_id: "turn-1".into(),
+                content: content.into(),
+            })
+        };
+        say("thinking");
         let since = OffsetDateTime::now_utc() - time::Duration::seconds(700);
         capture.0.lock().unwrap().previous_event = Some(since);
-        capture.record_raw("stdout", "still thinking");
-        capture.record_raw("stdout", "done");
+        say("still thinking");
+        say("done");
 
         let store = super::row_store(&capture.artifact_dir()).unwrap();
         let silences = store.input_silences(&capture.artifact_key()).unwrap();
@@ -4032,32 +3794,20 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
         let dir = capture.artifact_dir();
-        // Production settlement has a bounded telemetry budget. This fixture
-        // needs the recorder's acknowledgement, not a scheduling deadline.
-        let drain = || {
-            let (acknowledge, drained) = std::sync::mpsc::channel();
-            capture
-                .0
-                .lock()
+        let facts = || {
+            super::row_store(&dir)
                 .unwrap()
-                .recorder
-                .sender
-                .as_ref()
+                .input_events(&capture.artifact_key())
                 .unwrap()
-                .send(super::RecorderMessage::Drain(acknowledge))
-                .unwrap();
-            drained.recv().unwrap();
         };
         let first = crate::store::ProviderAccountId::parse("primary").unwrap();
         let second = crate::store::ProviderAccountId::parse("fallback").unwrap();
         capture.mark_spawn_requested();
         capture.observe_provider(None, Some(first.clone()));
-        drain();
 
         assert!(!dir.join("terminal.json").exists());
         assert!(read_provider_session(&dir).unwrap().is_none());
-        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"account_id\":\"primary\""));
+        assert!(facts().iter().any(|fact| fact["account_id"] == "primary"));
 
         capture.observe_provider(Some("first-session".into()), Some(first.clone()));
         capture.observe_provider(Some("first-session".into()), Some(first.clone()));
@@ -4072,7 +3822,6 @@ mod tests {
             .fail_and_begin_attempt("proof".into(), None, Some(second.clone()))
             .unwrap();
         capture.observe_provider(Some("second-session".into()), Some(second.clone()));
-        drain();
         assert!(!dir.join("provider-session.json").exists());
         rusqlite::Connection::open(super::row_database(&dir).unwrap()).unwrap().execute(
             "DELETE FROM session_events WHERE kind='observed' AND json_extract(payload,'$.input_id')=?1 AND json_extract(payload,'$.source') LIKE 'provider-session:%'",
@@ -4089,13 +3838,8 @@ mod tests {
             .unwrap();
         capture.observe_provider(Some("ambient-session".into()), None);
         capture.finish("completed").unwrap();
-        drain();
 
-        let events: Vec<serde_json::Value> = fs::read_to_string(dir.join("events.jsonl"))
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
+        let events = facts();
         let accounts: Vec<_> = events
             .iter()
             .filter(|event| event["type"] == "provider_account_selected")
@@ -4154,47 +3898,6 @@ mod tests {
     }
 
     #[test]
-    fn telemetry_failure_does_not_gate_terminal_settlement() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
-            .expect("publish Session capture manifest");
-        let dir = capture.artifact_dir();
-        fs::create_dir(dir.join("events.jsonl")).unwrap();
-
-        capture.mark_spawn_requested();
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(10),
-                ..TurnUsage::default()
-            },
-            final_receipt: true,
-        });
-        capture
-            .finish("completed")
-            .expect("settle without telemetry");
-
-        assert!(dir.join("terminal.json").is_file());
-    }
-
-    #[test]
-    fn terminal_history_survives_an_unavailable_telemetry_recorder() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        capture.0.lock().unwrap().recorder.sender = None;
-
-        capture.finish("completed").unwrap();
-        capture.finish("completed").unwrap();
-        let store = super::row_store(&capture.artifact_dir()).unwrap();
-        fs::remove_dir_all(capture.artifact_dir()).unwrap();
-
-        let history = store
-            .input_history(capture.artifact_key().as_str())
-            .unwrap();
-        assert_eq!(history.recorded_outcome.as_deref(), Some("completed"));
-    }
-
-    #[test]
     fn dropping_the_last_capture_settles_unexpected_control_flow_as_failed() {
         let home = tempfile::tempdir().unwrap();
         let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
@@ -4206,147 +3909,6 @@ mod tests {
         let terminal: TerminalReceipt =
             serde_json::from_slice(&fs::read(dir.join("terminal.json")).unwrap()).unwrap();
         assert_eq!(terminal.outcome, "failed");
-    }
-
-    #[test]
-    fn retry_usage_keeps_provider_cumulative_values_in_distinct_streams() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
-            .expect("publish Session capture manifest");
-        capture.record_input("initial", "do the work");
-        let dir = capture.artifact_dir();
-
-        capture.mark_spawn_requested();
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(10),
-                output_tokens: Some(4),
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture
-            .0
-            .lock()
-            .unwrap()
-            .fail_and_begin_attempt(
-                "proof-fallback".to_string(),
-                None,
-                Some(crate::store::ProviderAccountId::parse("fallback-account").unwrap()),
-            )
-            .unwrap();
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(12),
-                output_tokens: Some(5),
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.finish("completed").expect("settle capture");
-
-        let events = fs::read_to_string(dir.join("events.jsonl")).unwrap();
-        assert!(events.contains("\"account_id\":\"fallback-account\""));
-        let usage = events
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .filter(|event| event["type"] == "usage")
-            .collect::<Vec<_>>();
-        assert_eq!(usage.len(), 2);
-        assert_eq!(usage[0]["usage"]["input_tokens"], 10);
-        assert_eq!(usage[1]["usage"]["input_tokens"], 12);
-        assert_ne!(usage[0]["attempt_key"], usage[1]["attempt_key"]);
-        assert_eq!(usage[0]["final_receipt"], false);
-        assert_eq!(usage[1]["final_receipt"], false);
-    }
-
-    #[test]
-    fn telemetry_loss_cannot_keep_retry_evidence_on_the_prior_attempt() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path())).unwrap();
-        let prior_attempt = {
-            let mut state = capture.0.lock().unwrap();
-            let stream = state.attempt_key();
-            state.recorder.sender = None;
-            stream
-        };
-
-        capture.mark_spawn_requested();
-        capture
-            .0
-            .lock()
-            .unwrap()
-            .fail_and_begin_attempt("fallback".to_string(), Some("next".to_string()), None)
-            .unwrap_err();
-
-        let state = capture.0.lock().unwrap();
-        assert_eq!(state.attempt, 2);
-        assert_eq!(state.provider, "fallback");
-        assert_eq!(state.model.as_deref(), Some("next"));
-        assert!(state.attempt_started);
-        assert_ne!(state.attempt_key(), prior_attempt);
-    }
-
-    #[test]
-    fn usage_keeps_omissions_for_each_provider_turn() {
-        let home = tempfile::tempdir().unwrap();
-        let capture = CaptureHandle::begin_at(home.path(), spec(home.path()))
-            .expect("publish Session capture manifest");
-        let dir = capture.artifact_dir();
-
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(10),
-                output_tokens: None,
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn".to_string(),
-            usage: TurnUsage {
-                input_tokens: None,
-                output_tokens: Some(4),
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.record_conversation(ConversationEvent::TurnStarted {
-            turn_id: "provider-turn-2".to_string(),
-        });
-        capture.record_conversation(ConversationEvent::UsageCheckpoint {
-            turn_id: "provider-turn-2".to_string(),
-            usage: TurnUsage {
-                input_tokens: Some(3),
-                output_tokens: None,
-                cache_read_tokens: None,
-                ..TurnUsage::default()
-            },
-            final_receipt: false,
-        });
-        capture.finish("completed").unwrap();
-
-        let usage = fs::read_to_string(dir.join("events.jsonl"))
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-            .filter(|event| event["type"] == "usage")
-            .collect::<Vec<_>>();
-        assert_eq!(usage.len(), 3);
-        assert_eq!(usage[1]["usage"]["input_tokens"], serde_json::Value::Null);
-        assert_eq!(
-            usage[1]["usage"]["total_input_tokens"],
-            serde_json::Value::Null
-        );
-        assert_eq!(usage[1]["turn_key"], "provider-turn");
-        assert_eq!(usage[2]["turn_key"], "provider-turn-2");
     }
 
     #[test]

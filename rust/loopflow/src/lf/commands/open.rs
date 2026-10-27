@@ -514,7 +514,7 @@ fn describe(
         None => (None, None),
     };
     let label = match (&task, &wave) {
-        (Some(task), _) => format!("{} · {}", task.identifier, task.title),
+        (Some(task), _) => crate::terminal_title::workspace_name(&task.identifier, &task.title),
         (None, Some(wave)) => format!("{short_name} · {wave} Wave"),
         (None, None) => short_name,
     };
@@ -745,7 +745,7 @@ fn available_target(
     )?;
     if exact.is_some() {
         resolved.label = match &resolved.task {
-            Some(task) => format!("{} · {}", task.identifier, session.title),
+            Some(task) => format!("{} · {}", session.title, task.identifier),
             None => session.title.clone(),
         };
     }

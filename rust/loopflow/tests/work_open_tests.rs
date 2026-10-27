@@ -96,10 +96,10 @@ fn task_link_resolves_by_folder_name_without_preparing_anything() {
     ));
     let link = &links[0];
     assert_eq!(link["url"], url.as_str());
-    assert_eq!(link["label"], "INF-123 · Prove Task PR transitions");
+    assert_eq!(link["label"], "Prove Task PR transitions · INF-123");
     assert_eq!(
         link["markdown"],
-        format!("[INF-123 · Prove Task PR transitions]({url})").as_str()
+        format!("[Prove Task PR transitions · INF-123]({url})").as_str()
     );
     assert_eq!(
         link["fallback_argv"],
@@ -120,7 +120,7 @@ fn task_link_resolves_by_folder_name_without_preparing_anything() {
         !text.contains('\x1b'),
         "piped text carries no escapes: {text:?}"
     );
-    assert!(text.starts_with("INF-123 · Prove Task PR transitions  lf open "));
+    assert!(text.starts_with("Prove Task PR transitions · INF-123  lf open "));
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn standalone_task_link_resolves_by_folder_name() {
     assert_eq!(links[0]["target"]["task_id"], created["id"]);
     assert_eq!(
         links[0]["label"],
-        format!("{identifier} · Stand alone").as_str()
+        format!("Stand alone · {identifier}").as_str()
     );
 }
 
@@ -357,7 +357,7 @@ fn refused_host_reports_cause_and_the_usable_command() {
     assert!(!output.status.success());
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(
-        text.contains("Could not open INF-123 · Prove Task PR transitions: cmux"),
+        text.contains("Could not open Prove Task PR transitions · INF-123: cmux"),
         "{text}"
     );
     assert!(text.contains(&format!("Run: lf open {url}")), "{text}");

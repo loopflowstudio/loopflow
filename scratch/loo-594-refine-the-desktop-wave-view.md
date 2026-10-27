@@ -323,6 +323,7 @@ one plan; `DashboardView.swift:37` still offers Working Tasks.
 - Compress (Oct 26): dropped the redundant part filter on `tile_request` (part verbs are never tile verbs) and the empty-verbs branch; `WaveStandup` carries `doneDays` (one default from `TaskHistoryFilter`), Backlog is two ordered filters instead of a sort. Fixed `every_verb_names_a_registry_action` to exempt `do`. `cargo test -p loopflow --lib desktop` → 21 pass; Swift filter (WaveStandup/TaskHistoryFilter/DesktopHeadless/WorkNavigation) → 61 pass.
 
 - Oct 26 (hide/Show…): `cargo test -p loopflow --lib desktop::` 13 pass, `--test integration dto_fixtures` 42 pass, clippy clean; Swift filter (WorkspacePanes/DesktopPaneControl/WaveStandup/WorkDestination/MultiplexerStore/DashboardWorkspace/WorktreeWorkspace/DTOFixture) pass. `hide -p board` CLI routing has no live-Desktop test (gate/demo).
+- Oct 26 (after `HideablePart` takes part/view/workspace, f504a40657): `scripts/test_desktop.sh --filter 'WaveStandupTests|WorkspacePanesTests|DesktopPaneControlTests'` → 37 pass.
 
 ## Direction added October 26, 2026, after acceptance (binding; supersedes conflicts above)
 

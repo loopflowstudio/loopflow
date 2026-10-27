@@ -331,7 +331,7 @@ struct TaskFilesTests {
         try FileManager.default.createSymbolicLink(at: parentLink ? directory : file,
                                                   withDestinationURL: parentLink ? targetDirectory : target)
         await store.loadFile()
-        await document.save(issue: store.issue, cwd: store.cwd, query: query)
+        await document.save(issue: store.issue, query: query)
         try await Task.sleep(for: .milliseconds(2200))
         #expect(try String(contentsOf: target, encoding: .utf8) == "original")
         #expect(document.text == "draft")
@@ -419,7 +419,7 @@ struct TaskFilesTests {
         try await eventually { document.text == "local\nexternal\n" }
         try await Task.sleep(for: .milliseconds(2200))
         #expect(try String(contentsOf: file, encoding: .utf8) == "ONE\nexternal\n")
-        await document.save(issue: store.issue, cwd: store.cwd, query: query)
+        await document.save(issue: store.issue, query: query)
         #expect(try String(contentsOf: file, encoding: .utf8) == "local\nexternal\n")
         await store.refresh()
         store.autosave = true
@@ -683,7 +683,7 @@ struct TaskFilesTests {
         let transport = HeldTaskSave()
         let query = RegistryQuery(runWithInput: { _, _, input in try await transport.save(input) },
                                   run: { _, _ in throw RegistryQueryError("unused read") })
-        let pending = Task { await document.save(issue: "TEST-1", cwd: "/fixture", query: query) }
+        let pending = Task { await document.save(issue: "TEST-1", query: query) }
         for _ in 0..<100 {
             if await transport.waiting { break }
             await Task.yield()
@@ -719,7 +719,7 @@ struct TaskFilesTests {
         let final = #"{"issue_identifier":"TEST-1","task_id":"task-files","path":"note.txt","content":"local\nDISK\n","state":"text","revision":"latest","size_bytes":11,"recoveries":[]}"#
         let query = RegistryQuery(runWithInput: { _, _, input in try await transport.save(input) },
                                   run: { _, _ in final })
-        let saving = Task { await document.save(issue: "TEST-1", cwd: "/fixture", query: query) }
+        let saving = Task { await document.save(issue: "TEST-1", query: query) }
         while !(await transport.waiting) { await Task.yield() }
         await document.reconcile(snapshot("one\ntwo\n"))
         await transport.release()
@@ -737,7 +737,7 @@ struct TaskFilesTests {
         let response = #"{"published":false,"message":"File changed on disk","file":{"issue_identifier":"TEST-1","task_id":"task-files","path":"scratch/notes.md","content":"external","state":"text","revision":"external","size_bytes":8,"recoveries":[{"directory":"/recovery","changed":true,"message":"Late write retained"}]}}"#
         let query = RegistryQuery(runWithInput: { _, _, _ in response },
                                   run: { _, _ in throw RegistryQueryError("unused read") })
-        await document.save(issue: "TEST-1", cwd: "/fixture", query: query)
+        await document.save(issue: "TEST-1", query: query)
         #expect(document.text == "draftexternal")
         #expect(document.snapshot?.content == "external")
         #expect(document.external == nil)

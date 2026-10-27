@@ -152,6 +152,15 @@ pub fn source_revision() -> &'static str {
 
 pub const BUILD_VERSION: &str = env!("LOOPFLOW_BUILD_VERSION");
 
+/// `lf --version`: the build version, then an unreleased build's label.
+pub const VERSION_LINE: &str = env!("LOOPFLOW_VERSION_LINE");
+
+/// What an unreleased build is, e.g. `hotfix e9b2c2eac on v0.14.16`; `None`
+/// for a release.
+pub fn label() -> Option<&'static str> {
+    Some(env!("LOOPFLOW_BUILD_LABEL")).filter(|label| !label.is_empty())
+}
+
 pub fn migration_authority() -> MigrationAuthority {
     match env!("LOOPFLOW_COMPILED_MIGRATION_AUTHORITY") {
         "published" => MigrationAuthority::Published,
@@ -205,9 +214,10 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        classify_revision, migration_authority, migration_draft_manifest, parse_provenance,
+        classify_revision, label, migration_authority, migration_draft_manifest, parse_provenance,
         pending_migration_drafts, provenance, short_revision, source_identity_for, source_revision,
         source_root, BuildFreshness, BuildProvenance, MigrationAuthority, BUILD_VERSION,
+        VERSION_LINE,
     };
 
     /// A throwaway `A -> B -> C` repo keeps classifier tests offline.
@@ -370,6 +380,22 @@ mod tests {
         );
         if source_revision() != "unknown" && BUILD_VERSION != package_version {
             assert!(BUILD_VERSION.contains(short_revision(source_revision())));
+            let label = label().expect("an unreleased build is labeled");
+            let kind = if pending_migration_drafts().is_empty() {
+                "hotfix"
+            } else {
+                "development"
+            };
+            assert!(
+                label
+                    .trim_start_matches("dirty ")
+                    .starts_with(&format!("{kind} {}", short_revision(source_revision()))),
+                "{label}"
+            );
+            assert_eq!(VERSION_LINE, format!("{BUILD_VERSION} ({label})"));
+        } else {
+            assert_eq!(label(), None);
+            assert_eq!(VERSION_LINE, BUILD_VERSION);
         }
     }
 }

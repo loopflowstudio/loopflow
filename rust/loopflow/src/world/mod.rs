@@ -615,9 +615,9 @@ impl World {
         let argv = vec!["lf", "task", "run", issue, requested];
         let (started, ended) = self.span(&steps, ended_days_ago, minutes, outcome)?;
         // The Task run starts its Graph, which starts the first step.
+        // Each Process is recorded running, then finished once its references
+        // exist, as live commands do; otherwise its exit would forget it.
         let mut run = self.process(&trace, None, &checkout, argv, started - 2);
-        run.completed_at = Some(ended);
-        outcome.complete(&mut run);
         store.sqlite.record_process(&run)?;
         if take_up {
             store.sqlite.take_up_task_graph(&task.id, &captured)?;
@@ -642,6 +642,9 @@ impl World {
                 .sqlite
                 .arrive_task_graph(&task.id, &run.id, &stops_at)?;
         }
+        run.completed_at = Some(ended);
+        outcome.complete(&mut run);
+        store.sqlite.record_process(&run)?;
         Ok(run.id)
     }
 
@@ -721,8 +724,7 @@ impl World {
                 break;
             }
         }
-        graph.completed_at = Some(begin);
-        outcome.complete(&mut graph);
+        // Its steps finish while it runs, so exit forgets none of them.
         store.sqlite.record_process(&graph)?;
         store.sqlite.record_graph_process(&graph.id, &compiled)?;
         for (process, key) in records {
@@ -731,6 +733,9 @@ impl World {
                 .sqlite
                 .record_graph_step(&graph.id, &process.id, key, &[Vec::new()])?;
         }
+        graph.completed_at = Some(begin);
+        outcome.complete(&mut graph);
+        store.sqlite.record_process(&graph)?;
         Ok(())
     }
 

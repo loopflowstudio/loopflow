@@ -28,7 +28,8 @@ fn process() -> LfProcess {
         pid: None,
         trace_id: loopflow::id::TraceId::new(),
         parent_lf_process_id: None,
-        via_agent: Some(false),
+        // Agent-issued, so the exit keeps the receipt after probing whether to forget it.
+        via_agent: Some(true),
         caller_session_id: None,
         caller_agent_process_id: None,
         command: Some(r#"["lf","graph","telemetry-daily"]"#.into()),

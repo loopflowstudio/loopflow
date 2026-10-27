@@ -1,7 +1,9 @@
 //! Session names projected into their attached terminal. Only the pre-spawn
 //! write uses OSC: writing alongside a native provider can split escape frames.
 //! cmux and tmux have separate control channels for their workspace, tab and
-//! window names, so those follow renames.
+//! window names, so those follow renames. A cmux workspace belongs to its Task
+//! and follows only the Task title, unless someone renamed it by hand; tabs and
+//! tmux windows follow the Session.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal, Write};
@@ -35,10 +37,22 @@ fn display_title(name: &str, task: Option<&str>, standing: Option<&str>) -> Stri
     }
 }
 
-/// Where a Task stands, for destination names: `Available` when its
+/// The one name a Task's host workspace carries, at creation and after:
+/// `<Task title> · <identifier>`. Only a Task title change moves it.
+pub(crate) fn workspace_name(identifier: &str, title: &str) -> String {
+    let title: String = title.chars().filter(|ch| !ch.is_control()).collect();
+    let title = title.trim();
+    if title.is_empty() {
+        identifier.to_string()
+    } else {
+        format!("{title} · {identifier}")
+    }
+}
+
+/// Where a Task stands, for terminal titles: `Available` when its
 /// conversation is, then the Workflow node where a person takes part, such as
 /// `Available · Design`. Both come from their shared readers; nothing new is judged.
-pub(crate) fn standing(
+fn standing(
     store: &SqliteStore,
     task: &crate::durable::TaskId,
     conversation: Option<&str>,
@@ -89,29 +103,116 @@ impl HostNames {
             .map(|pane| Self::Tmux { pane })
     }
 
-    fn rename(&self, name: &str) -> std::io::Result<()> {
-        match self {
-            Self::Cmux { workspace, surface } => {
-                host_command(
-                    "cmux",
-                    &["rename-workspace", "--workspace", workspace, "--", name],
-                )?;
-                host_command(
-                    "cmux",
-                    &[
-                        "rename-tab",
-                        "--workspace",
-                        workspace,
-                        "--surface",
-                        surface,
-                        "--",
-                        name,
-                    ],
-                )
+    /// The cmux workspace's name as shown now; `None` when it cannot be read.
+    fn shown_workspace(&self) -> Option<String> {
+        let Self::Cmux { workspace, .. } = self else {
+            return None;
+        };
+        let listing = host_output("cmux", &["workspace", "list", "--json"])
+            .inspect_err(|error| tracing::debug!(%error, "cannot read cmux workspace names"))
+            .ok()?;
+        let listing: serde_json::Value = serde_json::from_str(&listing).ok()?;
+        listing["workspaces"]
+            .as_array()?
+            .iter()
+            .find(|entry| entry["id"].as_str() == Some(workspace))?["title"]
+            .as_str()
+            .map(str::to_string)
+    }
+
+    fn rename(&self, rename: &HostRename) -> std::io::Result<()> {
+        match (self, rename) {
+            (Self::Cmux { workspace, .. }, HostRename::Workspace(name)) => host_command(
+                "cmux",
+                &[
+                    "rename-workspace",
+                    "--workspace",
+                    workspace,
+                    "--",
+                    &name.name,
+                ],
+            ),
+            (Self::Cmux { workspace, surface }, HostRename::Terminal(name)) => host_command(
+                "cmux",
+                &[
+                    "rename-tab",
+                    "--workspace",
+                    workspace,
+                    "--surface",
+                    surface,
+                    "--",
+                    name,
+                ],
+            ),
+            // A tmux window is the Session's, like a cmux tab.
+            (Self::Tmux { .. }, HostRename::Workspace(_)) => Ok(()),
+            (Self::Tmux { pane }, HostRename::Terminal(name)) => {
+                host_command("tmux", &["rename-window", "-t", pane, "--", name])
             }
-            Self::Tmux { pane } => host_command("tmux", &["rename-window", "-t", pane, "--", name]),
         }
     }
+}
+
+/// The names one attached terminal projects onto its host.
+#[derive(Debug, PartialEq)]
+struct Names {
+    /// The Task's workspace name; taskless Sessions leave the workspace alone.
+    workspace: Option<WorkspaceName>,
+    /// The Session's terminal title, for the tab or window.
+    terminal: String,
+}
+
+#[derive(Debug, PartialEq)]
+struct WorkspaceName {
+    identifier: String,
+    name: String,
+}
+
+impl WorkspaceName {
+    fn new(identifier: &str, title: &str) -> Self {
+        Self {
+            identifier: identifier.to_string(),
+            name: workspace_name(identifier, title),
+        }
+    }
+
+    /// Whether `shown` is a name lf wrote, so lf may replace it: the name it
+    /// last published, any `<title> · <identifier>` name, or an earlier lf's
+    /// identifier-first name. Anything else someone chose in cmux by hand.
+    fn replaces(&self, shown: &str, published: Option<&str>) -> bool {
+        let identifier = self.identifier.as_str();
+        shown != self.name
+            && (Some(shown) == published
+                || shown == identifier
+                || shown
+                    .strip_suffix(identifier)
+                    .is_some_and(|title| title.ends_with(" · "))
+                || shown
+                    .strip_prefix(identifier)
+                    .is_some_and(|rest| rest.starts_with(' ')))
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum HostRename<'a> {
+    Workspace(&'a WorkspaceName),
+    Terminal(&'a str),
+}
+
+/// Renames that bring the host from the `previous` names lf published to `current`.
+/// lf writes only on its own changes; a workspace rename is then still gated
+/// on the name cmux shows, so a hand-edited name stays.
+fn renames_due<'a>(previous: Option<&Names>, current: &'a Names) -> Vec<HostRename<'a>> {
+    let mut due = Vec::new();
+    if let Some(workspace) = &current.workspace {
+        if previous.and_then(|names| names.workspace.as_ref()) != Some(workspace) {
+            due.push(HostRename::Workspace(workspace));
+        }
+    }
+    if previous.map(|names| &names.terminal) != Some(&current.terminal) {
+        due.push(HostRename::Terminal(&current.terminal));
+    }
+    due
 }
 
 #[derive(Debug)]
@@ -119,7 +220,7 @@ pub(crate) struct TerminalTitle {
     store: SqliteStore,
     session: String,
     attachment: Option<SessionAttachment>,
-    name: String,
+    names: Names,
     provider_name: String,
     host: Option<HostNames>,
     checked: Instant,
@@ -161,10 +262,14 @@ impl TerminalTitle {
             }
             _ => {}
         }
-        if let Err(error) = write!(std::io::stderr().lock(), "\x1b]0;{}\x07", title.name) {
+        if let Err(error) = write!(
+            std::io::stderr().lock(),
+            "\x1b]0;{}\x07",
+            title.names.terminal
+        ) {
             tracing::warn!(%error, "cannot set terminal Session name");
         }
-        title.publish();
+        title.publish(None);
         // Only a host control channel can carry renames while the provider owns terminal output.
         title.host.is_some().then_some(title)
     }
@@ -185,7 +290,7 @@ impl TerminalTitle {
             .inspect_err(|error| tracing::debug!(%error, "cannot read viewed Session name"))
             .ok()
             .flatten()?;
-        title.publish();
+        title.publish(None);
         title.host.is_some().then_some(title)
     }
 
@@ -203,7 +308,7 @@ impl TerminalTitle {
         Ok(Self {
             attachment: store.session_attachment(&session.id)?,
             provider_name: name.provider,
-            name: name.terminal,
+            names: name.names,
             store,
             session: session.id.to_string(),
             host: HostNames::current(),
@@ -216,12 +321,11 @@ impl TerminalTitle {
             return;
         }
         self.checked = Instant::now();
-        match self.read_name() {
-            Ok(Some(name)) if name != self.name => {
-                self.name = name;
-                self.publish();
+        match self.read_names() {
+            Ok(Some(names)) => {
+                let previous = std::mem::replace(&mut self.names, names);
+                self.publish(Some(&previous));
             }
-            Ok(Some(_)) => {}
             // A handed-off attachment must stop changing the old terminal's names.
             Ok(None) => self.host = None,
             Err(error) => {
@@ -231,23 +335,37 @@ impl TerminalTitle {
         }
     }
 
-    fn read_name(&self) -> StoreResult<Option<String>> {
+    fn read_names(&self) -> StoreResult<Option<Names>> {
         if self.store.session_attachment(&self.session)? != self.attachment {
             return Ok(None);
         }
         self.store
             .session(&self.session)?
-            .map(|session| session_title(&self.store, &session).map(|name| name.terminal))
+            .map(|session| session_title(&self.store, &session).map(|name| name.names))
             .transpose()
     }
 
-    fn publish(&mut self) {
+    /// A failed rename detaches the host, so `previous` is always what it shows.
+    fn publish(&mut self, previous: Option<&Names>) {
         let Some(host) = &self.host else {
             return;
         };
-        if let Err(error) = host.rename(&self.name) {
-            tracing::warn!(%error, "terminal host title update failed; Session continues");
-            self.host = None;
+        let published = previous
+            .and_then(|names| names.workspace.as_ref())
+            .map(|workspace| workspace.name.as_str());
+        for rename in renames_due(previous, &self.names) {
+            if let HostRename::Workspace(workspace) = rename {
+                // An unreadable name might be someone's; leave it.
+                let shown = host.shown_workspace();
+                if !shown.is_some_and(|shown| workspace.replaces(&shown, published)) {
+                    continue;
+                }
+            }
+            if let Err(error) = host.rename(&rename) {
+                tracing::warn!(%error, "terminal host title update failed; Session continues");
+                self.host = None;
+                return;
+            }
         }
     }
 }
@@ -305,8 +423,8 @@ impl ViewerTitle {
 struct SessionTitle {
     /// The Session's own name, Task first.
     provider: String,
-    /// That name and where its Task stands now.
-    terminal: String,
+    /// That name and where its Task stands now, with the Task's workspace name.
+    names: Names,
 }
 
 fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<SessionTitle> {
@@ -324,8 +442,40 @@ fn session_title(store: &SqliteStore, session: &LfSession) -> StoreResult<Sessio
     let identifier = task.as_ref().map(|task| task.identifier.as_str());
     Ok(SessionTitle {
         provider: display_title(&session.title, identifier, None),
-        terminal: display_title(&session.title, identifier, standing.as_deref()),
+        names: Names {
+            workspace: task
+                .as_ref()
+                .map(|task| WorkspaceName::new(&task.identifier, &task.title)),
+            terminal: display_title(&session.title, identifier, standing.as_deref()),
+        },
     })
+}
+
+fn host_output(program: &str, args: &[&str]) -> std::io::Result<String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut stdout = child.stdout.take().expect("stdout is piped");
+    // Drain while waiting: a long listing would otherwise fill the pipe.
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut stdout, &mut text).map(|_| text)
+    });
+    let (status, timed_out) = wait_for_exit(&mut child, Some(Duration::from_secs(1)), || {})?;
+    let text = reader.join().expect("reader thread does not panic")?;
+    if timed_out {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("{program} read timed out"),
+        ))
+    } else if status.success() {
+        Ok(text)
+    } else {
+        Err(std::io::Error::other(format!("{program} exited {status}")))
+    }
 }
 
 fn host_command(program: &str, args: &[&str]) -> std::io::Result<()> {
@@ -350,7 +500,9 @@ fn host_command(program: &str, args: &[&str]) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{display_title, TerminalTitle};
+    use super::{
+        display_title, renames_due, workspace_name, HostRename, Names, TerminalTitle, WorkspaceName,
+    };
 
     #[test]
     fn replaced_attachment_stops_observing_session_names() {
@@ -374,7 +526,10 @@ mod tests {
             store,
             session: session.id.to_string(),
             attachment: Some(attachment.clone()),
-            name: session.title.clone(),
+            names: Names {
+                workspace: None,
+                terminal: session.title.clone(),
+            },
             provider_name: session.title,
             host: None,
             checked: std::time::Instant::now(),
@@ -387,12 +542,15 @@ mod tests {
                 crate::session::TitleSource::Human,
             )
             .unwrap();
-        assert_eq!(title.read_name().unwrap().as_deref(), Some("Release notes"));
+        assert_eq!(
+            title.read_names().unwrap().map(|names| names.terminal),
+            Some("Release notes".to_string())
+        );
         title
             .store
             .claim_session_attachment(&title.session, Some(&attachment), &process, false)
             .unwrap();
-        assert_eq!(title.read_name().unwrap(), None);
+        assert_eq!(title.read_names().unwrap(), None);
     }
 
     #[test]
@@ -423,5 +581,60 @@ mod tests {
             "Hérdr and machine work"
         );
         assert_eq!(display_title("demo\x1b\x07\u{009c}", None, None), "demo");
+    }
+
+    #[test]
+    fn task_workspace_follows_only_the_task_title() {
+        let names = |title: &str, terminal: &str| Names {
+            workspace: Some(WorkspaceName::new("LOO-609", title)),
+            terminal: terminal.to_string(),
+        };
+        let published = names("Task-named cmux", "LOO-609 plan names");
+        assert_eq!(
+            renames_due(None, &published),
+            [
+                HostRename::Workspace(published.workspace.as_ref().unwrap()),
+                HostRename::Terminal("LOO-609 plan names"),
+            ]
+        );
+        let renamed = names("Task-named cmux", "LOO-609 review names · Available");
+        assert_eq!(
+            renames_due(Some(&published), &renamed),
+            [HostRename::Terminal("LOO-609 review names · Available")]
+        );
+        let retitled = names("Workspaces named after Tasks", "LOO-609 plan names");
+        assert_eq!(
+            renames_due(Some(&published), &retitled),
+            [HostRename::Workspace(retitled.workspace.as_ref().unwrap())]
+        );
+        let taskless = Names {
+            workspace: None,
+            terminal: "demo".to_string(),
+        };
+        assert_eq!(renames_due(None, &taskless), [HostRename::Terminal("demo")]);
+    }
+
+    #[test]
+    fn workspace_rename_replaces_only_names_lf_wrote() {
+        let target = WorkspaceName::new("LOO-609", "Workspaces named after Tasks");
+        let published = Some("Task-named cmux · LOO-609");
+        assert!(target.replaces("Task-named cmux · LOO-609", published));
+        assert!(target.replaces("Older title · LOO-609", None));
+        assert!(target.replaces("LOO-609", None));
+        assert!(target.replaces("LOO-609 · Task-named cmux · Explore", None));
+        assert!(target.replaces("LOO-609 cmux titles", None));
+        assert!(!target.replaces("Workspaces named after Tasks · LOO-609", published));
+        assert!(!target.replaces("my cmux work", published));
+        assert!(!target.replaces("LOO-6090 · Other Task", None));
+        assert!(!target.replaces("NotLOO-609", None));
+    }
+
+    #[test]
+    fn workspace_name_is_title_then_identifier_without_controls() {
+        assert_eq!(
+            workspace_name("LOO-609", "Name \x1bworkspaces"),
+            "Name workspaces · LOO-609"
+        );
+        assert_eq!(workspace_name("LOO-609", " \x07"), "LOO-609");
     }
 }

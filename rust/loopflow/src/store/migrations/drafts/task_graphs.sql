@@ -14,6 +14,9 @@ CREATE TABLE task_graphs (
     updated_at INTEGER NOT NULL,
     CHECK ((run_start IS NULL) = (lf_process_id IS NULL))
 ) STRICT;
+-- Process forgetting probes this reference on every exit.
+CREATE INDEX task_graphs_process ON task_graphs(lf_process_id)
+    WHERE lf_process_id IS NOT NULL;
 INSERT INTO task_graphs(task_id,graph,step,updated_at)
 SELECT task_id,graph,node,updated_at FROM task_workflows;
 DROP TABLE task_workflows;

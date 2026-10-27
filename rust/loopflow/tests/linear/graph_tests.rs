@@ -244,6 +244,34 @@ fn mechanical_failure_retains_earlier_step_success() {
 }
 
 #[test]
+fn a_step_that_finishes_before_the_graph_looks_keeps_its_result() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    // A rejected argument exits before admission, so its Process row first
+    // appears at exit: only the Graph's post-exit read can find it.
+    write_graph(
+        repo.path(),
+        "fast-steps",
+        "- cmd: sync --plan\n- cmd: sync --no-such-flag\n- cmd: sync --plan\n",
+    );
+    let output = run_lf(
+        repo.path(),
+        home.path(),
+        &["graph", "fast-steps", "--batch"],
+        None,
+    );
+    assert!(!output.status.success());
+    let graphs = graph_details(repo.path(), home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0]["entry"]["state"], "stopped");
+    assert_eq!(
+        step_fields(&graphs[0], "label"),
+        ["sync --plan", "sync --no-such-flag"]
+    );
+    assert_eq!(step_fields(&graphs[0], "outcome"), ["succeeded", "failed"]);
+}
+
+#[test]
 fn ordinary_graph_crash_retains_effects_without_repository_restart() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();

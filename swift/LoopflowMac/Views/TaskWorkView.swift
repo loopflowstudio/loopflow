@@ -736,14 +736,12 @@ struct GraphProcessLog: View {
             do {
                 let ownerQuery: RegistryQuery
                 let subject: String
-                let cwd: String?
                 if let execution {
                     guard case .recorded(let ownerTask, _) = execution.location else {
                         throw RegistryQueryError("Task log location is unavailable.")
                     }
                     ownerQuery = query.onMachine(execution.machineID, repository: execution.repositoryID).pinTaskLocation(to: execution)
                     subject = ownerTask
-                    cwd = nil
                 } else {
                     guard let location, location.machineId == model.savedMachineId,
                           query.remoteMachine == nil else {
@@ -751,9 +749,8 @@ struct GraphProcessLog: View {
                     }
                     ownerQuery = query
                     subject = task?.runtime?.workId ?? taskId
-                    cwd = location.worktree
                 }
-                let graphs = try await ownerQuery.taskGraphProcesses(task: subject, cwd: cwd)
+                let graphs = try await ownerQuery.taskGraphProcesses(task: subject)
                 try Task.checkCancellation()
                 captured = graphs
                 error = nil

@@ -346,3 +346,13 @@ Check (2026-10-26): `swift test --filter 'RegistryQueryTests|TaskFilesTests'` 43
 `--lib journal` 30 ok. Compress (2026-10-26): running-parent fixture shared as `loopflow_test_support::RunningParent`; doctor's test-only `audit` dropped; clippy clean, `--lib doctor failed_placement` 13 ok, `process_ownership_tests` 12 ok, touched integration tests 8 ok. Earlier sweep: everything else touched passes except
 `store_contention` under load. The clone probe and the quiet contention
 comparison are deferred to gate.
+Concept review (2026-10-27): no change. One rule (`FORGETTABLE`), one exit writer,
+one prune, and harness provenance cover the accepted contract. The remaining
+pre-admission paths (`--context`/`--explain`, `lf desktop view`, `lf task
+location|watch-files`, `lf wave show|workflow list|show|source`, and the remote
+`preview` set) skip admission to avoid repository reconnect and installation
+dispatch, not to choose retention. They are exit-observed like help and early failures.
+Late-reference audit: CI repair hands `repair_lf_process_id` from its running launcher
+to the worker child, and `task_workflows.lf_process_id` names the Graph child of a
+running `task run`. Rule 2 keeps both. Agent-issued growth (~150 MB/year) stays a
+separate decision outside this Task.

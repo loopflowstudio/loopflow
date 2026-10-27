@@ -242,7 +242,7 @@ fn read_store() -> OpsResult<Store> {
         .ok_or_else(|| project_error("Planning unavailable: local registry is absent"))
 }
 
-async fn workflow_wave(store: &Store, repo: &Path, wave: Option<&str>) -> OpsResult<Wave> {
+async fn graph_wave(store: &Store, repo: &Path, wave: Option<&str>) -> OpsResult<Wave> {
     crate::work::wave::context::resolve_managed_wave(
         Some(store),
         Some(repo),
@@ -283,47 +283,47 @@ pub async fn edit(
 }
 
 #[derive(Debug, serde::Serialize)]
-pub struct WaveWorkflow {
+pub struct WaveGraph {
     pub wave_id: crate::id::WaveId,
     pub wave: String,
-    pub workflow: Option<String>,
+    pub graph: Option<String>,
 }
 
-pub async fn workflow(repo: &Path, selector: Option<&str>) -> OpsResult<WaveWorkflow> {
+pub async fn wave_graph(repo: &Path, selector: Option<&str>) -> OpsResult<WaveGraph> {
     let store = read_store()?;
-    let wave = workflow_wave(&store, repo, selector).await?;
-    Ok(WaveWorkflow {
-        workflow: store
+    let wave = graph_wave(&store, repo, selector).await?;
+    Ok(WaveGraph {
+        graph: store
             .sqlite
-            .selected_wave_workflow(wave.id())
+            .selected_wave_graph(wave.id())
             .map_err(project_error)?,
         wave_id: wave.id().clone(),
         wave: wave.slug().into(),
     })
 }
 
-pub async fn set_workflow(
+pub async fn set_wave_graph(
     repo: &Path,
     selector: Option<&str>,
     name: &str,
-) -> OpsResult<WaveWorkflow> {
+) -> OpsResult<WaveGraph> {
     let store = super::planning_sync::planning_store().await?;
-    let wave = workflow_wave(&store, repo, selector).await?;
-    if crate::workflow::load_workflow(name, repo)
+    let wave = graph_wave(&store, repo, selector).await?;
+    if crate::task_graph::CapturedGraph::load(name, repo)
         .map_err(project_error)?
         .is_none()
     {
-        return Err(project_error(crate::workflow::missing_workflow(name)));
+        return Err(project_error(crate::task_graph::missing_graph(name)));
     }
     let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     store
         .sqlite
-        .select_wave_workflow(wave.id(), name)
+        .select_wave_graph(wave.id(), name)
         .map_err(project_error)?;
-    Ok(WaveWorkflow {
+    Ok(WaveGraph {
         wave_id: wave.id().clone(),
         wave: wave.slug().into(),
-        workflow: Some(name.into()),
+        graph: Some(name.into()),
     })
 }
 

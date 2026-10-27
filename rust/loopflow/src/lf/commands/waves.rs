@@ -249,8 +249,10 @@ pub struct TaskDetailSnapshot {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
-    pub workflow_name: Option<String>,
-    pub workflow_source: Option<String>,
+    /// The graph the Task took up, else the one its first `lf task run` takes up.
+    pub graph_name: Option<String>,
+    /// `task`, `wave`, `repository` or `builtin`.
+    pub graph_source: Option<String>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -390,7 +392,8 @@ pub struct RoadmapSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveRoadmap {
-    pub workflow: Option<String>,
+    /// The graph the Wave's Tasks take up by default.
+    pub graph: Option<String>,
     pub project_readiness: crate::store::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
@@ -513,8 +516,10 @@ pub struct RoadmapTask {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
-    pub workflow_name: Option<String>,
-    pub workflow_source: Option<String>,
+    /// The graph the Task took up, else the one its first `lf task run` takes up.
+    pub graph_name: Option<String>,
+    /// `task`, `wave`, `repository` or `builtin`.
+    pub graph_source: Option<String>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -873,7 +878,7 @@ async fn roadmap_snapshot(
             continue;
         }
         roadmaps.push(WaveRoadmap {
-            workflow: store.sqlite.selected_wave_workflow(wave.id())?,
+            graph: store.sqlite.selected_wave_graph(wave.id())?,
             project_readiness: store.sqlite.project_readiness(wave.id())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
@@ -1000,8 +1005,8 @@ fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
         next_move: detail.next_move,
         condition: detail.condition,
         actions: detail.actions,
-        workflow_name: detail.workflow_name,
-        workflow_source: detail.workflow_source,
+        graph_name: detail.graph_name,
+        graph_source: detail.graph_source,
         latest_graph_process: detail.latest_graph_process,
         execution: detail.execution,
         run_control: detail.run_control,
@@ -1427,7 +1432,7 @@ async fn snapshot_task_detail(
     let run_control =
         crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
             status: Some(&work_status),
-            // Shared completion withdraws an unstarted Task, never advances its Workflow.
+            // Shared completion withdraws an unstarted Task, never moves its Graph.
             plan_terminal_reason: crate::linear::terminal_reason(task.state.as_deref())
                 .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
             worktree_blocker: worktree_blocker
@@ -1435,30 +1440,30 @@ async fn snapshot_task_detail(
                 .map(|blocker| blocker.reason.as_str()),
             launch_refusal: launch_refusal.as_deref(),
         });
-    let workflow = store.sqlite.workflow(&task.id)?;
+    let graph = store.sqlite.task_graph(&task.id)?;
     let shipping = crate::ops::task::ship::read_shipping(
         &store.sqlite,
         &task.id,
-        workflow.as_ref(),
+        graph.as_ref(),
         runtime.status,
     )?;
-    let at_end = workflow.as_ref().is_some_and(|workflow| {
-        matches!(&workflow.position, crate::ops::workflow::WorkflowPosition::Node { node } if node == crate::workflow::END)
+    let at_end = graph.as_ref().is_some_and(|graph| {
+        matches!(&graph.position, crate::task_graph::TaskGraphPosition::At { step } if step == crate::task_graph::END)
     });
     let ship_control = TaskRunControl {
         unavailable: run_control.unavailable.clone().or_else(|| {
             if shipping.is_some() {
                 Some("Task is already shipping".to_string())
             } else if at_end {
-                Some("Task is at the end of its Workflow".to_string())
+                Some("Task is at the end of its graph".to_string())
             } else {
                 None
             }
         }),
     };
-    let (workflow_name, workflow_source) = match workflow {
-        Some(workflow) => (workflow.definition.name, "task"),
-        None => crate::ops::task::task_workflow_default(store, task)?,
+    let (graph_name, graph_source) = match graph {
+        Some(graph) => (graph.name, "task"),
+        None => crate::ops::task::task_graph_default(store, task)?,
     };
     Ok(TaskDetailSnapshot {
         task: task_summary(
@@ -1475,8 +1480,8 @@ async fn snapshot_task_detail(
         next_move,
         condition,
         actions,
-        workflow_name: Some(workflow_name),
-        workflow_source: Some(workflow_source.to_owned()),
+        graph_name: Some(graph_name),
+        graph_source: Some(graph_source.to_owned()),
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,

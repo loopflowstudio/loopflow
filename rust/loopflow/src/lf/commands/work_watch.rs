@@ -1237,7 +1237,7 @@ mod tests {
         };
         // The released row stood at a node; graphs replaced that definition, so
         // the next run takes one up again and the Task reads with none.
-        assert!(reading.work.workflow.is_none());
+        assert!(reading.work.graph.is_none());
         assert_eq!(
             crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),
             frontier

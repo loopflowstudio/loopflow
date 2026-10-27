@@ -210,7 +210,7 @@ Then offer Linear binding as above. Connection creates or links the Initiative
 and preserves existing Projects; it does not provision an initial Project.
 Inspect available Linear status/content: one In Progress Project is the current
 plan, Planned Projects hold future plans, and Completed Projects retain history.
-Tasks select an explicit Workflow, then their Wave default, repository `workflow:`, then the builtin `code`.
+A Task takes up the graph it names, else its Wave's default, the repository's `graph:`, or `code`.
 
 If no current Project exists, report that planning gap. Establishing a chapter
 requires accepted repository-wide direction and plan dispositions: preview with
@@ -218,7 +218,7 @@ requires accepted repository-wide direction and plan dispositions: preview with
 `lf wave new-chapter --all <name> --json` to apply those dispositions. Every Wave
 participates; do not rotate the repository merely to initialize one Wave. A Wave
 with no Projects receives an empty plan unless an authored Planned successor
-supplies its content. Workflow defaults remain on the Wave or repository. Existing successors and predecessors
+supplies its content. Default graphs remain on the Wave or repository. Existing successors and predecessors
 retain identity; rotation completes predecessors rather than deleting them.
 
 Author future content in the Planned Linear Project through an available

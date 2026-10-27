@@ -254,8 +254,7 @@ fn expire_processes(conn: &Connection, before: i64, cursor: &Cursor) -> StoreRes
              UNION SELECT lf_process_id FROM graph_processes WHERE lf_process_id IS NOT NULL
              UNION SELECT lf_process_id FROM graph_process_steps WHERE lf_process_id IS NOT NULL
              UNION SELECT graph_lf_process_id FROM graph_process_steps WHERE graph_lf_process_id IS NOT NULL
-             UNION SELECT lf_process_id FROM task_workflows WHERE lf_process_id IS NOT NULL
-             UNION SELECT lf_process_id FROM task_workflow_moves WHERE lf_process_id IS NOT NULL
+             UNION SELECT lf_process_id FROM task_graphs WHERE lf_process_id IS NOT NULL
              UNION SELECT project_activation_lf_process_id FROM waves WHERE project_activation_lf_process_id IS NOT NULL
              UNION SELECT repair_lf_process_id FROM ci_incidents WHERE repair_lf_process_id IS NOT NULL
              UNION SELECT supervisor_process_id FROM pr_landings WHERE supervisor_process_id IS NOT NULL

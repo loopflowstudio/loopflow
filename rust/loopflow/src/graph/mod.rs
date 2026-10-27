@@ -69,13 +69,13 @@ fn validate_step_settings(id: Option<&str>) -> Result<(), LoadError> {
 }
 
 /// An executable occurrence. Template names resolve to Target during loading;
-/// stage and loop settings belong to this occurrence, not to the definition.
+/// interactive and loop settings belong to this occurrence, not to the definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Step {
     pub target: Target,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    /// A stage: a person takes part here, in the Task conversation. Written
+    /// An interactive step: a person takes part here, in the Task conversation. Written
     /// `interactive: <skill>`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub interactive: bool,
@@ -216,7 +216,7 @@ pub struct GraphDefinition {
 pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
-    /// A stage where a person takes part; its id is `id`, else the skill name.
+    /// An interactive step, where a person takes part; its id is `id`, else the skill name.
     pub interactive: bool,
     /// A deciding occurrence returns this many steps back in its own body.
     pub returns: Option<usize>,
@@ -224,8 +224,8 @@ pub struct ConcreteSkill {
 }
 
 impl ConcreteSkill {
-    /// The stage this occurrence is, when a person takes part at it.
-    pub fn stage(&self) -> Option<&str> {
+    /// The interactive step this occurrence is, when a person takes part at it.
+    pub fn interactive_step(&self) -> Option<&str> {
         self.interactive
             .then(|| self.id.as_deref().unwrap_or(&self.skill.name))
     }
@@ -483,30 +483,33 @@ fn resolve_graph_with_catalog(
     let items = flatten_resolved(&resolved);
     let mut ids = HashSet::new();
     validate_occurrence_ids(&items, &mut ids)?;
-    validate_stages(&items, &mut HashSet::new())?;
+    validate_interactive_steps(&items, &mut HashSet::new())?;
     Ok(resolved)
 }
 
-/// Every stage has its own id, and no autonomous loop returns across one: a
-/// person decides at a stage, so nothing automatic may run back over it.
-fn validate_stages(items: &[ConcreteStep], stages: &mut HashSet<String>) -> Result<(), LoadError> {
+/// Every interactive step has its own id, and no autonomous loop returns across one: a
+/// person decides there, so nothing automatic may run back over it.
+fn validate_interactive_steps(
+    items: &[ConcreteStep],
+    steps: &mut HashSet<String>,
+) -> Result<(), LoadError> {
     for (index, item) in items.iter().enumerate() {
         match item {
             ConcreteStep::Skill(skill) => {
-                if let Some(stage) = skill.stage() {
-                    if !stages.insert(stage.to_string()) {
+                if let Some(step) = skill.interactive_step() {
+                    if !steps.insert(step.to_string()) {
                         return Err(LoadError::InvalidGraph(format!(
-                            "two stages are named {stage:?}; give one `interactive: {{name: {}, id: <stage>}}`",
+                            "two interactive steps are named {step:?}; give one `interactive: {{name: {}, id: <step>}}`",
                             skill.skill.name
                         )));
                     }
                 } else if let Some(target) = return_target(items, index) {
                     if let Some(crossed) = items[target..index].iter().find_map(|step| match step {
-                        ConcreteStep::Skill(step) => step.stage(),
+                        ConcreteStep::Skill(step) => step.interactive_step(),
                         _ => None,
                     }) {
                         return Err(LoadError::InvalidGraph(format!(
-                            "loop at {} returns across stage {crossed:?}; a person decides there",
+                            "loop at {} returns across interactive step {crossed:?}; a person decides there",
                             skill.skill.name
                         )));
                     }
@@ -514,7 +517,7 @@ fn validate_stages(items: &[ConcreteStep], stages: &mut HashSet<String>) -> Resu
             }
             ConcreteStep::Xor(branch) => {
                 for path in branch.paths.values() {
-                    validate_stages(&path.steps, stages)?;
+                    validate_interactive_steps(&path.steps, steps)?;
                 }
             }
             ConcreteStep::Command(_) => {}
@@ -798,7 +801,7 @@ fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
 
 /// `loop: <target>` runs a deciding skill last, `step`, `interactive` or
 /// `loop-or-next`, which advances, returns to the target or stops blocked. An
-/// interactive decider is a stage: the person there decides.
+/// interactive decider is an interactive step: the person there decides.
 fn parse_loop(map: &serde_yaml_ng::Mapping, target: &Value) -> Result<Step, LoadError> {
     let target = target
         .as_str()
@@ -1315,14 +1318,14 @@ mod tests {
         .unwrap();
         let graph = load_graph("review", tmp.path()).unwrap();
         let items = compile_graph(&graph, tmp.path()).unwrap();
-        let stages: Vec<_> = items
+        let steps: Vec<_> = items
             .iter()
             .filter_map(|item| match item {
-                ConcreteStep::Skill(skill) => skill.stage().map(str::to_owned),
+                ConcreteStep::Skill(skill) => skill.interactive_step().map(str::to_owned),
                 _ => None,
             })
             .collect();
-        assert_eq!(stages, ["explore", "final-demo"]);
+        assert_eq!(steps, ["explore", "final-demo"]);
 
         fs::write(
             graphs.join("retired.yaml"),
@@ -2014,7 +2017,7 @@ Design the feature.
         let ConcreteStep::Skill(review) = &branch.paths["proceed"].steps[0] else {
             panic!("review")
         };
-        assert_eq!(review.stage(), Some("review"));
+        assert_eq!(review.interactive_step(), Some("review"));
         assert_eq!(review.skill.content.as_deref(), Some("Captured work"));
         assert_eq!(review.sources, ["outer", "inner"]);
         let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {

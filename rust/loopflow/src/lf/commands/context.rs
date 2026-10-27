@@ -124,6 +124,7 @@ pub fn explain(
 pub fn explain_task_run(
     task: Option<&str>,
     options: &crate::ops::task::TaskProcessOptions,
+    through: bool,
 ) -> Result<crate::ops::task::TaskRunExplanation> {
     let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
@@ -138,6 +139,7 @@ pub fn explain_task_run(
                         wave: options.wave.as_deref(),
                     },
                     options,
+                    through,
                 )
                 .await
             }
@@ -182,40 +184,6 @@ pub fn explain_session_connect(
                 .await
             }
             Err(error) => SessionConnectExplanation::unavailable(error),
-        }
-    }))
-}
-
-/// Explain a position change without recording a move or reconciling completion.
-pub fn explain_task_move(
-    task: &str,
-    wave: Option<&str>,
-    node: &str,
-    reason: Option<&str>,
-) -> Result<crate::ops::task::TaskMoveExplanation> {
-    let cwd = std::env::current_dir()?;
-    let runtime = tokio::runtime::Runtime::new()?;
-    Ok(runtime.block_on(async {
-        match read_registry() {
-            Ok(store) => {
-                crate::ops::task::explain_task_move(
-                    &store,
-                    &cwd,
-                    crate::ops::WorkSelection {
-                        task: Some(task),
-                        wave,
-                    },
-                    node,
-                    reason,
-                )
-                .await
-            }
-            Err(error) => crate::ops::task::TaskMoveExplanation {
-                resolution: crate::ops::context::ContextExplanation::unavailable(&error),
-                action: None,
-                impediments: Vec::new(),
-                unavailable: vec![error.to_string()],
-            },
         }
     }))
 }

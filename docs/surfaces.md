@@ -45,7 +45,7 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **Task workspace**: three panes, the `session` conversation, a `shell` at the
   Task's checkout and a `browser` for Files, the Graph log and local pages.
 - **Dashboards**: Tasks side by side, chosen by a query.
-- **⌘K**: search Waves, Tasks, Sessions, Graphs and Workflows.
+- **⌘K**: search Waves, Tasks, Sessions and Graphs.
 
 ```bash
 lf desktop view 'state:available'                       # a Dashboard of every available conversation

@@ -2151,10 +2151,10 @@ mod tests {
                 {"metric_id":"recovery","target":{"kind":"at_least","value":1.0}}
             ])
         );
-        // `ship_it` drops Workflows short of `end`; the next run re-places them.
+        // `ship_it` drops Workflows short of `end`; the next run takes up a graph.
         assert_eq!(
             conn.query_row(
-                "SELECT count(*) FROM task_workflows WHERE task_id='retained-task'",
+                "SELECT count(*) FROM task_graphs WHERE task_id='retained-task'",
                 [],
                 |r| r.get::<_, i64>(0)
             )

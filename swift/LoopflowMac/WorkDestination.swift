@@ -11,7 +11,6 @@ enum WorkDestination: Hashable {
     case wave(String)
     case task(String)
     case graph(String)
-    case workflow(String)
     case rename(String)
     case bind(String)
     case graphLog(String)

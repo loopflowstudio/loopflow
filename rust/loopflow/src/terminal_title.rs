@@ -50,10 +50,11 @@ pub(crate) fn standing(
             .is_some_and(|summary| summary.available),
         None => false,
     };
-    let workflow = store.workflow(task)?;
-    let node = workflow
+    let graph = store.task_graph(task)?;
+    let node = graph
         .as_ref()
-        .and_then(|workflow| workflow.person_node());
+        .and_then(|graph| graph.waiting_step())
+        .map(|step| step.name.as_str());
     let mut parts = Vec::new();
     if available {
         parts.push("Available".to_string());

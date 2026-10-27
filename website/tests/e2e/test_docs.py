@@ -3,11 +3,14 @@ from playwright.sync_api import Page
 # Slugs the sidebar must offer; content of each page is not pinned here.
 NAV_SLUGS = [
     "getting-started",
-    "waves",
-    "authoring",
+    "work",
+    "sessions",
+    "ops",
+    "surfaces",
+    "telemetry",
+    "orchestration",
     "agent-api",
-    "conducting",
-    "lf",
+    "lf-reference",
     "config",
     "subscriptions",
     "security",
@@ -22,8 +25,8 @@ def test_docs_page_loads(page: Page, base_url: str):
     assert page.locator(".docs-content").is_visible()
     assert page.locator(".docs-nav-area-title").all_text_contents() == [
         "Start",
-        "Plan and conduct",
-        "Build and extend",
+        "Work and sessions",
+        "See and extend",
         "Reference",
     ]
 
@@ -129,8 +132,8 @@ def test_architecture_area_routes_render(page: Page, base_url: str):
 
 
 def test_retired_docs_redirect(page: Page, base_url: str):
-    # wave-authoring merged into waves, ops merged into lf, fleet renamed
-    # to conducting; no retired slug may 500
-    for retired in ("wave-authoring", "ops", "fleet"):
+    # lf, waves, conducting, planning and authoring dissolved into the
+    # staged pages; no retired slug may 500
+    for retired in ("wave-authoring", "fleet", "lf", "waves", "conducting", "planning", "authoring"):
         page.goto(f"{base_url}/docs/{retired}")
         assert page.url == f"{base_url}/docs"

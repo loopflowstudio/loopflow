@@ -15,33 +15,33 @@ def test_health_reports_the_exact_release(page: Page, base_url: str):
 
 
 def test_doc_md_endpoint(page: Page, base_url: str):
-    response = page.request.get(f"{base_url}/docs/waves.md")
+    response = page.request.get(f"{base_url}/docs/work.md")
     assert response.status == 200
     assert "text/markdown" in response.headers["content-type"]
     body = response.text()
     assert body.startswith("---\n")
-    assert "canonical_url: https://loopflow.studio/docs/waves" in body
-    assert "# Waves" in body
+    assert "canonical_url: https://loopflow.studio/docs/work" in body
+    assert "# Work" in body
 
 
 def test_content_negotiation(page: Page, base_url: str):
-    response = page.request.get(f"{base_url}/docs/waves", headers={"Accept": "text/markdown"})
+    response = page.request.get(f"{base_url}/docs/work", headers={"Accept": "text/markdown"})
     assert response.status == 200
     assert "text/markdown" in response.headers["content-type"]
     assert response.headers.get("vary") == "Accept"
 
     # FastHTML adds its own Vary on HTML responses; ours must survive beside it.
-    html = page.request.get(f"{base_url}/docs/waves", headers={"Accept": "text/html"})
+    html = page.request.get(f"{base_url}/docs/work", headers={"Accept": "text/html"})
     assert html.status == 200
     assert "Accept" in html.headers.get("vary", "")
 
 
 def test_markdown_404_suggests_pages(page: Page, base_url: str):
-    response = page.request.get(f"{base_url}/docs/wavez.md")
+    response = page.request.get(f"{base_url}/docs/workz.md")
     assert response.status == 404
     assert "text/markdown" in response.headers["content-type"]
     body = response.text()
-    assert "/docs/waves.md" in body
+    assert "/docs/work.md" in body
     assert "/llms.txt" in body
 
 
@@ -60,7 +60,7 @@ def test_llms_full_txt(page: Page, base_url: str):
     response = page.request.get(f"{base_url}/llms-full.txt")
     assert response.status == 200
     body = response.text()
-    assert "# Waves" in body
+    assert "# Work" in body
     assert "# The Agent API" in body
     assert "# Architecture" not in body
 
@@ -81,12 +81,12 @@ def test_sitemap(page: Page, base_url: str):
     response = page.request.get(f"{base_url}/sitemap.xml")
     assert response.status == 200
     body = response.text()
-    assert "<loc>https://loopflow.studio/docs/waves</loc>" in body
+    assert "<loc>https://loopflow.studio/docs/work</loc>" in body
     assert "<loc>https://loopflow.studio/story</loc>" not in body
     assert "<lastmod>" in body
 
 
 def test_view_as_markdown_link(page: Page, base_url: str):
-    page.goto(f"{base_url}/docs/waves")
+    page.goto(f"{base_url}/docs/work")
     link = page.locator(".docs-md-link a")
-    assert link.get_attribute("href") == "/docs/waves.md"
+    assert link.get_attribute("href") == "/docs/work.md"

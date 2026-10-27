@@ -11,9 +11,8 @@ find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
-scripts/bootstrap-cron-host.sh infrastructure  # preflight, sync, and configured-path receipts
-lf cron history --wave infrastructure --days 35
-lf release history --wave infrastructure --days 35 --json
+scripts/bootstrap-cron-host.sh infrastructure  # preflight, crontab lines, one telemetry run
+crontab -l | grep loopflow:infrastructure
 ```
 
 ```bash
@@ -91,7 +90,7 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
 | Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
-| Daily | Loopflow host `release-run` cron | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
+| Daily | Loopflow host `release-run` crontab line | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
 | Local | `scripts/install.py local` | Build validation-only `lf` and `Loopflow.app` into `local-bin/` | No |
 | Local | `lf install` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Machine |
@@ -101,31 +100,7 @@ credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
 and the GitHub Release. It deploys the website from the exact tag and requires
 `/healthz` to report that tag. If the proof fails it restores the previous Fly
 image and leaves the release incomplete. Publishing the non-draft GitHub
-Release records an external effect. Scheduled settlement follows public artifact
-read-back and exact-version installer smoke, with every required check retained.
-Public installer smoke requires a running Docker engine. It installs the pinned
-release in a disposable Ubuntu 24.04 ARM64 container, copies only public inputs,
-and checks the selected CLI bytes plus the installed gate's version/help/list.
-No host Machine or credentials enter the container. Native macOS version/help smoke
-and signing/notarization remain separate checks; Linux smoke does not prove Mac
-app installation. Missing Docker or failed cleanup prevents verified settlement.
-In history JSON, `attempts[].verification` holds those checks once; each attempt
-saves its checks and product outcome together. `attempts[].telemetry` retains
-original prerequisite associations with retained schedule/Machine segments and the
-current execution's automatic retry, if needed. Successful recovery leaves the
-earlier failure and its repair disposition visible. An interrupted telemetry runner can recover after its exact
-process identity is confirmed gone and its surviving children release the cron
-job lock. The original receipt remains unresolved; the new check supplies current
-verification. Receipts without runner identity cannot authorize that recovery.
-
-Closed, unfinished release owners remain visible beyond the history window in
-`summary.closed_unsettled`. Record repair ownership with the printed
-`lf cron disposition` command on the original Machine. This preserves the candidate,
-attempts and late ownership evidence without claiming product settlement or
-transferring execution to a new Machine. A replacement schedule on the same Machine
-continues its predecessors on the next wake, freezing all outstanding dues in
-one attempt. The saved candidate keeps its original owner. A Machine change breaks
-that continuation chain; removed schedules have no future wake.
+Release records an external effect.
 
 The publisher controller runs from current main while its source path is the
 leased exact-tag worktree. This lets an incomplete immutable tag resume with a

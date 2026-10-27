@@ -184,9 +184,11 @@ unavailable and retains prior account evidence. Claude refresh coordination with
 native sessions is still under development; these comparisons do not serialize
 native refresh or credential writes.
 
-An active usage window at 95% or above demotes that account behind candidates
-below the threshold. Codex plan preference then applies; declared route order
-decides remaining ties. A provider session stays
+Eligible accounts are ordered by plan, then room: Codex Pro leads Plus, then
+the account whose most-used window (not yet reset) is lowest leads; declared
+route order decides ties. In shared
+mode the signed-in account also wins ties, so a launch switches every running
+Claude only when another account has more room. A provider session stays
 pinned to the account that created it so a resume does not silently switch
 identities.
 
@@ -320,8 +322,8 @@ Loopflow asks Claude whose it is before the next launch or switch and brings
 that account's stored copy up to date. If it cannot ask, a switch keeps the
 unrecognized login beside the stored accounts rather than discarding it.
 
-A shared launch follows the active account while it is eligible and below the
-95% threshold, and otherwise moves the home to the next account in the route.
+A shared launch moves the home to the eligible account with the most room,
+staying on the active account when nothing has more.
 `--account codex=work@` makes that account active before launching.
 These launch-time switches do not restart Codex's shared daemon. If plain
 `codex` keeps the old login, run `lf account codex use` with the selected account.
@@ -442,8 +444,7 @@ lf account connect opencode --api-key
 ```
 
 Its stored credential applies to local OpenCode launches.
-Subscription polling, repository account routes, and the 95% demotion threshold
-do not apply.
+Subscription polling, repository account routes, and room ordering do not apply.
 
 ## Rust API migration
 

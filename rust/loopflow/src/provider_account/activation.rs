@@ -212,10 +212,12 @@ pub(crate) async fn activate(
     let credential = read_login(provider, profile).ok_or_else(|| {
         ProviderAccountError::Filesystem(format!("read stored {provider} credential"))
     })?;
-    write_login(provider, native, &credential)?;
+    // Record first: a switch the log cannot hold must not move every running
+    // agent onto an account their usage would not be attributed to.
     store
         .record_provider_account_switch(provider, account_id, cause.as_str())
         .await?;
+    write_login(provider, native, &credential)?;
     Ok(Some(lock))
 }
 

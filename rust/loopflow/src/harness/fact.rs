@@ -6,6 +6,8 @@
 //! person watches live. Decoders hold only the cross-message correlation their
 //! provider needs; `FactWriter` owns every store and account effect.
 
+use std::collections::BTreeSet;
+
 use serde_json::Value;
 
 use crate::chat::types::{ConversationEvent, Lifecycle};
@@ -30,6 +32,9 @@ pub(crate) enum Signal {
     ToolResolved(String),
     InputRequested(String),
     InputResolved(String),
+    /// The provider's complete set of backgrounded tasks. They outlive the
+    /// turn that started them, and the provider starts a turn when they finish.
+    Background(BTreeSet<String>),
     /// The provider handed the turn back; `true` when it succeeded.
     Yielded(bool),
     /// Assistant prose the current turn produced, shown as its preview.

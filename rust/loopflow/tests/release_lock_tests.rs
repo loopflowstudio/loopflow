@@ -1,9 +1,7 @@
 use crate::support;
 
 use std::fs;
-use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -15,81 +13,8 @@ use loopflow::ops::{
 };
 use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
 use loopflow_test_support::TestRepo;
-use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
+use serde_json::Value;
 use support::{codex_app_server_script, EnvGuard};
-
-#[test]
-fn only_an_owned_inherited_lock_suppresses_manual_intervention() {
-    for held in [false, true] {
-        let _env = EnvGuard::new(&[]);
-        let repo = TestRepo::new();
-        let home = PathBuf::from(std::env::var_os("LF_HOME").unwrap());
-        let fixture: Value = serde_json::from_str(include_str!(
-            "../../../tests/fixtures/dto/release_history.json"
-        ))
-        .unwrap();
-        let mut obligation = fixture["obligations"][0].clone();
-        obligation["repo"] = json!(repo.path().canonicalize().unwrap());
-        obligation["opportunities"]
-            .as_array_mut()
-            .unwrap()
-            .truncate(1);
-        obligation["opportunities"][0]["attempts"][0]["outcome"] =
-            json!({"status": "failed", "cause": "interrupted publication"});
-        let attempts = obligation["opportunities"][0]["attempts"].clone();
-        let records = home.join("cron/obligations");
-        fs::create_dir_all(&records).unwrap();
-        let record = records.join("fixture.json");
-        fs::write(&record, serde_json::to_vec(&obligation).unwrap()).unwrap();
-
-        let locks = repo.path().join(".lf/locks");
-        fs::create_dir_all(&locks).unwrap();
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(locks.join(format!(
-                "release-{}.lock",
-                hex::encode(Sha256::digest("default"))
-            )))
-            .unwrap();
-        if held {
-            fs2::FileExt::lock_exclusive(&file).unwrap();
-        }
-        let fd = file.as_raw_fd();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
-        command
-            .args(["repo", "release", "tag", "0.9.1"])
-            .current_dir(repo.path())
-            .env("LF_RELEASE_LOCK_FD", fd.to_string());
-        // SAFETY: file stays alive until the child exits; fcntl only changes
-        // this descriptor's inheritance in the child and is async-signal-safe.
-        unsafe {
-            command.pre_exec(move || {
-                if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let saved: Value = serde_json::from_slice(&fs::read(record).unwrap()).unwrap();
-        let opportunity = &saved["opportunities"][0];
-        assert_eq!(opportunity["attempts"], attempts);
-        assert_eq!(
-            opportunity["interventions"].as_array().unwrap().len(),
-            usize::from(!held),
-            "an unlocked descriptor must not hide manual repair"
-        );
-    }
-}
 
 // Always release the fixture's child, including when an assertion fails.
 struct MutationParent {
@@ -174,7 +99,7 @@ fn surviving_source_inspector_excludes_replacement_after_controller_death() {
     repo.create_file("README.md", "caller bytes\n");
     let index = fs::read(repo.path().join(".git/index")).unwrap();
     let head = repo.head_sha();
-    let mut parent = start(&repo, state.path(), &["repo", "release", "run", "patch"]);
+    let mut parent = start(&repo, state.path(), &["release", "run", "patch"]);
     parent.child.kill().unwrap();
     parent.child.wait().unwrap();
     assert!(matches!(
@@ -209,7 +134,7 @@ fn surviving_tag_push_excludes_release_after_controller_death() {
         real_git.trim(),
     );
     let _env = EnvGuard::new(&[("git", &git)]);
-    let mut parent = start(&repo, state.path(), &["repo", "release", "tag", "0.9.1"]);
+    let mut parent = start(&repo, state.path(), &["release", "tag", "0.9.1"]);
     parent.child.kill().unwrap();
     assert!(!parent.child.wait().unwrap().success());
 
@@ -252,7 +177,7 @@ fn surviving_publication_excludes_release_after_controller_death() {
     let mut parent = start(
         &repo,
         state.path(),
-        &["repo", "release", "publish", "v0.9.1", "--finalize"],
+        &["release", "publish", "v0.9.1", "--finalize"],
     );
     parent.child.kill().unwrap();
     assert!(!parent.child.wait().unwrap().success());
@@ -375,7 +300,7 @@ exit 92
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
         let checkout = PathBuf::from(
             fs::read_to_string(state.path().join("checkout"))
                 .unwrap()
@@ -539,7 +464,7 @@ exit 94
                 .unwrap();
             assert!(pushed.status.success(), "{pushed:?}");
         }
-        let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
         let checkout = PathBuf::from(
             fs::read_to_string(state.path().join("checkout"))
                 .unwrap()
@@ -664,7 +589,7 @@ exit 0
             let notes = format!("#!/bin/sh\ncat > RELEASE_NOTES.md <<'EOF'\n# v0.9.1\n\n<!-- loopflow:release-notes=narrative;gate=safe -->\n\nFixture release.\nEOF\nif [ '{phase}' = retarget ]; then : > '{}/created'; fi\n", state.path().display());
             let _env = EnvGuard::new(&[("gh", &gh), ("lf", &notes)]);
             let repo = TestRepo::new();
-            let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+            let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
             let checkout = PathBuf::from(
                 fs::read_to_string(state.path().join("checkout"))
                     .unwrap()
@@ -809,7 +734,7 @@ fi
             );
             let _env = EnvGuard::new(&[("git", &git), ("gh", gh), ("lf", &notes)]);
             let repo = TestRepo::new();
-            let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+            let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
             let checkout = PathBuf::from(
                 fs::read_to_string(state.path().join("checkout"))
                     .unwrap()
@@ -940,7 +865,7 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
         let head = git(&["rev-parse", "HEAD"]);
         let branch = git(&["branch", "--show-current"]);
         let index = fs::read(repo.path().join(".git/index")).unwrap();
-        let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
         let checkout = PathBuf::from(
             fs::read_to_string(state.path().join("checkout"))
                 .unwrap()
@@ -1108,7 +1033,7 @@ fn surviving_release_lockfile_tool_retains_target_and_checkout() {
             // The wrapper inherits these settings; no external package resolution occurs.
             let log = fs::File::create(state.path().join("controller.log")).unwrap();
             let child = Command::new(env!("CARGO_BIN_EXE_lf"))
-                .args(["repo", "release", "run", "0.9.1"])
+                .args(["release", "run", "0.9.1"])
                 .current_dir(repo.path())
                 .env_remove("LF_RELEASE_LOCK_FD")
                 .env("CARGO_NET_OFFLINE", "true")
@@ -1239,7 +1164,7 @@ fn surviving_release_hook_retains_target_and_checkout_ownership() {
         let head = git(&["rev-parse", "HEAD"]);
         let branch = git(&["branch", "--show-current"]);
         let index = fs::read(repo.path().join(".git/index")).unwrap();
-        let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
         let checkout = PathBuf::from(
             fs::read_to_string(state.path().join("checkout"))
                 .unwrap()
@@ -1429,7 +1354,7 @@ esac
                 ]);
             }
             fs::write(state.path().join("armed"), "").unwrap();
-            let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+            let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
             if kill_controller {
                 parent.child.kill().unwrap();
             } else {
@@ -1564,7 +1489,7 @@ exit 1
     )
     .unwrap();
     fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
-    let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+    let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
     let deadline = Instant::now() + Duration::from_secs(20);
     while parent.child.try_wait().unwrap().is_none() {
         assert!(Instant::now() < deadline, "controller did not exit");
@@ -1688,7 +1613,7 @@ NOTES
         let caller_head = repo.head_sha();
         let caller_branch = current_branch(repo.path()).unwrap();
         let caller_index = fs::read(repo.path().join(".git/index")).unwrap();
-        let mut parent = start(&repo, state.path(), &["repo", "release", "run", "0.9.1"]);
+        let mut parent = start(&repo, state.path(), &["release", "run", "0.9.1"]);
         let checkout = PathBuf::from(
             fs::read_to_string(state.path().join("checkout"))
                 .unwrap()
@@ -2009,7 +1934,7 @@ esac
         .find(|p| p.is_file())
         .unwrap();
     fs::write(gh_path, gh).unwrap();
-    let mut parent = start(&repo, state.path(), &["repo", "release", "run", "patch"]);
+    let mut parent = start(&repo, state.path(), &["release", "run", "patch"]);
     let checkout = PathBuf::from(
         fs::read_to_string(state.path().join("checkout"))
             .unwrap()

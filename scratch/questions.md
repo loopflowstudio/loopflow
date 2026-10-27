@@ -15,4 +15,4 @@
 
 - `lock_task_pr_mutation` stays: it serializes a head move with clearing a head-pinned merge request, so Auto-merge never merges an unreviewed head. Held for the push/settlement only; contention refuses rather than waits.
 
-Check: `cargo clippy --all-targets -- -D warnings` clean; `sync_tests` 42/42 pass after the dirt-check removal (land_tests 30/30 earlier; untouched).
+Check: `cargo clippy --all-targets -- -D warnings` clean; `sync_tests` 42/42 pass after sharing `verify_integrated_head` between the two sync verifiers (land_tests 30/30 earlier; untouched).

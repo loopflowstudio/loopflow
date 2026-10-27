@@ -371,42 +371,17 @@ fn verify_sync(
     owner: &GitOperationOwner,
     expected: &SyncExpectation,
 ) -> OpsResult<SyncVerification> {
-    if let Some(state) = intervention_state(repo)? {
-        return Err(OpsError::Message(format!(
-            "sync incomplete: Git still reports an active {state} operation"
-        )));
-    }
-    let branch = current_branch(repo)?
-        .ok_or_else(|| OpsError::Message("sync incomplete: HEAD is detached".to_string()))?;
-    if branch != owner.branch {
-        return Err(OpsError::Message(format!(
-            "sync incomplete: expected branch {}, found {branch}",
-            owner.branch
-        )));
-    }
-    let head = rev_parse(repo, "HEAD")?;
     let target_sha = owner.target_sha.as_deref().ok_or_else(|| {
         OpsError::Message("sync verification has no pinned target commit".to_string())
     })?;
-    if !crate::git::is_ancestor(repo, target_sha, &head)? {
-        return Err(OpsError::Message(format!(
-            "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD {head}"
-        )));
-    }
+    let keeps_history = matches!(expected.strategy, SyncStrategy::MergeTarget);
+    verify_integrated_head(repo, owner, Some(target_sha), keeps_history)?;
     let conflicts = git(repo, &["diff", "--diff-filter=U", "--name-only"])?;
     if !conflicts.trim().is_empty() {
         return Err(OpsError::Message(format!(
             "sync incomplete: unresolved paths remain: {}",
             conflicts.lines().collect::<Vec<_>>().join(", ")
         )));
-    }
-    let unique_commits = count_unique_commits(repo, target_sha)?;
-    if matches!(expected.strategy, SyncStrategy::MergeTarget)
-        && !crate::git::is_ancestor(repo, &owner.head, &head)?
-    {
-        return Err(OpsError::Message(
-            "sync lost the original branch history".to_string(),
-        ));
     }
     if expected.require_changes
         && rev_parse(repo, "HEAD^{tree}")? == rev_parse(repo, &format!("{target_sha}^{{tree}}"))?
@@ -417,14 +392,25 @@ fn verify_sync(
         ));
     }
     Ok(SyncVerification {
-        branch,
-        head,
+        branch: owner.branch.clone(),
+        head: rev_parse(repo, "HEAD")?,
         target_sha: target_sha.to_string(),
-        unique_commits,
+        unique_commits: count_unique_commits(repo, target_sha)?,
     })
 }
 
 fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
+    verify_integrated_head(repo, owner, owner.target_sha.as_deref(), true)
+}
+
+/// Sync publishes HEAD, so its postconditions cover only HEAD; the working
+/// tree may hold other writers' edits.
+fn verify_integrated_head(
+    repo: &Path,
+    owner: &GitOperationOwner,
+    target_sha: Option<&str>,
+    keeps_history: bool,
+) -> OpsResult<()> {
     if let Some(state) = intervention_state(repo)? {
         return Err(OpsError::Message(format!(
             "sync incomplete: Git still reports an active {state} operation"
@@ -440,17 +426,18 @@ fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResul
             )));
         }
     }
-    if let Some(target_sha) = owner.target_sha.as_deref() {
-        if !crate::git::is_ancestor(repo, target_sha, "HEAD")? {
-            return Err(OpsError::Message(format!(
-                "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD"
-            )));
-        }
-        if !crate::git::is_ancestor(repo, &owner.head, "HEAD")? {
-            return Err(OpsError::Message(
-                "sync lost the original branch history".to_string(),
-            ));
-        }
+    let Some(target_sha) = target_sha else {
+        return Ok(());
+    };
+    if !crate::git::is_ancestor(repo, target_sha, "HEAD")? {
+        return Err(OpsError::Message(format!(
+            "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD"
+        )));
+    }
+    if keeps_history && !crate::git::is_ancestor(repo, &owner.head, "HEAD")? {
+        return Err(OpsError::Message(
+            "sync lost the original branch history".to_string(),
+        ));
     }
     Ok(())
 }

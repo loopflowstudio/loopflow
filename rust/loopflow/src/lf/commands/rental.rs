@@ -625,10 +625,7 @@ pub fn place(
     // The Task's own repository, wherever this checkout was first recorded.
     let (_, task) = runtime.block_on(crate::ops::task::resolve_saved_task(repo, None, issue))?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
-    let label = machine
-        .label
-        .clone()
-        .unwrap_or_else(|| machine.id.to_string());
+    let label = machine.name();
     if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
         // Nothing ran on it yet, so nothing is lost by giving it back now.
         let cleanup = Sandboxes::from_env(rental.provider)

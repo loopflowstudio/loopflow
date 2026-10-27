@@ -381,6 +381,7 @@ pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult
             ..Default::default()
         },
         None,
+        super::remote::source_for_task(&task.identifier)?,
     )
 }
 

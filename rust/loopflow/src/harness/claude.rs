@@ -420,15 +420,6 @@ impl Harness for ClaudeHarness {
             self.requested_account_id.as_ref(),
         )
         .await?;
-        if account_route
-            .as_ref()
-            .is_some_and(|route| !route.resume_requested_session())
-        {
-            *self
-                .agent_session
-                .lock()
-                .expect("claude provider session id lock poisoned") = None;
-        }
         self.account_route = account_route;
 
         // Validate claude binary on PATH.

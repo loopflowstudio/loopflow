@@ -171,7 +171,6 @@ struct AccountCandidate {
 pub(crate) struct ProviderAccountRoute {
     provider: Provider,
     account_id: ProviderAccountId,
-    resume_requested_session: bool,
     home: RouteHome,
     login: AccountLogin,
 }
@@ -186,7 +185,6 @@ impl std::fmt::Debug for ProviderAccountRoute {
             .field("provider", &self.provider)
             .field("account_id", &self.account_id)
             .field("home", &home)
-            .field("resume_requested_session", &self.resume_requested_session)
             .finish()
     }
 }
@@ -215,8 +213,6 @@ impl ProviderAccountRoute {
         Self {
             provider,
             account_id,
-            // A shared conversation is in the native home whichever account runs it.
-            resume_requested_session: true,
             home: Self::shared_home(named),
             login: AccountLogin::Stored { store, profile },
         }
@@ -254,8 +250,60 @@ impl ProviderAccountRoute {
         Ok(self.account_id.clone())
     }
 
-    pub(crate) fn resume_requested_session(&self) -> bool {
-        self.resume_requested_session
+    /// The home this route's conversations live in: the account's own when
+    /// isolated, else the provider's native one.
+    fn conversation_home(&self) -> PathBuf {
+        match self.home {
+            RouteHome::Isolated => self.account_home().to_path_buf(),
+            RouteHome::Shared { .. } => activation::native_home(self.provider, None),
+        }
+    }
+
+    /// Bring conversation `agent_session` into this route's home and pin it
+    /// here, so the provider resumes the same conversation under this account.
+    /// Fails, rather than starting an empty conversation, when its transcript
+    /// is nowhere to be found. A conversation no route has run and whose
+    /// transcript is nowhere, such as one whose id lf assigns before its
+    /// first launch, is new: there is nothing to adopt.
+    async fn adopt(&self, agent_session: &AgentSessionId) -> Result<(), ProviderAccountError> {
+        let AccountLogin::Stored { store, .. } = &self.login else {
+            return Ok(());
+        };
+        let recorded = store
+            .provider_session_isolated(self.provider, agent_session)
+            .await?
+            .is_some();
+        let harness = crate::harness::HarnessKind::parse(self.provider.as_str())
+            .expect("account routes exist only for agent providers");
+        let to = self.conversation_home();
+        let from =
+            crate::transcript::conversation_home(&store.sqlite, self.provider, agent_session, None)
+                .map_err(|error| ProviderAccountError::Runtime(format!("{error:#}")))?;
+        if from.as_deref() != Some(to.as_path()) {
+            let copied = match &from {
+                Some(from) => {
+                    crate::transcript::copy_between(harness, agent_session.as_str(), from, &to)
+                        .map_err(|error| ProviderAccountError::Filesystem(format!("{error:#}")))?
+                }
+                None => None,
+            };
+            if copied.is_none()
+                && crate::transcript::transcript(harness, &to, agent_session.as_str()).is_none()
+            {
+                if !recorded {
+                    return Ok(());
+                }
+                let place = match &from {
+                    Some(from) => format!("missing from {}", from.display()),
+                    None => "its account home was removed".to_string(),
+                };
+                return Err(ProviderAccountError::Runtime(format!(
+                    "cannot resume {} conversation {agent_session} on '{}': its transcript is {place}",
+                    self.provider, self.account_id
+                )));
+            }
+        }
+        self.pin_session(agent_session).await
     }
 
     #[cfg(test)]
@@ -685,7 +733,44 @@ pub(crate) async fn resolve_provider_account(
     resolve_provider_account_exact(provider, agent_session, None).await
 }
 
+/// Whether this launch's `--account` names a `provider` login other than the
+/// one conversation `agent_session` is pinned to: a request to move it.
+pub(crate) async fn names_another_account(
+    store: &SharedStore,
+    provider: Provider,
+    agent_session: &AgentSessionId,
+) -> Result<bool, ProviderAccountError> {
+    let selection = selection::AccountSelection::from_env()?;
+    if selection.is_default() {
+        return Ok(false);
+    }
+    let named = selection
+        .resolved_accounts(&store.list_provider_accounts(None).await?)?
+        .into_iter()
+        .filter(|(selected, _)| *selected == provider)
+        .map(|(_, account_id)| account_id)
+        .collect::<Vec<_>>();
+    let pinned = store
+        .provider_session_account(provider, agent_session)
+        .await?;
+    Ok(!named.is_empty() && !pinned.is_some_and(|pinned| named.contains(&pinned)))
+}
+
+/// The route a launch takes. A conversation it resumes is brought into the
+/// route's home first, whichever account held it before.
 pub(crate) async fn resolve_provider_account_exact(
+    provider: Provider,
+    agent_session: Option<&AgentSessionId>,
+    exact_account_id: Option<&ProviderAccountId>,
+) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
+    let route = select_route(provider, agent_session, exact_account_id).await?;
+    if let (Some(route), Some(agent_session)) = (&route, agent_session) {
+        route.adopt(agent_session).await?;
+    }
+    Ok(route)
+}
+
+async fn select_route(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
@@ -833,7 +918,6 @@ pub(crate) async fn resolve_provider_account_exact(
     Ok(Some(ProviderAccountRoute {
         provider,
         account_id,
-        resume_requested_session: selection.resume_requested_session,
         home: RouteHome::Isolated,
         login: AccountLogin::Stored {
             store,
@@ -909,13 +993,6 @@ async fn resolve_selected_provider_account(
         }
         let operator_home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         ensure_account_home_at(&operator_home, home, provider)?;
-        let resumed = match agent_session {
-            Some(session_id) => store
-                .provider_session_account(provider, session_id)
-                .await?
-                .is_some_and(|account_id| account_id == candidate.account.account_id),
-            None => false,
-        };
         if !isolated {
             return Ok(Some(ProviderAccountRoute::shared(
                 provider,
@@ -928,7 +1005,6 @@ async fn resolve_selected_provider_account(
         return Ok(Some(ProviderAccountRoute {
             provider,
             account_id: candidate.account.account_id.clone(),
-            resume_requested_session: resumed,
             home: RouteHome::Isolated,
             login: AccountLogin::Stored {
                 store: Arc::clone(store),
@@ -1042,8 +1118,11 @@ async fn ordered_selected_candidates(
         }
     }
 
+    // A resumed conversation moves to the login named for it and never falls
+    // back to the one it ran on.
+    let moving = agent_session.is_some() && !explicitly_preferred.is_empty();
     let mut order = explicitly_preferred.clone();
-    if !selection.is_restricted() {
+    if !selection.is_restricted() && !moving {
         for account_id in &local_route {
             if let Some(index) = candidates
                 .iter()
@@ -1058,7 +1137,9 @@ async fn ordered_selected_candidates(
         }
     }
 
-    if let Some(account_id) = exact_account_id {
+    // A resume replays the login the conversation last ran on; one named for
+    // it replaces that login.
+    if let Some(account_id) = exact_account_id.filter(|_| !moving) {
         order.retain(|index| candidates[*index].account.account_id == *account_id);
     }
     if order.is_empty() {
@@ -1068,7 +1149,7 @@ async fn ordered_selected_candidates(
         });
     }
 
-    if let Some(session_id) = agent_session {
+    if let Some(session_id) = agent_session.filter(|_| !moving) {
         let local_pin = match &local_store {
             Some(store) => store.provider_session_account(provider, session_id).await?,
             None => None,
@@ -1091,19 +1172,34 @@ async fn ordered_selected_candidates(
         .take_while(|index| explicitly_preferred.contains(index))
         .count();
     order[preferred_count..].sort_by_key(|index| candidates[*index].rank);
-    Ok(Some(
-        order
-            .into_iter()
-            .enumerate()
-            .filter_map(|(position, index)| {
-                let candidate = &candidates[index];
-                let explicit = position < preferred_count;
-                (candidate.credential_available
-                    && (explicit || account_route_eligible(&candidate.account, now)))
-                .then(|| (candidate.clone(), explicit))
-            })
-            .collect(),
-    ))
+    let ordered = order
+        .iter()
+        .enumerate()
+        .filter_map(|(position, index)| {
+            let candidate = &candidates[*index];
+            let explicit = position < preferred_count;
+            (candidate.credential_available
+                && (explicit || account_route_eligible(&candidate.account, now)))
+            .then(|| (candidate.clone(), explicit))
+        })
+        .collect::<Vec<_>>();
+    if moving && ordered.is_empty() {
+        return Err(ProviderAccountError::NoEligibleAccount {
+            provider,
+            accounts: order
+                .iter()
+                .map(|index| match candidates[*index].account.credential_state {
+                    CredentialState::Connected => format!(
+                        "'{}' does not match its stored login",
+                        account_login(&candidates[*index].account)
+                    ),
+                    _ => account_unavailable_reason(&candidates[*index].account),
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    }
+    Ok(Some(ordered))
 }
 
 fn push_candidate(order: &mut Vec<usize>, index: usize) {
@@ -1324,7 +1420,6 @@ pub(crate) fn resolve_recorded_provider_account_blocking(
             let route = ProviderAccountRoute {
                 provider,
                 account_id,
-                resume_requested_session: false,
                 home: RouteHome::Isolated,
                 login: AccountLogin::Replayed {
                     catalog,
@@ -1617,7 +1712,6 @@ mod tests {
         let route = ProviderAccountRoute {
             provider: Provider::Codex,
             account_id: parse_account_id("reserve").unwrap(),
-            resume_requested_session: false,
             home: RouteHome::Isolated,
             login: AccountLogin::Stored {
                 store,
@@ -1673,7 +1767,6 @@ mod tests {
                 ProviderAccountRoute {
                     provider: Provider::Claude,
                     account_id: parse_account_id("primary").unwrap(),
-                    resume_requested_session: false,
                     home: RouteHome::Isolated,
                     login: AccountLogin::Stored {
                         store: store.clone(),
@@ -1687,7 +1780,6 @@ mod tests {
                 ProviderAccountRoute {
                     provider: Provider::Codex,
                     account_id: parse_account_id("reserve").unwrap(),
-                    resume_requested_session: false,
                     home: RouteHome::Isolated,
                     login: AccountLogin::Stored {
                         store,
@@ -1732,7 +1824,6 @@ mod tests {
         let route = ProviderAccountRoute {
             provider: Provider::Claude,
             account_id: account_id.clone(),
-            resume_requested_session: false,
             home: RouteHome::Isolated,
             login: AccountLogin::Stored {
                 store: store.clone(),
@@ -2229,7 +2320,7 @@ mod account_first_tests {
     }
 
     #[tokio::test]
-    async fn session_resume_is_pinned_by_account_only() {
+    async fn a_resumed_conversation_prefers_its_pinned_account_over_strain() {
         let temp = tempdir().unwrap();
         let store = Arc::new(
             crate::store::open_ephemeral_store(&StorageConfig::sqlite(
@@ -2277,7 +2368,6 @@ mod account_first_tests {
             .unwrap();
 
         assert_eq!(selection.account.account_id, second.account_id);
-        assert!(selection.resume_requested_session);
     }
 
     #[tokio::test]
@@ -2879,7 +2969,6 @@ mod account_first_tests {
             .unwrap();
         assert!(!resumed.is_shared());
         assert_eq!(resumed.account_id().as_str(), "first");
-        assert!(resumed.resume_requested_session());
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -2904,7 +2993,6 @@ mod account_first_tests {
 
         assert!(resumed.is_shared());
         assert_eq!(resumed.account_id().as_str(), "second");
-        assert!(resumed.resume_requested_session());
 
         // The account it began under is history: resuming does not switch back.
         let began = parse_account_id("first").unwrap();
@@ -2978,6 +3066,174 @@ mod account_first_tests {
             .unwrap()
             .is_some());
         assert_eq!(codex_login(&native), "first@example.com");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn naming_another_login_moves_an_isolated_conversation_with_its_transcript() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
+        let (store, _native) = shared_home(Provider::Codex, temp.path(), "first").await;
+        set_isolation(true);
+        // A Claude login on the same email never competes for a Codex launch.
+        store
+            .upsert_provider_account(&account(Provider::Claude, "second", temp.path()))
+            .await
+            .unwrap();
+        let id = "0199a213-81c0-7800-8aa1-bbab2a035a53";
+        let rollout = format!("sessions/2026/10/02/rollout-2026-10-02T10-00-00-{id}.jsonl");
+        let first_home = temp.path().join("first");
+        fs::create_dir_all(first_home.join(&rollout).parent().unwrap()).unwrap();
+        fs::write(first_home.join(&rollout), "{\"type\":\"session_meta\"}\n").unwrap();
+        let conversation: AgentSessionId = id.into();
+        let first = parse_account_id("first").unwrap();
+        store
+            .pin_provider_session_route(Provider::Codex, &conversation, &first, true)
+            .await
+            .unwrap();
+        let named = |login: &str| {
+            let selection =
+                selection::AccountSelection::from_flags(&[login.to_string()], &[]).unwrap();
+            std::env::set_var(
+                selection::ACCOUNT_SELECTION_ENV,
+                selection.env_value().unwrap(),
+            );
+        };
+
+        // A resume replays the login it last ran on; naming another moves it.
+        named("second@example.com");
+        let route =
+            resolve_provider_account_exact(Provider::Codex, Some(&conversation), Some(&first))
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(route.account_id().as_str(), "second");
+        assert!(!route.is_shared());
+        assert!(temp.path().join("second").join(&rollout).is_file());
+        assert_eq!(
+            store
+                .provider_session_account(Provider::Codex, &conversation)
+                .await
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "second"
+        );
+
+        // A conversation whose transcript is nowhere fails instead of starting empty.
+        let lost: AgentSessionId = "0199a213-81c0-7800-8aa1-bbab2a035a54".into();
+        store
+            .pin_provider_session_route(Provider::Codex, &lost, &first, true)
+            .await
+            .unwrap();
+        let error = resolve_provider_account(Provider::Codex, Some(&lost))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("transcript"), "{error}");
+
+        // A named login that cannot launch fails rather than falling back.
+        let mut second = store
+            .list_provider_accounts(Some("codex"))
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|account| account.account_id.as_str() == "second")
+            .unwrap();
+        second.credential_state = CredentialState::Missing;
+        store.upsert_provider_account(&second).await.unwrap();
+        named("first@example.com");
+        resolve_provider_account(Provider::Codex, Some(&conversation))
+            .await
+            .unwrap();
+        named("second@example.com");
+        let error = resolve_provider_account(Provider::Codex, Some(&conversation))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("second@example.com"), "{error}");
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn naming_another_login_moves_an_isolated_claude_conversation_with_its_transcript() {
+        let _lock = crate::journal::test_env_lock();
+        let temp = tempdir().unwrap();
+        let _restore = EnvRestore::capture(&SHARED_ENV);
+        let _selection = EnvRestore::capture(&[selection::ACCOUNT_SELECTION_ENV]);
+        let (store, native) = shared_home(Provider::Claude, temp.path(), "first").await;
+        set_isolation(true);
+        let id = "0199a213-81c0-7800-8aa1-bbab2a035a55";
+        let project = "projects/-Users-jack-src-loopflow";
+        let first_home = temp.path().join("first");
+        fs::create_dir_all(first_home.join(project).join(format!("{id}/subagents"))).unwrap();
+        fs::write(
+            first_home.join(project).join(format!("{id}.jsonl")),
+            format!("{{\"type\":\"user\",\"sessionId\":\"{id}\"}}\n"),
+        )
+        .unwrap();
+        fs::write(
+            first_home
+                .join(project)
+                .join(format!("{id}/subagents/agent.jsonl")),
+            "{}\n",
+        )
+        .unwrap();
+        let conversation: AgentSessionId = id.into();
+        let first = parse_account_id("first").unwrap();
+        store
+            .pin_provider_session_route(Provider::Claude, &conversation, &first, true)
+            .await
+            .unwrap();
+        let selection =
+            selection::AccountSelection::from_flags(&["second@example.com".to_string()], &[])
+                .unwrap();
+        std::env::set_var(
+            selection::ACCOUNT_SELECTION_ENV,
+            selection.env_value().unwrap(),
+        );
+
+        let route = resolve_provider_account(Provider::Claude, Some(&conversation))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "second");
+        assert!(!route.is_shared());
+        let second_project = temp.path().join("second").join(project);
+        assert!(second_project.join(format!("{id}.jsonl")).is_file());
+        assert!(second_project
+            .join(format!("{id}/subagents/agent.jsonl"))
+            .is_file());
+
+        // A conversation whose id lf assigned before its first launch starts there.
+        let fresh: AgentSessionId = "0199a213-81c0-7800-8aa1-bbab2a035a56".into();
+        let route = resolve_provider_account(Provider::Claude, Some(&fresh))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(route.account_id().as_str(), "second");
+        assert_eq!(
+            store
+                .provider_session_account(Provider::Claude, &conversation)
+                .await
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "second"
+        );
+
+        // One that arrived from another Machine sits in the native home, unrecorded here.
+        let received = "0199a213-81c0-7800-8aa1-bbab2a035a57";
+        fs::create_dir_all(native.join(project)).unwrap();
+        fs::write(
+            native.join(project).join(format!("{received}.jsonl")),
+            format!("{{\"type\":\"user\",\"sessionId\":\"{received}\"}}\n"),
+        )
+        .unwrap();
+        resolve_provider_account(Provider::Claude, Some(&received.into()))
+            .await
+            .unwrap();
+        assert!(second_project.join(format!("{received}.jsonl")).is_file());
     }
 
     #[allow(clippy::await_holding_lock)]

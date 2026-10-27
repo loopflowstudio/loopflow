@@ -177,7 +177,7 @@ Conflicts stay visible: resolve them, then `lf sync --continue`, or `lf sync --a
 lf machine add mini                              # save an SSH destination; offers to install lf
 lf machine connect mini claude jack@example.com  # a login of its own, approved in this laptop's browser
 lf --machine mini task list                      # any command, run there
-lf machine use mini --task LOO-12                # hand a Task to it; you stay its person
+lf task move LOO-12 --machine mini               # move a Task there with its Session; you stay its person
 lf machine use mini product                      # new Tasks in Wave `product` run there
 ```
 

@@ -140,6 +140,12 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   disclosure reads `execution.work` from it. Watch frames carry `home`/`copy`.
   Deleted `next_quiet_available`, `roadmap_all`, `current_waves`,
   `observeTaskDiagnostics`. Fixture: `watch_frames.json`.
+- One Task row: `TaskDetailSnapshot` and Swift `WaveTaskWork` are deleted;
+  `wave status` Tasks and `--done` pages are `RoadmapTask` rows with `section`.
+  Their `direction` (Rust `{text}`) never reached Desktop, which decoded a
+  `directive` key no reader emitted; both are deleted with the per-reading
+  steers statement and `durable::render_steers`. `closed_task_page.json` was
+  stale after main's Auto-Ship merge (`human`, `completed`, no `ship_control`).
 
 ## Plan per read
 
@@ -170,11 +176,11 @@ unless "Work needed" says otherwise.
 
 The 2026-10-26 pass's (a)–(d) are done except Wave detail (1); 2–4 follow it.
 
-1. Wave detail as `RoadmapTask` rows (`lf task list --wave W --watch`) plus the
-   Wave's own fields; closed pages switch from `wave status` rows to
-   `RoadmapTask` with it. Deferred this pass: `WaveDetailSnapshot` also carries
-   readiness, metrics, unavailable Tasks and Session history, which need their
-   own reads first. Desktop watches `lf wave status <id>` meanwhile.
+1. Wave detail as `lf task list --wave W --watch` plus the Wave's own fields.
+   Rows are already `RoadmapTask`; what remains is that `WaveDetailSnapshot`
+   also carries readiness, metrics, unavailable Tasks and Session history,
+   which need their own reads first. Desktop watches `lf wave status <id>`
+   meanwhile.
 2. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 3. `lf task status`: 5k statements / 20 connections for one Task, now with
@@ -204,4 +210,4 @@ The 2026-10-26 pass's (a)–(d) are done except Wave detail (1); 2–4 follow it
 
 - Earlier slices (open-Task scope, batching, `task list [query]`, `--watch` on task/session list, task status, monitor top): passed; detail in git history of this file (515ed2f3bf).
 - Pass b6772c9e3d (monitor deletion): clippy clean; watch lib/integration tests, reference, Desktop suites (130) passed; Linux `planning_reconnect` e2e: CI.
-- Compress: `cargo clippy --all-targets -- -D warnings` clean; `--test integration -- watch active_runs` 6 passed; `test_desktop.sh --filter 'DTOFixtureTests|WorkObservationTransportTests|WorkModelTests'` 89 passed.
+- One Task row: clippy clean; `--test integration dto_fixtures` 43 passed; `test_desktop.sh --filter 'DTOFixtureTests|WaveLensTests|RegistryQueryTests|TaskHistoryFilterTests|WaveDetailReadingTests|MockWaveFixtureTests'` 103 passed; waves lib tests: gate.

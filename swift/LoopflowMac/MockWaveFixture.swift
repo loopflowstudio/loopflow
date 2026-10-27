@@ -240,14 +240,7 @@ enum MockWaveFixture {
                   "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
                 },
                 "workflow_name":"feature","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
-                "directive": {
-                  "version": 2,
-                  "kind": "replacement",
-                  "text": "Surface verification failures before publish failures.",
-                  "applied_at": "2026-07-13T18:30:00Z",
-                  "incorporated_at": "2026-07-13T18:31:00Z",
-                  "incorporated_summary": "Verification failures are now first."
-                },
+                "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "user",
                   "reason": "merge pull request head 333333333333 on GitHub"
@@ -300,7 +293,8 @@ enum MockWaveFixture {
                     },
                     "merge_commit": null,
                     "abandoned_at": null
-                  }
+                  },
+                "section": "waiting"
               },
               {
                 "task": {
@@ -322,7 +316,7 @@ enum MockWaveFixture {
                 },
                 "runtime": null,
                 "workflow_name":"feature","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
-                "directive": null,
+                "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "wave",
                   "reason": "Task is ready to start"
@@ -346,7 +340,8 @@ enum MockWaveFixture {
                   "recommended": null,
                   "reason": "Task is ready to start"
                 },
-                "pr": null
+                "pr": null,
+                "section": "not_started"
               }
             ],
             "truncated": false

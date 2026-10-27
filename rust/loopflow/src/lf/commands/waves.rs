@@ -67,7 +67,7 @@ pub struct WaveDetailSnapshot {
     pub project_readiness: crate::store::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
-    pub tasks: Evidence<TaskDetailSnapshot>,
+    pub tasks: Evidence<RoadmapTask>,
     /// Wave-owned live evidence derived once by Rust for every consumer.
     pub metric_portfolio: MetricPortfolioDto,
     /// Durable Project Work that cannot join the current PM plan, including
@@ -142,11 +142,6 @@ pub enum NextMoveOwner {
 pub struct NextMove {
     pub owner: NextMoveOwner,
     pub reason: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DirectionSnapshot {
-    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,26 +233,6 @@ pub struct TaskWorktreeSnapshot {
     pub worktree: String,
     /// Existence on the reading Machine; unknown when the filesystem check fails.
     pub local_exists: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskDetailSnapshot {
-    pub task: TaskSummary,
-    pub reference: TaskReferenceSnapshot,
-    pub runtime: Option<TaskRuntimeSnapshot>,
-    pub direction: Option<DirectionSnapshot>,
-    pub next_move: NextMove,
-    pub condition: TaskConditionSnapshot,
-    pub actions: TaskActionModel,
-    pub workflow_name: Option<String>,
-    pub workflow_source: Option<String>,
-    pub latest_graph_process: Option<GraphProcessDetail>,
-    pub execution: Option<TaskExecutionSnapshot>,
-    pub run_control: TaskRunControl,
-    /// Whether `lf ship` would start now; `unavailable` says why not.
-    pub ship_control: TaskRunControl,
-    pub shipping: Option<crate::ops::task::ship::ShippingSnapshot>,
-    pub pr: Option<PrSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -910,7 +885,6 @@ async fn open_tasks(
                     .is_some_and(|runtime| runtime.status.label() == state)
             })
         })
-        .map(roadmap_task)
         .collect())
 }
 
@@ -953,8 +927,7 @@ async fn repository_scope(
 /// `lf task list --done --json`: one page of closed Tasks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClosedTaskPageSnapshot {
-    /// Rows as `lf wave status` gives its Tasks.
-    pub tasks: Vec<TaskDetailSnapshot>,
+    pub tasks: Vec<RoadmapTask>,
     /// Pass as `--after` for the next page; absent on the last page.
     pub next: Option<String>,
 }
@@ -1101,9 +1074,8 @@ async fn roadmap_snapshot(
         &shared,
     )
     .await;
-    let tasks: Evidence<RoadmapTask> = Evidence::from_result(
-        inventory.map(|(tasks, _)| (tasks.into_iter().map(roadmap_task).collect(), false)),
-    );
+    let tasks: Evidence<RoadmapTask> =
+        Evidence::from_result(inventory.map(|(tasks, _)| (tasks, false)));
     let mut roadmaps = Vec::with_capacity(waves.len());
     for wave in &waves {
         // Repository scoping can repair an alias in the registry. Use that
@@ -1204,7 +1176,7 @@ fn ask_checkouts_ahead(
 
 #[derive(Debug)]
 struct WaveTasks {
-    tasks: Evidence<TaskDetailSnapshot>,
+    tasks: Evidence<RoadmapTask>,
     unavailable_tasks: Vec<UnavailableTaskEvidence>,
 }
 
@@ -1243,31 +1215,14 @@ async fn wave_tasks(
     })
 }
 
-fn roadmap_task(detail: TaskDetailSnapshot) -> RoadmapTask {
-    let section = task_section(&detail);
-    RoadmapTask {
-        task: detail.task,
-        reference: detail.reference,
-        runtime: detail.runtime,
-        next_move: detail.next_move,
-        condition: detail.condition,
-        actions: detail.actions,
-        workflow_name: detail.workflow_name,
-        workflow_source: detail.workflow_source,
-        latest_graph_process: detail.latest_graph_process,
-        execution: detail.execution,
-        run_control: detail.run_control,
-        ship_control: detail.ship_control,
-        shipping: detail.shipping,
-        pr: detail.pr,
-        section,
-    }
-}
-
 /// A Task's section, from the same planning primitives the row already carries.
-fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
-    let Some(runtime) = &task.runtime else {
-        return if crate::linear::terminal_reason(task.task.state.as_deref()).is_some() {
+fn task_section(
+    state: Option<&str>,
+    runtime: Option<&TaskRuntimeSnapshot>,
+    next_move: &NextMove,
+) -> RoadmapSection {
+    let Some(runtime) = runtime else {
+        return if crate::linear::terminal_reason(state).is_some() {
             RoadmapSection::Later
         } else {
             RoadmapSection::NotStarted
@@ -1276,11 +1231,11 @@ fn task_section(task: &TaskDetailSnapshot) -> RoadmapSection {
     // Linear completing a Task that never left `start` withdraws it from what
     // is offered; an active one keeps its place and shows the conflict.
     let withdrawn = matches!(runtime.status, TaskState::Unstarted)
-        && crate::linear::terminal_reason(task.task.state.as_deref()).is_some();
+        && crate::linear::terminal_reason(state).is_some();
     if runtime.status.is_terminal() || runtime.status == TaskState::Deferred || withdrawn {
         return RoadmapSection::Later;
     }
-    match task.next_move.owner {
+    match next_move.owner {
         NextMoveOwner::Task => RoadmapSection::Now,
         _ => RoadmapSection::Waiting,
     }
@@ -1451,7 +1406,7 @@ async fn snapshot_tasks(
     probe_pr_empty: bool,
     include_retained: bool,
     shared: &SharedTaskReads,
-) -> Result<(Vec<TaskDetailSnapshot>, Vec<UnavailableTaskEvidence>)> {
+) -> Result<(Vec<RoadmapTask>, Vec<UnavailableTaskEvidence>)> {
     let mut requests = Vec::new();
     let mut unavailable_tasks = Vec::new();
     for task in &tasks {
@@ -1492,7 +1447,7 @@ fn snapshot_task_details(
     requests: Vec<&Task>,
     probe_pr_empty: bool,
     shared: &SharedTaskReads,
-) -> Result<Vec<TaskDetailSnapshot>> {
+) -> Result<Vec<RoadmapTask>> {
     // `git status` is parallel itself: past four, overlapping children cost
     // more CPU than the wall time they save.
     const MAX_WORKERS: usize = 4;
@@ -1612,7 +1567,7 @@ async fn snapshot_task_detail(
     task: &Task,
     probe_pr_empty: bool,
     reads: &DetailReads<'_>,
-) -> Result<TaskDetailSnapshot> {
+) -> Result<RoadmapTask> {
     let facts = &reads.facts;
     let shared = reads.shared;
     let pr = facts.active_prs.get(&task.id).cloned();
@@ -1744,12 +1699,6 @@ async fn snapshot_task_detail(
         observed_at,
     );
     let actions = derive_task_actions(&action_evidence);
-    let direction = facts
-        .steers
-        .get(&task.id)
-        .map(|steers| crate::durable::render_steers(steers))
-        .filter(|text| !text.is_empty())
-        .map(|text| DirectionSnapshot { text });
     let work_status = runtime.status.work_status();
     let run_control =
         crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
@@ -1778,7 +1727,8 @@ async fn snapshot_task_detail(
     let (workflow_name, workflow_source) = selection
         .map(|(name, source)| (name, source.to_owned()))
         .unzip();
-    Ok(TaskDetailSnapshot {
+    let section = task_section(task.state.as_deref(), Some(&runtime), &next_move);
+    Ok(RoadmapTask {
         task: task_summary(
             task,
             facts
@@ -1795,7 +1745,6 @@ async fn snapshot_task_detail(
         ),
         reference,
         runtime: Some(runtime),
-        direction,
         next_move,
         condition,
         actions,
@@ -1812,6 +1761,7 @@ async fn snapshot_task_detail(
                 .flatten();
             PrSnapshot::new(pr, empty)
         }),
+        section,
     })
 }
 
@@ -2950,7 +2900,7 @@ mod tests {
             assert_eq!(detail.task.completed_at, item.completed_at);
             let terminal = crate::linear::terminal_reason(detail.task.state.as_deref());
             assert_eq!(
-                matches!(super::task_section(detail), super::RoadmapSection::Later),
+                matches!(detail.section, super::RoadmapSection::Later),
                 terminal.is_some()
             );
             if terminal.is_some() {
@@ -3163,11 +3113,7 @@ mod tests {
             };
             assert_eq!(items.len(), 1);
             assert!(detail.unavailable_tasks.is_empty());
-            let roadmap = items
-                .into_iter()
-                .map(super::roadmap_task)
-                .collect::<Vec<_>>();
-            assert_eq!(roadmap[0].task.linear_id.as_deref(), Some("started"));
+            assert_eq!(items[0].task.linear_id.as_deref(), Some("started"));
         }
     }
 
@@ -3390,10 +3336,6 @@ mod tests {
                 .unwrap();
             assert_eq!(items[0].task.id, saved.id.as_str());
             assert_eq!(items[0].task.linear_id.as_deref(), Some(item.id.as_str()));
-            assert_eq!(
-                super::roadmap_task(items[0].clone()).task.id,
-                saved.id.as_str()
-            );
             assert!(tasks.unavailable_tasks.is_empty());
         }
         let after = (
@@ -4008,7 +3950,9 @@ mod tests {
             .replace("{wave}", crate::id::WaveId::new().as_str())
             .replace("{project}", crate::durable::ProjectId::new().as_str())
             .replace("{task}", task.as_str())
-            .replace("{repo}", directory.path().to_str().unwrap());
+            .replace("{repo}", directory.path().to_str().unwrap())
+            // The upgrade keeps only Workflows standing at `end`.
+            .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_draft(&conn, "task_paused");
         conn.execute_batch("ALTER TABLE tasks DROP COLUMN paused")
@@ -4032,7 +3976,7 @@ mod tests {
         let workflow = store.sqlite.task_overview(&task).unwrap().workflow.unwrap();
         assert_eq!(workflow.definition.name, "feature");
         assert!(
-            matches!(workflow.position, crate::ops::workflow::WorkflowPosition::Node { ref node } if node == "demo")
+            matches!(workflow.position, crate::ops::workflow::WorkflowPosition::Node { ref node } if node == "end")
         );
         assert_eq!(
             crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),

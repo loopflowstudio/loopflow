@@ -269,7 +269,7 @@ private struct WavePlanView: View {
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
                     if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
-                    ForEach(tasks) { task in WaveTaskWorkView(task: task, selectedTaskID: $selectedTaskID) }
+                    ForEach(tasks) { task in RoadmapTaskView(task: task, selectedTaskID: $selectedTaskID) }
                     if historyFilter.showCompleted {
                         if let error = closed.error {
                             Text(error).foregroundStyle(palette.warning)
@@ -718,8 +718,8 @@ private extension MetricContractIssue {
     }
 }
 
-private struct WaveTaskWorkView: View {
-    let task: WaveTaskWork
+private struct RoadmapTaskView: View {
+    let task: RoadmapTask
     @Binding var selectedTaskID: String?
 
     @Environment(\.palette) private var palette
@@ -749,11 +749,6 @@ private struct WaveTaskWorkView: View {
                 Text(statusLine)
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
-                if let directive = task.directive {
-                    Text("direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending" : "incorporated")")
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                }
                 if let pr = task.pr {
                     PrLink(pr: pr)
                 }
@@ -799,7 +794,6 @@ private struct WaveWorkInspector: View {
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(palette.text)
                 details(
-                    directive: task.directive,
                     status: task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted",
                     reason: task.condition.reason,
                     provider: task.runtime?.provider,
@@ -820,7 +814,7 @@ private struct WaveWorkInspector: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
     }
 
-    private var task: WaveTaskWork? {
+    private var task: RoadmapTask? {
         return workMap.tasks.items
             .first { $0.task.id == selectedTaskID }
     }
@@ -833,7 +827,6 @@ private struct WaveWorkInspector: View {
 
     @ViewBuilder
     private func details(
-        directive: WorkDirectiveSnapshot?,
         status: String,
         reason: String,
         provider: String?,
@@ -843,18 +836,6 @@ private struct WaveWorkInspector: View {
         Text("\(status) · \(reason)")
             .font(Typography.caption(11))
             .foregroundStyle(palette.textSecondary)
-        if let directive {
-            Text("Direction v\(directive.version)")
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-            Text(directive.text)
-                .font(Typography.body(12))
-                .foregroundStyle(palette.text)
-                .textSelection(.enabled)
-            Text(directive.incorporatedAt == nil ? "Awaiting incorporation" : "Incorporated")
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-        }
         if let provider {
             Text("Provider · \(provider)")
                 .font(Typography.caption(10))

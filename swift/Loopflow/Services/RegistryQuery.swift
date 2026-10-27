@@ -672,7 +672,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
 
 /// `lf task list --done --json`: closed Tasks and the Task to continue after.
 public struct ClosedTaskPage: Decodable, Sendable, Hashable {
-    public let tasks: [WaveTaskWork]
+    public let tasks: [RoadmapTask]
     public let next: String?
 }
 
@@ -760,7 +760,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
-    public let tasks: WorkEvidence<WaveTaskWork>
+    public let tasks: WorkEvidence<RoadmapTask>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
     public let history: WorkEvidence<SessionHistory>

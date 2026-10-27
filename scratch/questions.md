@@ -14,10 +14,9 @@
   every closed Task. Reversible: add those Tasks to the open predicate.
 - Assumption: `--done` pages done and abandoned Tasks together (both left the
   plan), ordered by abandonment, else completion, else last update.
-- Note (2026-10-26): LOO-594's steer says "keep the closed row type as
-  RoadmapTask", but closed pages still return `wave status` rows (Swift
-  `WaveTaskWork`) so Desktop can merge them with the Wave view's open rows.
-  They switch with Wave detail (Remaining 1, deferred this pass).
+- Assumption (2026-10-26): Task rows drop `direction`. Desktop never read it
+  (it decoded a different key); steers stay visible through `lf task status`
+  comments. Reversible: add a field to `RoadmapTask` that Desktop renders.
 - Assumption: a graph's inventory entry in Task reads names the Task being read
   and its Wave, not `task_of_process`'s longest-worktree owner; they differ only
   for a Graph run in a nested Task checkout.

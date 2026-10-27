@@ -9,7 +9,6 @@ use super::children::{
 };
 use super::SqliteStore;
 use crate::durable::{RepositoryId, TaskOwner, TaskState};
-use crate::steer::Steer;
 use crate::store::planning_sync::PlanningSyncStatus;
 use crate::store::{StoreError, StoreResult, TaskAcquisition};
 use crate::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
@@ -27,7 +26,6 @@ pub struct TaskDetailFacts {
     pub owners: HashMap<TaskId, TaskOwner>,
     pub acquisitions: HashMap<TaskId, TaskAcquisition>,
     pub latest_events: HashMap<TaskId, TaskEvent>,
-    pub steers: HashMap<TaskId, Vec<Steer>>,
     /// The name of each Task's own Workflow.
     pub workflow_names: HashMap<TaskId, String>,
     /// Tasks whose Workflow stands at `end`.
@@ -96,7 +94,6 @@ impl SqliteStore {
                     Ok((event.task_id.clone(), event))
                 },
             )?,
-            steers: steers_in(&snapshot, &json)?,
             workflow_names: keyed(
                 &snapshot,
                 "SELECT task_id,json_extract(graph,'$.name') FROM task_workflows
@@ -162,25 +159,6 @@ fn states_in(conn: &Connection, ids: &str) -> StoreResult<HashMap<TaskId, TaskSt
                 .ok_or_else(|| StoreError::InvalidData(format!("invalid Task state {state:?}")))
         })
         .collect()
-}
-
-fn steers_in(conn: &Connection, ids: &str) -> StoreResult<HashMap<TaskId, Vec<Steer>>> {
-    let mut statement = conn.prepare(&format!(
-        "SELECT {},p.task_id FROM steers p WHERE task_id IN (SELECT value FROM json_each(?1)) ORDER BY seq",
-        super::steers::COLUMNS
-    ))?;
-    let rows = statement.query_map([ids], |row| {
-        Ok((
-            TaskId::from_raw(row.get::<_, String>(6)?),
-            super::steers::read_steer(row)?,
-        ))
-    })?;
-    let mut steers = HashMap::<TaskId, Vec<Steer>>::new();
-    for row in rows {
-        let (task, steer) = row?;
-        steers.entry(task).or_default().push(steer);
-    }
-    Ok(steers)
 }
 
 fn repository_paths_in(conn: &Connection) -> StoreResult<HashMap<RepositoryId, String>> {

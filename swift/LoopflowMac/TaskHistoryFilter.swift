@@ -38,7 +38,7 @@ struct TaskHistoryFilter: Equatable {
 /// Closed Tasks paged from `lf task list --done`, most recently closed first.
 /// The Wave's status carries only open Tasks.
 struct ClosedTaskHistory {
-    private(set) var tasks: [WaveTaskWork] = []
+    private(set) var tasks: [RoadmapTask] = []
     private(set) var next: String?
     var isLoading = false
     var error: String?
@@ -56,7 +56,7 @@ struct ClosedTaskHistory {
     }
 
     /// The open inventory, then closed Tasks it does not already hold.
-    func merged(after open: [WaveTaskWork]) -> [WaveTaskWork] {
+    func merged(after open: [RoadmapTask]) -> [RoadmapTask] {
         let ids = Set(open.map(\.id))
         return open + tasks.filter { !ids.contains($0.id) }
     }

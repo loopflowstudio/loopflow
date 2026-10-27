@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
-use crate::steer::Steer;
 
 use crate::id::prefixed_uuid_id;
 
@@ -322,18 +321,6 @@ impl std::fmt::Display for Author {
     }
 }
 
-pub fn render_steers(steers: &[Steer]) -> String {
-    if steers.is_empty() {
-        return String::new();
-    }
-    let direction = steers
-        .iter()
-        .map(|steer| format!("- {}", steer.text))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("<lf:steers>\n{direction}\n</lf:steers>")
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolResponseWrite {
     pub request_id: String,
@@ -534,27 +521,7 @@ impl GraphStepProcess {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_steers, WorkStatus};
-    use crate::durable::Author;
-    use crate::steer::Steer;
-
-    #[test]
-    fn ordered_steers_render_as_one_input_projection() {
-        let steer = |sequence: i64, text: &str| Steer {
-            id: crate::id::SteerId::new(),
-            sequence,
-            source: format!("fixture:{sequence}"),
-            revision: "1".into(),
-            author: Author::User,
-            text: text.to_string(),
-        };
-        let steers = vec![steer(1, "first"), steer(2, "second")];
-
-        assert_eq!(
-            render_steers(&steers),
-            "<lf:steers>\n- first\n- second\n</lf:steers>"
-        );
-    }
+    use super::WorkStatus;
 
     #[test]
     fn work_status_fixture_round_trips_every_current_variant() {

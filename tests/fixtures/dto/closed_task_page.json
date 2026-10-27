@@ -7,7 +7,6 @@
         "name": "Surface nightly failures",
         "description": "Surface one focused failure.",
         "rank": 1,
-        "completed": true,
         "assignee": "user-1",
         "state": "completed",
         "completed_at": "2026-07-14T18:30:00Z",
@@ -150,7 +149,7 @@
               "id": "design",
               "label": "task-design",
               "kind": "skill",
-              "human": false,
+              "interactive": false,
               "returns_to": null,
               "sources": [
                 "feature"
@@ -162,7 +161,7 @@
               "id": "implement",
               "label": "implement",
               "kind": "skill",
-              "human": false,
+              "interactive": false,
               "returns_to": null,
               "sources": [
                 "feature",
@@ -175,7 +174,7 @@
               "id": null,
               "label": "realign",
               "kind": "skill",
-              "human": false,
+              "interactive": false,
               "returns_to": null,
               "sources": [
                 "feature",
@@ -188,7 +187,7 @@
               "id": "decide",
               "label": "loop-or-next",
               "kind": "skill",
-              "human": false,
+              "interactive": false,
               "returns_to": 1,
               "sources": [
                 "feature",
@@ -201,7 +200,7 @@
               "id": "demo",
               "label": "demo",
               "kind": "skill",
-              "human": true,
+              "interactive": true,
               "returns_to": null,
               "sources": [
                 "feature",
@@ -214,7 +213,7 @@
               "id": "decide_delivery",
               "label": "loop-or-next",
               "kind": "skill",
-              "human": false,
+              "interactive": false,
               "returns_to": 1,
               "sources": [
                 "feature",
@@ -227,7 +226,7 @@
               "id": null,
               "label": "xor-route",
               "kind": "xor",
-              "human": false,
+              "interactive": false,
               "returns_to": null,
               "sources": [
                 "feature"
@@ -242,7 +241,7 @@
                       "id": "patch",
                       "label": "patch",
                       "kind": "skill",
-                      "human": false,
+                      "interactive": false,
                       "returns_to": null,
                       "sources": [],
                       "paths": []
@@ -261,7 +260,7 @@
               "id": null,
               "label": "pr land -c",
               "kind": "op",
-              "human": false,
+              "interactive": false,
               "returns_to": null,
               "sources": [
                 "feature",
@@ -468,7 +467,11 @@
         "abandoned_at": null
       },
       "workflow_source": "task",
-      "direction": null
+      "section": "later",
+      "ship_control": {
+        "unavailable": null
+      },
+      "shipping": null
     }
   ],
   "next": "ts_22222222222222222222222222222222"

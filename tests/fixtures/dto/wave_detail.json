@@ -207,14 +207,6 @@
             }
           }
         },
-        "directive": {
-          "version": 2,
-          "kind": "replacement",
-          "text": "Surface verification failures before publish failures.",
-          "applied_at": "2026-07-13T18:30:00Z",
-          "incorporated_at": "2026-07-13T18:31:00Z",
-          "incorporated_summary": "Verification failures are now first."
-        },
         "next_move": {
           "owner": "user",
           "reason": "merge pull request head 333333333333 on GitHub"
@@ -579,7 +571,8 @@
           "merge_commit": null,
           "abandoned_at": null
         },
-        "workflow_source": "task"
+        "workflow_source": "task",
+        "section": "waiting"
       },
       {
         "task": {
@@ -664,7 +657,6 @@
           "workspace": null
         },
         "runtime": null,
-        "directive": null,
         "next_move": {
           "owner": "wave",
           "reason": "Task is ready to start"
@@ -704,7 +696,8 @@
         },
         "shipping": null,
         "pr": null,
-        "workflow_source": "task"
+        "workflow_source": "task",
+        "section": "not_started"
       }
     ],
     "truncated": false

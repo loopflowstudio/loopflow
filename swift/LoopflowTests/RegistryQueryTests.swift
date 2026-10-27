@@ -242,7 +242,6 @@ struct RegistryQueryTests {
           "provider": "codex",
           "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
         },
-        "directive": null,
         "workflow_name":"feature","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move": {
           "owner": "task",
@@ -267,7 +266,8 @@ struct RegistryQueryTests {
           "recommended": "resume",
           "reason": "resume the parked Task"
         },
-        "pr": null
+        "pr": null,
+        "section": "now"
       }
     ],
     "truncated": false

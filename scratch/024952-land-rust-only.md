@@ -76,3 +76,4 @@ The `website/tests` suite needs playwright and is deferred to CI `website-test`.
 Compress: `cargo clippy --all-targets -D warnings` clean; `ops::human_session::` lib → 34 passed; `land_tests::final_preparation` → 2 passed.
 After syncing main (70825b1e8a): `scripts/check_architecture.py` now skips out-of-line `tests.rs` modules (the split's `/bin/sleep` fixtures read as production edges); clippy/fmt clean; `ops::task:: ops::human_session::` lib → 72 passed; `land_tests::` → 30 passed; Python CI/architecture suites → 103 passed; actionlint shows only pre-existing SC2016 info in `dependabot-auto.yml`.
 Compress after sync: inlined `render_lf_reference` into `website/dev.py::_generate_lf_reference`; `_generate_lf_reference` on a temp copy → 2,428-line reference from installed lf. No other reductions found.
+Checkpoint 8d6fd07572 (all four items committed): `cargo fmt --check` clean; earlier focused checks still apply, no code changed since.

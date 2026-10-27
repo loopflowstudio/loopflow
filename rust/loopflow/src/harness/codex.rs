@@ -35,7 +35,7 @@ use crate::harness::codex_decode::{self, CodexDecoder};
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::FactWriter;
-use crate::harness::{ApprovalPolicy, Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
+use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
 use crate::os_process::{
     agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
@@ -176,7 +176,6 @@ impl CodexStream {
 
 pub struct CodexHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
-    raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     approval: ApprovalPolicy,
     child: Option<Child>,
     outbound_tx: Option<mpsc::Sender<OutboundRpc>>,
@@ -223,7 +222,6 @@ impl CodexHarness {
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
         Self {
             events,
-            raw_provider: None,
             approval,
             child: None,
             outbound_tx: None,
@@ -357,13 +355,6 @@ impl CodexHarness {
 impl Harness for CodexHarness {
     fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
-    }
-
-    fn set_raw_provider_sender(
-        &mut self,
-        raw_provider: Option<mpsc::UnboundedSender<RawProviderEvent>>,
-    ) {
-        self.raw_provider = raw_provider;
     }
 
     fn process_group_id(&self) -> Option<u32> {
@@ -811,7 +802,6 @@ impl CodexHarness {
         let turn_in_progress = self.turn_in_progress.clone();
         let shutdown_requested = self.shutdown_requested.clone();
         let event_tx = self.events.clone();
-        let raw_provider = self.raw_provider.clone();
         let approval_tx = outbound_tx.clone();
         let approval = self.approval;
         let agent_session = self.agent_session.clone();
@@ -830,12 +820,6 @@ impl CodexHarness {
                 let Message::Text(line) = message else {
                     continue;
                 };
-                if let Some(raw_provider) = &raw_provider {
-                    let _ = raw_provider.send(RawProviderEvent {
-                        stream: "notification",
-                        line: line.to_string(),
-                    });
-                }
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };

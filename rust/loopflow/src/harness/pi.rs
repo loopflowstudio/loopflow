@@ -18,7 +18,7 @@ use super::agent_process::AttachmentOwner;
 use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
 use super::pi_decode::Turn;
-use super::{Harness, HarnessError, RawProviderEvent, SendCurrentOutcome};
+use super::{Harness, HarnessError, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::chat::types::{ConversationEvent, Lifecycle};
 use crate::id::AgentSessionId;
@@ -60,7 +60,6 @@ impl State {
 #[derive(Debug)]
 pub struct PiHarness {
     events: mpsc::UnboundedSender<ConversationEvent>,
-    raw: Option<mpsc::UnboundedSender<RawProviderEvent>>,
     state: Arc<Mutex<State>>,
     attachment: Option<(String, SessionAttachment)>,
     session: Option<AgentSessionId>,
@@ -109,7 +108,6 @@ impl PiHarness {
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>) -> Self {
         Self {
             events,
-            raw: None,
             state: Arc::default(),
             attachment: None,
             session: None,
@@ -250,17 +248,10 @@ impl PiHarness {
     fn spawn_reader(&self, stdout: ChildStdout) -> JoinHandle<()> {
         let state = self.state.clone();
         let events = self.events.clone();
-        let raw = self.raw.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             let outcome: Result<()> = async {
                 while let Some(line) = lines.next_line().await? {
-                    if let Some(raw) = &raw {
-                        let _ = raw.send(RawProviderEvent {
-                            stream: "pi_rpc",
-                            line: line.clone(),
-                        });
-                    }
                     let value: Value = serde_json::from_str(&line).context("Invalid Pi RPC JSON")?;
                     let mut state = state.lock().expect("Pi state lock poisoned");
                     if value["type"] == "response" {
@@ -325,9 +316,6 @@ impl PiHarness {
 impl Harness for PiHarness {
     fn set_agent_session(&mut self, session: Option<AgentSessionId>) {
         self.session = session;
-    }
-    fn set_raw_provider_sender(&mut self, raw: Option<mpsc::UnboundedSender<RawProviderEvent>>) {
-        self.raw = raw;
     }
     fn agent_session(&self) -> Option<AgentSessionId> {
         self.session.clone()

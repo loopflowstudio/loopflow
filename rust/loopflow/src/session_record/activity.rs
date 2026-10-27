@@ -1,34 +1,28 @@
-//! Read-only CPU/event observations. These never authorize process control.
+//! Read-only CPU and provider-signal observations. These never authorize
+//! process control.
+//!
+//! The launching process samples its provider body's CPU every
+//! `SAMPLE_INTERVAL` into `session_activity`; a status read judges Running or
+//! Stalled from that row alone.
 
 use std::collections::BTreeSet;
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use super::{record_dir, CaptureEvent, EventEnvelope, SCHEMA_VERSION};
+use crate::session::SessionLiveness;
+use crate::store::sqlite::SqliteStore;
 
 pub(crate) const SAMPLE_INTERVAL: Duration = Duration::from_secs(15);
 const MAX_SAMPLE_GAP: i64 = 45;
 const STALL_WINDOW: i64 = 300;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct CpuProcess {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CpuProcess {
     pid: u32,
     parent: u32,
     started_at: String,
     cpu_millis: u64,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub(super) struct Observation {
-    body_pid: Option<u32>,
-    processes: Option<Vec<CpuProcess>>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    quiet_since: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, Default)]
@@ -43,12 +37,14 @@ impl Observer {
         self.quiet_since = Some(now);
     }
 
+    /// Since when the body and its tools used no CPU; `None` when this sample
+    /// could not read them or the PID now names another process.
     fn observe(
         &mut self,
         now: OffsetDateTime,
         body_pid: Option<u32>,
         processes: Option<Vec<CpuProcess>>,
-    ) -> Observation {
+    ) -> Option<OffsetDateTime> {
         let processes = processes.filter(|processes| {
             let Some(root) = processes
                 .iter()
@@ -71,12 +67,8 @@ impl Observer {
             (_, Some(_)) => Some(now),
             (_, None) => None,
         };
-        self.previous = processes.clone().map(|processes| (now, processes));
-        Observation {
-            body_pid,
-            processes,
-            quiet_since: self.quiet_since,
-        }
+        self.previous = processes.map(|processes| (now, processes));
+        self.quiet_since
     }
 }
 
@@ -84,11 +76,21 @@ impl super::CaptureHandle {
     pub(crate) async fn observe_activity(&self, body_pid: Option<u32>) {
         let processes = sample(body_pid).await;
         self.with_capture(|capture| {
-            let observation =
-                capture
-                    .activity
-                    .observe(OffsetDateTime::now_utc(), body_pid, processes);
-            capture.append_event(CaptureEvent::Activity { observation })
+            let now = OffsetDateTime::now_utc();
+            let quiet_since = capture.activity.observe(now, body_pid, processes);
+            let Some((session, attachment)) = &capture.attachment else {
+                return Ok(());
+            };
+            super::row_store(&capture.dir)
+                .and_then(|store| {
+                    store.record_session_cpu(
+                        session,
+                        attachment,
+                        now.unix_timestamp(),
+                        quiet_since.map(OffsetDateTime::unix_timestamp),
+                    )
+                })
+                .map_err(std::io::Error::other)
         });
     }
 }
@@ -100,78 +102,42 @@ pub(crate) enum Activity {
     Unknown,
 }
 
-pub(crate) async fn read(home: &Path, run: &str) -> Activity {
-    let Some(dir) = record_dir(home, run) else {
-        return Activity::Unknown;
-    };
-    let Ok(envelope) = latest_event(&dir.join("events.jsonl")) else {
-        return Activity::Unknown;
-    };
-    let now = OffsetDateTime::now_utc();
-    match envelope.event {
-        CaptureEvent::Activity { observation } => {
-            let current = sample(observation.body_pid).await;
-            project(&observation, envelope.observed_at, now, current.as_deref())
+/// Whether a step's Session is progressing, judged from its stored liveness;
+/// `step_started_at` covers a Session whose provider has not spoken yet.
+pub(crate) fn read(store: &SqliteStore, session: &str, step_started_at: i64) -> Activity {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    match store.session_liveness(session) {
+        Ok(liveness) => project(liveness, step_started_at, now),
+        Err(error) => {
+            tracing::warn!(%error, session, "Session liveness unreadable");
+            Activity::Unknown
         }
-        _ if (0..STALL_WINDOW).contains(&(now - envelope.observed_at).whole_seconds()) => {
+    }
+}
+
+fn project(liveness: Option<SessionLiveness>, step_started_at: i64, now: i64) -> Activity {
+    let recent = |at: i64| (0..STALL_WINDOW).contains(&(now - at));
+    let Some(liveness) = liveness else {
+        return if recent(step_started_at) {
             Activity::Running
-        }
-        _ => Activity::Unknown,
-    }
-}
-
-fn project(
-    observation: &Observation,
-    at: OffsetDateTime,
-    now: OffsetDateTime,
-    current: Option<&[CpuProcess]>,
-) -> Activity {
-    let (Some(previous), Some(current), Some(quiet_since), Some(pid)) = (
-        &observation.processes,
-        current,
-        observation.quiet_since,
-        observation.body_pid,
-    ) else {
-        return Activity::Unknown;
+        } else {
+            Activity::Unknown
+        };
     };
-    if !(0..=MAX_SAMPLE_GAP).contains(&(now - at).whole_seconds()) {
-        return Activity::Unknown;
-    }
-    let old_root = previous.iter().find(|process| process.pid == pid);
-    let root = current.iter().find(|process| process.pid == pid);
-    if !matches!((old_root, root), (Some(old), Some(new)) if old.started_at == new.started_at) {
-        return Activity::Unknown;
-    }
-    if previous != current || (now - quiet_since).whole_seconds() < STALL_WINDOW {
+    let fresh_sample = liveness
+        .cpu_sampled_at
+        .is_some_and(|at| (0..=MAX_SAMPLE_GAP).contains(&(now - at)));
+    let cpu_quiet_since = liveness.cpu_quiet_since.filter(|_| fresh_sample);
+    if recent(liveness.observed_at) || cpu_quiet_since.is_some_and(recent) {
         Activity::Running
-    } else {
+    } else if cpu_quiet_since.is_some() {
         Activity::Stalled
+    } else {
+        Activity::Unknown
     }
 }
 
-// Bound status reads independently of a capture's transcript size. Ignore only the
-// incomplete first/last records; a malformed complete record stays unknown.
-fn latest_event(path: &Path) -> std::io::Result<EventEnvelope> {
-    let mut file = File::open(path)?;
-    let offset = file.metadata()?.len().saturating_sub(64 * 1024);
-    file.seek(SeekFrom::Start(offset))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
-    let mut lines = bytes.split_inclusive(|byte| *byte == b'\n');
-    if offset > 0 {
-        lines.next();
-    }
-    let line = lines
-        .rfind(|line| line.last() == Some(&b'\n'))
-        .ok_or_else(|| std::io::Error::other("no complete activity observation"))?;
-    let event: EventEnvelope = serde_json::from_slice(line)?;
-    if event.schema_version != SCHEMA_VERSION {
-        return Err(std::io::Error::other("unknown capture event schema"));
-    }
-    Ok(event)
-}
-
-async fn sample(body_pid: Option<u32>) -> Option<Vec<CpuProcess>> {
+pub(crate) async fn sample(body_pid: Option<u32>) -> Option<Vec<CpuProcess>> {
     let pid = body_pid?;
     // Include reaped children's CPU: a short-lived tool must not disappear
     // between samples and make a busy body look idle. No command text is read.
@@ -256,6 +222,7 @@ fn cpu_millis(text: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{cpu_millis, parse_processes, project, sample, Activity, CpuProcess, Observer};
+    use crate::session::SessionLiveness;
     use time::OffsetDateTime;
 
     fn processes() -> Vec<CpuProcess> {
@@ -275,76 +242,92 @@ mod tests {
         ]
     }
 
+    fn at(seconds: i64) -> OffsetDateTime {
+        OffsetDateTime::UNIX_EPOCH + time::Duration::seconds(seconds)
+    }
+
     #[test]
-    fn inactivity_stalls_but_silent_tool_cpu_and_events_restore_running() {
+    fn unchanged_cpu_is_quiet_until_a_tool_or_event_moves() {
         let mut observer = Observer::default();
-        let start = OffsetDateTime::UNIX_EPOCH;
-        let at = start + time::Duration::seconds(300);
         let mut cpu = processes();
-        for seconds in (0..300).step_by(15) {
-            observer.observe(
-                start + time::Duration::seconds(seconds),
-                Some(10),
-                Some(cpu.clone()),
+        for seconds in (0..=300).step_by(15) {
+            assert_eq!(
+                observer.observe(at(seconds), Some(10), Some(cpu.clone())),
+                Some(at(0))
             );
         }
-        let quiet = observer.observe(at, Some(10), Some(cpu.clone()));
-        assert_eq!(project(&quiet, at, at, Some(&cpu)), Activity::Stalled);
-        observer.note_event(at);
-        let event = observer.observe(at, Some(10), Some(cpu.clone()));
-        assert_eq!(project(&event, at, at, Some(&cpu)), Activity::Running);
         cpu[1].cpu_millis += 1;
-        // Even before the next stored sample, a silent tool's CPU wins.
-        assert_eq!(project(&quiet, at, at, Some(&cpu)), Activity::Running);
-        let active = observer.observe(at, Some(10), Some(cpu.clone()));
-        assert_eq!(project(&active, at, at, Some(&cpu)), Activity::Running);
-        observer.note_event(at);
-        let fresh = observer.observe(at, Some(10), Some(cpu.clone()));
-        assert_eq!(project(&fresh, at, at, Some(&cpu)), Activity::Running);
-    }
-
-    #[test]
-    fn missing_samples_stale_observers_and_reused_pids_never_prove_stalled() {
-        let at = OffsetDateTime::UNIX_EPOCH;
-        let cpu = processes();
-        let quiet = super::Observation {
-            body_pid: Some(10),
-            processes: Some(cpu.clone()),
-            quiet_since: Some(at - time::Duration::seconds(300)),
-        };
-        assert_eq!(project(&quiet, at, at, None), Activity::Unknown);
         assert_eq!(
-            project(&quiet, at, at + time::Duration::seconds(46), Some(&cpu)),
-            Activity::Unknown
+            observer.observe(at(315), Some(10), Some(cpu.clone())),
+            Some(at(315))
         );
-        let mut reused = cpu.clone();
-        reused[0].started_at = "another body".into();
-        assert_eq!(project(&quiet, at, at, Some(&reused)), Activity::Unknown);
-        let mut observer = Observer::default();
-        observer.observe(at, Some(10), Some(cpu.clone()));
-        observer.observe(at + time::Duration::seconds(15), Some(10), None);
-        let now = at + time::Duration::seconds(300);
-        let restored = observer.observe(now, Some(10), Some(cpu.clone()));
-        assert_eq!(project(&restored, now, now, Some(&cpu)), Activity::Running);
+        observer.note_event(at(320));
+        assert_eq!(
+            observer.observe(at(330), Some(10), Some(cpu)),
+            Some(at(320))
+        );
     }
 
     #[test]
-    fn reused_body_never_becomes_the_runs_observed_process() {
+    fn missing_samples_and_reused_pids_have_no_quiet_time() {
         let mut observer = Observer::default();
-        let start = OffsetDateTime::UNIX_EPOCH;
         let cpu = processes();
-        observer.observe(start, Some(10), Some(cpu));
+        observer.observe(at(0), Some(10), Some(cpu.clone()));
+        assert_eq!(observer.observe(at(15), Some(10), None), None);
+        assert_eq!(
+            observer.observe(at(30), Some(10), Some(cpu.clone())),
+            Some(at(30))
+        );
         let mut reused = processes();
         reused[0].started_at = "replacement body".into();
-        for seconds in (15..=330).step_by(15) {
-            let now = start + time::Duration::seconds(seconds);
-            let observation = observer.observe(now, Some(10), Some(reused.clone()));
+        for seconds in (45..=400).step_by(15) {
             assert_eq!(
-                project(&observation, now, now, Some(&reused)),
-                Activity::Unknown,
-                "a reused PID is not this Session's provider, even after repeated samples"
+                observer.observe(at(seconds), Some(10), Some(reused.clone())),
+                None,
+                "a reused PID is not this Session's provider"
             );
         }
+    }
+
+    #[test]
+    fn a_step_stalls_only_when_a_fresh_sample_and_its_provider_are_both_quiet() {
+        let now = 1_000;
+        let reading = |observed_at, sampled: Option<i64>, quiet: Option<i64>| {
+            Some(SessionLiveness {
+                observed_at,
+                cpu_sampled_at: sampled,
+                cpu_quiet_since: quiet,
+            })
+        };
+        // A silent long tool keeps its CPU moving.
+        assert_eq!(
+            project(reading(0, Some(990), Some(980)), 0, now),
+            Activity::Running
+        );
+        // The provider spoke recently, whatever the CPU says.
+        assert_eq!(
+            project(reading(900, Some(990), Some(0)), 0, now),
+            Activity::Running
+        );
+        assert_eq!(project(reading(900, None, None), 0, now), Activity::Running);
+        // Five quiet minutes on a fresh sample.
+        assert_eq!(
+            project(reading(600, Some(990), Some(700)), 0, now),
+            Activity::Stalled
+        );
+        // A stale or unreadable sample proves nothing.
+        assert_eq!(
+            project(reading(600, Some(950), Some(0)), 0, now),
+            Activity::Unknown
+        );
+        assert_eq!(
+            project(reading(600, Some(990), None), 0, now),
+            Activity::Unknown
+        );
+        assert_eq!(project(reading(600, None, None), 0, now), Activity::Unknown);
+        // A Session that has not spoken yet runs only while its step is young.
+        assert_eq!(project(None, 800, now), Activity::Running);
+        assert_eq!(project(None, 600, now), Activity::Unknown);
     }
 
     #[test]

@@ -3,9 +3,8 @@
 Status: **decided slice implemented** (2026-10-26): items 1–6 below are on the
 branch, merged with main `e636ab6397` (#1652). Remaining: gate, publish.
 Deviations in `scratch/questions.md`. Sections 1–8 are the review as proposed;
-where the implementation scope or a later decision differs, the later one wins. Source: `docs/lf-reference.md` at main `1b137b8f2d` (26 top-level
-commands, ~230 subcommands, 24 root flags), `lf --help`, the builtin catalog,
-LOO-601's branch (hidden `__` commands) and LOO-602's accepted tracking decisions.
+a later decision wins where they differ. Source: `docs/lf-reference.md` at
+main `1b137b8f2d`, LOO-601 (hidden `__` commands) and LOO-602's decisions.
 
 ## Direction (Jack Heart, 2026-10-26)
 
@@ -395,12 +394,10 @@ and `ci watch` are gone; scheduled work is a crontab line (`lf pr reconcile`).
 Decision D6: build `lf serve` now, or record the rule and ship 1.0 with the
 pollers marked experimental.
 
-## 7. Experimental for 1.0 (superseded: no experimental tier)
+## 7. Experimental for 1.0 (superseded)
 
-Jack's "promised or deleted" direction replaces this tier. Each command below
-still needs that call; none is in this Task's slice. Originally: not deleted, but outside the 1.0 promise, under `lf experimental …` or a hidden
-flag — Jack's call (D1): `repo release *`, `discord`, `machine pool/ondemand`,
-`wave plan *`, `desktop` pane control, `history replay`.
+No experimental tier: Jack's "promised or deleted" replaces it. The commands
+it held await that call (listed under One steer verb, unresolved).
 
 ## 8. Builtin skills and Graphs
 
@@ -687,38 +684,24 @@ commands (`discord`, `machine pool/ondemand`, `wave plan`, `desktop` pane
 control, `history replay`) and the not-yet-reviewed roots `clone`,
 `portfolio`, `disk`, `scratch`, `monitor`.
 
-## Concept review of the built slice (2026-10-26, Graph step)
+## Concept review of the built slice (2026-10-26, built)
 
-Checked the compiled root against the accepted direction ("organize the API by
-the product's pillars"; root shows core concepts and essential verbs).
-
-**Built: root help ordered by pillar.** `lf --help` lists
-commands in `Commands` enum order (`lf/mod.rs:431`, rendered by
-`navigation.rs:430`), so a recruit's first screen reads `clone ops ship
-scratch monitor disk : session …` with `task` and `wave` near the end. Reorder
-the enum (and so the generated reference) as: Work `task wave ship` · Sessions
-`session open :` · Orchestration `graph skill` · Telemetry `history` ·
-Surfaces `desktop monitor` · `ops` · `config self list help context` · then the
-not-yet-reviewed `clone portfolio disk scratch discord`. No names or paths
-change; `docs/lf-reference.md` regenerated. Check: `documented_commands` 4/4
-and `reference_matches_the_compiled_cli` pass; `lf --help` lists `task wave` first.
-
-Considered and left: `lf ship` → `lf task ship`. It is a Task verb, but main
-(#1652) chose the root deliberately, `lf ship` would still resolve by elision,
-and moving it changes only the canonical path; recorded in questions.
+Root help is ordered by pillar (enum order in `lf/mod.rs` is help order): Work
+`task wave ship` · Sessions `session open :` · Orchestration `graph skill` ·
+Telemetry `history` · Surfaces `desktop monitor` · `ops` · `config self list
+help context` · not-yet-reviewed `clone portfolio disk scratch discord`. No
+names or paths changed. Left: `lf ship` → `lf task ship` (main #1652 chose the
+root; see questions).
 
 ## Run notes
 
-- 2026-10-26: the `wave cron` deletion was built in a side worktree and merged
-  by hand (4 conflicts); orphaned `ops/cron*`, `scheduled_release_tests.rs`,
-  the cron-only release-lock test and `release_history.json` fixture removed.
+- `wave cron` deletion merged by hand from a side worktree; orphaned cron
+  code, tests and fixtures removed.
 - Verify run: integration 436/436 after 7 fixes; two_people, golden_prompt,
   clippy, Xcode build-for-testing, SwiftPM build pass. Lib suite stopped at
   966/2215 under machine load (its 9 failures passed in isolation).
 - Item 6: docs 5/5, website 72/72, every documented `lf` path resolved.
-- Merge with main `e636ab6397` (#1652) and docs port (`964b288617`): no tests
-  run since the merge; the generated reference shows `ship`, `ops ci` (no
-  `watch`) and `task defer`. Gate owes integration, lib, clippy, Swift.
-- Steer verb built: `session_steers`, `global_commands` 45/45,
-  `documented_commands`, reference regenerated, clippy clean. Gate still owes
-  integration, lib and Swift.
+- Merge with main `e636ab6397` (#1652) and docs port (`964b288617`); steer
+  verb (`session_steers`, `global_commands` 45/45, clippy clean); pillar order
+  (`documented_commands` 4/4, `reference_matches_the_compiled_cli` pass).
+  Gate owes integration, lib and Swift since the merge.

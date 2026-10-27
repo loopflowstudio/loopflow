@@ -55,6 +55,18 @@ promote output, receipt and `lf self doctor`.
 Kept: `LOOPFLOW_BUILD_PROVENANCE`/`LOOPFLOW_MIGRATION_AUTHORITY` (release CI needs them;
 `scripts/test_task_installation.py --repository-upgrade` migrates, so it keeps them).
 
+## Concept review (2026-10-27)
+
+One rule, one place: `decide()` ties authority to whether the store changes.
+Exact switches skip the candidate store advance (`advance_switch_store`), so the
+remaining `Published` checks (`advance_switch`, `bootstrap_published_install`)
+guard only migration or the retained fallback, as intended. Names that still say
+"published" (`exact_published_switch_candidate`, `InstallSource::Published`,
+`MigrationAuthority::ValidationOnly` shown as "migrations validation-only" in
+doctor) describe the fallback/migration role, not "is a release"; the label carries
+provenance. No design change; the `InstallSource` rename stays the separate change
+noted in `scratch/questions.md`.
+
 ## Remaining
 
 - Demo: promote the plain build and show `lf --version` / `lf self doctor`; add an empty

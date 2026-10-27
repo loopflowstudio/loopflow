@@ -539,6 +539,45 @@ fn record_process_interruption(context: &ProcessContext) {
     ledger_insert(context, &event, &context.cwd, Some(130));
 }
 
+/// This Process's row as its start receipt writes it. Attachment writes the
+/// same row in its own transaction, so an agent never names an unrecorded parent.
+fn start_record(context: &ProcessContext, cwd: &Path) -> LfProcess {
+    LfProcess {
+        kind: crate::process::ProcessKind::Lf,
+        agent_session_id: None,
+        os_started_at: context.process_started_at,
+        id: context.lf_process_id.clone(),
+        pid: Some(std::process::id()),
+        trace_id: context.trace_id.clone(),
+        parent_lf_process_id: context.parent_lf_process_id.clone(),
+        via_agent: Some(context.agent_caller.is_some()),
+        caller_session_id: context
+            .agent_caller
+            .as_ref()
+            .map(|caller| caller.session_id.clone()),
+        caller_agent_process_id: context
+            .agent_caller
+            .as_ref()
+            .and_then(|caller| caller.agent_process_id.clone()),
+        command: context.command.clone(),
+        repo: context.repo.clone(),
+        cwd: Some(cwd.display().to_string()),
+        started_at: context.started_at,
+        completed_at: None,
+        outcome: None,
+        exit_code: None,
+        signal: None,
+        error: None,
+    }
+}
+
+/// The current Process's start row, when `process` is the current Process.
+pub(crate) fn current_start_record(process: &LfProcessId) -> Option<LfProcess> {
+    current_context()
+        .filter(|context| &context.lf_process_id == process)
+        .map(|context| start_record(&context, &context.cwd))
+}
+
 /// Best-effort write into the machine-grain SQLite ledger. Never fails the
 /// run: the first failure warns, and later failures log at debug. Local-only —
 /// the ledger never leaves the machine.
@@ -557,38 +596,17 @@ fn ledger_insert(
         LfEventType::Escalated => Some("interrupted"),
         _ => None,
     };
-    let record = LfProcess {
-        kind: crate::process::ProcessKind::Lf,
-        agent_session_id: None,
-        os_started_at: context.process_started_at,
-        id: context.lf_process_id.clone(),
-        pid: Some(std::process::id()),
-        trace_id: event.trace_id.clone(),
-        parent_lf_process_id: context.parent_lf_process_id.clone(),
-        via_agent: Some(context.agent_caller.is_some()),
-        caller_session_id: context
-            .agent_caller
-            .as_ref()
-            .map(|caller| caller.session_id.clone()),
-        caller_agent_process_id: context
-            .agent_caller
-            .as_ref()
-            .and_then(|caller| caller.agent_process_id.clone()),
-        command: context.command.clone(),
-        repo: context.repo.clone(),
-        cwd: Some(repo_root.display().to_string()),
-        started_at: context.started_at,
-        completed_at: outcome.map(|_| event.ts.unix_timestamp()),
-        outcome: outcome.map(str::to_owned),
-        exit_code: exit_code.or(match event.event {
-            LfEventType::Completed => Some(0),
-            LfEventType::Errored => Some(1),
-            LfEventType::Escalated => Some(130),
-            _ => None,
-        }),
-        signal: event.signal.clone(),
-        error: event.error.clone(),
-    };
+    let mut record = start_record(context, repo_root);
+    record.completed_at = outcome.map(|_| event.ts.unix_timestamp());
+    record.outcome = outcome.map(str::to_owned);
+    record.exit_code = exit_code.or(match event.event {
+        LfEventType::Completed => Some(0),
+        LfEventType::Errored => Some(1),
+        LfEventType::Escalated => Some(130),
+        _ => None,
+    });
+    record.signal = event.signal.clone();
+    record.error = event.error.clone();
 
     let started = Instant::now();
     let already_waited = context

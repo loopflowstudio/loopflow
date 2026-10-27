@@ -398,6 +398,53 @@ pub fn reap_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
     Ok(reap_in(&store, dry_run)?)
 }
 
+/// Release ancestry that `lf monitor prune` can prove was never recorded.
+/// Runs only from the explicit prune, never from lazy recovery.
+pub fn repair_unrecorded_ancestry(dry_run: bool) -> Result<AgentProcessReapReport> {
+    let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    Ok(repair_unrecorded_ancestry_in(
+        &store,
+        crate::journal::current_lf_process_id().as_ref(),
+        dry_run,
+    )?)
+}
+
+fn repair_unrecorded_ancestry_in(
+    store: &SqliteStore,
+    repairer: Option<&LfProcessId>,
+    dry_run: bool,
+) -> StoreResult<AgentProcessReapReport> {
+    let mut report = AgentProcessReapReport::default();
+    for agent in store.unrecorded_agent_ancestry()? {
+        let mut record = AgentProcessCleanup {
+            id: agent.agent_process_id.clone(),
+            action: "would_repair".into(),
+            reason: format!(
+                "parent LfProcess {} was never recorded",
+                agent.parent_lf_process_id
+            ),
+        };
+        if !dry_run {
+            match store.release_unrecorded_ancestry(&agent, repairer) {
+                Ok(true) => record.action = "repaired".into(),
+                Ok(false) => {
+                    record.action = "retained".into();
+                    record.reason = "ancestry changed during repair".into();
+                }
+                Err(error) => {
+                    record.action = "retained".into();
+                    record.reason = error.to_string();
+                    report
+                        .errors
+                        .push(format!("AgentProcess {}: {error}", agent.agent_process_id));
+                }
+            }
+        }
+        report.records.push(record);
+    }
+    Ok(report)
+}
+
 fn reap_in(store: &SqliteStore, dry_run: bool) -> StoreResult<AgentProcessReapReport> {
     let agents = store.agent_processes()?;
     let mut counts = HashMap::new();
@@ -657,6 +704,166 @@ mod tests {
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
 
+    /// The live LOO-643 shape: an ended agent reserved under an lf whose
+    /// start receipt never landed, still attached to that unrecorded lf.
+    fn unrecorded_ancestry_fixture(
+        store: &SqliteStore,
+        sql: &rusqlite::Connection,
+        name: &str,
+    ) -> (String, LfProcessId, LfProcessId) {
+        let session = store.test_session(name, &crate::session_record::new_artifact_key());
+        let ghost = LfProcessId::new();
+        sql.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+            [&ghost],
+        )
+        .unwrap();
+        let attachment = store
+            .claim_session_attachment(&session.id, None, &ghost, true)
+            .unwrap();
+        sql.execute_batch(&format!(
+            "UPDATE processes SET trace_id=id,completed_at=2 WHERE id='{agent}';
+             DELETE FROM processes WHERE id='{ghost}';
+             UPDATE agent_sessions SET provider_thread='thread-1' WHERE id='{session}';",
+            agent = attachment.agent_process_id,
+            session = session.id,
+        ))
+        .unwrap();
+        (session.id.to_string(), ghost, attachment.agent_process_id)
+    }
+
+    fn lineage(store: &SqliteStore) -> crate::lf::commands::doctor::Check {
+        crate::lf::commands::doctor::audit(&store.processes_since(0).unwrap())
+            .into_iter()
+            .find(|check| check.name == "lineage")
+            .unwrap()
+    }
+
+    #[test]
+    fn prune_releases_unrecorded_ancestry_and_the_session_resumes() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        let (session, ghost, agent) = unrecorded_ancestry_fixture(&store, &sql, "ladder");
+        let events = |sql: &rusqlite::Connection| -> i64 {
+            sql.query_row(
+                "SELECT count(*) FROM session_events WHERE session_id=?1",
+                [&session],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let before = events(&sql);
+        let resumer = LfProcessId::new();
+        sql.execute(
+            "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,?1,'lf',3)",
+            [&resumer],
+        )
+        .unwrap();
+
+        let stuck = store.session_attachment(&session).unwrap();
+        assert!(store
+            .resume_session_attachment(&session, stuck.as_ref(), &resumer, || Ok(false))
+            .is_err());
+        let check = lineage(&store);
+        assert!(
+            check.detail.contains("`lf monitor prune` repairs"),
+            "{check:?}"
+        );
+
+        let preview = super::repair_unrecorded_ancestry_in(&store, None, true).unwrap();
+        assert_eq!(preview.records.len(), 1);
+        assert_eq!(preview.records[0].id, agent);
+        assert_eq!(preview.records[0].action, "would_repair");
+        assert!(preview.records[0].reason.contains(ghost.as_str()));
+        assert_eq!(events(&sql), before);
+
+        let applied = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
+        assert_eq!(applied.records[0].action, "repaired");
+        assert!(applied.errors.is_empty());
+        let fact: serde_json::Value = sql
+            .query_row(
+                "SELECT payload FROM session_events WHERE session_id=?1
+                 AND json_extract(payload,'$.type')='agent_process_ancestry_repaired'",
+                [&session],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|payload| serde_json::from_str(&payload).unwrap())
+            .unwrap();
+        assert_eq!(fact["agent_process_id"], agent.as_str());
+        assert_eq!(fact["unrecorded_parent_lf_process_id"], ghost.as_str());
+        assert_eq!(fact["released_attached_lf_process_id"], ghost.as_str());
+        assert_eq!(events(&sql), before + 1);
+        assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+
+        let rerun = super::repair_unrecorded_ancestry_in(&store, Some(&resumer), false).unwrap();
+        assert!(rerun.records.is_empty());
+
+        // The Session resumes through the ordinary claim with native history intact.
+        assert_eq!(store.session_attachment(&session).unwrap(), None);
+        let resumed = store
+            .resume_session_attachment(&session, None, &resumer, || Ok(false))
+            .unwrap();
+        assert_ne!(resumed.agent_process_id, agent);
+        let thread: Option<String> = sql
+            .query_row(
+                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
+                [&session],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(thread.as_deref(), Some("thread-1"));
+        assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+    }
+
+    #[test]
+    fn prune_leaves_pruned_parents_and_live_agents_failing_doctor() {
+        let home = tempfile::tempdir().unwrap();
+        let database = home.path().join("db");
+        let store = SqliteStore::open_ephemeral(&database).unwrap();
+        let sql = rusqlite::Connection::open(&database).unwrap();
+        let (_, _, pruned) = unrecorded_ancestry_fixture(&store, &sql, "pruned");
+        let (_, _, live) = unrecorded_ancestry_fixture(&store, &sql, "live");
+        sql.execute(
+            "UPDATE processes SET trace_id=?2 WHERE id=?1",
+            [&pruned, &LfProcessId::new()],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE processes SET completed_at=NULL WHERE id=?1",
+            [&live],
+        )
+        .unwrap();
+        let report = super::repair_unrecorded_ancestry_in(&store, None, false).unwrap();
+        assert!(report.records.is_empty());
+        let check = lineage(&store);
+        assert!(check.status == crate::lf::commands::doctor::Status::Fail);
+        assert!(!check.detail.contains("lf monitor prune"), "{check:?}");
+    }
+
+    #[test]
+    fn attachment_records_its_lf_when_the_start_receipt_was_lost() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let home = ledger.home();
+        crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
+            let process = crate::journal::current_lf_process_id().unwrap();
+            let store = SqliteStore::new(&home.join("loopflow.db"))?;
+            rusqlite::Connection::open(home.join("loopflow.db"))?
+                .execute("DELETE FROM processes WHERE id=?1", [&process])?;
+            let session = store.test_session("lost", &crate::session_record::new_artifact_key());
+            let attachment = store.claim_session_attachment(&session.id, None, &process, true)?;
+            let parent = store.process(&process)?.unwrap();
+            let agent = store.process(&attachment.agent_process_id)?.unwrap();
+            assert_eq!(agent.trace_id, parent.trace_id);
+            assert!(parent.command.is_some());
+            assert!(lineage(&store).status == crate::lf::commands::doctor::Status::Ok);
+            Ok(())
+        })
+        .unwrap();
+    }
+
     #[test]
     fn tool_lifeline_refuses_the_providers_own_group() {
         let error =
@@ -671,7 +878,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("dead", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
             .unwrap();
         let mut command = Command::new("/usr/bin/true");
         command.env_clear();
@@ -922,7 +1129,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("cleanup", &crate::session_record::new_artifact_key());
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -977,7 +1184,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("takeover", &crate::session_record::new_artifact_key());
         let first = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
             .unwrap();
         let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
@@ -1005,7 +1212,7 @@ mod tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("failed-wait", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment(&session.id, None, &LfProcessId::new(), true)
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
             .unwrap();
         let owner = (store.clone(), session.id.to_string(), attachment.clone());
         let mut command = Command::new("/bin/sh");
@@ -1032,7 +1239,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("spawn", &crate::session_record::new_artifact_key());
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -1096,7 +1303,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("native", &crate::session_record::new_artifact_key());
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         let first = store
             .claim_session_attachment(&session.id, None, &parent, true)
             .unwrap();
@@ -1169,7 +1376,7 @@ mod tests {
             .unwrap();
         let pid = child.id();
         let start = crate::journal::process_started_at(pid).unwrap().unwrap();
-        let parent = LfProcessId::new();
+        let parent = store.test_lf_process();
         for name in ["first", "conflict"] {
             let session = store.test_session(name, &crate::session_record::new_artifact_key());
             rusqlite::Connection::open(home.path().join("db"))

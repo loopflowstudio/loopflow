@@ -2130,20 +2130,7 @@ impl SqliteStore {
     }
 
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
-                via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
-             ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
-                outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
-             WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
-            params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
-                process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
-                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
-                process.os_started_at],
-        )?;
-        Ok(())
+        record_process_in(&self.conn.lock().expect("store mutex poisoned"), process)
     }
 
     /// Record a process, waiting at most `wait` for another writer; a zero wait
@@ -2172,6 +2159,27 @@ impl SqliteStore {
         let mut query = conn.prepare("SELECT 1 FROM processes WHERE id=?1")?;
         Ok(query.exists([lf_process_id])?)
     }
+}
+
+/// A start record never overwrites an existing row; a terminal record completes
+/// the row it started.
+pub(super) fn record_process_in(
+    conn: &rusqlite::Connection,
+    process: &crate::process::LfProcess,
+) -> StoreResult<()> {
+    conn.execute(
+        "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
+            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+         ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+            outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
+         WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
+        params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
+            process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
+            process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
+            process.os_started_at],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

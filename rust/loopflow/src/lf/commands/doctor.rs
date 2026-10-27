@@ -416,13 +416,29 @@ fn check_lineage(events: &[LfProcess]) -> Check {
     if dangling.is_empty() {
         return Check::ok("lineage", "every parent process resolves");
     }
-    Check::fail(
-        "lineage",
-        format!(
-            "{} parent process id(s) are missing or belong to another trace",
-            dangling.len()
-        ),
-    )
+    let mut detail = format!(
+        "{} parent process id(s) are missing or belong to another trace",
+        dangling.len()
+    );
+    // An ended agent rooted at its own trace was reserved before its parent had a row.
+    let unrecorded = events
+        .iter()
+        .filter(|event| {
+            event.kind == crate::process::ProcessKind::Agent
+                && event.completed_at.is_some()
+                && event.trace_id.as_str() == event.id.as_str()
+                && event
+                    .parent_lf_process_id
+                    .as_ref()
+                    .is_some_and(|parent| !processes.contains_key(parent.as_str()))
+        })
+        .count();
+    if unrecorded > 0 {
+        detail.push_str(&format!(
+            "; {unrecorded} AgentProcess parent(s) were never recorded, and `lf monitor prune` repairs them"
+        ));
+    }
+    Check::fail("lineage", detail)
 }
 
 fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {

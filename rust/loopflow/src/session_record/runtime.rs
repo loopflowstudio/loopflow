@@ -50,7 +50,7 @@ mod tests {
         )
         .unwrap();
         let attached = store
-            .claim_session_attachment("resume", None, &LfProcessId::new(), true)
+            .claim_session_attachment("resume", None, &store.test_lf_process(), true)
             .unwrap();
         let detached = store
             .release_session_attachment("resume", &attached)
@@ -89,7 +89,7 @@ mod tests {
         assert!(crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &LfProcessId::new(),
+            &store.test_lf_process(),
         )
         .is_err());
         assert!(child.0.try_wait().unwrap().is_none());
@@ -113,7 +113,7 @@ mod tests {
         assert!(crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &LfProcessId::new(),
+            &store.test_lf_process(),
         )
         .is_err());
         sql.execute(
@@ -125,7 +125,7 @@ mod tests {
         let next = crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &LfProcessId::new(),
+            &store.test_lf_process(),
         )
         .unwrap();
         assert_ne!(next.agent_process_id, attached.agent_process_id);
@@ -176,7 +176,7 @@ mod tests {
         let next = crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &LfProcessId::new(),
+            &store.test_lf_process(),
         )
         .unwrap();
         assert_ne!(next.agent_process_id, attached.agent_process_id);
@@ -219,14 +219,14 @@ mod tests {
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
         assert!(store
-            .claim_session_input(next, Some(&detached), &LfProcessId::new(), || {
+            .claim_session_input(next, Some(&detached), &store.test_lf_process(), || {
                 super::close_session_agent_process(&store, "resume")
             })
             .is_err());
         assert!(crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &LfProcessId::new()
+            &store.test_lf_process()
         )
         .is_err());
         assert_eq!(store.process(&detached.agent_process_id).unwrap(), before);
@@ -262,7 +262,7 @@ mod tests {
             .unwrap();
         store.test_session("duplicate", &crate::session_record::new_artifact_key());
         let duplicate = store
-            .claim_session_attachment("duplicate", None, &LfProcessId::new(), true)
+            .claim_session_attachment("duplicate", None, &store.test_lf_process(), true)
             .unwrap();
         store
             .record_agent_process_identity("duplicate", &duplicate, pid, birth)
@@ -270,7 +270,7 @@ mod tests {
         let error = crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &LfProcessId::new(),
+            &store.test_lf_process(),
         )
         .unwrap_err();
         assert!(error.to_string().contains("multiple owners"), "{error}");
@@ -316,7 +316,7 @@ mod tests {
         let next = crate::session_record::resume_session_agent_process(
             &store,
             "resume",
-            &LfProcessId::new(),
+            &store.test_lf_process(),
         )
         .unwrap();
         assert_ne!(next.agent_process_id, attached.agent_process_id);
@@ -347,31 +347,36 @@ mod tests {
         let (finished, finishing) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             let next = store
-                .resume_session_attachment("resume", Some(&detached), &LfProcessId::new(), || {
-                    let store = &store;
-                    let expected = &detached;
-                    scope.spawn(move || {
-                        started.send(()).unwrap();
-                        let result = store.claim_session_attachment(
-                            "resume",
-                            Some(expected),
-                            &LfProcessId::new(),
-                            false,
+                .resume_session_attachment(
+                    "resume",
+                    Some(&detached),
+                    &store.test_lf_process(),
+                    || {
+                        let store = &store;
+                        let expected = &detached;
+                        scope.spawn(move || {
+                            started.send(()).unwrap();
+                            let result = store.claim_session_attachment(
+                                "resume",
+                                Some(expected),
+                                &LfProcessId::new(),
+                                false,
+                            );
+                            finished.send(result).unwrap();
+                        });
+                        starting.recv().unwrap();
+                        assert!(matches!(
+                            finishing.recv_timeout(std::time::Duration::from_millis(100)),
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                        ));
+                        // Other SQLite reads/writes remain available during provider I/O.
+                        assert_eq!(
+                            store.session_attachment("resume").unwrap(),
+                            Some(detached.clone())
                         );
-                        finished.send(result).unwrap();
-                    });
-                    starting.recv().unwrap();
-                    assert!(matches!(
-                        finishing.recv_timeout(std::time::Duration::from_millis(100)),
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                    ));
-                    // Other SQLite reads/writes remain available during provider I/O.
-                    assert_eq!(
-                        store.session_attachment("resume").unwrap(),
-                        Some(detached.clone())
-                    );
-                    Ok(true)
-                })
+                        Ok(true)
+                    },
+                )
                 .unwrap();
             assert!(finishing
                 .recv_timeout(std::time::Duration::from_secs(5))
@@ -493,7 +498,7 @@ mod tests {
                 )
                 .unwrap();
             let attachment = store
-                .claim_session_attachment("resume", Some(&detached), &LfProcessId::new(), true)
+                .claim_session_attachment("resume", Some(&detached), &store.test_lf_process(), true)
                 .unwrap();
             let mut command = std::process::Command::new("/bin/sleep");
             command.env_clear().arg("60").process_group(0);

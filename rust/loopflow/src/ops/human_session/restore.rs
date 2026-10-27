@@ -139,23 +139,25 @@ pub(crate) fn render(resumed: &[ResumedSession]) -> String {
     if resumed.is_empty() {
         return "No interrupted conversations.".into();
     }
-    let mut lines = Vec::new();
-    for session in resumed {
-        let name = if session.title.is_empty() {
-            session.id.clone()
-        } else {
-            format!("“{}” ({})", session.title, session.id)
-        };
-        let mut line = match &session.outcome {
-            ResumeOutcome::Resumed => format!("Resumed {name}"),
-            ResumeOutcome::Starting => format!("Resuming {name}; still starting"),
-            ResumeOutcome::Failed { reason } => format!("Could not resume {name}: {reason}"),
-        };
-        if session.turn_cut_off {
-            line.push_str(" — its last turn was cut off; ask again");
-        }
-        lines.push(line);
-    }
+    let mut lines = resumed.iter().map(describe).collect::<Vec<_>>();
     lines.push("Open one with: lf resume <id>".into());
     lines.join("\n")
+}
+
+/// One line saying how `session` came back.
+pub(crate) fn describe(session: &ResumedSession) -> String {
+    let name = if session.title.is_empty() {
+        session.id.clone()
+    } else {
+        format!("“{}” ({})", session.title, session.id)
+    };
+    let mut line = match &session.outcome {
+        ResumeOutcome::Resumed => format!("Resumed {name}"),
+        ResumeOutcome::Starting => format!("Resuming {name}; still starting"),
+        ResumeOutcome::Failed { reason } => format!("Could not resume {name}: {reason}"),
+    };
+    if session.turn_cut_off {
+        line.push_str(" — its last turn was cut off; ask again");
+    }
+    line
 }

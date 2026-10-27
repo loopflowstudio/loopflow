@@ -125,13 +125,7 @@ pub fn inventory() -> Result<BinaryInventory> {
         });
     let (store_floor, processes) = if database.exists() {
         let store = SqliteStore::open_processes_read_only(&database)?;
-        let floor = rusqlite::Connection::open_with_flags(
-            &database,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .map_err(anyhow::Error::from)
-        .and_then(|conn| Ok(crate::store::migrations::store_reader_floor(&conn)?))
-        .unwrap_or_else(|error| {
+        let floor = store.reader_floor().unwrap_or_else(|error| {
             tracing::warn!(%error, "store reader floor unreadable");
             None
         });
@@ -164,12 +158,13 @@ pub fn inventory() -> Result<BinaryInventory> {
         (version, is_selected)
     });
     for binary in &mut binaries {
-        binary.cannot_open_store = match (&binary.version, &store_floor) {
-            (Some(version), Some(floor)) => {
+        binary.cannot_open_store = binary
+            .version
+            .as_deref()
+            .zip(store_floor.as_deref())
+            .is_some_and(|(version, floor)| {
                 crate::store::migrations::release_meets_floor(version, floor) == Some(false)
-            }
-            _ => false,
-        };
+            });
     }
     Ok(BinaryInventory {
         selected,
@@ -357,22 +352,28 @@ pub struct StayingProcess {
     pub reason: String,
 }
 
-/// Why a superseded Process can't move; `None` when it can.
-async fn stays_because(shared: &SharedStore, process: &RunningLfProcess) -> Result<Option<String>> {
+#[derive(Debug)]
+enum Disposition {
+    /// An idle, unviewed owner and the Sessions it holds.
+    Moves(Vec<String>),
+    Stays(String),
+}
+
+/// Whether a superseded Process can move, and why not when it can't.
+async fn disposition(shared: &SharedStore, process: &RunningLfProcess) -> Result<Disposition> {
     let store = &shared.sqlite;
+    let stays = |reason: &str| Ok(Disposition::Stays(reason.into()));
     let sessions = store.owner_sessions(&process.id)?;
     if sessions.is_empty() {
-        return Ok(Some("keeps its lf until it exits".into()));
+        return stays("keeps its lf until it exits");
     }
     if store.owner_viewed(&process.id)? {
-        return Ok(Some(
-            "a terminal is attached; detach it (Ctrl+]) or close it, then roll over again".into(),
-        ));
+        return stays(
+            "a terminal is attached; detach it (Ctrl+]) or close it, then roll over again",
+        );
     }
     if !store.owner_waits_for_person(&process.id)? {
-        return Ok(Some(
-            "a turn, Graph step or headless Run is in progress".into(),
-        ));
+        return stays("a turn, Graph step or headless Run is in progress");
     }
     for session in &sessions {
         let key = shared
@@ -384,12 +385,12 @@ async fn stays_because(shared: &SharedStore, process: &RunningLfProcess) -> Resu
             None => false,
         };
         if !saved {
-            return Ok(Some(format!(
+            return Ok(Disposition::Stays(format!(
                 "{session} has no saved provider history to resume"
             )));
         }
     }
-    Ok(None)
+    Ok(Disposition::Moves(sessions))
 }
 
 pub fn run(dry_run: bool, json: bool) -> Result<()> {
@@ -423,14 +424,14 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
     };
     for binary in inventory.superseded() {
         for process in &binary.processes {
-            match stays_because(&store, process).await? {
-                Some(reason) => report.stays.push(StayingProcess {
+            match disposition(&store, process).await? {
+                Disposition::Stays(reason) => report.stays.push(StayingProcess {
                     process: process.clone(),
                     binary: binary.describe(),
                     reason,
                 }),
-                None => report.moved.push(MovedOwner {
-                    session_ids: store.sqlite.owner_sessions(&process.id)?,
+                Disposition::Moves(session_ids) => report.moved.push(MovedOwner {
+                    session_ids,
                     process: process.clone(),
                     binary: binary.describe(),
                     sessions: Vec::new(),
@@ -439,30 +440,30 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
             }
         }
     }
-    let Some(selected) = &inventory.selected else {
+    let (Some(selected), false) = (&inventory.selected, dry_run) else {
         return Ok(report);
     };
-    if dry_run {
-        return Ok(report);
-    }
     // Earlier resumes take seconds each, so a person may have started a turn or
     // attached a terminal since classification; the owner may also have exited.
     let classified = std::mem::take(&mut report.moved);
     for mut owner in classified {
         let still_running = crate::journal::process_evidence(&store.sqlite, &owner.process.id)
             == ProcessIdentityEvidence::Live;
-        let reason = if still_running {
-            stays_because(&store, &owner.process).await?
+        let now = if still_running {
+            disposition(&store, &owner.process).await?
         } else {
-            Some("exited before rollover reached it".into())
+            Disposition::Stays("exited before rollover reached it".into())
         };
-        if let Some(reason) = reason {
-            report.stays.push(StayingProcess {
-                process: owner.process,
-                binary: owner.binary,
-                reason,
-            });
-            continue;
+        match now {
+            Disposition::Moves(session_ids) => owner.session_ids = session_ids,
+            Disposition::Stays(reason) => {
+                report.stays.push(StayingProcess {
+                    process: owner.process,
+                    binary: owner.binary,
+                    reason,
+                });
+                continue;
+            }
         }
         if let Err(error) = stop_owner(&store.sqlite, &owner.process) {
             owner.error = Some(format!("{error:#}"));
@@ -535,12 +536,8 @@ fn render_report(report: &RolloverReport) -> String {
                 owner.process.pid, owner.binary
             )),
         }
-        if !owner.sessions.is_empty() {
-            for line in restore::render(&owner.sessions).lines() {
-                if !line.starts_with("Open one with") {
-                    lines.push(format!("  {line}"));
-                }
-            }
+        for session in &owner.sessions {
+            lines.push(format!("  {}", restore::describe(session)));
         }
     }
     if !report.stays.is_empty() {

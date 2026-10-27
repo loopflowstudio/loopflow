@@ -99,6 +99,7 @@ busy turns).
 - 2026-10-27, after rebase: clippy, the focused lib tests (11) and the CLI
   reference pass. 2026-10-26: branch `lf doctor` here showed
   `29 processes on Loopflow.app lf (0.14.16)` with floor 0.14.16 (correctly no flag).
+- 2026-10-27, after compress: clippy and focused lib tests (13) pass.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).
 
@@ -106,3 +107,7 @@ busy turns).
 
 - `install.rs` private `proc_pidpath` extern → `OsProcess::executable` (done).
 - `resume_all`'s inline resume body → shared `restore::resume` (done).
+- Rollover's second rusqlite connection for the floor → `SqliteStore::reader_floor`;
+  the duplicated per-row floor query → `migrations::applied_floor` (done).
+- `stays_because` + second `owner_sessions` read → one `Disposition` (done).
+- Filtering `restore::render`'s footer → per-Session `restore::describe` (done).

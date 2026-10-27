@@ -1,7 +1,10 @@
 # LOO-634: show and roll over processes on a superseded lf
 
 Status: Session rollover and the Graph-boundary slice implemented (PR #1729),
-current with origin/main 4a85fb3a5a. Remaining: the live demo after install. Source: the Task definition and cbda52's `scratch/database-locked-5-whys.md`
+current with origin/main f7200e4138. The across-switch Graph proof passes
+locally in Docker. Remaining: the live demo after install. Hosted CI defers every
+proof job on a PR while `scratch/` holds files, so `task-installation` first runs
+at submit/queue. Source: the Task definition and cbda52's `scratch/database-locked-5-whys.md`
 (Why 5). Jack asked for it to ship without stopping for review.
 
 ## Problem
@@ -164,6 +167,8 @@ Nothing to rename or merge.
   reference pass. Docker proof: first wrapper design hung (above, fixed); reruns of
   the fixed test never reached it because OrbStack's VM crashed during compile and
   OrbStack.app then left /Applications. Deferred to CI `task-installation`.
+- 2026-10-27 realign, Docker Desktop: `scripts/test_task_installation.py --test
+  graph_live_across_switch_runs_next_step_on_selected_install` passes (1 test).
 - 2026-10-27 compress (one `place` for every disposition): clippy and `--lib -- rollover` (4) pass.
 - Demo: rollover and the `ps` section reach the live store only once installed (a
   branch build re-execs the installed lf for ordinary commands; `lf doctor` doesn't).

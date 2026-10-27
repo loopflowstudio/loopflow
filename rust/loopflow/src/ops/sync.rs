@@ -1,4 +1,3 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -9,7 +8,8 @@ use crate::git::{
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::git_operation::{
-    authorize_sync_control, begin_sync_operation, GitOperationOwner, SyncOperation,
+    authorize_sync_control, begin_sync_operation, reclaim_sync_operation, refuse_intervention,
+    GitOperationOwner, SyncOperation,
 };
 use crate::ops::progress::Progress;
 
@@ -39,6 +39,8 @@ pub enum SyncStrategy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncPlan {
     pub branch: String,
+    /// The commit the plan classified; the sync refuses if HEAD moved since.
+    pub head: String,
     pub base_ref: String,
     /// The recorded stack base shared by planning, integration and the PR range.
     pub fork_base: Option<String>,
@@ -52,7 +54,6 @@ pub struct SyncPlan {
 #[derive(Debug)]
 struct SyncExpectation {
     strategy: SyncStrategy,
-    tracked_dirty: BTreeSet<String>,
     stacked: bool,
     require_changes: bool,
 }
@@ -79,6 +80,7 @@ pub fn plan_sync(
 ) -> OpsResult<SyncPlan> {
     let default_branch = get_default_branch(repo)?;
     let branch = current_branch(repo)?.unwrap_or_else(|| "HEAD".to_string());
+    let head = rev_parse(repo, "HEAD")?;
     let base_ref = if let Some(onto) = onto {
         onto.to_string()
     } else {
@@ -146,6 +148,7 @@ pub fn plan_sync(
 
     Ok(SyncPlan {
         branch,
+        head,
         base_ref,
         fork_base,
         class,
@@ -242,18 +245,17 @@ pub(crate) fn abort_sync_after_authorization(
     Ok(())
 }
 
+/// Hand a stopped merge to a resolver without fencing the checkout, then take
+/// the fence back to verify and publish what it left.
 pub fn recover_sync(
     recovery: SyncRecovery,
-    launch: impl FnOnce(&BTreeMap<String, String>) -> OpsResult<()>,
+    launch: impl FnOnce() -> OpsResult<()>,
 ) -> OpsResult<SyncVerification> {
-    let worktree = recovery.operation.owner().worktree.clone();
-    launch(&recovery.operation.scoped_env())?;
-    finish_sync(
-        &worktree,
-        recovery.operation,
-        &recovery.expected,
-        recovery.push,
-    )
+    let owner = recovery.operation.release();
+    let worktree = owner.worktree.clone();
+    launch()?;
+    let operation = reclaim_sync_operation(owner)?;
+    finish_sync(&worktree, operation, &recovery.expected, recovery.push)
 }
 
 fn start_owned_sync(
@@ -263,8 +265,9 @@ fn start_owned_sync(
     require_changes: bool,
     progress: &impl Progress,
 ) -> OpsResult<SyncVerification> {
-    let mut operation = begin_sync_operation(repo, &options.onto)?;
-    let tracked_dirty = tracked_dirty_state(repo)?;
+    // Fetch and plan before taking the fence: a stalled network fetch must
+    // not keep other writers out of the checkout.
+    refuse_intervention(repo)?;
     let planned;
     let plan = match plan {
         Some(plan) => plan,
@@ -274,13 +277,13 @@ fn start_owned_sync(
             &planned
         }
     };
+    let mut operation = begin_sync_operation(repo, &options.onto)?;
     let target_sha = rev_parse(repo, &options.onto)?;
     operation.pin_target(target_sha.clone())?;
-    revalidate_start(repo, operation.owner())?;
+    revalidate_start(repo, operation.owner(), plan)?;
 
     let expected = SyncExpectation {
         strategy: plan.strategy.clone(),
-        tracked_dirty,
         stacked: options.fork_base.is_some(),
         require_changes,
     };
@@ -375,53 +378,17 @@ fn verify_sync(
     owner: &GitOperationOwner,
     expected: &SyncExpectation,
 ) -> OpsResult<SyncVerification> {
-    if let Some(state) = intervention_state(repo)? {
-        return Err(OpsError::Message(format!(
-            "sync incomplete: Git still reports an active {state} operation"
-        )));
-    }
-    let branch = current_branch(repo)?
-        .ok_or_else(|| OpsError::Message("sync incomplete: HEAD is detached".to_string()))?;
-    if branch != owner.branch {
-        return Err(OpsError::Message(format!(
-            "sync incomplete: expected branch {}, found {branch}",
-            owner.branch
-        )));
-    }
-    let head = rev_parse(repo, "HEAD")?;
     let target_sha = owner.target_sha.as_deref().ok_or_else(|| {
         OpsError::Message("sync verification has no pinned target commit".to_string())
     })?;
-    if !crate::git::is_ancestor(repo, target_sha, &head)? {
-        return Err(OpsError::Message(format!(
-            "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD {head}"
-        )));
-    }
+    let keeps_history = matches!(expected.strategy, SyncStrategy::MergeTarget);
+    verify_integrated_head(repo, owner, Some(target_sha), keeps_history)?;
     let conflicts = git(repo, &["diff", "--diff-filter=U", "--name-only"])?;
     if !conflicts.trim().is_empty() {
         return Err(OpsError::Message(format!(
             "sync incomplete: unresolved paths remain: {}",
             conflicts.lines().collect::<Vec<_>>().join(", ")
         )));
-    }
-    let tracked_dirty = tracked_dirty_state(repo)?;
-    let introduced = tracked_dirty
-        .difference(&expected.tracked_dirty)
-        .cloned()
-        .collect::<Vec<_>>();
-    if !introduced.is_empty() {
-        return Err(OpsError::Message(format!(
-            "sync incomplete: new tracked dirty state remains: {}",
-            introduced.join(", ")
-        )));
-    }
-    let unique_commits = count_unique_commits(repo, target_sha)?;
-    if matches!(expected.strategy, SyncStrategy::MergeTarget)
-        && !crate::git::is_ancestor(repo, &owner.head, &head)?
-    {
-        return Err(OpsError::Message(
-            "sync lost the original branch history".to_string(),
-        ));
     }
     if expected.require_changes
         && rev_parse(repo, "HEAD^{tree}")? == rev_parse(repo, &format!("{target_sha}^{{tree}}"))?
@@ -432,14 +399,25 @@ fn verify_sync(
         ));
     }
     Ok(SyncVerification {
-        branch,
-        head,
+        branch: owner.branch.clone(),
+        head: rev_parse(repo, "HEAD")?,
         target_sha: target_sha.to_string(),
-        unique_commits,
+        unique_commits: count_unique_commits(repo, target_sha)?,
     })
 }
 
 fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
+    verify_integrated_head(repo, owner, owner.target_sha.as_deref(), true)
+}
+
+/// Sync publishes HEAD, so its postconditions cover only HEAD; the working
+/// tree may hold other writers' edits.
+fn verify_integrated_head(
+    repo: &Path,
+    owner: &GitOperationOwner,
+    target_sha: Option<&str>,
+    keeps_history: bool,
+) -> OpsResult<()> {
     if let Some(state) = intervention_state(repo)? {
         return Err(OpsError::Message(format!(
             "sync incomplete: Git still reports an active {state} operation"
@@ -455,24 +433,18 @@ fn verify_control_completion(repo: &Path, owner: &GitOperationOwner) -> OpsResul
             )));
         }
     }
-    if let Some(target_sha) = owner.target_sha.as_deref() {
-        if !crate::git::is_ancestor(repo, target_sha, "HEAD")? {
-            return Err(OpsError::Message(format!(
-                "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD"
-            )));
-        }
-        let introduced = tracked_dirty_state(repo)?;
-        if !introduced.is_empty() {
-            return Err(OpsError::Message(format!(
-                "sync incomplete: tracked dirty state remains: {}",
-                introduced.into_iter().collect::<Vec<_>>().join(", ")
-            )));
-        }
-        if !crate::git::is_ancestor(repo, &owner.head, "HEAD")? {
-            return Err(OpsError::Message(
-                "sync lost the original branch history".to_string(),
-            ));
-        }
+    let Some(target_sha) = target_sha else {
+        return Ok(());
+    };
+    if !crate::git::is_ancestor(repo, target_sha, "HEAD")? {
+        return Err(OpsError::Message(format!(
+            "sync incomplete: pinned target {target_sha} is not an ancestor of HEAD"
+        )));
+    }
+    if keeps_history && !crate::git::is_ancestor(repo, &owner.head, "HEAD")? {
+        return Err(OpsError::Message(
+            "sync lost the original branch history".to_string(),
+        ));
     }
     Ok(())
 }
@@ -494,7 +466,7 @@ fn fetch_target(repo: &Path, target: &str) -> OpsResult<()> {
     Ok(())
 }
 
-fn revalidate_start(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
+fn revalidate_start(repo: &Path, owner: &GitOperationOwner, plan: &SyncPlan) -> OpsResult<()> {
     if let Some(state) = intervention_state(repo)? {
         return Err(OpsError::Message(format!(
             "refusing to start the owned sync: a {state} operation appeared during preparation"
@@ -504,22 +476,13 @@ fn revalidate_start(repo: &Path, owner: &GitOperationOwner) -> OpsResult<()> {
         OpsError::Message("refusing to start the owned sync from detached HEAD".to_string())
     })?;
     let head = rev_parse(repo, "HEAD")?;
-    if branch != owner.branch || head != owner.head {
+    if branch != owner.branch || head != owner.head || head != plan.head {
         return Err(OpsError::Message(format!(
-            "refusing to start the owned sync: branch/HEAD changed during preparation (expected {} at {}, found {branch} at {head})",
-            owner.branch, owner.head
+            "refusing to start the owned sync: branch/HEAD changed during preparation (planned {} at {}, found {branch} at {head})",
+            owner.branch, plan.head
         )));
     }
     Ok(())
-}
-
-fn tracked_dirty_state(repo: &Path) -> OpsResult<BTreeSet<String>> {
-    Ok(
-        git(repo, &["status", "--porcelain", "--untracked-files=no"])?
-            .lines()
-            .map(str::to_string)
-            .collect(),
-    )
 }
 
 fn push_synced_branch(repo: &Path, branch: &str) -> OpsResult<()> {
@@ -532,7 +495,23 @@ fn push_synced_branch(repo: &Path, branch: &str) -> OpsResult<()> {
     } else {
         "--force-with-lease".to_string()
     };
-    git(repo, &["push", &lease, "-u", "origin", &reference]).map(|_| ())
+    // The push holds the sync fence, so let Git abort an HTTP transfer that
+    // stalls below 1 B/s for five minutes rather than holding it forever.
+    git(
+        repo,
+        &[
+            "-c",
+            "http.lowSpeedLimit=1",
+            "-c",
+            "http.lowSpeedTime=300",
+            "push",
+            &lease,
+            "-u",
+            "origin",
+            &reference,
+        ],
+    )
+    .map(|_| ())
 }
 
 /// Validate the recorded comparison base before merging a squash-landed parent.

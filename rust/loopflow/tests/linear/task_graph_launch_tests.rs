@@ -488,7 +488,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         assert_eq!(recorded[0].1.len(), 1);
         assert_eq!(
             recorded[0].1[0]["argv"],
-            serde_json::json!(["sync", "--plan"])
+            serde_json::json!(["ops", "sync", "--plan"])
         );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
         // At its end the Task has no route to run; completion retries without

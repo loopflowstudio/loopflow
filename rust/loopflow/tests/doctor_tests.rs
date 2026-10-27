@@ -2,9 +2,6 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
-use chrono::{Local, Timelike};
-use loopflow::durable::{CronReceiptId, MachineId};
-use loopflow::ops::{CronOutcome, CronReceipt, CronSource, CronTargetKind};
 use loopflow::process::LfProcess;
 use loopflow::store::sqlite::SqliteStore;
 use time::OffsetDateTime;
@@ -42,17 +39,6 @@ fn run_lf(home: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn continuity_check(output: &Output) -> serde_json::Value {
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    report["checks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|check| check["name"] == "continuity")
-        .unwrap()
-        .clone()
-}
-
 fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
     store
         .record_process(&LfProcess {
@@ -79,64 +65,6 @@ fn insert_process(store: &SqliteStore, _id: &str, ts: i64) {
             error: None,
         })
         .unwrap();
-}
-
-fn install_current_telemetry_obligation(home: &Path) {
-    let now = Local::now();
-    let scheduled = now - chrono::Duration::minutes(5);
-    let schedule = format!("0 {} {} * * *", scheduled.minute(), scheduled.hour());
-    let started_at = scheduled.with_second(0).unwrap().timestamp() + 10;
-    let machine_id = MachineId::parse("home_11111111111111111111111111111111").unwrap();
-    let launch_agents = home.join("Library/LaunchAgents");
-    fs::create_dir_all(&launch_agents).unwrap();
-    fs::write(
-        launch_agents.join("loopflow.cron.infrastructure.telemetry-daily.plist"),
-        format!(
-            r#"<plist><dict>
-<key>LoopflowWave</key><string>infrastructure</string>
-<key>LoopflowGraph</key><string>telemetry-daily</string>
-<key>LoopflowTargetKind</key><string>graph</string>
-<key>LoopflowSchedule</key><string>{schedule}</string>
-<key>LoopflowHomeId</key><string>{machine_id}</string>
-<key>LoopflowActivatedAt</key><string>1787419431</string>
-<key>LoopflowRepo</key><string>{repo}</string>
-<key>LoopflowLfPath</key><string>/usr/local/bin/lf</string>
-<key>LoopflowLfHome</key><string>{lf_home}</string>
-<key>LoopflowPath</key><string>/usr/bin:/bin</string>
-</dict></plist>
-"#,
-            repo = home.display(),
-            lf_home = home.display(),
-        ),
-    )
-    .unwrap();
-    let receipt = CronReceipt {
-        schema_version: 1,
-        id: CronReceiptId::new(),
-        runner_pid: 123,
-        runner_started_at: None,
-        machine_id,
-        wave: "infrastructure".to_string(),
-        graph: "telemetry-daily".to_string(),
-        target_kind: CronTargetKind::Graph,
-        source: CronSource::Scheduled,
-        schedule,
-        repo: home.to_path_buf(),
-        lf_path: "/usr/local/bin/lf".into(),
-        log_path: home.join("cron.log"),
-        started_at,
-        finished_at: Some(started_at + 60),
-        outcome: CronOutcome::Succeeded,
-        exit_code: Some(0),
-        error: None,
-    };
-    let receipt_dir = home.join("cron/receipts/infrastructure/telemetry-daily");
-    fs::create_dir_all(&receipt_dir).unwrap();
-    fs::write(
-        receipt_dir.join(format!("{}-{}.json", receipt.started_at, receipt.id)),
-        serde_json::to_vec_pretty(&receipt).unwrap(),
-    )
-    .unwrap();
 }
 
 #[test]
@@ -193,39 +121,12 @@ fn copied_production_history_does_not_block_the_telemetry_cron() {
         ordinal += 1;
     }
     let original_events = store.processes_since(0).unwrap();
-    install_current_telemetry_obligation(home.path());
     fs::create_dir_all(home.path().join(".lf/graphs")).unwrap();
     fs::write(
         home.path().join(".lf/graphs/telemetry-daily.yaml"),
         "- cmd: doctor\n",
     )
     .unwrap();
-
-    // Recovery success cannot stand in for the missing natural firing.
-    let receipt_path = fs::read_dir(
-        home.path()
-            .join("cron/receipts/infrastructure/telemetry-daily"),
-    )
-    .unwrap()
-    .next()
-    .unwrap()
-    .unwrap()
-    .path();
-    let original_receipt = fs::read(&receipt_path).unwrap();
-    let mut recovery: CronReceipt = serde_json::from_slice(&original_receipt).unwrap();
-    recovery.source = CronSource::Recovery;
-    fs::write(&receipt_path, serde_json::to_vec(&recovery).unwrap()).unwrap();
-    let missing = run_lf(home.path(), &["doctor", "--json"]);
-    assert_eq!(continuity_check(&missing)["status"], "fail");
-    let blocked = run_lf(home.path(), &["--batch", "graph", "telemetry-daily"]);
-    assert!(!blocked.status.success());
-    assert_eq!(
-        serde_json::from_slice::<CronReceipt>(&fs::read(&receipt_path).unwrap())
-            .unwrap()
-            .source,
-        CronSource::Recovery
-    );
-    fs::write(&receipt_path, original_receipt).unwrap();
 
     let doctor = run_lf(home.path(), &["doctor", "--json"]);
     assert!(
@@ -234,8 +135,6 @@ fn copied_production_history_does_not_block_the_telemetry_cron() {
         String::from_utf8_lossy(&doctor.stdout),
         String::from_utf8_lossy(&doctor.stderr)
     );
-    let continuity = continuity_check(&doctor);
-    assert_eq!(continuity["status"], "ok");
 
     let telemetry = run_lf(home.path(), &["--batch", "graph", "telemetry-daily"]);
     assert!(
@@ -305,7 +204,7 @@ fn doctor_does_not_initialize_a_missing_database() {
 }
 
 #[test]
-fn doctor_reports_processes_and_scheduler_despite_an_unknown_migration() {
+fn doctor_reports_processes_despite_an_unknown_migration() {
     let home = TestRepo::new();
     let path = home.path().join("loopflow.db");
     let store = SqliteStore::new(&path).unwrap();
@@ -320,7 +219,6 @@ fn doctor_reports_processes_and_scheduler_despite_an_unknown_migration() {
         .unwrap()
         .contains("9.0.001_future"));
     assert!(report["rows"].as_u64().unwrap() >= 1);
-    assert_eq!(continuity_check(&output)["status"], "ok");
     assert!(report["checks"]
         .as_array()
         .unwrap()
@@ -350,6 +248,5 @@ fn doctor_keeps_reporting_when_the_database_is_corrupt() {
         .unwrap()
         .iter()
         .any(|check| check["name"] == "processes" && check["status"] == "fail"));
-    assert_eq!(continuity_check(&output)["status"], "ok");
     assert_eq!(fs::read(path).unwrap(), b"not a sqlite database");
 }

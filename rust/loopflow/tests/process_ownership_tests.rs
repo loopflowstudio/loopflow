@@ -758,7 +758,7 @@ fn empty_release_check_returns_through_process_completion() {
     let output = child(
         home.path(),
         repo.path(),
-        &["repo", "release", "check"],
+        &["release", "check"],
         &parent,
     )
     .env(

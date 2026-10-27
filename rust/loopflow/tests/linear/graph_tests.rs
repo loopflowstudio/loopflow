@@ -2535,7 +2535,7 @@ fn wave_context_keeps_task_location_and_rejects_another_owner() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["--wave", "other", "repo", "tokens", "--json"],
+        &["--wave", "other", "ops", "tokens", "--json"],
         None,
     );
     assert!(!output.status.success());
@@ -2544,7 +2544,7 @@ fn wave_context_keeps_task_location_and_rejects_another_owner() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["--wave", "task-pr-tests", "repo", "tokens", "--json"],
+        &["--wave", "task-pr-tests", "ops", "tokens", "--json"],
         None,
     );
     assert!(
@@ -2572,7 +2572,7 @@ fn worktree_selector_uses_the_named_checkout_without_changing_the_caller() {
     let output = run_lf(
         repo.path(),
         home.path(),
-        &["--wt", "selected", "repo", "tokens", "--json"],
+        &["--wt", "selected", "ops", "tokens", "--json"],
         None,
     );
     assert!(

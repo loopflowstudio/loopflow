@@ -1664,7 +1664,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
         .unwrap();
     let identity = |path: &Path| -> serde_json::Value {
         serde_json::from_str(&success(
-            command(home.path(), path, &["repo", "identity", "--json"])
+            command(home.path(), path, &["config", "repository", "--json"])
                 .output()
                 .unwrap(),
         ))
@@ -1740,7 +1740,7 @@ fn repository_recovery_refuses_copies_and_reuses_verified_legacy_identity() {
             .output()
             .unwrap(),
     );
-    let rejected = command(home.path(), &copy, &["repo", "identity", "--json"])
+    let rejected = command(home.path(), &copy, &["config", "repository", "--json"])
         .output()
         .unwrap();
     assert!(!rejected.status.success());
@@ -1760,7 +1760,7 @@ fn repository_recovery_refuses_copies_and_reuses_verified_legacy_identity() {
         command(
             home.path(),
             &moved,
-            &["repo", "identity", "--relocate", id.as_str(), "--json"],
+            &["config", "repository", "--relocate", id.as_str(), "--json"],
         )
         .output()
         .unwrap(),
@@ -1771,7 +1771,7 @@ fn repository_recovery_refuses_copies_and_reuses_verified_legacy_identity() {
         command(
             home.path(),
             &moved,
-            &["repo", "identity", "--relocate", id.as_str()],
+            &["config", "repository", "--relocate", id.as_str()],
         )
         .output()
         .unwrap(),
@@ -1793,7 +1793,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         command(
             source_home.path(),
             source.path(),
-            &["repo", "identity", "--json"],
+            &["config", "repository", "--json"],
         )
         .output()
         .unwrap(),
@@ -1805,7 +1805,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         command(
             target_home.path(),
             target.path(),
-            &["repo", "identity", "--bind", &id, "--json"],
+            &["config", "repository", "--bind", &id, "--json"],
         )
         .output()
         .unwrap(),
@@ -1844,7 +1844,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     let rebound = command(
         target_home.path(),
         target.path(),
-        &["repo", "identity", "--bind", other.as_str()],
+        &["config", "repository", "--bind", other.as_str()],
     )
     .output()
     .unwrap();
@@ -1856,7 +1856,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         command(
             target_home.path(),
             target.path(),
-            &["--repository", &id, "repo", "identity", "--json"],
+            &["--repository", &id, "config", "repository", "--json"],
         )
         .output()
         .unwrap(),
@@ -3319,7 +3319,7 @@ fn repository_upgrade_enrolls_retained_linked_work_without_manual_binding() {
             );
             assert_eq!(
                 success(
-                    command(home.path(), &checkout, &["repo", "identity"])
+                    command(home.path(), &checkout, &["config", "repository"])
                         .output()
                         .unwrap()
                 )
@@ -3336,7 +3336,7 @@ fn repository_reuse_before_reopening_cannot_steal_work() {
     let home = tempfile::tempdir().unwrap();
     let old = original.path().canonicalize().unwrap();
     let before = success(
-        command(home.path(), &old, &["repo", "identity"])
+        command(home.path(), &old, &["config", "repository"])
             .output()
             .unwrap(),
     );
@@ -3351,7 +3351,7 @@ fn repository_reuse_before_reopening_cannot_steal_work() {
             .output()
             .unwrap(),
     );
-    let rejected = command(home.path(), &old, &["repo", "identity"])
+    let rejected = command(home.path(), &old, &["config", "repository"])
         .output()
         .unwrap();
     assert!(!rejected.status.success());
@@ -3367,7 +3367,7 @@ fn repository_reuse_before_reopening_cannot_steal_work() {
             command(
                 home.path(),
                 &moved,
-                &["repo", "identity", "--relocate", before.trim()]
+                &["config", "repository", "--relocate", before.trim()]
             )
             .output()
             .unwrap()
@@ -3376,7 +3376,7 @@ fn repository_reuse_before_reopening_cannot_steal_work() {
     );
     assert_ne!(
         success(
-            command(home.path(), &old, &["repo", "identity"])
+            command(home.path(), &old, &["config", "repository"])
                 .output()
                 .unwrap()
         ),
@@ -3390,7 +3390,11 @@ fn repository_locators_isolate_machines_and_collapse_symlink_aliases() {
     let production = tempfile::tempdir().unwrap();
     let experiment = tempfile::tempdir().unwrap();
     let identify = |home: &Path, cwd: &Path| {
-        success(command(home, cwd, &["repo", "identity"]).output().unwrap())
+        success(
+            command(home, cwd, &["config", "repository"])
+                .output()
+                .unwrap(),
+        )
     };
     let original = identify(production.path(), repo.path());
     let experimental = identify(experiment.path(), repo.path());
@@ -3410,7 +3414,7 @@ fn repository_concurrent_reconciliation_retains_one_identity() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let original = success(
-        command(home.path(), repo.path(), &["repo", "identity"])
+        command(home.path(), repo.path(), &["config", "repository"])
             .output()
             .unwrap(),
     );
@@ -3419,7 +3423,7 @@ fn repository_concurrent_reconciliation_retains_one_identity() {
     fs::rename(repo.path(), &moved).unwrap();
     let children: Vec<_> = (0..4)
         .map(|_| {
-            command(home.path(), &moved, &["repo", "identity"])
+            command(home.path(), &moved, &["config", "repository"])
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .spawn()
@@ -3446,7 +3450,7 @@ fn repository_move_with_a_separate_git_directory_keeps_work_readable() {
     );
     let home = tempfile::tempdir().unwrap();
     let identity = success(
-        command(home.path(), &before, &["repo", "identity"])
+        command(home.path(), &before, &["config", "repository"])
             .output()
             .unwrap(),
     );
@@ -3459,7 +3463,7 @@ fn repository_move_with_a_separate_git_directory_keeps_work_readable() {
     );
     assert_eq!(
         success(
-            command(home.path(), &after, &["repo", "identity"])
+            command(home.path(), &after, &["config", "repository"])
                 .output()
                 .unwrap()
         ),

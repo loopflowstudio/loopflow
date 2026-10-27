@@ -1,75 +1,61 @@
-# v0.14.17
+# v0.14.18
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.17 lets a Task finish without you walking it there. Click **Auto-Ship** or run `lf ship`, and Loopflow runs the rest of the Task's Workflow, repairs CI, merges the PR and marks the Task done. Tasks can also run on rented machines from Daytona, Modal, RunPod, AWS or Fly, including GPU and spot capacity, and a Wave can send its Tasks there by default. Session history is now read from each provider's own transcript instead of from copies Loopflow kept, so `lf history` can show and search past conversations, and `~/.lf` no longer stores a second copy of every stream. This release changes the store format: `lf < 0.14.17 can no longer open the store (raised by: scope_tasks_capacity, rental_spot, session_facts_only, ship_it)`.
+v0.14.18 reorganizes `lf` around the work itself. Root help now starts with Tasks, Waves, Sessions, Graphs and Skills. Delivery, machine and account plumbing moves under `lf ops`, and the familiar short forms (`lf land`, `lf wt create`, `lf machine use`, `lf release run`) still resolve. The release also fixes things that interrupted work that was otherwise going fine. Headless Claude steps no longer end while their background commands are still running. CI repair and sync can run while you keep working in a Task. Launches go to the account with the most room. Task and Wave status can read Graphs recorded before v0.14.17 again. There is no store format change, so older `lf` versions keep working against the same `~/.lf`.
 
-## Ship a Task with one click
+## A command tree that starts with the work
 
-Landing a Task used to involve several separate mechanisms: a Workflow format kept apart from graphs, `lf ci watch` and per-Task automation holds for CI repair, and a pause that didn't match the other states. Now approving a Task carries it the rest of the way, and a single landing engine handles everything after that. (#1652)
+Root help used to list about thirty peer groups in no particular order, and many jobs had two or three spellings. Now it is ordered by pillar: the work model first, then history and monitoring, then `ops`, config and the rest. Most of the change is moves, and `lf repo` is gone. (#1708)
 
-- **`lf ship` and Auto-Ship.** The Task moves to `shipping`, and Loopflow runs every remaining route, standing in at each `interactive:` stage. Choosing any route into `end` also ships the Task. If the PR merges, the Task completes no matter who merged it. A failed ship process backs off before restarting and names the failure. When the Machine's work is next read, any ship process that has died is started again.
-- **`lf ship --stop`** ends the ship process and disarms any auto-merge it armed. In Desktop, an Undo toast follows ship and stop.
-- **Task state has two separate axes.** A Task is `unstarted · idle · active · moving · shipping · deferred · done · abandoned`, and a Session is `available · busy`. Pause is now Defer everywhere: `lf task defer` replaces `lf task pause`. Abandoning a Task is one write that keeps its reason.
-- **Workflows are graphs.** A Workflow's definition is a graph in `.lf/graphs/`. Its `interactive:` steps are stages, and the slices between them are routes. `.lf/workflows/` and the builtin workflow files are gone. The builtin `ship` graph is now `deliver`. `feature` and `code` now end at a post-merge `verify` stage, which uses a new `verify` skill.
-- **One landing engine owns CI repair.** CI repair now happens only inside a waiting landing (`lf land --wait-and-fix`, `lf ship`). `lf repo ci watch` and its launchd watcher are gone, along with the minute-by-minute Task check, per-Task CI repair holds, and `lf task automation`, `lf task automate` and `lf task reconcile`.
-- **Desktop.** Auto-Ship sits on the Task heading, and Defer and Abandon appear on hover. A Workflow bar in the main pane shows the stages and the routes you can start, with a live `At <stage> · yours` line. Opening a Task no longer shifts the sidebar.
+- **Delivery and machine plumbing live under `lf ops`.** That covers `lf ops pr …`, `lf ops wt …`, `lf ops account …`, `lf ops machine …` (with `pool` and `ondemand` underneath it), `lf ops commit` and `lf ops sync`. `lf sync` stays a shortcut even though `task sync` also exists.
+- **`lf repo`'s subcommands were redistributed:**
+  - `release {run,check,notes,bump,tag,publish,status}` → `lf ops release …`
+  - `ci` and `tokens` → `lf ops ci` and `lf ops tokens`
+  - `identity` → `lf config repository`
+  - `planning {key,status}` → `lf config planning {key,status}`
+  - `connect` and `reteam` → `lf wave connect` and `lf wave reteam`
+  - `new-chapter` → `lf wave new-chapter`
+  - `refresh` → `lf wave status --sync`, which now also exchanges the Git planning ref. `refresh --all` and `release history` have no replacement.
+- **Steering replaces comments.** `lf repo comment` and `lf wave comment` are removed. `lf session steer "…"` with no Session id steers the Wave chosen with the global `--wave`, or else the current repository. `lf task comment` is unchanged.
+- **Repository scope comes from the global `--repo` selector.** `lf ops machine use` and `lf session steer` no longer have their own boolean `--repo` flag.
+- **Every Task has a Workflow.** A Task with no Workflow checks its Wave default, then the repository `workflow:`, and then falls back to the builtin `code`. Desktop no longer shows "No workflow selected".
+- **New builtin `auto` workflow.** It runs `pursue` and then `deliver` as one route, with no stage for a person. Use it to take a Task from request to merged PR with nobody stepping in.
+- **The docs follow the same order.** The README explains a Task first (one conversation, a Workflow, its own PR, its history), then Graphs and Skills, then Waves, and ends with a "You want to…" table. `docs/` is rewritten as a reading path that starts at Get started.
 
-## Rent a machine for a Task, and give it back when the Task is done
+## Scheduled work is ordinary cron
 
-The goal is for infrastructure Tasks to run on rented CPUs that close once the Task is done. During the cycle, Daytona and Modal sandboxes first replaced v0.14.16's RunPod pods. RunPod then came back with a new provider boundary, alongside AWS and Fly, plus GPU and spot options. The final set is five providers behind one embedded bridge. (#1704, #1707, #1709)
+`lf wave cron` (add, list, publish, unpublish, sync, history, trigger, remove, disposition) is removed, together with its module, its test suite and the `cron` crate, about 8,000 lines in all. Scheduled telemetry and releases are now plain crontab lines that run `lf … graph release-run`. `release/CRON_HOST.md` and `scripts/bootstrap-cron-host.sh` show how to set them up. `lf self doctor` no longer runs a cron-continuity audit. (#1708)
 
-```bash
-doppler run -- lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
-lf machine use code infrastructure     # the Wave's new Tasks rent from code; its Session stays here
-doppler run -- lf task run LOO-xxx     # rents code-1, hands the Task off, runs there
-lf ondemand list
-```
+## Agents finish what they started
 
-- **Providers:** `--provider daytona | modal | runpod | aws | fly`. Daytona and Modal boot an Ubuntu 24.04 image that already has gh, Node, Claude Code, Rust and uv. Modal is reached over a TCP tunnel to key-only sshd, and Daytona through its SSH gateway. RunPod, AWS and Fly boot stock Ubuntu 24.04 and install the same tools before `lf` is admitted, so their SSH wait is 20 minutes instead of 5. `lf` itself is installed over SSH after boot: either the published release or `LF_RENT_LINUX_BIN`. (#1704, #1707)
-- **The deadline holds even if your laptop is asleep.** Daytona (`ttl_minutes`) and Modal (`timeout`) enforce it themselves. On RunPod, AWS and Fly, a guardian starts on the machine before any setup runs. Fly destroys the Machine when the guardian exits. A RunPod guardian deletes its own pod, retrying until the delete succeeds, and shortens the deadline if the price RunPod actually charges uses up the budget sooner. An AWS guardian powers the instance off, which terminates it. A guardian can only shorten the deadline, and machines found already ended are still deleted. (#1707)
-- **GPUs and spot capacity.** `lf ondemand add --gpu` rents one GPU on RunPod (A40, A6000, L4, RTX4090, L40S, A100, H100), AWS (L4, A10G) or Modal (T4, L4, A10G, L40S, A100, H100). `--vcpus` and `--memory-gb` are now minimums, and the cheapest matching shape sets the actual size and price. `--spot` (AWS, RunPod) admits, caps and sets the deadline at the on-demand price, and warns that the provider may end the machine early and that unpushed work is lost. (#1707)
-- **Prices.** Published per-second rates set the price. When the provider reports its actual charge (RunPod's `costPerHr`), that charge replaces the published rate once the rental is confirmed. AWS output names both regions, for example `aws (eu-west-1, priced as us-east-1)`. An on-demand whose shape has no price is refused when added, and `lf ondemand list` shows it as unpriced instead of failing. (#1707)
-- **A Wave can rent by default.** `lf machine use <on-demand or pool> [wave]` (or `--repo`) sets where that scope's Tasks run. Whichever is nearer wins: a capacity default or a Tasks Machine. `lf task run` then places an unowned Task exactly as `--rent` or `--pool` would. `--session` is refused, and capacity defaults are not copied to your other Machines, because pools and on-demands are local to each Machine. (#1704)
-- **Give-back waits 15 minutes** after a rental's last Task is completed or abandoned, so a follow-up run can reuse it. A sandbox that never becomes usable is deleted immediately. (#1704)
-- **Removed:** `lf ondemand availability`, and the RunPod CPU catalog, stock checks and image digest pinning from v0.14.16. (#1704)
+Two separate problems could cut real work short. A headless Claude step used to settle at its first `result`, even when the agent had backgrounded a test suite and ended its turn to wait for it. Loopflow then shut Claude down, the command was killed, and the Graph moved on (the LOO-596 incident). Separately, `lf land`'s CI repair refused with "checkout is busy" whenever a Task Session or any other process was live in the checkout, and a sync held its lock through network fetches and conflict resolution. (#1688, #1714)
 
-## Read and search past conversations
+- **Headless Claude steps wait for background tasks.** A step stays alive while Claude reports running background tasks. It completes on the turn Claude starts after they finish, and only that final answer is recorded. Steers accepted in the meantime still settle. While background tasks run, the Session counts as busy. The headless instructions now tell agents to stop long-lived processes such as servers or watchers before they answer, because one that never exits keeps the step running. Codex and OpenCode were not changed. (#1688)
+- **CI repair runs beside live work.** Landing no longer checks the checkout for running work before it starts `ci-fix`, so your Task Session stays open throughout the repair. Restoring a missing checkout no longer checks either. Abandon, `wt delete` and cleanup of completed Tasks still wait, because they remove the checkout. (#1714)
+- **Sync holds its lock only while it merges or pushes.** `lf sync` fetches and plans before it takes the lock, and refuses if HEAD moved in between. It releases the lock while `sync-conflicts` runs and takes it back to verify and push. Verification checks only what gets pushed, so tracked edits from other writers no longer fail it. An HTTP push that stalls aborts after five minutes without progress. (#1714)
+- **A blocked launch names the sync holding the lock:** `lf sync pid 4121 has held the sync lock for 14 min (feature onto origin/main)…`. (#1714)
 
-Before this release, Loopflow couldn't show what was said in a past Session, and when Claude removed an idle transcript, the conversation disappeared without notice. `lf history` now reads conversations directly from the provider's transcript. It also reports what each provider still keeps, so you can raise `cleanupPeriodDays` before something you need is gone. Loopflow stores no conversation text. (#1700)
+## Launches go to the account with the most room
 
-```
-lf history retention
-lf history show <SESSION> --transcript
-lf history search "cleanupPeriodDays" --since 30d
-```
+In shared mode, launches used to stay on the signed-in account until one of its usage windows reached 95%, and then follow declared route order. Running Claudes could sit on an almost exhausted account while another account had plenty left. (#1717)
 
-- **`lf history show SESSION`** now ends with the conversation: for each provider conversation the Session used, it lists your requests, launched skills, agent messages, one line per tool call and the reason for any failure. `--transcript` prints only the conversation, and `--json` returns it as structured output. If a transcript is gone, the output lists the recorded turns (time, status, final answer) and says why.
-- **`lf history retention`** counts readable and facts-only Sessions by provider, account and age, lists the next removals, and shows each provider's retention policy. A new **Retention** card on the Desktop Telemetry dashboard reads its `--json` output (the `RetentionSummary` wire type).
-- **`lf history search TEXT`** finds text in recent conversations. It accepts `--since` (default `7d`), `--wave`, `--project`, `--task`, `--limit` and `--json`. It scans transcript files on every call and reports `scanned_bytes`, so wide windows over a lot of Claude history may be slow.
-- Transcripts are read from Claude, Codex and Pi transcript files, and from `opencode session export`. Codex, OpenCode and Pi are reported as having no provider expiry, per their documentation; this has not been checked against live data.
-
-## The store keeps facts, not copies
-
-v0.14.16 shrank the store but kept each run's full provider stream in `events.jsonl` and in SQLite. This release removes both copies. Every provider now has one decoder, and a single writer records what Loopflow reads back. Usage totals come from a single source, and neither the store nor `~/.lf/runs` grows with transcript text anymore. (#1698, #1702, #1706)
-
-- **One decoder per provider.** Claude, Codex, OpenCode and Pi each have one decoder that feeds the live view, Session receipts and availability. Previously, three separate parsers each read the stream and could drift apart. A failed receipt write now returns to the driver instead of being logged and ignored. Receipt payloads and the conversation stream are unchanged. (#1702)
-- **One usage row per provider turn.** Claude's row matches what the live view shows, including cost, model, peak input and context window. Readers sum only these native rows, so stream usage copies that earlier versions stored no longer count twice. (#1698)
-- **Headless steps stop writing `events.jsonl`.** Prompt context (first and peak request tokens, tool-result count and size, compactions) is attached to each turn's receipt. `lf history usage --context` and `lf history show <input> --context` read it from the store. Running/Stalled for a Task step now comes from CPU samples stored in SQLite, not from the file's last line. (#1706)
-- **`lf history show --events` is removed.** To debug a stream, read the provider's own transcript, now available through `lf history show --transcript`. (#1706)
-- Retention is simpler. The per-capture prune pass, its 24-hour settle window and its cursor file are gone. `lf disk clean` still merges per-receipt native usage into one row per turn, and its summary no longer reports stream rows or captures. (#1698)
+- **Ranking:** eligible accounts sort by plan first (Codex Pro ahead of Plus). Within a plan, the account whose tightest unreset window has the lowest use goes first. Route order only breaks ties. The 95% threshold is gone. A window that has reset, or has no reset time, counts as full room.
+- **Shared mode:** the signed-in account wins only ties. A launch switches every running Claude or Codex only when another account ranks strictly ahead. An explicit `--account` still wins, and the ranking applies within what it leaves open. Resumed provider sessions stay on the account that created them.
+- **Switches are recorded first.** The switch is written to the store before the native login changes. If it can't be recorded, the launch fails and the current login stays in place, so `used_account` attribution stays correct.
+- **`lf account route`** shows each account's tightest window (`weekly 80% used`) instead of a `demoted:` line.
 
 ## Operational notes
 
-- **Store format.** `lf < 0.14.17 can no longer open the store (raised by: scope_tasks_capacity, rental_spot, session_facts_only, ship_it)`.
-- **`session_facts_only` rewrites every store in one pass.** It deletes stream rows from SQLite after first carrying their usage into native rows. Claude turns that had no stream copy keep only their token counts, so their cost and model show as unknown. Stream usage from an attempt with no observed provider session is dropped, so that Session may show lower or unknown usage. Existing `events.jsonl` files stay on disk, but nothing reads them anymore.
-- **v0.14.16 RunPod rentals.** `scope_tasks_capacity` deletes RunPod on-demands and rentals in the v0.14.16 shape (templates that name an `image`, or hardware tagged with `kind`), which no current reader can parse. Current-shape RunPod rows are kept. A v0.14.16 pod that is still running is ended at its deadline by its own guardian. Recreate the on-demand with `lf ondemand add --provider runpod`. (#1709)
-- **Custom Workflows need rewriting.** Graphs with `human: true` steps, or anything under `.lf/workflows/`, must be rewritten as `interactive:` stages in `.lf/graphs/`. Scripts that call `lf task pause`, `lf task automation`, `lf task automate`, `lf task reconcile` or `lf repo ci watch` must be updated. (#1652)
-- **Uninstall the launchd CI watcher before upgrading** on any Machine that used it. Only a running landing repairs CI now. (#1652)
-- **Live verification of rentals.** Daytona and Modal were rented, reached and ended by hand through this code. RunPod, AWS and Fly have been tested only against mocked HTTP and SDKs. The automatic Wave-default path, and give-back without `--force`, have not yet been exercised end to end. Give-back needs `lf history export` on the rented machine, which this release provides. (#1704, #1707)
+- **No store break.** This release adds no migration, and `lf` v0.14.17 can still open the store.
+- **Update scripts and crontabs that call moved commands.** Short forms resolve, but scripted canonical paths such as `lf repo release run`, `lf repo ci` or `lf pr land` should move to the paths above. Anything that relied on `lf wave cron` schedules must be set up again as crontab entries that run `lf … graph release-run` (see `release/CRON_HOST.md`).
+- **JSON rename:** in `lf account route --json`, the field `demotion` is now `tightest`. Update any consumers.
+- **`LF_GIT_OPERATION_ID` is gone.** Conflict resolvers no longer need it, because the sync lock isn't held while they run. The macOS app and the environment docs no longer set it either. Lock records written by an older `lf` have no `locked_at`, so the refusal can't say how long those syncs have held the lock. The two versions still share the same lock file.
+- **Known limits:** the push stall timeout covers HTTP remotes only, and a stalled SSH push can still hold the sync lock. If another writer runs `git add` while a conflict resolver works, that change lands in the merge commit. This is deliberate.
+- **Upgrading from v0.14.17 fixes Task and Wave status.** v0.14.17 renamed the Graph field `human` to `interactive`, and Task status and Wave status then failed with `missing field interactive` on Graphs recorded earlier. v0.14.18 accepts the retained `human` name in compiled nodes and saved steps, including nested ones, and still writes `interactive`. Review stages and routes are preserved, and no records are rewritten. (#1722)
 
 ## Small changes
 
-- **Desktop: a Wave's sidebar lists only its started Tasks**, plus its subwaves, in plan order. ⌘1–9, ⌃⇥ and sidebar search now skip unstarted work. The Wave board still shows unstarted Tasks with **Start**, and an empty Wave reads "No working Tasks in this Wave". (#1703)
-- **Usage updates no longer scan `session_events` while holding the store's write lock.** A new index lets each usage update find its row directly, so other writers no longer wait while that scan runs. (#1713)
-- `scripts/check_cost.py` and `scripts/benchmarks/storage/replay_history.py` are deleted. `scripts/context_ablation.py` reads `lf history show --transcript --json`. (#1706)
+- Prompt goldens and the shared `StandInClaude` test fixture cover the background-task contract. (#1688)
+- Short comments now state what each remaining lock protects: the worktree lease, journal append, credential lock and landing observer. (#1714)
+- `docs/subscriptions.md` describes the plan-then-room ordering. (#1717)

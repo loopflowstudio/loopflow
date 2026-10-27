@@ -51,8 +51,13 @@ fn cli_volume_records_real_reads_without_contents() {
 
 /// Statements one `lf wave show --all` reading runs, and what it printed.
 fn planning_statements(home: &std::path::Path, repo: &std::path::Path) -> (u64, String) {
+    statements(home, repo, &["wave", "show", "--all", "--json"])
+}
+
+/// Statements one read runs, and what it printed.
+fn statements(home: &std::path::Path, repo: &std::path::Path, args: &[&str]) -> (u64, String) {
     let receipts = tempfile::tempdir().unwrap();
-    let output = lf(home, repo, &["wave", "show", "--all", "--json"])
+    let output = lf(home, repo, args)
         .env("LF_PERF_OUTPUT", receipts.path())
         .output()
         .unwrap();
@@ -133,4 +138,53 @@ fn planning_statements_do_not_grow_with_its_tasks() {
         3,
         "{plan}"
     );
+}
+
+#[test]
+fn task_status_statements_do_not_grow_with_its_graphs() {
+    let home = tempfile::tempdir().unwrap();
+    let repo = loopflow_test_support::TestRepo::new();
+    let checkout = tempfile::tempdir().unwrap();
+    let output = lf(
+        home.path(),
+        repo.path(),
+        &["task", "create", "--title", "Graphs", "--json"],
+    )
+    .output()
+    .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let created: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = created["id"].as_str().unwrap();
+    rusqlite::Connection::open(home.path().join("loopflow.db"))
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET worktree=?2,
+                 checkout_machine_id=(SELECT id FROM machines WHERE route='local')
+             WHERE id=?1",
+            rusqlite::params![id, checkout.path().to_string_lossy()],
+        )
+        .unwrap();
+    let record = |count: usize| {
+        for _ in 0..count {
+            crate::support::record_graph(
+                home.path(),
+                checkout.path(),
+                "code",
+                "implement",
+                "failed",
+            );
+        }
+    };
+    let status = ["task", "status", id, "--json"];
+    record(1);
+    let (fewer, _) = statements(home.path(), repo.path(), &status);
+    record(3);
+    let (more, body) = statements(home.path(), repo.path(), &status);
+    let status: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        status["graph_processes"].as_array().unwrap().len(),
+        4,
+        "{body}"
+    );
+    assert_eq!(more, fewer);
 }

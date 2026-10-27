@@ -158,6 +158,14 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   `TaskCommentsProofTests`); the thread arrives with the `task status` watch,
   a failed reading marks it unavailable, and retry asks the watches to reread.
   Production `WorkModel` always has the watch; only tests lacked one.
+- `lf task status`: Graph processes come from the overview's one Graph read
+  (`task_overview` returns their details) instead of `graph_process(id)` per
+  Graph, and a Task's Graph entries name that Task and its Wave (one lookup)
+  instead of `task_of_process` per Graph. Measured: 12 statements per Graph →
+  0 (`task_status_statements_do_not_grow_with_its_graphs`). Of the remaining
+  ~260 statements on a small store, about half are six store opens at process
+  start (recovery, rental check, journal admission, target resolution), paid
+  once per watch process, not per reading.
 
 ## Plan per read
 
@@ -186,9 +194,10 @@ unless "Work needed" says otherwise.
 
 1. Sessions: incremental or paged rows instead of 5.7 MB per reading; a quiet
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
-2. `lf task status`: 5k statements / 20 connections for one Task, now with
-   overview, Graph processes and comments, on a 2 s clock; reuse
-   `TaskDetailFacts` and `GraphExecutionFacts`.
+2. `lf task status`: flat in Graphs; measure what still grows on Jack's store
+   (Sessions, Processes) against a copy or lf-world, never the live store.
+   Every lf command opens the store six times at start: one shared open for
+   recovery, rental check and journal admission.
 3. Delete remaining Desktop duplicates; catalog and machine reads
    (`wave workflow list`, `graph list`, `portfolio`, `machine id/list`).
 4. Known differences from the monitor: usage alone no longer refreshes Wave
@@ -216,3 +225,4 @@ unless "Work needed" says otherwise.
 - One Task row: clippy clean; `--test integration dto_fixtures` 43 passed; `test_desktop.sh --filter 'DTOFixtureTests|WaveLensTests|RegistryQueryTests|TaskHistoryFilterTests|WaveDetailReadingTests|MockWaveFixtureTests'` 103 passed; waves lib tests: gate.
 - Wave detail from planning (Swift only): `test_desktop.sh --filter 'WaveDetailReadingTests|MockWaveFixtureTests|DTOFixtureTests|WorkObservationTransportTests|DesktopPerformanceTests|RegistryQueryTests|WorkModelTests|WorkSelectionTests'` 128 passed; UI capture: gate.
 - Comments from the watch: `test_desktop.sh --filter 'DesktopHeadlessTests|WorkModelTests|DTOFixtureTests|WorkSelectionTests'` 100 passed.
+- Task status flat in Graphs (+ compress: Task→Wave via `task_wave_in`): clippy clean; lib `store::sqlite::task_work` 7, `graph_inventory` 3, `--test integration performance_tests` 3 passed.

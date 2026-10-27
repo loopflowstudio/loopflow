@@ -654,13 +654,18 @@ fn task_open_process_ids(conn: &rusqlite::Connection) -> StoreResult<String> {
     ))
 }
 
+/// One of a Task's Graphs with its inventory entry.
+type TaskGraph = (
+    crate::ops::graph_process::GraphProcess,
+    crate::durable::GraphProcessInventoryEntry,
+);
+
+/// A Task's Sessions and its Graphs. The entries name the Task being read and
+/// its Wave, read once for all of them.
 fn members(
     tx: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<(
-    Vec<TaskSession>,
-    Vec<crate::durable::GraphProcessInventoryEntry>,
-)> {
+) -> StoreResult<(Vec<TaskSession>, Vec<TaskGraph>)> {
     let sessions = tx
         .prepare(&format!(
             "SELECT s.id,s.title,s.interactive,{},s.completed_at
@@ -678,9 +683,18 @@ fn members(
             })
         })?
         .collect::<StoreResult<Vec<_>>>()?;
-    let graphs = graphs_of_task(tx, task)?
-        .iter()
-        .map(|graph| super::graph_inventory::entry_in(tx, graph))
+    let graphs = graphs_of_task(tx, task)?;
+    let wave = if graphs.is_empty() {
+        None
+    } else {
+        super::durable::task_wave_in(tx, task)?
+    };
+    let graphs = graphs
+        .into_iter()
+        .map(|graph| {
+            let entry = super::graph_inventory::entry_of(&graph, Some(task.clone()), wave.clone())?;
+            Ok((graph, entry))
+        })
         .collect::<StoreResult<Vec<_>>>()?;
     Ok((sessions, graphs))
 }
@@ -715,19 +729,34 @@ impl SqliteStore {
     }
 
     /// Current workspace facts, without enumerating mechanical Process history.
-    pub fn task_overview(&self, task: &TaskId) -> StoreResult<crate::task_work::TaskOverview> {
+    /// The Task's overview and, for each of its Graphs in the same order, what
+    /// `lf graph show --processes` says of it.
+    pub fn task_overview(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<(
+        crate::task_work::TaskOverview,
+        Vec<crate::durable::GraphProcessDetail>,
+    )> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let (sessions, graph_processes) = members(&tx, task)?;
+        let (sessions, graphs) = members(&tx, task)?;
         let workflow = workflow_row(&tx, task)?;
         let history = workflow_moves(&tx, task)?;
         tx.commit()?;
         drop(conn);
-        Ok(crate::task_work::TaskOverview {
-            sessions,
-            graph_processes,
-            workflow: workflow.map(|row| self.read_workflow(row, history)),
-        })
+        let details = graphs
+            .iter()
+            .map(|(graph, entry)| graph.detail(entry.clone()))
+            .collect();
+        Ok((
+            crate::task_work::TaskOverview {
+                sessions,
+                graph_processes: graphs.into_iter().map(|(_, entry)| entry).collect(),
+                workflow: workflow.map(|row| self.read_workflow(row, history)),
+            },
+            details,
+        ))
     }
 
     /// Read all three owners in one SQLite snapshot, including closed history.
@@ -735,6 +764,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graphs) = members(&tx, task)?;
+        let graphs = graphs.into_iter().map(|(_, entry)| entry).collect();
         let processes = tx
             .prepare(&format!(
                 "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",

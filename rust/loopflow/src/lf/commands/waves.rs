@@ -3973,7 +3973,13 @@ mod tests {
             );
         };
         assert!(reason.contains("no such column: t.paused"), "{reason}");
-        let workflow = store.sqlite.task_overview(&task).unwrap().workflow.unwrap();
+        let workflow = store
+            .sqlite
+            .task_overview(&task)
+            .unwrap()
+            .0
+            .workflow
+            .unwrap();
         assert_eq!(workflow.definition.name, "feature");
         assert!(
             matches!(workflow.position, crate::ops::workflow::WorkflowPosition::Node { ref node } if node == "end")

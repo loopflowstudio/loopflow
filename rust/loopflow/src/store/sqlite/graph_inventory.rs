@@ -93,34 +93,26 @@ pub(super) fn entry_in(
     graph: &GraphProcess,
 ) -> StoreResult<GraphProcessInventoryEntry> {
     let process = &graph.process;
-    let task = super::task_work::task_of_process(conn, &process.id)?;
-    let wave: Option<String> = match &task {
-        Some(task) => conn
-            .query_row(
-                "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
-                [task],
-                |row| row.get(0),
-            )
-            .optional()?,
+    let task = super::task_work::task_of_process(conn, &process.id)?
+        .map(|id| TaskId::parse(&id))
+        .transpose()
+        .map_err(invalid)?;
+    let wave = match &task {
+        Some(task) => super::durable::task_wave_in(conn, task)?,
         None => conn
             .query_row(
                 "SELECT c.wave_id FROM session_events c JOIN processes e ON e.id=c.lf_process_id
                  WHERE c.kind='captured' AND e.parent_lf_process_id=?1 AND c.wave_id IS NOT NULL
                  ORDER BY c.seq DESC LIMIT 1",
                 [&process.id],
-                |row| row.get(0),
+                |row| row.get::<_, String>(0),
             )
-            .optional()?,
+            .optional()?
+            .map(|id| WaveId::parse(&id))
+            .transpose()
+            .map_err(invalid)?,
     };
-    entry_of(
-        graph,
-        task.map(|id| TaskId::parse(&id))
-            .transpose()
-            .map_err(invalid)?,
-        wave.map(|id| WaveId::parse(&id))
-            .transpose()
-            .map_err(invalid)?,
-    )
+    entry_of(graph, task, wave)
 }
 
 /// The Graph's inventory entry once its Task and Wave are known.

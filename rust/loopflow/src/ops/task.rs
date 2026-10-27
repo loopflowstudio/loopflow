@@ -3167,17 +3167,7 @@ async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<Ta
         .sqlite
         .task_acquisition(&task.id)
         .map_err(task_error)?;
-    let overview = store.sqlite.task_overview(&task.id).map_err(task_error)?;
-    let mut graph_processes = Vec::with_capacity(overview.graph_processes.len());
-    for graph in &overview.graph_processes {
-        let id = graph.summary.id.as_str();
-        let (process, entry) = store
-            .sqlite
-            .graph_process(id)
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Graph {id} has no Graph process record")))?;
-        graph_processes.push(process.detail(entry));
-    }
+    let (overview, graph_processes) = store.sqlite.task_overview(&task.id).map_err(task_error)?;
     let mut result = TaskStatus {
         sync: Some(
             store

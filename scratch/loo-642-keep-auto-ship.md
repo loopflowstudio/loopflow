@@ -1,6 +1,6 @@
 # LOO-642: Keep Auto-Ship moving through review stages and unmerged delivery
 
-Status: implemented incl. B″, steer eb5b5f3d (explicit `lf ship` grants landing, restart is `--recover`) and B‴ docs (reference test passed 2026-10-27). LOO-622 answered its landing question in line with this one (see LOO-622 coordination). Fourth concept review (2026-10-27): no change. Integration `task_ship_*` pending at gate. Jack Heart authorized autonomous
+Status: implemented incl. B″, steer eb5b5f3d (explicit `lf ship` grants landing, restart is `--recover`) and B‴ docs (reference test passed 2026-10-27). LOO-622 answered its landing question in line with this one (see LOO-622 coordination). Fourth concept review (2026-10-27): no change. Gate passed 2026-10-27 (checks below). Jack Heart authorized autonomous
 recovery, local hotfixes and patch releases.
 
 ## Problem
@@ -282,7 +282,7 @@ Integration tests in `tests/linear/task_graph_launch_tests.rs` (fixture
 - `task_ship_leaves_a_live_edge_graph_alone`
 
 Command, with inherited `LF_*` unset:
-`cargo test -p loopflow --test integration task_ship_ < /dev/null`
+`cargo test -p loopflow --lib -- task_ship_ < /dev/null`
 Expected: all `task_ship_*` tests pass. Also run `cargo clippy --all-targets -- -D warnings`.
 
 ## Live recovery (after merge and patch release)
@@ -295,3 +295,4 @@ Expected: all `task_ship_*` tests pass. Also run `cargo clippy --all-targets -- 
   lands #1719. Do not assume it is still looping.
 
 Check: `cargo test -p loopflow --lib -- ops::task::ship:: store::sqlite::processes:: store::sqlite::task_work::` 30 passed (lands at #1718's processes.rs caller is `false`); `cargo clippy --all-targets -- -D warnings` clean after compress (2026-10-27); integration `task_ship_*` deferred to gate.
+Gate (2026-10-27, inherited `LF_*` unset, `< /dev/null`): `cargo fmt --check` clean; `cargo clippy --all-targets -- -D warnings` clean; `cargo test -p loopflow --lib -- task_ship_ ops::task::ship:: store::sqlite::task_work:: store::sqlite::processes::` 41 passed (the `task_ship_*` suite lives in the lib via `src/lib.rs` `#[path]`, not `--test integration`); `-- task_graph_launch_tests:: ops::task::` (rest) 64 passed; `-- store::migrations` 129 passed; integration `reference_matches_the_compiled_cli` 1 and `documented_commands` 4 passed. LOO-622 (#1733) still open, so no AutoShip mapping on this branch.

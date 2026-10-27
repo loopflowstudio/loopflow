@@ -10,3 +10,5 @@ Remaining: the demo is the next local hotfix running `.lf/skills/hotfix.md` end 
 Check: `lf help hotfix` resolves .lf/skills/hotfix.md; active.json one-liner (revision, identity, CLI path) and ps|uniq -c count run against this Machine — pass.
 
 Concept review 2026-10-26: the seven steps match the Task outcome order and its one concept (base = active.json source_revision, never main). Verified against this build: `promote --preview` verdict strings (install.rs:587), build.rs env vars, `session list --available --all`, `session connect`, migrations dir incl. drafts/. No change, no open product choice.
+
+Gate 2026-10-26: prose-only diff, no build. Verified against this tree: `lf help hotfix` resolves; `self install promote --cli-target/--preview` flags; verdict strings (install.rs:587-588); build.rs env vars and `<version>+<9-char sha>` version shape; `session list --available --all`, `session serve`, `session connect`, `pr publish` exist; active.json one-liner prints e9b2c2eac1 release + CLI path — pass.

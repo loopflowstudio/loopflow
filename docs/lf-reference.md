@@ -623,6 +623,7 @@ Ship the Task: run every remaining step to merge and completion, standing in at 
 | `--graph` | Take up this graph in place of the Task's remaining steps |
 | `--reason` | Why, kept in the Task's history |
 | `--stop` | Stop Auto-Ship: end the ship process and disarm auto-merge it armed Default: false. |
+| `--recover` | Continue the existing approval with only the authority it has, as automatic restart does Default: false. |
 | `--help / -h` | Print help (see more with '--help') |
 
 ## lf session

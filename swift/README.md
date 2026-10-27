@@ -386,8 +386,8 @@ one tool pane. A lone terminal omits the redundant pane header. A neutral edge a
 distinguish the selected pane without recoloring its reported activity.
 Terminal surfaces sit inside the rounded edge, so text wraps before the border
 in both single and split panes.
-The enclosing workspace curve follows the pane radius plus its inset, keeping
-the gap even around nested corners.
+The workspace has square top corners without an outer border. Its rounded lower
+corners follow the pane radius plus its inset, keeping the gap even around nested corners.
 The workspace also leaves clearance from the native window's larger lower corners.
 
 Copy selected text with **⌘C**: the pane header briefly confirms the line count,

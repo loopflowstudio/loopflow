@@ -9,7 +9,7 @@ description. Decisions: `scratch/loo-625-direction.md`.
 # .lf/wave/infrastructure/config.yaml   (committed)
 workflow: code
 agent: claude
-skills:            # or whatever key .lf/config.yaml already uses for per-skill agents
+skill_agents:
   implement: claude:opus
 
 lf set machine daytona --wave infrastructure    # personal, local store
@@ -108,6 +108,13 @@ Launches and `lf wave status` share one route chain
 `wave::context::ambient_wave_id`. `config::workflow_setting` is the one
 Wave → repo → builtin `code` Workflow resolution (Task default and Wave setup).
 
+`lf set` / `lf unset` (One verb, below; Jack Heart steers 2249b6d5, 1a78ed7e, 4d4360a5,
+b4f19861): `lf/commands/setting.rs`, `scope_settings` table in draft `wave_setup`,
+`ConfigLayer::Personal` in `config::config_layers`, source `personal` in `lf wave status`.
+`lf wave workflow set`, `lf machine use` (its Task handoff moved to
+`lf task move --machine` on main, #1720) and `lf account route set` are deleted; Desktop,
+tests, docs and skills moved.
+
 ## Settled history (2026-10-27)
 
 - Cross-repository Wave workflow migration dropped (Jack Heart steer 2a6771a3); manabot
@@ -118,12 +125,6 @@ Wave → repo → builtin `code` Workflow resolution (Task default and Wave setu
   `task | personal | wave | repo | global | default`. Swift keeps `String?`.
 
 ## Remaining
-
-`lf set` / `lf unset` (One verb, below; Jack Heart steers 2249b6d5, 1a78ed7e, 4d4360a5,
-b4f19861) is built: `lf/commands/setting.rs`, `scope_settings` table in draft
-`wave_setup`, `ConfigLayer::Personal` in `config::config_layers`, source `personal` in
-`lf wave status`. `lf wave workflow set`, `lf machine use` (its Task handoff moved to
-`lf task move --machine` on main, #1720) and `lf account route set` are deleted; Desktop, tests, docs and skills moved.
 
 - Gate: full suites (incl. `machine_commands`, `two_people`, `auth_tests`, Swift
   `WorkCLISubscriptionTests`), clippy, DTO fixtures.

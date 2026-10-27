@@ -64,7 +64,8 @@ def http(monkeypatch):
         return fake
 
     monkeypatch.setenv("RUNPOD_API_KEY", "rp-key")
-    monkeypatch.setenv("FLY_API_TOKEN", "FlyV1 fm2_token")
+    monkeypatch.setenv("FLY_RENT_TOKEN", "FlyV1 fm2_token")
+    monkeypatch.delenv("FLY_ORG", raising=False)
     return install
 
 
@@ -267,14 +268,15 @@ def test_fly_creates_an_app_with_ipv4_and_a_self_destroying_machine(http):
             ("POST", "/v1/apps/lf-rent-0b5c/machines"): [(200, {"id": "m1"})],
             ("POST", "/v1/apps"): [(201, {"id": "app1"})],
             ("POST", "/graphql"): [
+                (200, {"data": {"organizations": {"nodes": [{"slug": "loopflow-studio"}]}}}),
                 (200, {"data": {"allocateIpAddress": {"ipAddress": {"address": "192.0.2.9"}}}})
             ],
         }
     )
     reply = bridge._fly("create", REQUEST)
     assert reply == {"id": "lf-rent-0b5c", "gone": False, "route": "ssh://lf@192.0.2.9"}
-    app, ip, machine = (sent[2] for sent in fake.sent)
-    assert app == {"app_name": "lf-rent-0b5c", "org_slug": "personal"}
+    _, app, ip, machine = (sent[2] for sent in fake.sent)
+    assert app == {"app_name": "lf-rent-0b5c", "org_slug": "loopflow-studio"}
     assert ip["variables"]["input"] == {"appId": "lf-rent-0b5c", "type": "v4"}
     config = machine["config"]
     assert config["guest"] == {"cpu_kind": "performance", "cpus": 4, "memory_mb": 16384}

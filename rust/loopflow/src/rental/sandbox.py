@@ -478,6 +478,7 @@ def _aws(op, request):
 FLY_MACHINES = "https://api.machines.dev/v1/"
 FLY_GRAPHQL = "https://api.fly.io/graphql"
 FLY_GONE = {"stopping", "stopped", "suspended", "destroying", "destroyed", "failed"}
+FLY_ORGS = "{ organizations { nodes { slug } } }"
 FLY_IPV4 = """mutation($input: AllocateIPAddressInput!) {
   allocateIpAddress(input: $input) { ipAddress { address } }
 }"""
@@ -488,8 +489,20 @@ def _fly_app(name):
     return name.lower().replace("_", "-")
 
 
+def _fly_org(authorization):
+    """`FLY_ORG`, else the one organization an org token reaches."""
+    if os.environ.get("FLY_ORG"):
+        return os.environ["FLY_ORG"]
+    reply = _http("POST", FLY_GRAPHQL, authorization, {"query": FLY_ORGS})
+    slugs = [org["slug"] for org in reply["data"]["organizations"]["nodes"]]
+    if len(slugs) != 1:
+        raise RuntimeError(f"FLY_RENT_TOKEN reaches {len(slugs)} organizations; set FLY_ORG")
+    return slugs[0]
+
+
 def _fly(op, request):
-    token = os.environ["FLY_API_TOKEN"]
+    # Not FLY_API_TOKEN: deploy tokens for one app cannot create rental apps.
+    token = os.environ["FLY_RENT_TOKEN"]
     authorization = token if token.startswith("FlyV1 ") else f"Bearer {token}"
 
     def ask(method, path, body=None):
@@ -505,7 +518,7 @@ def _fly(op, request):
 
     if op == "create":
         app = _fly_app(request["name"])
-        ask("POST", "apps", {"app_name": app, "org_slug": os.environ.get("FLY_ORG", "personal")})
+        ask("POST", "apps", {"app_name": app, "org_slug": _fly_org(authorization)})
         reply = _http(
             "POST",
             FLY_GRAPHQL,

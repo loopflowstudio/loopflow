@@ -39,6 +39,9 @@ pub const GRACE_SECONDS: i64 = 15 * 60;
 pub const MAX_HOURS: f64 = 24.0;
 /// An unconfirmed create absent under its name after this long is lost.
 pub const CREATE_SECONDS: i64 = 20 * 60;
+/// A rental still booting this long after admission lost the lf booting it
+/// (its create, SSH wait and install each fit well inside); nothing ran on it.
+pub const BOOT_SECONDS: i64 = 60 * 60;
 
 // ---------------------------------------------------------------------------
 // Money
@@ -212,7 +215,7 @@ impl Provider {
                     "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_REGION are not all",
                 ))
             }
-            Self::Fly if !set("FLY_API_TOKEN") => Some(doppler("FLY_API_TOKEN is")),
+            Self::Fly if !set("FLY_RENT_TOKEN") => Some(doppler("FLY_RENT_TOKEN is")),
             _ => None,
         }
     }
@@ -581,6 +584,14 @@ impl Rental {
 
     pub fn soft_deadline(&self) -> OffsetDateTime {
         self.deadline - time::Duration::seconds(SOFT_DEADLINE_SECONDS)
+    }
+
+    /// Created but never made a Machine, long after admission: the lf booting
+    /// it died, and nothing ran on it.
+    pub fn boot_abandoned(&self, now: OffsetDateTime) -> bool {
+        self.state == RentalState::Booting
+            && self.machine_id.is_none()
+            && now - self.created_at >= time::Duration::seconds(BOOT_SECONDS)
     }
 }
 

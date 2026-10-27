@@ -397,11 +397,9 @@ pub(crate) fn rent(
             sqlite.set_rental_state(&rental.id, RentalState::Unconfirmed)?;
             return Err(anyhow!(
                 "{error}; it is unknown whether {} created {}. `lf ondemand list` finds it by name \
-                 and gives it back; {} deletes it by {} if it exists",
+                 and gives it back",
                 ondemand.provider,
-                rental.provider_name,
-                ondemand.provider,
-                clock(rental.deadline)
+                rental.provider_name
             ));
         }
     };
@@ -802,6 +800,9 @@ fn reconcile(sqlite: &SqliteStore, api: &Sandboxes, rental: &Rental) -> anyhow::
         return Ok(());
     };
     let Some(machine_id) = &rental.machine_id else {
+        if rental.boot_abandoned(now()) {
+            delete_sandbox(sqlite, api, &rental)?;
+        }
         return Ok(());
     };
     let Some(machine) = sqlite.machine_by_id(machine_id)? else {
@@ -1127,17 +1128,18 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use super::{end_rental, read_holdings, refresh, Ended};
+    use super::{end_rental, read_holdings, reconcile, refresh, Ended};
     use crate::durable::MachineId;
     use crate::machine_records::CopyCounts;
     use crate::rental::sandbox::Sandboxes;
-    use crate::rental::{Hardware, OnDemand, Provider, Rental, RentalState, Usd};
+    use crate::rental::{Hardware, OnDemand, Provider, Rental, RentalState, Usd, BOOT_SECONDS};
     use crate::store::sqlite::SqliteStore;
 
     type Log = Rc<RefCell<Vec<String>>>;
 
     /// A running rental of `code-1` and a provider that knows its sandbox.
-    fn running(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
+    /// Created and confirmed, with no Machine yet: what a boot leaves.
+    fn booting(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
         let store = SqliteStore::open_ephemeral(&dir.join("db")).unwrap();
         store
             .add_ondemand(&OnDemand {
@@ -1157,14 +1159,9 @@ mod tests {
             })
             .unwrap();
         let rental = store.admit_rental("code", None, None, false).unwrap();
-        store
+        let rental = store
             .confirm_rental(&rental.id, "sb-1", rental.usd_per_hour)
             .unwrap();
-        let machine = MachineId::new();
-        store
-            .add_machine(&machine, "ssh://lf@203.0.113.7:40022", "code-1")
-            .unwrap();
-        let rental = store.attach_rental(&rental.id, &machine).unwrap();
         let log: Log = Rc::default();
         let kept = log.clone();
         let api = Sandboxes::with_call(
@@ -1174,6 +1171,16 @@ mod tests {
                 Ok(br#"{"id": "sb-1", "gone": false, "route": null}"#.to_vec())
             }),
         );
+        (store, rental, api, log)
+    }
+
+    fn running(dir: &std::path::Path) -> (SqliteStore, Rental, Sandboxes, Log) {
+        let (store, rental, api, log) = booting(dir);
+        let machine = MachineId::new();
+        store
+            .add_machine(&machine, "ssh://lf@203.0.113.7:40022", "code-1")
+            .unwrap();
+        let rental = store.attach_rental(&rental.id, &machine).unwrap();
         (store, rental, api, log)
     }
 
@@ -1229,6 +1236,17 @@ mod tests {
             store.rental(&rental.id).unwrap().state,
             RentalState::Running
         );
+    }
+
+    #[test]
+    fn a_boot_whose_lf_died_is_given_back_once_its_window_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, rental, api, log) = booting(dir.path());
+        assert_eq!(rental.state, RentalState::Booting);
+        reconcile(&store, &api, &rental).unwrap();
+        assert!(!deleted(&log), "a fresh boot may still be running");
+        let later = rental.created_at + time::Duration::seconds(BOOT_SECONDS);
+        assert!(rental.boot_abandoned(later));
     }
 
     #[test]

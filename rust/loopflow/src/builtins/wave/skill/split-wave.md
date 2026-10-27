@@ -57,7 +57,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
    - `.lf/wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
    - `.lf/wave/<child>/MEMORY.md` — the decisions and context this child inherits
    - `.lf/wave/<child>/metrics/*.md` — contracts allocated to that child
-   - `lf repo connect <child>` — create each child's Linear Initiative
+   - `lf wave connect <child>` — create each child's Linear Initiative
    - Connection does not create a Project. Inspect each child's Linear plans:
      one In Progress Project is current; Planned and Completed Projects retain
      future and historical content. Preserve existing Project identities.
@@ -74,9 +74,9 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
 
 5. Retire the parent's future planning
    - Chapter rotation is a separate operation from splitting a Wave. If a repository boundary is
-     also accepted, preview `lf repo new-chapter <name> --dry-run --json` for all
+     also accepted, preview `lf wave new-chapter --all <name> --dry-run --json` for all
      Waves, including the parent and children. There is no per-Wave or plan-file
-     option. Apply with `lf repo new-chapter <name> --json` only after the
+     option. Apply with `lf wave new-chapter --all <name> --json` only after the
      direction and Task-disposition review gates.
    - Rotation moves started unfinished Tasks within their owning Wave, retaining
      worktrees, PRs and captured execution. Proven untouched backlog is canceled,

@@ -296,7 +296,7 @@ pub(crate) fn selected_context(
     session: Option<&str>,
 ) -> Result<ContextExplanation> {
     let resolution = work_context(cli.task.as_deref(), cli.wave.as_deref(), session)?;
-    if cli.repo.is_some() || cli.repository.is_some() {
+    if cli.selects_repository() {
         if let ContextFact::Bound { value, .. } = &resolution.repository_path {
             anyhow::ensure!(
                 crate::repository::CanonicalRepo::current()?.as_ref()
@@ -649,7 +649,7 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
         &crate::store::storage_config_from_env().context("resolve the shared Loopflow store")?,
     ))?;
     let store = std::sync::Arc::new(store);
-    let scoped = cli.repo.is_some() || cli.repository.is_some();
+    let scoped = cli.selects_repository();
     let wave = cli
         .wave
         .as_deref()

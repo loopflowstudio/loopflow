@@ -39,7 +39,7 @@ not another Task store. A complete future Task inventory is not required.
 Preview the exact input:
 
 ```bash
-lf repo new-chapter <name> --plan scratch/chapter-plan.json --dry-run --json
+lf wave new-chapter --all <name> --plan scratch/chapter-plan.json --dry-run --json
 ```
 
 Show KRs, targets, predecessor/successor IDs, carried work, retained backlog and
@@ -49,7 +49,7 @@ material changes need renewed judgment. Preserve names and dates of decisions.
 ## Create the chapter Projects
 
 ```bash
-lf repo new-chapter <name> --plan scratch/chapter-plan.json --json
+lf wave new-chapter --all <name> --plan scratch/chapter-plan.json --json
 ```
 
 The operation preflights every participating Wave and reserves exact destinations

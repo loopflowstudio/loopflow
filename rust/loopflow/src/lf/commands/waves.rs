@@ -586,29 +586,14 @@ fn current_wave(wave: &WaveSnapshot) -> bool {
 }
 
 /// Publication is local; Session claims and receipts never enter planning sync.
-pub fn comment(wave: Option<&str>, message: &str) -> Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = std::sync::Arc::new(
-            crate::store::open_store(&crate::store::storage_config_from_env()?).await?,
-        );
-        let author =
-            crate::config::participant_name()?.unwrap_or_else(|| "attribution unresolved".into());
-        let publication = if let Some(wave) = wave {
-            let wave = resolve_status_wave(&store, Some(wave)).await?;
-            store.sqlite.save_wave_steer(wave.id(), &author, message)?
-        } else {
-            let root = crate::repo::find_repo_root()?;
-            let repo = crate::repository::CanonicalRepo::discover(&root)?;
-            store
-                .sqlite
-                .save_repository_steer(&repo, &author, message)?
-        };
-        println!(
-            "Saved {} locally; shared planning exchange for this scope is unavailable",
-            publication.id
-        );
-        Ok(())
-    })
+pub async fn save_steer(
+    store: &SharedStore,
+    wave: &str,
+    author: &str,
+    message: &str,
+) -> Result<crate::steer::Steer> {
+    let wave = resolve_status_wave(store, Some(wave)).await?;
+    Ok(store.sqlite.save_wave_steer(wave.id(), author, message)?)
 }
 
 /// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
@@ -1471,13 +1456,10 @@ async fn snapshot_task_detail(
             }
         }),
     };
-    let selection = match workflow {
-        Some(workflow) => Some((workflow.definition.name, "task")),
+    let (workflow_name, workflow_source) = match workflow {
+        Some(workflow) => (workflow.definition.name, "task"),
         None => crate::ops::task::task_workflow_default(store, task)?,
     };
-    let (workflow_name, workflow_source) = selection
-        .map(|(name, source)| (name, source.to_owned()))
-        .unzip();
     Ok(TaskDetailSnapshot {
         task: task_summary(
             task,
@@ -1493,8 +1475,8 @@ async fn snapshot_task_detail(
         next_move,
         condition,
         actions,
-        workflow_name,
-        workflow_source,
+        workflow_name: Some(workflow_name),
+        workflow_source: Some(workflow_source.to_owned()),
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,

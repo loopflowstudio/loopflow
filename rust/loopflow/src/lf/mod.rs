@@ -2557,14 +2557,6 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "task", "admission", "LOO-1"]).is_err());
         assert!(Cli::try_parse_from(["lf", "wave", "machine", "product", "mini"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "handoff", "LOO-1", "mini"]).is_err());
-        assert!(
-            Cli::try_parse_from(["lf", "ops", "machine", "use", "mini", "product", "--repo"])
-                .is_err()
-        );
-        assert!(Cli::try_parse_from([
-            "lf", "ops", "machine", "use", "mini", "--task", "LOO-1", "--repo"
-        ])
-        .is_err());
         for args in [
             vec!["lf", "list"],
             vec!["lf", "wave", "list", "--json"],
@@ -2588,12 +2580,19 @@ mod tests {
                 "p.json",
             ],
             vec!["lf", "session", "steer", "keep attribution"],
-            vec!["lf", "--repo", "loopflow", "session", "steer", "keep attribution"],
+            vec![
+                "lf",
+                "--repo",
+                "loopflow",
+                "session",
+                "steer",
+                "keep attribution",
+            ],
             vec!["lf", "session", "steer", "session_1", "keep attribution"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
             vec!["lf", "ops", "machine", "use", "mini"],
             vec!["lf", "ops", "machine", "use", "mini", "product"],
-            vec!["lf", "ops", "machine", "use", "mini", "--repo"],
+            vec!["lf", "--repo", "loopflow", "ops", "machine", "use", "mini"],
             vec!["lf", "ops", "machine", "use", "mini", "--task", "LOO-1"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "self", "doctor", "--planning", "--json"],

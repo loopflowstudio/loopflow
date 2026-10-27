@@ -89,9 +89,9 @@ struct WorkObservationTransportTests {
         observation.request(.checkpoint(id: 5, replay: []))
         try await watches.answer(["wave", "show"], 5)
         #expect(try await frames.next()?.answers == 5)
-        #expect(watches.requests(["monitor", "top"]) == [#"{"id":5}"#])
+        #expect(watches.requests(["monitor", "ps"]) == [#"{"id":5}"#])
         // The live-process watch has not answered, so nothing is confirmed yet.
-        try await watches.answer(["monitor", "top"], 5)
+        try await watches.answer(["monitor", "ps"], 5)
         let answered = try await frames.next()
         #expect(answered?.content.part == "activity")
         let checkpoint = try await frames.next()

@@ -61,8 +61,8 @@ lf task list --watch                          # a JSON line each time the list c
 it answers instantly and offline.
 
 `--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
-`lf session list`, `lf history`, `lf planning status`, `lf desktop plans`,
-`lf monitor top` and `lf monitor active`, always with `--json`. Each line is
+`lf session list`, `lf history`, `lf planning status`, `lf desktop plans`
+and `lf monitor ps`, always with `--json`. Each line is
 `{"answers", "home", "copy", "revisions", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line

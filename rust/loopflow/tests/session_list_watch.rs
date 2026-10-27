@@ -7,8 +7,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use loopflow::lf::commands::session_history::{ActiveSessionsSnapshot, DiscoveryState};
-
 struct Owned(Child);
 impl Drop for Owned {
     fn drop(&mut self) {
@@ -40,22 +38,22 @@ fn command(home: &Path, args: &[&str]) -> Command {
     command
 }
 
-fn next_ready(frames: &Receiver<serde_json::Value>, count: usize) -> ActiveSessionsSnapshot {
+/// The next frame whose row for `id` is in one of `states`.
+fn next_state(frames: &Receiver<serde_json::Value>, id: &str, states: &[&str]) {
     let deadline = Instant::now() + Duration::from_secs(12);
     loop {
         let frame = frames
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
             .unwrap();
-        let snapshot: ActiveSessionsSnapshot =
-            serde_json::from_value(frame["body"].clone()).unwrap_or_else(|_| panic!("{frame}"));
-        assert_ne!(
-            snapshot.discovery,
-            DiscoveryState::Unavailable,
-            "{snapshot:?}"
-        );
-        if snapshot.discovery == DiscoveryState::Ready && snapshot.sessions.len() == count {
-            assert!(snapshot.gaps.is_empty(), "{snapshot:?}");
-            return snapshot;
+        assert_eq!(frame["unavailable"], serde_json::Value::Null, "{frame}");
+        let state = frame["body"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{frame}"))
+            .iter()
+            .find(|row| row["id"] == id)
+            .and_then(|row| row["state"].as_str());
+        if state.is_some_and(|state| states.contains(&state)) {
+            return;
         }
     }
 }
@@ -76,7 +74,7 @@ fn exited(child: &mut Child) {
 }
 
 #[test]
-fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
+fn session_rows_follow_their_provider_and_release_only_the_reader_on_eof_or_closed_stdout() {
     let home = tempfile::tempdir().unwrap();
     let mut client = Owned(
         Command::new("/bin/cat")
@@ -129,7 +127,7 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
     )
     .unwrap();
     let mut watch = Owned(
-        command(home.path(), &["monitor", "active", "--watch", "--json"])
+        command(home.path(), &["session", "list", "--all", "--watch"])
             .spawn()
             .unwrap(),
     );
@@ -144,15 +142,14 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         }
     });
     // The first read comes from process records, with no registry to wait on.
-    let snapshot = next_ready(&frames, 1);
-    assert_eq!(snapshot.sessions[0].id.as_str(), id);
+    next_state(&frames, id, &["active", "detached"]);
     db.execute(
         "UPDATE processes SET completed_at=?2,spawn_state='exited' WHERE id=?1",
         rusqlite::params![agent, client_started],
     )
     .unwrap();
     // The ordinary cadence must observe the recorded exit without a UI request.
-    next_ready(&frames, 0);
+    next_state(&frames, id, &["closed"]);
     watch
         .0
         .stdin
@@ -160,14 +157,14 @@ fn watch_updates_and_releases_only_its_reader_on_eof_or_closed_stdout() {
         .unwrap()
         .write_all(b"{\"id\":1}\n")
         .unwrap();
-    next_ready(&frames, 0);
+    next_state(&frames, id, &["closed"]);
     drop(watch.0.stdin.take());
     exited(&mut watch.0);
     output.join().unwrap();
     assert!(client.0.try_wait().unwrap().is_none());
 
     let mut broken = Owned(
-        command(home.path(), &["monitor", "active", "--watch", "--json"])
+        command(home.path(), &["session", "list", "--all", "--watch"])
             .spawn()
             .unwrap(),
     );

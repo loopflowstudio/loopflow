@@ -59,7 +59,7 @@ Desktop (`WorkWatches`, `swift/Loopflow/Services/WorkObservation.swift`) runs pe
 window: `wave show --all` (plan; Waves derived from it), `desktop plans`
 (Dashboard plans), `planning status` (receipts; holds the repository's planning
 sync), `session list`, `task status <id>` (overview, Graph processes, comments,
-recorded work), `history --since 7d --limit 50 [filters]`, `monitor top`. Wave
+recorded work), `history --since 7d --limit 50 [filters]`, `monitor ps`. Wave
 detail is the selected Wave's `WaveRoadmap` from the planning watch. A scope change restarts watches whose argv/cwd changed and
 replays the others' last frame answering the new id. A checkpoint confirms each
 running watch (or only `replay` parts) and follows once each answered with a
@@ -121,8 +121,15 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   closing time (LOO-594's standup Done column is one read). Not indexed: the
   filter scans the repository's closed Tasks (~540 on Jack's store), which
   needs no migration.
-- `lf monitor top --json --watch`: the live-process read through the same
-  watch.
+- `lf ps --json --watch` (`lf monitor ps`) is the live-process read through
+  the same watch; `lf top` is only the terminal view (redirected, one text
+  frame). Desktop's activity watch runs `["monitor", "ps"]`.
+- Session liveness is the `session list` row's `state` (AgentProcess
+  evidence: active, detached, closed, unknown) and `agent_process_id`; process
+  detail is `lf ps`. `lf monitor active`, `session_record::active`
+  (`ActiveSessionsSnapshot`, `observe_agent_process`) and `active_runs.json`
+  are deleted; bare `lf monitor` judges Sessions from their rows. Its watch
+  proof now runs `session list --all --watch` (`session_list_watch.rs`).
 - `lf history` is Session records only: input captured, recorded completion,
   provider turns, tagged with Task/Wave. `WorkCreated`, `Pr*` and `SteerIssued`
   are deleted with their per-Task PR scan, `steers_since`, `SteerComment` and
@@ -178,7 +185,7 @@ unless "Work needed" says otherwise.
 | `session list` | watch | R | page or diff (Remaining 1) |
 | `task status <id>` | watch | T | flat in Graphs; Sessions/Processes unmeasured (Remaining 2) |
 | `history --since 7d` | watch | W/P/T | |
-| `monitor top` | watch | M | becomes `lf ps --watch` (Remaining 4); shrinks with LOO-615 |
+| `monitor ps` | watch | M | shrinks with LOO-615 |
 | `planning status` | watch | R | holds the repository's planning sync |
 | `desktop plans` | watch | R | |
 | `wave status` per Wave | `openHistoricalReference`, `ProjectHistoryView`; user action | W | check historical Projects are in the plan |
@@ -200,35 +207,19 @@ unless "Work needed" says otherwise.
    recovery, rental check and journal admission.
 3. Delete remaining Desktop duplicates; catalog and machine reads
    (`wave workflow list`, `graph list`, `portfolio`, `machine id/list`).
-4. Live reads under `lf monitor`, from option B (one read per answer; the
-   one-shot command is the streamed one). Concept review, 2026-10-27:
-   - `lf ps --json` and `lf top --json`/redirected print the same
-     `ActivitySnapshot` (`run_top` calls `run_ps`). Make `lf ps --json
-     [--watch]` the live-process read (skills, `docs/`, `activity_snapshot.json`
-     already name it); `lf top` keeps only the terminal view. Desktop's
-     `.activity` watch moves to `["monitor", "ps"]`.
-   - Session state has three derivations: `session list` (availability),
-     `monitor active` (Sessions joined to observed provider processes, plus
-     gaps) and bare `lf monitor` (re-derives active/available/unknown/finished
-     from both). A client should get a Session's liveness from its `session
-     list` row, as Tasks come only as `RoadmapTask`. Next: carry the observed
-     provider processes on `session list` rows, have `lf monitor` render those
-     rows, and delete `monitor active` (callers: tests only; plus
-     `lf monitor`'s "next" hint). Check first that `session list --watch` can
-     take the ACTIVITY clock without exceeding item 1's budget; if not, keep
-     `monitor active` as the narrow live read and record why.
-5. Known differences from the monitor: usage alone no longer refreshes Wave
+4. Known differences from the monitor: usage alone no longer refreshes Wave
    detail token totals (next change or 300 s clock); a store that cannot derive
    Task state fails `lf task status` too, so the Task pane keeps its last
    reading marked unavailable (the monitor read only `task_overview`); a
    confirmation re-reads each watch (the monitor replayed unchanged parts).
-6. Live p99 A/B with an installed build: gate/demo.
+5. Live p99 A/B with an installed build: gate/demo.
 
 ## Delete — do not maintain
 
 - Done: `RegistryQuery.plan/waves(repoPath:)/userName/taskFiles/repositoryWaves`,
   WavesView per-Wave `lf wave status`, `lf monitor work` and `work_watch.rs`,
-  `session_watch.rs`, task_history part, `work_frame.json`, `LocalWorkObservation`'s
+  `session_watch.rs`, task_history part, `lf monitor active` and
+  `session_record::active`, `lf top --json/--watch`, `work_frame.json`, `LocalWorkObservation`'s
   single reader, Desktop's `wave status` watch, `taskComments` read.
 - Next: `allWaves`
   after createWave (`PortfolioRepoState`, `WavesView`); one-shot reads
@@ -245,3 +236,4 @@ unless "Work needed" says otherwise.
 - Wave detail from planning (Swift only): `test_desktop.sh --filter 'WaveDetailReadingTests|MockWaveFixtureTests|DTOFixtureTests|WorkObservationTransportTests|DesktopPerformanceTests|RegistryQueryTests|WorkModelTests|WorkSelectionTests'` 128 passed; UI capture: gate.
 - Comments from the watch: `test_desktop.sh --filter 'DesktopHeadlessTests|WorkModelTests|DTOFixtureTests|WorkSelectionTests'` 100 passed.
 - Task status flat in Graphs (+ compress: Task→Wave via `task_wave_in`): clippy clean; lib `store::sqlite::task_work` 7, `graph_inventory` 3, `--test integration performance_tests` 3 passed.
+- Live reads (`lf ps --watch`, `monitor active` deleted): clippy clean; integration `cli_reference`, `session_list_watch`, `dto_fixtures`, `cli_discovery`, `world_recipes::session_list_task_status_and_top_watch`, `boundary_launch_and_resume`, process_ownership `monitor_does_not_treat`, lib `graph_tests` (2), `test_desktop.sh --filter WorkObservationTransportTests` (9) passed.

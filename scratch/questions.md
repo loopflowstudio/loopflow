@@ -38,3 +38,9 @@
   (abandoned or retired) shows its cached plan with "not in the current plan"
   instead of a live `lf wave status` reading. Reversible: one-shot
   `RegistryQuery.status` for those Waves on selection.
+- Assumption (2026-10-27): Session rows carry liveness through their existing
+  `state` and `agent_process_id`, not a copied list of observed provider
+  processes. Sampling OS processes on every `session list` reading would add
+  to Remaining 1's cost for detail `lf ps` already gives. The per-process
+  activity (`waiting`/`working`) is no longer per Session. Reversible: add
+  `processes` to the row from `lf ps`'s sample.

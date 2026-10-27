@@ -724,11 +724,10 @@ lf planning status --json --watch          # sync receipts; keeps planning excha
 
 A window runs the reads any client runs, one `--watch` process per part, through
 `RegistryQuery.watchWork()`: the plan, the repository's Dashboard plans
-(`lf desktop plans`), Sessions and planning status, the shown Task's status, the
-shown Wave's `lf wave status`, its activity (`lf history`) and live call trees
-(`lf monitor top`). Each watch is internally consistent; panes do not share one
-snapshot. Changing what the window shows restarts only the watches whose read
-changed; the rest answer from their last frame without reading again.
+(`lf desktop plans`), Sessions and planning status, the shown Task's status, its
+activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
+internally consistent; panes do not share one snapshot. Changing what the window
+shows restarts only the watches whose read changed; the rest answer from their last frame without reading again.
 
 A part arrives again only when a commit changed what it shows, so a Task created
 by `lf`, a worker or another window appears without a refresh. A file written or

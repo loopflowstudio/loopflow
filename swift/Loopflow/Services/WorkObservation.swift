@@ -91,7 +91,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
     public func command(for scope: WorkScope) -> (args: [String], cwd: String?)? {
         switch self {
         case .planning: return (["wave", "show", "--all"], nil)
-        case .activity: return (["monitor", "top"], nil)
+        case .activity: return (["monitor", "ps"], nil)
         case .selections:
             return scope.repo.map { (["desktop", "plans"], $0) }
         case .peerPlanning:

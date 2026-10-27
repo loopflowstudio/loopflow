@@ -305,7 +305,7 @@ fn session_list_task_status_and_top_watch_answer_requests() {
     for args in [
         vec!["session", "list", "--all", "--watch"],
         vec!["task", "status", issue.as_str(), "--watch"],
-        vec!["monitor", "top", "--json", "--watch"],
+        vec!["monitor", "ps", "--json", "--watch"],
     ] {
         let mut watch = built
             .command(&args)

@@ -281,7 +281,7 @@
     }
   },
   {
-    "read": "lf monitor top --json --watch",
+    "read": "lf monitor ps --json --watch",
     "part": "activity",
     "frame": {
       "answers": 7,

@@ -1415,17 +1415,6 @@ Show waiting, blocked, active, and finished work with next actions
 | `--all` | all Default: false. |
 | `--help / -h` | Print help |
 
-## lf monitor active
-
-Observe active conversations and missing process evidence
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--watch` | Print a JSON line now and each time the conversations change, until stdin closes Default: false. |
-| `--task` | task |
-| `--help / -h` | Print help |
-
 ## lf monitor ps
 
 Print one parseable snapshot of live Loopflow call trees
@@ -1433,6 +1422,7 @@ Print one parseable snapshot of live Loopflow call trees
 | Argument | What it does |
 |---|---|
 | `--json` | Emit the versioned activity snapshot as JSON Default: false. |
+| `--watch` | Print a JSON line now and each time the call trees change, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor top
@@ -1441,8 +1431,6 @@ Refresh live Loopflow call trees on a terminal; print once when redirected
 
 | Argument | What it does |
 |---|---|
-| `--json` | Emit one versioned activity snapshot as JSON Default: false. |
-| `--watch` | Print a JSON line now and each time the call trees change, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
 ## lf monitor prune

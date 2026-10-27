@@ -26,37 +26,6 @@ fn activity_retains_unknown_record_identity_without_a_pid() {
 }
 
 #[test]
-fn active_sessions_preserve_identity_waiting_clients_and_incomplete_evidence() {
-    use loopflow::lf::commands::session_history::ActiveSessionsSnapshot;
-    use loopflow::lf::commands::top::ActivityState;
-    let json = include_str!("../../../tests/fixtures/dto/active_runs.json");
-    let snapshot: ActiveSessionsSnapshot = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        snapshot.discovery,
-        loopflow::lf::commands::session_history::DiscoveryState::Unavailable
-    );
-    assert_eq!(snapshot.sessions[0].work, snapshot.task);
-    assert_eq!(
-        snapshot.sessions[0].processes[0].state,
-        ActivityState::Waiting
-    );
-    assert_eq!(
-        snapshot.sessions[0].processes[1].state,
-        ActivityState::Unknown
-    );
-    assert_eq!(snapshot.sessions[0].processes[1].pid, None);
-    assert_eq!(snapshot.gaps.len(), 1);
-    assert_eq!(
-        serde_json::from_str::<ActiveSessionsSnapshot>(&serde_json::to_string(&snapshot).unwrap())
-            .unwrap(),
-        snapshot
-    );
-    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing.as_object_mut().unwrap().remove("discovery");
-    assert!(serde_json::from_value::<ActiveSessionsSnapshot>(missing).is_err());
-}
-
-#[test]
 fn task_comments_keep_authorship_and_require_every_field() {
     use loopflow::work::task::comment::TaskCommentAuthor;
     use loopflow::work::task::comment::TaskComments;

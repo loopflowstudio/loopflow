@@ -1389,7 +1389,7 @@ async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
         assert_eq!(item["next_action"], action);
     }
     assert!(overview["recent_commands"]["entries"].is_array());
-    assert!(overview["active"]["gaps"].is_array());
+    assert!(overview["gaps"].is_array());
     assert!(overview["items"]
         .as_array()
         .unwrap()

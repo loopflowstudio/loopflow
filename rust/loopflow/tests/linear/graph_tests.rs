@@ -1223,7 +1223,6 @@ fn observing_and_preparing_a_task_are_not_execution() {
     let _ = &runtime;
     assert_eq!(entries(), 1, "the prepared checkout claimed its Task");
     for args in [
-        vec!["monitor", "active", "--task", "INF-123", "--json"],
         vec!["session", "list", "--task", "INF-123", "--json"],
         vec!["history", "usage", "--task", "INF-123", "--json"],
     ] {
@@ -1511,7 +1510,6 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let _ = json(&[
         "history", "usage", "--days", "0", "--task", "INF-123", "--json",
     ]);
-    let _ = json(&["monitor", "active", "--task", "INF-123", "--json"]);
     assert_eq!(events(), settled, "reads write no Task event");
 
     // Landing preserves the checkout's Task context and historical attribution.

@@ -1,4 +1,4 @@
-//! Loopflow activity snapshots: `lf monitor ps` once, `lf monitor top` continuously on a TTY.
+//! Loopflow activity snapshots: `lf monitor ps` once or `--watch`ed, `lf monitor top` continuously on a TTY.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
@@ -84,27 +84,6 @@ pub struct ProcessPruneReport {
     pub errors: u32,
 }
 
-/// Read-local OS evidence for a recorded AgentProcess; no inferred ownership.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AgentProcessObservation {
-    pub id: crate::id::LfProcessId,
-    pub pid: Option<u32>,
-    pub provider: String,
-    pub state: ActivityState,
-}
-
-pub(crate) fn observe_agent_process(
-    processes: Option<&[OsProcess]>,
-    agent: &crate::process::AgentProcess,
-) -> Option<AgentProcessObservation> {
-    Some(AgentProcessObservation {
-        id: agent.process.id.clone(),
-        pid: agent.process.pid,
-        provider: agent.provider.clone().unwrap_or_else(|| "unknown".into()),
-        state: activity_state(&agent.process, &Ok(None), processes)?,
-    })
-}
-
 /// Missing identity and failed sampling remain visible without granting control.
 /// Only affirmative death removes a recorded process from the activity view.
 fn activity_state(
@@ -134,10 +113,9 @@ pub fn run_ps(json: bool) -> Result<()> {
     print_snapshot(&snapshot, json)
 }
 
-pub fn run_top(json: bool) -> Result<()> {
-    let interactive = !json && std::io::stdout().is_terminal();
-    if !interactive {
-        return run_ps(json);
+pub fn run_top() -> Result<()> {
+    if !std::io::stdout().is_terminal() {
+        return run_ps(false);
     }
 
     let mut stdout = std::io::stdout().lock();
@@ -152,7 +130,7 @@ pub fn run_top(json: bool) -> Result<()> {
 
 /// Stream the call trees: Process rows change with the store, liveness and
 /// activity state only on the clock.
-pub fn watch_top() -> Result<()> {
+pub fn watch_ps() -> Result<()> {
     super::watch::run(
         (),
         super::watch::Watched {

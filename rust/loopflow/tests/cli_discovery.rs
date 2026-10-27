@@ -670,13 +670,14 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
             Some(Commands::History { cmd: Some(_), .. })
         ));
     }
-    for verb in ["ps", "top", "active"] {
+    for verb in ["ps", "top"] {
         assert!(matches!(
             parse(&["lf", verb]).command,
             Some(Commands::Monitor { .. })
         ));
     }
     assert!(Cli::try_parse_from(["lf", "monitor", "activity"]).is_err());
+    assert!(Cli::try_parse_from(["lf", "monitor", "active"]).is_err());
     assert!(Cli::command().find_subcommand("replay").is_none());
 }
 

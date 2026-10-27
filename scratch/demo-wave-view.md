@@ -98,3 +98,46 @@ Jack Heart, October 26, 2026 (LOO-594 demo), in addition to hover-hide panes wit
 10. Found the grid (LOO-561 design, commit 427d91bfe8, Oct 24; now AGENTS.md "Task state … Session state (available · busy) is a separate axis"). Jack Heart, 2026-10-24: "so its Working vs Active and Available vs Busy as two different axes". Task axis today: unstarted · idle · active (at an interactive stage) · moving (Graph running, stage ahead) · shipping (Graph running to merge) · deferred · done · abandoned. Session axis: available · busy. Proposed board sections (awaiting Jack): Backlog = unstarted (+deferred?); Active = active (+idle?); Moving = moving + shipping (the fourth section, "autonomous Tasks still working"); Done = done. Session availability is a badge on the row, not a section.
 11. Jack Heart Oct 26: "Yeah maybe Working = Active + Idle + Moving" (the existing Working Tasks rule). Agent reading, to confirm: sections Backlog (unstarted) · Working (idle + active + moving) · Shipping (shipping: autonomous, running to merge without stopping for chat; the fourth section) · Done. Session available/busy as a row marker.
 12. Board sections decided (Jack Heart Oct 26: "Working = Active + Idle + Moving", "I think Autonomous might be better than Shipping"): Backlog = unstarted (+ deferred, agent default) · Working = idle + active + moving (same rule as the sidebar Working Tasks) · Autonomous = shipping (a Graph running to merge that will not stop for chat) · Done = done. Bucket by Task state (runtime.status), not roadmap section. Each Working/Autonomous row shows its Session as Available or Busy. The section selector offers these four; default Backlog.
+
+## Third capture — October 26, 2026, branch 68419e094d (PR #1705, CLEAN)
+
+`scratch/demo/after-wave-2.png` (Loopflow Dev, Product Wave): Session left, board right,
+strip below. Board section selector `Backlog · 35 | Working · 3 | Autonomous · 0 | Done · 13`,
+Backlog selected by default, one scrolling list. Strip: LOO-594, LOO-609, LOO-628 (the
+three Working Tasks), one page. No initials (solo count fixed).
+
+Agent observations (verified):
+1. **Canceled Task in Backlog.** LOO-299 (Linear state `canceled`, title "[superseded by
+   LOO-303 — cancel]") reads runtime `unstarted`, so the state-based bucketing puts it in
+   Backlog. The earlier strip tile labelled it Abandoned, so Desktop has two answers for
+   one Task. Backlog should exclude canceled planning state (or the Task state should read
+   abandoned) — one rule.
+2. **Render artifact.** A lighter rectangle spans the top of the window over the board's
+   left edge (roughly x 980–1360 of 2000, top to y≈710) in the capture. Unknown cause;
+   check in the live window.
+3. Strip membership question still open (questions #17): Working only (built) vs
+   Working + Autonomous.
+
+## Jack's live walk-through — October 26, 2026 (branch 68419e094d)
+
+- First open of the repository page (Jack's screenshot): "Couldn't update: Workspace
+  reader sent no observation for ten seconds"; empty sidebar and strip, board from the
+  last good read. Cause (measured): on the freshly made preview copy, `lf monitor work
+  --watch --json` sends heartbeats (`answers: null`) every 2 s and its first answers
+  (6.2 MB) after ~16 s, past Desktop's 10 s reader limit
+  (`LocalLineObservation.swift:207`). The installed release hit the same limit earlier
+  today on the shared store, so it is not specific to this branch.
+- Second screenshot, after recovery: repository page works — sidebar 19 Working Tasks,
+  board `Backlog · 106 | Working · 19 | Autonomous · 0 | Done · 58`, strip "Page 1 of 7"
+  with live tiles (… menu and expand). Backlog still lists canceled/merged Tasks
+  (LOO-299 "cancel", LOO-318 "Merged into LOO-309"), confirming the canceled-state gap.
+- Third screenshot (Jack, 22:55): repository page with "Repository planning unavailable"
+  and the same reader timeout. At that moment the Mac's load average was 122 (several
+  `rustc`/`clippy-driver` builds of `loopflow` from other Task worktrees, e.g. LOO-630,
+  LOO-609); the feed's own startup ran past the 10 s limit. Every line, heartbeats
+  included, resets the limit (`LocalLineObservation.swift` `lastFrame`), so the stall is
+  before the first heartbeat, under load. Not caused by this branch.
+- **Paint bug (this branch, seen in both the agent capture and Jack's screenshot):** the
+  board part's dark background covers only its left portion (to about x 1390 of 2000);
+  the rest of the board pane shows the window background. Needs a fix: the board view
+  should fill its part's frame.

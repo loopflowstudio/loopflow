@@ -164,8 +164,9 @@ CPU: a descendant still held its stdin open, which was the only stop signal.
   `planning status` (with the sync lifetime; works in a non-Git Work folder),
   `history`, `desktop plans` (new command); `session_watch.rs` and its
   `refresh`/`rescan` requests deleted.
-  `TaskStatus` gains `overview`, `graph_processes`, `comments`; Desktop's Debug
-  disclosure reads `execution.work` from it. Watch frames are
+  `lf desktop task` (ops `TaskStatus`) carries `overview`, full
+  `graph_processes` and `comments`; Desktop's Debug disclosure reads
+  `execution.work` from it. Watch frames are
   `{answers, unavailable, body}`; the store/build comes from `lf --version`.
   Deleted `next_quiet_available`, `roadmap_all`, `current_waves`,
   `observeTaskDiagnostics`. Fixture: `watch_frames.json`.
@@ -247,6 +248,8 @@ unless "Work needed" says otherwise.
    Session turns Waiting on the 2 s clock (`next_quiet_available` is gone).
 2. `lf task status`: flat in Graphs; measure what still grows on Jack's store
    (Sessions, Processes) against a copy or lf-world, never the live store.
+   `lf task status --json` summarizes ops `TaskStatus`, so it still reads every
+   full GraphProcessDetail it reduces to `TaskGraphRow`.
    Every lf command opens the store six times at start: one shared open for
    recovery, rental check and journal admission.
 3. Delete remaining Desktop duplicates; catalog and machine reads
@@ -299,3 +302,4 @@ unless "Work needed" says otherwise.
 - Realign after main merge 651ccfbe80 (main adds `account` to Desktop's `sessions.json`): `cargo test -p loopflow --test integration dto_fixtures` 45 passed.
 - Task status summaries + RFC 3339 history/ps (0b): clippy --all-targets clean; integration `dto_fixtures world_recipes session_cli_tests` 71 passed; lib `lf::commands::activity|top` 10 passed; `test_desktop.sh --filter 'DTOFixtureTests|WorkObservationTransportTests|WorkModelTests|RegistryQueryTests'` 105 passed.
 - Compress (0b: Unix→RFC 3339 rows use `store::rows::unix_to_datetime`): clippy --all-targets clean; `--test integration dto_fixtures` 45 passed.
+- Realign after 0b (2026-10-27): code matches 0b (`TaskDetail`, `TaskGraphRow`, `TaskThread`, `SessionFacts`; `TaskSession` kept for `TaskOverview`); prose only, no checks rerun.

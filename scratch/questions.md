@@ -29,9 +29,10 @@
 - Assumption (2026-10-26): Desktop's planning watch is `lf wave show --all`
   (Waves and Projects come with the plan), not `lf wave list --watch`, which
   would carry no Projects and read the plan twice.
-- Assumption: the Task pane's shape comes from `lf task status` (now with
-  `overview`, `graph_processes`, `comments`), rather than Desktop assembling it
-  from separate reads. Every `lf task status --json` caller pays for them.
+- Assumption: the Task pane's shape comes from one `lf desktop task` read
+  (`overview`, full `graph_processes`, `comments`), rather than Desktop
+  assembling it from separate reads; `lf task status --json` summarizes the
+  same read, so its callers still pay for the full Graph details.
 - Assumption: Dashboard selections live in a new `lf desktop plans --json
   [--watch]` (the repository's default and saved plans).
 - Assumption (2026-10-26): Wave detail for a Wave outside the current plan

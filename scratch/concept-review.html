@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-625 concept review</title>
+<title>LOO-625 concept review: lf set</title>
 <style>
 :root{color-scheme:light dark;--fg:#1b1b1b;--bg:#fdfdfb;--mut:#666;--acc:#9a4a00;--code:#f1efe9}
 @media(prefers-color-scheme:dark){:root{--fg:#e8e6e1;--bg:#161616;--mut:#999;--acc:#f0a050;--code:#242424}}
@@ -14,39 +14,42 @@ pre{padding:.8rem 1rem;overflow-x:auto}code{padding:0 .25rem}
 .label{color:var(--acc);font-size:.8rem;text-transform:uppercase;letter-spacing:.06em}
 </style></head><body><main>
 <header>
-<h1>One answer to “which layer chose this?”</h1>
-<p>LOO-625 · concept-review (headless) · 2026-10-27</p>
-<p>From scratch/loo-625-design.md, rust/loopflow/src/work/wave/setup.rs, rust/loopflow/src/ops/task.rs, swift/LoopflowMac/Views/TaskWorkView.swift</p>
+<h1>One verb, two writers for “global”</h1>
+<p>LOO-625 · concept-review (headless, second pass) · 2026-10-27</p>
+<p>From scratch/loo-625-design.md, rust/loopflow/src/lf/commands/setting.rs, rust/loopflow/src/config.rs (config_layers), rust/loopflow/src/work/wave/setup.rs, release/CRON_HOST.md</p>
 </header>
 
-<p><strong>Decision:</strong> none needed. The accepted source list <code>task | wave | repo | global | default</code> settles it; the next implement pass unifies the names.</p>
+<p><strong>Decision:</strong> none needed now. The built <code>lf set</code> matches Jack’s final steer. One stale doc goes back to implement; one overlap is recorded, not blocking.</p>
 
 <h2>Actions → concepts → APIs</h2>
-<pre>commit .lf/wave/&lt;name&gt;/config.yaml   → Wave layer   → config::config_layers
-lf machine use &lt;m&gt; &lt;wave&gt;              → personal row → MachineSetting
-lf account route set … --wave &lt;wave&gt;  → personal row → RouteScope::Wave
-lf wave status &lt;wave&gt;                 → WaveSetup     → SetupValue{value, source}
-lf task run                           → Task          → task_workflow_default</pre>
+<p><span class="label">existing on this branch</span></p>
+<pre>edit .lf/wave/&lt;name&gt;/config.yaml        → Wave layer     → config::config_layers (ConfigLayer::Wave)
+lf --wave &lt;w&gt; set workflow|agent|…     → personal value → scope_settings → ConfigLayer::Personal
+lf --wave &lt;w&gt; set machine &lt;m&gt;          → personal row   → set_machine_default (copied to your Machines)
+lf --wave &lt;w&gt; set account.claude a,b   → personal route → RouteScope::Wave
+lf set … (no --wave)                    → this repository, even in a Wave’s Task worktree
+lf set … --global                       → every repository (refused for workflow, machine)
+lf wave status &lt;w&gt; --json               → WaveSetup      → SetupValue{value, source}
+                                          source: task | personal | wave | repo | global | default</pre>
 
-<h2>The mismatch</h2>
-<p><span class="label">existing</span></p>
-<pre>$ lf wave status billing
-workflow  code  (default)
+<h2>The overlap</h2>
+<pre>~/.lf/config.yaml          agent: codex        → ConfigLayer::Global
+lf set agent claude --global                   → ConfigLayer::Global, ranked above the file
 
-Desktop, Task in a Wave without workflow:
-code · builtin
+$ lf wave status research
+agent  claude  (global)       # which one do you edit to change it?</pre>
+<p>Accounts have no file equivalent, so <code>--global</code> is their only writer. For <code>agent</code> and <code>skill_agents.&lt;skill&gt;</code> there are two. The steer gives <code>--global</code> the same keys, so this stays as built and is recorded in <code>scratch/questions.md</code>.</p>
 
-Task in a repo with workflow: feature
-feature · repository</pre>
-<p>Same layers, two vocabularies: <code>repo</code>/<code>default</code> in Wave setup, <code>repository</code>/<code>builtin</code> in a Task's <code>workflow_source</code>.</p>
-
-<div class="proposed"><p><span class="label">proposed</span></p>
-<pre>lf wave status billing   →  workflow  code  (default)
-Desktop                  →  code · default
-                            feature · repo
-                            feature · task</pre>
-<p><code>task_workflow_default</code> returns the <code>ConfigLayer</code> from <code>workflow_setting</code>; the Task snapshot uses <code>SetupSource</code> (gaining <code>Task</code>). Fixture <code>local_task.json</code> and the <code>local_planning</code> asserts change with it.</p></div>
+<div class="proposed"><p><span class="label">proposed next implement</span></p>
+<pre># release/CRON_HOST.md:17
+- lf machine use mini infrastructure
++ lf set machine mini --wave infrastructure</pre></div>
 
 <h2>Questions</h2>
-<ol><li>None open. Outcome: design changed, iterate to implement.</li></ol>
+<ol>
+<li>Should “global” have one writer?
+  <ol type="a"><li>keep both, as built (recorded assumption)</li>
+  <li>refuse <code>agent</code>/<code>skill_agents</code> under <code>--global</code>; <code>~/.lf/config.yaml</code> is the one place</li>
+  <li>keep both, and have <code>lf wave status</code> show the path behind a <code>global</code> value</li></ol></li>
+</ol>
 </main></body></html>

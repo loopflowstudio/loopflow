@@ -23,3 +23,7 @@
   repository discovery only when any exist). Gate should watch command latency.
 - After merging main (#1720 moved Task handoff to `lf task move --machine`), `lf machine use`
   had no form left, so it is deleted; Desktop's Task handoff calls `lf task move --machine`.
+- `lf set agent|skill_agents.<skill> --global` and `~/.lf/config.yaml` both write the global
+  layer; the store value outranks the file and both report `global`. Kept (Jack Heart's steer
+  gives `--global` the same keys); if one way per layer should hold, either refuse those keys
+  under `--global` like `workflow`/`machine`, or report `global` values with their path.

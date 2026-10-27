@@ -120,12 +120,20 @@ tests, docs and skills moved.
 - Cross-repository Wave workflow migration dropped (Jack Heart steer 2a6771a3); manabot
   and etude-studio selections were written by hand.
 - Keychain escape: launch tests use `LF_ACCOUNT_ISOLATION=isolated`.
+- Concept review 2 (`lf set`, against Jack Heart steer b4f19861): shape holds. Root
+  `--wave` scopes it, no `--wave` is the repository, `--global` every repository, store
+  only. `global` has two writers for `agent`/`skill_agents` (`~/.lf/config.yaml` and
+  `lf set --global`, the store value above the file), both reported `global`; kept as
+  `questions.md` records, not a product block.
 - Concept review: one source vocabulary. `task_workflow_default` returns `SetupSource`;
   Task JSON, `lf wave status` and the missing-Workflow error say
   `task | personal | wave | repo | global | default`. Swift keeps `String?`.
 
 ## Remaining
 
+- Implement: `release/CRON_HOST.md:17` still teaches the deleted `lf machine use mini
+  infrastructure`; write `lf set machine mini --wave infrastructure` (concept review
+  2026-10-27; `bootstrap-cron-host.sh` reads `.wave.machine.id`, which still exists).
 - Gate: full suites (incl. `machine_commands`, `two_people`, `auth_tests`, Swift
   `WorkCLISubscriptionTests`), clippy, DTO fixtures.
 

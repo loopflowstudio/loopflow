@@ -141,7 +141,8 @@ jobs:
       - name: Test macOS installation process discovery
         run: uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
       - name: Test native process identity
-        run: uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
+        run: |
+          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
 
   loopflow-ui-test:
     if: inputs.loopflow-ui-test

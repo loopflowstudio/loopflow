@@ -15,9 +15,9 @@ overwrite archives, change ignore rules, force staging or suppress Git errors.
 LOO-664 / #1754 is integrated; its disposable reproduction proves only the bridge.
 Infrastructure owns CLI/helper installation and installed acceptance.
 
-Latest archive (2026-10-28 realign):
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-s3p31b6k/tmp`.
+Latest archive (2026-10-28 kickoff):
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-fz0c40a8/tmp`.
 Earlier complete receipts and archive references:
-`78c41329c831ac9a1cc045dbd745417d434c5e4a:scratch/questions.md`.
-Realign still observes installed 0.14.19; integrated source v0.15.0 proves no
+`8d0b15b9d43ed60c4f15b01f585623e0bcf1d862:scratch/questions.md`.
+Kickoff still observes installed 0.14.19; integrated source v0.15.0 proves no
 installed or credential recovery.

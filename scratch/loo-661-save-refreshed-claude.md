@@ -6,7 +6,8 @@ requirements. The checked-in `security -i` writer still has the destructive size
 failure below. Public interfaces are not exhausted; revisit rejected routes only
 with a mechanism addressing their counterexamples. In particular,
 [`kSecAttrAccess`](https://developer.apple.com/documentation/security/ksecattraccess)
-support does not establish atomic preservation (findings 31/33).
+support does not establish atomic preservation (findings 31/33). Creating a
+separate item with copied access also fails before promotion (finding 34).
 The implementation sequence is conditional on that missing mechanism; Jack Heart's
 accepted outcome and boundaries remain unchanged. Supported reconnection for
 jack@loopflow.studio is a separate live-acceptance dependency, proving neither
@@ -171,6 +172,37 @@ access, but cannot prove server validity after OAuth rotation: `fresh_claude_tok
 receives the refresh response before saving, with no provider/Keychain transaction.
 Neither limitation relaxes Jack Heart's requirements.
 
+### Copied-access creation counterexample (34, 2026-10-28)
+
+Apple documents `SecKeychainItemCreateFromContent` accepting an access object
+copied from another item via `SecKeychainItemCopyAccess`
+([API contract](https://developer.apple.com/documentation/security/seckeychainitemcreatefromcontent(_:_:_:_:_:_:_:))).
+This suggests staging a readable candidate before changing the original, avoiding
+the uncommitted new-group lookup in findings 22–26. It does not promise an atomic
+promotion or preservation of partition access.
+
+A new disposable probe created a synthetic original with `security -i`, copied
+its access object without reading its password through the API, then attempted
+native creation under a second unique service with exactly 2,048/8,192 bytes.
+With interaction disabled, lookup and access-copy returned zero; both creations
+returned `-25293`. Independent `security` reads returned exact original bytes;
+the new items were absent (exit 44). Both original deletions succeeded; cleanup
+of absent candidates also returned 44. Every child had a 15-second timeout and
+was reaped. Output held only statuses, sizes and equality booleans. No real
+credential, routing, Session or global trust setting changed.
+
+This rejects copied-access staging as an established escape from the replacement
+counterexamples. No promotion or transaction experiment followed; creation itself
+failed. It does not establish that every explicit-access creation is impossible.
+The supported writer remains unresolved; no product choice has been relaxed.
+Reproducible evidence is preserved in Git blobs: C source
+`1059c9ed006003509adf938405870afc3b0cc4a9`, Python runner
+`b80bb3edc52b65f7fd2d1585a249d40b744bad9d`, JSON results
+`23c5b26bbcbea7af1c2334eb89b4571dd6202938`. Restore them as `probe.c`, `run.py`
+and `results.json` in one disposable directory; compile with
+`clang -Wno-deprecated-declarations probe.c -framework Security -framework CoreFoundation -o probe`,
+then run `uv run python run.py`.
+
 ## Remaining implementation and acceptance
 
 1. **This slice:** prove a supported writer's encoding, access and failure preservation, then
@@ -246,4 +278,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — realign (2026-10-28): `git diff --check` and `lf context` pass; source, upstream and relevant parent/child memory agree with the plan. Notes only; no build/test rerun. Native writer proof, affected gate checks and Infrastructure's installed acceptance after supported reconnection remain pending.
+Check — kickoff (2026-10-28): copied-access creation probe executed both native sizes and returned `-25293`, preserving both originals; `git diff --check` and `lf context` pass. No production change or broad test rerun; writer proof, affected gate checks and Infrastructure's installed acceptance after supported reconnection remain pending.

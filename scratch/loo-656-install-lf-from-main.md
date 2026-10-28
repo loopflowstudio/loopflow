@@ -189,4 +189,4 @@ Check (2026-10-28, top-3 pursue): 8 focused `store::migrations` tests (refusals,
 
 Check (2026-10-28, implement): `lf self install reader-catalog` with an empty `HOME`/`LF_HOME` prints the five released floors and creates nothing.
 
-Check (2026-10-28, compress passes): `store::migrations::tests::a_candidate_opens…` passes, clippy lib+tests and `cargo fmt --check` clean; later passes trimmed doc comments only.
+Check (2026-10-28, compress passes, rechecked at 9cf512c1f): `store::migrations::tests::a_candidate_opens…` passes, clippy lib+tests and `cargo fmt --check` clean.

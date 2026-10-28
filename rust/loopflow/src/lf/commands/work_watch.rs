@@ -59,9 +59,6 @@ pub struct WorkFrame {
     pub sequence: u64,
     pub answers: Option<u64>,
     pub home: String,
-    /// The preview copy directory this build's drafts run on; `null` on the
-    /// shared store.
-    pub copy: Option<String>,
     /// The store revisions this frame was read at; `null` before a store exists.
     pub revisions: Option<StoreRevisions>,
     /// Why this part could not be read. Its body is then `null`.
@@ -347,7 +344,6 @@ fn lock(shared: &Shared) -> MutexGuard<'_, Mailbox> {
 #[derive(Debug, Clone)]
 struct Origin {
     home: String,
-    copy: Option<String>,
 }
 
 fn enqueue(
@@ -362,7 +358,6 @@ fn enqueue(
         sequence: mailbox.sequence,
         answers: mailbox.answers,
         home: origin.home.clone(),
-        copy: origin.copy.clone(),
         // Activity uses a separate OS/process reader, outside the Work snapshot.
         revisions: if matches!(content, WorkContent::Activity(_)) {
             None
@@ -951,13 +946,6 @@ pub(super) fn run(watch: bool) -> Result<()> {
             .unwrap_or(home)
             .to_string_lossy()
             .into_owned(),
-        copy: crate::store::copy::selected().map(|database| {
-            database
-                .parent()
-                .expect("copy database has a directory")
-                .to_string_lossy()
-                .into_owned()
-        }),
     };
     if watch {
         // Every reading asks Git the same questions about the same checkouts.
@@ -1199,7 +1187,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("released.db");
         let conn = rusqlite::Connection::open(&database).unwrap();
-        crate::store::migrations::apply_before_current_draft(&conn, "task_paused");
+        crate::store::migrations::apply_before_migration(&conn, "task_paused");
         let task = crate::durable::TaskId::new();
         let fixture = include_str!("../../../tests/fixtures/migrations/work_stream_released.sql")
             .replace("{wave}", crate::id::WaveId::new().as_str())
@@ -1207,7 +1195,7 @@ mod tests {
             .replace("{task}", task.as_str())
             .replace("{repo}", directory.path().to_str().unwrap());
         conn.execute_batch(&fixture).unwrap();
-        crate::store::migrations::upgrade_from_draft(&conn, "task_paused");
+        crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
         conn.execute_batch("ALTER TABLE tasks DROP COLUMN paused")
             .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();

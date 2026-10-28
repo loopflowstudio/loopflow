@@ -4,7 +4,6 @@
     "sequence": 1,
     "answers": null,
     "home": "/Users/fixture/.lf",
-    "copy": null,
     "revisions": {
       "planning": 911,
       "sessions": 402,
@@ -209,7 +208,6 @@
     "sequence": 2,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "copy": null,
     "revisions": {
       "planning": 911,
       "sessions": 403,
@@ -229,7 +227,6 @@
     "sequence": 3,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "copy": null,
     "revisions": {
       "planning": 911,
       "sessions": 403,
@@ -245,7 +242,6 @@
     "sequence": 4,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "copy": null,
     "revisions": {
       "planning": 911,
       "sessions": 403,
@@ -274,7 +270,6 @@
     "sequence": 5,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "copy": null,
     "revisions": null,
     "unavailable": null,
     "body": {
@@ -288,7 +283,6 @@
     "sequence": 6,
     "answers": 7,
     "home": "/Users/fixture/.lf",
-    "copy": null,
     "revisions": {
       "planning": 911,
       "sessions": 403,
@@ -309,7 +303,6 @@
     "sequence": 7,
     "answers": 8,
     "home": "/Users/fixture/.lf",
-    "copy": "/Users/fixture/.lf/copies/3f2a9c1b",
     "revisions": {
       "planning": 912,
       "sessions": 403,
@@ -339,7 +332,6 @@
     "sequence": 8,
     "answers": 7,
     "home": "/home",
-    "copy": null,
     "revisions": null,
     "unavailable": null,
     "part": "peer_planning",
@@ -352,7 +344,6 @@
     "sequence": 9,
     "answers": 8,
     "home": "/home",
-    "copy": null,
     "revisions": {
       "planning": 912,
       "sessions": 17,
@@ -368,7 +359,6 @@
     "sequence": 10,
     "answers": 8,
     "home": "/Users/fixture/.lf",
-    "copy": null,
     "revisions": {
       "planning": 912,
       "sessions": 403,

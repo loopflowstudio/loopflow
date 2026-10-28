@@ -919,8 +919,6 @@ struct DTOFixtureTests {
         #expect(peers.repo == "/src/loopflow")
         #expect(peers.destinations.isEmpty)
         #expect(frames[0].answers == nil)
-        #expect(frames[0].copy == nil)
-        #expect(frames[6].copy == "/Users/fixture/.lf/copies/3f2a9c1b")
         #expect(frames[1].answers == 7)
         #expect(frames[0].revisions?.planning == 911)
         #expect(frames[4].revisions == nil)
@@ -957,7 +955,7 @@ struct DTOFixtureTests {
         let page = try #require(frames[1].wire?.sessionPage)
         #expect(try RegistryQuery.decode(SessionPage.self, from: page).next == nil)
 
-        for field in ["answers", "copy"] {
+        for field in ["answers"] {
             var missing = lines[0]
             missing.removeValue(forKey: field)
             #expect(throws: (any Error).self) {

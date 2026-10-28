@@ -525,11 +525,6 @@ pub enum Commands {
         #[arg(long)]
         task: Option<String>,
     },
-    /// Create and use an offline, isolated development data clone (macOS)
-    Clone {
-        #[command(subcommand)]
-        cmd: crate::data_clone::CloneCommand,
-    },
     /// Select repositories for the Machine-local portfolio
     Portfolio {
         #[command(subcommand)]

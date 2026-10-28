@@ -49,12 +49,12 @@ mod tests {
     fn project_ensure_migration_keeps_one_pending_transition_and_settled_history() {
         let conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        crate::store::migrations::apply_before_current_draft(&conn, "project_readiness");
+        crate::store::migrations::apply_before_migration(&conn, "project_readiness");
         conn.execute_batch(
             "INSERT INTO waves(id,name,repo,created_at) VALUES('w','product','/repo',1)",
         )
         .unwrap();
-        conn.execute_batch(&crate::store::migrations::current_draft_sql(
+        conn.execute_batch(&crate::store::migrations::migration_section_sql(
             "project_readiness",
         ))
         .unwrap();
@@ -67,7 +67,7 @@ mod tests {
             )
             .unwrap()
         {
-            conn.execute_batch(&crate::store::migrations::current_draft_sql(
+            conn.execute_batch(&crate::store::migrations::migration_section_sql(
                 "store_revisions",
             ))
             .unwrap();

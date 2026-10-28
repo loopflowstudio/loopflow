@@ -388,14 +388,14 @@ fn scopes_graph_downward_and_idle_peers_keep_independent_pending_receipts() {
 
 #[test]
 fn migration_preserves_released_event_copies_and_planning_receipts() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "session_steers");
+    apply_before_migration(&conn, "session_steers");
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/session_steers_released.sql"
     ))
     .unwrap();
-    conn.execute_batch(&current_draft_sql("session_steers"))
+    conn.execute_batch(&migration_section_sql("session_steers"))
         .unwrap();
     let body: String = conn
         .query_row(
@@ -618,16 +618,16 @@ fn activation_never_moves_an_existing_selection() {
 
 #[test]
 fn dropping_the_adapter_thread_keeps_capabilities() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "drop_steer_adapter_thread");
+    apply_before_migration(&conn, "drop_steer_adapter_thread");
     conn.execute_batch(
         "INSERT INTO processes(id,trace_id,started_at) VALUES('agent','fixture',1);
          INSERT INTO steer_adapters(agent_process_id,capability,provider_thread,created_at,activated_at)
          VALUES('agent','capability','native',1,2);",
     )
     .unwrap();
-    conn.execute_batch(&current_draft_sql("drop_steer_adapter_thread"))
+    conn.execute_batch(&migration_section_sql("drop_steer_adapter_thread"))
         .unwrap();
     let kept: (String, i64) = conn
         .query_row(

@@ -1,0 +1,80 @@
+# LOO-656: install lf from main
+
+Status: accepted direction (Jack, 2026-10-27, Task description); implementation
+decisions below were made headless during `implement` and are recorded in
+`questions.md` where reversible.
+
+## Outcome
+
+`lf self install --main` installs the CI build of the newest green main commit and
+migrates `~/.lf` forward. A worktree build whose migrations the store already has
+runs its own code on the live store. Main never carries a "draft".
+
+## Model
+
+- **Released history is frozen.** `migration_catalog.rs` keeps the
+  `<ver>.<NNN>_release` entries and their reader floors byte for byte. Nothing
+  appends to it again.
+- **New migrations are `src/store/migrations/<slug>.sql`.** The slug, chosen in
+  the PR, is the ledger `version`. One per Task, edited in place until merge.
+- **Order is main's first-parent history**, computed by `build.rs`:
+  `git log origin/main --first-parent --diff-merges=first-parent --diff-filter=A`
+  over the migrations directory. Files in the tree that `origin/main` never added
+  are **unmerged**; they sort after merged ones by name. Every build of a main
+  commit computes the same order, so ids exist only for bytes on origin/main.
+- **Breaking is proven, not declared.** `build.rs` applies each slug migration over
+  the schema before it (the released chain, then earlier slugs) and proves it
+  additive: old objects unchanged, tables only gain nullable/defaulted columns,
+  new objects are tables or non-unique indexes, no statement writes an existing
+  table. `-- breaks: <reason>` forces breaking.
+- **Floors are membership.** Each slug migration's floor is the version of the
+  newest breaking migration at or before it (the last released migration seeds
+  it). The ledger's `reader_floor` stores it. A binary admits a store holding
+  unknown rows only when every unknown row's floor is a version it knows, and the
+  objects it knows survive (`validate_schema_within`). Released rows keep release
+  floors, so ≤0.14.19 still reads a store until the first slug migration lands.
+- **Who migrates `~/.lf/loopflow.db`.** Only the install switch
+  (`open_as_promotion_boundary`, under the promotion lock, after the in-transaction
+  backup). It refuses unmerged migrations. Ordinary opens validate and refuse a
+  pending migration with the fix (`lf self install --main`, or `LF_HOME` for
+  unmerged schema work). Any other path (`LF_HOME`) migrates itself, unmerged
+  included; a changed unmerged migration is a checksum mismatch that names a fresh
+  `LF_HOME` as the fix.
+- **No re-exec.** A build runs its own code on whatever home it selects.
+- **Install trust comes from source.** `decide` no longer reads a build-time
+  authority; it refuses unmerged pending migrations and incompatible stores.
+- **Per-green-main packages.** `packages-main.yml` runs after CI succeeds on main
+  and uploads `lf-<target>` artifacts; it replaces the nightly. `lf self install
+  --main` downloads the newest successful run's artifact with `gh`, then runs the
+  candidate's `install promote` (CLI only; the app still ships with releases).
+
+## Delete — do not maintain
+
+- Copy-on-draft: `store/copy.rs` except `snapshot()`; `copy::enter`/`selected`,
+  `~/.lf/copies/`, disk-cleanup of copies.
+- `lf clone`: `data_clone.rs`, `tests/data_clones.rs`, `enter_selected`,
+  read-only-session guards, Swift `LF_CLONE_ROOT`, `data_clones::` CI steps.
+- Drafts: `migration_drafts.rs`, embedded draft manifest, `draft_schema.json`,
+  `pending_migration_drafts`, Custom-Machine exact-schema rule
+  (`initialize_experimental_sqlite`, `validate_experimental_*`,
+  `IncompatibleDevelopment`), `--materialize-for-tests` +
+  `scripts/materialize_rust_tests.py`, release-cut canonicalization
+  (`scripts/canonicalize_migrations.py`, `lf release run`'s cut, BREAKING.md
+  generation from floors).
+- Authority split: `MigrationAuthority`, `LOOPFLOW_MIGRATION_AUTHORITY`,
+  validation-only refusals in `decide`/`may_apply_migrations`.
+- `installation::dispatch_default_cli` re-exec to the installed lf.
+- Nightly packages workflow (replaced by per-green-main packages).
+
+Keep: `LF_HOME` isolation, lf-world, released-schema seed fixtures, reader-floor
+tests, the Docker upgrade test, per-migration FK/JSON checks, backups.
+
+## Not in this change (Jack: design still open)
+
+Expand → wait 30 days → contract enforcement for destructive changes. Today a
+breaking slug migration simply raises the floor; install prints which migration
+locks older builds out.
+
+## Remaining work
+
+(updated as implementation proceeds)

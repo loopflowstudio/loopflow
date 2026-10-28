@@ -218,15 +218,15 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
 
 #[test]
 fn hardware_rented_before_spot_existed_reads_as_on_demand() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "rental_spot");
+    apply_before_migration(&conn, "rental_spot");
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/rental_spot_released.sql"
     ))
     .unwrap();
-    conn.execute_batch(&current_draft_sql("rental_spot"))
+    conn.execute_batch(&migration_section_sql("rental_spot"))
         .unwrap();
     for sql in [
         "SELECT template FROM ondemands",
@@ -240,15 +240,15 @@ fn hardware_rented_before_spot_existed_reads_as_on_demand() {
 
 #[test]
 fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "scope_tasks_capacity");
+    apply_before_migration(&conn, "scope_tasks_capacity");
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/scope_tasks_capacity_released.sql"
     ))
     .unwrap();
-    conn.execute_batch(&current_draft_sql("scope_tasks_capacity"))
+    conn.execute_batch(&migration_section_sql("scope_tasks_capacity"))
         .unwrap();
     let names: Vec<String> = conn
         .prepare("SELECT name FROM ondemands ORDER BY name")
@@ -266,15 +266,15 @@ fn runpod_rows_from_0_14_16_go_and_current_ones_stay() {
 
 #[test]
 fn fly_rows_from_0_14_17_go_and_the_rest_still_read() {
-    use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+    use crate::store::migrations::{apply_before_migration, migration_section_sql};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    apply_before_current_draft(&conn, "forget_fly_rentals");
+    apply_before_migration(&conn, "forget_fly_rentals");
     conn.execute_batch(include_str!(
         "../../../tests/fixtures/migrations/forget_fly_rentals_released.sql"
     ))
     .unwrap();
-    conn.execute_batch(&current_draft_sql("forget_fly_rentals"))
+    conn.execute_batch(&migration_section_sql("forget_fly_rentals"))
         .unwrap();
     let providers: Vec<String> = conn
         .prepare("SELECT provider FROM ondemands UNION ALL SELECT provider FROM rentals")

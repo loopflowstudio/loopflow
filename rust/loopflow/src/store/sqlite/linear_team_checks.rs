@@ -46,14 +46,14 @@ impl SqliteStore {
 mod tests {
     #[test]
     fn linear_on_demand_migration_retains_released_work() {
-        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "linear_team_checks");
+        apply_before_migration(&conn, "linear_team_checks");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/linear_team_checks_released.sql"
         ))
         .unwrap();
-        conn.execute_batch(&current_draft_sql("linear_team_checks"))
+        conn.execute_batch(&migration_section_sql("linear_team_checks"))
             .unwrap();
         let work: (String, String) = conn
             .query_row(

@@ -38,7 +38,7 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct BinaryInventory {
     /// The CLI ordinary launches run; `None` before a receipt-managed install.
     pub selected: Option<SelectedBinary>,
-    /// The oldest release that can open the store.
+    /// The migration a binary must know to open the store.
     pub store_floor: Option<String>,
     pub binaries: Vec<RunningBinary>,
 }
@@ -56,7 +56,7 @@ pub struct RunningBinary {
     pub version: Option<String>,
     /// Part of the selected artifact set, by path or content.
     pub selected: bool,
-    /// Below the store's reader floor: it fails every store open.
+    /// It does not know the store's reader floor, so it fails every store open.
     pub cannot_open_store: bool,
     pub processes: Vec<RunningLfProcess>,
 }
@@ -165,14 +165,13 @@ pub fn inventory() -> Result<BinaryInventory> {
         };
         (version, is_selected)
     });
-    for binary in &mut binaries {
-        binary.cannot_open_store = binary
-            .version
-            .as_deref()
-            .zip(store_floor.as_deref())
-            .is_some_and(|(version, floor)| {
-                crate::store::migrations::release_meets_floor(version, floor) == Some(false)
-            });
+    if store_floor.is_some() {
+        for binary in &mut binaries {
+            binary.cannot_open_store = binary
+                .path
+                .as_deref()
+                .is_some_and(|path| !binary_opens_store(path));
+        }
     }
     Ok(BinaryInventory {
         selected,
@@ -278,6 +277,25 @@ fn binary_version(path: &Path) -> Option<String> {
         return None;
     }
     parse_version(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Whether the binary reads the selected store, by its own read-only
+/// promotion preview; a binary that cannot answer is not judged.
+fn binary_opens_store(path: &Path) -> bool {
+    let mut command = Command::new(path);
+    command
+        .args(["self", "install", "preflight", "--json"])
+        .env_clear()
+        .env("LF_HOME", crate::store::lf_home_dir());
+    if let Some(home) = std::env::var_os("HOME") {
+        command.env("HOME", home);
+    }
+    let Ok(output) = crate::os_process::bounded_output(&mut command, VERSION_TIMEOUT) else {
+        return true;
+    };
+    serde_json::from_slice::<serde_json::Value>(&output.stdout).map_or(true, |preview| {
+        preview["compatibility"]["kind"] != "incompatible"
+    })
 }
 
 fn parse_version(output: &str) -> Option<String> {
@@ -696,17 +714,6 @@ mod tests {
             Some("0.14.16+e9b2c2eac")
         );
         assert_eq!(parse_version("error: unexpected argument"), None);
-    }
-
-    #[test]
-    fn a_release_below_the_store_floor_cannot_open_it() {
-        use crate::store::migrations::release_meets_floor;
-        assert_eq!(release_meets_floor("0.14.15", "0.14.16"), Some(false));
-        assert_eq!(
-            release_meets_floor("0.14.16+e9b2c2eac", "0.14.16"),
-            Some(true)
-        );
-        assert_eq!(release_meets_floor("dev", "0.14.16"), None);
     }
 
     #[tokio::test]

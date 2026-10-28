@@ -10,19 +10,6 @@ import Testing
 
 @Suite("Local wave launcher")
 struct LocalWaveAgentLauncherTests {
-    @Test("clone terminals retain the isolated helper and provider selection")
-    func cloneEnvironmentStaysIsolated() {
-        let selected = [
-            "LF_CLONE_ROOT": "/tmp/clone", "LF_HOME": "/tmp/clone",
-            "LF_BIN": "/tmp/clone/bin/lf", "HOME": "/tmp/clone/home",
-            "CODEX_HOME": "/tmp/clone/home/.codex",
-            "CLAUDE_CONFIG_DIR": "/tmp/clone/home/.claude",
-            "PATH": "/tmp/clone/bin:/usr/bin:/bin",
-        ]
-        let environment = GUIProcessEnvironment.enriched(selected)
-        for (key, value) in selected { #expect(environment[key] == value) }
-    }
-
     // MARK: - Command construction
 
     @Test("development launcher preserves the selected Machine registry")
@@ -97,8 +84,8 @@ struct LocalWaveAgentLauncherTests {
 
     // MARK: - Bundled binary boundary
 
-    @Test("a clone selects its own helper before bundled helpers")
-    func cloneSelectsPinnedHelper() throws {
+    @Test("a private home selects its explicit helper before the bundled one")
+    func privateHomeSelectsExplicitHelper() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let bin = directory.appendingPathComponent("bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
@@ -106,7 +93,7 @@ struct LocalWaveAgentLauncherTests {
         let helper = bin.appendingPathComponent("lf")
         try Data("#!/bin/sh\nexit 0\n".utf8).write(to: helper)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
-        let environment = ["LF_CLONE_ROOT": directory.path, "LF_HOME": directory.path, "LF_BIN": helper.path]
+        let environment = ["LF_HOME": directory.path, "LF_BIN": helper.path]
         #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: environment) == helper.path)
         try FileManager.default.removeItem(at: helper)
         #expect(throws: LocalLfError.self) {
@@ -117,9 +104,7 @@ struct LocalWaveAgentLauncherTests {
     @Test("a missing bundled helper never falls through to PATH")
     func missingBundledHelperFails() {
         #expect {
-            try LocalWaveAgentLauncher.controlLfPath(
-                bundled: nil
-            )
+            try LocalWaveAgentLauncher.controlLfPath(bundled: nil, environment: [:])
         } throws: { error in
             guard error is LocalLfError else { return false }
             return error.localizedDescription.contains("missing its executable bundled lf helper")
@@ -129,7 +114,7 @@ struct LocalWaveAgentLauncherTests {
 
     @Test("the app selects its bundled helper")
     func appUsesBundledHelper() throws {
-        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh")) == "/bin/sh")
+        #expect(try LocalWaveAgentLauncher.controlLfPath(bundled: URL(fileURLWithPath: "/bin/sh"), environment: [:]) == "/bin/sh")
     }
 
     #if !SWIFT_PACKAGE

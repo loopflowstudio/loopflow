@@ -1390,10 +1390,6 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> std::process::ExitCode {
-    if let Err(error) = loopflow::store::copy::enter() {
-        eprintln!("Error: {error}");
-        return std::process::ExitCode::FAILURE;
-    }
     loopflow::transport::initialize();
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {
@@ -1458,7 +1454,6 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
 }
 
 fn run() -> anyhow::Result<()> {
-    loopflow::data_clone::enter_selected()?;
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Validate addressed commands once, before help, repository lookup, or admission.
     // A rejected destination must not create even a fallback Process on that Machine.
@@ -1496,7 +1491,7 @@ fn run() -> anyhow::Result<()> {
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
         init_tracing(false);
         if !preview {
-            loopflow::installation::dispatch_default_cli()?;
+            loopflow::installation::canonicalize_selected_home()?;
             journal::admit_process(&std::env::current_dir()?, &raw_args);
         }
         ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
@@ -1546,12 +1541,6 @@ fn run() -> anyhow::Result<()> {
     if cli.agent.is_some() && !cli.may_launch_agent() {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }
-    // Clone creation must reach an incompatible source read-only, without
-    // admitting a Process or forwarding the development binary to an install.
-    if let Some(Commands::Clone { cmd }) = &cli.command {
-        journal::mark_effect_free_read();
-        return loopflow::data_clone::run(cmd);
-    }
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
     let bypasses_installation_startup_gate = matches!(
@@ -1564,9 +1553,7 @@ fn run() -> anyhow::Result<()> {
                 }
         })
     );
-    if !bypasses_installation_startup_gate {
-        loopflow::installation::dispatch_default_cli()?;
-    }
+    loopflow::installation::canonicalize_selected_home()?;
     // Only an explicit selection becomes an inherited override. Task and
     // repository defaults are filled later and never acquire this precedence.
     let selected_agent = loopflow::config::agent_override().or(cli.agent.clone());
@@ -2512,7 +2499,6 @@ fn execute_command(
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
-        Some(Commands::Clone { .. }) => unreachable!("clone dispatch precedes admission"),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
             in_directory_runtime(args, |repo| match binding {

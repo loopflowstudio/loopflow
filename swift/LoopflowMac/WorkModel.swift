@@ -1104,8 +1104,6 @@ final class WorkModel {
     @ObservationIgnored private var workObservation: WorkObservation?
     private var workMachine: String?
     private var workDataDirectory: String?
-    /// The preview copy the local lf reads, when this build carries unreleased drafts.
-    private(set) var previewCopy: String?
     @ObservationIgnored private var workOpened = ContinuousClock.now
     @ObservationIgnored private var nextRequestId = 0
     @ObservationIgnored private var sentScope: WorkScope?
@@ -1449,9 +1447,7 @@ final class WorkModel {
 
     private func apply(_ frame: WorkFrame) async {
         let part = frame.content.part
-        if previewCopy != frame.copy { previewCopy = frame.copy }
-        // A preview copy is where the data lives, so it is the data identity.
-        let dataDirectory = frame.copy ?? frame.home
+        let dataDirectory = frame.home
         if case .heartbeat = frame.content {
             // Heartbeats can carry a stored-definition commit whose planning
             // body stayed equal. They do not establish a new Machine identity.

@@ -112,7 +112,7 @@ pub struct ArtifactSet {
     pub source: InstallSource,
     pub source_revision: String,
     pub source_identity: String,
-    /// An unreleased build's provenance, e.g. `hotfix e9b2c2eac on v0.14.16`.
+    /// An unreleased build's provenance, e.g. `build e9b2c2eac on v0.14.16`.
     pub build_label: Option<String>,
     pub content_sha256: String,
     pub artifacts: Vec<ArtifactIdentity>,
@@ -783,56 +783,14 @@ pub(crate) fn is_app_helper(path: &Path) -> bool {
     matches!(tail[..], [Some("lf"), Some("MacOS"), Some("Contents"), Some(bundle)] if bundle.ends_with(".app"))
 }
 
-/// Use the installed CLI for the main Machine. A Desktop helper keeps itself,
-/// private Homes keep their caller, and so does a draft build, which works on
-/// its own copy of the store.
-pub fn dispatch_default_cli() -> Result<()> {
-    if crate::store::copy::selected().is_some() {
-        return Ok(());
-    }
+/// A build runs its own code on whichever home it selects. A private home
+/// reaches children as its canonical path.
+pub fn canonicalize_selected_home() -> Result<()> {
     if crate::store::custom_home_selected() {
         let home = crate::store::canonicalize_with_missing_tail(&crate::store::lf_home_dir())?;
         std::env::set_var("LF_HOME", home);
-        return Ok(());
     }
-    // A build with drafts works on its own copy of the shared store; the
-    // installed lf cannot read that copy.
-    if crate::store::copy::selected().is_some() {
-        return Ok(());
-    }
-    let current = fs::canonicalize(std::env::current_exe()?)?;
-    if is_app_helper(&current) {
-        return Ok(());
-    }
-    std::env::remove_var("LF_BIN");
-    let destination = if let Some(cli) = installed_cli(&root()?)? {
-        cli.verify()?;
-        cli.path
-    } else {
-        let installed = account_home()?.join(".local/bin/lf");
-        match fs::canonicalize(&installed) {
-            Ok(path) => path,
-            Err(error) if error.kind() == ErrorKind::NotFound && crate::build_info::provenance().is_release() => return Ok(()),
-            Err(error) if error.kind() == ErrorKind::NotFound => return Err(anyhow!(
-                "no installed lf; install a published release or select an explicit disposable LF_HOME for this build"
-            )),
-            Err(error) => return Err(error.into()),
-        }
-    };
-    if current == destination {
-        return Ok(());
-    }
-    let main_home = account_home()?.join(".lf");
-    let mut command = reexec(&destination);
-    command.env("LF_HOME", &main_home);
-    #[cfg(unix)]
-    {
-        Err(command.exec()).context("run installed lf")
-    }
-    #[cfg(not(unix))]
-    {
-        std::process::exit(command.status()?.code().unwrap_or(1));
-    }
+    Ok(())
 }
 
 pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
@@ -946,17 +904,6 @@ pub(crate) fn installed_artifacts(root: &Path) -> Result<Option<ArtifactSet>> {
         InstallSource::Published => active.selection.artifact_set,
         InstallSource::Development => active.published_fallback,
     }))
-}
-
-pub(crate) fn installed_cli(root: &Path) -> Result<Option<ArtifactIdentity>> {
-    let Some(artifacts) = installed_artifacts(root)? else {
-        return Ok(None);
-    };
-    artifacts
-        .artifact(&ArtifactRole::Cli)
-        .cloned()
-        .map(Some)
-        .context("installed CLI is missing")
 }
 
 /// The install selection ordinary startup should use while a switch receipt is
@@ -1666,25 +1613,24 @@ mod tests {
     fn ordinary_cli_uses_published_artifacts_through_legacy_development_selection() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("authority");
-        assert!(super::installed_cli(&root).unwrap().is_none());
+        let installed_cli = |root: &std::path::Path| {
+            super::installed_artifacts(root)
+                .unwrap()
+                .and_then(|set| set.artifact(&ArtifactRole::Cli).cloned())
+        };
+        assert!(installed_cli(&root).is_none());
         let published = selection(directory.path(), "published", InstallSource::Published);
         let development = selection(directory.path(), "development", InstallSource::Development);
         let expected = published.artifact_set.artifact(&ArtifactRole::Cli).unwrap();
         for selected in [published.clone(), development.clone()] {
             let active = active(selected, published.artifact_set.clone());
             write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
-            assert_eq!(
-                super::installed_cli(&root).unwrap().as_ref(),
-                Some(expected)
-            );
+            assert_eq!(installed_cli(&root).as_ref(), Some(expected));
         }
         let next = selection(directory.path(), "next", InstallSource::Published);
         let receipt = switch(development, next, published.artifact_set.clone());
         write_switch(&root, &receipt).unwrap();
-        assert_eq!(
-            super::installed_cli(&root).unwrap().as_ref(),
-            Some(expected)
-        );
+        assert_eq!(installed_cli(&root).as_ref(), Some(expected));
     }
 
     #[test]

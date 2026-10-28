@@ -451,13 +451,7 @@ fn seed_previous_release_task_pr(home: &Path) {
         )
         .expect("read previous release frontier");
     assert_eq!(frontier, "0.12.8.001_release");
-    migrations::apply_sqlite(&connection)
-        .expect("apply published migrations to historical fixture");
-    for draft in loopflow::build_info::migration_draft_manifest() {
-        connection
-            .execute_batch(draft.sql)
-            .expect("apply finished draft to historical fixture");
-    }
+    migrations::apply_sqlite(&connection).expect("apply migrations to historical fixture");
     drop(connection);
 
     let store = SqliteStore::new(&database).expect("open migrated previous release store");

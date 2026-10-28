@@ -244,9 +244,6 @@ pub(crate) fn resolve_lf_binary() -> Result<PathBuf> {
             .filter(|value| !value.is_empty())
             .or_else(|| std::env::var_os("CARGO_BIN_EXE_lf"))
             .map(PathBuf::from)
-    } else if crate::store::copy::selected().is_some() {
-        // The copy belongs to the build that made it: children run this binary.
-        Some(std::env::current_exe()?)
     } else if let Some(helper) = crate::installation::desktop_helper() {
         Some(helper)
     } else {
@@ -453,21 +450,6 @@ mod tests {
     use super::{lf_session_shell_command, terminate_process_group};
 
     #[test]
-    fn a_draft_build_on_the_default_home_keeps_itself_and_its_copy() {
-        let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
-        // Only a build carrying drafts selects a copy; without one the default
-        // home belongs to the installed lf, which this test must not exec.
-        if crate::store::copy::selected().is_none() {
-            return;
-        }
-        crate::installation::dispatch_default_cli().unwrap();
-        assert_eq!(
-            super::resolve_lf_binary().unwrap(),
-            std::env::current_exe().unwrap()
-        );
-    }
-
-    #[test]
     fn private_home_keeps_explicit_binary_selection() {
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
@@ -476,7 +458,7 @@ mod tests {
         let binary = std::env::current_exe().unwrap();
         std::env::set_var("LF_BIN", &binary);
         assert_eq!(super::resolve_lf_binary().unwrap(), binary);
-        crate::installation::dispatch_default_cli().unwrap();
+        crate::installation::canonicalize_selected_home().unwrap();
         std::env::set_var("LF_BIN", "/missing/selected/lf");
         assert!(super::resolve_lf_binary().is_err());
     }

@@ -2,7 +2,8 @@
 
 2026-10-27. Accepted outcome: Jack Heart's Task brief and comment
 `ab839681-400b-44b9-9c3e-7b32b392dadc` authorize repair through merge.
-Implementation design: selected here; implementation and delivery remain open.
+Implementation and focused verification are complete. Gate and delivery remain
+with the selected Graph.
 
 ## Problem and demo
 
@@ -123,32 +124,34 @@ The deletion inventory and end-to-end fixture specifically cover these cases.
   No second cleanup policy, publication-history table, fallback, compatibility
   adapter or silent-success branch is part of this change.
 
-## This slice and remaining work
+## Implementation and remaining work
 
 One indivisible hotfix: classifier deletion, safe removal, caller cutover,
-regression coverage and documentation land together.
+regression coverage and documentation land together. The code now removes
+age/absence authorization and carries the exact PR-matched head from listing
+through the checkout lease to non-force removal and conditional local ref deletion.
+Explicit disposal and the two owned release cleanup sites retain force semantics.
+`release_lock_tests.rs` also calls the removal primitive; its fixtures now name
+force explicitly. `Listing.pull_requests_known` was exclusive age-policy plumbing
+and is removed. No schema or wire DTO changed.
 
-1. Replace unsafe regression expectations; remove age/absence policy and its
-   callers. Focused test: `cargo test -p loopflow --test integration worktree_tests::`.
-2. Carry observed head to execution; use the existing lease and expected-head
-   mechanisms, explicit force semantics and non-force pruning. Cover changed
-   head/dirty candidates and preserve explicit `wt delete --force` behavior.
-   Removal callers are `ensure_agent_worktree`, `ops/wt.rs::apply_delete`, the
-   two owned release cleanup sites, and the Git helper test; retain their
-   existing explicit disposal behavior and cover any changed release boundary.
-3. Add real-CLI fixtures with local bare origin and deterministic `gh` answers,
-   following `wt_prune_branches.rs`'s GitHub-URL/local-transport fixture. Exercise
-   both normal/squash merged exact heads, closed heads, added commits, unavailable
-   evidence and existing protection boundaries. No live GitHub mutation.
-4. Extend `python/tests/test_disk_cleanup.py` to run the mechanical script with
-   the built candidate for real `wt prune` operations. Isolate HOME/LF_HOME,
-   account-home resolution and source roots through the existing test harness;
-   pin LF_BIN inside the network boundary. Only external provider/cache tools are
-   stand-ins. The current stubbed-lf unit tests remain useful for Home protections.
-5. Publish and merge through the selected Graph. The Infrastructure operator
+Portable real-CLI fixtures cover normal/squash merges, closed PRs, moved heads,
+missing/malformed/empty evidence, dirty/untracked files, persistent checkouts,
+unfinished Tasks, unreadable ownership, failed process inspection and a live cwd.
+Removal tests cover branch/head/file changes, an occupied lease, conditional local
+ref deletion and explicit force. The macOS script fixture executes the built CLI
+through ordinary pruning, build cleanup, branch pruning and a second run.
+Its temporary `getpwuid_r` interposer redirects OS-account reads as well as HOME;
+this is a source-fixture proof, not installed acceptance. Existing script tests
+continue to own database/sidecar/account-home/newest-backup protections.
+
+Remaining:
+
+1. Gate runs the affected suites below once, including the release-lock callers.
+2. Publish and merge through the selected Graph. The Infrastructure operator
    owns patch publication/installation, installed disposable acceptance, then
-   restoration of only the existing hourly entry. Merge alone is not installed
-   acceptance; no competing release publisher or schedule change.
+   restoration of only the existing hourly entry. No competing release publisher
+   or schedule change is part of implementation.
 
 ## Done when
 
@@ -167,7 +170,7 @@ protections continue to pass.
 Headless gate commands, with inherited LF_* unset and stdin from `/dev/null`:
 
 ```sh
-uv run python scripts/test.py --reuse-passing --rust-filter 'test(git::worktrees::) | test(worktree_tests::) | test(ops::wt::) | test(ops::branch_prune::) | test(wt_prune_branches::) | test(build_cleanup::)'
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(git::worktrees::) | test(worktree_tests::) | test(ops::wt::) | test(ops::branch_prune::) | test(wt_prune_branches::) | test(build_cleanup::) | test(release_lock_tests::) | test(git::tests::local_branch_deletion_retains_a_new_head)'
 uv run pytest python/tests/test_disk_cleanup.py
 ```
 
@@ -195,4 +198,4 @@ redesign, Git gc/prune recovery operations and account configuration are exclude
 Ignored build-output retention remains governed by the existing script contract;
 this hotfix does not redefine ignored files as source or claim they are backed up.
 
-Check: 2026-10-27 `uv run python` disposable Git probe — passed unpublished-head and untracked-file preservation premises; observed ignored-only removal. No production cleanup or implementation tests run in kickoff.
+Check: 2026-10-27 `cargo test` filters `wt_prune_branches::worktree_prune` (integration), `git::worktrees::tests::prune_`, `git::tests::local_branch_deletion_retains_a_new_head`, `ops::wt::tests::` (lib) — 13 passed; `uv run pytest python/tests/test_disk_cleanup.py::test_real_cleanup_preserves_unpublished_work_and_removes_finished_checkouts -q` — passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `uv run ruff check python/tests/test_disk_cleanup.py` — passed. Gate owns affected suites; the operator owns installed acceptance.

@@ -1,9 +1,9 @@
 use crate::error::GitError;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::{
-    current_branch, delete_local_branch, get_default_branch, has_commits_beyond, is_clean,
-    rev_parse, stash_including_untracked, stash_pop, worktree_add, worktree_add_inheriting,
-    worktree_remove, WorktreeBranch,
+    acquire_worktree_lease, current_branch, delete_local_branch_at, get_default_branch,
+    has_commits_beyond, is_clean, rev_parse, stash_including_untracked, stash_pop, worktree_add,
+    worktree_add_inheriting, worktree_remove, worktree_remove_owned, WorktreeBranch,
 };
 use crate::naming::git_user;
 use serde::{Deserialize, Serialize};
@@ -90,28 +90,21 @@ pub enum PullRequestState {
 #[serde(rename_all = "kebab-case")]
 pub enum WorktreePruneReason {
     Merged,
-    SquashMerged,
     ClosedPullRequest,
-    RemoteGone,
-    Stale,
-    Terminal,
 }
 
 impl WorktreePruneReason {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Merged => "merged",
-            Self::SquashMerged => "squash-merged",
             Self::ClosedPullRequest => "closed-pr",
-            Self::RemoteGone => "remote-gone",
-            Self::Stale => "stale",
-            Self::Terminal => "terminal",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreePruneTarget {
+    pub head: String,
     pub branch: Option<String>,
     pub path: PathBuf,
     pub reason: WorktreePruneReason,
@@ -129,23 +122,6 @@ pub struct WorktreePruneReport {
     pub removed: Vec<WorktreePruneTarget>,
     pub retained_dirty: Vec<PathBuf>,
     pub failed: Vec<WorktreePruneFailure>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WorktreePrunePolicy {
-    stale_after: Option<Duration>,
-}
-
-impl WorktreePrunePolicy {
-    pub fn manual() -> Self {
-        Self {
-            stale_after: Some(Duration::from_secs(7 * 24 * 60 * 60)),
-        }
-    }
-
-    pub fn automatic() -> Self {
-        Self { stale_after: None }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1288,7 +1264,6 @@ pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
             local_git,
         )
     });
-    let pull_requests_known = remote.pull_requests.is_some();
     apply_network_enrichment(
         &mut worktrees,
         &default_branch,
@@ -1298,7 +1273,7 @@ pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     Ok(Listing {
         default_branch,
         worktrees,
-        pull_requests_known,
+        branches,
         local_git,
         remote: remote_time,
         remote_outcome: remote.outcome,
@@ -1311,9 +1286,8 @@ pub struct Listing {
     /// The branch every worktree was compared against.
     pub default_branch: String,
     pub worktrees: Vec<WorktreeState>,
-    /// False when GitHub was applicable but unavailable: an absent
-    /// `pull_request` then proves nothing about an open PR.
-    pub pull_requests_known: bool,
+    // The same heads used to match remote PR evidence, retained for removal.
+    branches: HashMap<String, LocalBranch>,
     /// Wall time of the local Git reads, which run beside the remote.
     pub local_git: Duration,
     /// Wall time until the remote answered, failed, or was stopped.
@@ -1330,87 +1304,11 @@ fn worktree_prune_reason(state: &WorktreeState) -> Option<WorktreePruneReason> {
     if state.dirty {
         return None;
     }
-    if state.merged {
-        Some(WorktreePruneReason::Merged)
-    } else if state.squash_merged && !state.fresh {
-        Some(WorktreePruneReason::SquashMerged)
-    } else if state.pull_request == Some(PullRequestState::Closed) {
-        Some(WorktreePruneReason::ClosedPullRequest)
-    } else if state.remote_gone {
-        Some(WorktreePruneReason::RemoteGone)
-    } else {
-        None
+    match state.pull_request {
+        Some(PullRequestState::Merged) => Some(WorktreePruneReason::Merged),
+        Some(PullRequestState::Closed) => Some(WorktreePruneReason::ClosedPullRequest),
+        _ => None,
     }
-}
-
-fn abandoned_prune_reason(
-    state: &WorktreeState,
-    pull_requests_known: bool,
-    stale: bool,
-) -> Option<WorktreePruneReason> {
-    (pull_requests_known
-        && state.pull_request != Some(PullRequestState::Open)
-        && !state.dirty
-        && stale)
-        .then_some(WorktreePruneReason::Stale)
-}
-
-fn branch_is_stale(
-    repo: &Path,
-    branch: &str,
-    stale_after: Duration,
-    now: SystemTime,
-) -> Result<bool, GitError> {
-    let reflog = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args([
-            "reflog",
-            "show",
-            "-1",
-            "--date=unix",
-            "--format=%gd",
-            branch,
-        ])
-        .output()?;
-    let reflog_seconds = if reflog.status.success() {
-        let raw = String::from_utf8_lossy(&reflog.stdout);
-        raw.trim()
-            .rsplit_once("@{")
-            .and_then(|(_, suffix)| suffix.strip_suffix('}'))
-            .and_then(|seconds| seconds.parse::<u64>().ok())
-    } else {
-        None
-    };
-
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["show", "-s", "--format=%ct", branch])
-        .output()?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: format!("git show -s --format=%ct {branch}"),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
-    let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let commit_seconds = raw
-        .parse::<u64>()
-        .map_err(|error| GitError::CommandFailed {
-            command: format!("git show -s --format=%ct {branch}"),
-            stderr: format!("invalid commit timestamp '{raw}': {error}"),
-        })?;
-    let activity_seconds = reflog_seconds
-        .map(|seconds| seconds.max(commit_seconds))
-        .unwrap_or(commit_seconds);
-    let active_at = SystemTime::UNIX_EPOCH
-        .checked_add(Duration::from_secs(activity_seconds))
-        .ok_or_else(|| GitError::CommandFailed {
-            command: format!("git reflog show {branch}"),
-            stderr: format!("branch activity timestamp '{activity_seconds}' is out of range"),
-        })?;
-    Ok(now.duration_since(active_at).unwrap_or_default() >= stale_after)
 }
 
 fn prune_stale_worktree_metadata(repo: &Path) -> Result<(), GitError> {
@@ -1433,10 +1331,20 @@ fn remove_worktree_target(
     default_branch: &str,
     target: &WorktreePruneTarget,
 ) -> Result<(), GitError> {
-    worktree_remove(repo, &target.path)?;
+    let lease = acquire_worktree_lease(repo, &target.path, "worktree pruning")?;
+    if current_branch(&target.path)? != target.branch
+        || rev_parse(&target.path, "HEAD")? != target.head
+        || !is_clean(&target.path)?
+    {
+        return Err(GitError::CommandFailed {
+            command: "prune worktree".to_string(),
+            stderr: format!("{} changed since listing; retained", target.path.display()),
+        });
+    }
+    worktree_remove_owned(repo, &target.path, false, &lease, &|_| {})?;
     if let Some(branch) = target.branch.as_deref() {
         if branch != default_branch {
-            let _ = delete_local_branch(repo, branch);
+            delete_local_branch_at(repo, branch, &target.head)?;
         }
     }
     Ok(())
@@ -1454,28 +1362,24 @@ fn path_is_protected(path: &Path, protected_paths: &HashSet<PathBuf>) -> bool {
         .any(|protected| protected == path || protected.starts_with(&path))
 }
 
-/// Remove clean worktrees with terminal evidence or manual abandonment evidence.
+/// Remove clean worktrees whose exact heads have merged or closed PRs.
 ///
-/// Merged, squash-landed, closed-PR, and remote-gone branches are terminal.
-/// Manual pruning additionally removes branches with no activity for seven days,
-/// unless their current head has an open PR. Explicit `wt delete --force` is the
-/// destructive escape hatch; no prune path removes uncommitted files.
+/// Missing remote branches, old activity and local tree equivalence do not
+/// establish completion. Explicit `wt delete --force` remains deliberate disposal.
 pub fn prune_worktrees(
     repo: &Path,
     current_path: &Path,
     protected_paths: &HashSet<PathBuf>,
-    policy: WorktreePrunePolicy,
     dry_run: bool,
 ) -> Result<WorktreePruneReport, GitError> {
     prune_stale_worktree_metadata(repo)?;
     let Listing {
         default_branch,
         worktrees: states,
-        pull_requests_known,
+        branches,
         ..
     } = list_worktrees_timed(repo)?;
     let mut report = WorktreePruneReport::default();
-    let now = SystemTime::now();
 
     for state in states {
         if state.path == current_path
@@ -1489,21 +1393,14 @@ pub fn prune_worktrees(
             report.retained_dirty.push(state.path.clone());
             continue;
         }
-        let reason = if let Some(reason) = worktree_prune_reason(&state) {
-            reason
-        } else if let Some(stale_after) = policy.stale_after {
-            let Some(branch) = state.branch.as_deref() else {
-                continue;
-            };
-            let stale = branch_is_stale(repo, branch, stale_after, now)?;
-            let Some(reason) = abandoned_prune_reason(&state, pull_requests_known, stale) else {
-                continue;
-            };
-            reason
-        } else {
+        let Some(reason) = worktree_prune_reason(&state) else {
+            continue;
+        };
+        let Some(branch) = state.branch.as_ref().and_then(|name| branches.get(name)) else {
             continue;
         };
         report.candidates.push(WorktreePruneTarget {
+            head: branch.head.clone(),
             branch: state.branch,
             path: state.path,
             reason,
@@ -1736,7 +1633,7 @@ pub fn ensure_agent_worktree(
     fs2::FileExt::lock_exclusive(&lock)?;
     let mut plan = plan_placement(&main_repo, segment)?;
     if plan.strategy == PlacementStrategy::UseExistingWorktree && !plan.worktree_path.exists() {
-        worktree_remove(&main_repo, &plan.worktree_path)?;
+        worktree_remove(&main_repo, &plan.worktree_path, true)?;
         plan.strategy = PlacementStrategy::CheckoutExisting;
     }
     if plan.strategy == PlacementStrategy::Create {
@@ -1972,13 +1869,12 @@ pub fn push_branch_with_upstream(worktree: &Path, branch: &str) -> Result<(), Gi
 #[cfg(test)]
 mod tests {
     use super::{
-        abandoned_prune_reason, apply_network_enrichment, diff_shortstats, ensure_agent_worktree,
-        git_common_dir, head_pull_request, list_worktrees, move_default_agent_to_worktree,
-        parse_existing_branches, parse_graphql_budget, parse_pull_request_nodes, plan_placement,
-        remote_stdout, wave_agent_segment, whole_github_answer, worktree_path,
-        worktree_prune_reason, GithubBranches, GraphqlBudget, PlacementError, PlacementStrategy,
-        PullRequestNode, PullRequestState, RemoteFailure, WorktreePruneReason, WorktreeSegment,
-        WorktreeState,
+        apply_network_enrichment, diff_shortstats, ensure_agent_worktree, git_common_dir,
+        head_pull_request, list_worktrees, move_default_agent_to_worktree, parse_existing_branches,
+        parse_graphql_budget, parse_pull_request_nodes, plan_placement, remote_stdout,
+        wave_agent_segment, whole_github_answer, worktree_path, worktree_prune_reason,
+        GithubBranches, GraphqlBudget, PlacementError, PlacementStrategy, PullRequestNode,
+        PullRequestState, RemoteFailure, WorktreePruneReason, WorktreeSegment, WorktreeState,
     };
     use std::collections::{HashMap, HashSet};
     use std::fs;
@@ -2412,7 +2308,64 @@ mod tests {
     }
 
     #[test]
-    fn every_prune_policy_retains_dirty_landed_worktrees() {
+    fn prune_rechecks_the_checkout_before_removing_it() {
+        for change in ["commit", "branch", "tracked", "untracked"] {
+            let fixture = loopflow_test_support::TestRepo::new();
+            let path = fixture.create_named_worktree("finished");
+            fs::write(path.join("work.txt"), "delivered").unwrap();
+            git(&path, &["add", "."]);
+            git(&path, &["commit", "-qm", "delivered"]);
+            let target = super::WorktreePruneTarget {
+                branch: Some("finished".to_string()),
+                head: crate::git::rev_parse(&path, "HEAD").unwrap(),
+                path: path.clone(),
+                reason: WorktreePruneReason::Merged,
+            };
+            match change {
+                "commit" => git(&path, &["commit", "--allow-empty", "-qm", "more work"]),
+                "branch" => git(&path, &["checkout", "-b", "new-work"]),
+                "tracked" => fs::write(path.join("work.txt"), "unfinished").unwrap(),
+                "untracked" => fs::write(path.join("notes.txt"), "unfinished").unwrap(),
+                _ => unreachable!(),
+            }
+            assert!(super::remove_worktree_target(fixture.path(), "main", &target).is_err());
+            assert!(path.exists());
+            assert!(crate::git::rev_parse(fixture.path(), "finished").is_ok());
+            if matches!(change, "tracked" | "untracked") {
+                let file = if change == "tracked" {
+                    "work.txt"
+                } else {
+                    "notes.txt"
+                };
+                assert_eq!(fs::read_to_string(path.join(file)).unwrap(), "unfinished");
+            }
+        }
+    }
+
+    #[test]
+    fn prune_preserves_protected_terminal_checkouts() {
+        let fixture = loopflow_test_support::TestRepo::new();
+        let path = fixture.create_named_worktree("protected");
+        // Path protection also includes a process holding a nested directory.
+        fs::create_dir(path.join("nested")).unwrap();
+        assert!(super::path_is_protected(
+            &path,
+            &HashSet::from([path.join("nested")])
+        ));
+        let target = super::WorktreePruneTarget {
+            branch: Some("protected".to_string()),
+            head: crate::git::rev_parse(&path, "HEAD").unwrap(),
+            path: path.clone(),
+            reason: WorktreePruneReason::Merged,
+        };
+        let _lease =
+            crate::git::acquire_worktree_lease(fixture.path(), &path, "live operation").unwrap();
+        assert!(super::remove_worktree_target(fixture.path(), "main", &target).is_err());
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn prune_retains_dirty_landed_worktrees() {
         let state = WorktreeState {
             branch: Some("landed".to_string()),
             path: Path::new("/tmp/repo.landed").to_path_buf(),
@@ -2429,7 +2382,7 @@ mod tests {
     }
 
     #[test]
-    fn manual_prune_retains_unmerged_dirty_worktrees() {
+    fn prune_retains_unmerged_dirty_worktrees() {
         let state = WorktreeState {
             branch: Some("abandoned".to_string()),
             path: Path::new("/tmp/repo.abandoned").to_path_buf(),
@@ -2443,29 +2396,6 @@ mod tests {
         };
 
         assert_eq!(worktree_prune_reason(&state), None);
-    }
-
-    #[test]
-    fn open_or_unknown_pull_request_state_blocks_abandonment_prune() {
-        let mut state = WorktreeState {
-            branch: Some("active".to_string()),
-            path: Path::new("/tmp/repo.active").to_path_buf(),
-            base_branch: None,
-            merged: false,
-            squash_merged: false,
-            fresh: false,
-            dirty: false,
-            remote_gone: false,
-            pull_request: Some(PullRequestState::Open),
-        };
-
-        assert_eq!(abandoned_prune_reason(&state, true, true), None);
-        state.pull_request = None;
-        assert_eq!(abandoned_prune_reason(&state, false, true), None);
-        assert_eq!(
-            abandoned_prune_reason(&state, true, true),
-            Some(WorktreePruneReason::Stale)
-        );
     }
 
     #[test]

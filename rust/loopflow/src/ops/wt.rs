@@ -185,6 +185,7 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
         worktree_remove_owned(
             &repo,
             &path,
+            force,
             lease.as_ref().expect("worktree has a deletion lease"),
             &|_| {},
         )?;
@@ -288,6 +289,20 @@ mod tests {
         )
         .unwrap()
         .is_empty());
+    }
+
+    #[test]
+    fn explicit_force_deletion_discards_uncommitted_files() {
+        let fixture = TestRepo::new();
+        let path = fixture.create_named_worktree("discard");
+        std::fs::write(path.join("draft"), "deliberately discarded").unwrap();
+        assert!(prepare_delete(fixture.path(), "discard", false).is_err());
+        apply_delete(
+            prepare_delete(fixture.path(), "discard", true).unwrap(),
+            &NullProgress,
+        )
+        .unwrap();
+        assert!(!path.exists());
     }
 
     #[test]

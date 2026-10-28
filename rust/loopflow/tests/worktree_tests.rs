@@ -6,7 +6,7 @@ use std::{fs, path::PathBuf};
 use loopflow::git::worktrees::{
     create_named_worktree, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
     push_branch_with_upstream, schedule_upstream_sync, sibling_worktree_name_with_main,
-    PlacementStrategy, WorktreePrunePolicy, WorktreeSegment,
+    PlacementStrategy, WorktreeSegment,
 };
 use loopflow::git::{is_clean, origin_branch, worktree_add, worktree_remove, WorktreeBranch};
 use loopflow_test_support::TestRepo;
@@ -425,7 +425,7 @@ fn upstream_sync_replaces_base_tracking_with_the_own_remote_branch() {
 fn worktree_remove_deletes_directory() {
     let repo = TestRepo::new();
     let result = create_named_worktree(repo.path(), "feature", None, &|_| {}).expect("create");
-    worktree_remove(repo.path(), &result.path).expect("remove");
+    worktree_remove(repo.path(), &result.path, false).expect("remove");
     assert!(!result.path.exists());
 }
 
@@ -472,21 +472,14 @@ fn worktree_state_detects_dirty() {
 }
 
 #[test]
-fn manual_prune_retains_every_uncommitted_file() {
+fn prune_retains_every_uncommitted_file() {
     let repo = TestRepo::new();
     let path = repo.create_named_worktree("prune-dirty-old");
     commit_worktree_at_age(&path, Duration::from_secs(8 * 24 * 60 * 60));
     fs::create_dir_all(path.join("scratch")).expect("create scratch");
     fs::write(path.join("scratch/notes.md"), "unsaved").expect("write scratch");
 
-    let report = prune_worktrees(
-        repo.path(),
-        repo.path(),
-        &HashSet::new(),
-        WorktreePrunePolicy::manual(),
-        false,
-    )
-    .expect("prune");
+    let report = prune_worktrees(repo.path(), repo.path(), &HashSet::new(), false).expect("prune");
 
     assert!(report.removed.is_empty());
     assert_eq!(report.retained_dirty.len(), 1);
@@ -500,66 +493,44 @@ fn manual_prune_retains_every_uncommitted_file() {
 }
 
 #[test]
-fn manual_prune_retains_recent_active_branch_without_a_pr() {
+fn prune_retains_recent_active_branch_without_a_pr() {
     let repo = TestRepo::new();
     let branch = "prune-recent";
     let path = repo.create_named_worktree(branch);
     commit_worktree_at_age(&path, Duration::ZERO);
     git_stdout(&path, &["push", "-u", "origin", branch]);
 
-    let report = prune_worktrees(
-        repo.path(),
-        repo.path(),
-        &HashSet::new(),
-        WorktreePrunePolicy::manual(),
-        false,
-    )
-    .expect("prune");
+    let report = prune_worktrees(repo.path(), repo.path(), &HashSet::new(), false).expect("prune");
 
     assert!(report.removed.is_empty());
     assert!(path.exists());
 }
 
 #[test]
-fn manual_prune_removes_stale_branch_without_an_open_pr() {
+fn prune_retains_old_branch_without_terminal_evidence() {
     let repo = TestRepo::new();
     let branch = "prune-stale";
     let path = repo.create_named_worktree(branch);
     commit_worktree_at_age(&path, Duration::from_secs(8 * 24 * 60 * 60));
     git_stdout(&path, &["push", "-u", "origin", branch]);
 
-    let report = prune_worktrees(
-        repo.path(),
-        repo.path(),
-        &HashSet::new(),
-        WorktreePrunePolicy::manual(),
-        false,
-    )
-    .expect("prune");
+    let report = prune_worktrees(repo.path(), repo.path(), &HashSet::new(), false).expect("prune");
 
-    assert_eq!(report.removed.len(), 1);
-    assert_eq!(report.removed[0].reason.as_str(), "stale");
-    assert!(!path.exists());
+    assert!(report.removed.is_empty());
+    assert!(path.exists());
 }
 
 #[test]
-fn manual_prune_removes_recent_remote_gone_branch() {
+fn prune_retains_never_pushed_unique_commits() {
     let repo = TestRepo::new();
     let path = repo.create_named_worktree("prune-remote-gone");
     commit_worktree_at_age(&path, Duration::ZERO);
 
-    let report = prune_worktrees(
-        repo.path(),
-        repo.path(),
-        &HashSet::new(),
-        WorktreePrunePolicy::manual(),
-        false,
-    )
-    .expect("prune");
+    let report = prune_worktrees(repo.path(), repo.path(), &HashSet::new(), false).expect("prune");
 
-    assert_eq!(report.removed.len(), 1);
-    assert_eq!(report.removed[0].reason.as_str(), "remote-gone");
-    assert!(!path.exists());
+    assert!(report.removed.is_empty());
+    assert!(path.exists());
+    assert!(git_stdout(&path, &["rev-parse", "HEAD"]) != repo.head_sha());
 }
 
 #[test]

@@ -1550,7 +1550,7 @@ fn materialize_exact_source_worktree(
     }
 
     if registered_at_path.is_some() {
-        worktree_remove_owned(repo, &path, lease, &inherit)?;
+        worktree_remove_owned(repo, &path, true, lease, &inherit)?;
     }
     if local_head.is_some() {
         delete_local_branch_inheriting(repo, &branch, &inherit)?;
@@ -3005,7 +3005,7 @@ fn cleanup_release_worktree(
             lock.inherit(command);
             lease.inherit(command);
         };
-        worktree_remove_owned(main_repo, wt_path, &lease, &inherit)?;
+        worktree_remove_owned(main_repo, wt_path, true, &lease, &inherit)?;
         let _ = delete_local_branch_inheriting(main_repo, branch, &inherit);
         Ok::<_, crate::error::GitError>(())
     })();

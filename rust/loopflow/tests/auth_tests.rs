@@ -1300,8 +1300,8 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
     runtime
         .block_on(store.upsert_provider_account(&account("excluded", excluded.clone())))
         .unwrap();
-    run(&["account", "route", "set", "codex", "excluded@", "--default"]);
-    run(&["account", "route", "set", "codex", "active@"]);
+    run(&["set", "account.codex", "excluded@", "--global"]);
+    run(&["set", "account.codex", "active@"]);
     let routes = || {
         let output = run(&["account", "route", "--json"]);
         let scoped: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();

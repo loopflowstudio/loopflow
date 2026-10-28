@@ -3324,7 +3324,8 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &["wave", "graph", "show", wave.slug(), "--json"],
     );
-    assert_eq!(selected["graph"], "code");
+    assert_eq!(selected["default"]["name"], "code");
+    assert_eq!(selected["default"]["source"], "personal");
     assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
     assert_eq!(store.project(&historical.id).unwrap().unwrap(), historical);
     lf(

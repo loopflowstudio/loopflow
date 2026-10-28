@@ -294,7 +294,6 @@ fn removed_options_and_aliases_report_usage_errors_without_effects() {
     let home = tempfile::tempdir().unwrap();
     for args in [
         &["--as", "wave:exports"][..],
-        &["task", "create", "--run"][..],
         &["--mode", "invalid"][..],
         &["--no-diff"][..],
         &["--diff-files"][..],

@@ -7,7 +7,7 @@ preservation pass; four large replacements still destroy old data. The defective
 `security -i` writer remains, with no eligible replacement established. The reader
 fix does not complete this repair or permit delivery.
 
-Implementation on `ad93466cf` (2026-10-28) closes finding 40 with finding 41;
+Implementation at `ed6c82b2b` (2026-10-28) closes finding 40 with finding 41;
 finding 42 assesses a public CSSM alternative without mutation. Finding 38's
 boundary was implemented in `1abbf832a` and simplified in `b909e2f71`. No acceptance
 constraint or delivery boundary changed.
@@ -84,177 +84,96 @@ Diagnostics and repeated rejected probes cannot close these gaps or justify ship
 
 ## Evidence and excluded alternatives
 
-Full findings, citations, dependency history and archive chain:
-`108095b26cfe5950c7ce42b6115e936601547ede:scratch/loo-661-save-refreshed-claude.md`,
-“Evidence and excluded alternatives.” Findings 1–37 retain that lookup.
-This archive also points to retired harnesses and complete source reviews.
+Complete findings 1–42, citations, rejected mechanisms, receipts and earlier
+archive links remain at
+`ed6c82b2bc02e3f9b0d6f3ca21a5a15179e33f4f:scratch/loo-661-save-refreshed-claude.md`,
+“Evidence and excluded alternatives” and “Writer decision after native reproduction.”
+This summary keeps the constraints needed to avoid repeating those probes; consult
+that revision before proposing a variation. No public-API exhaustion is proved.
 
-Probes used disposable `loopflow-LOO-661-*-probe-<uuid>` items, synthetic bytes,
-bounded/reaped children, captured output and successful cleanup. They neither
-read real credentials directly nor changed routes, Sessions or global trust.
-Source conclusions use Apple Security `db15acbe6a7f257a859ad9a3bb86097bfe0679d9`;
-they establish neither installed binary equivalence nor public-API exhaustion.
+Native probes used unique disposable services, synthetic bytes, bounded/reaped
+children and captured output; cleanup succeeded. They did not read real credentials
+or change routes, Sessions or global trust. Source findings use Apple Security
+`db15acbe6a7f257a859ad9a3bb86097bfe0679d9`; source inspection does not prove installed
+binary equivalence. Read-only findings 36–37 and 42 added no mutation evidence.
 
-- **Transport (1–2, 30):** `security -i` has a 4,096-byte input buffer. Early
-  64/1,242-byte round trips passed and a 2,048-byte failure retained old bytes.
-  Later exact-command probes twice contradicted preservation at 2,048/8,192 bytes
-  with five-/six-character accounts: write exit 1, read exit 0, neither old nor
-  intended bytes. They did not invoke compiled Rust. Published parsing executes
-  each buffer read, consistent with partial replacement then error; installed
-  parsing was not instrumented. Detached `security … -w` returned zero but truncated
-  larger values to 128 bytes. PTYs, file/FD indirection and repeated `-w`/`-X` do
-  not append a password across commands.
-- **Native access (3–5, 8–9, 11, 21, 27–29, 31, 33):**
-  `SecKeychainItemModifyAttributesAndData` returned zero at 2/8 KiB, but independent
-  reads exited 128. Writes replaced `apple-tool:` with writer `cdhash:`;
-  published non-null updates create a group and strip partition/integrity ACLs.
-  `ModifyContent`, Apple-signed `osascript`/`SecItemUpdate` and copied-access
-  restoration supplied no safe replacement. `security-framework` 3.7.0 uses the
-  same modifier. Partition edits failed `-25293` with UI disabled; JXA's initial
-  `-50` was a bridge error. Signing/trusting the writer grants no partition
-  authority. Combined data/access updates modify data before access without
-  encompassing rollback; pre-setting access affects only the old group. Public
-  creation rejects duplicates. Null-data updates leave bytes unchanged.
-- **Other interfaces (10, 12–20):** raw `CSSM_DL_DataModify` bypasses encryption;
-  `CSSM_EncryptData` needs private envelope composition; `SecKeychainSetBatchMode`
-  is private. Import handles keys/certificates; copy strips partition/integrity
-  access on group creation. Read-only macOS 26.0.1 dispatch inspection connected
-  `KCSetData`/`KCUpdateItem` to staged new-group paths. Shared web credentials,
-  TN3137's file shim and data-protection storage supplied no compatible atomic
-  replacement. The TN3137 backup-entropy change left this conclusion unchanged.
-- **Outer transactions (22–26):** FileDL deferred commit of successful 2/8 KiB
-  modifications, but password reads failed `-25300` while metadata succeeded.
-  By-ID reads saw new encoded data; queries saw the old snapshot without its
-  decoding group, preventing pre-commit verification. Rollback/autocommit
-  restoration recovered old bytes, not proof of unchanged ACL identity or general
-  rollback safety. No commit/access-restoration probe ran.
-- **Copied-access creation (34):** `SecKeychainItemCreateFromContent` failed
-  `-25293` at both sizes with UI disabled; originals stayed exact and candidates
-  were absent (44). No promotion/transaction was tested. This rejects copied
-  access, not every explicit-access construction.
-- **Explicit access (35):** eight 2,048/8,192-byte cases reconstructed access with
-  `SecAccessGetOwnerAndACL` / `SecAccessCreateFromOwnerAndACL`, or used
-  `SecAccessCreate` trusting `/usr/bin/security`. Omitting integrity only failed
-  creation `-25293` (candidate absent, 44). Omitting partition, both partition and
-  integrity, or using fresh trusted access created candidates but independent
-  readers timed out at 15 seconds. Those candidates lacked original `apple-tool:`
-  partition access. All originals retained exact bytes and semantic ACL fingerprints
-  (not group identity); none was replaced. No promotion/transaction followed.
-  Published `changeAcl` requires database-authenticated credentials for partition
-  edits, while creation supplies temporary group credentials. Integrity installation
-  also checks partition membership. Earlier `SecACLRemove` failure `-67702` reflects
-  an invalid-form tombstone, not a contradiction of fresh construction.
-  Corrected probe and receipts:
+- **Transport (1–2, 30):** `security -i` has a 4,096-byte input buffer. Initial
+  64/1,242-byte round trips passed and one 2,048-byte failure preserved old bytes;
+  later command probes contradicted preservation at 2/8 KiB. Published parsing
+  executes each buffer read, consistent with partial replacement then error, but
+  installed parsing was not instrumented. Detached `security … -w` truncated to
+  128 bytes despite exit zero. PTYs, file/FD indirection and repeated flags supplied
+  no append mechanism. Finding 39 establishes the compiled Rust failure below.
+- **Native modification (3–5, 8–9, 11, 21, 27–29, 31, 33):**
+  `SecKeychainItemModifyAttributesAndData` returned zero at 2/8 KiB but independent
+  reads exited 128. Updates replaced `apple-tool:` with writer `cdhash:`; non-null
+  data creates a new group and strips partition/integrity ACLs. `ModifyContent`,
+  Apple-signed `osascript`/`SecItemUpdate`, copied-access restoration and
+  `security-framework` supplied no safe replacement. Signing/trusting the writer
+  grants no partition authority. Combined data/access updates lack encompassing
+  rollback; pre-setting access affects only the old group. Null data changes no
+  bytes, and creation rejects duplicates.
+- **Creation/access (34–35):** copied access and reconstructed access omitting only
+  integrity failed `-25293`, leaving candidates absent. Omitting partition, omitting
+  both ACLs, or fresh access trusting `/usr/bin/security` created candidates whose
+  independent reads timed out at 15 seconds. Originals retained exact bytes and
+  semantic ACL fingerprints, not proven group identity; no promotion followed.
+  `SecACLRemove`'s earlier `-67702` was an invalid-form tombstone, not a contrary
+  result. Corrected probe/receipts:
   `66ae255389e2800111dfc056c5009d380bab512a:scratch/keychain-access-probe/`.
-- **Authentication/group retention (36):** pinned-source review found
-  `KeychainDatabase::checkCredentials` requires a passphrase/key in the ACL operation's
-  `KEYCHAIN_LOCK` sample even when unlocked. It ignores prompt samples and
-  `CSSM_DL_Authenticate`'s `mCred`; `SecKeychainUnlock` does not authorize later ACL
-  edits. Creation supplies a random setup-password sample and accepts no database
-  credential argument. `SSDbUniqueRecordImpl::modify` can retain `SSGroup`, but
-  `ItemImpl::updateSSGroup` reaches it only with null new data. Public
-  `SSDLSession::DataModify` dispatches through raw `DbUniqueRecordImpl`, not that
-  encoder. Retaining references cannot alter dispatch; internal C++/envelope
-  reconstruction crosses the private-interface boundary.
-- **Local authentication context (37):** read-only documentation/source review
-  found LAContext externalization in the data-protection implementation. The
-  separate file-keychain update modifies content before access, without handling
-  `kSecUseAuthenticationContext` or `kSecUseCredentialReference`. This identifies
-  no context-to-database-credential bridge or atomic preservation path; it is not
-  an installed securityd trace or public-API impossibility proof. Findings 36–37
-  performed no authentication, unlock, mutation or real credential read.
-- **Live observations (6, 32):** launches reported a write/readback failure without
-  status and two expired OAuth errors. Later 0.14.18/0.14.19 polls accepted both
-  managed accounts with capacity, including three verified windows at `1793163454`;
-  the local row stayed unavailable. Polls establish no refresh, size or causality.
-  On October 27 at `1793169073`, supported `lf account claude --json` rejected
-  jack@loopflow.studio with recovery/no windows; an allowlisted diagnostic at
-  `1793169147` confirmed `refresh grant rejected` (HTTP 400 `invalid_grant`, before
-  the writer). jackstah@gmail.com retained three windows. This diagnoses neither
-  the historical save failure nor token invalidation. No token was inspected,
-  forced to expire or put in argv. Supported
-  `lf account connect claude jack@loopflow.studio` needs browser sign-in; no sign-in
-  or route change was attempted. Further polling without recovery adds no acceptance.
-- **Earlier acceptance gap (38, 2026-10-28; closed by 39):** source inspection at `f1daf112a`
-  confirms `read_claude_login` and `write_claude_login` compile out their native
-  dispatch under `cfg(test)`. The direct writer diagnostic fixture substitutes
-  `security` through PATH, while `fresh_claude_token` tests use files. Combining
-  those passing suites would still leave the refresh-to-native-save boundary
-  untested. A standalone test binary alone does not solve this: production OAuth
-  URLs ignore the test endpoint variables. Finding 39 resolves this with the
-  library test build's mocked HTTP and a test-only native-home selection, without
-  adding a second writer or enabling production endpoint overrides.
-  This finding adds no native experiment or evidence about the live failure.
-- **Production native acceptance (39, 2026-10-28):** the explicit
-  `native_refresh_replaces_exact_bytes_and_preserves_failed_saves` test executes
-  eight isolated cases through the compiled native implementation. Two 512-byte
-  ASCII replacements pass exact readback, identity and usage with one refresh each.
-  Both 2,048/8,192-byte cases with a five-character account overwrite old data with
-  2,010 bytes; both long-account cases leave 1,994 bytes. Account reporting returns
-  sanitized persistence `unavailable` without reconnect advice; old bytes are lost.
-  Invalid JSON is rejected before writing and old bytes remain exact. All services
-  were absent before setup and absent after cleanup; account names remain unchanged.
-  Parent/children use the shared environment lock, loopback-only network boundary,
-  captured output and 15-second process-group deadlines. Each child's only native
-  home is synthetic; ordinary tests keep file storage and production has no test
-  endpoint/backend switch. No real OAuth request, credential read or Session change.
-- **Unicode reader failure (40, 2026-10-28):** the Unicode case is a
-  512-byte refresh preserving an unrelated Unicode field. It writes the exact new
-  bytes but reports persistence failure: `/usr/bin/security -w` renders this value
-  as hex, while the production reader expects raw JSON. The fixture's independent
-  observer decodes that rendering and compares bytes without printing them. The old
-  seed uses an ASCII JSON Unicode escape, so native reading and refresh start normally.
-  This is distinct from the large-value truncation; it also violates failed-save
-  preservation. [Apple's reader source](https://github.com/apple-oss-distributions/SecurityTool/blob/main/keychain_find.c)
-  documents the rendering branch; installed fixture results establish this case.
-- **Unicode repair (41, 2026-10-28):** replaced the trim-only reader with decoding
-  and removed that helper's use from the independent native observer. The existing
-  native fixture's Unicode case now accepts identity/usage after one mocked refresh,
-  with exact 512-byte replacement and cleanup. All eight cases complete; the four
-  2,048/8,192-byte cases still leave 2,010/1,994 bytes and lose the old value.
-  Ordinary ASCII and invalid-input preservation still pass. The focused decoder
-  test covers Unicode, escaping, JSON whitespace and invalid output. No credential
-  bytes enter assertions/output, no real account is touched, and no writer changes.
-- **Public CSSM ACL alternative (42, 2026-10-28):** evaluated content replacement
-  plus credential-bearing `CSSM_ChangeKeyAcl` inside the previously examined
-  transaction. The [public declaration](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_cssm/lib/cssmapi.h)
-  accepts credentials but requires a `CSSM_KEY`, not a password-item reference.
-  [SecKeyGetCSSMKey](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKey.cpp)
-  operates on a key item. The examined password-to-key mapping is internal
-  [aclBearer](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItem.cpp),
-  whose [SSGroup lookup](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_cdsa_client/lib/securestorage.cpp)
-  interprets an internal blob label/magic before querying its symmetric key.
-  The public item bridge exposes a database handle and record ID, not that mapping.
-  Thus this examined construction does not establish an eligible public-interface
-  writer; reproducing private layout is not an accepted bridge. Partition credentials
-  and transaction preservation also remain unproved. No password was requested,
-  API invoked or mutation probe repeated. This is a bounded source assessment,
-  not public-API exhaustion or proof that every CSSM construction fails.
+- **Transactions (22–26):** FileDL deferred successful modifications, but password
+  reads failed `-25300`; metadata and by-ID encoded-data reads succeeded. Queries
+  saw an old snapshot missing its decoding group. Rollback/autocommit restoration
+  recovered old bytes without proving ACL/group identity or general rollback safety.
+  No commit/access-restoration probe ran; pre-commit verification remains unproved.
+- **Authority (36–37):** partition edits require an ACL operation's passphrase/key
+  `KEYCHAIN_LOCK` sample even when unlocked. Prompt samples, `CSSM_DL_Authenticate`
+  and `SecKeychainUnlock` supplied no bridge; creation uses temporary group
+  credentials. Internal group-preserving modification is reached only with null
+  data; public raw modification bypasses the encoder. File-keychain updates do
+  not handle the reviewed LAContext credential attributes. Neither reference
+  retention nor data-protection authentication proves a compatible write path.
+- **Excluded interfaces (10, 12–20, 42):** raw CSSM modification bypasses encryption;
+  envelope reconstruction and `SecKeychainSetBatchMode` cross the private-interface
+  boundary. Import, copy, shared web credentials, TN3137's file shim and
+  data-protection storage supplied no compatible atomic replacement. Public
+  `CSSM_ChangeKeyAcl` needs a `CSSM_KEY`; the examined password-item mapping relies
+  on private `aclBearer`/SSGroup layout. Its public database-handle/record-ID bridge
+  does not establish that mapping or prove every CSSM construction impossible.
+  The proposed FileDL transaction plus password-authorized ACL restoration uses
+  private `SecKeychainItemSetAccessWithPassword` and is excluded. No password was
+  requested/read or private entry invoked. A transaction alone grants no authority.
 
-## Writer decision after native reproduction
+**Native acceptance (38–41, October 28):** ordinary file and stand-in tests missed
+refresh-to-native persistence. The existing explicit fixture closes that boundary
+through mocked HTTP and one disposable native home per isolated child, with no
+production backend/endpoint switch. All eight cases execute and clean up. Two
+512-byte ASCII replacements pass identity/usage after one refresh; invalid JSON
+is rejected before writing and preserves the old bytes. Four 2,048/8,192-byte
+replacements leave 2,010 bytes with short accounts or 1,994 with long accounts,
+losing old data and reporting sanitized `unavailable` without reconnect advice.
+Account metadata remains unchanged, which proves neither ACL nor group retention.
 
-The concrete combination assessed on October 28 is native content replacement
-inside a FileDL transaction, followed by password-authorized restoration of the
-copied access/partition ACL before commit, rolling back on either failure. It
-would need to address both authority and preservation, rather than repair ACLs
-after an unprotected commit. **It is not an accepted or proven implementation.**
+The Unicode case originally wrote exact bytes but failed readback because
+`security -w` hex-renders non-printable bytes. Finding 41's decoder fixes that
+512-byte case: exact readback, identity/usage and cleanup now pass. The observer
+decodes independently; unit coverage retains escaping, whitespace and invalid
+output. This reader repair changes none of the writer failures or preservation gaps.
 
-The password-taking entry is declared in Apple's private
-[`SecKeychainItemPriv.h`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItemPriv.h)
-(`SecKeychainItemSetAccessWithPassword`, lines 190–199). Its implementation supplies
-passphrase credentials to the ACL edit. The accepted public-interface constraint excludes that candidate;
-no password was requested or read, no private entry invoked, and no previously
-rejected mutation probe repeated. A transaction alone supplies no partition
-authority, and findings 22–26 still leave group/ACL rollback and pre-commit
-verification unproved. The fixture is ready to judge an eligible writer, but no
-mechanism meeting the existing constraints has been established. Writer implementation
-and delivery remain incomplete; this does not establish API exhaustion or authorize
-a scope/trust/storage change. No concrete product decision is ready for acceptance.
+**Live diagnosis (6, 32):** the original save/readback failure had no status.
+Subsequent 0.14.18/0.14.19 capacity polls proved neither refresh nor causality.
+On October 27, supported `lf account claude --json` rejected jack@loopflow.studio
+at `1793169073`; an allowlisted diagnostic at `1793169147` confirmed HTTP 400
+`invalid_grant` before saving. jackstah@gmail.com retained three windows. No token
+was inspected or forced to expire. Supported browser reconnection through
+`lf account connect claude jack@loopflow.studio` remains a dependency; no sign-in
+or route change was attempted. Neither historical save causality nor the reason
+for token invalidation is established. Repeating polls without recovery adds no proof.
 
 ## Remaining implementation and acceptance
 
 1. Select and prove an eligible writer mechanism before replacing the production
-   transport and exclusive fixture. The password-taking candidate above is excluded.
+   transport and exclusive fixture. The private password-taking candidate is excluded.
    Preserve JSON validation, readback, managed login locking, replacement checks,
    omitted refresh tokens, unknown fields and the 15-second HTTP timeout. No extra
    OAuth request or automatic retry. Bound new subprocesses to 15 seconds, close
@@ -317,4 +236,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `cargo test -p loopflow --lib security_password_output_preserves_exact_json_bytes`: PASS (1); native command above: FAIL (8 cases executed, Unicode passes, 4 large-value failures, all cleaned; ld unwind-size warning); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, `lf context`: PASS. Cargo checks used `scripts/test_network.py` with inherited `LF_*` cleared and stdin closed. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.
+Check (reused from `ed6c82b2b`; this reduction changes prose only) — `cargo test -p loopflow --lib security_password_output_preserves_exact_json_bytes`: PASS (1); native command above: FAIL (8 cases executed, Unicode passes, 4 large-value failures, all cleaned; ld unwind-size warning); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, `lf context`: PASS. Cargo checks used `scripts/test_network.py` with inherited `LF_*` cleared and stdin closed. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.

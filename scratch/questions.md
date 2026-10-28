@@ -11,10 +11,10 @@ change ignore rules, force staging or suppress Git errors. Installed repair rema
 unverified; Infrastructure owns CLI/helper installation and installed acceptance.
 
 Prior reservations, archive paths and receipt references remain in
-`b909e2f71d63dbf251075839b528b3c16e5f5b62:scratch/questions.md`.
+`ed6c82b2bc02e3f9b0d6f3ca21a5a15179e33f4f:scratch/questions.md`.
 Do not reuse any prior reservation.
 
-This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-implement-unicode-kjkai3q2/tmp`
+This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-se02u2sn/tmp`
 for fresh telemetry after checkpointing. Its sibling `receipt.json` records the
 checkpoint and verified move, or source absence. A reservation alone proves no archive.
 

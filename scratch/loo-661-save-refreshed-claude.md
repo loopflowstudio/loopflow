@@ -1,6 +1,6 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Writer unresolved; diagnostics only; not implementation-ready.**
+Status (realigned 2026-10-28): **Writer unresolved; diagnostics only.**
 Accepted scope is unchanged; the replacement mechanism remains a draft.
 The checked-in `security -i` writer still has the destructive size failure below.
 No candidate meets transport, native reader-access and failed-save preservation
@@ -10,6 +10,10 @@ proof; live acceptance separately requires supported reconnection for
 jack@loopflow.studio. Neither dependency relaxes Jack Heart's accepted outcome.
 Finding 35 isolates the copied partition entry as the creation obstacle and rejects
 explicit trusted-application construction as a reader-compatible replacement.
+The requested differential investigation is complete; no replacement mechanism
+has been selected. Its original-byte and semantic-ACL checks passed, but every
+candidate failed native reading. These results establish neither production
+acceptance nor safe promotion.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -242,8 +246,14 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Remaining implementation and acceptance
 
-1. **Unresolved prerequisite:** prove a supported writer's encoding, access and failure preservation, then
-   replace the transport and its exclusive fixture in one cut.
+1. **Unresolved mechanism:** a distinct supported construction must explain how it
+   supplies native partition access and preserves failed saves. Finding 35 resolves
+   the copied-access differential and rejects the tested explicit trusted-application
+   route; neither needs an unchanged repeat. Public interfaces remain unexhausted,
+   but no next candidate is yet supported by evidence. Proof requires disposable
+   synthetic items, exact independent native-reader round trips, and preservation
+   of original bytes and access. Only then can the production transport and its
+   exclusive fixture be replaced in one cut.
    Preserve JSON validation, readback, managed login locking,
    intervening-replacement checks, omitted refresh tokens, unknown fields and the
    15-second HTTP timeout. No extra OAuth request or automatic retry. Bound new
@@ -319,4 +329,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — compress (2026-10-28): `git diff --check` and `lf context` pass; archived probe bytes match `66ae255389`. No production behavior changed, so no build or probe rerun; writer proof, native acceptance fixture, gate and Infrastructure's installed acceptance remain pending.
+Check — realign (2026-10-28): `git diff --check` and `lf context` pass; reviewed source and eight archived results at `66ae255389` agree with finding 35. No behavior changed or probe reran; writer proof, native acceptance fixture, gate and Infrastructure's installed acceptance remain pending.

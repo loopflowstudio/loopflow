@@ -72,6 +72,27 @@ runs its own code on the live store. Main never carries a "draft".
 Keep: `LF_HOME` isolation, lf-world, released-schema seed fixtures, reader-floor
 tests, the Docker upgrade test, per-migration FK/JSON checks, backups.
 
+## Concept review (headless, 2026-10-27)
+
+Three user actions, three concepts: merge a PR (slug migration gets its place in
+main's order), `lf self install --main` (the only path that advances
+`~/.lf`), run a worktree build (opens `~/.lf` when it knows nothing the store
+lacks; otherwise names `install --main` or a private `LF_HOME`). The accepted
+decisions settle every name and boundary here; no open product choice.
+
+Settled by the accepted contract, recorded so later steps don't relitigate:
+
+- **One build per foreground command, installed build for what outlives it.**
+  A worktree build's own process runs its code; Graph steps and agents' nested
+  `lf` resolve the installed entry. Those run detached for hours, and a
+  `cargo build` or a removed worktree would swap or delete their binary mid-run
+  (Jack: "I have LF processes running 24/7"). Floors keep the mix safe: the
+  installed build is never behind the store's merged migrations.
+- **Post-merge window.** Between merge and the green `Packages (main)` run, a
+  build rebased onto the merge is refused on `~/.lf`, and `install --main`
+  still finds the previous green commit. Wait for the run; the refusal and the
+  install output already name the migration and the installed commit.
+
 ## Not in this change (Jack: design still open)
 
 Expand → wait 30 days → contract enforcement for destructive changes. Today a

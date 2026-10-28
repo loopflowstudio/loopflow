@@ -1555,16 +1555,6 @@ mod tests {
     }
 
     #[test]
-    fn the_reader_catalog_lists_released_and_breaking_migrations_only() {
-        let catalog = reader_catalog();
-        assert!(catalog.contains(&"0.15.0.001_release"), "{catalog:?}");
-        assert!(MIGRATIONS
-            .iter()
-            .filter(|migration| !migration.breaks_readers())
-            .all(|migration| !catalog.contains(&migration.version)));
-    }
-
-    #[test]
     fn a_candidate_opens_a_store_only_when_its_catalog_knows_the_store_floor() {
         let current: Vec<String> = reader_catalog().into_iter().map(str::to_string).collect();
         let older = current[..current.len() - 1].to_vec();

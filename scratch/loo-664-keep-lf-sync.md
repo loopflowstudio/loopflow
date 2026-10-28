@@ -101,8 +101,11 @@ and actionable recovery, and the repair lands with an exact merged revision for
 Infrastructure's release. Installed LOO-661 recovery remains a separate readback
 after that release; a passing source fixture cannot close that obligation.
 
-Until the fixed binary is installed, checkpoint intended edits with explicit
-`lf commit` paths before returning to Graph sync, including this Task's authorized
-Wave-memory contribution. Preserve other work; leave release/install to Infrastructure.
+The self-hosting blocker recorded in the Task definition is resolved by
+`0f6969856dcda27735c9e67520116f9e7684616d`: the authorized LOO-664 Wave-memory
+contribution now describes selective checkpoints and is committed. The 2026-10-27
+kickoff readback found a clean index and worktree, with code and test content
+unchanged since the recorded focused checks. Gate and delivery remain; this
+checkpoint does not establish installed recovery.
 
 Check: `git diff --check` and `lf context` passed on 2026-10-27 (both budgets within limits); prior unchanged-source evidence: `scripts/test_network.py cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 6 passed, `cargo +stable fmt --all -- --check` and network-isolated `cargo +stable clippy --all-targets -- -D warnings` passed; affected suites remain with gate.

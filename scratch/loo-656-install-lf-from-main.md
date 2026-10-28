@@ -201,4 +201,4 @@ catalog makes it visible to updaters.
   deletion, and every package ships `reader-catalog.txt`.
 - First real `lf self install --main` needs a green `Packages (main)` run after merge.
 
-Check (2026-10-28, realign): `cargo test -p loopflow --lib store::migrations::` 121 passed at 9fa92571b, `cargo fmt --check` clean; `lf self install reader-catalog` with empty `HOME`/`LF_HOME` prints every released batch and creates nothing; full `store::` module (times out locally), Swift and `release_tests` left to gate/CI.
+Check (2026-10-28, realign): `cargo test -p loopflow --lib store::migrations::` 121 passed at 9fa92571b, `cargo fmt --check` and `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `lf self install reader-catalog` with empty `HOME`/`LF_HOME` prints every released batch and creates nothing; full `store::` module (times out locally), Swift and `release_tests` left to gate/CI.

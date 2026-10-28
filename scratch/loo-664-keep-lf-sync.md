@@ -6,6 +6,10 @@ Jack Heart authorized the bounded hotfix and autonomous shipping in comment
 pre-staged telemetry exception. The implementation mechanism follows source and
 fixture evidence; it was not separately reviewed.
 
+Kickoff revalidation on 2026-10-27: current Task definition revision 7 matches
+the selective checkpoint at `3796c6c8f9` and the recovery coverage retained at
+`7c84ab6650`. No additional implementation slice is needed before gate.
+
 ## Outcome and demo
 
 Installed 0.14.19 stopped LOO-661 after staging ordinary edits because Apple Git
@@ -73,9 +77,9 @@ Pre-compression design and evidence: `3796c6c8f9:scratch/loo-664-keep-lf-sync.md
 
 ## Acceptance and remaining work
 
-The selective checkpoint and six `sync_preserves_work_with_` regressions remain
-one change. They cover ignored/unignored telemetry; additions, modifications,
-deletions and renames; unusual names and neighboring/nested ordinary directories;
+**This slice:** the selective checkpoint and six `sync_preserves_work_with_`
+regressions remain one change. They cover ignored/unignored telemetry; additions,
+modifications, deletions and renames; unusual names and neighboring/nested ordinary directories;
 explicitly staged ignored user files; existing telemetry history; repeat sync;
 index-lock failure retaining HEAD/index/work; and upstream telemetry conflicts
 retaining staged/working bytes in the named recovery stash without reporting
@@ -85,7 +89,7 @@ Gate, publication and landing remain. Gate includes existing resolver/Graph-sync
 tests and commit-boundary suites:
 
 ```bash
-PATH="$HOME/.cargo/bin:$PATH" TMPDIR=/private/tmp uv run python scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(commit_tests::) | test(agent_startup_tests::) | test(release_tests::) | test(release_lock_tests::)' < /dev/null
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(commit_tests::) | test(agent_startup_tests::) | test(release_tests::) | test(release_lock_tests::)' < /dev/null
 ```
 
 The affected gate must exit zero, including formatting and Clippy; CI owns
@@ -96,14 +100,13 @@ owns the single coordinated release/install and installed LOO-661 readback; this
 Task supplies its merged revision, with no competing publisher or installation.
 Source fixtures establish no installed recovery.
 
-Jack Heart's steer `4041cb56-1198-4b8b-b5a5-1f146fdc969f` requires explicit-path
-`lf commit` checkpoints before returning editing steps to Graph sync: installed
-0.14.19 otherwise stages edits, fails on ignored telemetry and repeats the work.
-Preserve unrelated index/work; do not force-add telemetry or patch installed
-binaries. This execution workaround is not part of the shipped behavior.
+Done when the actual CLI scenarios above pass, genuine Git failures retain work
+and actionable recovery, and the repair lands with an exact merged revision for
+Infrastructure's release. Installed LOO-661 recovery remains a separate readback
+after that release; a passing source fixture cannot close that obligation.
 
 The existing staged Wave-memory contribution predates the selective checkpoint.
 Proposed correction to its LOO-664 Gotcha: pre-staged telemetry is now preserved
 outside new commits. Memory reconciliation belongs to its authorized owner.
 
-Check: `scripts/test_network.py cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 6 passed (reused, unchanged code); `cargo +stable fmt --all -- --check`, network-isolated `cargo +stable clippy --all-targets -- -D warnings`, and staged/unstaged `git diff --check` passed; affected suites remain with gate.
+Check: `git diff --check` and `lf context` passed on 2026-10-27 (both budgets within limits); prior unchanged-source evidence: `scripts/test_network.py cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 6 passed, `cargo +stable fmt --all -- --check` and network-isolated `cargo +stable clippy --all-targets -- -D warnings` passed; affected suites remain with gate.

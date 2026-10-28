@@ -312,9 +312,8 @@ pub(crate) fn run_sync_in(
         print_sync_plan(&plan);
         return Ok(());
     }
-    // A merge over stashed edits can conflict only when restoring them, after
-    // the resolver is gone. Committing them first turns that into an ordinary
-    // merge conflict the resolver handles, and ordinary edits never live in a stash.
+    // Checkpoint ordinary edits so their conflicts reach the merge resolver,
+    // rather than surfacing during stash restoration after the resolver is gone.
     // The checkpoint moves HEAD, so plan again against it.
     if !manual
         && !on_main
@@ -391,11 +390,9 @@ pub(crate) fn run_sync_in(
 /// Checkpoint ordinary edits while retaining telemetry's staged and working contents.
 fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress) -> Result<bool> {
     // A literal `.lf/tmp` prefix makes Git reject the pathspec when ignored.
-    // Match the dot through a glob so ignored and unignored telemetry both work.
-    crate::git::git_stdout(
-        repo,
-        &["add", "-A", "--", ":/", ":(exclude,top,glob)[.]lf/tmp/**"],
-    )?;
+    // Use the same rooted glob when staging and refreshing the real index.
+    const EXCLUDE_TELEMETRY: &str = ":(exclude,top,glob)[.]lf/tmp/**";
+    crate::git::git_stdout(repo, &["add", "-A", "--", ":/", EXCLUDE_TELEMETRY])?;
     // Start from the staged tree so explicitly staged ignored user files survive.
     // Excluding telemetry from `add` alone cannot exclude already-staged entries.
     let staged_tree = crate::git::git_stdout(repo, &["write-tree"])?;
@@ -420,14 +417,7 @@ fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress
     // carries the remaining telemetry through the merge with its index intact.
     crate::git::git_stdout(
         repo,
-        &[
-            "reset",
-            "-q",
-            "HEAD",
-            "--",
-            ":/",
-            ":(exclude,top,glob)[.]lf/tmp/**",
-        ],
+        &["reset", "-q", "HEAD", "--", ":/", EXCLUDE_TELEMETRY],
     )
     .map_err(|error| anyhow!("checkpoint saved; index refresh failed: {error}"))?;
     Ok(true)

@@ -1814,6 +1814,56 @@ fn sync_preserves_work_with_missing_or_only_telemetry_without_checkpoint() {
 }
 
 #[test]
+fn sync_preserves_work_with_conflicting_telemetry_in_recovery_stash() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let telemetry = ".lf/tmp/local.jsonl";
+    repo.create_file(".gitignore", "/.lf/tmp/\n");
+    repo.create_file(telemetry, "baseline\n");
+    git(repo.path(), &["add", "-f", ".gitignore", telemetry]);
+    repo.commit("tracked telemetry baseline");
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature\n");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.checkout("main");
+    repo.create_file(telemetry, "upstream\n");
+    repo.stage_all();
+    repo.commit("upstream telemetry");
+    repo.push();
+    repo.checkout("feature");
+    repo.create_file(telemetry, "staged telemetry\n");
+    git(repo.path(), &["add", "-f", telemetry]);
+    repo.create_file(telemetry, "working telemetry\n");
+    repo.create_file("ordinary.txt", "ordinary work\n");
+
+    let output = run_sync_cli(&repo);
+    assert!(!output.status.success());
+    let stash = git(repo.path(), &["rev-parse", "refs/stash"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!("git stash apply --index {stash}")),
+        "{stderr}"
+    );
+    for (revision, content) in [
+        ("HEAD^1", "baseline"),
+        ("HEAD", "upstream"),
+        ("refs/stash^2", "staged telemetry"),
+        ("refs/stash", "working telemetry"),
+    ] {
+        assert_eq!(
+            git(repo.path(), &["show", &format!("{revision}:{telemetry}")]),
+            content
+        );
+    }
+    assert_eq!(
+        git(repo.path(), &["show", "HEAD:ordinary.txt"]),
+        "ordinary work"
+    );
+    assert!(!repo.path().join(".lf/tmp/metrics/ops.jsonl").exists());
+}
+
+#[test]
 fn sync_preserves_work_with_locked_index_and_reports_failure() {
     let _env = EnvGuard::new(&[]);
     let repo = create_telemetry_sync_repo(true);

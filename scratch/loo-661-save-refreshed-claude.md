@@ -1,14 +1,13 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status: **Accepted outcome; implementation planning blocked on writer proof; diagnostics only.**
+Status: **Diagnostics only; replacement writer unproved.**
 Jack Heart authorized bounded repair and autonomous delivery of
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-Reviewed checkout: `84e35e250300f06619364284437c01b12f2401a6`;
-kickoff reconciliation: 2026-10-27. The merge of `0d72f072a4` changes Task/Graph
-plumbing but leaves the auth, refresh, activation and account-status code unchanged
-from the prior reviewed `0373652051`. LOO-657 and v0.14.19 remain integrated.
-No remote freshness or installed upgrade is claimed.
+reviewed checkout: `ffd265bcd3eafe32d46f9b57e8b8dc5837f12f61`, which also retains
+the full pre-compression plan. Merged Task/Graph changes leave the credential paths
+unchanged; LOO-657 and v0.14.19 remain integrated. No remote freshness or installed
+upgrade is claimed.
 
 ## Required outcome
 
@@ -25,27 +24,13 @@ Infrastructure's primary conversation owns release, CLI/Desktop/helper installat
 and installed acceptance. This Task serves its reliable-auth objective and KR about
 advancing work without plumbing failures; no quantitative Wave target is selected.
 
-**Next: prove a compatible writer.** No tested replacement preserves existing
-reader access and readable old credentials on failure. Successful write status
-or post-write repair is insufficient; the current `security -i` input ceiling
-remains. Findings 22–27 reject outer-transaction verification and explicit-access
-alternatives without exhausting public interfaces. No product decision or
-additional authorization is pending. Production cutover depends on this proof;
-the acceptance sequence below then requires synthetic and installed verification.
-
-**Planning decision (2026-10-27):** retain the accepted outcome and existing
-acceptance plan. No supported replacement mechanism has met its prerequisites;
-“prove a compatible writer” is unresolved research, not an implementation choice.
-The evidence does not justify a production cutover or a ready-to-implement claim.
-Reopening a rejected route requires a concrete mechanism that addresses its recorded
-counterexample. This is a technical proof gap, not a request for Jack Heart to
-approve weaker preservation. The current diagnostics alone do not deliver LOO-661.
-
-**Demo:** after a naturally required refresh on the repaired installation,
-`lf account claude --json` accepts the same identity and capacity, and native
-Claude continues using that login without reauthentication. Infrastructure owns
-installed execution. A synthetic 8 KiB replacement demonstrates storage transport
-only; an unexpired account poll demonstrates neither refresh nor repair.
+**Next: prove a compatible writer.** No tested replacement preserves reader access
+and readable old credentials on failure. The `security -i` ceiling remains;
+successful status or post-write repair is insufficient. Keep the accepted outcome
+and acceptance sequence below. No product decision or authorization is pending.
+Reopen a rejected route only with a mechanism addressing its counterexample;
+the exclusions below do not exhaust public interfaces. Diagnostics alone cannot
+deliver LOO-661.
 
 ## Surviving implementation
 
@@ -68,12 +53,10 @@ only; an unexpired account poll demonstrates neither refresh nor repair.
   Existing diagnostic/recovery fields carry failures. SQLite account evidence is
   derived, not credential authority.
 
-The writer still validates JSON, resolves service/account, sends hex through
-`security -i` stdin and verifies readback. Four diagnostic tests cover hostile
-output, mismatch, numeric IO errors and unstructured errors; they prove redaction,
-not native preservation. No replacement writer or native acceptance fixture exists.
-This repair adds no database migration, DTO change or Swift change; the merged
-Task/Graph work has its own migration and does not supply credential acceptance.
+Four diagnostic tests cover hostile output, mismatch, numeric IO errors and
+unstructured errors; they prove redaction, not native preservation. No replacement
+writer or native acceptance fixture exists. This repair adds no migration, DTO or
+Swift change; merged Task/Graph work supplies no credential acceptance.
 
 ## Evidence and excluded alternatives
 
@@ -142,18 +125,17 @@ source/header review, except read-only installed dispatch inspection in 18.
   unavailable. Latest recorded observation: `1793156935`. Polls expose neither
   refresh occurrence nor storage stage, payload size or causality. They explain
   neither the earlier failure nor a browser sign-in dependency.
-- **Password-assisted access does not close the gap (28, 2026-10-27):**
+- **Password-assisted access (28, 2026-10-27):**
   Apple's documented [`kSecAttrAccess`](https://developer.apple.com/documentation/security/ksecattraccess)
   supports access updates, but supplies no atomic data/access preservation guarantee.
   The separately named `SecKeychainItemSetAccessWithPassword` is declared in
   [`SecKeychainItemPriv.h`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItemPriv.h),
   not the installed SDK's public `SecKeychainItem.h`. Its pinned
   [implementation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItem.cpp)
-  constructs Keychain-passphrase credentials and edits existing access; it does
-  not accept replacement data or combine the two writes. This private API adds
-  a password dependency without providing the missing public atomic replacement.
-  It is excluded, not a new candidate. This finding is documentation/source/header
-  review only; no credential read, Keychain mutation or live account poll ran.
+  constructs Keychain-passphrase credentials and edits access without accepting
+  replacement data or combining the writes. It remains excluded: a private API
+  with a password dependency and no atomic replacement. This was source/header
+  review only; no credential read, mutation or live poll ran.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
@@ -164,9 +146,8 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Remaining implementation and acceptance
 
-1. **This slice — compatible-writer proof, still unresolved.** Prove a supported
-   mechanism that establishes encoding, access and failure
-   preservation, then replace the transport and its exclusive fixture in one cut.
+1. Prove a supported writer's encoding, access and failure preservation, then
+   replace the transport and its exclusive fixture in one cut.
    Preserve JSON validation, readback, managed login locking,
    intervening-replacement checks, omitted refresh tokens, unknown fields and the
    15-second HTTP timeout. No extra OAuth request or automatic retry. Bound new
@@ -230,10 +211,12 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Delivery retains the LOO-664 sync dependency. Jack Heart's Task revision of
-2026-10-28 03:39 UTC authorizes a temporary telemetry archive bridge, recorded in
-`scratch/questions.md`; checkpointing alone does not restore sync. The supplied
-disposable reproduction proves the bridge, not installed repair. Infrastructure
-owns the prepared signed CLI/helper installation and verification.
+LOO-664's installed sync failure and Jack Heart's authorized telemetry archive
+bridge remain in `scratch/questions.md`. The disposable reproduction proves the
+bridge, not installed repair; Infrastructure owns the prepared CLI/helper installation.
 
-Check — kickoff (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reconciliation and API review; no build/test rerun. Gate owns affected suites on the merged tree; native replacement and installed refresh acceptance remain unproved.
+Compression rationale: the surviving refresh/save path and closed error boundary
+need no further abstraction. Consolidate repeated planning constraints; leave the
+obsolete transport and its exclusive fixture for the proven replacement above.
+
+Check — compress (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reduction; no build/test rerun. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.

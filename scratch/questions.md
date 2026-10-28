@@ -9,11 +9,9 @@ Task-local `.lf/tmp` after validation and an explicit-path checkpoint, leaving i
 absent for automatic sync. Checkpointing alone does not restore installed19 sync.
 The preceding realign archive is
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-realign-hxkX9Mtm/tmp`.
-The 2026-10-27 kickoff confirmed that directory exists and this checkout's `.lf/tmp`
-is absent. No new telemetry archive is needed unless it reappears before return.
-Earlier archives and any
-new telemetry remain separate; no logs are deleted or overwritten. No ignore-rule
-change, forced telemetry staging or suppressed Git error is authorized.
+Keep earlier archives and new telemetry separate; no logs are deleted or
+overwritten. No ignore-rule change, forced telemetry staging or suppressed Git
+error is authorized.
 This bridge changes neither writer proof nor Infrastructure's installation and
 live-acceptance ownership. Earlier archive paths remain at
 `22d5d8e0e5:scratch/questions.md` and `0288f9d611:scratch/questions.md`.

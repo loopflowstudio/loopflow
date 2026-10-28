@@ -1,7 +1,7 @@
 # LOO-664: Keep sync working with ignored telemetry
 
-2026-10-27, reconciled after compression. Selective checkpoint implemented;
-gate and delivery remain. The approach is accepted under the Task's hotfix scope.
+2026-10-27, reconciled after gate. Selective checkpoint implemented, checked and
+published; landing remains. The approach is accepted under the Task's hotfix scope.
 The current Task definition requires no additional implementation slice.
 Jack Heart authorized the bounded hotfix and autonomous shipping in comment
 `297df81a-24b3-4431-8336-a0dfeb3660ab`. Iteration feedback rejects the previous
@@ -164,3 +164,30 @@ for fresh telemetry before returning to automatic Graph sync. Both are atomic mo
 prior archives remain untouched.
 
 Check: after conflict-free sync with `fd2b2c18b5`, network-isolated `cargo test -p loopflow --test integration documented_commands:: --jobs 4` passed all 4 checks; the sync implementation and regressions were unchanged. PR #1754 is published at https://github.com/loopflowstudio/loopflow/pull/1754; merge and installed acceptance remain with their existing owners.
+
+## Gate — 2026-10-27
+
+Reviewed all six changed paths against `fd2b2c18b5`; no code or documentation
+repair needed. The ops implementation and sync fixtures reach sync, commit,
+startup, release and release-lock tests; `docs/ops.md` reaches website checks.
+Architecture, Rust inventory, formatting and Clippy complete the affected plan.
+No Swift, schema or DTO change requires another suite.
+
+Check: the affected `scripts/test.py --reuse-passing --rust-filter` command above passed architecture, inventory, formatting, 153 Rust tests (including all seven telemetry regressions) and Clippy; website setup failed because rustup-first PATH selected obsolete `~/.cargo/bin/lf`, which rejects `help --all --json`.
+Check: `cd website && LF_BIN=/Applications/Loopflow.app/Contents/MacOS/lf uv run python dev.py test` passed all 72 tests after pinning the supported CLI; passing suites were not rerun.
+Check: `git diff --check` passed; CI retains cross-platform coverage, and Infrastructure retains installed LOO-661 verification.
+
+The first gate attempt ran no product checks: shared uv-cache inventory exceeded
+its 15-second deadline. A direct scan then measured 7.6 GiB in 10.6 seconds;
+the unchanged runner's retry passed resource preflight and postflight (113.9/109.4
+GiB free, 32 GiB floor). Installed build cleanup returned an unavailable-command
+receipt; the supported `lf wt prune --builds --dry-run` retained every candidate.
+No cache was deleted to bypass inspection. The two runner receipts remain under
+the common Git directory's `loopflow/pre-land/runs/changed/` as
+`20261028T041231Z-45974-54faf19f.json` and `20261028T041414Z-79308-03e71272.json`;
+the latter correctly retains its website setup failure alongside passing suites.
+
+After checkpointing this note, atomically preserve this step's `.lf/tmp` at
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-664-gate-zmvzfftv/telemetry`
+and leave the original path absent for automatic sync. Earlier archives remain
+untouched. This is the authorized Task-local bridge, not installed repair.

@@ -204,6 +204,7 @@ When editing Rust tests:
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` (standalone binaries included) for the old name.
 - Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
+- Native credential acceptance mocks HTTP but invokes real storage for exact disposable homes. Isolate process-global Keychain settings in bounded children; assertions and receipts contain no credential bytes.
 
 # Goals
 

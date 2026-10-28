@@ -636,6 +636,10 @@ fn wrap_line(line: &str, width: usize) -> String {
     lines.join("\n")
 }
 
+#[cfg(all(test, target_os = "macos"))]
+#[path = "account_status_native_tests.rs"]
+mod native_tests;
+
 #[cfg(test)]
 mod tests {
     use super::{render, AccountReport};

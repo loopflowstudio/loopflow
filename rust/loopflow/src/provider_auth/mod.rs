@@ -2606,11 +2606,18 @@ fn extract_claude_token_from_config_dir(config_dir: &Path) -> Option<ProviderTok
 }
 
 /// Claude's native homes keep their login in the Keychain on macOS; a stored
-/// account's own home keeps it in a file everywhere. Tests stay on files.
-#[cfg(all(target_os = "macos", not(test)))]
+/// account's own home keeps it in a file everywhere. Ordinary tests stay on files;
+/// the isolated native fixture opts only its disposable home into this dispatch.
+#[cfg(target_os = "macos")]
 fn claude_login_in_keychain(config_dir: &Path) -> bool {
+    #[cfg(test)]
+    return native_keychain_tests::is_native_home(config_dir);
+    #[cfg(not(test))]
     !crate::provider_account::activation::is_account_home(config_dir)
 }
+
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) mod native_keychain_tests;
 
 /// The login a Claude started in `config_dir` would read: the Keychain item
 /// first where there is one, as Claude itself prefers it, then the file.
@@ -2619,7 +2626,7 @@ fn claude_login_in_keychain(config_dir: &Path) -> bool {
 ///
 /// Returns an error when a store exists but cannot be read.
 pub(crate) fn read_claude_login(config_dir: &Path) -> Result<Option<SecretString>, AuthError> {
-    #[cfg(all(target_os = "macos", not(test)))]
+    #[cfg(target_os = "macos")]
     if claude_login_in_keychain(config_dir) {
         if let Some(credential) = read_claude_keychain_credential_for_config(config_dir)? {
             return Ok(Some(credential.blob));
@@ -2644,7 +2651,7 @@ pub(crate) fn write_claude_login(
     config_dir: &Path,
     credential: &SecretString,
 ) -> Result<(), AuthError> {
-    #[cfg(all(target_os = "macos", not(test)))]
+    #[cfg(target_os = "macos")]
     if claude_login_in_keychain(config_dir) {
         return write_claude_keychain_credential(config_dir, credential);
     }

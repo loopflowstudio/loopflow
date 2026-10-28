@@ -17,6 +17,16 @@ The compress receipt at
 verified source absence after checkpoint `775fe0901`; it moved no telemetry.
 That reservation is complete and must not be reused.
 
-This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-xfhhpj41/tmp`
+The prior realign reservation and its receipt remain at
+`a2763b171:scratch/questions.md`.
+
+This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-implement-native-wolw9cry/tmp`
 for fresh telemetry after checkpointing. Its sibling `receipt.json` records the
 checkpoint and verified move, or source absence. A reservation alone proves no archive.
+
+October 28 implementation assumption: use the library test build's existing mocked
+HTTP endpoints and opt only one disposable home per child into the actual native
+storage functions. Production gains no test backend or endpoint override. The
+native test remains explicit because ordinary unit tests must not touch Keychain;
+its eight-case failure is retained, not waived. The design records the excluded
+transaction/password candidate and the unresolved writer decision.

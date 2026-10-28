@@ -1,9 +1,11 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28, reconciled against `775fe0901`): **Implementation incomplete.**
-The branch supplies diagnostics; the defective `security -i` writer remains,
-with no replacement selected or native acceptance fixture. The accepted outcome
-and preservation constraints below remain binding.
+Status (2026-10-28): **Implementation incomplete; native acceptance fails.**
+An isolated mocked-refresh fixture now invokes the actual native writer through
+account verification. All eight cases execute and clean up; ordinary ASCII
+replacement passes, large replacements destroy old data, and Unicode exposes a
+readback encoding failure. The defective `security -i` writer remains, with no
+eligible replacement established. This is a failing acceptance boundary, not a repair.
 
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -37,8 +39,9 @@ Two independent gaps remain:
   Ordinary repair is authorized; no concrete product choice is ready for decision.
   Private interfaces, trust changes and provider-owned refresh remain unaccepted
   alternatives. Neither public-API exhaustion nor a scope change is established.
-  Finding 38 also leaves the native acceptance design open: file-backed refresh
-  tests and substituted-command diagnostics do not exercise this boundary together.
+  Finding 39 closes finding 38's missing test boundary using test-only native
+  dispatch for one disposable home per child. HTTP stays mocked; the writer,
+  reader, active-home selection and account-report consumers are real.
 - **Live diagnosis:** jack@loopflow.studio needs browser reconnection; `invalid_grant`
   returns before `write_claude_login`. The historical save failure remains unexplained.
   Reconnection cannot prove a writer, and local rollback cannot undo server-side
@@ -167,6 +170,49 @@ they establish neither installed binary equivalence nor public-API exhaustion.
   exercise the actual storage implementation with isolated synthetic homes and
   mocked HTTP, without adding a second writer or enabling real OAuth requests.
   This finding adds no native experiment or evidence about the live failure.
+- **Production native acceptance (39, 2026-10-28):** the explicit
+  `native_refresh_replaces_exact_bytes_and_preserves_failed_saves` test executes
+  eight isolated cases through the compiled native implementation. Two 512-byte
+  ASCII replacements pass exact readback, identity and usage with one refresh each.
+  Both 2,048/8,192-byte cases with a five-character account overwrite old data with
+  2,010 bytes; both long-account cases leave 1,994 bytes. Account reporting returns
+  sanitized persistence `unavailable` without reconnect advice; old bytes are lost.
+  Invalid JSON is rejected before writing and old bytes remain exact. All services
+  were absent before setup and absent after cleanup; account names remain unchanged.
+  Parent/children use the shared environment lock, loopback-only network boundary,
+  captured output and 15-second process-group deadlines. Each child's only native
+  home is synthetic; ordinary tests keep file storage and production has no test
+  endpoint/backend switch. No real OAuth request, credential read or Session change.
+- **Unicode reader failure (40, 2026-10-28):** the Unicode case is a
+  512-byte refresh preserving an unrelated Unicode field. It writes the exact new
+  bytes but reports persistence failure: `/usr/bin/security -w` renders this value
+  as hex, while the production reader expects raw JSON. The fixture's independent
+  observer decodes that rendering and compares bytes without printing them. The old
+  seed uses an ASCII JSON Unicode escape, so native reading and refresh start normally.
+  This is distinct from the large-value truncation; it also violates failed-save
+  preservation. [Apple's reader source](https://github.com/apple-oss-distributions/SecurityTool/blob/main/keychain_find.c)
+  documents the rendering branch; installed fixture results establish this case.
+
+## Writer decision after native reproduction
+
+The concrete combination assessed on October 28 is native content replacement
+inside a FileDL transaction, followed by password-authorized restoration of the
+copied access/partition ACL before commit, rolling back on either failure. It
+would need to address both authority and preservation, rather than repair ACLs
+after an unprotected commit. **It is not an accepted or proven implementation.**
+
+The password-taking entry is declared in Apple's private
+[`SecKeychainItemPriv.h`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItemPriv.h)
+(`SecKeychainItemSetAccessWithPassword`, lines 190–199), and is absent from this
+Machine's public SDK headers. Its implementation supplies passphrase credentials
+to the ACL edit. The accepted public-interface constraint excludes that candidate;
+no password was requested or read, no private entry invoked, and no previously
+rejected mutation probe repeated. A transaction alone supplies no partition
+authority, and findings 22–26 still leave group/ACL rollback and pre-commit
+verification unproved. The fixture is ready to judge an eligible writer, but no
+mechanism meeting the existing constraints has been established. Dependent writer
+implementation and delivery stop here; this does not establish API exhaustion or
+authorize a scope/trust/storage change.
 
 ## Remaining implementation and acceptance
 
@@ -185,16 +231,14 @@ they establish neither installed binary equivalence nor public-API exhaustion.
    JSON, injected pre-commit failure and denied/locked storage must leave old data
    readable; cover partition and partial-commit failures. Compare booleans/lengths,
    never values in output. Do not apply an unproved candidate to real credentials.
-3. Compile and explicitly invoke the production native writer while ordinary unit
-   tests remain file-backed. Require nonzero native cases; names/filters alone prove
-   nothing. Use the shared environment lock and a child process for process-global
-   Keychain UI settings, without a production test-only backend. Mocked OAuth refresh
-   must reach the writer through `fresh_claude_token` and identity/usage/account-report
-   consumers. Failed saves must report sanitized actionable `unavailable`, not
-   `rejected`, with old data readable. Preserve managed-file, replacement-race and
-   native-activation coverage. Register a dedicated native test binary if needed.
-   Unavailable Keychain infrastructure is unavailable, not green; Linux cannot
-   replace macOS proof.
+3. Make the existing native fixture pass after selecting an eligible writer. It
+   already compiles/invokes production storage through `fresh_claude_token`, identity,
+   usage and account-report consumers, while ordinary tests remain file-backed.
+   Extend it for creation, ambient service selection, denied/locked storage,
+   injected pre-commit failure and partition/partial-commit failures. Failed saves
+   must retain old readable data as well as sanitized `unavailable`. Preserve
+   managed-file, replacement-race and native-activation coverage. Unavailable native
+   infrastructure is a failed check, not green; Linux cannot replace macOS proof.
 4. Diagnose recurrence through supported installed account operations, recording
    sanitized stage/code, storage kind and whether refresh occurred. Never force
    expiry, revoke tokens, switch routes or damage a real item. Keep recovery docs
@@ -229,8 +273,13 @@ and stdin `/dev/null`, run:
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(provider_auth::) | test(subscription::) | test(provider_account::) | test(lf::commands::account_status::) | test(lf::commands::account::)'
 ```
 
-Record the native acceptance command when implemented; require nonzero cases
-meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
+The explicit native boundary (currently red; asserts all eight cases executed):
+
+```sh
+uv run python scripts/test_network.py cargo test -p loopflow --lib native_refresh_replaces_exact_bytes_and_preserves_failed_saves -- --ignored --nocapture < /dev/null
+```
+
+Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only reconciliation, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.
+Check — native command above: FAIL (8 cases, 5 failures, all cleaned); focused file-backed refresh test, `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`: PASS. Gate retains complete acceptance and Infrastructure retains installed verification.

@@ -563,6 +563,24 @@ After Session-history or schema changes, run `lf history list --json`, `lf usage
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove a draft migration.
 
+## Native Claude credential persistence
+
+```bash
+uv run python scripts/test_network.py cargo test -p loopflow --lib native_refresh_replaces_exact_bytes_and_preserves_failed_saves -- --ignored --nocapture < /dev/null
+```
+
+Run explicitly on macOS with an unlocked Keychain. The fixture asserts eight
+executed cases: ordinary, 2,048- and 8,192-byte replacements with short/long account
+names, Unicode readback, and invalid-input preservation. It mocks HTTP and invokes
+the actual native storage implementation through refresh and account reporting.
+Independent `security` reads compare exact bytes. Only counts and booleans print.
+
+Each child opts one disposable home into native dispatch; ordinary unit tests keep
+file storage. Setup uses unique scoped items and `security`'s default access. The
+parent bounds/reaps process groups at 15 seconds and deletes only its own items,
+including after a failed child. It changes no Keychain search list or default.
+Missing native infrastructure fails the check. A skipped test proves nothing.
+
 ## Codex daemon account switching
 
 ```bash

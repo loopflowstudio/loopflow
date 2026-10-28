@@ -91,10 +91,16 @@ then supplies Infrastructure the exact merged revision. Infrastructure alone own
 coordinated release/install and installed LOO-661 readback. Source fixtures and
 landing cannot close that installed verification obligation.
 
-The self-hosting blocker recorded in the Task definition is resolved by
+The memory checkpoint is resolved by
 `0f6969856dcda27735c9e67520116f9e7684616d`: the authorized LOO-664 Wave-memory
-contribution describes selective checkpoints and is committed; compress started
-with a clean index and worktree. Until installation, checkpoint each step's intended
-edits with explicit-path `lf commit` before returning to installed Graph sync.
+contribution describes selective checkpoints and is committed. The execution
+dependency remains: the Task update of 2026-10-28 03:31 UTC reports that installed
+0.14.19 fails its literal-exclusion staging command even on a clean protected
+branch. Explicit-path checkpoints preserve edits but cannot restore Graph sync.
+Infrastructure has pinned a candidate that passes the clean-checkout reproduction
+and prepared a signed CLI and matching Desktop helper with passing exact-frontier
+installation preflight. Installation and subsequent verification remain pending
+with Infrastructure; this is reported candidate evidence, not installed proof.
+No repeated implementation or unchanged check can resolve that installation boundary.
 
 Check (2026-10-27, rustup stable 1.99.1): `uv run python scripts/test_network.py /Users/jack/.cargo/bin/cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 7 passed; rustup-first `cargo +stable fmt --all -- --check` and network-isolated `cargo +stable clippy --all-targets -- -D warnings` passed; `git diff --check` and `lf context` passed, both budgets within limits; affected suites remain with gate.

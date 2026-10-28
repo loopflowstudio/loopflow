@@ -1,0 +1,216 @@
+name: macOS
+
+# The macOS jobs, run once per macOS-touching pull request (ci.yml) and after
+# merge on main (macos-main.yml). The queue proves the Linux suite only.
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to test; empty tests the triggering commit.
+        type: string
+        default: ""
+      swift-test:
+        type: boolean
+        default: true
+      macos-process-test:
+        type: boolean
+        default: true
+      loopflow-ui-test:
+        type: boolean
+        default: true
+
+jobs:
+  swift-test:
+    if: inputs.swift-test
+    runs-on: macos-26
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
+      - uses: astral-sh/setup-uv@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          key: swift-cli-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+      - name: Fingerprint Swift build inputs
+        id: swift-inputs
+        run: uv run python scripts/swift_cache.py key >> "$GITHUB_OUTPUT"
+      - name: Restore SwiftPM build
+        id: swift-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            swift/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ steps.swift-inputs.outputs.key }}
+          restore-keys: ${{ steps.swift-inputs.outputs.restore-prefix }}
+      - name: Restore unchanged Swift source timestamps
+        run: uv run python scripts/swift_cache.py restore
+      - name: Build CLI for Swift transport tests
+        run: /usr/bin/time -l cargo build -p loopflow --bin lf
+      - name: Test checkout observation's read-only sandbox
+        run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes
+      - name: Build Desktop and its tests
+        # Failure locations come from #file/#line, so debug info is unnecessary.
+        run: /usr/bin/time -l swift build --build-tests --package-path swift -Xswiftc -gnone
+        timeout-minutes: 30
+      - name: Run headless model and view tests
+        shell: bash
+        # Display-session diagnostics are opt-in; production view inspection
+        # and control actions need no app launch. The build above is reused.
+        run: |
+          mkdir -p "$RUNNER_TEMP/swift-tests"
+          swift --version > "$RUNNER_TEMP/swift-tests/toolchain.txt"
+          /usr/bin/time -l scripts/test_desktop.sh -Xswiftc -gnone \
+            --event-stream-output-path "$RUNNER_TEMP/swift-tests/events.jsonl" \
+            --event-stream-version 0 \
+            2>&1 | tee "$RUNNER_TEMP/swift-tests/output.log"
+        # A pull request that makes the suite slower fails here, on its own PR,
+        # naming its slow tests below. Main keeps a hang guard so runner
+        # variance never reds it; there, test_desktop.sh ends the run and
+        # names the test when one outlives its own limit. The suite
+        # took 161 s on 2026-10-22; raise this only together with a measured reason.
+        timeout-minutes: ${{ github.event_name == 'pull_request' && 5 || 20 }}
+      - name: Name unfinished and slowest Swift tests
+        if: failure()
+        run: python3 scripts/swift_test_report.py "$RUNNER_TEMP/swift-tests/events.jsonl" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve Swift failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: swift-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/swift-tests
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Check Swift multiplatform boundaries
+        run: uv run python scripts/check_swift_multiplatform_boundaries.py
+      - name: Record Swift source timestamps
+        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/swift_cache.py save
+      - name: Save SwiftPM build
+        if: github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            swift/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ steps.swift-inputs.outputs.key }}
+
+  macos-process-test:
+    if: inputs.macos-process-test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          key: macos-process-${{ matrix.os }}-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+      - name: Build the macOS process tests
+        run: |
+          /usr/bin/time -l cargo test -p loopflow --lib app_process_tests --no-run
+          /usr/bin/time -l cargo test -p loopflow --test integration data_clones:: --no-run
+      - name: Test macOS installation process discovery
+        run: uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
+      - name: Test isolated data clones and native process identity
+        run: |
+          # These fixtures install their own inherited sandbox; the outer runner
+          # permits an unsandboxed system ps and cannot be nested with this policy.
+          if [ "${{ matrix.os }}" = macos-26 ]; then
+            cargo test --offline -p loopflow --test integration data_clones:: < /dev/null
+          else
+            cargo test --offline -p loopflow --test integration data_clones::clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source < /dev/null
+          fi
+          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
+
+  loopflow-ui-test:
+    if: inputs.loopflow-ui-test
+    runs-on: macos-26
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      # Claims name their person by Git user.email; repository-local test identities win.
+      - name: Give tests a fallback Git identity
+        run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v7
+      - name: Fingerprint workspace build profiles
+        id: rust-profiles
+        run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        id: rust-cache
+        with:
+          key: loopflow-ui-test-${{ steps.rust-profiles.outputs.key }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
+          workspaces: . -> target/dev-app-control
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Fingerprint Xcode build inputs
+        id: xcode-inputs
+        run: uv run python scripts/swift_cache.py key --build-system xcode >> "$GITHUB_OUTPUT"
+      - name: Restore Xcode build
+        id: xcode-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: swift/.build/xcode-derived-data
+          # Only identical source and toolchain inputs may reuse signed build
+          # state. In particular, changed entitlements need fresh DerivedData.
+          key: ${{ steps.xcode-inputs.outputs.key }}
+      - name: Restore unchanged Xcode source timestamps
+        run: uv run python scripts/swift_cache.py restore --build-system xcode
+      - name: Generate Xcode project
+        run: xcodegen generate
+        working-directory: swift
+      - name: Build Loopflow for testing (compile check)
+        # Compile the app and signed test runners with the terminal fallback;
+        # SwiftPM exercises the suites with GhosttyKit. build-for-testing keeps
+        # that separate configuration's compile proof without launching a host.
+        # The real hosted UI run is an optional display diagnostic:
+        # `scripts/test.py --ui-host`; see release/UI_HOST_GATE.md.
+        env:
+          XCODE_CACHE_HIT: ${{ steps.xcode-cache.outputs.cache-hit }}
+        run: uv run python scripts/build_xcode_ci.py
+        timeout-minutes: 12
+      - name: Record Xcode source timestamps
+        if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
+        run: uv run python scripts/swift_cache.py save --build-system xcode
+      - name: Save Xcode build
+        if: github.ref == 'refs/heads/main' && steps.xcode-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: swift/.build/xcode-derived-data
+          key: ${{ steps.xcode-inputs.outputs.key }}
+

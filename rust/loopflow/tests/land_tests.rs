@@ -461,8 +461,15 @@ fn land_cleans_added_scratch_and_retains_existing_edits() {
 }
 
 #[test]
-fn final_preparation_keeps_published_history_when_the_base_changes() {
-    for (manual_merge, advance_base) in [(false, false), (true, false), (false, true)] {
+fn final_preparation_keeps_published_history_and_merges_main_only_on_conflict() {
+    // (manual merge, main advanced, GitHub reports the PR conflicting)
+    for (manual_merge, advance_base, conflicting) in [
+        (false, false, false),
+        (true, false, false),
+        (false, true, false),
+        (false, true, true),
+        (true, true, true),
+    ] {
         let home = tempfile::TempDir::new().unwrap();
         let repo = TestRepo::new();
         repo.create_file("scratch/.gitkeep", "");
@@ -484,8 +491,14 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
             repo.checkout("feature");
         }
         let gh_log = home.path().join("gh.log");
-        let script = gh_existing_pr_script(gh_log.to_str().unwrap())
+        let mut script = gh_existing_pr_script(gh_log.to_str().unwrap())
             .replace("git rev-parse HEAD", "git rev-parse @{upstream}");
+        if conflicting {
+            script = script.replace(
+                r#""mergeStateStatus":"CLEAN""#,
+                r#""mergeStateStatus":"DIRTY""#,
+            );
+        }
         let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
         let options = LandOptions {
             strict: true,
@@ -502,7 +515,7 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
         } else {
             land(repo.path(), &options, &NullProgress).unwrap();
         }
-        if advance_base {
+        if conflicting {
             assert_ne!(repo.head_sha(), published_head);
             assert!(loopflow::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap());
             assert_eq!(
@@ -510,7 +523,9 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
                 "new upstream work"
             );
         } else {
+            // A repair or re-arm on a mergeable PR keeps the base its checks ran on.
             assert_eq!(repo.head_sha(), published_head);
+            assert!(!repo.path().join("upstream.txt").exists());
         }
         assert_eq!(
             fs::read_to_string(repo.path().join("feature.txt")).unwrap(),

@@ -387,7 +387,7 @@ def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
 
 
 def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
-    ci = (ROOT / ".github/workflows/ci.yml").read_text()
+    ci = (ROOT / ".github/workflows/macos.yml").read_text()
     ci_build = (ROOT / "scripts/build_xcode_ci.py").read_text()
     test_script = (ROOT / "scripts/test.py").read_text()
     screenshot_script = (ROOT / "scripts/generate_screenshots.py").read_text()

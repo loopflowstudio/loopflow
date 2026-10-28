@@ -10,7 +10,7 @@ lf ps --json
 A conversation, a Graph and an operating-system process answer different
 questions. SQLite owns their identities and history references; large payloads
 and provider-native state keep their own storage formats. This page specifies
-those ownership boundaries. [Cutover status](../architecture-reference.md#cutover-status)
+those ownership boundaries. [Cutover status](reference-cutover.md#cutover-status)
 distinguishes this contract from the current source inventory and CLI wire format.
 
 ## Rust store API migration
@@ -126,7 +126,7 @@ Same-target assignment is idempotent; reassignment and clearing are unavailable.
 The exact target is explicit and the transaction rejects competing assignment,
 attachment replacement or incompatible Graph membership. Prospective usage attribution
 and its limits are in the
-[contract](../architecture-reference.md#attribution-binding-and-ownership).
+[contract](reference-models.md#attribution-binding-and-ownership).
 
 Actual work reservation, when `lf task run` or `lf task checkout` allocates a
 checkout, claims an unowned Task in its append-only `task_ownership` log. Merely

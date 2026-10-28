@@ -421,9 +421,9 @@ For Markdown changes under `docs/`, builtins or skills, and changes to README or
 AGENTS, also run `cargo test -p loopflow --test integration documented_commands::`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
 suite does not check those additions.
-`docs/lf-reference.md` renders the compiled command tree below its preamble;
-after a command or help-text change, rewrite it with
-`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration cli_reference`.
+`docs/lf-reference.md` commits only its preamble; the website's `sync-docs`
+appends the command tree from `lf help --all --json`, so a command or help-text
+change needs no reference update.
 Keep README and docs/index openings identical and regenerate docs/architecture.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.

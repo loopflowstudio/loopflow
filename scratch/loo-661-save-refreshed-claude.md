@@ -2,11 +2,10 @@
 
 Status: **Implementation blocked on writer design; diagnostics only.**
 The checked-in writer still uses the transport invalidated by finding 30.
-Prove a replacement that preserves native reader access and readable old bytes
-on failure before implementation or delivery. No product decision or relaxation
-of preservation requirements is pending; exclusions below do not exhaust public
-interfaces. Reopen a rejected route only with a mechanism addressing its
-counterexample.
+A replacement preserving native reader access and readable old bytes on failure
+remains unproved. No product decision or relaxation of preservation requirements
+is pending; exclusions below do not exhaust public interfaces. A rejected route
+needs a mechanism addressing its counterexample before reconsideration.
 
 Kickoff decision, 2026-10-27: retain the accepted outcome and existing plan;
 no replacement mechanism is ready for implementation. Direct inspection of the
@@ -34,6 +33,13 @@ candidate. Claude still shares `write_claude_login` between refresh and activati
 the merged Codex changes do not satisfy this repair. Release child memory likewise
 separates public-entry fixtures from installed acceptance. No acceptance or scope
 change follows from either dependency.
+
+Realigned 2026-10-27 at `fb7b38afc3`: merged #1758 (`c87b53c5c1`) changes
+only v0.14.20 release notes. Those notes explicitly retain installed sync and
+Codex acceptance with Infrastructure; they establish no Claude persistence repair
+or installation. Source inspection still finds the shared `security -i` writer
+and `invalid_grant` handling before persistence. Findings 31–32 remain the latest
+writer/live evidence; no new probe or account poll was needed for reconciliation.
 
 ## Required outcome
 
@@ -298,4 +304,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — kickoff (2026-10-27): `lf account claude --json` exits 0 but reports `refresh grant rejected` for jack@loopflow.studio; `git diff --check` and `lf context` pass. Prose/source investigation only; native proof and affected gate checks remain pending.
+Check — realign (2026-10-27): `git diff --check` and `lf context` pass; prose-only reconciliation reuses findings 30–32. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.

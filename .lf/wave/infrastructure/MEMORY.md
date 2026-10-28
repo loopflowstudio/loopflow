@@ -791,14 +791,16 @@ with five-minute turn grace. Configured acceptance remains open.
 ## Claude credential preservation (LOO-661, 2026-10-27)
 
 Jack Heart authorized preservation-first repair; Infrastructure owns installation.
-`security -i` failed at 2/8 KiB while replacing old bytes. Native API probes broke
-reader access; FileDL rollback recovered bytes but proved no safe replacement.
-No compatible writer or live failure cause is established. Diagnostics and accepted
-polls prove neither preservation nor refresh. File-backed tests cannot establish
-native acceptance; local rollback cannot undo OAuth rotation. LOO-325 stays separate.
-Release's entry-point lesson applies: prove the production writer, then installed
-refresh. Full counterexamples and limits:
-`65281101c2:scratch/loo-661-save-refreshed-claude.md`.
+`security -i` failed at 2/8 KiB while replacing old bytes. Native probes broke
+reader access; FileDL rollback proved no safe replacement. Published combined
+data/access updates commit sequentially, not atomically. No compatible writer or
+historical save-failure cause is established. Later supported polling reports
+`refresh grant rejected` before persistence: reconnection is needed for live
+acceptance, not proof of the original cause. Diagnostics/file fixtures prove no
+native preservation; local rollback cannot undo OAuth rotation. LOO-325 stays separate.
+Release's entry-point lesson applies: production writer proof precedes installed
+refresh acceptance. Counterexamples and limits:
+`56caf253b8:scratch/loo-661-save-refreshed-claude.md`.
 
 ## Codex credential recovery (LOO-665, 2026-10-28)
 

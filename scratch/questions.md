@@ -18,7 +18,7 @@ LOO-664 / #1754 is integrated; its disposable reproduction proves only the bridg
 Infrastructure owns CLI/helper installation and installed acceptance.
 The previous realign archive exists and preserves that complete telemetry directory:
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-realign-rk9ra266/tmp`.
-Kickoff found `.lf/tmp` absent; no new archive is needed unless telemetry recurs
-before automatic sync.
+Realign found fresh telemetry after kickoff. Its separate post-checkpoint archive:
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-realign-DgnB3mVm/tmp`.
 Previous archive paths and references:
 `ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/questions.md`.

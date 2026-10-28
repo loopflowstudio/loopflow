@@ -2407,19 +2407,8 @@ mod tests {
             "../../tests/fixtures/migrations/optional_task_pr_held_process.sql"
         ))
         .unwrap();
-        if _draft_is_canonical("local_planning") {
-            // Exercise the combined release, not an intermediate draft schema.
-            apply_sqlite(&conn).unwrap();
-        } else {
-            super::_migration_transaction(&conn, |conn, _guards| {
-                conn.execute_batch(&current_draft_sql("local_planning"))?;
-                conn.execute_batch(&current_draft_sql("optional_task_pr"))?;
-                conn.execute_batch(&current_draft_sql("agent_process"))?;
-                conn.execute_batch(&current_draft_sql("lf_process_ids"))?;
-                validate_foreign_keys(conn)
-            })
-            .unwrap();
-        }
+        apply_sqlite(&conn).unwrap();
+        apply_build_drafts(&conn);
         assert_eq!(
             conn.query_row(
                 "SELECT planning_completed FROM tasks WHERE id='research'",
@@ -2430,7 +2419,7 @@ mod tests {
             1
         );
         conn.execute(
-            "UPDATE task_workflows SET node='start' WHERE task_id='research'",
+            "UPDATE task_graphs SET step='start' WHERE task_id='research'",
             [],
         )
         .unwrap();
@@ -2451,16 +2440,16 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pending, ("completed".into(), 1, 0));
-        let execution: Option<(String, i64, String, Option<i64>)> = conn.query_row(
-            "SELECT w.node,w.edge,w.lf_process_id,p.completed_at FROM task_workflows w JOIN processes p ON p.id=w.lf_process_id WHERE w.task_id='single'",
-            [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
-        ).optional().unwrap();
-        // A released `ship_it` drops Workflow rows short of `end`; the next run re-places them.
-        if _draft_is_canonical("ship_it") {
-            assert_eq!(execution, None);
-        } else {
-            assert_eq!(execution, Some(("start".into(), 0, "held".into(), None)));
-        }
+        // Released `ship_it` dropped positions short of `end`; their next run
+        // takes up a Graph without retaining that earlier execution.
+        let execution: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM task_graphs WHERE task_id='single'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(execution, 0);
         assert_eq!(
             conn.query_row(
                 "SELECT task_id FROM agent_sessions WHERE id='conversation'",
@@ -5918,10 +5907,12 @@ mod tests {
                 .unwrap();
         }
 
+        apply_build_drafts(&conn);
+
         let task: (String, String, String, String) = conn
             .query_row(
-                "SELECT t.id, t.issue_identifier, t.workspace_slug, w.node
-                 FROM tasks t JOIN task_workflows w ON w.task_id=t.id
+                "SELECT t.id, t.issue_identifier, t.workspace_slug, w.step
+                 FROM tasks t JOIN task_graphs w ON w.task_id=t.id
                  WHERE t.external_issue_id='issue-1'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),

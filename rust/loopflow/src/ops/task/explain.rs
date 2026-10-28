@@ -190,10 +190,9 @@ async fn read_task_run(
             },
             None => TaskRunAction::Run {
                 from: graph.step_name(&place).into(),
-                stops_at: graph
-                    .after(&place)
-                    .filter(|_| !through)
-                    .and_then(|next| graph.next_interactive(&next))
+                stops_at: (!through)
+                    .then(|| graph.next_interactive(&place))
+                    .flatten()
                     .map(str::to_owned),
                 graph: name,
                 take_up,

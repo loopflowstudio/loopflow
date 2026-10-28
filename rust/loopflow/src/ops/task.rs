@@ -715,7 +715,11 @@ async fn start_task_run(
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
     let Some(start) = start else {
-        if store.sqlite.end_task_graph(&task.id).map_err(task_error)? {
+        if store
+            .sqlite
+            .end_task_graph(&task.id, &process)
+            .map_err(task_error)?
+        {
             settle_pending_completion(store, task).await?;
         }
         return Ok(TaskRunStart::Ended);

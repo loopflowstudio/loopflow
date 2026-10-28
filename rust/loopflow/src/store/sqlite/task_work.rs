@@ -415,6 +415,11 @@ fn arrive_in(
     )? > 0;
     let ended = arrived && step == END;
     if ended {
+        // A routed path may reach end even though another path had an
+        // interactive step, so launch-time prediction is not sufficient.
+        if !super::durable::task_state_in(tx, task)?.is_terminal() {
+            ship_in(tx, task, carrier, "its run reached the end")?;
+        }
         super::children::request_completion_in(tx, task, None)?;
     }
     Ok(ended)
@@ -691,7 +696,7 @@ impl SqliteStore {
 
     /// Put the Task at `end` with nothing left to run, requesting completion.
     /// Returns whether it reached `end` now.
-    pub(crate) fn end_task_graph(&self, task: &TaskId) -> StoreResult<bool> {
+    pub(crate) fn end_task_graph(&self, task: &TaskId, by: &LfProcessId) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let ended = tx.execute(
@@ -699,6 +704,7 @@ impl SqliteStore {
             rusqlite::params![task.as_str(), END, crate::store::rows::now_unix()],
         )? > 0;
         if ended {
+            ship_in(&tx, task, by, "its run reached the end")?;
             super::children::request_completion_in(&tx, task, None)?;
         }
         tx.commit()?;
@@ -1027,11 +1033,13 @@ mod tests {
                 assert!(super::arrive_in(&tx, &task, &carrier, super::END).is_err());
             }
             assert!(!at_end(&conn));
+            assert!(super::shipping_in(&conn, &task).unwrap().is_none());
             conn.execute_batch("DROP TRIGGER refuse_request").unwrap();
             let tx = conn.transaction().unwrap();
             assert!(super::arrive_in(&tx, &task, &carrier, super::END).unwrap());
             tx.commit().unwrap();
         }
+        assert!(store.task_shipping(&task).unwrap().is_some());
         let (request, _) = store.task_completion_pending(&task).unwrap().unwrap();
         store
             .fail_task_completion(&task, request, "provider unavailable")
@@ -1064,6 +1072,51 @@ mod tests {
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Done
         );
+    }
+
+    #[test]
+    fn reaching_end_without_remaining_steps_approves_shipping() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let by = LfProcessId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/repo").unwrap(),
+                id: task.clone(),
+                project_id: None,
+                title: "Finish review".into(),
+                description: "No steps remain".into(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                params![by, TraceId::new()],
+            )
+            .unwrap();
+        store
+            .take_up_task_graph(
+                &task,
+                &crate::task_graph::CapturedGraph {
+                    name: "review".into(),
+                    steps: Vec::new(),
+                },
+            )
+            .unwrap();
+        store.set_task_graph_step(&task, "review").unwrap();
+        assert!(store.task_shipping(&task).unwrap().is_none());
+        assert!(store.end_task_graph(&task, &by).unwrap());
+        assert!(store.task_completion_pending(&task).unwrap().is_some());
+        assert_eq!(
+            store.task_shipping(&task).unwrap().unwrap().process,
+            Some(by.clone())
+        );
+        assert!(!store.end_task_graph(&task, &by).unwrap());
     }
 
     #[test]

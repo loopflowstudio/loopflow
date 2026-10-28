@@ -1380,6 +1380,32 @@ fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
 }
 
 #[test]
+fn a_run_explanation_includes_interactive_steps_inside_its_first_xor() {
+    let task = GraphTask::new();
+    fs::write(
+        task.repo.path().join(".lf/graphs/conditional.yaml"),
+        "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n",
+    )
+    .unwrap();
+    let output = task.run(&[
+        "task",
+        "run",
+        "INF-123",
+        "conditional",
+        "--explain",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let preview: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(preview["action"]["stops_at"], "demo");
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+}
+
+#[test]
 fn nothing_after_the_last_interactive_step_reaches_end_without_a_pr() {
     let task = GraphTask::new();
     task.task_run_ok(&["task", "run", "INF-123", "findings"]);

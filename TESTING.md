@@ -35,6 +35,10 @@ After changing `Cargo.lock`, including a release version bump, run
 the inventory after bumping versions. Gate must check the resulting release
 tree: stale inventory fails both Python tests and Desktop packaging.
 
+For migration changes, run `uv run python scripts/check_migrations.py` before
+the Rust suites. Schema construction can pass even when a released migration
+was edited; this check also verifies immutable history against main and tags.
+
 Dependabot checks weekly and groups minor/patch updates by ecosystem. Its
 auto-merge workflow uses the `DEPENDABOT_MERGE_TOKEN` Actions secret, sourced
 from Doppler, with repository Contents and Pull requests write access. Renew

@@ -83,11 +83,4 @@ locks older builds out.
 - Expand → wait → contract enforcement (design open).
 - First real `lf self install --main` needs a green `Packages (main)` run after merge.
 
-Check results (2026-10-27): focused `store::migrations::`, `store::migration_build::`,
-`store::sqlite::frontier_tests::`, `lf::commands::install::`, rollover, build_info,
-CLI parse, reference regeneration pass; `cargo clippy --all-targets` clean; Python
-migration/gate/release/install/architecture tests pass. Three canonical-ids tests
-and one contention test failed only under the full parallel module run and pass
-alone. Swift edits are uncompiled here (gate/CI own the Swift build).
-Compress (2026-10-27): `ops::release` lib (45), `release_lock_tests` (13), Python
-publisher/automation tests pass; clippy `--all-targets` clean; `release_tests` compiles, run left to CI.
+Check (2026-10-27): focused Rust store/install/release modules, clippy `--all-targets`, Python migration/release/install tests pass; three canonical-ids tests and one contention test fail only in the full parallel module run (pass alone); Swift and `release_tests` run left to gate/CI.

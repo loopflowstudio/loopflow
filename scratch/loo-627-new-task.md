@@ -282,7 +282,8 @@ receipt, and `WorkModel.createTask` closes the sheet, selects the Task and puts 
 on its Start control. The success path now opens the conversation by Task id, and the
 New Task WorkModel fakes answer `desktop plan` (main's refresh read). Checks:
 `task_create_run`, `dto_fixtures::task_create_receipt`, clippy, Swift
-`NewTaskTests|WorkDestinationTests/newTask` (5): pass.
+`NewTaskTests|WorkDestinationTests/newTask` (5): pass; rerun at 203846275 (receipt/close
+consolidation): `task_create_run`, Swift (5), fmt + clippy: pass.
 
 Remaining: demo with a real provider (`code` stops at its interactive steps; `auto`
 reaches a merged PR), including whether the first reply leaves building to the

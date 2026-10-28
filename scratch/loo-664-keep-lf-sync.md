@@ -162,3 +162,5 @@ The Task-local bridge retains pre-publication telemetry (including gate logs) at
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-664-pr-publish-acgse2al/before-sync` and reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-664-pr-publish-acgse2al/after-publication`
 for fresh telemetry before returning to automatic Graph sync. Both are atomic moves;
 prior archives remain untouched.
+
+Check: after conflict-free sync with `fd2b2c18b5`, network-isolated `cargo test -p loopflow --test integration documented_commands:: --jobs 4` passed all 4 checks; the sync implementation and regressions were unchanged. PR #1754 is published at https://github.com/loopflowstudio/loopflow/pull/1754; merge and installed acceptance remain with their existing owners.

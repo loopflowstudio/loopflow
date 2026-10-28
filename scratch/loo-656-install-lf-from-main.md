@@ -188,3 +188,5 @@ Check (2026-10-27): focused Rust store/install/release modules, clippy `--all-ta
 Check (2026-10-28, top-3 pursue): 8 focused `store::migrations` tests (refusals, reader catalog, `can_open`) pass; clippy `--all-targets` clean; full `store::` module timed out locally at 10 min, left to gate.
 
 Check (2026-10-28, compress): `store::migrations::tests::a_candidate_opens…` passes, `cargo fmt --check` clean; doc-comment and memory edits only otherwise.
+
+Check (2026-10-28, implement): `lf self install reader-catalog` with an empty `HOME`/`LF_HOME` prints the five released floors and creates nothing; committed d7f675e4a.

@@ -4,7 +4,7 @@ Status: **Diagnostics only; replacement writer unproved.**
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-Reconciled checkout: `ea7431e163145e8d6aaa83652e1022b41ce51a85` (2026-10-27).
+Reconciled checkout: `8e52d2e163bc9882cdfb17538ee6beb281a0be33` (2026-10-27).
 The full pre-compression plan remains at `ffd265bcd3eafe32d46f9b57e8b8dc5837f12f61`.
 Merged PR #1749 changes CI selection and landing, leaving both credential modules
 unchanged. LOO-657 and v0.14.19 remain integrated; no remote freshness or installed
@@ -123,7 +123,9 @@ source/header review, except read-only installed dispatch inspection in 18.
   without status and two expired OAuth errors. Later supported 0.14.18/0.14.19
   polls accepted jack@loopflow.studio and jackstah@gmail.com with verified capacity
   and no diagnostic/recovery instruction; the uninspected local row remained
-  unavailable. Latest recorded observation: `1793156935`. Polls expose neither
+  unavailable. Latest supported `lf account claude --json` observation:
+  `1793163454` (2026-10-27), exit 0, both managed accounts accepted with three
+  verified windows each and no diagnostic or recovery instruction. Polls expose neither
   refresh occurrence nor storage stage, payload size or causality. They explain
   neither the earlier failure nor a browser sign-in dependency.
 - **Password-assisted access (28, 2026-10-27):**
@@ -137,6 +139,14 @@ source/header review, except read-only installed dispatch inspection in 18.
   replacement data or combining the writes. It remains excluded: a private API
   with a password dependency and no atomic replacement. This was source/header
   review only; no credential read, mutation or live poll ran.
+- **API versus storage (29, 2026-10-27):** Apple's current
+  [TN3137](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+  confirms that `SecItem` defaults to the file-based Keychain through a shim;
+  selecting the data-protection implementation changes storage and its access
+  model. Thus swapping API names does not bypass the observed partition failures,
+  while enabling data protection would abandon the existing provider item.
+  Neither is a newly viable writer. This is documentation evidence, not a new
+  native probe or proof that all compatible mechanisms are exhausted.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
@@ -219,4 +229,4 @@ LOO-664's installed sync failure and Jack Heart's authorized telemetry archive
 bridge remain in `scratch/questions.md`. The disposable reproduction proves the
 bridge, not installed repair; Infrastructure owns the prepared CLI/helper installation.
 
-Check — realign (2026-10-27): `uv run python` invoking `scripts.macos_inputs.affected_jobs` selects `macos-process-test`; `git diff --check` passed; `lf context` fits both limits. Prose-only changes; no Rust rerun. Gate owns affected suites; native and installed acceptance remain unproved.
+Check — kickoff (2026-10-27): bounded `lf account claude --json` accepted both managed accounts; `git diff --check` passed; `lf context` fits both limits. Prose-only changes; no Rust rerun. Gate owns affected suites; compatible-writer and installed-refresh acceptance remain unproved.

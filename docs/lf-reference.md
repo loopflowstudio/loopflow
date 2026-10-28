@@ -1480,11 +1480,11 @@ Move idle Sessions still running a superseded lf onto the selected install
 
 ## lf monitor prune
 
-Reap orphan providers, remove dead process receipts, and release AgentProcess ancestry that was never recorded
+Reap orphan providers, remove dead receipts, forget finished Process rows and release unrecorded AgentProcess ancestry
 
 | Argument | What it does |
 |---|---|
-| `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
+| `--dry-run` | Show exact targets without changing processes, receipts or the store Default: false. |
 | `--json` | Emit the versioned prune report as JSON Default: false. |
 | `--help / -h` | Print help |
 
@@ -2426,26 +2426,6 @@ Import previous Desktop membership only when no selection has been saved
 | Argument | What it does |
 |---|---|
 | `<paths>` | paths |
-| `--help / -h` | Print help |
-
-## lf disk
-
-Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf disk clean
-
-Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
-
-| Argument | What it does |
-|---|---|
-| `--dry-run` | Show what would be removed without removing anything Default: false. |
-| `--json` | json Default: false. |
-| `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
 | `--help / -h` | Print help |
 
 ## lf scratch

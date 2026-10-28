@@ -579,6 +579,8 @@ Each child opts one disposable home into native dispatch; ordinary unit tests ke
 file storage. Setup uses unique scoped items and `security`'s default access. The
 parent bounds/reaps process groups at 15 seconds and deletes only its own items,
 including after a failed child. It changes no Keychain search list or default.
+Keep process-global Keychain settings inside those children and credential bytes
+out of assertions and receipts.
 Missing native infrastructure fails the check. A skipped test proves nothing.
 
 ## Codex daemon account switching

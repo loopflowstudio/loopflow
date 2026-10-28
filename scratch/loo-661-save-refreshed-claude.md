@@ -9,13 +9,10 @@ preservation pass; four large replacements still destroy old data. The defective
 fix does not complete this repair or permit delivery.
 
 `ed6c82b2b` closes finding 40 with finding 41's Unicode proof. Findings 42–43
-exclude two examined public CSSM bridges, not all public APIs. Native synthetic
-proof and installed live acceptance remain separate.
-
-Reconciled October 28 against `2b2079af4`: the production writer and eight-case
-fixture still match these findings. Finding 43 changes the candidate assessment,
-not acceptance. Release's child memory retains the same distinction between
-entry-point proof and installed behavior; it supplies no Claude recovery evidence.
+exclude two examined public CSSM bridges, not all public APIs. Review at
+`c98606d8703498f44f35843dae1868a2f5c4003a` confirms the writer and fixture still
+match these findings. Neither native synthetic proof nor release evidence
+establishes installed Claude recovery.
 
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -225,14 +222,6 @@ or shrinking stored JSON changes provider storage semantics. None supplies the
 missing preservation proof. Provider-owned refresh alone is not established as a
 complete solution.
 
-**Planning disposition:** retain the existing repair architecture and its red
-native acceptance. No eligible writer mechanism has been established. The next
-implementation slice remains blocked on that capability; containment remains a
-separate draft choice. Repeating unchanged probes or passing file-backed tests
-cannot resolve either boundary. Wild success is silent native refresh with the
-same readers; the failure to prevent is a reported save error after OAuth rotation
-and destructive local replacement, leaving neither credential usable.
-
 ## Remaining implementation and acceptance
 
 1. **This slice — writer capability proof and replacement (blocked).** Select and
@@ -279,6 +268,9 @@ and destructive local replacement, leaving neither credential usable.
   explicit profile-capture cleanup and race/rotation tests; they have other consumers.
 - Removed `trim_security_password_output` and its trim-only test; the surviving
   decoder owns exact output handling and the native observer decodes independently.
+- Native fixture guidance lives in `rust/loopflow/tests/README.md`; removed the
+  duplicate global `AGENTS.md` rule. Keep containment's behavior and tradeoff only
+  in this design; `questions.md` retains attribution, selection and sync recovery.
 
 ## Verification and delivery
 
@@ -300,4 +292,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check (October 28 kickoff; prose only) — `git diff --check` and `lf context`: PASS; source/upstream review adds no native mutation or test rerun. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.
+Check (October 28 compress; prose only) — `git diff --check` and `lf context`: PASS; no code changes or test rerun. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.

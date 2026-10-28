@@ -1,12 +1,13 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
 Status: **Diagnostics only; replacement writer unproved.**
-Jack Heart authorized bounded repair and autonomous delivery of
+Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-reviewed checkout: `ffd265bcd3eafe32d46f9b57e8b8dc5837f12f61`, which also retains
-the full pre-compression plan. Merged Task/Graph changes leave the credential paths
-unchanged; LOO-657 and v0.14.19 remain integrated. No remote freshness or installed
+Reconciled checkout: `ea7431e163145e8d6aaa83652e1022b41ce51a85` (2026-10-27).
+The full pre-compression plan remains at `ffd265bcd3eafe32d46f9b57e8b8dc5837f12f61`.
+Merged PR #1749 changes CI selection and landing, leaving both credential modules
+unchanged. LOO-657 and v0.14.19 remain integrated; no remote freshness or installed
 upgrade is claimed.
 
 ## Required outcome
@@ -198,6 +199,9 @@ Neither limitation relaxes Jack Heart's requirements.
 ## Verification and delivery
 
 Gate owns affected suites, formatting and `cargo clippy --all-targets -- -D warnings`.
+PR #1749 skips macOS jobs for some Rust-only changes, but its classifier selects
+`macos-process-test` for this branch because `provider_auth/mod.rs` contains macOS
+code. That selection does not supply the missing native acceptance fixture.
 With inherited `LF_*` unset and stdin `/dev/null`, run:
 
 ```sh
@@ -215,8 +219,4 @@ LOO-664's installed sync failure and Jack Heart's authorized telemetry archive
 bridge remain in `scratch/questions.md`. The disposable reproduction proves the
 bridge, not installed repair; Infrastructure owns the prepared CLI/helper installation.
 
-Compression rationale: the surviving refresh/save path and closed error boundary
-need no further abstraction. Consolidate repeated planning constraints; leave the
-obsolete transport and its exclusive fixture for the proven replacement above.
-
-Check — compress (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reduction; no build/test rerun. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.
+Check — realign (2026-10-27): `uv run python` invoking `scripts.macos_inputs.affected_jobs` selects `macos-process-test`; `git diff --check` passed; `lf context` fits both limits. Prose-only changes; no Rust rerun. Gate owns affected suites; native and installed acceptance remain unproved.

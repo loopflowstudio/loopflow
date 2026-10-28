@@ -776,7 +776,7 @@ with five-minute turn grace. Configured acceptance remains open.
 
 Jack Heart authorized bounded repair and delivery, preserving native access,
 credentials and active Sessions; Infrastructure owns release/installation.
-Synthetic probes exposed `security -i`'s 2 KiB hex-input ceiling. Native writes
+Synthetic 2 KiB values exceeded `security -i`'s command buffer. Native writes
 changed partitions and broke the `security` reader; access restoration failed.
 Published source commits data before restoring access. Compatible writing remains
 unproved; exclusions do not prove exhaustion.

@@ -7,41 +7,25 @@ remains unproved. No product decision or relaxation of preservation requirements
 is pending; exclusions below do not exhaust public interfaces. A rejected route
 needs a mechanism addressing its counterexample before reconsideration.
 
-Kickoff decision, 2026-10-28: retain the accepted outcome and sufficient existing
-plan; no replacement mechanism is ready for implementation. Source review rules
-out preparing the old item's partition access before replacement (33), alongside
-the sequential combined update (31). These are engineering blockers, not a request
-to relax the brief. The latest recorded supported account observation remains
-`refresh grant rejected` for jack@loopflow.studio (32). Supported reconnection is a
-separate live-acceptance dependency; it would neither prove the writer nor explain
-the original save failure. No new account poll or native mutation ran this step.
+The latest recorded supported account observation is `refresh grant rejected` for
+jack@loopflow.studio (32). Supported reconnection is a separate live-acceptance
+dependency; it would neither prove the writer nor explain the original save failure.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-complete pre-compression plan:
-`ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/loo-661-save-refreshed-claude.md`.
-PR #1749's CI selection, LOO-657 and v0.14.19 are integrated.
-LOO-664 / #1754 (`fefda39493`) is now integrated through `15f32f8605`:
-source sync handles ignored and pre-staged telemetry. This supplies no installed
-upgrade or credential-writer repair; the authorized temporary sync bridge remains
-applicable until Infrastructure establishes installed recovery.
+prior plan and dependency reconciliation:
+`61c6f82a7fd9e9c61d3a9e81dfcfa261708536dc:scratch/loo-661-save-refreshed-claude.md`.
 
-Realigned 2026-10-27 after merge `65281101c2`: LOO-665 / #1756
-(`9967df791b`) is integrated. Codex recovery verifies the same login and preserves
-concurrent file writes by retaining the displaced inode. That file mechanism does
-not preserve a Keychain item's partition access and is not a Claude writer
-candidate. Claude still shares `write_claude_login` between refresh and activation;
-the merged Codex changes do not satisfy this repair. Release child memory likewise
-separates public-entry fixtures from installed acceptance. No acceptance or scope
-change follows from either dependency.
+Integrated dependencies do not repair Claude persistence or prove installation:
 
-Realigned 2026-10-27 at `fb7b38afc3`: merged #1758 (`c87b53c5c1`) changes
-only v0.14.20 release notes. Those notes explicitly retain installed sync and
-Codex acceptance with Infrastructure; they establish no Claude persistence repair
-or installation. Source inspection still finds the shared `security -i` writer
-and `invalid_grant` handling before persistence. Findings 31–32 remain the latest
-writer/live evidence; no new probe or account poll was needed for reconciliation.
+- PR #1749 selects macOS CI; LOO-657 supplies takeover notices.
+- LOO-664 / #1754 (`fefda39493`) repairs source sync. The authorized temporary
+  telemetry bridge remains in `scratch/questions.md` until installed recovery.
+- LOO-665 / #1756 (`9967df791b`) retains displaced file inodes for Codex recovery;
+  that mechanism does not preserve Keychain partition access.
+- PR #1758 (`c87b53c5c1`) supplies v0.14.20 release notes. Infrastructure retains
+  installation and installed acceptance.
 
 ## Required outcome
 
@@ -280,9 +264,6 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Delete — do not maintain
 
-- No deletion can be completed before the replacement writer is proved. The
-  surviving diagnostics already retain the original secret and serialize once;
-  keep that path and its redaction boundary without adding another abstraction.
 - Replace the `security -i` spawn, hex script and command-string escaping restrictions
   inside `write_claude_keychain_credential` once a compatible writer is proven.
   Replace its exclusive stand-in in
@@ -292,6 +273,9 @@ Neither limitation relaxes Jack Heart's requirements.
   no small-value fallback, size dispatch, dual writes or bypass.
 - Retain shared readers, service/account parsers and tests, managed file writes,
   explicit profile-capture cleanup and race/rotation tests; they have other consumers.
+  The refresh path already retains the original secret and serializes once; its
+  redaction boundary needs no additional abstraction. No production deletion is
+  ready until the replacement writer is proved.
 
 ## Verification and delivery
 
@@ -314,4 +298,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; prose-only source review retains findings 30–32 and adds 33. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.
+Check — compress (2026-10-28): `git diff --check` and `lf context` pass; prose-only reduction, no build/test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.

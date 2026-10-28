@@ -8,6 +8,15 @@ exhausted. Revisit a rejected route only with a mechanism addressing its counter
 Supported reconnection for jack@loopflow.studio is a separate live-acceptance
 dependency; it proves neither the writer nor the historical save-failure cause.
 
+Kickoff decision (2026-10-28): **not implementation-ready**. Jack Heart's outcome
+and boundaries remain accepted; no writer mechanism is selected. Reconciliation
+against the current code and Apple's documented
+[`kSecAttrAccess`](https://developer.apple.com/documentation/security/ksecattraccess)
+update route leaves findings 31/33 intact: API support for setting access is not
+evidence of atomic preservation. The remaining sequence below is conditional on
+that missing mechanism, not an executable repair plan. No new native experiment,
+live-account poll or production change was warranted by this review.
+
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
@@ -252,4 +261,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — realign (2026-10-28): `git diff --check` and `lf context` pass; code, plan and parent/Release memory agree, with no production change or test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.
+Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; code and saved evidence reconciled, with no production change or test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.

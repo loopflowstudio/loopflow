@@ -22,27 +22,13 @@ Infrastructure's primary conversation owns release, CLI/Desktop/helper installat
 and installed acceptance. This Task serves its reliable-auth objective and KR about
 advancing work without plumbing failures; no quantitative Wave target is selected.
 
-No tested writer meets the preservation contract. The current `security -i`
-writer still has its input ceiling; diagnostics do not repair it. Prove a supported
-mechanism before production cutover. Findings 22–27 below reject the proposed
-outer-transaction verification and explicit-access alternatives without exhausting
-public interfaces. No product decision or additional authorization is pending.
-
-## Demo and decision (2026-10-27)
-
-Jack Heart's preservation requirements are accepted; the replacement mechanism
-remains unselected. The demo is a naturally required Claude refresh followed by
-`lf account claude --json` accepting the same identity and capacity, with native
-Claude still usable without reauthentication. Infrastructure owns installed proof.
-Before that demo, a disposable native item must survive production replacement
-with exactly 2,048 and 8,192 serialized bytes and remain readable by `security`.
-
-**This slice: compatible-writer proof, blocked.** The missing evidence is one
-supported replacement operation that preserves existing reader access and leaves
-the old credential readable on failure. Neither a successful write status nor
-post-write repair establishes that contract. The remaining implementation below
-is conditional on this proof; the diagnostic changes alone are not the repair.
-The existing design and rejected alternatives remain binding evidence.
+**Next: prove a compatible writer.** No tested replacement preserves existing
+reader access and readable old credentials on failure. Successful write status
+or post-write repair is insufficient; the current `security -i` input ceiling
+remains. Findings 22–27 reject outer-transaction verification and explicit-access
+alternatives without exhausting public interfaces. No product decision or
+additional authorization is pending. Production cutover depends on this proof;
+the acceptance sequence below then requires synthetic and installed verification.
 
 ## Surviving implementation
 
@@ -78,8 +64,8 @@ Full evidence before this consolidation is preserved at
 (blob `47bcef7ebe8d8f75a0e7f9526169c891914d0110`), including earlier archives,
 source URLs, process IDs and probe blobs. The conclusions below group the findings
 by mechanism so the next investigation need not replay them.
-The pre-compression plan is at
-`e0fbae22bb4b4e3bee33a62a51dcf12f30a7b2a6:scratch/loo-661-save-refreshed-claude.md`.
+The complete plan before this consolidation is at
+`c751de406824a3ff60f9e50cf52c63989fa0ffdd:scratch/loo-661-save-refreshed-claude.md`.
 The earlier uncommitted memory/assumptions are preserved as Git blobs
 `a7a634b98304be1599c7039139496e8eb8dec209` /
 `5ddde1b3c97907dcfb356bd1fde5ab3e64022705` before reconciliation/checkpointing.
@@ -220,12 +206,16 @@ Heart's preservation requirement or selects the excluded concurrency redesign.
    and partial-commit failures. Compare booleans/lengths, never values in output.
    Do not apply an unproved candidate to real credentials.
 3. Compile and explicitly invoke the production native writer in tests while keeping
-   ordinary unit tests isolated. Use the shared environment lock and a child process
-   for process-global Keychain UI settings, without a production test-only backend.
+   ordinary unit tests on files. Require nonzero executed native cases; a test
+   name/filter or file-backed success proves no native coverage. Use the shared
+   environment lock and a child process for process-global Keychain UI settings,
+   without a production test-only backend.
    Mocked OAuth refresh must reach that writer through `fresh_claude_token` and
    existing identity/usage/account-report consumers. Save failure must produce
    sanitized actionable `unavailable`, not `rejected`, with old data readable.
-   Preserve managed file, replacement-race and native-activation coverage.
+   Preserve managed file, replacement-race and native-activation coverage. Register
+   a dedicated native test binary if isolation requires one. Unavailable Keychain
+   infrastructure is unavailable, not green; Linux cannot replace macOS proof.
 4. Diagnose a recurring installed failure through supported account operations,
    recording sanitized stage/code, storage kind and whether refresh occurred. Never
    force expiry, revoke tokens, switch routes or damage a real item to reproduce it.
@@ -257,18 +247,12 @@ With inherited `LF_*` unset and stdin `/dev/null`, run:
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(provider_auth::) | test(subscription::) | test(provider_account::) | test(lf::commands::account_status::) | test(lf::commands::account::)'
 ```
 
-The native fixture still needs implementation:
+Planned native check (fixture not implemented):
 `cargo test -p loopflow --lib claude_keychain_native -- --test-threads=1`.
-This is a planned command, not an existing passing check. Acceptance requires
-nonzero executed native cases: ordinary `cfg(test)` login dispatch uses files,
-so naming/filtering a test does not establish native storage coverage. The fixture
-must demonstrate the refresh-to-native-writer-to-account-report path described
-above, as well as independently reading the item through `security`.
-Register/filter a dedicated native binary if isolation requires one. File-backed
-or Linux tests cannot replace macOS proof; unavailable Keychain infrastructure
-is unavailable, not green. Publish/ship only the complete bounded repair through
-the selected Graph, without another release publisher. Do not repeat checks solely
-because a lifecycle phase changes.
+It must meet steps 2–3 above; adapt the command if a dedicated binary is needed.
+Publish/ship only the complete bounded repair through the selected Graph, without
+another release publisher. Do not repeat checks solely because a lifecycle phase
+changes.
 
 Delivery also depends on LOO-664: installed 0.14.19 sync cannot stage edits because
 of its ignored `.lf/tmp` exclusion. Until the repair is installed, checkpoint
@@ -276,4 +260,4 @@ intended step edits with `lf commit <paths>` before sync, preserving unrelated
 staged/unstaged work and normal validation. Do not force-add telemetry or implement
 a competing repair; retain the dependency if checkpointing fails.
 
-Check — kickoff (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only clarification; no native mutation or live-account poll repeated. Prior diagnostic checks remain applicable; gate owns affected suites, and native replacement plus installed refresh acceptance remain unproved.
+Check — compress (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only consolidation; no build/test rerun. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.

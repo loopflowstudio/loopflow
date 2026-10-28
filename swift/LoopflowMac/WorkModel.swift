@@ -2147,6 +2147,39 @@ final class WorkModel {
         }
     }
 
+    /// The graph a new Task in each scope would take up, keyed by repository and
+    /// Wave. Rust resolves it; the New Task sheet only shows it.
+    private(set) var graphDefaults: [String: WorkReading<WaveGraph>] = [:]
+
+    func graphDefaultKey(wave: WaveSnapshot?) -> String { "\(repoPath ?? ""):\(wave?.id ?? "")" }
+
+    func loadGraphDefault(wave: WaveSnapshot?) async {
+        let key = graphDefaultKey(wave: wave)
+        let previous = graphDefaults[key]?.value
+        let result: Result<WaveGraph, Error>
+        do { result = .success(try await query.waveGraph(wave: wave?.name, cwd: repoPath)) }
+        catch { result = .failure(error) }
+        graphDefaults[key] = reading(from: result, lastGood: previous)
+    }
+
+    /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
+    /// repository), starts its workflow and admits its conversation with the
+    /// request as the first turn; this window then shows that conversation.
+    /// A failure keeps the sheet and the request; a Task filed before its run
+    /// failed is listed with its Start control.
+    func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
+        let receipt: TaskCreateReceipt
+        do {
+            receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
+        } catch {
+            try? await confirmWorkUpdate()
+            throw error
+        }
+        navigation.palette = nil
+        try? await confirmWorkUpdate()
+        await openTaskConversation(receipt.task.identifier)
+    }
+
     /// Ship the Task, then confirm its subscription update; it moves to Shipping
     /// and the window's ship toast offers Undo.
     func shipTask(_ task: RoadmapTask) async {

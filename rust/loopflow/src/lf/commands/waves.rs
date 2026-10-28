@@ -1463,7 +1463,11 @@ async fn snapshot_task_detail(
     };
     let (graph_name, graph_source) = match graph {
         Some(graph) => (graph.name, "task"),
-        None => crate::ops::task::task_graph_default(store, task)?,
+        None => crate::ops::task::task_graph_default(
+            store,
+            task.wave_id.as_ref(),
+            &crate::ops::task::repository_for_task(store, task)?,
+        )?,
     };
     Ok(TaskDetailSnapshot {
         task: task_summary(

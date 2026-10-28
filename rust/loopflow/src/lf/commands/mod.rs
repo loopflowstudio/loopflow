@@ -33,6 +33,7 @@ pub mod session_move;
 mod session_watch;
 pub mod ship;
 pub mod ssh;
+pub mod task_create;
 pub mod tokens;
 pub mod top;
 pub mod usage;

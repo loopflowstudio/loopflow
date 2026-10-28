@@ -672,12 +672,29 @@ async fn wave_graph_selects_a_committed_definition_offline() {
             assert!(missing.contains(".lf/graphs/review.yaml"), "{missing}");
             std::fs::create_dir_all(repo.join(".lf/graphs")).unwrap();
             std::fs::write(repo.join(".lf/graphs/review.yaml"), "- cmd: help\n").unwrap();
-            let selected = crate::ops::project::set_wave_graph(&repo, Some(wave.slug()), "review")
+            let saved = crate::ops::project::set_wave_graph(&repo, Some(wave.slug()), "review")
                 .await
                 .unwrap();
-            assert_eq!(selected.graph.as_deref(), Some("review"));
-            assert_eq!(selected.wave_id, *wave.id());
+            assert_eq!(saved, wave.slug());
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
+            // New Tasks in the Wave take up its selection; the repository's, `code`.
+            let shown = crate::ops::project::wave_graph(&repo, Some(wave.slug()), true)
+                .await
+                .unwrap();
+            assert_eq!(shown.wave_id.as_ref(), Some(wave.id()));
+            assert_eq!(shown.graph.as_deref(), Some("review"));
+            assert_eq!(
+                (shown.default.name.as_str(), shown.default.source.as_str()),
+                ("review", "wave")
+            );
+            let shown = crate::ops::project::wave_graph(&repo, None, false)
+                .await
+                .unwrap();
+            assert_eq!(shown.wave, None);
+            assert_eq!(
+                (shown.default.name.as_str(), shown.default.source.as_str()),
+                ("code", "builtin")
+            );
         })
         .await;
 }

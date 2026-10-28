@@ -1380,6 +1380,80 @@ fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
 }
 
 #[test]
+fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
+    let task = GraphTask::without_wave_graph(&[]);
+    // New Tasks branch from the remote's main, which carries the fixture Graphs.
+    assert!(Command::new("git")
+        .args(["push", "origin", "main"])
+        .current_dir(task.repo.path())
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let tasks = || -> i64 {
+        db.query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap()
+    };
+    // An unknown graph is refused before any Task exists.
+    let before = tasks();
+    let refused = task.run(&["task", "create", "never filed", "--run", "--graph", "nope"]);
+    assert!(!refused.status.success());
+    assert_eq!(tasks(), before);
+
+    let request = "fix the flaky retry test\n\nIt fails one run in ten.";
+    let output = task.run(&[
+        "task", "create", request, "--run", "--graph", "feature", "--json",
+    ]);
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    let ran = task.ran(output);
+    assert!(ran.success(), "{}", ran.text);
+    let issue = receipt["task"]["identifier"].as_str().unwrap();
+    assert_eq!(receipt["task"]["title"], "fix the flaky retry test");
+    assert_eq!(receipt["task"]["description"], request);
+    assert_eq!(receipt["graph"], "feature");
+    let status = task.run(&["task", "status", issue, "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["execution"]["work"]["graph"]["name"], "feature");
+    assert_eq!(
+        status["execution"]["work"]["graph"]["position"],
+        at("review")
+    );
+    // The admitted primary conversation opens with the request, word for word.
+    let session = receipt["session_id"].as_str().unwrap();
+    let first_turn: String = db
+        .query_row(
+            "SELECT request FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_turn, request);
+    let primary: String = db
+        .query_row(
+            "SELECT primary_session_id FROM tasks WHERE id=?1",
+            [receipt["task"]["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(primary, session);
+
+    // `-b` runs to the end headless and admits no conversation.
+    let output = task.run(&[
+        "-b", "task", "create", "headless", "--run", "--graph", "proof", "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(receipt["session_id"].is_null(), "{receipt}");
+    assert_eq!(receipt["graph"], "proof");
+}
+
+#[test]
 fn a_run_explanation_includes_interactive_steps_inside_its_first_xor() {
     let task = GraphTask::new();
     fs::write(

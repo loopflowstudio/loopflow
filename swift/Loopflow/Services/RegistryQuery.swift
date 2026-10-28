@@ -347,6 +347,22 @@ public struct RegistryQuery: Sendable {
         _ = try await run(args, cwd)
     }
 
+    /// New Task: Rust files the request in `wave` (nil files it in the
+    /// repository), starts it as `lf task run` does and admits its conversation
+    /// with the request as the first turn. Returns once the Graph registers.
+    public func createTask(request: String, wave: String?, graph: String?, cwd: String?) async throws -> TaskCreateReceipt {
+        var args = ["task", "create"] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
+        if let graph { args += ["--graph", graph] }
+        args += ["--run", "--json", "--", request]
+        return try Self.decode(TaskCreateReceipt.self, from: await run(args, cwd))
+    }
+
+    /// The graph a new Task in `wave`, or the repository when nil, would take up.
+    public func waveGraph(wave: String?, cwd: String?) async throws -> WaveGraph {
+        let args = ["wave", "graph", "show"] + (wave.map { [$0] } ?? ["--no-wave"]) + ["--json"]
+        return try Self.decode(WaveGraph.self, from: await run(args, cwd))
+    }
+
     /// Ship the Task: run the rest of its graph to the end headless, standing
     /// in at each interactive step. Returns once it is shipping; it runs on until the Task lands.
     public func shipTask(issue: String, cwd: String?) async throws {
@@ -635,6 +651,44 @@ public struct RegistryQuery: Sendable {
 }
 
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
+
+/// `lf task create REQUEST --run --json`: the created Task, the graph it took
+/// up and its admitted conversation, nil after a headless run.
+public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
+    public struct CreatedTask: Decodable, Sendable, Hashable {
+        public let id: String
+        public let identifier: String
+        public let title: String
+    }
+    public let task: CreatedTask
+    public let graph: String
+    public let sessionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case task, graph
+        case sessionId = "session_id"
+    }
+}
+
+/// `lf wave graph show --json`: a Wave's own selection and the default its new
+/// Tasks take up, resolved in Rust through Wave, repository `graph:` and `code`.
+/// The repository scope has no Wave.
+public struct WaveGraph: Decodable, Sendable, Hashable {
+    public struct Default: Decodable, Sendable, Hashable {
+        public let name: String
+        /// `wave`, `repository` or `builtin`
+        public let source: String
+    }
+    public let waveId: String?
+    public let wave: String?
+    public let graph: String?
+    public let `default`: Default
+
+    enum CodingKeys: String, CodingKey {
+        case wave, graph, `default`
+        case waveId = "wave_id"
+    }
+}
 
 /// Durable execution authority and its mutable observed route.
 public struct Machine: Decodable, Sendable, Hashable {

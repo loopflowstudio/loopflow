@@ -122,3 +122,9 @@ metadata, independent Dashboard identity and portable tile-face intent.
 account, age and retention state (`provider`, `facts`, `unknown`), the soonest
 removals ahead, and each home's expiry policy. Rust and Swift decode it; the
 Desktop Retention card renders it.
+
+`task_create_receipt.json` pins `lf task create REQUEST --run --json`: the created
+Task, the graph it took up and its admitted primary conversation, null after a
+headless `-b` run. `wave_graph.json` pins `lf wave graph show --json` for a Wave
+and for the repository (`--no-wave`); `default` is Rust's resolution, which
+Desktop's New Task sheet shows instead of rebuilding it. Rust and Swift decode both.

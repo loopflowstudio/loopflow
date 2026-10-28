@@ -575,16 +575,20 @@ impl TaskRunSelection {
     }
 }
 
-/// The graph a Task with none takes up: its Wave's, its repository's, else `code`.
-pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, &'static str)> {
-    if let Some(wave) = &task.wave_id {
+/// The graph a Task with none takes up: its Wave's, its repository's, else
+/// `code`. A Task need not exist yet; the scope it would be filed in decides.
+pub(crate) fn task_graph_default(
+    store: &Store,
+    wave: Option<&crate::id::WaveId>,
+    repo: &Path,
+) -> OpsResult<(String, &'static str)> {
+    if let Some(wave) = wave {
         if let Some(name) = store.sqlite.selected_wave_graph(wave).map_err(task_error)? {
             crate::task_graph::validate_graph_name(&name).map_err(task_error)?;
             return Ok((name, "wave"));
         }
     }
-    let repo = repository_for_task(store, task)?;
-    let name = crate::config::load_repo_config(&repo)
+    let name = crate::config::load_repo_config(repo)
         .map_err(task_error)?
         .and_then(|c| c.graph);
     if let Some(name) = name {
@@ -631,8 +635,8 @@ pub(crate) fn select_task_run(
         (Some(row), Some(name)) if name == row.graph.name => (row.graph.clone(), Some(row)),
         (_, Some(name)) => (load(name, "", checkout)?, None),
         (None, None) => {
-            let (name, source) = task_graph_default(store, task)?;
             let repo = repository_for_task(store, task)?;
+            let (name, source) = task_graph_default(store, task.wave_id.as_ref(), &repo)?;
             (load(&name, &format!("{source} default "), &repo)?, None)
         }
     };

@@ -73,6 +73,37 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
+    @Test("New Task creates through one lf command, then shows its conversation")
+    func newTaskSelectsTheTaskAndOpensItsConversation() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let receipt = """
+        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
+         "graph": "code", "session_id": "\(record.id)"}
+        """
+        let created = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["task", "create"]) {
+                created.withLock { $0.append(args) }
+                return receipt
+            }
+            if args.contains("connect") { return encoded }
+            if args.starts(with: ["wave", "show"]) { return planning }
+            throw RegistryQueryError("New Task runs no separate start or connect sequence")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.navigation.palette = .newTask
+        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        #expect(created.withLock { $0 } == [["task", "create", "--no-wave", "--run", "--json", "--", "fix the flaky retry test"]])
+        #expect(model.navigation.palette == nil)
+        #expect(model.selection == .task(id: task.id))
+        #expect(installedSession(model, registry)?.id == record.id)
+    }
+
     @Test func dashboardTileOpensConversationInPlace() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))

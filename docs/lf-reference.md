@@ -179,14 +179,17 @@ Reopen local planning without moving its Graph or replacing the PR
 
 ## lf task create
 
-Create a planning Task without allocating a checkout or starting work
+Create a planning Task; with --run, start it and open its conversation
 
 | Argument | What it does |
 |---|---|
+| `<request>` | What you want, in your words: the Task's notes, its first line the title. With --run, also the first turn of its conversation |
 | `--no-wave` | Create without a Wave (the default) Default: false. |
 | `--wave` | Explicit Wave membership; omitted creates a standalone Task |
 | `--title` | Task title; omitted when stdin supplies the report and first line |
 | `--notes` | Description; defaults to a report read from stdin |
+| `--run` | Start it as `lf task run` does, then open its conversation here Default: false. |
+| `--graph` | The graph it takes up in place of the default |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
@@ -431,6 +434,7 @@ Show the graph the Wave's Tasks take up by default
 | Argument | What it does |
 |---|---|
 | `<wave>` | wave |
+| `--no-wave` | Show the default for Tasks filed in the repository, without a Wave Default: false. |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 

@@ -1,0 +1,32 @@
+{
+  "task": {
+    "id": "task_0123456789ab40008000000000000001",
+    "revision": 1,
+    "identifier": "LOO-1",
+    "title": "fix the flaky retry test",
+    "description": "fix the flaky retry test\n\nIt fails one run in ten.",
+    "rank": 0,
+    "assignee": null,
+    "due_date": null,
+    "state": null,
+    "completed_at": null,
+    "linear_id": null,
+    "pm_snapshot_synced_at": null,
+    "pm_writeback": {
+      "state": "current"
+    },
+    "wave_id": "11111111-1111-4111-8111-111111111111",
+    "repository_id": "repo_00000000000040008000000000000001",
+    "project_id": "proj_0123456789ab40008000000000000001",
+    "worktree": null,
+    "workspace_slug": "",
+    "branch": "",
+    "base_commit": "",
+    "parent_pr_id": null,
+    "agent": null,
+    "created_at": [2026, 301, 0, 0, 0, 0, 0, 0, 0],
+    "updated_at": [2026, 301, 0, 0, 0, 0, 0, 0, 0]
+  },
+  "graph": "code",
+  "session_id": "0123456789abcdef0123456789abcdef"
+}

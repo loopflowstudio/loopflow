@@ -282,31 +282,56 @@ pub async fn edit(
     read_saved(&store, &project.id)
 }
 
-#[derive(Debug, serde::Serialize)]
+/// The graph a scope's new Tasks take up: the Wave's own selection, if any,
+/// and the default resolved through Wave, repository `graph:` and `code`.
+/// The repository scope has no Wave.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WaveGraph {
-    pub wave_id: crate::id::WaveId,
-    pub wave: String,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub wave: Option<String>,
     pub graph: Option<String>,
+    pub default: GraphDefault,
 }
 
-pub async fn wave_graph(repo: &Path, selector: Option<&str>) -> OpsResult<WaveGraph> {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GraphDefault {
+    pub name: String,
+    /// `wave`, `repository` or `builtin`
+    pub source: String,
+}
+
+/// `selector: None` reads the ambient Wave; `in_wave: false` the repository.
+pub async fn wave_graph(
+    repo: &Path,
+    selector: Option<&str>,
+    in_wave: bool,
+) -> OpsResult<WaveGraph> {
     let store = read_store()?;
-    let wave = graph_wave(&store, repo, selector).await?;
+    let wave = if in_wave {
+        Some(graph_wave(&store, repo, selector).await?)
+    } else {
+        None
+    };
+    let main = crate::git::worktrees::main_repo_root(repo).map_err(project_error)?;
+    let (name, source) =
+        super::task::task_graph_default(&store, wave.as_ref().map(|wave| wave.id()), &main)?;
     Ok(WaveGraph {
-        graph: store
-            .sqlite
-            .selected_wave_graph(wave.id())
-            .map_err(project_error)?,
-        wave_id: wave.id().clone(),
-        wave: wave.slug().into(),
+        graph: wave
+            .as_ref()
+            .map(|wave| store.sqlite.selected_wave_graph(wave.id()))
+            .transpose()
+            .map_err(project_error)?
+            .flatten(),
+        wave_id: wave.as_ref().map(|wave| wave.id().clone()),
+        wave: wave.as_ref().map(|wave| wave.slug().into()),
+        default: GraphDefault {
+            name,
+            source: source.into(),
+        },
     })
 }
 
-pub async fn set_wave_graph(
-    repo: &Path,
-    selector: Option<&str>,
-    name: &str,
-) -> OpsResult<WaveGraph> {
+pub async fn set_wave_graph(repo: &Path, selector: Option<&str>, name: &str) -> OpsResult<String> {
     let store = super::planning_sync::planning_store().await?;
     let wave = graph_wave(&store, repo, selector).await?;
     if crate::task_graph::CapturedGraph::load(name, repo)
@@ -320,11 +345,7 @@ pub async fn set_wave_graph(
         .sqlite
         .select_wave_graph(wave.id(), name)
         .map_err(project_error)?;
-    Ok(WaveGraph {
-        wave_id: wave.id().clone(),
-        wave: wave.slug().into(),
-        graph: Some(name.into()),
-    })
+    Ok(wave.slug().into())
 }
 
 fn read_saved(

@@ -995,7 +995,11 @@ impl WavePlanTarget {
 pub enum WaveGraphCommand {
     /// Show the graph the Wave's Tasks take up by default
     Show {
+        #[arg(conflicts_with = "no_wave")]
         wave: Option<String>,
+        /// Show the default for Tasks filed in the repository, without a Wave
+        #[arg(long)]
+        no_wave: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1517,8 +1521,12 @@ terminal instead."
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Create a planning Task without allocating a checkout or starting work
+    /// Create a planning Task; with --run, start it and open its conversation
     Create {
+        /// What you want, in your words: the Task's notes, its first line the title.
+        /// With --run, also the first turn of its conversation
+        #[arg(conflicts_with = "notes")]
+        request: Option<String>,
         /// Create without a Wave (the default)
         #[arg(long, conflicts_with = "wave")]
         no_wave: bool,
@@ -1531,6 +1539,12 @@ terminal instead."
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
+        /// Start it as `lf task run` does, then open its conversation here
+        #[arg(long)]
+        run: bool,
+        /// The graph it takes up in place of the default
+        #[arg(long, requires = "run")]
+        graph: Option<String>,
         #[arg(long)]
         json: bool,
     },

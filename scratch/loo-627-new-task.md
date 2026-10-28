@@ -254,6 +254,10 @@ open. Checks: `cargo test -p loopflow --lib task_create_run` (the fixture lives 
 `NewTaskTests` + `newTaskSelectsTheTask` + action registry fixture: pass.
 
 Compress (2026-10-28): `task_create` calls `primary::ensure_task` directly (no wrapper).
+Compress 2 (2026-10-28): `GraphDefault.source` is `SetupSource` (same wire); `check_graph` and
+`select_task_run` share `ops::task::load_graph` for the missing-graph error. Check: clippy clean;
+`cargo test --lib -- task_create_run wave_planning_reads_current a_task_takes_up_its_waves_graph` and
+integration `wave_graph_reports task_create_receipt graph_catalog_and_wave_selection`: pass.
 Sync onto main (2026-10-28, #1751 `lf set`): `lf wave graph set` and `set_wave_graph` are gone;
 `wave graph show [--no-wave]` resolves `default` through main's config layers, so sources are
 `personal · wave · repo · default`, and the sheet labels them.

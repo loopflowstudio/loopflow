@@ -28,15 +28,7 @@ pub struct TaskCreateReceipt {
 
 /// Refuse an unknown graph before any Task exists, so a typo leaves nothing behind.
 pub fn check_graph(repo: &Path, name: &str) -> Result<()> {
-    if crate::task_graph::CapturedGraph::load(name, repo)?.is_none() {
-        let available = crate::graph::available_graph_names(repo)
-            .map(|names| names.join(", "))
-            .unwrap_or_default();
-        bail!(
-            "{}. Available: {available}",
-            crate::task_graph::missing_graph(name)
-        );
-    }
+    crate::ops::task::load_graph(name, "", repo)?;
     Ok(())
 }
 
@@ -125,19 +117,15 @@ fn admit(
             .context("the run did not take up a graph")?
             .name;
         // A headless run has no one to talk to; its conversation is not admitted.
-        let session_id = match cli.batch {
-            true => None,
-            false => Some(
-                primary::ensure_task(
-                    &store,
-                    repo,
-                    &task.identifier,
-                    false,
-                    request.map(str::to_owned),
-                )
-                .await?
-                .id,
-            ),
+        let session_id = if cli.batch {
+            None
+        } else {
+            let request = request.map(str::to_owned);
+            Some(
+                primary::ensure_task(&store, repo, &task.identifier, false, request)
+                    .await?
+                    .id,
+            )
         };
         Ok((graph, session_id))
     })

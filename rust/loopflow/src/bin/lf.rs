@@ -834,7 +834,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                                 "{} · {} ({} default)",
                                 selected.wave.as_deref().unwrap_or("repository"),
                                 selected.default.name,
-                                selected.default.source
+                                selected.default.source.as_str()
                             );
                         }
                     }
@@ -1058,10 +1058,11 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 title.clone(),
                 report,
             )?;
-            if !*json {
-                println!("{} · {}", issue.title, issue.identifier);
-            } else if !*run {
-                println!("{}", serde_json::to_string_pretty(&issue)?);
+            match (*json, *run) {
+                (false, _) => println!("{} · {}", issue.title, issue.identifier),
+                (true, false) => println!("{}", serde_json::to_string_pretty(&issue)?),
+                // `--run --json` prints one receipt once the run settles.
+                (true, true) => {}
             }
             if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
                 .planning_transport()

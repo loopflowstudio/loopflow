@@ -295,8 +295,7 @@ pub struct WaveGraph {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GraphDefault {
     pub name: String,
-    /// `personal`, `wave`, `repo`, `global` or `default`
-    pub source: String,
+    pub source: crate::work::wave::setup::SetupSource,
 }
 
 /// `selector: None` reads the ambient Wave; `in_wave: false` the repository.
@@ -316,10 +315,7 @@ pub async fn wave_graph(
     Ok(WaveGraph {
         wave_id: wave.as_ref().map(|wave| wave.id().clone()),
         wave: wave.as_ref().map(|wave| wave.slug().into()),
-        default: GraphDefault {
-            name,
-            source: source.as_str().into(),
-        },
+        default: GraphDefault { name, source },
     })
 }
 

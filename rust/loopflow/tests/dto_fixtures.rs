@@ -1251,7 +1251,7 @@ fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run
 fn wave_graph_reports_its_default_with_or_without_a_wave() {
     let json = include_str!("../../../tests/fixtures/dto/wave_graph.json");
     let graphs: Vec<loopflow::ops::project::WaveGraph> = serde_json::from_str(json).unwrap();
-    assert_eq!(graphs[0].default.source, "repo");
+    assert_eq!(graphs[0].default.source.as_str(), "repo");
     assert!(graphs[1].wave.is_none());
     assert_eq!(
         serde_json::to_value(&graphs).unwrap(),

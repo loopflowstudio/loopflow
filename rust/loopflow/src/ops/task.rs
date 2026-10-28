@@ -608,6 +608,26 @@ pub(crate) fn scope_graph_default(
     Ok((name, layer.map_or(SetupSource::Default, SetupSource::from)))
 }
 
+/// Load `name` from `repo`, or name the graphs it could have been;
+/// `source` prefixes the error with which setting chose it.
+pub(crate) fn load_graph(
+    name: &str,
+    source: &str,
+    repo: &Path,
+) -> OpsResult<crate::task_graph::CapturedGraph> {
+    crate::task_graph::CapturedGraph::load(name, repo)
+        .map_err(task_error)?
+        .ok_or_else(|| {
+            let available = crate::graph::available_graph_names(repo)
+                .map(|names| names.join(", "))
+                .unwrap_or_default();
+            task_error(format!(
+                "{source}{}. Available: {available}",
+                crate::task_graph::missing_graph(name)
+            ))
+        })
+}
+
 /// The graph a Task takes up when nothing else selects one.
 pub const DEFAULT_TASK_GRAPH: &str = "code";
 
@@ -618,7 +638,7 @@ pub(crate) fn select_task_run(
     requested: Option<&str>,
     from: Option<&str>,
 ) -> OpsResult<TaskRunSelection> {
-    use crate::task_graph::{CapturedGraph, END, START};
+    use crate::task_graph::{END, START};
     let issue = &task.identifier;
     if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Deferred
     {
@@ -627,28 +647,15 @@ pub(crate) fn select_task_run(
         )));
     }
     let current = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;
-    let load = |name: &str, source: &str, repo: &Path| {
-        CapturedGraph::load(name, repo)
-            .map_err(task_error)?
-            .ok_or_else(|| {
-                let available = crate::graph::available_graph_names(repo)
-                    .map(|names| names.join(", "))
-                    .unwrap_or_default();
-                task_error(format!(
-                    "{source}{}. Available: {available}",
-                    crate::task_graph::missing_graph(name)
-                ))
-            })
-    };
     let (graph, row) = match (current, requested) {
         (Some(row), None) => (row.graph.clone(), Some(row)),
         (Some(row), Some(name)) if name == row.graph.name => (row.graph.clone(), Some(row)),
-        (_, Some(name)) => (load(name, "", checkout)?, None),
+        (_, Some(name)) => (load_graph(name, "", checkout)?, None),
         (None, None) => {
             let (name, source) = task_graph_default(store, task)?;
             let repo = repository_for_task(store, task)?;
             (
-                load(&name, &format!("{} default ", source.as_str()), &repo)?,
+                load_graph(&name, &format!("{} default ", source.as_str()), &repo)?,
                 None,
             )
         }

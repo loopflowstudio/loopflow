@@ -101,6 +101,13 @@ admits, as a rollback does, applies nothing and is allowed.
 
 Rename, drop and reshape directly; the floor rises at that migration.
 
+New code must accept what an older writer leaves behind. While older lf still
+runs, it writes rows without the new columns, so read `NULL` there sensibly, and
+avoid `INSERT OR REPLACE` on extended tables: an older writer's replace drops
+the newer columns. Runtime SQL names its columns — `check_migrations.py` rejects
+positional `INSERT ... VALUES` and `SELECT *` outside tests — and JSON persisted
+in the store tolerates fields it does not know.
+
 ## Reader catalog
 
 ```bash
@@ -111,13 +118,6 @@ Every package (green main and release) ships this list as `reader-catalog.txt`
 beside its archive. A build opens a store when its catalog holds the floor of
 the store's newest migration; `store::migrations::can_open(store, catalog)`
 answers that, so an updater can rule out a candidate before downloading it.
-
-New code must accept what an older writer leaves behind. While older lf still
-runs, it writes rows without the new columns, so read `NULL` there sensibly, and
-avoid `INSERT OR REPLACE` on extended tables: an older writer's replace drops
-the newer columns. Runtime SQL names its columns — `check_migrations.py` rejects
-positional `INSERT ... VALUES` and `SELECT *` outside tests — and JSON persisted
-in the store tolerates fields it does not know.
 
 ## What the check enforces
 

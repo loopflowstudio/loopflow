@@ -1194,6 +1194,9 @@ pub(crate) fn newer_store_floor(conn: &rusqlite::Connection) -> StoreResult<Opti
 /// The migration a reader must know to open this store: the floor of its
 /// newest applied migration. `None` for an empty store.
 pub(crate) fn store_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
+    if !has_ledger(conn)? {
+        return Ok(None);
+    }
     let Some(newest) = applied_versions(conn)?.pop() else {
         return Ok(None);
     };
@@ -1254,9 +1257,6 @@ pub fn reader_catalog() -> Vec<&'static str> {
 /// that the store lacks, or reads past additive migrations it does not know.
 pub fn can_open(conn: &rusqlite::Connection, catalog: &[String]) -> StoreResult<bool> {
     _read_snapshot(conn, |conn| {
-        if !has_ledger(conn)? {
-            return Ok(true);
-        }
         Ok(store_reader_floor(conn)?.is_none_or(|floor| catalog.contains(&floor)))
     })
 }

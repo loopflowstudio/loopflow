@@ -192,3 +192,5 @@ Check (2026-10-28, compress): `store::migrations::tests::a_candidate_opens…` p
 Check (2026-10-28, implement): `lf self install reader-catalog` with an empty `HOME`/`LF_HOME` prints the five released floors and creates nothing; committed d7f675e4a.
 
 Check (2026-10-28, compress 2): dropped the reader-catalog test that restated its filter; `a_candidate_opens…` passes, clippy lib+tests clean.
+
+Check (2026-10-28, compress 3): `store_reader_floor` answers `None` without a ledger, so `can_open` is one expression; `a_candidate_opens…` passes, clippy lib+tests clean.

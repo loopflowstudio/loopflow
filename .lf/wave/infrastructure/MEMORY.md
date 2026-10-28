@@ -791,17 +791,18 @@ with five-minute turn grace. Configured acceptance remains open.
 ## Claude credential preservation (LOO-661, 2026-10-28)
 
 Jack Heart authorized preservation-first repair; Infrastructure owns installation.
-Command probes found destructive `security -i` failures at 2/8 KiB, contradicting
-earlier preservation. Copied partition access denied creation; omitting it or
-trusting `security` caused reader timeouts. Creation probes preserved originals;
-group identity and safe production replacement remain unproved.
-Source review identified no creation authority, group retention or file-keychain
-LAContext bridge; no installed trace or API exhaustion is proved.
-A password alone is unproved.
-`refresh grant rejected` precedes saving; live acceptance needs browser reconnection.
-Historical save causality remains unknown. Diagnostics prove no preservation;
-rollback cannot undo OAuth rotation. LOO-325 stays separate. Evidence:
-`055c8a3005:scratch/loo-661-save-refreshed-claude.md`, findings 30–37.
+Command probes found destructive `security -i` failures at 2/8 KiB. Copied partition
+access denied creation; omitting it or trusting `security` caused reader timeouts.
+Originals survived creation probes; safe replacement/group identity remain unproved.
+Source review found no creation authority, group retention or LAContext bridge;
+neither a password alone nor API exhaustion is proved. `invalid_grant` precedes
+saving; browser reconnection leaves historical save causality unresolved. Rollback
+cannot undo OAuth rotation; LOO-325 stays separate.
+
+File-backed refresh tests and a substituted `security` prove no native persistence.
+Production OAuth ignores test URLs; a separate binary alone supplies no isolation.
+Evidence:
+`775fe0901:scratch/loo-661-save-refreshed-claude.md`, findings 30–38.
 
 ## Codex credential recovery (LOO-665, 2026-10-28)
 

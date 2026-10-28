@@ -1,6 +1,6 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28, reviewed at `86877c091`): **Implementation incomplete.**
+Status (2026-10-28, reconciled against `775fe0901`): **Implementation incomplete.**
 The branch supplies diagnostics; the defective `security -i` writer remains,
 with no replacement selected or native acceptance fixture. The accepted outcome
 and preservation constraints below remain binding.
@@ -37,6 +37,8 @@ Two independent gaps remain:
   Ordinary repair is authorized; no concrete product choice is ready for decision.
   Private interfaces, trust changes and provider-owned refresh remain unaccepted
   alternatives. Neither public-API exhaustion nor a scope change is established.
+  Finding 38 also leaves the native acceptance design open: file-backed refresh
+  tests and substituted-command diagnostics do not exercise this boundary together.
 - **Live diagnosis:** jack@loopflow.studio needs browser reconnection; `invalid_grant`
   returns before `write_claude_login`. The historical save failure remains unexplained.
   Reconnection cannot prove a writer, and local rollback cannot undo server-side
@@ -231,4 +233,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only compression, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.
+Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only reconciliation, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.

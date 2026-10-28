@@ -11,12 +11,12 @@ change ignore rules, force staging or suppress Git errors. Installed repair rema
 unverified; Infrastructure owns CLI/helper installation and installed acceptance.
 
 Prior archives and receipts remain in
-`86877c09150f4043164331423f82e223939203ff:scratch/questions.md` and its references.
-The kickoff receipt at
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-xuznj_dj/receipt.json`
-verified source absence after checkpoint `86877c091`; it moved no telemetry.
+`775fe090130060fe4cb7a7e898f97dd0ebfd5ce7:scratch/questions.md` and its references.
+The compress receipt at
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-supvaqza/receipt.json`
+verified source absence after checkpoint `775fe0901`; it moved no telemetry.
 That reservation is complete and must not be reused.
 
-This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-supvaqza/tmp`
+This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-xfhhpj41/tmp`
 for fresh telemetry after checkpointing. Its sibling `receipt.json` records the
 checkpoint and verified move, or source absence. A reservation alone proves no archive.

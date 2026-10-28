@@ -1,21 +1,16 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Writer design unresolved; diagnostics only.** No candidate
-has met transport, native reader-access and failed-save preservation requirements.
-The checked-in `security -i` writer still has the destructive size failure below.
-No relaxation of the accepted outcome is pending; public interfaces are not
-exhausted. Revisit a rejected route only with a mechanism addressing its counterexample.
-Supported reconnection for jack@loopflow.studio is a separate live-acceptance
-dependency; it proves neither the writer nor the historical save-failure cause.
-
-Kickoff decision (2026-10-28): **not implementation-ready**. Jack Heart's outcome
-and boundaries remain accepted; no writer mechanism is selected. Reconciliation
-against the current code and Apple's documented
+Status (2026-10-28): **Writer unresolved; diagnostics only; not implementation-ready.**
+No candidate meets transport, native reader-access and failed-save preservation
+requirements. The checked-in `security -i` writer still has the destructive size
+failure below. Public interfaces are not exhausted; revisit rejected routes only
+with a mechanism addressing their counterexamples. In particular,
 [`kSecAttrAccess`](https://developer.apple.com/documentation/security/ksecattraccess)
-update route leaves findings 31/33 intact: API support for setting access is not
-evidence of atomic preservation. The remaining sequence below is conditional on
-that missing mechanism, not an executable repair plan. No new native experiment,
-live-account poll or production change was warranted by this review.
+support does not establish atomic preservation (findings 31/33).
+The implementation sequence is conditional on that missing mechanism; Jack Heart's
+accepted outcome and boundaries remain unchanged. Supported reconnection for
+jack@loopflow.studio is a separate live-acceptance dependency, proving neither
+the writer nor the historical save-failure cause.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -23,17 +18,15 @@ Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
 prior plan and dependency reconciliation:
 `61c6f82a7fd9e9c61d3a9e81dfcfa261708536dc:scratch/loo-661-save-refreshed-claude.md`.
 
-Integrated dependencies do not repair Claude persistence or prove installation:
+Integrated dependencies (none proves Claude repair or installation):
 
 - PR #1749 selects macOS CI; LOO-657 supplies takeover notices.
-- LOO-664 / #1754 (`fefda39493`) repairs source sync. The authorized temporary
-  telemetry bridge remains in `scratch/questions.md` until installed recovery.
+- LOO-664 / #1754 (`fefda39493`) repairs source sync. The temporary telemetry
+  bridge and archive receipts remain in `scratch/questions.md` until installed recovery.
 - LOO-665 / #1756 (`9967df791b`) retains displaced file inodes for Codex recovery;
   that mechanism does not preserve Keychain partition access.
-- PR #1759 (`635d99fee0`) is integrated: v0.15.0 consolidates the 0.14.11–0.14.20
-  cycle and retains the 0.14.20 store compatibility floor. It supersedes #1758's
-  release metadata, without proving publication, installation or this repair.
-  Infrastructure retains release and installed acceptance.
+- PR #1759 (`635d99fee0`): v0.15.0 consolidates 0.14.11–0.14.20 and retains the
+  0.14.20 store compatibility floor, superseding #1758's release metadata.
 
 ## Required outcome
 
@@ -51,9 +44,7 @@ and installed acceptance. This Task serves its reliable-auth objective and KR ab
 advancing work without plumbing failures; no quantitative Wave target is selected.
 
 The target is one native writer shared by refresh and activation. Diagnostics,
-a size refusal, successful API status or post-write repair cannot establish the
-required preservation. The acceptance sequence below separates disposable native
-storage proof from the installed refresh demo; neither can replace the other.
+a size refusal, successful API status or post-write repair do not prove preservation.
 
 **Demo:** after a naturally required refresh on the repaired installation,
 `lf account claude --json` accepts the same account with verified capacity, and
@@ -76,17 +67,16 @@ that recovery alone will not demonstrate the repair.
 - Closed storage stages and numeric statuses survive error conversion; arbitrary
   errors stay redacted. Save failures are `Unavailable`, not `NeedsLogin`.
   Readback failure and mismatch differ; neither proves rollback or safe retry.
-  Input/wait failures reap the child without claiming rollback.
+  Input/wait failures reap the child without claiming rollback; waits remain
+  unbounded until the replacement implements the required 15-second limit.
 - `provider_account/activation.rs::write_login` shares the native writer;
   `lf/commands/account_status.rs::managed_rows` observes and polls native identity.
   Existing diagnostic/recovery fields carry failures. SQLite account evidence is
   derived, not credential authority.
 
 Four diagnostic tests cover hostile output, mismatch, numeric IO errors and
-unstructured errors; they prove redaction, not native preservation. No native
-acceptance fixture exists. This repair adds no migration, DTO or Swift change.
-The current writer still waits without a deadline; the 15-second subprocess bound
-below is remaining implementation, not a property of these diagnostics.
+unstructured errors; they prove redaction, not native preservation. This repair
+adds no migration, DTO or Swift change.
 
 ## Evidence and excluded alternatives
 
@@ -224,9 +214,6 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Delete — do not maintain
 
-- The completed `scratch/claude_command_boundary_probe.py` is removed; recover it
-  from the evidence reference above if a new mechanism needs its exact fixture.
-  No production test or acceptance coverage depended on this standalone experiment.
 - Replace the `security -i` spawn, hex script and command-string escaping restrictions
   inside `write_claude_keychain_credential` once a compatible writer is proven.
   Replace its exclusive stand-in in
@@ -259,6 +246,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
-
-Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; code and saved evidence reconciled, with no production change or test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.
+Check — compress (2026-10-28): `git diff --check` and `lf context` pass; notes only, no build/test rerun. Gate owns affected checks; native writer proof and Infrastructure's installed acceptance after supported reconnection remain pending.

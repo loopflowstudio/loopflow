@@ -177,16 +177,14 @@ def test_stage_binaries_errors_on_missing_cargo_output(
         install._stage_binaries(tmp_path / "local-bin")
 
 
-def test_source_builds_are_always_development_validation_only(
+def test_source_builds_are_always_development(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("LOOPFLOW_BUILD_PROVENANCE", "release")
-    monkeypatch.setenv("LOOPFLOW_MIGRATION_AUTHORITY", "published")
 
     env = install._development_build_env()
 
     assert env["LOOPFLOW_BUILD_PROVENANCE"] == "development"
-    assert env["LOOPFLOW_MIGRATION_AUTHORITY"] == "validation_only"
 
 
 def test_local_dry_run_has_no_production_activation_path(
@@ -204,5 +202,5 @@ def test_local_dry_run_has_no_production_activation_path(
     install.local(dry_run=True, skip=[])
 
     output = capsys.readouterr().out
-    assert "validation-only build under local-bin" in output
+    assert "build under local-bin" in output
     assert "promote" not in output.lower()

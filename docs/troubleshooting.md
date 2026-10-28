@@ -160,8 +160,8 @@ lf monitor prune                   # only lf's records: dead Process rows and re
 The script prunes every repository under `~/src`: finished worktrees, completed
 Tasks' build output and merged branches through `lf wt prune`, and ignored
 build output (`target`, `node_modules`, `.venv`, `.build`, `DerivedData`) that no process
-holds and nothing wrote for 4 hours. In `~/.lf` it removes captures, logs, draft store
-copies and every database backup but the newest once untouched for a week. The
+holds and nothing wrote for 4 hours. In `~/.lf` it removes captures, logs
+and every database backup but the newest once untouched for a week. The
 database, account homes, Home material written in the last day and anything a
 process holds open are never removed; when `lsof` fails, neither is anything else
 that check protects.

@@ -192,8 +192,6 @@ def _validate_release_candidate(archives: tuple[Path, ...]) -> None:
         candidate = preview["candidate"]
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("release candidate did not emit a promotion identity") from exc
-    if candidate.get("authority") != "published":
-        raise RuntimeError("release candidate has validation-only migration authority")
     verdict = preview.get("verdict", {})
     if result.returncode != 0 or verdict.get("kind") not in {"promote", "promote_and_migrate"}:
         reasons = "; ".join(verdict.get("reasons", [])) or result.stderr.strip()
@@ -416,7 +414,6 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
             **os.environ,
             "LF_RELEASE_BINARY": str(arm_binary),
             "LOOPFLOW_BUILD_PROVENANCE": "release",
-            "LOOPFLOW_MIGRATION_AUTHORITY": "published",
             "RELEASE_TAG": tag,
             # Survives cleanup of the generated preparation checkout on timeout.
             "LF_RELEASE_NOTARIZATION_DIR": str(

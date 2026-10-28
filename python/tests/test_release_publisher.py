@@ -59,7 +59,6 @@ def test_publisher_extracts_the_arm_cli(tmp_path: Path):
 @pytest.mark.parametrize(
     ("code", "output", "error"),
     [
-        (0, '{"candidate":{"authority":"validation_only"}}', "validation-only"),
         (
             1,
             '{"candidate":{"authority":"published"},"verdict":{"kind":"reject"}}',

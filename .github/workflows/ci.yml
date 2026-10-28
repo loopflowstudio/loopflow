@@ -147,10 +147,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
-      - name: Materialize draft migrations for tests
-        run: |
-          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
@@ -217,10 +213,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
       - uses: taiki-e/install-action@nextest
-      - name: Materialize the archived source's migration inputs
-        run: |
-          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - uses: actions/download-artifact@v8
         with:
           name: rust-${{ matrix.suite }}
@@ -337,10 +329,6 @@ jobs:
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
-      - name: Materialize draft migrations for tests
-        run: |
-          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
@@ -482,21 +470,12 @@ jobs:
         if: needs.merge-proof.outputs.reuse != 'true' || steps.rust-cache.outputs.cache-hit != 'true'
         run: |
           /usr/bin/time -l cargo test -p loopflow --lib app_process_tests --no-run
-          /usr/bin/time -l cargo test -p loopflow --test integration data_clones:: --no-run
       - name: Test macOS installation process discovery
         if: needs.merge-proof.outputs.reuse != 'true'
         run: uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
-      - name: Test isolated data clones and native process identity
+      - name: Test native process identity
         if: needs.merge-proof.outputs.reuse != 'true'
-        run: |
-          # These fixtures install their own inherited sandbox; the outer runner
-          # permits an unsandboxed system ps and cannot be nested with this policy.
-          if [ "${{ matrix.os }}" = macos-26 ]; then
-            cargo test --offline -p loopflow --test integration data_clones:: < /dev/null
-          else
-            cargo test --offline -p loopflow --test integration data_clones::clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source < /dev/null
-          fi
-          uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
+        run: uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
 
   loopflow-ui-test:
     needs: [merge-proof, scratch-clear, macos-inputs]

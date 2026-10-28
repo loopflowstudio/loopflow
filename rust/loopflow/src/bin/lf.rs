@@ -1753,10 +1753,11 @@ fn run() -> anyhow::Result<()> {
     // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
     if let Some(Commands::Self_ {
-        cmd: loopflow::lf::SelfCommand::Install { cmd },
+        cmd: loopflow::lf::SelfCommand::Install { main, cmd },
     }) = &cli.command
     {
         return match cmd.as_ref() {
+            None if *main => loopflow::lf::commands::install::main_build(),
             None => loopflow::lf::commands::install::latest(),
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)

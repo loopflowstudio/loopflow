@@ -647,13 +647,12 @@ def _apply_dev_identity(plist: Path) -> None:
 
 def _build_control_tools() -> Path:
     # The app is a live operator surface even when its Swift shell is a dev
-    # build. The app selects its bundled CLI for every child;
-    # it has no authority to migrate the main Machine.
+    # build. The app selects its bundled CLI for every child; an ordinary lf
+    # never migrates the main Machine.
     target_dir = REPO_ROOT / "target" / "dev-app-control"
     cargo_cmd = [
         "/usr/bin/env",
         "LOOPFLOW_BUILD_PROVENANCE=development",
-        "LOOPFLOW_MIGRATION_AUTHORITY=validation_only",
         "cargo",
         "build",
         "--locked",
@@ -680,7 +679,7 @@ def cmd_prepare_control_tools() -> int:
 
 
 def cmd_bundle_control_tools(output: Path) -> int:
-    """Build validation-only control tools into an Xcode app bundle."""
+    """Build control tools into an Xcode app bundle."""
     output.mkdir(parents=True, exist_ok=True)
     _copy_bundled_tools(output)
     return 0
@@ -713,9 +712,9 @@ COMMANDS = {
     "logs": (cmd_logs, "Tail the app logs"),
     "bundle-control-tools": (
         cmd_bundle_control_tools,
-        "Build validation-only control tools into an app bundle",
+        "Build control tools into an app bundle",
     ),
-    "prepare-control-tools": (cmd_prepare_control_tools, "Prepare validation-only control tools"),
+    "prepare-control-tools": (cmd_prepare_control_tools, "Prepare control tools"),
     "screenshots": (cmd_screenshots, "Generate app screenshots"),
 }
 

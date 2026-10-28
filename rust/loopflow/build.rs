@@ -78,17 +78,32 @@ fn emit_migration_catalog(
 ) -> Vec<String> {
     let directory = manifest_dir.join("src/store/migrations");
     println!("cargo:rerun-if-changed={}", directory.display());
-    let merged_order = git_root
-        .map(|root| {
-            let root = root
-                .canonicalize()
-                .expect("canonicalize Loopflow source root");
-            let directory = directory
-                .canonicalize()
-                .expect("canonicalize migrations directory");
-            migration_build::merged_order(&root, &directory)
-        })
-        .unwrap_or_default();
+    // A source snapshot without Git history (a container build) names the
+    // order origin/main gave its migrations, one slug per line.
+    println!("cargo:rerun-if-env-changed=LOOPFLOW_MIGRATION_ORDER");
+    let merged_order = match env::var_os("LOOPFLOW_MIGRATION_ORDER") {
+        Some(path) => {
+            println!("cargo:rerun-if-changed={}", Path::new(&path).display());
+            fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read LOOPFLOW_MIGRATION_ORDER: {error}"))
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+        }
+        None => git_root
+            .map(|root| {
+                let root = root
+                    .canonicalize()
+                    .expect("canonicalize Loopflow source root");
+                let directory = directory
+                    .canonicalize()
+                    .expect("canonicalize migrations directory");
+                migration_build::merged_order(&root, &directory)
+            })
+            .unwrap_or_default(),
+    };
     let ordered = migration_build::order_catalog(&directory, &merged_order)
         .unwrap_or_else(|error| panic!("order migrations: {error}"));
     let (catalog, connection) = migration_build::build_catalog(ordered)

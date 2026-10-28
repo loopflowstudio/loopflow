@@ -21,7 +21,7 @@ def main() -> None:
     require_fixture(args.home)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     seed = args.output / "seed"
-    prepare(args.home / "loopflow.db", seed, False)
+    prepare(args.home / "loopflow.db", seed)
     variants = {"baseline": args.baseline.resolve(), "candidate": args.candidate.resolve()}
 
     def record(path: str, variant: str, sample: int, result: dict) -> None:

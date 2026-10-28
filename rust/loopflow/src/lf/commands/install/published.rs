@@ -1,4 +1,4 @@
-//! Published updates and their optional machine-local schedule.
+//! Published updates, green main builds, and the optional machine-local schedule.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -12,7 +12,10 @@ use sha2::{Digest, Sha256};
 
 use crate::lf::InstallFrequency;
 
+const REPOSITORY: &str = "loopflowstudio/loopflow";
 const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
+/// Packages every green main commit (`.github/workflows/main-packages.yml`).
+const MAIN_PACKAGES: &str = "main-packages.yml";
 
 pub fn latest() -> Result<()> {
     let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
@@ -53,6 +56,109 @@ pub fn latest() -> Result<()> {
         directory.join("lf").display()
     );
     Ok(())
+}
+
+/// Install the package CI built for the newest green main commit. GitHub keeps
+/// those artifacts behind authentication, so this uses the `gh` login.
+pub fn main_build() -> Result<()> {
+    let target =
+        package_target().ok_or_else(|| anyhow!("no main package is built for this platform"))?;
+    let runs = gh(&[
+        "run",
+        "list",
+        "--repo",
+        REPOSITORY,
+        "--workflow",
+        MAIN_PACKAGES,
+        "--branch",
+        "main",
+        "--status",
+        "success",
+        "--limit",
+        "1",
+        "--json",
+        "databaseId,headSha",
+    ])?;
+    let (run, revision) = newest_run(&runs)?;
+    let temporary = tempfile::tempdir()?;
+    gh(&[
+        "run",
+        "download",
+        &run.to_string(),
+        "--repo",
+        REPOSITORY,
+        "--name",
+        &format!("lf-{target}"),
+        "--dir",
+        &temporary.path().to_string_lossy(),
+    ])?;
+    let archive = temporary.path().join(format!("lf-{target}.tar.gz"));
+    let status = Command::new("tar")
+        .arg("-xzf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(temporary.path())
+        .status()
+        .context("unpack the main package")?;
+    if !status.success() {
+        bail!("could not unpack {} ({status})", archive.display());
+    }
+    let candidate = temporary.path().join("lf");
+    let directory = install_dir()?;
+    let status = Command::new(&candidate)
+        .args(["self", "install", "promote", "--cli-target"])
+        .arg(directory.join("lf"))
+        .arg("--sync-skills")
+        .status()
+        .context("start the main build's promotion")?;
+    if !status.success() {
+        bail!("installing main {revision} failed ({status}); fix the error above and rerun `lf self install --main`");
+    }
+    println!(
+        "main: {revision}\ninstalled: {}",
+        directory.join("lf").display()
+    );
+    Ok(())
+}
+
+/// The package name CI gives this platform's `lf`.
+fn package_target() -> Option<&'static str> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => Some("aarch64-apple-darwin"),
+        ("macos", "x86_64") => Some("x86_64-apple-darwin"),
+        ("linux", "x86_64") => Some("x86_64-unknown-linux-gnu"),
+        ("linux", "aarch64") => Some("aarch64-unknown-linux-gnu"),
+        _ => None,
+    }
+}
+
+fn newest_run(json: &str) -> Result<(u64, String)> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Run {
+        database_id: u64,
+        head_sha: String,
+    }
+    let runs: Vec<Run> = serde_json::from_str(json).context("read the main package runs")?;
+    let run = runs
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("no green main build has packages yet"))?;
+    Ok((run.database_id, run.head_sha))
+}
+
+fn gh(args: &[&str]) -> Result<String> {
+    let output = Command::new("gh").args(args).output().context(
+        "`lf self install --main` downloads CI packages with `gh`; install it and run `gh auth login`",
+    )?;
+    if !output.status.success() {
+        bail!(
+            "gh {} failed: {}",
+            args[..2].join(" "),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(output.stdout)?)
 }
 
 fn release_tag(path: &str) -> Result<String> {
@@ -98,10 +204,7 @@ fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool 
     let published = inspect(&directory.join("lf"), &["install", "preflight", "--json"])
         .filter(|output| output.status.success())
         .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
-        .is_some_and(|preview| {
-            preview["candidate"]["authority"] == "published"
-                && preview["verdict"]["kind"] == "promote"
-        });
+        .is_some_and(|preview| preview["verdict"]["kind"] == "promote");
     published && applications.is_none_or(|root| has_release_app(root, version))
 }
 
@@ -282,15 +385,15 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 
 #[cfg(test)]
 mod tests {
-    use super::{is_current, release_tag, run_verified_installer};
+    use super::{is_current, newest_run, package_target, release_tag, run_verified_installer};
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
-    fn binary(path: &Path, name: &str, authority: &str) {
+    fn binary(path: &Path, name: &str) {
         fs::write(path, format!(
-            "#!/bin/sh\ncase \"$*\" in\n  --version) echo '{name} 9.9.9' ;;\n  'install preflight --json') echo '{{\"candidate\":{{\"authority\":\"{authority}\"}},\"verdict\":{{\"kind\":\"promote\"}}}}' ;;\n  *) exit 2 ;;\nesac\n"
+            "#!/bin/sh\ncase \"$*\" in\n  --version) echo '{name} 9.9.9' ;;\n  'install preflight --json') echo '{{\"candidate\":{{}},\"verdict\":{{\"kind\":\"promote\"}}}}' ;;\n  *) exit 2 ;;\nesac\n"
         )).unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -298,12 +401,9 @@ mod tests {
     #[test]
     fn installed_release_needs_only_the_verified_cli() {
         let temp = tempfile::tempdir().unwrap();
-        binary(&temp.path().join("lf"), "lf", "published");
+        binary(&temp.path().join("lf"), "lf");
         assert!(is_current(temp.path(), "v9.9.9", None));
         assert!(!is_current(temp.path(), "v9.9.10", None));
-        binary(&temp.path().join("lf"), "lf", "validation_only");
-        assert!(!is_current(temp.path(), "v9.9.9", None));
-        binary(&temp.path().join("lf"), "lf", "published");
         let script = fs::read_to_string(temp.path().join("lf")).unwrap();
         fs::write(
             temp.path().join("lf"),
@@ -334,6 +434,20 @@ mod tests {
     }
 
     #[test]
+    fn main_installs_the_newest_green_run_for_this_platform() {
+        let runs = r#"[{"databaseId":42,"headSha":"5c9c22ac36f327d11368654218902a63f3f88b1b"}]"#;
+        assert_eq!(
+            newest_run(runs).unwrap(),
+            (42, "5c9c22ac36f327d11368654218902a63f3f88b1b".to_string())
+        );
+        assert!(newest_run("[]")
+            .unwrap_err()
+            .to_string()
+            .contains("no green main build"));
+        assert!(package_target().is_some_and(|target| target.contains(std::env::consts::ARCH)));
+    }
+
+    #[test]
     fn failed_installer_remains_a_failure() {
         let temp = tempfile::tempdir().unwrap();
         let payload = b"#!/bin/sh\nexit 23\n";
@@ -347,14 +461,14 @@ mod tests {
     #[test]
     fn current_cli_does_not_hide_a_missing_stale_or_incomplete_app() {
         let temp = tempfile::tempdir().unwrap();
-        binary(&temp.path().join("lf"), "lf", "published");
+        binary(&temp.path().join("lf"), "lf");
         let applications = temp.path().join("Applications");
         let current = || is_current(temp.path(), "v9.9.9", Some(&applications));
         assert!(!current());
         let contents = applications.join("Loopflow.app/Contents");
         fs::create_dir_all(contents.join("MacOS")).unwrap();
         for name in ["Loopflow", "lf"] {
-            binary(&contents.join("MacOS").join(name), name, "published");
+            binary(&contents.join("MacOS").join(name), name);
         }
         for (version, expected) in [("9.9.8", false), ("9.9.9", true)] {
             fs::write(contents.join("Info.plist"), format!(

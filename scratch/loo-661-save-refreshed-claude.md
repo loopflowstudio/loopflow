@@ -237,4 +237,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 realign, implementation at `4d3aad462`); writer, diagnostics, related changes and relevant Infrastructure/complete Release memory agree; no code change or test rerun. Native acceptance is missing; live recovery needs browser reconnection, and Infrastructure owns installed acceptance.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff, code unchanged from `b5db5546f`); current writer and refresh control flow still match the saved findings. Existing design retained; no new mechanism proof, native acceptance or live recovery. No code tests repeated for this prose-only reconciliation.

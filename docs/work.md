@@ -43,14 +43,30 @@ conversation, use `lf resume` ([Sessions](sessions.md)).
 
 ```bash
 lf wave show                       # each Wave's plan and Tasks, sorted by what they need
-lf task status LOO-12              # owner, state, PR, and every Session and Graph on it
-lf task status LOO-12 --json       # its graph, its interactive steps, and the step it stands at
+lf task status LOO-12              # state, graph step, PR, and every Session and Graph on it
 lf task diff LOO-12 --files        # what it changed so far
 lf task wait LOO-13                # block until its run ends, with no agent polling
 ```
 
-`lf task list` is the flat inventory (`--wave` to narrow it). Every view reads
-this machine's store, so it answers instantly and offline.
+```bash
+lf task list                                  # open Tasks in this repository
+lf task list loo-60                           # identifier or title contains "loo-60"
+lf task list --wave infra --state idle
+lf task list --done --wave infra --since 7d   # closed in the last week
+lf task list --watch                          # a JSON line each time the list changes
+```
+
+`lf task list` is the flat inventory. Every view reads this machine's store, so
+it answers instantly and offline.
+
+`--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
+`lf session list`, `lf history`, `lf planning status`, `lf ps` and the
+`lf desktop` reads, always with `--json`. Each line is
+`{"answers", "unavailable", "body"}`, where `body` is
+what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
+change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
+answers that id. It stops when stdin closes. `lf planning status --watch` also
+keeps the repository's planning exchanged while it runs.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read
 `lf task status`, then launch what remains with `lf task run`. The Task keeps
@@ -96,7 +112,7 @@ planning:
 
 Ref names are not access control; pick a remote whose readers should see the
 plan. When two people edit the same field, the later edit wins and the other
-value stays in `lf planning status`, ready to copy back.
+value stays in `lf planning journal`, ready to copy back.
 
 ### Linear, Asana or Notion
 

@@ -706,7 +706,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             let status = lf_json(
                 repo.path(),
                 home.path(),
-                &["task", "status", issue, "--json"],
+                &["desktop", "task", issue, "--json"],
             );
             status["execution"]["work"]["graph_processes"]
                 .as_array()
@@ -725,11 +725,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             String::from_utf8_lossy(&status.stderr)
         );
         let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-        assert_eq!(
-            status["execution"]["task_id"],
-            child.task.id.as_str(),
-            "{status}"
-        );
+        assert_eq!(status["task"]["id"], child.task.id.as_str(), "{status}");
 
         let bin = TempDir::new().unwrap();
         let launched = home.path().join("launched");
@@ -754,7 +750,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
         let sessions = run_lf(
             repo.path(),
             home.path(),
-            &["session", "list", "--all", "--json"],
+            &["desktop", "sessions", "--all", "--json"],
             None,
         );
         assert!(
@@ -1213,7 +1209,6 @@ fn observing_and_preparing_a_task_are_not_execution() {
     let _ = &runtime;
     assert_eq!(entries(), 1, "the prepared checkout claimed its Task");
     for args in [
-        vec!["monitor", "active", "--task", "INF-123", "--json"],
         vec!["session", "list", "--task", "INF-123", "--json"],
         vec!["history", "usage", "--task", "INF-123", "--json"],
     ] {
@@ -1364,7 +1359,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
         serde_json::from_slice(&output.stdout).unwrap()
     };
     let session = |run_id: &str| -> serde_json::Value {
-        json(&["session", "list", "--all", "--json"])
+        json(&["desktop", "sessions", "--all", "--json"])
             .as_array()
             .unwrap()
             .iter()
@@ -1435,7 +1430,7 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     // A checkout no Task owns stays unbound and retires on exit.
     let unrelated = repo.create_named_worktree("unregistered");
     let unbound = launch(&unrelated, &["-i", "binding-work"]);
-    let history = json(&["session", "list", "--all", "--history", "--json"]);
+    let history = json(&["desktop", "sessions", "--all", "--history", "--json"]);
     let retired = history
         .as_array()
         .unwrap()
@@ -1464,7 +1459,6 @@ fn lf_launches_inside_a_task_checkout_bind_to_that_task() {
     let _ = json(&[
         "history", "usage", "--days", "0", "--task", "INF-123", "--json",
     ]);
-    let _ = json(&["monitor", "active", "--task", "INF-123", "--json"]);
     assert_eq!(events(), settled, "reads write no Task event");
 
     // Landing preserves the checkout's Task context and historical attribution.
@@ -1874,7 +1868,7 @@ fn adding_a_graph_changes_an_untyped_reference_but_not_an_explicit_skill() {
 }
 
 fn roadmap_task(repo: &Path, home: &Path) -> serde_json::Value {
-    lf_json(repo, home, &["wave", "show", "--json"])["tasks"]["items"][0].clone()
+    lf_json(repo, home, &["desktop", "plan", "--json"])["tasks"]["items"][0].clone()
 }
 
 fn labels(compiled: &serde_json::Value) -> Vec<&str> {
@@ -1993,7 +1987,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
         lf_json(
             repo.path(),
             home.path(),
-            &["task", "status", "INF-123", "--json"],
+            &["desktop", "task", "INF-123", "--json"],
         )["execution"]
             .clone()
     };
@@ -2218,7 +2212,7 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
     let status = lf_json(
         repo.path(),
         home.path(),
-        &["task", "status", "INF-123", "--json"],
+        &["desktop", "task", "INF-123", "--json"],
     );
     let graphs = status["execution"]["work"]["graph_processes"]
         .as_array()
@@ -2266,7 +2260,7 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
         lf_json(
             repo.path(),
             home.path(),
-            &["task", "status", "INF-123", "--json"],
+            &["desktop", "task", "INF-123", "--json"],
         )["execution"]["work"]["graph"]["position"]
             .clone()
     };

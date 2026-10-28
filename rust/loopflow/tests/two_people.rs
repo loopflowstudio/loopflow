@@ -116,7 +116,7 @@ impl Pair {
     }
 
     fn branch(&self, person: Person, task: &str) -> String {
-        self.json(person, &["task", "status", task, "--json"])["task"]["branch"]
+        self.json(person, &["desktop", "task", task, "--json"])["task"]["branch"]
             .as_str()
             .unwrap()
             .to_string()
@@ -160,7 +160,7 @@ fn two_people_share_one_repository() {
     let branch = pair.branch(Maya, &task);
     assert!(branch.starts_with("maya/"), "{branch}");
     // Maya pushes work and opens PR #1 on the World's GitHub.
-    let status = pair.json(Maya, &["task", "status", &task, "--json"]);
+    let status = pair.json(Maya, &["desktop", "task", &task, "--json"]);
     let worktree = PathBuf::from(status["execution"]["worktree"].as_str().unwrap());
     std::fs::write(worktree.join("gpu.txt"), "fallback\n").unwrap();
     pair.git(&worktree, &["add", "gpu.txt"]);
@@ -249,7 +249,7 @@ fn two_people_share_one_repository() {
     pair.ok(Lee, &["task", "run", &task, "takeover"]);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let taken = loop {
-        let status = pair.json(Lee, &["task", "status", &task, "--json"]);
+        let status = pair.json(Lee, &["desktop", "task", &task, "--json"]);
         if status["execution"]["work"]["graph"]["position"]
             == serde_json::json!({"kind": "at", "step": "review"})
         {

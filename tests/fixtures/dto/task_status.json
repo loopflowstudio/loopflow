@@ -29,28 +29,8 @@
     "base_commit": "",
     "parent_pr_id": null,
     "agent": null,
-    "created_at": [
-      2026,
-      272,
-      12,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "updated_at": [
-      2026,
-      272,
-      12,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
+    "created_at": "2026-09-29T12:00:00Z",
+    "updated_at": "2026-09-29T12:00:00Z",
     "repository_id": "repo_00000000000040008000000000000001"
   },
   "project": {
@@ -70,28 +50,8 @@
     "linear_id": "project-gmail",
     "pm_snapshot_synced_at": 1790683200,
     "wave_id": "11111111-1111-4111-8111-111111111111",
-    "created_at": [
-      2026,
-      272,
-      12,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "updated_at": [
-      2026,
-      272,
-      12,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ]
+    "created_at": "2026-09-29T12:00:00Z",
+    "updated_at": "2026-09-29T12:00:00Z"
   },
   "ownership": {
     "owner": {
@@ -125,5 +85,36 @@
         "at": 1790683150
       }
     ]
+  },
+  "overview": {
+    "sessions": [
+      {
+        "id": "manual",
+        "title": "Checkout conversation",
+        "interactive": false,
+        "completed_at": null,
+        "graph_lf_process_id": null
+      }
+    ],
+    "graph_processes": [],
+    "graph": null
+  },
+  "graph_processes": [],
+  "comments": {
+    "identifier": "LOO-2",
+    "pending_sync": [],
+    "comments": [
+      {
+        "id": "c-1",
+        "body": "Moved to review.",
+        "author": {
+          "kind": "person",
+          "name": "Maya"
+        },
+        "created_at": "2026-09-23T08:00:00Z"
+      }
+    ],
+    "refresh_error": null,
+    "conflicts": {}
   }
 }

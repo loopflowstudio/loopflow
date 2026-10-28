@@ -210,10 +210,10 @@ private actor HistorySource {
 
     func respond(_ args: [String]) async throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("wave", "show"): return roadmap
+        case ("desktop", "plan"): return roadmap
         case ("wave", "list"): return "[]"
-        case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
+        case ("history", _): return #"{"truncated":false,"items":[]}"#
+        case ("desktop", "sessions"): return #"{"entries":\#(session),"next":null}"#
         case ("graph", "list"): return "[]"
         case ("task", "comment"):
             return #"{"identifier":"fixture","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#

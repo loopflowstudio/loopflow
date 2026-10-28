@@ -152,23 +152,29 @@ pub(super) fn graphs_of_task(
     )
 }
 
-/// Each Task's most recently launched Graph, for every Task in one reading.
+/// Each of `tasks`' most recently launched Graph, for all of them in one reading.
 fn latest_task_graphs(
     conn: &rusqlite::Connection,
+    tasks: &[&TaskId],
 ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
     let mut latest = HashMap::new();
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
          ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
-        task_graph_pairs(conn, "SELECT id,worktree,checkout_machine_id FROM tasks")?
+        task_graph_pairs(
+            conn,
+            "SELECT id,worktree,checkout_machine_id FROM tasks
+             WHERE id IN (SELECT value FROM json_each(?1))"
+        )?
     ))?;
-    for row in query.query_map([], |row| {
+    let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
+    for row in query.query_map([&ids], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })? {
         let (task, graph) = row?;
         latest.insert(task, graph);
     }
-    let ids = serde_json::to_string(&latest.values().collect::<Vec<_>>())?;
+    let ids = super::children::ids_json(latest.values().map(String::as_str));
     let graphs: HashMap<_, _> = super::graph_inventory::graphs_in(
         conn,
         "e.id IN (SELECT value FROM json_each(?1))",
@@ -451,13 +457,18 @@ fn task_open_process_ids(conn: &rusqlite::Connection) -> StoreResult<String> {
     ))
 }
 
+/// One of a Task's Graph processes with its inventory entry.
+type MemberGraph = (
+    crate::ops::graph_process::GraphProcess,
+    crate::durable::GraphProcessInventoryEntry,
+);
+
+/// A Task's Sessions and its Graphs. The entries name the Task being read and
+/// its Wave, read once for all of them.
 fn members(
     tx: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<(
-    Vec<TaskSession>,
-    Vec<crate::durable::GraphProcessInventoryEntry>,
-)> {
+) -> StoreResult<(Vec<TaskSession>, Vec<MemberGraph>)> {
     let sessions = tx
         .prepare(&format!(
             "SELECT s.id,s.title,s.interactive,{},s.completed_at
@@ -475,9 +486,18 @@ fn members(
             })
         })?
         .collect::<StoreResult<Vec<_>>>()?;
-    let graphs = graphs_of_task(tx, task)?
-        .iter()
-        .map(|graph| super::graph_inventory::entry_in(tx, graph))
+    let graphs = graphs_of_task(tx, task)?;
+    let wave = if graphs.is_empty() {
+        None
+    } else {
+        super::durable::task_wave_in(tx, task)?
+    };
+    let graphs = graphs
+        .into_iter()
+        .map(|graph| {
+            let entry = super::graph_inventory::entry_of(&graph, Some(task.clone()), wave.clone())?;
+            Ok((graph, entry))
+        })
         .collect::<StoreResult<Vec<_>>>()?;
     Ok((sessions, graphs))
 }
@@ -498,18 +518,33 @@ impl SqliteStore {
     }
 
     /// Current workspace facts, without enumerating mechanical Process history.
-    pub fn task_overview(&self, task: &TaskId) -> StoreResult<crate::task_work::TaskOverview> {
+    /// The Task's overview and, for each of its Graphs in the same order, what
+    /// `lf graph show --processes` says of it.
+    pub fn task_overview(
+        &self,
+        task: &TaskId,
+    ) -> StoreResult<(
+        crate::task_work::TaskOverview,
+        Vec<crate::durable::GraphProcessDetail>,
+    )> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let (sessions, graph_processes) = members(&tx, task)?;
+        let (sessions, graphs) = members(&tx, task)?;
         let graph = task_graph_row(&tx, task)?;
         tx.commit()?;
         drop(conn);
-        Ok(crate::task_work::TaskOverview {
-            sessions,
-            graph_processes,
-            graph: graph.map(|row| self.read_task_graph(row)),
-        })
+        let details = graphs
+            .iter()
+            .map(|(graph, entry)| graph.detail(entry.clone()))
+            .collect();
+        Ok((
+            crate::task_work::TaskOverview {
+                sessions,
+                graph_processes: graphs.into_iter().map(|(_, entry)| entry).collect(),
+                graph: graph.map(|row| self.read_task_graph(row)),
+            },
+            details,
+        ))
     }
 
     /// Read all three owners in one SQLite snapshot, including closed history.
@@ -517,6 +552,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graphs) = members(&tx, task)?;
+        let graphs = graphs.into_iter().map(|(_, entry)| entry).collect();
         let processes = tx
             .prepare(&format!(
                 "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
@@ -812,12 +848,13 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Each Task's most recently launched Graph, read for every Task at once.
+    /// Each of `tasks`' most recently launched Graph, read for all of them at once.
     pub(crate) fn latest_task_graphs(
         &self,
+        tasks: &[&TaskId],
     ) -> StoreResult<HashMap<TaskId, crate::ops::graph_process::GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        latest_task_graphs(&conn)
+        latest_task_graphs(&conn, tasks)
     }
 
     /// Every Graph among the Task's work, oldest first.
@@ -1168,7 +1205,7 @@ mod tests {
         for id in &graphs {
             store.record_graph_process(id, &graph).unwrap();
         }
-        let latest = store.latest_task_graphs().unwrap();
+        let latest = store.latest_task_graphs(&[&task, &sibling, &idle]).unwrap();
         for id in [&task, &sibling, &idle] {
             assert_eq!(
                 latest.get(id),

@@ -1,5 +1,21 @@
 # infrastructure wave memory
 
+## Unpublished checkout preservation (LOO-666, 2026-10-27)
+
+Jack Heart authorized repair through merge after installed 0.14.19 cleanup
+deleted MTG-193's unpushed calibration checkout. Remote absence and inactivity
+prove no delivery. Source now requires merged/closed PR evidence at the exact
+local head, retains existing work protections, and rechecks branch/head/files
+under the removal lease. Explicit disposal stays separate. Ignored artifacts in
+finished checkouts are not protected by non-force Git removal.
+
+Release's entry-point lesson applies: the real CLI/script fixture proves source
+behavior, not installed acceptance. Infrastructure owns patch/install and
+disposable verification before restoring the existing hourly cleanup entry.
+Preserved refs/bundle establish committed-history recovery only; no pre-deletion
+inventory establishes whether uncommitted/ignored data existed. Recovery must
+preserve MTG-193's active checkout and Task. LOO-543 remains separate.
+
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 
 Jack Heart requested Pi through existing Session, Task and Flow paths with exact
@@ -987,6 +1003,17 @@ runs prove no firing, and old gaps do not keep later telemetry red.
 
 ## Gotchas
 
+- **Git exclusions can fail after staging work** (LOO-664, 2026-10-27).
+  Apple Git 2.50.1 rejects a literal ignored `.lf/tmp` exclusion after staging
+  ordinary edits. The rooted glob `[.]lf/tmp/**` avoids that literal prefix;
+  exclusion alone leaves pre-staged telemetry in the index. A separate checkpoint
+  index restores telemetry from HEAD; existing stash recovery preserves its local
+  staged/working partition, retaining a named stash on conflict. CLI fixtures
+  cover ignored/unignored and pre-staged telemetry, not installed LOO-661 recovery.
+  Whitespace-only filenames are work: do not trim filename output to detect an
+  empty checkpoint.
+  Jack Heart authorized the bounded hotfix and autonomous shipping; Infrastructure
+  owns the single release/install and subsequent installed verification.
 - **Commit failures need both Git streams** (2026-10-11). Jack Heart requested
   repair and publication without landing. Selected scratch failed because staging
   excluded it in ordinary checkouts and stderr-only conversion hid Git's stdout.

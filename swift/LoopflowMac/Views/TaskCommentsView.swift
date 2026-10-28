@@ -2,9 +2,9 @@ import Foundation
 import Loopflow
 import SwiftUI
 
-/// Collapsed Comments below a Task's Description. The count and thread come
-/// from the selected Task's planning reader; a failed read keeps any earlier
-/// thread visible and says it may be out of date. Comments are never derived
+/// Collapsed Comments below a Task's Description. The count and thread arrive
+/// with the selected Task's `lf task status` watch; a failed reading keeps any
+/// earlier thread visible and says it may be out of date. Comments are never derived
 /// from the Description.
 struct TaskCommentsView: View {
     let model: WorkModel
@@ -14,7 +14,6 @@ struct TaskCommentsView: View {
     private var reading: WorkReading<TaskComments> { model.comments[task.id] }
     private var thread: TaskComments? { reading.value }
     private var expanded: Bool { model.navigation.expandedComments.contains(task.id) }
-    private var inFlight: Bool { model.comments.inFlight.contains(task.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
@@ -22,7 +21,7 @@ struct TaskCommentsView: View {
                 title: "Comments",
                 count: thread?.comments.count,
                 expanded: expanded,
-                inFlight: inFlight,
+                inFlight: false,
                 failure: reading.errorMessage == nil ? nil : thread != nil,
                 identifier: "task-comments",
                 accessibilityLabel: accessibilityHeading,
@@ -31,17 +30,15 @@ struct TaskCommentsView: View {
                     let navigation = model.navigation
                     if navigation.expandedComments.remove(task.id) == nil {
                         navigation.expandedComments.insert(task.id)
-                        Task { await model.loadComments(task: task) }
                     }
                 },
-                retry: { Task { await model.loadComments(task: task) } }
+                retry: { Task { await model.refresh() } }
             )
             .padding(.top, Spacing.sm)
             if expanded {
                 if let thread { threadView(thread) } else { statusText }
             }
         }
-        .task(id: task.id) { await model.loadComments(task: task) }
     }
 
     private var heading: String {

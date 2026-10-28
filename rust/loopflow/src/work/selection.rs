@@ -724,7 +724,6 @@ pub struct ViewPlan {
     pub pinned: bool,
     pub dashboard_id: Option<DashboardId>,
     pub repository: String,
-    pub observed_at: i64,
     pub selection: Selection,
     pub saved_revision: Option<i64>,
     pub resolution: SelectionResolution,

@@ -90,22 +90,17 @@ enum MockWaveFixture {
         try? JSONDecoder().decode(WaveDetailSnapshot.self, from: Data(detailJSON.utf8))
     }
 
-    /// The detail reading a `mock-waves` capture renders for `waveName` in the
-    /// given state, plus whether the pane still awaits its first live read (the
-    /// loading affordance stays on screen only while awaiting). Pure so the
-    /// screenshot states are covered without launching the app.
-    static func detailReading(
-        waveName: String,
-        state: DetailState
-    ) -> (reading: WaveDetailReading, awaitingFirstRead: Bool) {
-        let snapshot = waveName == detailWaveName ? selectedWaveDetail() : nil
+    /// The detail reading a `mock-waves` capture renders in the given state,
+    /// plus whether the pane still awaits its first live read (the loading
+    /// affordance stays on screen only while awaiting). Pure so the screenshot
+    /// states are covered without launching the app.
+    static func detailReading(state: DetailState) -> (reading: WaveDetailReading, awaitingFirstRead: Bool) {
         var reading = WaveDetailReading()
         switch state {
         case .loading:
             reading.clear()
             return (reading, true)
         case .error:
-            if let snapshot { reading.update(snapshot) }
             reading.recordFailure(refreshError)
             return (reading, false)
         }
@@ -240,14 +235,7 @@ enum MockWaveFixture {
                   "owner": {"person": "Jack Heart", "machine": {"id": null, "label": null}}
                 },
                 "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
-                "directive": {
-                  "version": 2,
-                  "kind": "replacement",
-                  "text": "Surface verification failures before publish failures.",
-                  "applied_at": "2026-07-13T18:30:00Z",
-                  "incorporated_at": "2026-07-13T18:31:00Z",
-                  "incorporated_summary": "Verification failures are now first."
-                },
+                "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "user",
                   "reason": "merge pull request head 333333333333 on GitHub"
@@ -300,7 +288,8 @@ enum MockWaveFixture {
                     },
                     "merge_commit": null,
                     "abandoned_at": null
-                  }
+                  },
+                "section": "waiting"
               },
               {
                 "task": {
@@ -322,7 +311,7 @@ enum MockWaveFixture {
                 },
                 "runtime": null,
                 "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},
-                "directive": null,
+                "ship_control":{"unavailable":null},"shipping":null,
                 "next_move": {
                   "owner": "wave",
                   "reason": "Task is ready to start"
@@ -346,7 +335,8 @@ enum MockWaveFixture {
                   "recommended": null,
                   "reason": "Task is ready to start"
                 },
-                "pr": null
+                "pr": null,
+                "section": "not_started"
               }
             ],
             "truncated": false

@@ -3,7 +3,7 @@ import SwiftUI
 import Loopflow
 
 struct WaveDetailReading {
-    private(set) var snapshot: WaveDetailSnapshot?
+    private(set) var snapshot: WaveRoadmap?
     private(set) var errorMessage: String?
 
     func plan(cached: WavePlan) -> WavePlan {
@@ -11,7 +11,7 @@ struct WaveDetailReading {
         return WavePlan(objective: snapshot.workMap.objective, projects: snapshot.workMap.projects)
     }
 
-    mutating func update(_ snapshot: WaveDetailSnapshot) {
+    mutating func update(_ snapshot: WaveRoadmap) {
         self.snapshot = snapshot
         errorMessage = nil
     }
@@ -27,11 +27,11 @@ struct WaveDetailReading {
     }
 }
 
-/// The Wave's Project plan, Tasks and metrics, supplied by `lf wave status`.
+/// The Wave's Project plan, Tasks and metrics, from the window's planning reading.
 struct WaveDetailPane: View {
     let wave: WaveViewModel
     let repoPath: String
-    /// The window's streamed reading of this Wave, once one has arrived.
+    /// This Wave's share of the window's planning reading, once one has arrived.
     let streamed: StreamedWaveDetail?
     let isProjectActivationPending: Bool
     let transportError: String?
@@ -115,6 +115,8 @@ private struct WavePlanView: View {
     @State private var reading = WaveDetailReading()
     @State private var historyFilter = TaskHistoryFilter()
     @State private var historyNow = Date()
+    /// Closed Tasks, paged in only while completed Tasks are shown.
+    @State private var closed = ClosedTaskHistory()
     // True until the first live read resolves. It gates the loading affordance,
     // so an empty plan during the pre-snapshot window reads as loading.
     @State private var isAwaitingDetail = true
@@ -147,6 +149,7 @@ private struct WavePlanView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(palette.background)
+        .task(id: historyFilter) { await loadClosed(more: false) }
         .onChange(of: streamed?.sequence, initial: true) { _, _ in
             if AppTestMode.current() == .mockWaves {
                 applyMockDetail()
@@ -156,8 +159,8 @@ private struct WavePlanView: View {
         }
     }
 
-    /// Later readings arrive from the window's Work stream when a commit
-    /// changes this Wave; nothing here reads on a clock.
+    /// Later readings arrive with each planning frame; nothing here reads on
+    /// a clock.
     private func applyStreamed() {
         guard let streamed, streamed.wave == wave.id else { return }
         if let snapshot = streamed.snapshot {
@@ -167,6 +170,27 @@ private struct WavePlanView: View {
             reading.recordFailure(RegistryQueryError(streamed.reason ?? "Wave status unavailable"))
         }
         isAwaitingDetail = false
+    }
+
+    /// Pages closed Tasks while completed ones are shown: back to the range's
+    /// start, or one more page on request.
+    private func loadClosed(more: Bool) async {
+        guard historyFilter.showCompleted, AppTestMode.current() != .mockWaves else {
+            closed = ClosedTaskHistory()
+            return
+        }
+        if !more { closed = ClosedTaskHistory() }
+        closed.isLoading = true
+        defer { closed.isLoading = false }
+        let since = historyFilter.days == 0 ? nil : Date().addingTimeInterval(-Double(historyFilter.days) * 86_400)
+        do {
+            repeat {
+                let page = try await RegistryQueryLocal.shared.closedTasks(wave: wave.id, after: closed.next, cwd: wave.repo)
+                closed.append(page)
+            } while !more && closed.next != nil && since.map { !closed.reaches($0) } ?? false
+        } catch {
+            closed.error = "Completed Tasks unavailable: \(error.localizedDescription)"
+        }
     }
 
     private var displayedPlan: WavePlan { reading.plan(cached: plan) }
@@ -236,7 +260,7 @@ private struct WavePlanView: View {
                     WorkSectionHeading("Tasks")
                     Text(reason).foregroundStyle(palette.warning)
                 case .available(let inventory, let truncated):
-                    let tasks = inventory.filter {
+                    let tasks = closed.merged(after: inventory).filter {
                         historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
                     }
                     WorkSectionHeading(title: "Tasks", count: tasks.count) {
@@ -245,7 +269,15 @@ private struct WavePlanView: View {
                     }
                     if truncated { Text("Planning is partial; more Tasks exist.") }
                     if tasks.isEmpty { Text("No current Tasks").foregroundStyle(palette.textSecondary) }
-                    ForEach(tasks) { task in WaveTaskWorkView(task: task, selectedTaskID: $selectedTaskID) }
+                    ForEach(tasks) { task in RoadmapTaskView(task: task, selectedTaskID: $selectedTaskID) }
+                    if historyFilter.showCompleted {
+                        if let error = closed.error {
+                            Text(error).foregroundStyle(palette.warning)
+                        } else if closed.next != nil {
+                            Button("Older completed Tasks") { Task { await loadClosed(more: true) } }
+                                .disabled(closed.isLoading)
+                        }
+                    }
                 }
             } else {
                 WorkSectionHeading("Tasks")
@@ -283,10 +315,7 @@ private struct WavePlanView: View {
     }
 
     private func applyMockDetail() {
-        let outcome = MockWaveFixture.detailReading(
-            waveName: wave.name,
-            state: MockWaveFixture.detailState
-        )
+        let outcome = MockWaveFixture.detailReading(state: MockWaveFixture.detailState)
         reading = outcome.reading
         isAwaitingDetail = outcome.awaitingFirstRead
     }
@@ -686,8 +715,8 @@ private extension MetricContractIssue {
     }
 }
 
-private struct WaveTaskWorkView: View {
-    let task: WaveTaskWork
+private struct RoadmapTaskView: View {
+    let task: RoadmapTask
     @Binding var selectedTaskID: String?
 
     @Environment(\.palette) private var palette
@@ -717,11 +746,6 @@ private struct WaveTaskWorkView: View {
                 Text(statusLine)
                     .font(Typography.caption(10))
                     .foregroundStyle(palette.textSecondary)
-                if let directive = task.directive {
-                    Text("direction v\(directive.version) · \(directive.incorporatedAt == nil ? "pending" : "incorporated")")
-                        .font(Typography.caption(10))
-                        .foregroundStyle(palette.textSecondary)
-                }
                 if let pr = task.pr {
                     PrLink(pr: pr)
                 }
@@ -767,7 +791,6 @@ private struct WaveWorkInspector: View {
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(palette.text)
                 details(
-                    directive: task.directive,
                     status: task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted",
                     reason: task.condition.reason,
                     provider: task.runtime?.provider,
@@ -788,7 +811,7 @@ private struct WaveWorkInspector: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
     }
 
-    private var task: WaveTaskWork? {
+    private var task: RoadmapTask? {
         return workMap.tasks.items
             .first { $0.task.id == selectedTaskID }
     }
@@ -801,7 +824,6 @@ private struct WaveWorkInspector: View {
 
     @ViewBuilder
     private func details(
-        directive: WorkDirectiveSnapshot?,
         status: String,
         reason: String,
         provider: String?,
@@ -811,18 +833,6 @@ private struct WaveWorkInspector: View {
         Text("\(status) · \(reason)")
             .font(Typography.caption(11))
             .foregroundStyle(palette.textSecondary)
-        if let directive {
-            Text("Direction v\(directive.version)")
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-            Text(directive.text)
-                .font(Typography.body(12))
-                .foregroundStyle(palette.text)
-                .textSelection(.enabled)
-            Text(directive.incorporatedAt == nil ? "Awaiting incorporation" : "Incorporated")
-                .font(Typography.caption(10))
-                .foregroundStyle(palette.textSecondary)
-        }
         if let provider {
             Text("Provider · \(provider)")
                 .font(Typography.caption(10))

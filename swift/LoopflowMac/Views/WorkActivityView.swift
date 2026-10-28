@@ -120,18 +120,11 @@ struct WorkActivityView: View {
                         .foregroundStyle(palette.textSecondary)
                         .help(exactTime(entry.recordedAt))
                 }
-                Text(entry.work.kind == .project && entry.fact == .workCreated ? "Chapter plan recorded" : entry.summary)
+                Text(entry.summary)
                     .font(Typography.body(11).weight(.semibold))
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-
-                if let github = entry.fact.github {
-                    Link("Open PR #\(github.number)", destination: github.url)
-                        .font(Typography.caption(9).weight(.semibold))
-                        .buttonStyle(WorkLinkStyle())
-                        .accessibilityIdentifier("loopflow-open-pr-\(github.number)")
-                }
             }
         }
         .padding(.horizontal, Spacing.lg)
@@ -145,7 +138,7 @@ struct WorkActivityView: View {
     private var scopeTitle: String {
         switch model.selection {
         case nil:
-            "All durable Work"
+            "All Sessions"
         case let work?:
             switch work.kind {
             case .wave:
@@ -182,7 +175,6 @@ struct WorkActivityView: View {
 
     private func activityAppearance(_ fact: WorkActivityFact) -> (icon: String, color: Color) {
         switch fact {
-        case .workCreated: ("plus", palette.textTertiary)
         case .inputCaptured, .providerHistoryRecorded: ("play.fill", palette.working)
         case .inputCompletionRecorded(_, _, let status):
             (
@@ -191,23 +183,15 @@ struct WorkActivityView: View {
                     ? palette.success
                     : palette.warning
             )
-        case .prStarted: ("arrow.triangle.branch", palette.textTertiary)
-        case .prPublishRequested: ("arrow.up.right", palette.working)
-        case .prMergeRequested: ("arrow.triangle.merge", palette.working)
-        case .prMerged: ("checkmark.seal.fill", palette.success)
-        case .prAbandoned: ("xmark", palette.warning)
-        case .steerIssued: ("arrow.turn.down.right", palette.emphasisInk)
         }
     }
 
-    private func activityTime(_ timestamp: Int64) -> String {
-        Date(timeIntervalSince1970: TimeInterval(timestamp))
-            .formatted(.relative(presentation: .named))
+    private func activityTime(_ time: Date) -> String {
+        time.formatted(.relative(presentation: .named))
     }
 
-    private func exactTime(_ timestamp: Int64) -> String {
-        Date(timeIntervalSince1970: TimeInterval(timestamp))
-            .formatted(date: .abbreviated, time: .shortened)
+    private func exactTime(_ time: Date) -> String {
+        time.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func evidenceBanner(_ reason: String) -> some View {

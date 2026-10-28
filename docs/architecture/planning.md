@@ -211,10 +211,11 @@ Comments retain identity and authorship. Incoming planning completion changes on
 the planning disposition: it neither moves a local Task nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
-`PlanningSyncStatus` presents local Linear delivery evidence; `peer_planning` Work
-frames and `lf planning status` present Git acquisition/publication and retained
-alternatives directly from the retained mutation journal. Ranked candidate IDs are
-not applied or published evidence; rejected projections retain their failure reasons.
+`PlanningSyncStatus` presents local Linear delivery evidence; `lf planning status`
+presents Git acquisition/publication receipts and held projections. The retained
+mutation journal grows with every edit, so `lf planning journal` reads it on
+request: every change, losing values included, and the ranked candidate IDs, which
+are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
 error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
 for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
@@ -301,7 +302,7 @@ a locally active Project alone is not proof of Linear activation. Ensure never s
 Projects; status and roadmap never call it. Desktop
 ensures on explicit opening or retry while retaining cached planning and independent
 Session reads. Both primary and Portfolio surfaces render the same SQLite-derived
-`project_readiness` through `lf monitor work --watch --json`. Committed selection,
+`project_readiness` through `lf wave show --watch --json`. Committed selection,
 accepted facts, transitions and exact activation Process outcomes invalidate that reading.
 A pending transition or unfinished Process is unresolved evidence, not proof of liveness.
 Watchers and status reads never provision or import.
@@ -376,10 +377,11 @@ failure there does not undo the selected Projects or their KRs.
 ## Inspect planning before starting execution
 
 ```bash
-lf task status INF-124 --json
+lf task status INF-124 --json      # the Task row, Sessions, Graph processes, comments
+lf desktop task INF-124 --json     # the planning evidence below
 ```
 
-Status returns canonical `task` and `project` records, `planning_state`,
+`lf desktop task` returns canonical `task` and `project` records, `planning_state`,
 `observed_at`, `planning_error`, `planning_stale`, delivery `sync` and optional
 `execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
 Project-less observation returns acquisition evidence without fabricating owned

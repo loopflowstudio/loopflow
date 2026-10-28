@@ -41,10 +41,10 @@ struct WorkNavigationProofTests {
         let roadmap = String(decoding: try JSONSerialization.data(withJSONObject: snapshot), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "wave" where args.dropFirst().first == "show": return roadmap
+            case "desktop" where args.dropFirst().first == "plan": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session": return #"{"entries":[],"next":null}"#
-            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":[],"next":null}"#
+            case "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigator proof")
             }
         }
@@ -155,10 +155,10 @@ struct WorkNavigationProofTests {
         let planning = RoadmapSource(roadmap)
         let query = RegistryQuery { args, _ in
             switch (args.first, args.dropFirst().first) {
-            case ("wave", "show"): return await planning.read()
+            case ("desktop", "plan"): return await planning.read()
             case ("wave", "list"): return "[]"
-            case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-            case ("session", "list"): return try await named.page(args)
+            case ("history", _): return #"{"truncated":false,"items":[]}"#
+            case ("desktop", "sessions"): return try await named.page(args)
             case ("session", "rename"): return try await named.rename(args)
             case ("session", "bind"): return try await named.bind(args, task: task)
             default: throw RegistryQueryError("A named local Session must not relaunch: \(args)")
@@ -445,9 +445,9 @@ struct WorkNavigationProofTests {
         let sessionJSON = String(decoding: try JSONSerialization.data(withJSONObject: records), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "wave" where args.dropFirst().first == "show": return #"{"generated_at":1,"waves":[]}"#
+            case "desktop" where args.dropFirst().first == "plan": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
+            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessionJSON),"next":null}"#
             default: throw RegistryQueryError("Local row must focus its existing shell")
             }
         }
@@ -596,11 +596,11 @@ struct WorkNavigationProofTests {
         """
         let query = RegistryQuery { args, cwd in
             switch args.first {
-            case "wave" where args.dropFirst().first == "show": return roadmap
+            case "desktop" where args.dropFirst().first == "plan": return roadmap
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list":
+            case "desktop" where args.dropFirst().first == "sessions":
                 return #"{"entries":\#(cwd == "/src/context" ? otherRecords : records),"next":null}"#
-            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected operation in navigation proof")
             }
         }

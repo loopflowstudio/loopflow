@@ -64,16 +64,20 @@ pub fn start(
         run.stdout(Stdio::from(std::io::stderr().as_fd().try_clone_to_owned()?));
     }
     let status = run.status().context("start `lf task run`")?;
+    let (graph, session_id) = match status.success() {
+        true => admit(cli, repo, task, request)?,
+        false => (None, None),
+    };
+    if json {
+        let receipt = TaskCreateReceipt {
+            task: task.clone(),
+            graph,
+            session_id: session_id.clone(),
+        };
+        println!("{}", serde_json::to_string_pretty(&receipt)?);
+    }
     if !status.success() {
         eprintln!("{issue} was created; start it again with `lf task run {issue}`");
-        if json {
-            let receipt = TaskCreateReceipt {
-                task: task.clone(),
-                graph: None,
-                session_id: None,
-            };
-            println!("{}", serde_json::to_string_pretty(&receipt)?);
-        }
         return Err(crate::process::CommandExit(
             status
                 .code()
@@ -82,34 +86,8 @@ pub fn start(
         )
         .into());
     }
-    let (graph, session_id) = tokio::runtime::Runtime::new()?.block_on(async {
-        let store = std::sync::Arc::new(open_store(&storage_config_from_env()?).await?);
-        let graph = store
-            .sqlite
-            .task_graph(&task.id)?
-            .context("the run did not take up a graph")?
-            .name;
-        // A headless run has no one to talk to; its conversation is not admitted.
-        let session_id = match cli.batch {
-            true => None,
-            false => Some(
-                primary::ensure_task(&store, repo, issue, false, request.map(str::to_owned))
-                    .await?
-                    .id,
-            ),
-        };
-        anyhow::Ok((graph, session_id))
-    })?;
-    if json {
-        let receipt = TaskCreateReceipt {
-            task: task.clone(),
-            graph: Some(graph),
-            session_id,
-        };
-        println!("{}", serde_json::to_string_pretty(&receipt)?);
-        return Ok(());
-    }
-    if session_id.is_none() {
+    // The receipt is the whole answer; a headless run has no conversation to open.
+    if json || session_id.is_none() {
         return Ok(());
     }
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
@@ -125,4 +103,38 @@ pub fn start(
         bail!("its conversation did not open; open it with `lf resume --task {issue}`");
     }
     Ok(())
+}
+
+/// The graph the run took up and, unless headless, the Task's primary
+/// conversation with `request` as its first turn.
+fn admit(
+    cli: &Cli,
+    repo: &Path,
+    task: &Task,
+    request: Option<&str>,
+) -> Result<(Option<String>, Option<crate::id::LfSessionId>)> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = std::sync::Arc::new(open_store(&storage_config_from_env()?).await?);
+        let graph = store
+            .sqlite
+            .task_graph(&task.id)?
+            .context("the run did not take up a graph")?
+            .name;
+        // A headless run has no one to talk to; its conversation is not admitted.
+        let session_id = match cli.batch {
+            true => None,
+            false => Some(
+                primary::ensure_task(
+                    &store,
+                    repo,
+                    &task.identifier,
+                    false,
+                    request.map(str::to_owned),
+                )
+                .await?
+                .id,
+            ),
+        };
+        Ok((Some(graph), session_id))
+    })
 }

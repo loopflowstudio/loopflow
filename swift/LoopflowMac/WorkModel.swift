@@ -2144,23 +2144,22 @@ final class WorkModel {
     /// filed before its run failed is selected with the error at its Start control.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
         let receipt: TaskCreateReceipt
+        var runError: String?
         do {
             receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
         } catch let failed as TaskCreateRunFailed {
-            navigation.palette = nil
-            try? await confirmWorkUpdate()
-            let id = failed.receipt.task.id
-            if let found = task(id: id) { openTaskDestination(wave: found.wave, task: found.task) }
-            else { select(.task(id: id)) }
-            navigation.taskRunDrafts[id] = TaskRunDraft(error: failed.message)
-            return
+            (receipt, runError) = (failed.receipt, failed.message)
         } catch {
             try? await confirmWorkUpdate()
             throw error
         }
         navigation.palette = nil
         try? await confirmWorkUpdate()
-        await openTaskConversation(receipt.task.id)
+        let id = receipt.task.id
+        guard let runError else { return await openTaskConversation(id) }
+        if let found = task(id: id) { openTaskDestination(wave: found.wave, task: found.task) }
+        else { select(.task(id: id)) }
+        navigation.taskRunDrafts[id] = TaskRunDraft(error: runError)
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping

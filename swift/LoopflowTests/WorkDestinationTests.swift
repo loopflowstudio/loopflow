@@ -115,7 +115,7 @@ struct WorkDestinationTests {
         """
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["task", "create"]) {
-                throw RegistryQueryError("graph show late failed", stdout: receipt)
+                throw RegistryQueryError("lf task run failed", stdout: receipt)
             }
             if args.starts(with: ["desktop", "plan"]) { return planning }
             throw RegistryQueryError("A failed run opens no conversation")
@@ -126,7 +126,7 @@ struct WorkDestinationTests {
         try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
         #expect(model.navigation.palette == nil)
         #expect(model.selection == .task(id: task.id))
-        #expect(model.navigation.taskRunDrafts[task.id]?.error == "graph show late failed")
+        #expect(model.navigation.taskRunDrafts[task.id]?.error == "lf task run failed")
     }
 
     @Test("New Task keeps the sheet when nothing was filed")

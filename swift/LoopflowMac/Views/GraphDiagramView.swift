@@ -107,7 +107,7 @@ private struct CompositionDisclosures: View {
                         DisclosureGroup("\(compiled.node(key)?.label ?? String(key)) · \(name)") {
                             AnyView(CompositionDisclosures(items: paths[name]!, compiled: compiled, expanded: $expanded))
                             if let node = compiled.node(key), let path = node.paths.first(where: { $0.name == name }) {
-                                let branch = CompiledGraph(name: name, steps: path.steps, interactions: compiled.interactions)
+                                let branch = CompiledGraph(name: name, steps: path.steps)
                                 CompositionDiagram(compiled: branch, items: paths[name]!, expanded: $expanded)
                             }
                         }
@@ -586,7 +586,7 @@ private struct GraphNodeDetail: View {
     private var facts: [String] {
         var facts: [String] = []
         switch node.kind {
-        case .skill where node.interactive: facts.append("Stage")
+        case .skill where node.interactive: facts.append("Interactive step")
         case .op: facts.append("Operation")
         case .xor: facts.append("Chooses one path")
         case .skill: break
@@ -626,7 +626,7 @@ enum GraphPalette {
         case .stalled: "stalled"
         case .stopped: "stopped here"
         case .unknown: "current, worker state unknown"
-        case .pendingHuman: "stage, pending"
+        case .pendingHuman: "interactive step, pending"
         case .pending: "pending"
         }
     }

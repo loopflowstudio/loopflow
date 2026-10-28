@@ -21,7 +21,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::Serialize;
 
 use crate::graph::compiled::CompiledGraph;
-use crate::graph::{ConcreteSkill, ConcreteStep, Skill};
+use crate::graph::ConcreteStep;
 use crate::id::{LfProcessId, TraceId};
 use crate::ops::human_session::provider_conversation;
 use crate::ops::task::TaskRunSelection;
@@ -29,12 +29,12 @@ use crate::process::{LfProcess, ProcessKind};
 use crate::provider_auth::Provider;
 use crate::session::TitleSource;
 use crate::store::{SharedStore, StorageConfig};
+use crate::task_graph::END;
 use crate::work::edit::{Disposition, WorkEdit, WorkValue};
 use crate::work::project::ProjectKR;
 use crate::work::task::{Task, TaskEventKind};
 use crate::work::wave::metrics::MetricTarget;
 pub use crate::work::wave::metrics::Threshold;
-use crate::workflow::END;
 
 const DAY: i64 = 24 * 60 * 60;
 const GITHUB_REPO: &str = "https://github.com/demo/project";
@@ -334,7 +334,7 @@ impl World {
         self.push_authored("Configure the project")
     }
 
-    /// Commit everything under `.lf/` (Wave goals, Workflows, config) and push it.
+    /// Commit everything under `.lf/` (Wave goals, Graphs, config) and push it.
     pub fn push_authored(&self, message: &str) -> Result<()> {
         git(Some(&self.repo), &["add", ".lf"])?;
         git(Some(&self.repo), &["commit", "-m", message])?;
@@ -565,13 +565,11 @@ impl World {
         Ok(())
     }
 
-    /// Run `requested` for `task` the way `lf task run` does: take up a
-    /// Workflow it names (or the Wave or repository default), set out on the
-    /// route it selects and record that route's Graph, each step lasting
-    /// `minutes` and the last ending `ended_days_ago`. A Graph that succeeds
-    /// puts the Task at the route's target stage; one that fails leaves it
-    /// stopped on the route. A requested Graph that is no route becomes the
-    /// Task's Workflow.
+    /// Run `requested` for `task` the way `lf task run` does: from the step
+    /// of the Task's graph it names (`--from`), else taking up the graph it
+    /// names, and record that run's Graph, each step lasting `minutes` and the
+    /// last ending `ended_days_ago`. A Graph that succeeds puts the Task at the
+    /// next interactive step or `end`; one that fails leaves its run stopped.
     pub fn task_run(
         &self,
         task: &Task,
@@ -582,56 +580,70 @@ impl World {
     ) -> Result<LfProcessId> {
         let store = self.store()?;
         let checkout = task.worktree()?.clone();
+        let names_step = store
+            .sqlite
+            .task_graph_row(&task.id)?
+            .is_some_and(|row| row.graph.find(requested).is_some());
+        let (graph, from) = match names_step {
+            true => (None, Some(requested)),
+            false => (Some(requested), None),
+        };
         let TaskRunSelection {
-            workflow,
-            index,
+            graph: captured,
             take_up,
-        } = crate::ops::task::select_task_run(&store, task, &checkout, Some(requested))?;
-        // A route into `end` that runs nothing completes the Task instead.
-        if !workflow.edge_runs(index) {
-            bail!("{requested} enters {END} running nothing; complete the Task instead");
-        }
-        // The route is recorded as the graph or skill it is named by.
-        let graph = workflow.definition.edges[index as usize].name.clone();
+            start,
+        } = crate::ops::task::select_task_run(&store, task, &checkout, graph, from)?;
+        let Some(start) = start else {
+            bail!("nothing remains of {requested}; complete the Task instead");
+        };
+        // The run's Graph records the steps up to the next interactive one.
+        let steps: Vec<ConcreteStep> = captured.steps[start.cursor().index..]
+            .iter()
+            .enumerate()
+            .take_while(|(offset, step)| {
+                *offset == 0 || !matches!(step, ConcreteStep::Skill(skill) if skill.interactive)
+            })
+            .map(|(_, step)| step.clone())
+            .collect();
+        let stops_at = captured
+            .after(&start)
+            .and_then(|next| captured.next_interactive(&next))
+            .unwrap_or(END)
+            .to_owned();
         let trace = TraceId::new();
         let issue = task.identifier.as_str();
         let argv = vec!["lf", "task", "run", issue, requested];
-        let (name, steps) = match crate::workflow::CapturedGraph::load(&graph, &checkout)? {
-            Some(captured) => (captured.name, captured.steps),
-            None => (
-                graph.clone(),
-                vec![ConcreteStep::Skill(ConcreteSkill {
-                    skill: Skill::named(&graph),
-                    id: None,
-                    interactive: false,
-                    returns: None,
-                    sources: Vec::new(),
-                })],
-            ),
-        };
         let (started, ended) = self.span(&steps, ended_days_ago, minutes, outcome)?;
         // The Task run starts its Graph, which starts the first step.
         // Each Process is recorded running, then finished once its references
         // exist, as live commands do; otherwise its exit would forget it.
         let mut run = self.process(&trace, None, &checkout, argv, started - 2);
         store.sqlite.record_process(&run)?;
-        if let Some(graph) = &take_up {
-            store
-                .sqlite
-                .take_up_workflow(&task.id, graph, &run.id, None)?;
+        if take_up {
+            store.sqlite.take_up_task_graph(&task.id, &captured)?;
         }
-        if !store
+        let row = store
             .sqlite
-            .choose_workflow_edge(&task.id, &workflow, index, &run.id, None)?
-        {
-            bail!("Task {issue} moved while choosing {graph}");
+            .task_graph_row(&task.id)?
+            .expect("the Task has a graph");
+        if !store.sqlite.start_task_graph_run(
+            &task.id,
+            &row,
+            &start.cursor(),
+            &run.id,
+            stops_at == END,
+        )? {
+            bail!("Task {issue} moved while starting {requested}");
         }
-        let argv = vec!["lf", "--task", issue, "graph", "--", &name];
+        let name = captured.name.clone();
+        let argv = vec!["lf", "--task", issue, "graph", "run"];
         self.graph(
             &store, &trace, &run.id, &checkout, argv, &name, &steps, started, minutes, outcome,
         )?;
         if outcome == Outcome::Succeeded {
-            store.sqlite.arrive_workflow_edge(&task.id, &run.id)?;
+            store
+                .sqlite
+                .arrive_task_graph(&task.id, &run.id, &stops_at)?;
         }
         run.completed_at = Some(ended);
         outcome.complete(&mut run);
@@ -639,29 +651,17 @@ impl World {
         Ok(run.id)
     }
 
-    /// Put `task` at `node` of its Workflow, as `lf task workflow move` does.
-    pub fn move_to(&self, task: &Task, node: &str, note: &str) -> Result<()> {
-        if node == END {
-            bail!("moving to {END} completes the Task; call complete instead");
-        }
+    /// Put `task` at the interactive step `step`, as `lf task run --from` does.
+    pub fn wait_at(&self, task: &Task, step: &str) -> Result<()> {
         let store = self.store()?;
-        let issue = task.identifier.as_str();
-        let workflow = store.sqlite.workflow(&task.id)?;
-        crate::ops::task::validate_workflow_move(workflow.as_ref(), issue, node)?;
-        let mut mover = self.process(
-            &TraceId::new(),
-            None,
-            task.worktree()?,
-            vec!["lf", "task", "workflow", "move", issue, node],
-            self.now,
-        );
-        store.sqlite.record_process(&mover)?;
-        store
+        let row = store
             .sqlite
-            .set_workflow_node(&task.id, node, &mover.id, Some(note))?;
-        mover.completed_at = Some(self.now);
-        Outcome::Succeeded.complete(&mut mover);
-        store.sqlite.record_process(&mover)?;
+            .task_graph_row(&task.id)?
+            .with_context(|| format!("Task {} has no graph", task.identifier))?;
+        if row.graph.interactive_step(step).is_none() {
+            bail!("graph {} has no interactive step {step:?}", row.graph.name);
+        }
+        store.sqlite.set_task_graph_step(&task.id, step)?;
         Ok(())
     }
 

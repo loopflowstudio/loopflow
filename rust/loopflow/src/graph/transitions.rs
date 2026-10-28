@@ -161,11 +161,11 @@ mod tests {
     }
 
     #[test]
-    fn iterate_requires_an_explicit_edge_even_for_saved_human_steps() {
-        for human in [false, true] {
+    fn iterate_requires_an_explicit_edge_even_for_interactive_steps() {
+        for interactive in [false, true] {
             let mut review = step("review", None);
             if let ConcreteStep::Skill(skill) = &mut review {
-                skill.interactive = human;
+                skill.interactive = interactive;
             }
             let steps = [step("work", None), review];
             let mut progress = GraphProgress::default();

@@ -216,8 +216,8 @@ authorize a scope/trust/storage change.
 
 ## Remaining implementation and acceptance
 
-1. Prove the writer mechanism above before replacing the production transport and
-   exclusive fixture.
+1. Select and prove an eligible writer mechanism before replacing the production
+   transport and exclusive fixture. The password-taking candidate above is excluded.
    Preserve JSON validation, readback, managed login locking, replacement checks,
    omitted refresh tokens, unknown fields and the 15-second HTTP timeout. No extra
    OAuth request or automatic retry. Bound new subprocesses to 15 seconds, close
@@ -248,6 +248,12 @@ authorize a scope/trust/storage change.
 
 ## Delete — do not maintain
 
+The native fixture uses one typed case payload and Tokio's current-thread test
+runtime; handwritten JSON field decoding and nested runtime setup are removed.
+Subprocess stderr has no consumer and goes directly to null, eliminating its
+reader thread and retained bytes. Stdout comparison, deadlines, cleanup and all
+eight acceptance cases remain. These reductions change no production storage.
+
 - Retired command-boundary and `scratch/keychain-access-probe/` harnesses stay in
   Git at the references above. Do not restore them as acceptance coverage or
   extend rejected constructions without a mechanism addressing partition authority
@@ -266,7 +272,7 @@ authorize a scope/trust/storage change.
 
 Gate owns affected suites, formatting and `cargo clippy --all-targets -- -D warnings`.
 The macOS CI classifier selects `macos-process-test` for `provider_auth/mod.rs`,
-which does not supply the missing native fixture. With inherited `LF_*` unset
+which does not run this explicitly ignored native fixture. With inherited `LF_*` unset
 and stdin `/dev/null`, run:
 
 ```sh
@@ -282,4 +288,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — native command above: FAIL (8 cases, 5 failures, all cleaned); focused file-backed refresh test, `cargo fmt`, and `cargo clippy --all-targets -- -D warnings`: PASS. Gate retains complete acceptance and Infrastructure retains installed verification.
+Check — native command above: FAIL (same 8 cases, 5 storage failures, all cleaned; build passed with an ld unwind-size warning); `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: PASS. Gate retains complete acceptance and Infrastructure retains installed verification.

@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::{
     claude_keychain_service, parse_security_keychain_account, trim_security_password_output,
@@ -50,6 +50,13 @@ pub(crate) struct Observation {
     pub credential_file_absent: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct Case {
+    pub size: usize,
+    pub invalid: bool,
+    pub unicode: bool,
+}
+
 pub(crate) fn credentials(size: usize, unicode: bool) -> (String, String, String) {
     let old = json!({
         "claudeAiOauth": {
@@ -77,26 +84,20 @@ fn security(args: &[&str], input: &[u8]) -> Output {
     run(Command::new("/usr/bin/security").args(args), input)
 }
 
-/// Drain both pipes, bound the whole process group and reap even on a timeout.
+/// Drain stdout, discard stderr and reap the process group even on a timeout.
 /// Never include command output in an assertion or error message.
 fn run(command: &mut Command, input: &[u8]) -> Output {
     let mut child = command
         .process_group(0)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::null())
         .spawn()
         .expect("start isolated native fixture command");
     let mut stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
     let out = std::thread::spawn(move || {
         let mut bytes = Vec::new();
         stdout.read_to_end(&mut bytes).unwrap();
-        bytes
-    });
-    let err = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        stderr.read_to_end(&mut bytes).unwrap();
         bytes
     });
     // Only short setup scripts are supplied here. Refresh payloads are served
@@ -123,7 +124,7 @@ fn run(command: &mut Command, input: &[u8]) -> Output {
     Output {
         status,
         stdout: out.join().unwrap(),
-        stderr: err.join().unwrap(),
+        stderr: Vec::new(),
     }
 }
 
@@ -257,7 +258,12 @@ pub(crate) fn run_cases(test_name: &str) {
         let mut item = Item::create(&native, account, &old);
         std::fs::write(
             root.path().join("case.json"),
-            json!({"size": size, "invalid": invalid, "unicode": unicode}).to_string(),
+            serde_json::to_vec(&Case {
+                size,
+                invalid,
+                unicode,
+            })
+            .unwrap(),
         )
         .unwrap();
         let output = run(
@@ -309,14 +315,4 @@ pub(crate) fn run_cases(test_name: &str) {
         passed,
         "native credential acceptance failed; see sanitized observations"
     );
-}
-
-pub(crate) fn child_case(root: &Path) -> (usize, bool, bool) {
-    let case: Value =
-        serde_json::from_slice(&std::fs::read(root.join("case.json")).unwrap()).unwrap();
-    (
-        case["size"].as_u64().unwrap() as usize,
-        case["invalid"].as_bool().unwrap(),
-        case["unicode"].as_bool().unwrap(),
-    )
 }

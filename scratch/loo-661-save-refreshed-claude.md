@@ -4,7 +4,7 @@ Status: **Implementation blocked on a verified native writer; diagnostics only.*
 Jack Heart authorized bounded repair and autonomous delivery of
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-reviewed checkout: `c33592e382` (2026-10-27, includes LOO-657 and v0.14.19).
+reviewed checkout: `3bc20b3aff` (2026-10-27, includes LOO-657 and v0.14.19).
 No remote freshness is claimed. Installed 0.14.19 accepted both managed accounts
 in a later poll, without proving refresh or explaining the original save failure.
 
@@ -28,7 +28,11 @@ writer still has its input ceiling; diagnostics do not repair it. Findings 22–
 prove old-reader recovery after specific rollbacks, but replacement reads failed.
 The next implementation needs a supported mechanism that demonstrates exact large
 replacement, existing-reader access and old-data recovery on failure together.
-This slice is mechanism proof before production cutover.
+This slice is mechanism proof before production cutover. The native-modifier /
+outer-transaction candidate remains blocked: finding 25 confirms that its new
+record is readable by ID while the matching group-key query finds nothing.
+It cannot currently verify replacement before commit. No production mechanism
+is selected merely to make the remaining implementation sequence executable.
 No product decision or additional authorization is pending, and the exclusions
 below do not exhaust every public interface.
 
@@ -206,6 +210,29 @@ No real credential was directly read or printed. Retain these counterexamples:
   reacquiring the item or adding another transaction wrapper is insufficient.
   This review made no Keychain mutation and established no new passing writer.
 
+- **Record versus group lookup (25, 2026-10-27):** a disposable-Keychain probe
+  distinguishes finding 24's alternatives using public CSSM reads. After the
+  high-level modifier returned zero, `SecKeychainItemGetUniqueRecordID` plus
+  `CSSM_DL_DataGetFromUniqueRecordId` read the new encoded record: 2,084 bytes for
+  the 2,048-byte input and 8,228 for 8,192. A symmetric-key query for that record's
+  group label returned `CSSMERR_DL_ENDOFDATA` (`-2147413715`) both times.
+  Meanwhile, fresh generic-password queries through both CSPDL and FileDL still
+  returned the exact original 52-byte encoded record and found its matching key.
+  Secret reads returned `-25300`. Thus the replacement record is not simply
+  absent; its group is unavailable to the lookup needed for decoding in this
+  transaction. This is consistent with the pinned
+  [group lookup](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_cdsa_client/lib/securestorage.cpp#L253-L277),
+  but does not establish whether the new key is absent or invisible to queries,
+  nor how commit would behave. Rollback/autocommit restoration returned zero,
+  and the existing `security` reader recovered exact old bytes after both trials.
+  Cleanup returned zero. No commit, access change, private encoder, real credential
+  access or real-account operation ran. Each subprocess had a 15-second bound;
+  output contained only statuses, lengths and comparisons. Probe/runner/results
+  Git blobs: `1755401719a564fefa372d652310292725e084c8`,
+  `4db66134850366576a038ce689b1527d6060ddff`,
+  `d6c97155d988c0d1453f82bc4c108f24f11e8d70`. The runner uses a temporary probe
+  directory locator; reconstruct it beside the compiled probe when reproducing.
+
 Findings 8–20 are source/header review except the read-only installed dispatch
 inspection in 18. These exclusions establish neither production acceptance nor
 exhaustion of every public interface. Argv credentials, broad trust changes,
@@ -223,7 +250,12 @@ the excluded concurrency redesign.
 ## Remaining implementation and acceptance
 
 1. Establish a supported writer's encoding, access and commit behavior before
-   another disposable probe. Transport replacement, consumer cutover and deletion
+   another replacement probe. Finding 25 closes the record-absence question for
+   the tested transaction; repeating a fresh lookup is not a new candidate.
+   A transaction approach must first explain how replacement and reader access
+   can be verified without exposing an incompatible committed value. Otherwise
+   it remains blocked and a distinct supported mechanism is required.
+   Transport replacement, consumer cutover and deletion
    are one cut. Preserve JSON validation, readback, managed login locking,
    intervening-replacement checks, omitted refresh tokens, unknown fields and the
    15-second HTTP timeout. No extra OAuth request or automatic retry. Bound new
@@ -291,4 +323,4 @@ intended step edits with `lf commit <paths>` before sync, preserving unrelated
 staged/unstaged work and normal validation. Do not force-add telemetry or implement
 a competing repair; retain the dependency if checkpointing fails.
 
-Check — 2026-10-27 compress: `cargo test -p loopflow --lib claude_persistence` passed (4 tests; linker unwind-table size warning); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff whitespace checks and `lf context` passed. Cargo ran with inherited `LF_*` unset and stdin closed. Gate owns affected suites; native replacement remains unproved and Infrastructure owns installed refresh acceptance.
+Check — 2026-10-27 kickoff: `uv run python /private/tmp/loo661-group-run.py` completed; both native probes exited 1 on failed secret read, exact old-reader recovery and cleanup passed. Prior unchanged-code diagnostic tests (4), fmt and clippy passes remain applicable; no production tests rerun for this plan-only change. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.

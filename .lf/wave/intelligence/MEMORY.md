@@ -5,6 +5,35 @@ Trace & Context in one measured bet: explicitly selected work is explainable fro
 durable local evidence. No standalone Memory, Evals, or Runtime Monitoring
 Project is implied by the historical research.
 
+## Explicit document delivery (branch evidence, 2026-10-27)
+
+Jack Heart authorized LOO-662 to repair explicit document delivery and ship the
+fix; Infrastructure owns coordinated release, installation and installed proof.
+
+- **Preview and a correct answer are insufficient delivery evidence.** Before
+  the repair, preview listed a 244,852-byte document that submitted context
+  omitted. Codex recovered its marker with a file-read tool. Compare actual
+  submitted channels with immutable capture and inspect tool activity; marker
+  success alone can conceal retrieval after omission.
+- **Explicit selection owns the submitted turn.** The branch sends complete,
+  escaped reference bodies through shared ordinary/native-skill task assembly.
+  Explicit intent survives same-path ambient deduplication. Hooks retain ambient
+  refresh; saved canonical document identities only suppress duplicate bodies.
+  New resume selections enter the new turn; old documents stay in native history.
+  Capture records submitted bytes, never gathered-but-unsent files. No second
+  payload store or hook-size increase is needed.
+- **Matcher containment needs a nonempty fixture.** An external absolute path
+  panics in the repository ignore matcher only when ignore rules exist; an empty
+  matcher returns early and hides the defect. Check selected and canonical paths
+  for exclusions, and match repository patterns only within their owning root.
+- **Proof follows supported Session ownership.** Exited standalone Sessions
+  retire, and attached Sessions reject a second input owner. A prepared repository
+  conversation permits two headless turns against the same native history without
+  changing those boundaries. Source receipts show complete long-document capture,
+  matching preview, zero tool output and successful terminal/resume markers.
+  These are branch receipts; affected-suite gate and installed verification remain
+  separate evidence, and native-skill acceptance uses a deterministic provider.
+
 ## Check ownership (2026-09-30)
 
 Jack Heart requested fewer checks and no Flow blocks on display access or a

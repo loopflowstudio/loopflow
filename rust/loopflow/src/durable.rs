@@ -398,27 +398,27 @@ impl std::fmt::Display for WorkStatus {
     }
 }
 
-/// A Task's state, derived from its checkout, Workflow position, whether a
+/// A Task's state, derived from its checkout, Graph position, whether a
 /// Graph runs for it and the Auto-Ship approval. Completion, abandonment and
 /// defer are durable; the open states follow what the Task is doing now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
-    /// Explicit hold; history, Workflow and shipping are retained.
+    /// Explicit hold; history, Graph position and shipping are retained.
     Deferred,
     /// No checkout yet.
     Unstarted,
-    /// A checkout, no Graph running and not at a stage: before its first route,
+    /// A checkout, no Graph running and not at an interactive step: before its first run,
     /// after a stopped one, or shipping whose ship process exited.
     Idle,
-    /// Between Graphs at an interactive stage, in a conversation in its Task Session.
+    /// Between Graphs at an interactive step, in a conversation in its Task Session.
     Active,
-    /// A Graph runs for it with a stage still ahead that will stop for a person.
+    /// A Graph runs for it with an interactive step still ahead that will stop for a person.
     Moving,
-    /// A Graph runs for it and no stage ahead will stop it: none remain, or
+    /// A Graph runs for it and no interactive step ahead will stop it: none remain, or
     /// Auto-Ship approved stand-ins at the rest. It finishes on its own to merge.
     Shipping,
-    /// Completed independently of Workflow position.
+    /// Completed independently of Graph position.
     Done,
     Abandoned,
 }

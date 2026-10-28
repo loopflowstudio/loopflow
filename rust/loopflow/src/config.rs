@@ -432,8 +432,11 @@ impl Config {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Default Workflow for Tasks without an explicit or Wave selection.
-    pub workflow: Option<String>,
+    /// The graph Tasks take up without their own or their Wave's selection;
+    /// `code` when unset. The released lf reads `workflow:`; LOO-637 removes
+    /// that alias once the release that reads `graph:` is installed.
+    #[serde(alias = "workflow")]
+    pub graph: Option<String>,
     #[serde(default)]
     pub planning: Option<PlanningConfig>,
     #[serde(default)]
@@ -541,7 +544,7 @@ impl Default for AutomationConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            workflow: None,
+            graph: None,
             planning: None,
             context_budgets: Default::default(),
             context_budget_sources: Default::default(),

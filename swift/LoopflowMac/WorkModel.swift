@@ -1047,16 +1047,21 @@ final class WorkModel {
     private(set) var workActivity: WorkReading<WorkActivitySnapshot> = .loading
     /// Selectable Graphs per repository, read once on demand; never per repaint.
     private var graphCatalogReadings: [String: WorkReading<[GraphCatalogEntry]>] = [:]
-    var graphCatalog: WorkReading<[GraphCatalogEntry]> {
-        graphCatalogReadings[repoPath ?? ""] ?? .loading
-    }
-    private var workflowCatalogReadings: [String: WorkReading<[WorkflowCatalogEntry]>] = [:]
     @ObservationIgnored private var definitionRevision: Int64?
-    @ObservationIgnored private var workflowCatalogRevisions: [String: Int64] = [:]
-    @ObservationIgnored private var workflowCatalogRequests: [String: UUID] = [:]
-    private var workflowCatalogKey: String { repoPath ?? "" }
+    @ObservationIgnored private var graphCatalogRevisions: [String: Int64] = [:]
+    @ObservationIgnored private var graphCatalogRequests: [String: UUID] = [:]
+    private var graphCatalogKey: String { repoPath ?? "" }
+    var graphCatalog: WorkReading<[GraphCatalogEntry]> {
+        graphCatalogReadings[graphCatalogKey] ?? .loading
+    }
+    /// The same read, each graph seen as a Workflow.
     var workflowCatalog: WorkReading<[WorkflowCatalogEntry]> {
-        workflowCatalogReadings[workflowCatalogKey] ?? .loading
+        switch graphCatalog {
+        case .loading: .loading
+        case .available(let entries): .available(entries.map(WorkflowCatalogEntry.init))
+        case .unavailable(let lastGood, let reason):
+            .unavailable(lastGood: lastGood?.map(WorkflowCatalogEntry.init), reason: reason)
+        }
     }
     /// Comment threads, read on demand for the shown Task.
     private(set) var comments = TaskReadings<TaskComments>()
@@ -1307,8 +1312,8 @@ final class WorkModel {
                 workOpened = .now
                 appliedSequence = [:]
                 definitionRevision = nil
-                workflowCatalogRevisions = [:]
-                workflowCatalogRequests = [:]
+                graphCatalogRevisions = [:]
+                graphCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
                 syncWorkScope()
                 if let diagnosticTask { _ = send { .taskHistory(id: $0, task: diagnosticTask) } }
@@ -1564,7 +1569,7 @@ final class WorkModel {
     private func observeDefinitions(_ revision: Int64?) async {
         guard let revision, definitionRevision.map({ revision > $0 }) ?? true else { return }
         definitionRevision = revision
-        if workflowCatalogReadings[workflowCatalogKey] != nil { await loadWorkflowCatalog() }
+        if graphCatalogReadings[graphCatalogKey] != nil { await loadGraphCatalog() }
     }
 
     private func applyPlanning(_ body: WorkFrame.Planning?, wire: WorkFrame.Wire?, reason: String) async {
@@ -1600,9 +1605,9 @@ final class WorkModel {
         applySelectionPlans(nil, reason: "Work reading changed; showing retained membership")
         selectionReadings = [:]
         definitionRevision = nil
-        workflowCatalogRevisions = [:]
-        workflowCatalogRequests = [:]
-        workflowCatalogReadings = [:]
+        graphCatalogRevisions = [:]
+        graphCatalogRequests = [:]
+        graphCatalogReadings = [:]
         roadmap = .loading
         waves = .loading
         showsSavedPlanning = false
@@ -2098,55 +2103,47 @@ final class WorkModel {
     /// File definitions have no store revision. Returning from an editor
     /// rereads only catalogues this window has opened.
     func rereadDefinitions() async {
-        if graphCatalogReadings[repoPath ?? ""] != nil { await loadGraphCatalog(force: true) }
-        if workflowCatalogReadings[workflowCatalogKey] != nil { await loadWorkflowCatalog(force: true) }
+        if graphCatalogReadings[graphCatalogKey] != nil { await loadGraphCatalog(force: true) }
     }
 
     /// Read the Graph catalogue for the current repository the first time it
-    /// is needed, or again after its definitions may have changed (`force`).
+    /// is needed, again after a stored definition change, or when `force`d.
+    /// The Workflow catalogue is the same read.
     func loadGraphCatalog(force: Bool = false) async {
-        let key = repoPath ?? ""
-        if !force, graphCatalogReadings[key]?.value != nil { return }
+        let key = graphCatalogKey
+        if !force, graphCatalogReadings[key]?.value != nil,
+           graphCatalogRevisions[key] == definitionRevision { return }
+        let revision = definitionRevision
+        let home = workDataDirectory
+        let request = UUID()
+        graphCatalogRequests[key] = request
         let previous = graphCatalogReadings[key]?.value
         let result: Result<[GraphCatalogEntry], Error>
         do { result = .success(try await query.graphCatalog(cwd: repoPath)) }
         catch { result = .failure(error) }
+        guard home == workDataDirectory, graphCatalogRequests[key] == request else { return }
         graphCatalogReadings[key] = reading(from: result, lastGood: previous)
-    }
-
-    func loadWorkflowCatalog(force: Bool = false) async {
-        let key = workflowCatalogKey
-        if !force, workflowCatalogReadings[key]?.value != nil,
-           workflowCatalogRevisions[key] == definitionRevision { return }
-        let revision = definitionRevision
-        let home = workDataDirectory
-        let request = UUID()
-        workflowCatalogRequests[key] = request
-        let previous = workflowCatalogReadings[key]?.value
-        let result: Result<[WorkflowCatalogEntry], Error>
-        do { result = .success(try await query.workflowCatalog(cwd: repoPath)) }
-        catch { result = .failure(error) }
-        guard home == workDataDirectory, workflowCatalogRequests[key] == request else { return }
-        workflowCatalogReadings[key] = reading(from: result, lastGood: previous)
-        workflowCatalogRevisions[key] = revision
+        graphCatalogRevisions[key] = revision
     }
 
     /// The repository file that defines graph `name`; a builtin is first copied
-    /// into `.lf/graphs/` so the edit is committed with the code. A Workflow is
-    /// a graph, so both catalogues may change.
+    /// into `.lf/graphs/` so the edit is committed with the code.
     func definitionFile(_ name: String) async throws -> URL {
         let path = try await query.customizeGraph(name, cwd: repoPath)
         await rereadDefinitions()
         return URL(fileURLWithPath: path)
     }
 
-    /// Launch a fresh Graph for the Task, then confirm its subscription update.
-    /// Without `graph`, Rust selects the Task's Workflow through its Wave or repository default.
+    /// Run the Task's Workflow through `lf task run`, then confirm its subscription
+    /// update. `graph` takes up that graph; `from` starts at that step, and an
+    /// interactive `from` only puts the Task there. Without either, Rust continues
+    /// after the step the Task waits at, taking up its Wave's or repository's default first.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startTask(_ graph: String?, task: RoadmapTask) async {
+    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async {
         await performTaskAction(task.id) {
-            try await query.runTask(issue: task.task.identifier, graph: graph, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.runTask(issue: task.task.identifier, graph: graph, from: from,
+                                    cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
@@ -2212,15 +2209,6 @@ final class WorkModel {
     private func machineCwd(_ target: WorkMachineTarget) -> String? {
         if case .task = target, let task = breadcrumb?.task { return WaveOrigin.resolve(task.task.task.repo) }
         return repoPath
-    }
-
-    /// Put the Task at a node of its Workflow, then confirm its subscription
-    /// update. A refusal is kept on that Task's draft.
-    func moveTask(to node: String, task: RoadmapTask) async {
-        await performTaskAction(task.id) {
-            try await query.moveTask(
-                issue: task.task.identifier, node: node, cwd: WaveOrigin.resolve(task.task.repo))
-        }
     }
 
     func deferTask(_ task: RoadmapTask, deferred: Bool) async {

@@ -43,13 +43,11 @@
       "planning_observed_at": null
     },
     "action": {
-      "kind": "edge",
-      "workflow": "feature",
+      "kind": "run",
+      "graph": "feature",
       "take_up": true,
       "from": "start",
-      "to": "review-design",
-      "name": "kickoff",
-      "runs": true
+      "stops_at": "explore"
     },
     "impediments": [],
     "unavailable": [
@@ -100,13 +98,10 @@
       "planning_observed_at": null
     },
     "action": {
-      "kind": "edge",
-      "workflow": "feature",
+      "kind": "wait",
+      "graph": "feature",
       "take_up": false,
-      "from": "review-design",
-      "to": "end",
-      "name": "end",
-      "runs": false
+      "step": "demo"
     },
     "impediments": [],
     "unavailable": [
@@ -157,13 +152,9 @@
       "planning_observed_at": null
     },
     "action": {
-      "kind": "edge",
-      "workflow": "proof",
-      "take_up": false,
-      "from": "start",
-      "to": "end",
-      "name": "proof",
-      "runs": true
+      "kind": "end",
+      "graph": "proof",
+      "take_up": false
     },
     "impediments": [
       "Task cancellation is pending"

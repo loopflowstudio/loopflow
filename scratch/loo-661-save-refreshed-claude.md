@@ -220,9 +220,11 @@ are omitted. Published `ACL::remove` leaves an invalid-form tombstone that
 are Git blobs `3fa49ed9df2c9e4fe00cea37163b6cb442b97620`,
 `528e91cb672a36cc6310dfdf02682c056f650bb4`,
 `b28b756191d59cfd9872e5897a0064cbf5c57738`.
-The corrected reproducible probe and full sanitized results live in
-`scratch/keychain-access-probe/`; run `uv run python scratch/keychain-access-probe/run.py`.
-These are investigation cases, not production native acceptance tests.
+The corrected C probe, Python runner and full sanitized results are preserved at
+`66ae255389e2800111dfc056c5009d380bab512a:scratch/keychain-access-probe/`.
+The completed harness is removed from the working diff: all four constructions
+failed the reader requirement, and rerunning them unchanged adds no evidence.
+Its eight cases are investigation evidence, not production native acceptance tests.
 
 The replacement design remains unresolved. Repeating copied access, omitting
 its partition, or supplying a trusted-application list alone cannot satisfy the
@@ -281,6 +283,10 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Delete — do not maintain
 
+- Completed `scratch/keychain-access-probe/{probe.c,run.py,results.json}` is removed;
+  finding 35 retains the counterexamples and exact Git reference. Do not restore
+  the harness as acceptance coverage or extend these rejected constructions
+  without a mechanism addressing partition authority and failure preservation.
 - Replace the `security -i` spawn, hex script and command-string escaping restrictions
   inside `write_claude_keychain_credential` once a compatible writer is proven.
   Replace its exclusive stand-in in
@@ -313,4 +319,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — implement (2026-10-28): `uv run python scratch/keychain-access-probe/run.py` executed 8 corrected native cases (plus 8 initial removal cases), rejecting all candidates while preserving original bytes/access; `git diff --check` and `lf context` pass. No production change; writer proof, native acceptance fixture, gate and Infrastructure's installed acceptance remain pending.
+Check — compress (2026-10-28): `git diff --check` and `lf context` pass; archived probe bytes match `66ae255389`. No production behavior changed, so no build or probe rerun; writer proof, native acceptance fixture, gate and Infrastructure's installed acceptance remain pending.

@@ -620,7 +620,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn source_build_without_draft_storage_keeps_installed_metric_visible() {
+    async fn source_build_keeps_installed_metric_visible() {
         let directory = tempdir().unwrap();
         let repo = directory.path().join("repo");
         let metrics_dir = repo.join(".lf/wave/product/metrics");

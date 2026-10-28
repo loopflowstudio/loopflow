@@ -1575,116 +1575,6 @@ fn release_run_builds_fixes_merged_after_the_release_pr() {
 }
 
 #[test]
-fn release_run_replaces_a_merged_candidate_with_unprepared_migrations() {
-    prove_unprepared_candidate_recovery(false, false, "0.9.2");
-}
-
-#[test]
-fn release_run_preserves_an_invalid_tag_without_skipping_its_version() {
-    prove_unprepared_candidate_recovery(true, false, "0.9.2");
-}
-
-#[test]
-fn release_run_preserves_partially_published_invalid_candidates() {
-    prove_unprepared_candidate_recovery(true, true, "0.9.2");
-}
-
-#[test]
-fn patch_release_repairs_the_pending_version_after_late_migrations() {
-    prove_unprepared_candidate_recovery(false, false, "patch");
-}
-
-fn prove_unprepared_candidate_recovery(
-    tagged: bool,
-    partially_published: bool,
-    version_input: &str,
-) {
-    let repo = TestRepo::new();
-    let state = tempfile::tempdir().unwrap();
-    let fixture = configure_candidate_publisher(&repo, state.path());
-    let publisher = repo.path().join("publisher.sh");
-    let publications = if partially_published {
-        r#"["crates.io"]"#
-    } else {
-        "[]"
-    };
-    let inspection = format!(
-        r#"inspect)
-    if git cat-file -e "$3:pending.sql" 2>/dev/null; then
-      echo '{{"preparation_required":["pending.sql"],"publications":{publications}}}'
-    else
-      echo '{{"preparation_required":[],"publications":[]}}'
-    fi
-    exit 0 ;;"#
-    );
-    let script = fs::read_to_string(&publisher).unwrap().replace(
-        r#"inspect) echo '{"preparation_required":[],"publications":[]}'; exit 0 ;;"#,
-        &inspection,
-    );
-    fs::write(&publisher, script).unwrap();
-    fs::write(repo.path().join("pending.sql"), "SELECT 1;\n").unwrap();
-    git(&repo, &["add", "."]);
-    git(
-        &repo,
-        &[
-            "commit",
-            "-m",
-            "Merge a migration after release preparation",
-        ],
-    );
-    let invalid = git_output(&repo, &["rev-parse", "HEAD"]);
-    if tagged {
-        git(&repo, &["tag", "v0.9.2"]);
-        git(&repo, &["push", "origin", "v0.9.2"]);
-    }
-    fs::rename(
-        repo.path().join("pending.sql"),
-        repo.path().join("canonical.sql"),
-    )
-    .unwrap();
-    git(&repo, &["add", "."]);
-    git(
-        &repo,
-        &["commit", "-m", "Prepare the corrected closing patch"],
-    );
-    git(&repo, &["push", "origin", "HEAD"]);
-    let corrected = git_output(&repo, &["rev-parse", "HEAD"]);
-    let gh = fixture.gh_script
-        .replace(r#"head="$(git rev-parse HEAD)""#, &format!(
-            "head=\"$(git rev-parse HEAD)\"\ncase \"$*\" in *release-default-v0-9-2-retry-*) ;; *release-default-v0-9-2*) head={invalid} ;; esac"
-        ));
-    let _env = EnvGuard::new(&[("gh", &gh)]);
-    let outcome = release_run(repo.path(), version_input, None, &NullProgress);
-    if partially_published {
-        assert!(outcome.unwrap_err().to_string().contains("crates.io"));
-        assert!(git_output(&repo, &["tag", "--list", "v0.9.3"]).is_empty());
-    } else if tagged {
-        assert!(outcome
-            .unwrap_err()
-            .to_string()
-            .contains("recover that version"));
-        assert!(git_output(&repo, &["tag", "--list", "v0.9.3"]).is_empty());
-    } else {
-        let ReleaseRunOutcome::Released(receipt) = outcome.unwrap() else {
-            panic!("expected the corrected candidate to publish")
-        };
-        assert_eq!(receipt.tag, "v0.9.2");
-        assert_eq!(receipt.commit, corrected);
-        assert_eq!(
-            git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
-            corrected
-        );
-    }
-    if tagged {
-        assert_eq!(
-            git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
-            invalid
-        );
-    }
-    assert!(git_output(&repo, &["tag", "--list", "v0.9.3"]).is_empty());
-}
-
-#[test]
 fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
     let repo = TestRepo::new();
     prepare_candidate_release_repo(&repo);
@@ -1698,7 +1588,6 @@ fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
-  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     if git ls-remote --tags origin refs/tags/v0.9.2 | grep -q .; then
       echo 'version tag existed before publisher preparation' >&2
@@ -2834,13 +2723,13 @@ fn release_run_fails_closed_when_the_publisher_role_is_missing() {
 
 #[test]
 fn release_run_refuses_to_skip_an_incomplete_tag() {
-    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script()), ("publisher", "#!/bin/sh\n[ \"$1\" = check ] && exit 0\n[ \"$1\" = inspect ] || exit 91\necho '{\"preparation_required\":[],\"publications\":null}'\n")]);
+    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script())]);
 
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"-c\", \"echo '{\\\"preparation_required\\\":[],\\\"publications\\\":[]}'\"]\n",
+        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
     )
     .expect("write config");
     git(&repo, &["tag", "v0.9.1"]);
@@ -2853,13 +2742,13 @@ fn release_run_refuses_to_skip_an_incomplete_tag() {
 
 #[test]
 fn release_run_keeps_a_failed_tag_pending_without_skipping_its_version() {
-    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script()), ("publisher", "#!/bin/sh\n[ \"$1\" = check ] && exit 0\n[ \"$1\" = inspect ] || exit 91\necho '{\"preparation_required\":[],\"publications\":null}'\n")]);
+    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script())]);
 
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"-c\", \"echo '{\\\"preparation_required\\\":[],\\\"publications\\\":[]}'\"]\n",
+        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
     )
     .expect("write config");
     git(&repo, &["tag", "v0.9.1"]);
@@ -2888,7 +2777,6 @@ fn active_tagged_publisher_blocks_concurrent_cleanup_until_exit() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
-  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -3069,7 +2957,6 @@ fn configure_candidate_publisher(
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
-  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -3207,7 +3094,6 @@ fn configure_same_tag_publisher(repo: &TestRepo, state: &std::path::Path) -> Str
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
-  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do

@@ -65,6 +65,9 @@ runs its own code on the live store. Main never carries a "draft".
   validation-only refusals in `decide`/`may_apply_migrations`.
 - `installation::dispatch_default_cli` re-exec to the installed lf.
 - Nightly packages workflow (replaced by per-green-main packages).
+- Publisher `inspect` stage and the release-run repair loop (deleted in compress).
+  `preparation_missing` stays: it tracks the publisher's signed `candidate.json`,
+  not migrations.
 
 Keep: `LF_HOME` isolation, lf-world, released-schema seed fixtures, reader-floor
 tests, the Docker upgrade test, per-migration FK/JSON checks, backups.
@@ -77,10 +80,6 @@ locks older builds out.
 
 ## Remaining work
 
-- Release run: `ReleaseSourceInspection.preparation_required`, the repair loop in
-  `release_run_inner` and `preparation_missing`, and the publisher's
-  `migrations/drafts` inspection are dead now that nothing is prepared. Delete
-  them with `release_tests` (CI-only) coverage.
 - Expand → wait → contract enforcement (design open).
 - First real `lf self install --main` needs a green `Packages (main)` run after merge.
 
@@ -90,3 +89,5 @@ CLI parse, reference regeneration pass; `cargo clippy --all-targets` clean; Pyth
 migration/gate/release/install/architecture tests pass. Three canonical-ids tests
 and one contention test failed only under the full parallel module run and pass
 alone. Swift edits are uncompiled here (gate/CI own the Swift build).
+Compress (2026-10-27): `ops::release` lib (45), `release_lock_tests` (13), Python
+publisher/automation tests pass; clippy `--all-targets` clean; `release_tests` compiles, run left to CI.

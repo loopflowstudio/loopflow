@@ -167,12 +167,6 @@ Manual tag and publication commands record intervention on pending scheduled
 releases. Nested publisher calls reusing the active lock preserve the owning
 execution's provenance.
 
-An invalid untagged candidate is corrected under the same version after exact-source
-inspection confirms that preparation remains and GitHub, crates.io, and the
-versioned DMG are all unpublished. The corrected PR uses a retry branch derived
-from the rejected commit; earlier preparation commits remain in history.
-Unknown or partial publication blocks replacement. Release history retains the
-rejected candidate and inspection on the same opportunity's attempt.
 A valid interrupted candidate resumes unchanged. Cached packaged binaries must
 still pass candidate installation preflight before reuse or publication. Each
 check runs the exact packaged ARM64 Linux CLI in a new Ubuntu 24.04 container,
@@ -195,19 +189,11 @@ and conflicting immutable bytes fail without overwriting them. A crash after
 publication does not require signing again or republishing GitHub assets just to
 obtain a receipt. Public assets do not substitute for required verification.
 
-After integration, the publisher inspects the exact merged source before the
-controller builds or tags it. A migration arriving after preparation causes a
-corrected cut at the same version, appending a canonical migration batch while
-preserving earlier batches. A failed build or publisher preparation likewise
-keeps the version. Tagged releases must finish or report their recovery blocker;
-the controller neither rewrites their tags nor skips ahead to another version.
-
-The configured publisher's read-only `inspect --commit SHA --tag TAG` emits JSON
-with `preparation_required` (a list of reasons) and `publications` (null when
-unchecked). `--check-publication` queries external publication when source needs
-preparation; only a successfully queried empty list permits replacement.
-Progress goes to stderr. The publisher owns repository-specific source and
-publication facts; the release controller owns version selection and retries.
+A failed build or publisher preparation keeps the version. Tagged releases must
+finish or report their recovery blocker; the controller neither rewrites their
+tags nor skips ahead to another version. Publisher progress goes to stderr. The
+publisher owns repository-specific source and publication facts; the release
+controller owns version selection and retries.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 

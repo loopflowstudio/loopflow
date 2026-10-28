@@ -231,8 +231,8 @@ fn portfolio(world: &World) -> Result<()> {
 
     world.task(
         Some("systems"),
-        "Copy the store for unreleased builds",
-        "A build with drafts works on a fresh copy of the real store.",
+        "Install lf from green main",
+        "A main build installs in minutes without waiting for a release.",
     )?;
     world.task(
         Some("quality"),

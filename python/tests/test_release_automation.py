@@ -30,7 +30,6 @@ def test_main_packages_build_every_green_main_commit_without_deploying():
     assert set(workflow["on"]) == {"workflow_call"}
     assert "inputs.release_tag" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
     assert "development" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
-    assert "LOOPFLOW_MIGRATION_AUTHORITY" not in workflow["env"]
     checkout = workflow["jobs"]["native-packages"]["steps"][0]
     assert checkout["with"]["fetch-depth"] == "0"
     assert workflow["env"]["LOOPFLOW_RELEASE_TAG"] == "${{ inputs.release_tag }}"

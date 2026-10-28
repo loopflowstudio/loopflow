@@ -86,7 +86,7 @@ check result to one line with its command and result or deferred owner. Update
 the existing plan; do not accumulate reports or repeated untested-claim lists.
 If everything already agrees, say so without manufacturing changes.
 Supply the facts for a reader such as loop-or-next to judge; do not preselect
-Advance, Iterate, or Blocked. Publication and workflow navigation belong to
+Advance, Iterate, or Blocked. Publication and moving the Task on belong to
 the caller.
 
 ## Keep authored context within budget

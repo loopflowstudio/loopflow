@@ -285,6 +285,18 @@ impl SqliteStore {
             [task.as_str()], |row| Ok((row.get(0)?,row.get(1)?))).optional()?)
     }
 
+    /// Whether the Task completed at or after `since` (Unix seconds), even if
+    /// it was reopened afterwards.
+    pub(crate) fn task_completed_since(&self, task: &TaskId, since: i64) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM task_events WHERE task_id=?1
+             AND json_extract(kind_json,'$.kind')='completed' AND created_at>=?2)",
+            params![task.as_str(), since],
+            |row| row.get(0),
+        )?)
+    }
+
     pub(crate) fn fail_task_completion(
         &self,
         task: &TaskId,
@@ -1140,14 +1152,14 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
     Ok(())
 }
 
-/// Open, not deferred, and past its Workflow's `start`.
+/// Open, not deferred, and past its Graph's `start`.
 fn under_way(conn: &Connection, task: &Task) -> StoreResult<bool> {
     Ok(!matches!(
         super::durable::task_state_in(conn, &task.id)?,
         TaskState::Deferred | TaskState::Done | TaskState::Abandoned
     ) && conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1 \
-             AND NOT (node='start' AND edge IS NULL))",
+        "SELECT EXISTS(SELECT 1 FROM task_graphs WHERE task_id=?1 \
+             AND NOT (step='start' AND lf_process_id IS NULL))",
         [task.id.as_str()],
         |row| row.get(0),
     )?)
@@ -2715,7 +2727,7 @@ mod local_planning_tests {
             .is_err());
         assert_eq!(store.task(&task.id).unwrap().unwrap(), edited);
         let conn = store.conn.lock().unwrap();
-        for table in ["agent_sessions", "processes", "task_workflows", "task_prs"] {
+        for table in ["agent_sessions", "processes", "task_graphs", "task_prs"] {
             let count: i64 = conn
                 .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
                     row.get(0)

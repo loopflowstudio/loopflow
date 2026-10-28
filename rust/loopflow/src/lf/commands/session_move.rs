@@ -124,8 +124,8 @@ async fn relay_task(store: &SharedStore, issue: &str, target: &str) -> Result<Ta
     if let Some(checkout) = &moved.checkout {
         eprintln!("Committed and pushed {name} on {}", checkout.branch);
     }
-    let place = match moved_task.workflow.as_ref() {
-        Some(workflow) => format!(" (Workflow at `{}`)", workflow.node),
+    let place = match moved_task.graph.as_ref() {
+        Some(graph) => format!(" (Graph at `{}`)", graph.step),
         None => String::new(),
     };
     let conversation = if moved.session.is_some() {

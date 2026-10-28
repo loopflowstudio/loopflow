@@ -324,14 +324,14 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             )
             assert graph.poll() is None, (root / "graph.log").read_text()
         run("task", "edit", "INF-123", "--title", "Pending local title")
-        run("task", "workflow", "move", "INF-124", "end", "--reason", "Saved offline")
+        run("task", "complete", "INF-124", "--reason", "Saved offline")
         saved = json.loads(run("task", "comment", "INF-124", "Saved offline", "--json"))
         comment_id = saved["pending_sync"][0]
         receipt = db.execute(
             "SELECT id FROM task_state_deliveries WHERE task_id=? ORDER BY seq DESC LIMIT 1",
             (local_id,),
         ).fetchone()[0]
-        workflow = db.execute("SELECT * FROM task_workflows ORDER BY task_id").fetchall()
+        task_graphs = db.execute("SELECT * FROM task_graphs ORDER BY task_id").fetchall()
         _await(
             lambda: db.execute(
                 "SELECT error FROM task_state_deliveries WHERE id=?", (receipt,)
@@ -394,7 +394,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             # The watcher's idle cadence can reach 240 seconds; acquisition and
             # uncertain-write settlement may need separate checks.
             _await(caught_up, "watcher did not catch up after reconnect", seconds=300)
-        assert db.execute("SELECT * FROM task_workflows ORDER BY task_id").fetchall() == workflow
+        assert db.execute("SELECT * FROM task_graphs ORDER BY task_id").fetchall() == task_graphs
         assert db.execute("SELECT id,task_id,branch,base_commit FROM task_prs").fetchall() == prs
         assert db.execute("SELECT worktree FROM tasks WHERE id=?", (remote_id,)).fetchone() == (
             None,
@@ -506,7 +506,7 @@ def main() -> None:
         "id": fixture["project"],
         "name": "Task PR tests",
         "description": "",
-        "content": "workflow: feature",
+        "content": "",
         "updatedAt": "2026-10-08T12:00:00Z",
         "archivedAt": None,
         "status": {"type": "started"},

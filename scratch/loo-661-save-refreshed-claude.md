@@ -34,6 +34,24 @@ unblocks live diagnosis only. Local rollback also cannot establish server token 
 after OAuth rotation: the refresh response precedes saving, without a shared transaction.
 Neither limitation relaxes the accepted preservation requirement.
 
+Kickoff disposition (2026-10-28): retain this design and its full acceptance scope.
+Source reinspection confirms that the defective transport remains and that
+`invalid_grant` returns before `write_claude_login`. Apple's current
+[access attribute reference](https://developer.apple.com/documentation/security/ksecattraccess)
+documents `SecItemUpdate` with `kSecAttrAccess`; that is the combined update
+already investigated, not evidence of atomic data/access preservation. Apple's
+[security command reference](https://github.com/apple-oss-distributions/Security/blob/main/SecurityTool/macOS/security.1)
+still requires the Keychain password to change a partition list; it supplies no
+missing atomic replacement mechanism. No new candidate is established by this
+review, and the public API space is not proved exhausted.
+
+**This slice is blocked at mechanism selection.** The next meaningful input is
+a distinct supported writer with an explanation of partition authority and
+failure preservation, or an explicit decision by Jack Heart changing the stated
+scope. Browser reconnection is independently required for live diagnosis; it does
+not resolve the writer. Existing diagnostic changes are not a shippable repair.
+No further credential mutation or unchanged probe is justified by this kickoff.
+
 ## Surviving implementation
 
 - `provider_auth/mod.rs::{read_claude_login,write_claude_login}` select Keychain for
@@ -224,4 +242,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28); source/plan reconciliation only, no build/test rerun. Gate owns affected checks; writer mechanism, native acceptance and installed acceptance remain unresolved.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); source/documentation review only, no build/test rerun. Both context budgets hold; writer mechanism, native acceptance and installed acceptance remain unresolved.

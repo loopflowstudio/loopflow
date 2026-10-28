@@ -875,6 +875,13 @@ pub(crate) fn attach_task_github_pr(
         let opened = pr
             .github()
             .is_none_or(|github| github.number != number || github.url != url);
+        // Linked as Open with nothing new to say: another push or refresh
+        // rewrites neither the attachment nor the comment.
+        let linked_open = !opened
+            && pr.phase() == PrPhase::Open
+            && pr.linear_attachment_id.is_some()
+            && pr.linear_comment_id.is_some()
+            && pr.linear_link_error.is_none();
         // An existing GitHub PR may predate local publication. Retain its
         // identity now; reviewer copy is recorded only after promotion succeeds.
         let publication = pr.publication.get_or_insert_with(|| PrPublication {
@@ -913,7 +920,9 @@ pub(crate) fn attach_task_github_pr(
         }
         // Linear linkage is idempotent. A failed or interrupted writeback cannot
         // erase the GitHub identity already committed above.
-        link_pr_to_planning(&store, &task, &mut pr).await;
+        if !(linked_open && pr.phase() == PrPhase::Open) {
+            link_pr_to_planning(&store, &task, &mut pr).await;
+        }
         pr.updated_at = time::OffsetDateTime::now_utc();
         store
             .update_task_pr(&pr)

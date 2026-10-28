@@ -52,6 +52,11 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     if !super::planning_client::connected(&repository.to_string_lossy()) {
         return Ok(());
     }
+    // The Team delta carries this issue's new comments; a current one needs no
+    // per-issue read.
+    if team_current(store, &repository.to_string_lossy()).await {
+        return Ok(());
+    }
     let client = super::planning_client::PlanningClient::for_items(&repository).await?;
     // A coworker deleted the item: remove the Task from the plan, keeping its work.
     let url = store.sqlite.task_issue_url(&task.id).map_err(message)?;
@@ -201,7 +206,7 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
     let now = OffsetDateTime::now_utc();
     let Some(since) = store
         .sqlite
-        .begin_linear_team_check(&team, now.unix_timestamp())
+        .begin_linear_team_check(&team, now.unix_timestamp(), fresh_for(repository))
         .map_err(message)?
     else {
         return Ok(false);
@@ -274,6 +279,42 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
         .finish_linear_team_check(&team, &through)
         .map_err(message)?;
     Ok(changed)
+}
+
+/// Seconds a finished scope delta answers reads. Linear's stretches as its
+/// shared budget falls; Asana and Notion keep the healthy window.
+fn fresh_for(repository: &str) -> i64 {
+    if super::planning_client::is_linear(repository) {
+        crate::linear::delta_fresh_for().as_secs() as i64
+    } else {
+        crate::linear::delta_fresh_for_healthy().as_secs() as i64
+    }
+}
+
+/// The one freshness check for Linear reads: bring the repository's Team
+/// delta up to date (a no-op inside its window), then report whether local
+/// state is current enough to answer in place of a per-item read.
+pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
+    if !super::planning_client::is_linear(repository) {
+        return false;
+    }
+    let check =
+        tokio::time::timeout(Duration::from_secs(5), check_repository(store, repository)).await;
+    if !matches!(check, Ok(Ok(_))) {
+        tracing::debug!(?check, "Linear team check pending");
+    }
+    let Ok(team) = super::planning_client::repository_scope(std::path::Path::new(repository))
+    else {
+        return false;
+    };
+    store
+        .sqlite
+        .linear_team_current(
+            &team,
+            OffsetDateTime::now_utc().unix_timestamp(),
+            fresh_for(repository),
+        )
+        .unwrap_or(false)
 }
 
 /// Bound on-demand work and retain local planning when Linear is unavailable.

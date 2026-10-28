@@ -1,57 +1,233 @@
-//! One Linear cooldown per Home, shared by repositories and refreshed logins.
-//! The lock covers only the deadline file, never network I/O or local saves.
+//! One Linear cooldown and budget per Home, shared by repositories and
+//! refreshed logins. The locks cover only these small files, never network I/O
+//! or local saves.
+//!
+//! Every response's `x-ratelimit-*` headers update the budget. As the hourly
+//! allowance falls, non-urgent requests are paced and then held, leaving the
+//! last tenth for urgent work: Task and Project creation and PR links run
+//! inside [`urgent`]. A held request fails as `RateLimited` before it is sent,
+//! so callers retain and retry it exactly like one paused by the cooldown.
 use std::fs::{File, OpenOptions};
+use std::future::Future;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::{header::HeaderMap, StatusCode};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::linear::{LinearError, LinearResult};
 
+/// Below this share of an allowance, only urgent requests are sent.
+const RESERVE_PERCENT: i64 = 10;
+/// Below this share, non-urgent requests are spaced so what remains above the
+/// reserve lasts until the allowance resets.
+const PACE_PERCENT: i64 = 25;
+/// How long a finished team delta answers reads while the budget is healthy.
+const HEALTHY_FRESH_MS: i64 = 10_000;
+
+tokio::task_local! {
+    static URGENT: ();
+}
+
+/// Run `work` with access to the reserved budget: requests it makes are never
+/// paced or held for the reserve, only paused by an actual rate limit.
+pub(crate) async fn urgent<F: Future>(work: F) -> F::Output {
+    URGENT.scope((), work).await
+}
+
+pub(super) fn is_urgent() -> bool {
+    URGENT.try_with(|_| ()).is_ok()
+}
+
+/// The Home holding Linear's shared request state for `endpoint`.
+pub(super) fn home(endpoint: &str) -> PathBuf {
+    let root = crate::store::lf_home_dir();
+    // Stand-in endpoints never touch the installed Home, even in unit tests
+    // without a fixture ledger. Each server has its own ephemeral Home.
+    #[cfg(test)]
+    let root = if endpoint != super::LINEAR_BASE_URL {
+        std::env::temp_dir()
+            .join(format!("lf-linear-tests-{}", std::process::id()))
+            .join(endpoint_key(endpoint))
+    } else {
+        root
+    };
+    #[cfg(not(test))]
+    let _ = endpoint;
+    root
+}
+
+fn endpoint_key(endpoint: &str) -> String {
+    format!("{:x}", Sha256::digest(endpoint.as_bytes()))
+}
+
+/// One rate-limit allowance as Linear last reported it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Allowance {
+    pub limit: Option<i64>,
+    pub remaining: i64,
+    /// Epoch milliseconds when the allowance refills.
+    pub reset_ms: Option<i64>,
+}
+
+/// The request-count and complexity allowances a response reported.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Allowances {
+    pub requests: Option<Allowance>,
+    pub complexity: Option<Allowance>,
+    /// This request's complexity, from `x-complexity`.
+    pub cost: Option<i64>,
+}
+
+impl Allowances {
+    pub(super) fn from_headers(headers: &HeaderMap) -> Self {
+        let number = |key: &str| headers.get(key)?.to_str().ok()?.trim().parse::<i64>().ok();
+        let allowance = |scope: &str| {
+            Some(Allowance {
+                limit: number(&format!("x-ratelimit-{scope}-limit")),
+                remaining: number(&format!("x-ratelimit-{scope}-remaining"))?,
+                reset_ms: number(&format!("x-ratelimit-{scope}-reset")),
+            })
+        };
+        Self {
+            requests: allowance("requests"),
+            complexity: allowance("complexity"),
+            cost: number("x-complexity"),
+        }
+    }
+}
+
+/// What this Home last learned of the shared allowance, and when the next
+/// paced non-urgent request may go.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct Budget {
+    requests: Option<Allowance>,
+    complexity: Option<Allowance>,
+    /// The latest request's complexity, the expected cost of the next one.
+    cost: Option<i64>,
+    paced_until_ms: i64,
+}
+
+impl Budget {
+    fn observe(&mut self, allowances: &Allowances) {
+        if allowances.requests.is_some() {
+            self.requests = allowances.requests;
+        }
+        if allowances.complexity.is_some() {
+            self.complexity = allowances.complexity;
+        }
+        if allowances.cost.is_some() {
+            self.cost = allowances.cost;
+        }
+    }
+
+    /// How tight the budget is at `now`.
+    fn pressure(&self, now: i64) -> Pressure {
+        let cost = self.cost.unwrap_or(1).max(1);
+        let mut interval = 0;
+        for (allowance, cost) in [(self.requests, 1), (self.complexity, cost)] {
+            let Some(Allowance {
+                limit: Some(limit),
+                remaining,
+                reset_ms: Some(reset),
+            }) = allowance
+            else {
+                continue;
+            };
+            if reset <= now || limit <= 0 {
+                continue;
+            }
+            let reserve = limit * RESERVE_PERCENT / 100;
+            if remaining <= reserve {
+                return Pressure::Reserve { reset_ms: reset };
+            }
+            if remaining <= limit * PACE_PERCENT / 100 {
+                let requests_left = ((remaining - reserve) / cost).max(1);
+                interval = interval.max((reset - now) / requests_left);
+            }
+        }
+        if interval > 0 {
+            Pressure::Paced {
+                interval_ms: interval,
+            }
+        } else {
+            Pressure::Healthy
+        }
+    }
+
+    /// Admit one non-urgent request, or the time to try again.
+    fn admit(&mut self, now: i64) -> Result<(), i64> {
+        match self.pressure(now) {
+            Pressure::Reserve { reset_ms } => return Err(reset_ms),
+            Pressure::Paced { interval_ms } => {
+                if self.paced_until_ms > now {
+                    return Err(self.paced_until_ms);
+                }
+                self.paced_until_ms = now + interval_ms;
+            }
+            Pressure::Healthy => {}
+        }
+        // Concurrent processes see this send before its response arrives.
+        if let Some(requests) = &mut self.requests {
+            requests.remaining -= 1;
+        }
+        Ok(())
+    }
+
+    fn fresh_for_ms(&self, now: i64) -> i64 {
+        match self.pressure(now) {
+            Pressure::Healthy => HEALTHY_FRESH_MS,
+            Pressure::Paced { interval_ms } => interval_ms.max(HEALTHY_FRESH_MS),
+            Pressure::Reserve { reset_ms } => (reset_ms - now).max(HEALTHY_FRESH_MS),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pressure {
+    Healthy,
+    Paced { interval_ms: i64 },
+    Reserve { reset_ms: i64 },
+}
+
+/// How long a finished scope delta answers reads with a healthy budget.
+pub(crate) fn delta_fresh_for_healthy() -> Duration {
+    Duration::from_millis(HEALTHY_FRESH_MS.unsigned_abs())
+}
+
+/// How long a finished Linear team delta stands in for Linear before reads
+/// ask again: 10 s while the budget is healthy, one pacing interval while it is
+/// paced, and until reset inside the reserve.
+pub(crate) fn delta_fresh_for() -> Duration {
+    let path = Cooldown::for_endpoint(super::LINEAR_BASE_URL).budget;
+    // A torn or missing budget reads as unknown, which is healthy.
+    let budget: Budget = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_default();
+    Duration::from_millis(budget.fresh_for_ms(now_ms()).unsigned_abs())
+}
+
 #[derive(Debug)]
 pub(super) struct Cooldown {
     path: PathBuf,
+    budget: PathBuf,
 }
 
 impl Cooldown {
     pub(super) fn for_endpoint(endpoint: &str) -> Self {
-        let root = crate::store::lf_home_dir();
-        // Stand-in endpoints never touch the installed Home, even in unit tests
-        // without a fixture ledger. Each server has its own ephemeral identity.
-        #[cfg(test)]
-        let root = if endpoint != super::LINEAR_BASE_URL {
-            std::env::temp_dir().join(format!("lf-linear-tests-{}", std::process::id()))
-        } else {
-            root
-        };
+        let dir = home(endpoint).join("locks/linear-cooldown");
+        let key = endpoint_key(endpoint);
         Self {
-            path: root
-                .join("locks/linear-cooldown")
-                .join(format!("{:x}", Sha256::digest(endpoint.as_bytes()))),
+            budget: dir.join(format!("{key}.budget")),
+            path: dir.join(key),
         }
     }
 
     async fn lock(&self) -> LinearResult<File> {
-        std::fs::create_dir_all(self.path.parent().expect("cooldown has a parent"))
-            .map_err(io_error)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&self.path)
-            .map_err(io_error)?;
-        loop {
-            match fs2::FileExt::try_lock_exclusive(&file) {
-                Ok(()) => return Ok(file),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                Err(error) => return Err(io_error(error)),
-            }
-        }
+        lock(&self.path).await
     }
 
     pub(super) async fn check(&self) -> LinearResult<()> {
@@ -63,6 +239,15 @@ impl Cooldown {
         Ok(())
     }
 
+    /// Hold a non-urgent request while the shared budget is low.
+    pub(super) async fn admit(&self) -> LinearResult<()> {
+        let mut file = lock(&self.budget).await?;
+        let mut budget = read_budget(&mut file);
+        let admitted = budget.admit(now_ms());
+        write_budget(&mut file, &budget)?;
+        admitted.map_err(paused)
+    }
+
     pub(super) async fn observe(
         &self,
         status: StatusCode,
@@ -70,6 +255,13 @@ impl Cooldown {
         body: &[u8],
     ) -> LinearResult<()> {
         let now = now_ms();
+        let allowances = Allowances::from_headers(headers);
+        if allowances != Allowances::default() {
+            let mut file = lock(&self.budget).await?;
+            let mut budget = read_budget(&mut file);
+            budget.observe(&allowances);
+            write_budget(&mut file, &budget)?;
+        }
         let parsed = serde_json::from_slice::<serde_json::Value>(body).ok();
         let limited = status == StatusCode::TOO_MANY_REQUESTS
             || parsed
@@ -103,7 +295,11 @@ impl Cooldown {
             file.sync_data().map_err(io_error)?;
         }
         if previous <= now {
-            tracing::warn!(reset_epoch_ms = until, "Linear rate limit reached; synchronization paused until reset; pending writes retained");
+            tracing::warn!(
+                limit = tripped(headers, limited),
+                reset_epoch_ms = until,
+                "Linear rate limit reached; synchronization paused until reset; pending writes retained"
+            );
         }
         // A successful final request still owns its response and must settle.
         if limited {
@@ -113,7 +309,57 @@ impl Cooldown {
     }
 }
 
-fn now_ms() -> i64 {
+async fn lock(path: &Path) -> LinearResult<File> {
+    std::fs::create_dir_all(path.parent().expect("cooldown has a parent")).map_err(io_error)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(io_error)?;
+    loop {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(error) => return Err(io_error(error)),
+        }
+    }
+}
+
+/// An unreadable budget is an unknown one: admit, and let the next response refill it.
+fn read_budget(file: &mut File) -> Budget {
+    let mut value = String::new();
+    if file.read_to_string(&mut value).is_err() || value.is_empty() {
+        return Budget::default();
+    }
+    serde_json::from_str(&value).unwrap_or_default()
+}
+
+fn write_budget(file: &mut File, budget: &Budget) -> LinearResult<()> {
+    file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+    file.set_len(0).map_err(io_error)?;
+    serde_json::to_writer(&mut *file, budget)
+        .map_err(|error| io_error(std::io::Error::other(error)))
+}
+
+/// Which allowances a limited or exhausted response ran out of.
+fn tripped(headers: &HeaderMap, limited: bool) -> String {
+    let number = |key: &str| headers.get(key)?.to_str().ok()?.parse::<i64>().ok();
+    let scopes: Vec<_> = ["requests", "endpoint-requests", "complexity"]
+        .into_iter()
+        .filter(|scope| number(&format!("x-ratelimit-{scope}-remaining")).is_some_and(|n| n <= 0))
+        .collect();
+    match (scopes.is_empty(), limited) {
+        (false, _) => scopes.join(","),
+        (true, true) => "unreported".into(),
+        (true, false) => "none".into(),
+    }
+}
+
+pub(super) fn now_ms() -> i64 {
     (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
 }
 
@@ -183,11 +429,140 @@ fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{reset_at, Cooldown};
-    use crate::linear::test_server::{self, json_response};
+    use super::{home, reset_at, urgent, Allowance, Budget, Cooldown};
+    use crate::linear::request_log::{self, RequestOutcome};
+    use crate::linear::test_server::{self, json_response, QueuedResponse};
     use crate::linear::LinearClient;
     use reqwest::{header::HeaderMap, StatusCode};
     use serde_json::json;
+
+    fn initiatives(remaining: i64, reset: i64) -> QueuedResponse {
+        let mut response = json_response(
+            StatusCode::OK,
+            json!({"data":{"initiatives":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}),
+        );
+        for (key, value) in [
+            ("x-ratelimit-requests-limit", 1000),
+            ("x-ratelimit-requests-remaining", remaining),
+            ("x-ratelimit-requests-reset", reset),
+            ("x-complexity", 3),
+        ] {
+            response.headers.push((key.into(), value.to_string()));
+        }
+        response
+    }
+
+    fn turn_on_request_log(url: &str) {
+        let home = home(url);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("config.yaml"), "logs:\n  linear_requests: true\n").unwrap();
+    }
+
+    #[tokio::test]
+    async fn request_log_is_off_by_default() {
+        let reset = super::now_ms() + 3_600_000;
+        let (url, requests) = test_server::spawn(vec![initiatives(900, reset)]).await;
+        let client = LinearClient::with_base_url("token".into(), None, url.clone());
+        client.initiatives().await.unwrap();
+        assert_eq!(requests.lock().await.len(), 1);
+        assert!(!request_log::log_path(&home(&url)).exists());
+    }
+
+    #[tokio::test]
+    async fn request_log_records_operation_outcome_and_allowance() {
+        let reset = super::now_ms() + 3_600_000;
+        let (url, _) = test_server::spawn(vec![initiatives(900, reset)]).await;
+        turn_on_request_log(&url);
+        let client = LinearClient::with_base_url("token".into(), None, url.clone());
+        client.initiatives().await.unwrap();
+        let records = request_log::read_since(&home(&url), 0).unwrap();
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+        assert_eq!(record.operation, "ListInitiatives");
+        assert_eq!(record.outcome, RequestOutcome::Sent);
+        assert_eq!(record.status, Some(200));
+        assert_eq!(record.cost, Some(3));
+        assert_eq!(
+            record.requests,
+            Some(Allowance {
+                limit: Some(1000),
+                remaining: 900,
+                reset_ms: Some(reset),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn low_budget_holds_non_urgent_requests_and_sends_urgent_ones() {
+        let reset = super::now_ms() + 3_600_000;
+        // The first response leaves 5% of the hour's requests: inside the reserve.
+        let (url, requests) =
+            test_server::spawn(vec![initiatives(50, reset), initiatives(49, reset)]).await;
+        turn_on_request_log(&url);
+        let client = LinearClient::with_base_url("token".into(), None, url.clone());
+        client.initiatives().await.unwrap();
+        assert_eq!(
+            client.initiatives().await.unwrap_err(),
+            crate::linear::LinearError::RateLimited { reset_at_ms: reset }
+        );
+        assert_eq!(requests.lock().await.len(), 1);
+        assert!(urgent(client.initiatives()).await.unwrap().is_empty());
+        assert_eq!(requests.lock().await.len(), 2);
+        let outcomes: Vec<_> = request_log::read_since(&home(&url), 0)
+            .unwrap()
+            .into_iter()
+            .map(|record| (record.outcome, record.urgent))
+            .collect();
+        assert_eq!(
+            outcomes,
+            [
+                (RequestOutcome::Sent, false),
+                (RequestOutcome::Deferred, false),
+                (RequestOutcome::Sent, true),
+            ]
+        );
+    }
+
+    #[test]
+    fn falling_budget_spaces_non_urgent_requests_until_reset() {
+        let allowance = |remaining| Allowance {
+            limit: Some(1000),
+            remaining,
+            reset_ms: Some(1_000_000),
+        };
+        let mut budget = Budget {
+            requests: Some(allowance(500)),
+            ..Budget::default()
+        };
+        assert_eq!(budget.admit(0), Ok(()));
+        assert_eq!(budget.admit(0), Ok(()));
+        // 20% left: 100 requests above the reserve share the 1000 s until reset.
+        budget.requests = Some(allowance(200));
+        assert_eq!(budget.admit(0), Ok(()));
+        assert_eq!(budget.admit(1), Err(10_000));
+        assert_eq!(budget.admit(10_000), Ok(()));
+        budget.requests = Some(allowance(100));
+        assert_eq!(budget.admit(20_000), Err(1_000_000));
+        // A reset allowance no longer holds anything back.
+        assert_eq!(budget.admit(1_000_000), Ok(()));
+    }
+
+    #[test]
+    fn team_delta_freshness_stretches_as_the_budget_falls() {
+        let allowance = |remaining| Allowance {
+            limit: Some(1000),
+            remaining,
+            reset_ms: Some(1_000_000),
+        };
+        let mut budget = Budget::default();
+        assert_eq!(budget.fresh_for_ms(0), 10_000);
+        budget.requests = Some(allowance(500));
+        assert_eq!(budget.fresh_for_ms(0), 10_000);
+        budget.requests = Some(allowance(110));
+        assert_eq!(budget.fresh_for_ms(0), 100_000);
+        budget.requests = Some(allowance(90));
+        assert_eq!(budget.fresh_for_ms(0), 1_000_000);
+    }
 
     #[tokio::test]
     async fn rate_limit_pauses_independent_clients_and_resumes_after_reset() {

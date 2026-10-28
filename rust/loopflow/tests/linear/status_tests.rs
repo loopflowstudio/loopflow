@@ -794,7 +794,7 @@ fn orphaned_task_work_preserves_status_and_roadmap_evidence() {
             assert_eq!(projects.len(), 1);
             assert_eq!(projects[0]["slug"], "auditability");
             assert_eq!(projects[0]["status"], "started");
-            assert!(projects[0].get("workflow").is_none());
+            assert!(projects[0].get("graph").is_none());
             assert_eq!(view["tasks"]["state"], "ok");
             let tasks = view["tasks"]["items"].as_array().unwrap();
             assert_eq!(tasks.len(), 2);

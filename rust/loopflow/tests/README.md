@@ -32,6 +32,10 @@ so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
 ## Boundary checks
 
+For migration changes, run `uv run python scripts/check_migrations.py` before
+the Rust suites. Schema construction can pass even when a released migration
+was edited; this check also verifies immutable history against main and tags.
+
 `cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no
 credentials. CI's ordinary Rust network isolation covers it. It bounds provider
@@ -461,10 +465,12 @@ uv run python scripts/test_task_installation.py --test task_adopts_linear_checko
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
-Agent-selection changes also require the container-only
+Agent-selection and Task launch-mode changes also require the container-only
 `declared_agent_can_start_another_tasks_graph` proof: saved Task defaults remain
 local, while explicit `-a` overrides child Tasks too. Ordinary Rust suites skip
 this installation-boundary proof.
+Fixtures that stop at an interactive step use bare `task run` and wait for the
+recorded Graph outcome; `-b` executes that step headlessly and needs a provider.
 Every ordinary installation run first upgrades populated released planning and
 Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
 historical PRs, pending completion delivery, a running Process and its Workflow,

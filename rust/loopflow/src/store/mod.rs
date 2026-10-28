@@ -1626,7 +1626,7 @@ mod tests {
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
                 rusqlite::params![process,crate::id::TraceId::new()],
             ).unwrap();
-            let definition = crate::workflow::CapturedGraph {
+            let definition = crate::task_graph::CapturedGraph {
                 name: "review".into(),
                 steps: vec![crate::graph::ConcreteStep::Skill(
                     crate::graph::ConcreteSkill {
@@ -1640,13 +1640,13 @@ mod tests {
             };
             store
                 .sqlite
-                .take_up_workflow(&task.id, &definition, &process, None)
+                .take_up_task_graph(&task.id, &definition)
                 .unwrap();
             store
                 .sqlite
-                .set_workflow_node(&task.id, "review", &process, None)
+                .set_task_graph_step(&task.id, "review")
                 .unwrap();
-            let workflow = store.sqlite.workflow(&task.id).unwrap();
+            let graph = store.sqlite.task_graph(&task.id).unwrap();
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:01:00Z".into());
             snapshot.snapshot.items[0].state = None;
             snapshot.snapshot.items[0].completed = true;
@@ -1656,7 +1656,7 @@ mod tests {
                 store.sqlite.task(&task.id).unwrap().unwrap().completed_at,
                 snapshot.snapshot.items[0].completed_at
             );
-            assert_eq!(store.sqlite.workflow(&task.id).unwrap(), workflow);
+            assert_eq!(store.sqlite.task_graph(&task.id).unwrap(), graph);
             store
                 .complete_task(
                     &task,
@@ -1675,9 +1675,9 @@ mod tests {
                 .unwrap();
             store
                 .sqlite
-                .set_workflow_node(&task.id, "review", &process, None)
+                .set_task_graph_step(&task.id, "review")
                 .unwrap();
-            let reopened = store.sqlite.workflow(&task.id).unwrap();
+            let reopened = store.sqlite.task_graph(&task.id).unwrap();
             snapshot.snapshot.items[0].state = Some("unstarted".into());
             snapshot.snapshot.items[0].completed = false;
             snapshot.snapshot.items[0].completed_at = None;
@@ -1699,7 +1699,7 @@ mod tests {
             assert_eq!(record.assignee, None);
             assert_eq!(record.rank, 0);
             assert_eq!(record.pm_snapshot_synced_at, Some(17));
-            assert_eq!(store.sqlite.workflow(&task.id).unwrap(), reopened);
+            assert_eq!(store.sqlite.task_graph(&task.id).unwrap(), reopened);
         }
     }
 
@@ -1881,7 +1881,7 @@ mod tests {
                     crate::durable::TaskState::Unstarted
                 }
             );
-            assert!(store.sqlite.workflow(&task.id).unwrap().is_none());
+            assert!(store.sqlite.task_graph(&task.id).unwrap().is_none());
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert_eq!(store.task_events_after(&task.id, 0).await.unwrap(), events);
             snapshot.snapshot.items[0].revision = Some("2026-10-05T12:02:00Z".into());
@@ -1933,7 +1933,7 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
-        assert!(store.sqlite.workflow(&task.id).unwrap().is_none());
+        assert!(store.sqlite.task_graph(&task.id).unwrap().is_none());
     }
 
     #[tokio::test]

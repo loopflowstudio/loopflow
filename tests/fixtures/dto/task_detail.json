@@ -7,9 +7,9 @@
     "project": "Gmail",
     "state": "active",
     "reason": "Review the demo in the Task's conversation",
-    "workflow": {
+    "graph": {
       "name": "feature",
-      "stage": "demo"
+      "step": "demo"
     },
     "pr": {
       "number": 1719,

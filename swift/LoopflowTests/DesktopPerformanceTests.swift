@@ -1027,7 +1027,6 @@ struct DesktopPerformanceTests {
         let workJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_work.json"), encoding: .utf8)
         let commentsJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("task_comments.json"), encoding: .utf8)
         let contextJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("context_report.json"), encoding: .utf8)
-        let workflowJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("workflow_catalog.json"), encoding: .utf8)
         let catalogJSON = try String(contentsOf: fixtureRoot.appendingPathComponent("graph_catalog.json"), encoding: .utf8)
         let sessionJSON = String(decoding: sessions, as: UTF8.self)
         let reader = PerformanceReader(planning: planning, sessions: sessionJSON)
@@ -1037,7 +1036,6 @@ struct DesktopPerformanceTests {
             case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
             case "desktop" where args.dropFirst().first == "plan": return await planning.read()
             case "graph" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
-            case "project" where args.dropFirst().prefix(2) == ["workflow", "list"]: return workflowJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
             case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessionJSON),"next":null}"#
             case "usage": return args.contains("--context") ? contextJSON : historyJSON
@@ -1152,7 +1150,7 @@ private final class PerformanceReader {
             }
         }
         send(.task, request.id, #"""
-            {"overview":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"workflow":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
+            {"overview":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
             """#)
     }
 

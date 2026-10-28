@@ -31,7 +31,7 @@ pub struct TaskRow {
     pub state: TaskState,
     /// Why it is in that state, or what it waits on.
     pub reason: String,
-    pub workflow: Option<TaskRowWorkflow>,
+    pub graph: Option<TaskRowGraph>,
     /// Its published pull request.
     pub pr: Option<TaskRowPr>,
     /// The command that moves it on; `null` while it moves by itself or is closed.
@@ -39,10 +39,10 @@ pub struct TaskRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskRowWorkflow {
+pub struct TaskRowGraph {
     pub name: String,
-    /// The stage it stands at; `null` while a route runs.
-    pub stage: Option<String>,
+    /// The step it stands at (`start`, `end` or an interactive step); `null` while a run carries it.
+    pub step: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,9 +163,9 @@ impl TaskNames {
             reason: task
                 .shipping
                 .map_or(task.next_move.reason, |shipping| shipping.reason),
-            workflow: task.workflow_name.map(|name| TaskRowWorkflow {
+            graph: task.graph_name.map(|name| TaskRowGraph {
                 name,
-                stage: task.stage,
+                step: task.step,
             }),
             pr: task.pr.and_then(|pr| {
                 let github = pr.publication?.github?;

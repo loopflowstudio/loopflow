@@ -161,7 +161,7 @@ pub struct NextMove {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRuntimeSnapshot {
     pub work_id: String,
-    /// Completion and abandonment are independent of Workflow position.
+    /// Completion and abandonment are independent of Graph position.
     pub status: TaskState,
     /// A durable completion request awaiting settlement.
     pub completion_pending: Option<String>,
@@ -379,7 +379,8 @@ pub struct RoadmapSnapshot<T = RoadmapTask> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveRoadmap {
-    pub workflow: Option<String>,
+    /// The graph the Wave's Tasks take up by default.
+    pub graph: Option<String>,
     pub project_readiness: crate::store::sqlite::ProjectReadiness,
     pub wave: WaveSnapshot,
     pub projects: Evidence<ProjectSummary>,
@@ -538,8 +539,10 @@ pub struct RoadmapTask {
     pub next_move: NextMove,
     pub condition: TaskConditionSnapshot,
     pub actions: TaskActionModel,
-    pub workflow_name: Option<String>,
-    pub workflow_source: Option<String>,
+    /// The graph the Task took up, else the one its first `lf task run` takes up.
+    pub graph_name: Option<String>,
+    /// `task`, `wave`, `repository` or `builtin`.
+    pub graph_source: Option<String>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -547,10 +550,10 @@ pub struct RoadmapTask {
     pub shipping: Option<crate::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
     pub section: RoadmapSection,
-    /// The Workflow stage the Task stands at; `None` on a route. Carried to
-    /// `TaskRow`, not on Desktop's wire.
+    /// The graph step the Task stands at; `None` while a run carries it.
+    /// Carried to `TaskRow`, not on Desktop's wire.
     #[serde(skip)]
-    pub(crate) stage: Option<String>,
+    pub(crate) step: Option<String>,
 }
 
 /// `lf wave list` — every durable Wave identity the registry knows.
@@ -1266,7 +1269,7 @@ async fn roadmap_snapshot(
             continue;
         }
         roadmaps.push(WaveRoadmap {
-            workflow: store.sqlite.selected_wave_workflow(wave.id())?,
+            graph: store.sqlite.selected_wave_graph(wave.id())?,
             project_readiness: store.sqlite.project_readiness(wave.id())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
@@ -1673,7 +1676,7 @@ struct DetailReads<'a> {
     facts: crate::store::sqlite::TaskDetailFacts,
     /// Each Task's own Workflow, else its Wave's, repository's or the builtin
     /// default, with that source; a default is resolved once per Wave and repository.
-    workflows: HashMap<crate::durable::TaskId, (String, &'static str)>,
+    selections: HashMap<crate::durable::TaskId, (String, &'static str)>,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
     /// Each Task's latest Graph and what its execution reads, asked once.
@@ -1689,18 +1692,18 @@ impl<'a> DetailReads<'a> {
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
         let execution = store.sqlite.graph_execution_facts(graphs.values())?;
         let mut defaults = HashMap::<_, (String, &'static str)>::new();
-        let mut workflows = HashMap::new();
+        let mut selections = HashMap::new();
         for task in tasks {
-            let selection = match facts.workflow_names.get(&task.id) {
+            let selection = match facts.graph_names.get(&task.id) {
                 Some(name) => (name.clone(), "task"),
                 None => match defaults.entry((task.wave_id.clone(), task.repository_id.clone())) {
                     std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
                     std::collections::hash_map::Entry::Vacant(entry) => entry
-                        .insert(crate::ops::task::task_workflow_default(store, task)?)
+                        .insert(crate::ops::task::task_graph_default(store, task)?)
                         .clone(),
                 },
             };
-            workflows.insert(task.id.clone(), selection);
+            selections.insert(task.id.clone(), selection);
         }
         let mut shipping = HashMap::new();
         for task in tasks.iter().filter(|task| facts.shipped.contains(&task.id)) {
@@ -1708,11 +1711,11 @@ impl<'a> DetailReads<'a> {
                 .states
                 .get(&task.id)
                 .ok_or_else(|| anyhow!("Task {} has no state", task.id))?;
-            let workflow = store.sqlite.workflow(&task.id)?;
+            let graph = store.sqlite.task_graph(&task.id)?;
             if let Some(snapshot) = crate::ops::task::ship::read_shipping(
                 &store.sqlite,
                 &task.id,
-                workflow.as_ref(),
+                graph.as_ref(),
                 status,
             )? {
                 shipping.insert(task.id.clone(), snapshot);
@@ -1721,7 +1724,7 @@ impl<'a> DetailReads<'a> {
         Ok(Self {
             shared,
             facts,
-            workflows,
+            selections,
             shipping,
             graphs,
             execution,
@@ -1884,7 +1887,7 @@ async fn snapshot_task_detail(
     let run_control =
         crate::ops::task_run::task_run_control(&crate::ops::task_run::TaskRunEvidence {
             status: Some(&work_status),
-            // Shared completion withdraws an unstarted Task, never advances its Workflow.
+            // Shared completion withdraws an unstarted Task, never moves its Graph.
             plan_terminal_reason: crate::linear::terminal_reason(task.state.as_deref())
                 .filter(|_| matches!(runtime.status, TaskState::Unstarted)),
             worktree_blocker: worktree_blocker
@@ -1898,21 +1901,21 @@ async fn snapshot_task_detail(
             if shipping.is_some() {
                 Some("Task is already shipping".to_string())
             } else if facts
-                .stages
+                .steps
                 .get(&task.id)
-                .is_some_and(|stage| stage == "end")
+                .is_some_and(|step| step == crate::task_graph::END)
             {
-                Some("Task is at the end of its Workflow".to_string())
+                Some("Task is at the end of its graph".to_string())
             } else {
                 None
             }
         }),
     };
-    let (workflow_name, workflow_source) = reads
-        .workflows
+    let (graph_name, graph_source) = reads
+        .selections
         .get(&task.id)
         .cloned()
-        .ok_or_else(|| anyhow!("Task {} has no Workflow", task.id))?;
+        .ok_or_else(|| anyhow!("Task {} has no graph", task.id))?;
     let section = task_section(task.state.as_deref(), Some(&runtime), &next_move);
     Ok(RoadmapTask {
         task: task_summary(
@@ -1934,8 +1937,8 @@ async fn snapshot_task_detail(
         next_move,
         condition,
         actions,
-        workflow_name: Some(workflow_name),
-        workflow_source: Some(workflow_source.to_owned()),
+        graph_name: Some(graph_name),
+        graph_source: Some(graph_source.to_owned()),
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
@@ -1948,7 +1951,7 @@ async fn snapshot_task_detail(
             PrSnapshot::new(pr, empty)
         }),
         section,
-        stage: facts.stages.get(&task.id).cloned(),
+        step: facts.steps.get(&task.id).cloned(),
     })
 }
 
@@ -4160,16 +4163,10 @@ mod tests {
             );
         };
         assert!(reason.contains("no such column: t.paused"), "{reason}");
-        let workflow = store
-            .sqlite
-            .task_overview(&task)
-            .unwrap()
-            .0
-            .workflow
-            .unwrap();
-        assert_eq!(workflow.definition.name, "feature");
+        let graph = store.sqlite.task_overview(&task).unwrap().0.graph.unwrap();
+        assert_eq!(graph.name, "feature");
         assert!(
-            matches!(workflow.position, crate::ops::workflow::WorkflowPosition::Node { ref node } if node == "end")
+            matches!(graph.position, crate::task_graph::TaskGraphPosition::At { ref step } if step == "end")
         );
         assert_eq!(
             crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap(),

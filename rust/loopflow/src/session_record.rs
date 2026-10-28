@@ -1596,7 +1596,6 @@ impl CaptureHandle {
             });
         #[cfg(not(test))]
         let home = crate::store::lf_home_dir();
-        crate::disk::rotate_when_due(&home);
         Self::begin_at_with_id(
             &home,
             spec,

@@ -15,7 +15,7 @@
           "state": "observed",
           "unsettled": true
         },
-        "observed_at": "2026-10-27T02:10:19.049431Z",
+        "observed_at": "2026-10-28T02:59:06.766951Z",
         "reason": "Task has uncommitted work",
         "state": "blocked",
         "unresolved_execution": true
@@ -26,38 +26,10 @@
         "state": "idle",
         "step": null
       },
+      "graph_name": "delivery",
+      "graph_source": "task",
       "latest_graph_process": {
         "compiled": {
-          "interactions": {
-            "stages": [],
-            "transitions": [
-              {
-                "from": "@start",
-                "nodes": [
-                  "0",
-                  "1"
-                ],
-                "routes": [
-                  {
-                    "condition": null,
-                    "from": "@start",
-                    "to": "0"
-                  },
-                  {
-                    "condition": null,
-                    "from": "0",
-                    "to": "1"
-                  },
-                  {
-                    "condition": null,
-                    "from": "1",
-                    "to": "@end"
-                  }
-                ],
-                "to": "@end"
-              }
-            ]
-          },
           "name": "delivery",
           "steps": [
             {
@@ -65,7 +37,7 @@
               "interactive": false,
               "key": 0,
               "kind": "op",
-              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
               "paths": [],
               "returns_to": null,
               "sources": [
@@ -91,16 +63,16 @@
           1
         ],
         "current": null,
-        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "entry": {
-          "ended_at": 1793067018,
-          "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+          "ended_at": 1793156346,
+          "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
           "name": "delivery",
-          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
           "state": "completed",
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-          "updated_at": 1793067018,
-          "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+          "updated_at": 1793156346,
+          "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "iterations": [
           []
@@ -108,28 +80,28 @@
         "returns": [],
         "steps": [
           {
-            "completed_at": 1793067018,
+            "completed_at": 1793156345,
             "exit_code": 0,
             "iterations": [
               []
             ],
             "key": 0,
-            "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
-            "lf_process_id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
+            "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+            "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
             "outcome": "succeeded",
-            "started_at": 1793067015
+            "started_at": 1793156341
           },
           {
-            "completed_at": 1793067018,
+            "completed_at": 1793156346,
             "exit_code": 0,
             "iterations": [
               []
             ],
             "key": 1,
             "label": "task complete FIX-1",
-            "lf_process_id": "d1b6fd8a-8028-49d3-9f61-1f4d613b47b0",
+            "lf_process_id": "8cb12475-d978-4dd0-b8e6-7d8a14dbe2ed",
             "outcome": "succeeded",
-            "started_at": 1793067018
+            "started_at": 1793156345
           }
         ]
       },
@@ -139,11 +111,11 @@
       },
       "pr": {
         "abandoned_at": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "empty": null,
-        "id": "pr_66a41b3c379d4ed4ad05d151ba4191c0",
-        "merge_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "id": "pr_2e492a0843654e498dd4b096deb1032c",
+        "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "phase": "merged",
         "publication": {
           "github": {
@@ -152,7 +124,7 @@
           },
           "merge": null,
           "presentation": null,
-          "requested_at": "2026-10-27T02:10:11Z"
+          "requested_at": "2026-10-28T02:58:55Z"
         },
         "sequence": 1,
         "slug": "delivery"
@@ -160,13 +132,13 @@
       "reference": {
         "issue_url": "https://linear.app/fixture/issue/FIX-1",
         "workspace": {
-          "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "branch": "main",
           "local_exists": true,
-          "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+          "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
           "machine_label": null,
           "slug": "delivery",
-          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
         }
       },
       "run_control": {
@@ -176,7 +148,7 @@
         "completion_pending": null,
         "owner": {
           "machine": {
-            "id": "home_6882224806cd48ae2be22a300d5b573b",
+            "id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
@@ -185,8 +157,8 @@
         "provider": "codex",
         "reason": "done",
         "status": "done",
-        "updated_at": "2026-10-27T02:10:16Z",
-        "work_id": "task_001b5cc8a08c48059b44030d6f184432"
+        "updated_at": "2026-10-28T02:59:03Z",
+        "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "later",
       "ship_control": {
@@ -195,28 +167,28 @@
       "shipping": null,
       "task": {
         "acquisition": {
-          "observed_at": 1793067012,
+          "observed_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
-        "completed_at": "2026-10-27T02:10:16.197108Z",
+        "completed_at": "2026-10-28T02:59:03.042503Z",
         "description": "",
         "due_date": null,
-        "id": "task_001b5cc8a08c48059b44030d6f184432",
+        "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
         "linear_id": "source-issue",
         "name": "Deliver the command",
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
           "changes": [
             {
               "error": null,
               "field": "state",
-              "id": "7610233c-2464-4584-a35f-fc1a5ddc00e9",
+              "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
               "linear_value": "unstarted",
               "local_value": "started",
               "state": "adopted_linear"
@@ -224,49 +196,47 @@
             {
               "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
               "field": "state",
-              "id": "0c8811a9-4806-4b25-b5e5-b25de519a08c",
+              "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
               "linear_value": null,
               "local_value": "completed",
               "state": "pending"
             },
             {
-              "error": "Comment ccdb1e36-3455-4822-a3e2-bf3b41a36604 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "field": "comment",
-              "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604",
+              "id": "57952d15-3228-4c75-8669-82a2f150e012",
               "linear_value": null,
               "local_value": {
                 "author": {
                   "kind": "integration"
                 },
-                "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-                "created_at": "2026-10-27T02:10:11.938197Z",
-                "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+                "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+                "created_at": "2026-10-28T02:58:56.626836Z",
+                "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
               "state": "pending"
             },
             {
-              "error": "Comment fdf6bd18-5bd3-471a-b06e-504e7b6ee853 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "field": "comment",
-              "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853",
+              "id": "2e5de426-1620-43a5-a234-6b203e56f531",
               "linear_value": null,
               "local_value": {
                 "author": {
                   "kind": "person",
                   "name": "Jack Heart"
                 },
-                "body": "Installed verification continues in a0676c.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:fdf6bd18-5bd3-471a-b06e-504e7b6ee853 -->",
-                "created_at": "2026-10-27T02:10:16.11684Z",
-                "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853"
+                "body": "Installed verification continues in 6413b1.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:2e5de426-1620-43a5-a234-6b203e56f531 -->",
+                "created_at": "2026-10-28T02:59:02.871386Z",
+                "id": "2e5de426-1620-43a5-a234-6b203e56f531"
               },
               "state": "pending"
             }
           ],
           "connected": true
         },
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
-      },
-      "workflow_name": "delivery",
-      "workflow_source": "task"
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+      }
     },
     "status": {
       "comments": {
@@ -275,25 +245,25 @@
             "author": {
               "kind": "integration"
             },
-            "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-            "created_at": "2026-10-27T02:10:11.938197Z",
-            "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+            "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+            "created_at": "2026-10-28T02:58:56.626836Z",
+            "id": "57952d15-3228-4c75-8669-82a2f150e012"
           },
           {
             "author": {
               "kind": "person",
               "name": "Jack Heart"
             },
-            "body": "Installed verification continues in a0676c.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:fdf6bd18-5bd3-471a-b06e-504e7b6ee853 -->",
-            "created_at": "2026-10-27T02:10:16.11684Z",
-            "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853"
+            "body": "Installed verification continues in 6413b1.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:2e5de426-1620-43a5-a234-6b203e56f531 -->",
+            "created_at": "2026-10-28T02:59:02.871386Z",
+            "id": "2e5de426-1620-43a5-a234-6b203e56f531"
           }
         ],
         "conflicts": {},
         "identifier": "FIX-1",
         "pending_sync": [
-          "ccdb1e36-3455-4822-a3e2-bf3b41a36604",
-          "fdf6bd18-5bd3-471a-b06e-504e7b6ee853"
+          "57952d15-3228-4c75-8669-82a2f150e012",
+          "2e5de426-1620-43a5-a234-6b203e56f531"
         ],
         "refresh_error": null
       },
@@ -303,10 +273,10 @@
           "recommended": "no_action"
         },
         "agent": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
-        "created_at": "2026-10-27T02:10:11Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
           "reason": "Graph delivery finished; nothing further is launched",
@@ -319,10 +289,10 @@
         "latest_event": {
           "created_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            16,
+            59,
+            3,
             0,
             0,
             0,
@@ -333,13 +303,13 @@
             "kind": "completed",
             "summary": "Task completed"
           },
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432"
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+        "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "pm_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
@@ -347,15 +317,15 @@
         },
         "pr": {
           "abandoned_at": null,
-          "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "branch": "main",
           "ci_observation": null,
           "created_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            11,
+            58,
+            55,
             0,
             0,
             0,
@@ -364,11 +334,11 @@
           "github_observation": {
             "checked_at": [
               2026,
-              300,
+              301,
               2,
-              10,
-              15,
-              425456000,
+              59,
+              1,
+              558346000,
               0,
               0,
               0
@@ -377,15 +347,15 @@
               "state": "fresh"
             }
           },
-          "id": "pr_66a41b3c379d4ed4ad05d151ba4191c0",
+          "id": "pr_2e492a0843654e498dd4b096deb1032c",
           "linear_attachment_id": null,
           "linear_comment_id": null,
           "linear_link_error": null,
-          "merge_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "parent_pr_id": null,
           "publication": {
             "github": {
-              "head_sha": "94adecc7d5014396214361c255f3c54f62cd8654",
+              "head_sha": "b61ecfe45224df107655f39cb4fb48646e97659a",
               "number": 1,
               "url": "https://github.com/loopflowstudio/fixture/pull/1"
             },
@@ -393,10 +363,10 @@
             "presentation": null,
             "requested_at": [
               2026,
-              300,
+              301,
               2,
-              10,
-              11,
+              58,
+              55,
               0,
               0,
               0,
@@ -405,13 +375,13 @@
           },
           "sequence": 1,
           "slug": "delivery",
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432",
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "updated_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            15,
+            59,
+            1,
             0,
             0,
             0,
@@ -419,24 +389,32 @@
           ]
         },
         "project": "provider-destination",
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "done",
-        "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-        "updated_at": "2026-10-27T02:10:16Z",
+        "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+        "updated_at": "2026-10-28T02:59:03Z",
         "wave": "product",
         "work": {
+          "graph": {
+            "interactive_steps": [],
+            "name": "delivery",
+            "position": {
+              "kind": "at",
+              "step": "end"
+            }
+          },
           "graph_processes": [
             {
-              "ended_at": 1793067018,
-              "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+              "ended_at": 1793156346,
+              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
               "name": "delivery",
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "state": "completed",
-              "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-              "updated_at": 1793067018,
-              "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+              "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "updated_at": 1793156346,
+              "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
           "processes": [
@@ -445,146 +423,41 @@
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
-              "completed_at": 1793067018,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "completed_at": 1793156346,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": 0,
-              "id": "d1b6fd8a-8028-49d3-9f61-1f4d613b47b0",
+              "id": "8cb12475-d978-4dd0-b8e6-7d8a14dbe2ed",
               "kind": "lf",
-              "os_started_at": 1793067018,
+              "os_started_at": 1793156345,
               "outcome": "succeeded",
-              "parent_lf_process_id": "c3d2b74a-c9df-4d89-9959-826af1249029",
-              "pid": 53073,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+              "pid": 77966,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067018,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156345,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             },
             {
               "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": null,
-              "id": "d9d94cc2-65a6-4ef0-8df2-1603d1eff678",
-              "kind": "lf",
-              "os_started_at": 1793067018,
-              "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 53142,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067018,
-              "trace_id": "9be2a49a-b84e-4c60-a62a-e696044f896e",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
-              "completed_at": 1793067016,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
+              "completed_at": 1793156345,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": 0,
-              "id": "a9ec2acb-c7c9-4abe-b76f-893cb1d128dd",
+              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
               "kind": "lf",
-              "os_started_at": 1793067016,
+              "os_started_at": 1793156341,
               "outcome": "succeeded",
-              "parent_lf_process_id": null,
-              "pid": 52641,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+              "pid": 76819,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067016,
-              "trace_id": "538c2b44-a8b5-4f25-a615-588ca01764c1",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
-              "completed_at": 1793067015,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": 0,
-              "id": "2bbdd5d7-04da-4f3a-8f38-ad8612f10952",
-              "kind": "lf",
-              "os_started_at": 1793067015,
-              "outcome": "succeeded",
-              "parent_lf_process_id": null,
-              "pid": 52470,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "bcbb5508-ce92-4011-b24e-9b40abba7cc0",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py\"]",
-              "completed_at": 1793067018,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": 0,
-              "id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
-              "kind": "lf",
-              "os_started_at": 1793067015,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "c3d2b74a-c9df-4d89-9959-826af1249029",
-              "pid": 52387,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_001b5cc8a08c48059b44030d6f184432\",\"graph\",\"route\"]",
-              "completed_at": 1793067018,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": 0,
-              "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
-              "kind": "lf",
-              "os_started_at": 1793067015,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "pid": 52294,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793067018,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": 0,
-              "id": "497161c0-0757-4607-ba83-430ddb1874c7",
-              "kind": "lf",
-              "os_started_at": 1793067012,
-              "outcome": "succeeded",
-              "parent_lf_process_id": null,
-              "pid": 51393,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156341,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             },
             {
@@ -592,20 +465,20 @@
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793067018,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "completed_at": 1793156346,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": 0,
-              "id": "72f859a8-812f-4b35-9f9b-2bac67be60c6",
+              "id": "0890211c-c3ff-460e-837e-de35e8580176",
               "kind": "lf",
-              "os_started_at": 1793067014,
+              "os_started_at": 1793156340,
               "outcome": "succeeded",
-              "parent_lf_process_id": "497161c0-0757-4607-ba83-430ddb1874c7",
-              "pid": 52152,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
+              "pid": 76404,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             },
             {
@@ -613,115 +486,73 @@
               "caller_agent_process_id": null,
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793067018,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "completed_at": 1793156346,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": 0,
-              "id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
+              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "kind": "lf",
-              "os_started_at": 1793067014,
+              "os_started_at": 1793156340,
               "outcome": "succeeded",
-              "parent_lf_process_id": "72f859a8-812f-4b35-9f9b-2bac67be60c6",
-              "pid": 52177,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
+              "pid": 76451,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
+              "via_agent": false
+            },
+            {
+              "agent_session_id": null,
+              "caller_agent_process_id": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
+              "completed_at": 1793156346,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "error": null,
+              "exit_code": 0,
+              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+              "kind": "lf",
+              "os_started_at": 1793156340,
+              "outcome": "succeeded",
+              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
+              "pid": 76666,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "signal": null,
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
+              "via_agent": false
+            },
+            {
+              "agent_session_id": null,
+              "caller_agent_process_id": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": 1793156346,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "error": null,
+              "exit_code": 0,
+              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
+              "kind": "lf",
+              "os_started_at": 1793156337,
+              "outcome": "succeeded",
+              "parent_lf_process_id": null,
+              "pid": 75863,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "signal": null,
+              "started_at": 1793156339,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             }
           ],
-          "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793067015,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793067015,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "edge",
-                "at": 1793067018,
-                "edge": 0,
-                "from": "start",
-                "kind": "arrived",
-                "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
-            "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
-            "position": {
-              "kind": "node",
-              "node": "end"
-            }
-          }
+          "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
       },
       "graph_processes": [
         {
           "compiled": {
-            "interactions": {
-              "stages": [],
-              "transitions": [
-                {
-                  "from": "@start",
-                  "nodes": [
-                    "0",
-                    "1"
-                  ],
-                  "routes": [
-                    {
-                      "condition": null,
-                      "from": "@start",
-                      "to": "0"
-                    },
-                    {
-                      "condition": null,
-                      "from": "0",
-                      "to": "1"
-                    },
-                    {
-                      "condition": null,
-                      "from": "1",
-                      "to": "@end"
-                    }
-                  ],
-                  "to": "@end"
-                }
-              ]
-            },
             "name": "delivery",
             "steps": [
               {
@@ -729,7 +560,7 @@
                 "interactive": false,
                 "key": 0,
                 "kind": "op",
-                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
                 "paths": [],
                 "returns_to": null,
                 "sources": [
@@ -755,16 +586,16 @@
             1
           ],
           "current": null,
-          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
           "entry": {
-            "ended_at": 1793067018,
-            "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+            "ended_at": 1793156346,
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
             "name": "delivery",
-            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
             "state": "completed",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-            "updated_at": 1793067018,
-            "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156346,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
           },
           "iterations": [
             []
@@ -772,118 +603,72 @@
           "returns": [],
           "steps": [
             {
-              "completed_at": 1793067018,
+              "completed_at": 1793156345,
               "exit_code": 0,
               "iterations": [
                 []
               ],
               "key": 0,
-              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
-              "lf_process_id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+              "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
               "outcome": "succeeded",
-              "started_at": 1793067015
+              "started_at": 1793156341
             },
             {
-              "completed_at": 1793067018,
+              "completed_at": 1793156346,
               "exit_code": 0,
               "iterations": [
                 []
               ],
               "key": 1,
               "label": "task complete FIX-1",
-              "lf_process_id": "d1b6fd8a-8028-49d3-9f61-1f4d613b47b0",
+              "lf_process_id": "8cb12475-d978-4dd0-b8e6-7d8a14dbe2ed",
               "outcome": "succeeded",
-              "started_at": 1793067018
+              "started_at": 1793156345
             }
           ]
         }
       ],
-      "observed_at": 1793067012,
+      "observed_at": 1793156337,
       "overview": {
+        "graph": {
+          "interactive_steps": [],
+          "name": "delivery",
+          "position": {
+            "kind": "at",
+            "step": "end"
+          }
+        },
         "graph_processes": [
           {
-            "ended_at": 1793067018,
-            "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+            "ended_at": 1793156346,
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
             "name": "delivery",
-            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
             "state": "completed",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-            "updated_at": 1793067018,
-            "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156346,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
           }
         ],
-        "sessions": [],
-        "workflow": {
-          "edges": [
-            {
-              "from": "start",
-              "name": "session",
-              "to": "end"
-            }
-          ],
-          "history": [
-            {
-              "actor": "person",
-              "at": 1793067015,
-              "edge": null,
-              "from": "start",
-              "kind": "took_up",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "note": null,
-              "session_id": null,
-              "to": "start",
-              "workflow": "delivery"
-            },
-            {
-              "actor": "person",
-              "at": 1793067015,
-              "edge": 0,
-              "from": "start",
-              "kind": "chose",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "note": null,
-              "session_id": null,
-              "to": "end",
-              "workflow": "delivery"
-            },
-            {
-              "actor": "edge",
-              "at": 1793067018,
-              "edge": 0,
-              "from": "start",
-              "kind": "arrived",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "note": null,
-              "session_id": null,
-              "to": "end",
-              "workflow": "delivery"
-            }
-          ],
-          "name": "delivery",
-          "nodes": [],
-          "outgoing": [],
-          "position": {
-            "kind": "node",
-            "node": "end"
-          }
-        }
+        "sessions": []
       },
       "ownership": {
         "log": [
           {
-            "at": 1793067011,
-            "id": "own_393394a8e0c946438163b3542d4e4773",
+            "at": 1793156336,
+            "id": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "kind": "claim",
-            "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+            "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
             "person_key": "test@test.com",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
           }
         ],
         "owner": {
           "machine": {
-            "id": "home_6882224806cd48ae2be22a300d5b573b",
+            "id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
@@ -895,26 +680,264 @@
       "planning_stale": false,
       "planning_state": "available",
       "project": {
-        "created_at": "2026-10-27T02:10:11Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "description": "",
-        "id": "proj_fcc14e46784e469787319842c5753ec9",
+        "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
         "linear_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
-        "updated_at": "2026-10-27T02:10:12Z",
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+        "updated_at": "2026-10-28T02:58:56Z",
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+      },
+      "row": {
+        "actions": {
+          "reason": "Task is terminal",
+          "recommended": "no_action"
+        },
+        "condition": {
+          "evidence_age_secs": 3,
+          "local_progress": {
+            "authored_commits": false,
+            "dirty": true,
+            "reason": null,
+            "recovery_required": false,
+            "state": "observed",
+            "unsettled": true
+          },
+          "observed_at": "2026-10-28T02:59:06.493169Z",
+          "reason": "Task has uncommitted work",
+          "state": "blocked",
+          "unresolved_execution": true
+        },
+        "execution": {
+          "captured": null,
+          "reason": "Graph delivery finished; nothing further is launched",
+          "state": "idle",
+          "step": null
+        },
+        "graph_name": "delivery",
+        "graph_source": "task",
+        "latest_graph_process": {
+          "compiled": {
+            "name": "delivery",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "delivery"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "op",
+                "label": "task complete FIX-1",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "delivery"
+                ]
+              }
+            ]
+          },
+          "completed": [
+            0,
+            1
+          ],
+          "current": null,
+          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+          "entry": {
+            "ended_at": 1793156346,
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+            "name": "delivery",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+            "state": "completed",
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156346,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+          },
+          "iterations": [
+            []
+          ],
+          "returns": [],
+          "steps": [
+            {
+              "completed_at": 1793156345,
+              "exit_code": 0,
+              "iterations": [
+                []
+              ],
+              "key": 0,
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+              "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
+              "outcome": "succeeded",
+              "started_at": 1793156341
+            },
+            {
+              "completed_at": 1793156346,
+              "exit_code": 0,
+              "iterations": [
+                []
+              ],
+              "key": 1,
+              "label": "task complete FIX-1",
+              "lf_process_id": "8cb12475-d978-4dd0-b8e6-7d8a14dbe2ed",
+              "outcome": "succeeded",
+              "started_at": 1793156345
+            }
+          ]
+        },
+        "next_move": {
+          "owner": "wave",
+          "reason": "done"
+        },
+        "pr": {
+          "abandoned_at": null,
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+          "branch": "main",
+          "empty": null,
+          "id": "pr_2e492a0843654e498dd4b096deb1032c",
+          "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+          "phase": "merged",
+          "publication": {
+            "github": {
+              "number": 1,
+              "url": "https://github.com/loopflowstudio/fixture/pull/1"
+            },
+            "merge": null,
+            "presentation": null,
+            "requested_at": "2026-10-28T02:58:55Z"
+          },
+          "sequence": 1,
+          "slug": "delivery"
+        },
+        "reference": {
+          "issue_url": "https://linear.app/fixture/issue/FIX-1",
+          "workspace": {
+            "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+            "branch": "main",
+            "local_exists": true,
+            "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
+            "machine_label": null,
+            "slug": "delivery",
+            "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+          }
+        },
+        "run_control": {
+          "unavailable": "Task is complete"
+        },
+        "runtime": {
+          "completion_pending": null,
+          "owner": {
+            "machine": {
+              "id": "home_56b1a8e309681768d26f79bf86b9d93c",
+              "label": "Jacks-MacBook-Pro-2"
+            },
+            "person": "Jack Heart",
+            "person_key": "test@test.com"
+          },
+          "provider": "codex",
+          "reason": "done",
+          "status": "done",
+          "updated_at": "2026-10-28T02:59:03Z",
+          "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+        },
+        "section": "later",
+        "ship_control": {
+          "unavailable": "Task is complete"
+        },
+        "shipping": null,
+        "task": {
+          "acquisition": {
+            "observed_at": 1793156337,
+            "state": "available"
+          },
+          "assignee": null,
+          "completed_at": "2026-10-28T02:59:03.042503Z",
+          "description": "",
+          "due_date": null,
+          "id": "task_9d1de6a17408459aa2db78181c5fb02a",
+          "identifier": "FIX-1",
+          "linear_id": "source-issue",
+          "name": "Deliver the command",
+          "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
+          "rank": 0,
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "state": "completed",
+          "sync": {
+            "changes": [
+              {
+                "error": null,
+                "field": "state",
+                "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
+                "linear_value": "unstarted",
+                "local_value": "started",
+                "state": "adopted_linear"
+              },
+              {
+                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
+                "field": "state",
+                "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
+                "linear_value": null,
+                "local_value": "completed",
+                "state": "pending"
+              },
+              {
+                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+                "field": "comment",
+                "id": "57952d15-3228-4c75-8669-82a2f150e012",
+                "linear_value": null,
+                "local_value": {
+                  "author": {
+                    "kind": "integration"
+                  },
+                  "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+                  "created_at": "2026-10-28T02:58:56.626836Z",
+                  "id": "57952d15-3228-4c75-8669-82a2f150e012"
+                },
+                "state": "pending"
+              },
+              {
+                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+                "field": "comment",
+                "id": "2e5de426-1620-43a5-a234-6b203e56f531",
+                "linear_value": null,
+                "local_value": {
+                  "author": {
+                    "kind": "person",
+                    "name": "Jack Heart"
+                  },
+                  "body": "Installed verification continues in 6413b1.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:2e5de426-1620-43a5-a234-6b203e56f531 -->",
+                  "created_at": "2026-10-28T02:59:02.871386Z",
+                  "id": "2e5de426-1620-43a5-a234-6b203e56f531"
+                },
+                "state": "pending"
+              }
+            ],
+            "connected": true
+          },
+          "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+        }
       },
       "sync": {
         "changes": [
           {
             "error": null,
             "field": "state",
-            "id": "7610233c-2464-4584-a35f-fc1a5ddc00e9",
+            "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
             "linear_value": "unstarted",
             "local_value": "started",
             "state": "adopted_linear"
@@ -922,39 +945,39 @@
           {
             "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
             "field": "state",
-            "id": "0c8811a9-4806-4b25-b5e5-b25de519a08c",
+            "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
             "linear_value": null,
             "local_value": "completed",
             "state": "pending"
           },
           {
-            "error": "Comment ccdb1e36-3455-4822-a3e2-bf3b41a36604 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "field": "comment",
-            "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604",
+            "id": "57952d15-3228-4c75-8669-82a2f150e012",
             "linear_value": null,
             "local_value": {
               "author": {
                 "kind": "integration"
               },
-              "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-              "created_at": "2026-10-27T02:10:11.938197Z",
-              "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+              "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+              "created_at": "2026-10-28T02:58:56.626836Z",
+              "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
             "state": "pending"
           },
           {
-            "error": "Comment fdf6bd18-5bd3-471a-b06e-504e7b6ee853 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "field": "comment",
-            "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853",
+            "id": "2e5de426-1620-43a5-a234-6b203e56f531",
             "linear_value": null,
             "local_value": {
               "author": {
                 "kind": "person",
                 "name": "Jack Heart"
               },
-              "body": "Installed verification continues in a0676c.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:fdf6bd18-5bd3-471a-b06e-504e7b6ee853 -->",
-              "created_at": "2026-10-27T02:10:16.11684Z",
-              "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853"
+              "body": "Installed verification continues in 6413b1.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:2e5de426-1620-43a5-a234-6b203e56f531 -->",
+              "created_at": "2026-10-28T02:59:02.871386Z",
+              "id": "2e5de426-1620-43a5-a234-6b203e56f531"
             },
             "state": "pending"
           }
@@ -964,32 +987,32 @@
       "task": {
         "agent": null,
         "assignee": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
-        "completed_at": "2026-10-27T02:10:16.197108Z",
-        "created_at": "2026-10-27T02:10:11Z",
+        "completed_at": "2026-10-28T02:59:03.042503Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "due_date": null,
-        "id": "task_001b5cc8a08c48059b44030d6f184432",
+        "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
         "linear_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "pm_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
         },
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 6,
         "state": "completed",
         "title": "Deliver the command",
-        "updated_at": "2026-10-27T02:10:16Z",
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39",
+        "updated_at": "2026-10-28T02:59:03Z",
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
       }
     }
   },
@@ -1009,49 +1032,21 @@
           "state": "observed",
           "unsettled": true
         },
-        "observed_at": "2026-10-27T02:10:16.481116Z",
-        "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+        "observed_at": "2026-10-28T02:59:03.545382Z",
+        "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "state": "clear",
         "unresolved_execution": true
       },
       "execution": {
         "captured": null,
-        "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+        "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "state": "running",
-        "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py"
+        "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
       },
+      "graph_name": "delivery",
+      "graph_source": "task",
       "latest_graph_process": {
         "compiled": {
-          "interactions": {
-            "stages": [],
-            "transitions": [
-              {
-                "from": "@start",
-                "nodes": [
-                  "0",
-                  "1"
-                ],
-                "routes": [
-                  {
-                    "condition": null,
-                    "from": "@start",
-                    "to": "0"
-                  },
-                  {
-                    "condition": null,
-                    "from": "0",
-                    "to": "1"
-                  },
-                  {
-                    "condition": null,
-                    "from": "1",
-                    "to": "@end"
-                  }
-                ],
-                "to": "@end"
-              }
-            ]
-          },
           "name": "delivery",
           "steps": [
             {
@@ -1059,7 +1054,7 @@
               "interactive": false,
               "key": 0,
               "kind": "op",
-              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
               "paths": [],
               "returns_to": null,
               "sources": [
@@ -1082,16 +1077,16 @@
         },
         "completed": [],
         "current": 0,
-        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "entry": {
           "ended_at": null,
-          "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+          "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
           "name": "delivery",
-          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
           "state": "current",
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-          "updated_at": 1793067015,
-          "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+          "updated_at": 1793156341,
+          "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "iterations": [
           []
@@ -1105,10 +1100,10 @@
               []
             ],
             "key": 0,
-            "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
-            "lf_process_id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
+            "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+            "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
             "outcome": null,
-            "started_at": 1793067015
+            "started_at": 1793156341
           }
         ]
       },
@@ -1118,11 +1113,11 @@
       },
       "pr": {
         "abandoned_at": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "empty": null,
-        "id": "pr_66a41b3c379d4ed4ad05d151ba4191c0",
-        "merge_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "id": "pr_2e492a0843654e498dd4b096deb1032c",
+        "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "phase": "merged",
         "publication": {
           "github": {
@@ -1131,7 +1126,7 @@
           },
           "merge": null,
           "presentation": null,
-          "requested_at": "2026-10-27T02:10:11Z"
+          "requested_at": "2026-10-28T02:58:55Z"
         },
         "sequence": 1,
         "slug": "delivery"
@@ -1139,13 +1134,13 @@
       "reference": {
         "issue_url": "https://linear.app/fixture/issue/FIX-1",
         "workspace": {
-          "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "branch": "main",
           "local_exists": true,
-          "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+          "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
           "machine_label": null,
           "slug": "delivery",
-          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
         }
       },
       "run_control": {
@@ -1155,7 +1150,7 @@
         "completion_pending": null,
         "owner": {
           "machine": {
-            "id": "home_6882224806cd48ae2be22a300d5b573b",
+            "id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
@@ -1164,8 +1159,8 @@
         "provider": "codex",
         "reason": "done",
         "status": "done",
-        "updated_at": "2026-10-27T02:10:16Z",
-        "work_id": "task_001b5cc8a08c48059b44030d6f184432"
+        "updated_at": "2026-10-28T02:59:03Z",
+        "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "later",
       "ship_control": {
@@ -1174,28 +1169,28 @@
       "shipping": null,
       "task": {
         "acquisition": {
-          "observed_at": 1793067012,
+          "observed_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
-        "completed_at": "2026-10-27T02:10:16.197108Z",
+        "completed_at": "2026-10-28T02:59:03.042503Z",
         "description": "",
         "due_date": null,
-        "id": "task_001b5cc8a08c48059b44030d6f184432",
+        "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
         "linear_id": "source-issue",
         "name": "Deliver the command",
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
           "changes": [
             {
               "error": null,
               "field": "state",
-              "id": "7610233c-2464-4584-a35f-fc1a5ddc00e9",
+              "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
               "linear_value": "unstarted",
               "local_value": "started",
               "state": "adopted_linear"
@@ -1203,49 +1198,47 @@
             {
               "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
               "field": "state",
-              "id": "0c8811a9-4806-4b25-b5e5-b25de519a08c",
+              "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
               "linear_value": null,
               "local_value": "completed",
               "state": "pending"
             },
             {
-              "error": "Comment ccdb1e36-3455-4822-a3e2-bf3b41a36604 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "field": "comment",
-              "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604",
+              "id": "57952d15-3228-4c75-8669-82a2f150e012",
               "linear_value": null,
               "local_value": {
                 "author": {
                   "kind": "integration"
                 },
-                "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-                "created_at": "2026-10-27T02:10:11.938197Z",
-                "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+                "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+                "created_at": "2026-10-28T02:58:56.626836Z",
+                "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
               "state": "pending"
             },
             {
-              "error": "Comment fdf6bd18-5bd3-471a-b06e-504e7b6ee853 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "field": "comment",
-              "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853",
+              "id": "2e5de426-1620-43a5-a234-6b203e56f531",
               "linear_value": null,
               "local_value": {
                 "author": {
                   "kind": "person",
                   "name": "Jack Heart"
                 },
-                "body": "Installed verification continues in a0676c.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:fdf6bd18-5bd3-471a-b06e-504e7b6ee853 -->",
-                "created_at": "2026-10-27T02:10:16.11684Z",
-                "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853"
+                "body": "Installed verification continues in 6413b1.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:2e5de426-1620-43a5-a234-6b203e56f531 -->",
+                "created_at": "2026-10-28T02:59:02.871386Z",
+                "id": "2e5de426-1620-43a5-a234-6b203e56f531"
               },
               "state": "pending"
             }
           ],
           "connected": true
         },
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
-      },
-      "workflow_name": "delivery",
-      "workflow_source": "task"
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+      }
     },
     "status": {
       "comments": {
@@ -1254,25 +1247,25 @@
             "author": {
               "kind": "integration"
             },
-            "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-            "created_at": "2026-10-27T02:10:11.938197Z",
-            "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+            "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+            "created_at": "2026-10-28T02:58:56.626836Z",
+            "id": "57952d15-3228-4c75-8669-82a2f150e012"
           },
           {
             "author": {
               "kind": "person",
               "name": "Jack Heart"
             },
-            "body": "Installed verification continues in a0676c.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:fdf6bd18-5bd3-471a-b06e-504e7b6ee853 -->",
-            "created_at": "2026-10-27T02:10:16.11684Z",
-            "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853"
+            "body": "Installed verification continues in 6413b1.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:2e5de426-1620-43a5-a234-6b203e56f531 -->",
+            "created_at": "2026-10-28T02:59:02.871386Z",
+            "id": "2e5de426-1620-43a5-a234-6b203e56f531"
           }
         ],
         "conflicts": {},
         "identifier": "FIX-1",
         "pending_sync": [
-          "ccdb1e36-3455-4822-a3e2-bf3b41a36604",
-          "fdf6bd18-5bd3-471a-b06e-504e7b6ee853"
+          "57952d15-3228-4c75-8669-82a2f150e012",
+          "2e5de426-1620-43a5-a234-6b203e56f531"
         ],
         "refresh_error": null
       },
@@ -1282,15 +1275,15 @@
           "recommended": "no_action"
         },
         "agent": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
-        "created_at": "2026-10-27T02:10:11Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
-          "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+          "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
-          "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py"
+          "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
         },
         "external_project_id": "project-1",
         "issue_id": "source-issue",
@@ -1298,10 +1291,10 @@
         "latest_event": {
           "created_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            16,
+            59,
+            3,
             0,
             0,
             0,
@@ -1312,13 +1305,13 @@
             "kind": "completed",
             "summary": "Task completed"
           },
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432"
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+        "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "pm_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
@@ -1326,15 +1319,15 @@
         },
         "pr": {
           "abandoned_at": null,
-          "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "branch": "main",
           "ci_observation": null,
           "created_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            11,
+            58,
+            55,
             0,
             0,
             0,
@@ -1343,11 +1336,11 @@
           "github_observation": {
             "checked_at": [
               2026,
-              300,
+              301,
               2,
-              10,
-              15,
-              425456000,
+              59,
+              1,
+              558346000,
               0,
               0,
               0
@@ -1356,15 +1349,15 @@
               "state": "fresh"
             }
           },
-          "id": "pr_66a41b3c379d4ed4ad05d151ba4191c0",
+          "id": "pr_2e492a0843654e498dd4b096deb1032c",
           "linear_attachment_id": null,
           "linear_comment_id": null,
           "linear_link_error": null,
-          "merge_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "parent_pr_id": null,
           "publication": {
             "github": {
-              "head_sha": "94adecc7d5014396214361c255f3c54f62cd8654",
+              "head_sha": "b61ecfe45224df107655f39cb4fb48646e97659a",
               "number": 1,
               "url": "https://github.com/loopflowstudio/fixture/pull/1"
             },
@@ -1372,10 +1365,10 @@
             "presentation": null,
             "requested_at": [
               2026,
-              300,
+              301,
               2,
-              10,
-              11,
+              58,
+              55,
               0,
               0,
               0,
@@ -1384,13 +1377,13 @@
           },
           "sequence": 1,
           "slug": "delivery",
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432",
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "updated_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            15,
+            59,
+            1,
             0,
             0,
             0,
@@ -1398,24 +1391,34 @@
           ]
         },
         "project": "provider-destination",
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "done",
-        "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-        "updated_at": "2026-10-27T02:10:16Z",
+        "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+        "updated_at": "2026-10-28T02:59:03Z",
         "wave": "product",
         "work": {
+          "graph": {
+            "interactive_steps": [],
+            "name": "delivery",
+            "position": {
+              "kind": "run",
+              "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
+              "running": true,
+              "step": "start"
+            }
+          },
           "graph_processes": [
             {
               "ended_at": null,
-              "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
               "name": "delivery",
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "state": "current",
-              "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-              "updated_at": 1793067015,
-              "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+              "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "updated_at": 1793156341,
+              "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
           "processes": [
@@ -1423,105 +1426,21 @@
               "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
               "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": null,
-              "id": "a9ec2acb-c7c9-4abe-b76f-893cb1d128dd",
+              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
               "kind": "lf",
-              "os_started_at": 1793067016,
+              "os_started_at": 1793156341,
               "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 52641,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+              "pid": 76819,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067016,
-              "trace_id": "538c2b44-a8b5-4f25-a615-588ca01764c1",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
-              "completed_at": 1793067015,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": 0,
-              "id": "2bbdd5d7-04da-4f3a-8f38-ad8612f10952",
-              "kind": "lf",
-              "os_started_at": 1793067015,
-              "outcome": "succeeded",
-              "parent_lf_process_id": null,
-              "pid": 52470,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "bcbb5508-ce92-4011-b24e-9b40abba7cc0",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": null,
-              "id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
-              "kind": "lf",
-              "os_started_at": 1793067015,
-              "outcome": null,
-              "parent_lf_process_id": "c3d2b74a-c9df-4d89-9959-826af1249029",
-              "pid": 52387,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_001b5cc8a08c48059b44030d6f184432\",\"graph\",\"route\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": null,
-              "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
-              "kind": "lf",
-              "os_started_at": 1793067015,
-              "outcome": null,
-              "parent_lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "pid": 52294,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": null,
-              "id": "497161c0-0757-4607-ba83-430ddb1874c7",
-              "kind": "lf",
-              "os_started_at": 1793067012,
-              "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 51393,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156341,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             },
             {
@@ -1530,19 +1449,19 @@
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
               "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": null,
-              "id": "72f859a8-812f-4b35-9f9b-2bac67be60c6",
+              "id": "0890211c-c3ff-460e-837e-de35e8580176",
               "kind": "lf",
-              "os_started_at": 1793067014,
+              "os_started_at": 1793156340,
               "outcome": null,
-              "parent_lf_process_id": "497161c0-0757-4607-ba83-430ddb1874c7",
-              "pid": 52152,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
+              "pid": 76404,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             },
             {
@@ -1551,104 +1470,72 @@
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
               "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": null,
-              "id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
+              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "kind": "lf",
-              "os_started_at": 1793067014,
+              "os_started_at": 1793156340,
               "outcome": null,
-              "parent_lf_process_id": "72f859a8-812f-4b35-9f9b-2bac67be60c6",
-              "pid": 52177,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
+              "pid": 76451,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
+              "via_agent": false
+            },
+            {
+              "agent_session_id": null,
+              "caller_agent_process_id": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "error": null,
+              "exit_code": null,
+              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+              "kind": "lf",
+              "os_started_at": 1793156340,
+              "outcome": null,
+              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
+              "pid": 76666,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "signal": null,
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
+              "via_agent": false
+            },
+            {
+              "agent_session_id": null,
+              "caller_agent_process_id": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "error": null,
+              "exit_code": null,
+              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
+              "kind": "lf",
+              "os_started_at": 1793156337,
+              "outcome": null,
+              "parent_lf_process_id": null,
+              "pid": 75863,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "signal": null,
+              "started_at": 1793156339,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             }
           ],
-          "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793067015,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793067015,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
-            "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
-            "position": {
-              "edge": 0,
-              "kind": "edge",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "running": true
-            }
-          }
+          "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
       },
       "graph_processes": [
         {
           "compiled": {
-            "interactions": {
-              "stages": [],
-              "transitions": [
-                {
-                  "from": "@start",
-                  "nodes": [
-                    "0",
-                    "1"
-                  ],
-                  "routes": [
-                    {
-                      "condition": null,
-                      "from": "@start",
-                      "to": "0"
-                    },
-                    {
-                      "condition": null,
-                      "from": "0",
-                      "to": "1"
-                    },
-                    {
-                      "condition": null,
-                      "from": "1",
-                      "to": "@end"
-                    }
-                  ],
-                  "to": "@end"
-                }
-              ]
-            },
             "name": "delivery",
             "steps": [
               {
@@ -1656,7 +1543,7 @@
                 "interactive": false,
                 "key": 0,
                 "kind": "op",
-                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
                 "paths": [],
                 "returns_to": null,
                 "sources": [
@@ -1679,16 +1566,16 @@
           },
           "completed": [],
           "current": 0,
-          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
           "entry": {
             "ended_at": null,
-            "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
             "name": "delivery",
-            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
             "state": "current",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-            "updated_at": 1793067015,
-            "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156341,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
           },
           "iterations": [
             []
@@ -1702,90 +1589,56 @@
                 []
               ],
               "key": 0,
-              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
-              "lf_process_id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+              "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
               "outcome": null,
-              "started_at": 1793067015
+              "started_at": 1793156341
             }
           ]
         }
       ],
-      "observed_at": 1793067012,
+      "observed_at": 1793156337,
       "overview": {
+        "graph": {
+          "interactive_steps": [],
+          "name": "delivery",
+          "position": {
+            "kind": "run",
+            "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
+            "running": true,
+            "step": "start"
+          }
+        },
         "graph_processes": [
           {
             "ended_at": null,
-            "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
             "name": "delivery",
-            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
             "state": "current",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-            "updated_at": 1793067015,
-            "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156341,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
           }
         ],
-        "sessions": [],
-        "workflow": {
-          "edges": [
-            {
-              "from": "start",
-              "name": "session",
-              "to": "end"
-            }
-          ],
-          "history": [
-            {
-              "actor": "person",
-              "at": 1793067015,
-              "edge": null,
-              "from": "start",
-              "kind": "took_up",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "note": null,
-              "session_id": null,
-              "to": "start",
-              "workflow": "delivery"
-            },
-            {
-              "actor": "person",
-              "at": 1793067015,
-              "edge": 0,
-              "from": "start",
-              "kind": "chose",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "note": null,
-              "session_id": null,
-              "to": "end",
-              "workflow": "delivery"
-            }
-          ],
-          "name": "delivery",
-          "nodes": [],
-          "outgoing": [],
-          "position": {
-            "edge": 0,
-            "kind": "edge",
-            "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-            "running": true
-          }
-        }
+        "sessions": []
       },
       "ownership": {
         "log": [
           {
-            "at": 1793067011,
-            "id": "own_393394a8e0c946438163b3542d4e4773",
+            "at": 1793156336,
+            "id": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "kind": "claim",
-            "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+            "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
             "person_key": "test@test.com",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
           }
         ],
         "owner": {
           "machine": {
-            "id": "home_6882224806cd48ae2be22a300d5b573b",
+            "id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
@@ -1797,26 +1650,249 @@
       "planning_stale": false,
       "planning_state": "available",
       "project": {
-        "created_at": "2026-10-27T02:10:11Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "description": "",
-        "id": "proj_fcc14e46784e469787319842c5753ec9",
+        "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
         "linear_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
-        "updated_at": "2026-10-27T02:10:12Z",
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+        "updated_at": "2026-10-28T02:58:56Z",
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+      },
+      "row": {
+        "actions": {
+          "reason": "Task is terminal",
+          "recommended": "no_action"
+        },
+        "condition": {
+          "evidence_age_secs": 0,
+          "local_progress": {
+            "authored_commits": false,
+            "dirty": true,
+            "reason": null,
+            "recovery_required": false,
+            "state": "observed",
+            "unsettled": true
+          },
+          "observed_at": "2026-10-28T02:59:03.362368Z",
+          "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+          "state": "clear",
+          "unresolved_execution": true
+        },
+        "execution": {
+          "captured": null,
+          "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+          "state": "running",
+          "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
+        },
+        "graph_name": "delivery",
+        "graph_source": "task",
+        "latest_graph_process": {
+          "compiled": {
+            "name": "delivery",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "delivery"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "op",
+                "label": "task complete FIX-1",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "delivery"
+                ]
+              }
+            ]
+          },
+          "completed": [],
+          "current": 0,
+          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+          "entry": {
+            "ended_at": null,
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+            "name": "delivery",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+            "state": "current",
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156341,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+          },
+          "iterations": [
+            []
+          ],
+          "returns": [],
+          "steps": [
+            {
+              "completed_at": null,
+              "exit_code": null,
+              "iterations": [
+                []
+              ],
+              "key": 0,
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+              "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
+              "outcome": null,
+              "started_at": 1793156341
+            }
+          ]
+        },
+        "next_move": {
+          "owner": "wave",
+          "reason": "done"
+        },
+        "pr": {
+          "abandoned_at": null,
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+          "branch": "main",
+          "empty": null,
+          "id": "pr_2e492a0843654e498dd4b096deb1032c",
+          "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+          "phase": "merged",
+          "publication": {
+            "github": {
+              "number": 1,
+              "url": "https://github.com/loopflowstudio/fixture/pull/1"
+            },
+            "merge": null,
+            "presentation": null,
+            "requested_at": "2026-10-28T02:58:55Z"
+          },
+          "sequence": 1,
+          "slug": "delivery"
+        },
+        "reference": {
+          "issue_url": "https://linear.app/fixture/issue/FIX-1",
+          "workspace": {
+            "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+            "branch": "main",
+            "local_exists": true,
+            "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
+            "machine_label": null,
+            "slug": "delivery",
+            "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+          }
+        },
+        "run_control": {
+          "unavailable": "Task is complete"
+        },
+        "runtime": {
+          "completion_pending": null,
+          "owner": {
+            "machine": {
+              "id": "home_56b1a8e309681768d26f79bf86b9d93c",
+              "label": "Jacks-MacBook-Pro-2"
+            },
+            "person": "Jack Heart",
+            "person_key": "test@test.com"
+          },
+          "provider": "codex",
+          "reason": "done",
+          "status": "done",
+          "updated_at": "2026-10-28T02:59:03Z",
+          "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+        },
+        "section": "later",
+        "ship_control": {
+          "unavailable": "Task is complete"
+        },
+        "shipping": null,
+        "task": {
+          "acquisition": {
+            "observed_at": 1793156337,
+            "state": "available"
+          },
+          "assignee": null,
+          "completed_at": "2026-10-28T02:59:03.042503Z",
+          "description": "",
+          "due_date": null,
+          "id": "task_9d1de6a17408459aa2db78181c5fb02a",
+          "identifier": "FIX-1",
+          "linear_id": "source-issue",
+          "name": "Deliver the command",
+          "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
+          "rank": 0,
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "state": "completed",
+          "sync": {
+            "changes": [
+              {
+                "error": null,
+                "field": "state",
+                "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
+                "linear_value": "unstarted",
+                "local_value": "started",
+                "state": "adopted_linear"
+              },
+              {
+                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
+                "field": "state",
+                "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
+                "linear_value": null,
+                "local_value": "completed",
+                "state": "pending"
+              },
+              {
+                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+                "field": "comment",
+                "id": "57952d15-3228-4c75-8669-82a2f150e012",
+                "linear_value": null,
+                "local_value": {
+                  "author": {
+                    "kind": "integration"
+                  },
+                  "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+                  "created_at": "2026-10-28T02:58:56.626836Z",
+                  "id": "57952d15-3228-4c75-8669-82a2f150e012"
+                },
+                "state": "pending"
+              },
+              {
+                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+                "field": "comment",
+                "id": "2e5de426-1620-43a5-a234-6b203e56f531",
+                "linear_value": null,
+                "local_value": {
+                  "author": {
+                    "kind": "person",
+                    "name": "Jack Heart"
+                  },
+                  "body": "Installed verification continues in 6413b1.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:2e5de426-1620-43a5-a234-6b203e56f531 -->",
+                  "created_at": "2026-10-28T02:59:02.871386Z",
+                  "id": "2e5de426-1620-43a5-a234-6b203e56f531"
+                },
+                "state": "pending"
+              }
+            ],
+            "connected": true
+          },
+          "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+        }
       },
       "sync": {
         "changes": [
           {
             "error": null,
             "field": "state",
-            "id": "7610233c-2464-4584-a35f-fc1a5ddc00e9",
+            "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
             "linear_value": "unstarted",
             "local_value": "started",
             "state": "adopted_linear"
@@ -1824,39 +1900,39 @@
           {
             "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
             "field": "state",
-            "id": "0c8811a9-4806-4b25-b5e5-b25de519a08c",
+            "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
             "linear_value": null,
             "local_value": "completed",
             "state": "pending"
           },
           {
-            "error": "Comment ccdb1e36-3455-4822-a3e2-bf3b41a36604 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "field": "comment",
-            "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604",
+            "id": "57952d15-3228-4c75-8669-82a2f150e012",
             "linear_value": null,
             "local_value": {
               "author": {
                 "kind": "integration"
               },
-              "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-              "created_at": "2026-10-27T02:10:11.938197Z",
-              "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+              "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+              "created_at": "2026-10-28T02:58:56.626836Z",
+              "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
             "state": "pending"
           },
           {
-            "error": "Comment fdf6bd18-5bd3-471a-b06e-504e7b6ee853 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
+            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "field": "comment",
-            "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853",
+            "id": "2e5de426-1620-43a5-a234-6b203e56f531",
             "linear_value": null,
             "local_value": {
               "author": {
                 "kind": "person",
                 "name": "Jack Heart"
               },
-              "body": "Installed verification continues in a0676c.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:fdf6bd18-5bd3-471a-b06e-504e7b6ee853 -->",
-              "created_at": "2026-10-27T02:10:16.11684Z",
-              "id": "fdf6bd18-5bd3-471a-b06e-504e7b6ee853"
+              "body": "Installed verification continues in 6413b1.\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-steer:2e5de426-1620-43a5-a234-6b203e56f531 -->",
+              "created_at": "2026-10-28T02:59:02.871386Z",
+              "id": "2e5de426-1620-43a5-a234-6b203e56f531"
             },
             "state": "pending"
           }
@@ -1866,32 +1942,32 @@
       "task": {
         "agent": null,
         "assignee": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
-        "completed_at": "2026-10-27T02:10:16.197108Z",
-        "created_at": "2026-10-27T02:10:11Z",
+        "completed_at": "2026-10-28T02:59:03.042503Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "due_date": null,
-        "id": "task_001b5cc8a08c48059b44030d6f184432",
+        "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
         "linear_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "pm_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
         },
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 6,
         "state": "completed",
         "title": "Deliver the command",
-        "updated_at": "2026-10-27T02:10:16Z",
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39",
+        "updated_at": "2026-10-28T02:59:03Z",
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
       }
     }
   },
@@ -1902,7 +1978,7 @@
         "recommended": "no_action"
       },
       "condition": {
-        "evidence_age_secs": 0,
+        "evidence_age_secs": 2,
         "local_progress": {
           "authored_commits": false,
           "dirty": true,
@@ -1911,49 +1987,21 @@
           "state": "observed",
           "unsettled": true
         },
-        "observed_at": "2026-10-27T02:10:15.854473Z",
-        "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+        "observed_at": "2026-10-28T02:59:02.287761Z",
+        "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "state": "clear",
         "unresolved_execution": true
       },
       "execution": {
         "captured": null,
-        "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+        "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "state": "running",
-        "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py"
+        "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
       },
+      "graph_name": "delivery",
+      "graph_source": "task",
       "latest_graph_process": {
         "compiled": {
-          "interactions": {
-            "stages": [],
-            "transitions": [
-              {
-                "from": "@start",
-                "nodes": [
-                  "0",
-                  "1"
-                ],
-                "routes": [
-                  {
-                    "condition": null,
-                    "from": "@start",
-                    "to": "0"
-                  },
-                  {
-                    "condition": null,
-                    "from": "0",
-                    "to": "1"
-                  },
-                  {
-                    "condition": null,
-                    "from": "1",
-                    "to": "@end"
-                  }
-                ],
-                "to": "@end"
-              }
-            ]
-          },
           "name": "delivery",
           "steps": [
             {
@@ -1961,7 +2009,7 @@
               "interactive": false,
               "key": 0,
               "kind": "op",
-              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
               "paths": [],
               "returns_to": null,
               "sources": [
@@ -1984,16 +2032,16 @@
         },
         "completed": [],
         "current": 0,
-        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+        "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "entry": {
           "ended_at": null,
-          "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+          "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
           "name": "delivery",
-          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
           "state": "current",
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-          "updated_at": 1793067015,
-          "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+          "updated_at": 1793156341,
+          "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
         "iterations": [
           []
@@ -2007,24 +2055,24 @@
               []
             ],
             "key": 0,
-            "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
-            "lf_process_id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
+            "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+            "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
             "outcome": null,
-            "started_at": 1793067015
+            "started_at": 1793156341
           }
         ]
       },
       "next_move": {
         "owner": "task",
-        "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py"
+        "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
       },
       "pr": {
         "abandoned_at": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "empty": null,
-        "id": "pr_66a41b3c379d4ed4ad05d151ba4191c0",
-        "merge_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "id": "pr_2e492a0843654e498dd4b096deb1032c",
+        "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "phase": "merged",
         "publication": {
           "github": {
@@ -2033,7 +2081,7 @@
           },
           "merge": null,
           "presentation": null,
-          "requested_at": "2026-10-27T02:10:11Z"
+          "requested_at": "2026-10-28T02:58:55Z"
         },
         "sequence": 1,
         "slug": "delivery"
@@ -2041,13 +2089,13 @@
       "reference": {
         "issue_url": "https://linear.app/fixture/issue/FIX-1",
         "workspace": {
-          "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "branch": "main",
           "local_exists": true,
-          "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+          "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
           "machine_label": null,
           "slug": "delivery",
-          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+          "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
         }
       },
       "run_control": {
@@ -2057,51 +2105,51 @@
         "completion_pending": null,
         "owner": {
           "machine": {
-            "id": "home_6882224806cd48ae2be22a300d5b573b",
+            "id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
           "person_key": "test@test.com"
         },
         "provider": "codex",
-        "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+        "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
         "status": "shipping",
-        "updated_at": "2026-10-27T02:10:15Z",
-        "work_id": "task_001b5cc8a08c48059b44030d6f184432"
+        "updated_at": "2026-10-28T02:59:00Z",
+        "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
       "section": "now",
       "ship_control": {
         "unavailable": "Task is already shipping"
       },
       "shipping": {
-        "reason": "session → end",
-        "shipped_at": 1793067015,
+        "reason": "running from start",
+        "shipped_at": 1793156340,
         "state": "building"
       },
       "task": {
         "acquisition": {
-          "observed_at": 1793067012,
+          "observed_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
         "completed_at": null,
         "description": "",
         "due_date": null,
-        "id": "task_001b5cc8a08c48059b44030d6f184432",
+        "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
         "linear_id": "source-issue",
         "name": "Deliver the command",
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "unstarted",
         "sync": {
           "changes": [
             {
               "error": null,
               "field": "state",
-              "id": "7610233c-2464-4584-a35f-fc1a5ddc00e9",
+              "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
               "linear_value": "unstarted",
               "local_value": "started",
               "state": "adopted_linear"
@@ -2109,25 +2157,23 @@
             {
               "error": null,
               "field": "comment",
-              "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604",
+              "id": "57952d15-3228-4c75-8669-82a2f150e012",
               "linear_value": null,
               "local_value": {
                 "author": {
                   "kind": "integration"
                 },
-                "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-                "created_at": "2026-10-27T02:10:11.938197Z",
-                "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+                "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+                "created_at": "2026-10-28T02:58:56.626836Z",
+                "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
               "state": "pending"
             }
           ],
           "connected": true
         },
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
-      },
-      "workflow_name": "delivery",
-      "workflow_source": "task"
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+      }
     },
     "status": {
       "comments": {
@@ -2136,15 +2182,15 @@
             "author": {
               "kind": "integration"
             },
-            "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-            "created_at": "2026-10-27T02:10:11.938197Z",
-            "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+            "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+            "created_at": "2026-10-28T02:58:56.626836Z",
+            "id": "57952d15-3228-4c75-8669-82a2f150e012"
           }
         ],
         "conflicts": {},
         "identifier": "FIX-1",
         "pending_sync": [
-          "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+          "57952d15-3228-4c75-8669-82a2f150e012"
         ],
         "refresh_error": null
       },
@@ -2154,15 +2200,15 @@
           "recommended": "no_action"
         },
         "agent": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
-        "created_at": "2026-10-27T02:10:11Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "execution": {
           "captured": null,
-          "reason": "Step Process 862896cc-1e8a-4ab9-b1e5-e2af1e161587 is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+          "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
           "state": "running",
-          "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py"
+          "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
         },
         "external_project_id": "project-1",
         "issue_id": "source-issue",
@@ -2170,10 +2216,10 @@
         "latest_event": {
           "created_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            15,
+            59,
+            1,
             0,
             0,
             0,
@@ -2182,33 +2228,33 @@
           "id": 4,
           "kind": {
             "kind": "pr_merged",
-            "merge_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+            "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
             "number": 1,
-            "pr_id": "pr_66a41b3c379d4ed4ad05d151ba4191c0",
+            "pr_id": "pr_2e492a0843654e498dd4b096deb1032c",
             "sequence": 1,
             "url": "https://github.com/loopflowstudio/fixture/pull/1"
           },
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432"
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+        "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "pm_writeback": {
           "state": "current"
         },
         "pr": {
           "abandoned_at": null,
-          "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "branch": "main",
           "ci_observation": null,
           "created_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            11,
+            58,
+            55,
             0,
             0,
             0,
@@ -2217,11 +2263,11 @@
           "github_observation": {
             "checked_at": [
               2026,
-              300,
+              301,
               2,
-              10,
-              15,
-              425456000,
+              59,
+              1,
+              558346000,
               0,
               0,
               0
@@ -2230,15 +2276,15 @@
               "state": "fresh"
             }
           },
-          "id": "pr_66a41b3c379d4ed4ad05d151ba4191c0",
+          "id": "pr_2e492a0843654e498dd4b096deb1032c",
           "linear_attachment_id": null,
           "linear_comment_id": null,
           "linear_link_error": null,
-          "merge_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+          "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
           "parent_pr_id": null,
           "publication": {
             "github": {
-              "head_sha": "94adecc7d5014396214361c255f3c54f62cd8654",
+              "head_sha": "b61ecfe45224df107655f39cb4fb48646e97659a",
               "number": 1,
               "url": "https://github.com/loopflowstudio/fixture/pull/1"
             },
@@ -2246,10 +2292,10 @@
             "presentation": null,
             "requested_at": [
               2026,
-              300,
+              301,
               2,
-              10,
-              11,
+              58,
+              55,
               0,
               0,
               0,
@@ -2258,13 +2304,13 @@
           },
           "sequence": 1,
           "slug": "delivery",
-          "task_id": "task_001b5cc8a08c48059b44030d6f184432",
+          "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "updated_at": [
             2026,
-            300,
+            301,
             2,
-            10,
-            15,
+            59,
+            1,
             0,
             0,
             0,
@@ -2272,24 +2318,34 @@
           ]
         },
         "project": "provider-destination",
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "provider": "codex",
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "status": "shipping",
-        "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-        "updated_at": "2026-10-27T02:10:15Z",
+        "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+        "updated_at": "2026-10-28T02:59:00Z",
         "wave": "product",
         "work": {
+          "graph": {
+            "interactive_steps": [],
+            "name": "delivery",
+            "position": {
+              "kind": "run",
+              "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
+              "running": true,
+              "step": "start"
+            }
+          },
           "graph_processes": [
             {
               "ended_at": null,
-              "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
               "name": "delivery",
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "state": "current",
-              "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-              "updated_at": 1793067015,
-              "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+              "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "updated_at": 1793156341,
+              "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
           "processes": [
@@ -2297,84 +2353,21 @@
               "agent_session_id": null,
               "caller_agent_process_id": null,
               "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"status\",\"FIX-1\",\"--json\"]",
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
               "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": null,
-              "id": "2bbdd5d7-04da-4f3a-8f38-ad8612f10952",
+              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
               "kind": "lf",
-              "os_started_at": 1793067015,
+              "os_started_at": 1793156341,
               "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 52470,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+              "pid": 76819,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "bcbb5508-ce92-4011-b24e-9b40abba7cc0",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": null,
-              "id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
-              "kind": "lf",
-              "os_started_at": 1793067015,
-              "outcome": null,
-              "parent_lf_process_id": "c3d2b74a-c9df-4d89-9959-826af1249029",
-              "pid": 52387,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_001b5cc8a08c48059b44030d6f184432\",\"graph\",\"route\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": null,
-              "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
-              "kind": "lf",
-              "os_started_at": 1793067015,
-              "outcome": null,
-              "parent_lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "pid": 52294,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067015,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
-              "via_agent": false
-            },
-            {
-              "agent_session_id": null,
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "error": null,
-              "exit_code": null,
-              "id": "497161c0-0757-4607-ba83-430ddb1874c7",
-              "kind": "lf",
-              "os_started_at": 1793067012,
-              "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 51393,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
-              "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156341,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             },
             {
@@ -2383,19 +2376,19 @@
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
               "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": null,
-              "id": "72f859a8-812f-4b35-9f9b-2bac67be60c6",
+              "id": "0890211c-c3ff-460e-837e-de35e8580176",
               "kind": "lf",
-              "os_started_at": 1793067014,
+              "os_started_at": 1793156340,
               "outcome": null,
-              "parent_lf_process_id": "497161c0-0757-4607-ba83-430ddb1874c7",
-              "pid": 52152,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
+              "pid": 76404,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             },
             {
@@ -2404,104 +2397,72 @@
               "caller_session_id": null,
               "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
               "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "error": null,
               "exit_code": null,
-              "id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
+              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
               "kind": "lf",
-              "os_started_at": 1793067014,
+              "os_started_at": 1793156340,
               "outcome": null,
-              "parent_lf_process_id": "72f859a8-812f-4b35-9f9b-2bac67be60c6",
-              "pid": 52177,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
+              "pid": 76451,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
               "signal": null,
-              "started_at": 1793067014,
-              "trace_id": "159fe0d2-a857-46c9-96dd-7234799a9ae9",
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
+              "via_agent": false
+            },
+            {
+              "agent_session_id": null,
+              "caller_agent_process_id": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "error": null,
+              "exit_code": null,
+              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+              "kind": "lf",
+              "os_started_at": 1793156340,
+              "outcome": null,
+              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
+              "pid": 76666,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "signal": null,
+              "started_at": 1793156340,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
+              "via_agent": false
+            },
+            {
+              "agent_session_id": null,
+              "caller_agent_process_id": null,
+              "caller_session_id": null,
+              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
+              "completed_at": null,
+              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "error": null,
+              "exit_code": null,
+              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
+              "kind": "lf",
+              "os_started_at": 1793156337,
+              "outcome": null,
+              "parent_lf_process_id": null,
+              "pid": 75863,
+              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+              "signal": null,
+              "started_at": 1793156339,
+              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
               "via_agent": false
             }
           ],
-          "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793067015,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793067015,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
-            "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
-            "position": {
-              "edge": 0,
-              "kind": "edge",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "running": true
-            }
-          }
+          "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
       },
       "graph_processes": [
         {
           "compiled": {
-            "interactions": {
-              "stages": [],
-              "transitions": [
-                {
-                  "from": "@start",
-                  "nodes": [
-                    "0",
-                    "1"
-                  ],
-                  "routes": [
-                    {
-                      "condition": null,
-                      "from": "@start",
-                      "to": "0"
-                    },
-                    {
-                      "condition": null,
-                      "from": "0",
-                      "to": "1"
-                    },
-                    {
-                      "condition": null,
-                      "from": "1",
-                      "to": "@end"
-                    }
-                  ],
-                  "to": "@end"
-                }
-              ]
-            },
             "name": "delivery",
             "steps": [
               {
@@ -2509,7 +2470,7 @@
                 "interactive": false,
                 "key": 0,
                 "kind": "op",
-                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
+                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
                 "paths": [],
                 "returns_to": null,
                 "sources": [
@@ -2532,16 +2493,16 @@
           },
           "completed": [],
           "current": 0,
-          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
           "entry": {
             "ended_at": null,
-            "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
             "name": "delivery",
-            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
             "state": "current",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-            "updated_at": 1793067015,
-            "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156341,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
           },
           "iterations": [
             []
@@ -2555,90 +2516,56 @@
                 []
               ],
               "key": 0,
-              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpft7a84/hold.py",
-              "lf_process_id": "862896cc-1e8a-4ab9-b1e5-e2af1e161587",
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+              "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
               "outcome": null,
-              "started_at": 1793067015
+              "started_at": 1793156341
             }
           ]
         }
       ],
-      "observed_at": 1793067012,
+      "observed_at": 1793156337,
       "overview": {
+        "graph": {
+          "interactive_steps": [],
+          "name": "delivery",
+          "position": {
+            "kind": "run",
+            "lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
+            "running": true,
+            "step": "start"
+          }
+        },
         "graph_processes": [
           {
             "ended_at": null,
-            "id": "c3d2b74a-c9df-4d89-9959-826af1249029",
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
             "name": "delivery",
-            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
             "state": "current",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432",
-            "updated_at": 1793067015,
-            "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156341,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
           }
         ],
-        "sessions": [],
-        "workflow": {
-          "edges": [
-            {
-              "from": "start",
-              "name": "session",
-              "to": "end"
-            }
-          ],
-          "history": [
-            {
-              "actor": "person",
-              "at": 1793067015,
-              "edge": null,
-              "from": "start",
-              "kind": "took_up",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "note": null,
-              "session_id": null,
-              "to": "start",
-              "workflow": "delivery"
-            },
-            {
-              "actor": "person",
-              "at": 1793067015,
-              "edge": 0,
-              "from": "start",
-              "kind": "chose",
-              "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-              "note": null,
-              "session_id": null,
-              "to": "end",
-              "workflow": "delivery"
-            }
-          ],
-          "name": "delivery",
-          "nodes": [],
-          "outgoing": [],
-          "position": {
-            "edge": 0,
-            "kind": "edge",
-            "lf_process_id": "f6643224-b900-4ce2-bfba-e97f41d42c4e",
-            "running": true
-          }
-        }
+        "sessions": []
       },
       "ownership": {
         "log": [
           {
-            "at": 1793067011,
-            "id": "own_393394a8e0c946438163b3542d4e4773",
+            "at": 1793156336,
+            "id": "own_ff8db95d30544ba0991c85eb5d7f55db",
             "kind": "claim",
-            "machine_id": "home_6882224806cd48ae2be22a300d5b573b",
+            "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "machine_label": "Jacks-MacBook-Pro-2",
             "person": "Jack Heart",
             "person_key": "test@test.com",
-            "task_id": "task_001b5cc8a08c48059b44030d6f184432"
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a"
           }
         ],
         "owner": {
           "machine": {
-            "id": "home_6882224806cd48ae2be22a300d5b573b",
+            "id": "home_56b1a8e309681768d26f79bf86b9d93c",
             "label": "Jacks-MacBook-Pro-2"
           },
           "person": "Jack Heart",
@@ -2650,26 +2577,229 @@
       "planning_stale": false,
       "planning_state": "available",
       "project": {
-        "created_at": "2026-10-27T02:10:11Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "description": "",
-        "id": "proj_fcc14e46784e469787319842c5753ec9",
+        "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
         "linear_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
-        "updated_at": "2026-10-27T02:10:12Z",
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39"
+        "updated_at": "2026-10-28T02:58:56Z",
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+      },
+      "row": {
+        "actions": {
+          "reason": "Merged; complete the Task",
+          "recommended": "no_action"
+        },
+        "condition": {
+          "evidence_age_secs": 2,
+          "local_progress": {
+            "authored_commits": false,
+            "dirty": true,
+            "reason": null,
+            "recovery_required": false,
+            "state": "observed",
+            "unsettled": true
+          },
+          "observed_at": "2026-10-28T02:59:02.112408Z",
+          "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+          "state": "clear",
+          "unresolved_execution": true
+        },
+        "execution": {
+          "captured": null,
+          "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+          "state": "running",
+          "step": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
+        },
+        "graph_name": "delivery",
+        "graph_source": "task",
+        "latest_graph_process": {
+          "compiled": {
+            "name": "delivery",
+            "steps": [
+              {
+                "id": null,
+                "interactive": false,
+                "key": 0,
+                "kind": "op",
+                "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "delivery"
+                ]
+              },
+              {
+                "id": null,
+                "interactive": false,
+                "key": 1,
+                "kind": "op",
+                "label": "task complete FIX-1",
+                "paths": [],
+                "returns_to": null,
+                "sources": [
+                  "delivery"
+                ]
+              }
+            ]
+          },
+          "completed": [],
+          "current": 0,
+          "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+          "entry": {
+            "ended_at": null,
+            "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
+            "name": "delivery",
+            "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+            "state": "current",
+            "task_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+            "updated_at": 1793156341,
+            "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+          },
+          "iterations": [
+            []
+          ],
+          "returns": [],
+          "steps": [
+            {
+              "completed_at": null,
+              "exit_code": null,
+              "iterations": [
+                []
+              ],
+              "key": 0,
+              "label": "session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+              "lf_process_id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
+              "outcome": null,
+              "started_at": 1793156341
+            }
+          ]
+        },
+        "next_move": {
+          "owner": "task",
+          "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py"
+        },
+        "pr": {
+          "abandoned_at": null,
+          "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+          "branch": "main",
+          "empty": null,
+          "id": "pr_2e492a0843654e498dd4b096deb1032c",
+          "merge_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+          "phase": "merged",
+          "publication": {
+            "github": {
+              "number": 1,
+              "url": "https://github.com/loopflowstudio/fixture/pull/1"
+            },
+            "merge": null,
+            "presentation": null,
+            "requested_at": "2026-10-28T02:58:55Z"
+          },
+          "sequence": 1,
+          "slug": "delivery"
+        },
+        "reference": {
+          "issue_url": "https://linear.app/fixture/issue/FIX-1",
+          "workspace": {
+            "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
+            "branch": "main",
+            "local_exists": true,
+            "machine_id": "home_56b1a8e309681768d26f79bf86b9d93c",
+            "machine_label": null,
+            "slug": "delivery",
+            "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+          }
+        },
+        "run_control": {
+          "unavailable": null
+        },
+        "runtime": {
+          "completion_pending": null,
+          "owner": {
+            "machine": {
+              "id": "home_56b1a8e309681768d26f79bf86b9d93c",
+              "label": "Jacks-MacBook-Pro-2"
+            },
+            "person": "Jack Heart",
+            "person_key": "test@test.com"
+          },
+          "provider": "codex",
+          "reason": "Step Process ad653185-cde7-4ed4-9c19-d91aa2e1192e is running session serve -- python3 /var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py",
+          "status": "shipping",
+          "updated_at": "2026-10-28T02:59:00Z",
+          "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
+        },
+        "section": "now",
+        "ship_control": {
+          "unavailable": "Task is already shipping"
+        },
+        "shipping": {
+          "reason": "running from start",
+          "shipped_at": 1793156340,
+          "state": "building"
+        },
+        "task": {
+          "acquisition": {
+            "observed_at": 1793156337,
+            "state": "available"
+          },
+          "assignee": null,
+          "completed_at": null,
+          "description": "",
+          "due_date": null,
+          "id": "task_9d1de6a17408459aa2db78181c5fb02a",
+          "identifier": "FIX-1",
+          "linear_id": "source-issue",
+          "name": "Deliver the command",
+          "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
+          "rank": 0,
+          "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+          "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
+          "state": "unstarted",
+          "sync": {
+            "changes": [
+              {
+                "error": null,
+                "field": "state",
+                "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
+                "linear_value": "unstarted",
+                "local_value": "started",
+                "state": "adopted_linear"
+              },
+              {
+                "error": null,
+                "field": "comment",
+                "id": "57952d15-3228-4c75-8669-82a2f150e012",
+                "linear_value": null,
+                "local_value": {
+                  "author": {
+                    "kind": "integration"
+                  },
+                  "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+                  "created_at": "2026-10-28T02:58:56.626836Z",
+                  "id": "57952d15-3228-4c75-8669-82a2f150e012"
+                },
+                "state": "pending"
+              }
+            ],
+            "connected": true
+          },
+          "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
+        }
       },
       "sync": {
         "changes": [
           {
             "error": null,
             "field": "state",
-            "id": "7610233c-2464-4584-a35f-fc1a5ddc00e9",
+            "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
             "linear_value": "unstarted",
             "local_value": "started",
             "state": "adopted_linear"
@@ -2677,15 +2807,15 @@
           {
             "error": null,
             "field": "comment",
-            "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604",
+            "id": "57952d15-3228-4c75-8669-82a2f150e012",
             "linear_value": null,
             "local_value": {
               "author": {
                 "kind": "integration"
               },
-              "body": "Jack Heart claimed this on home_6882224806cd48ae2be22a300d5b573b\n\n<!-- loopflow-ownership:{\"id\":\"own_393394a8e0c946438163b3542d4e4773\",\"task_id\":\"task_001b5cc8a08c48059b44030d6f184432\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_6882224806cd48ae2be22a300d5b573b\",\"machine_label\":null,\"at\":1793067011} -->",
-              "created_at": "2026-10-27T02:10:11.938197Z",
-              "id": "ccdb1e36-3455-4822-a3e2-bf3b41a36604"
+              "body": "Jack Heart claimed this on home_56b1a8e309681768d26f79bf86b9d93c\n\n<!-- loopflow-ownership:{\"id\":\"own_ff8db95d30544ba0991c85eb5d7f55db\",\"task_id\":\"task_9d1de6a17408459aa2db78181c5fb02a\",\"kind\":\"claim\",\"person\":\"Jack Heart\",\"person_key\":\"test@test.com\",\"machine_id\":\"home_56b1a8e309681768d26f79bf86b9d93c\",\"machine_label\":null,\"at\":1793156336} -->",
+              "created_at": "2026-10-28T02:58:56.626836Z",
+              "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
             "state": "pending"
           }
@@ -2695,30 +2825,30 @@
       "task": {
         "agent": null,
         "assignee": null,
-        "base_commit": "94adecc7d5014396214361c255f3c54f62cd8654",
+        "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completed_at": null,
-        "created_at": "2026-10-27T02:10:11Z",
+        "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "due_date": null,
-        "id": "task_001b5cc8a08c48059b44030d6f184432",
+        "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
         "linear_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793067012,
+        "pm_snapshot_synced_at": 1793156337,
         "pm_writeback": {
           "state": "current"
         },
-        "project_id": "proj_fcc14e46784e469787319842c5753ec9",
+        "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
-        "repository_id": "repo_4d337841563b447fa601afacb23d70d0",
+        "repository_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "revision": 5,
         "state": "unstarted",
         "title": "Deliver the command",
-        "updated_at": "2026-10-27T02:10:15Z",
-        "wave_id": "a31ec302-4dae-4781-b312-81a018237c39",
+        "updated_at": "2026-10-28T02:59:00Z",
+        "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmp5O1lmr"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
       }
     }
   }

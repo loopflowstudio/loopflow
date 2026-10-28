@@ -4,7 +4,7 @@
 //! checks out the branch where it arrives and admits the same Session, so the
 //! same provider conversation resumes there.
 //!
-//! A Task moves the same way with its ownership and Workflow: `send_task`
+//! A Task moves the same way with its ownership and Graph: `send_task`
 //! stops its Graph, checkpoints its worktree, takes its conversation along and
 //! hands it off; `receive` takes in the handoff before checking it out.
 
@@ -24,7 +24,7 @@ use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
-use crate::store::sqlite::task_work::WorkflowRecord;
+use crate::store::sqlite::task_work::TaskGraphRecord;
 use crate::store::sqlite::SqliteStore;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
@@ -51,8 +51,8 @@ pub(crate) struct MovedTask {
     pub identifier: String,
     /// The handoff, as the marked comment planning would deliver later.
     pub ownership_marker: String,
-    /// Absent before the Task takes up a Workflow.
-    pub workflow: Option<WorkflowRecord>,
+    /// Absent before the Task takes up a Graph.
+    pub graph: Option<TaskGraphRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -189,7 +189,7 @@ pub(crate) async fn send_task(store: &SharedStore, issue: &str, to: &MachineId) 
             task_id: task.id.clone(),
             identifier: task.identifier.clone(),
             ownership_marker: crate::store::sqlite::task_ownership::marker(&handoff)?,
-            workflow: store.sqlite.workflow_record(&task.id)?,
+            graph: store.sqlite.task_graph_record(&task.id)?,
         }),
     })
 }
@@ -445,7 +445,7 @@ pub(crate) async fn known_task(store: &SharedStore, task: &TaskId, name: &str) -
 /// Check out the moved branch in a worktree of this repository, admit the
 /// same Session there and place its transcript where its provider resumes it.
 /// A moved Task is taken in first: its handoff, its checkout on the carried
-/// branch and its Workflow. Returns the Session, when one moved.
+/// branch and its Graph. Returns the Session, when one moved.
 pub(crate) async fn receive(store: &SharedStore, moved: Move) -> Result<Option<LfSession>> {
     let repo = repository(store, &moved).await?;
     let main = crate::git::worktrees::main_repo_root(&repo)?;
@@ -556,7 +556,7 @@ async fn repository(store: &SharedStore, moved: &Move) -> Result<PathBuf> {
 }
 
 /// This Machine owns the Task from here: the handoff, then its checkout of
-/// the carried branch, then its Workflow where it stood.
+/// the carried branch, then its Graph where it stood.
 async fn take_in_task(
     store: &SharedStore,
     main: &Path,
@@ -585,10 +585,10 @@ async fn take_in_task(
                 .expect("Task checkout thread panicked")
         })?;
     }
-    if let Some(workflow) = &moved.workflow {
-        store.sqlite.place_moved_workflow(
+    if let Some(graph) = &moved.graph {
+        store.sqlite.place_moved_task_graph(
             &moved.task_id,
-            workflow,
+            graph,
             crate::journal::current_lf_process_id().as_ref(),
         )?;
     }
@@ -745,7 +745,7 @@ mod tests {
             serde_json::from_str::<Move>(&serde_json::to_string(&moved).unwrap()).unwrap(),
             moved
         );
-        assert_eq!(moved.task.unwrap().workflow.unwrap().node, "explore");
+        assert_eq!(moved.task.unwrap().graph.unwrap().step, "explore");
         let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
         missing.as_object_mut().unwrap().remove("from_machine_id");
         assert!(serde_json::from_value::<Move>(missing).is_err());

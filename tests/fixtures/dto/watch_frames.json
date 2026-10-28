@@ -260,7 +260,7 @@
         "ownership": null,
         "overview": {
           "sessions": [],
-          "workflow": null,
+          "graph": null,
           "graph_processes": []
         },
         "graph_processes": [],

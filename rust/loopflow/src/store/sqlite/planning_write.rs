@@ -22,7 +22,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
         | WorkValue::WaveProject(_)
-        | WorkValue::WaveWorkflow(_) => "waves",
+        | WorkValue::WaveGraph(_) => "waves",
         WorkValue::ProjectWave(_)
         | WorkValue::ProjectLinearId(_)
         | WorkValue::ProjectSlug(_)
@@ -60,7 +60,7 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
         WorkValue::WaveProject(_) => "current_project_id",
-        WorkValue::WaveWorkflow(_) => "workflow",
+        WorkValue::WaveGraph(_) => "graph",
         WorkValue::ProjectWave(_) => "wave_id",
         WorkValue::ProjectLinearId(_) => "external_project_id",
         WorkValue::ProjectSlug(_) => "project_slug",
@@ -184,16 +184,21 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
             |row| row.get(0),
         )?));
     }
-    // Released migrations seed this writer before the Wave default column exists.
-    if table == "waves"
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('waves') WHERE name='workflow')",
+    // Released migrations seed this writer before the Wave default column
+    // exists, and before the `task_graphs` draft names it `graph`.
+    let wave_default: Option<String> = if table == "waves" {
+        conn.query_row(
+            "SELECT name FROM pragma_table_info('waves') WHERE name IN ('graph','workflow')",
             [],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
-        values.push(WorkValue::WaveWorkflow(conn.query_row(
-            "SELECT workflow FROM waves WHERE id=?1",
+            |row| row.get(0),
+        )
+        .optional()?
+    } else {
+        None
+    };
+    if let Some(column) = wave_default {
+        values.push(WorkValue::WaveGraph(conn.query_row(
+            &format!("SELECT {column} FROM waves WHERE id=?1"),
             [id],
             |row| row.get(0),
         )?));
@@ -712,7 +717,7 @@ mod tests {
                 b.task_state(&task).unwrap() == crate::durable::TaskState::Deferred,
                 deferred
             );
-            assert!(b.workflow(&task).unwrap().is_none());
+            assert!(b.task_graph(&task).unwrap().is_none());
             assert!(b.task(&task).unwrap().unwrap().worktree.is_none());
         }
     }
@@ -795,8 +800,8 @@ mod tests {
             .pending_project_changes(project.as_ref().unwrap())
             .unwrap();
         a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
-        let selected = a.selected_wave_workflow(&saved.wave_id).unwrap();
-        assert!(a.select_wave_workflow(&saved.wave_id, "another").is_err());
+        let selected = a.selected_wave_graph(&saved.wave_id).unwrap();
+        assert!(a.select_wave_graph(&saved.wave_id, "another").is_err());
         assert_eq!(
             a.project(project.as_ref().unwrap()).unwrap().unwrap(),
             current
@@ -806,7 +811,7 @@ mod tests {
                 .unwrap(),
             pending
         );
-        assert_eq!(a.selected_wave_workflow(&saved.wave_id).unwrap(), selected);
+        assert_eq!(a.selected_wave_graph(&saved.wave_id).unwrap(), selected);
     }
 
     #[test]
@@ -832,7 +837,11 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",rusqlite::params![task.as_str(),r#"{"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]}"#]).unwrap();
+            conn.execute(
+                "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'review',1)",
+                rusqlite::params![task.as_str(), r#"{"name":"review","steps":[]}"#],
+            )
+            .unwrap();
         }
         let local_wave = b.task(&task).unwrap().unwrap().wave_id;
         {
@@ -852,7 +861,7 @@ mod tests {
                 "agent_sessions",
                 "session_events",
                 "session_activity",
-                "task_workflows",
+                "task_graphs",
                 "task_state_deliveries",
             ]
             .into_iter()
@@ -921,7 +930,7 @@ mod tests {
         let conn = b.conn.lock().unwrap();
         assert_eq!(
             conn.query_row(
-                "SELECT node FROM task_workflows WHERE task_id=?1",
+                "SELECT step FROM task_graphs WHERE task_id=?1",
                 [task.as_str()],
                 |r| r.get::<_, String>(0)
             )

@@ -9,10 +9,9 @@ import Foundation
 public struct CompiledGraph: Decodable, Sendable, Hashable {
     public let name: String
     public let steps: [GraphNode]
-    public let interactions: InteractionGraph
 
-    public init(name: String, steps: [GraphNode], interactions: InteractionGraph) {
-        self.name = name; self.steps = steps; self.interactions = interactions
+    public init(name: String, steps: [GraphNode]) {
+        self.name = name; self.steps = steps
     }
 
     /// Locate an exact captured occurrence, including nested XOR paths.
@@ -30,24 +29,6 @@ public struct CompiledGraph: Decodable, Sendable, Hashable {
     }
 }
 
-public struct InteractionGraph: Decodable, Sendable, Hashable {
-    public let stages: [String]
-    public let transitions: [InteractionTransition]
-}
-
-public struct InteractionTransition: Decodable, Sendable, Hashable {
-    public let from: String
-    public let to: String
-    public let nodes: [String]
-    public let routes: [InteractionRoute]
-}
-
-public struct InteractionRoute: Decodable, Sendable, Hashable {
-    public let from: String
-    public let to: String
-    public let condition: String?
-}
-
 public struct GraphNode: Decodable, Sendable, Hashable {
     /// Captured preorder ID, local to this Graph and including all XOR alternatives.
     public let key: UInt32
@@ -56,7 +37,7 @@ public struct GraphNode: Decodable, Sendable, Hashable {
     /// Literal skill name, operation, or XOR router.
     public let label: String
     public let kind: GraphNodeKind
-    /// A stage: a person takes part here.
+    /// An interactive step: a person takes part here.
     public let interactive: Bool
     public let returnsTo: UInt32?
     /// Composed Graphs this occurrence came from, outermost first.
@@ -175,19 +156,83 @@ public struct GraphCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
     public var id: String { name }
 }
 
-public struct WorkflowCatalogEntry: Decodable, Sendable, Hashable, Identifiable {
+/// A graph as a Workflow: `start`, its interactive steps in order, `end`, and
+/// the runs between them. Not a wire type; derived from what Rust sends.
+public struct WorkflowDefinition: Sendable, Hashable {
+    /// What a run from `from` carries the Task to; `name` is the step it runs first.
+    public struct Run: Sendable, Hashable {
+        public let from: String
+        public let to: String
+        public let name: String
+    }
+
+    public let name: String
+    public let steps: [TaskGraph.InteractiveStep]
+    public let runs: [Run]
+
+    /// A Task's captured graph: each run carries it to the next interactive step.
+    public init(_ graph: TaskGraph) {
+        name = graph.name
+        steps = graph.interactiveSteps
+        let columns = [TaskGraph.start] + steps.map(\.name) + [TaskGraph.end]
+        runs = zip(columns, columns.dropFirst()).map { Run(from: $0, to: $1, name: "") }
+    }
+
+    /// A definition: interactive steps in order, each XOR path's in name order,
+    /// and a run back wherever a step returns to an earlier one.
+    public init(_ compiled: CompiledGraph) {
+        var flat: [GraphNode] = []
+        func walk(_ nodes: [GraphNode]) {
+            for node in nodes {
+                flat.append(node)
+                for path in node.paths.sorted(by: { $0.name < $1.name }) { walk(path.steps) }
+            }
+        }
+        walk(compiled.steps)
+        var steps: [TaskGraph.InteractiveStep] = []
+        // The column each node runs in: 0 after `start`, n after the nth interactive step.
+        var segment: [UInt32: Int] = [:]
+        var first: [Int: String] = [:]
+        for node in flat {
+            if node.interactive {
+                steps.append(TaskGraph.InteractiveStep(name: node.id ?? node.label, skill: node.label, description: nil))
+            } else if first[steps.count] == nil {
+                first[steps.count] = node.label
+            }
+            segment[node.key] = steps.count
+        }
+        let columns = [TaskGraph.start] + steps.map(\.name) + [TaskGraph.end]
+        var runs = zip(columns.indices, columns.indices.dropFirst()).map {
+            Run(from: columns[$0], to: columns[$1], name: first[$0] ?? "")
+        }
+        for node in flat {
+            guard let back = node.returnsTo, let from = segment[node.key],
+                  let target = flat.first(where: { $0.key == back }), let column = segment[target.key] else { continue }
+            // A return into an interactive step arrives there; into any other, at the next one.
+            let to = target.interactive ? column : column + 1
+            let run = Run(from: columns[from], to: columns[to], name: node.label)
+            if to != from + 1, !runs.contains(run) { runs.append(run) }
+        }
+        name = compiled.name
+        self.steps = steps
+        self.runs = runs
+    }
+}
+
+/// A catalog graph as a Workflow, keeping an invalid source editable.
+public struct WorkflowCatalogEntry: Sendable, Hashable, Identifiable {
     public let name: String
     public let source: String?
     public let workflow: WorkflowDefinition?
     public let unavailable: String?
     public var id: String { name }
-}
 
-/// A graph projected as a Workflow before any Task has taken it up.
-public struct WorkflowDefinition: Decodable, Sendable, Hashable {
-    public let name: String
-    public let nodes: [Workflow.Node]
-    public let edges: [Workflow.Edge]
+    public init(_ entry: GraphCatalogEntry) {
+        name = entry.name
+        source = entry.source
+        workflow = entry.compiled.map(WorkflowDefinition.init)
+        unavailable = entry.unavailable
+    }
 }
 
 /// Formatting only: order and nesting are supplied by Rust's captured definition.
@@ -281,7 +326,7 @@ public struct GraphCompositionProjection {
                 }
             }
         }
-        self.compiled = CompiledGraph(name: compiled.name, steps: nodes(items), interactions: compiled.interactions)
+        self.compiled = CompiledGraph(name: compiled.name, steps: nodes(items))
         visibleKeys = visible
         self.groups = groups
     }

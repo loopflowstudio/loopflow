@@ -26,10 +26,10 @@ pub struct TaskDetailFacts {
     pub owners: HashMap<TaskId, TaskOwner>,
     pub acquisitions: HashMap<TaskId, TaskAcquisition>,
     pub latest_events: HashMap<TaskId, TaskEvent>,
-    /// The name of each Task's own Workflow.
-    pub workflow_names: HashMap<TaskId, String>,
-    /// The stage each Task's Workflow stands at; absent while it is on a route.
-    pub stages: HashMap<TaskId, String>,
+    /// The name of the graph each Task took up.
+    pub graph_names: HashMap<TaskId, String>,
+    /// The step each Task stands at on its graph; absent while a run carries it.
+    pub steps: HashMap<TaskId, String>,
     /// Tasks handed off to Auto-Ship.
     pub shipped: HashSet<TaskId>,
     pub planning_sync: HashMap<TaskId, PlanningSyncStatus>,
@@ -94,17 +94,17 @@ impl SqliteStore {
                     Ok((event.task_id.clone(), event))
                 },
             )?,
-            workflow_names: keyed(
+            graph_names: keyed(
                 &snapshot,
-                "SELECT task_id,json_extract(graph,'$.name') FROM task_workflows
+                "SELECT task_id,json_extract(graph,'$.name') FROM task_graphs
                  WHERE task_id IN (SELECT value FROM json_each(?1))",
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
-            stages: keyed(
+            steps: keyed(
                 &snapshot,
-                "SELECT task_id,node FROM task_workflows
-                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND edge IS NULL",
+                "SELECT task_id,step FROM task_graphs
+                 WHERE task_id IN (SELECT value FROM json_each(?1)) AND run_start IS NULL",
                 &json,
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,

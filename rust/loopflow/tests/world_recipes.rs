@@ -74,8 +74,8 @@ impl Built {
             .to_string()
     }
 
-    fn workflow(&self, issue: &str) -> Value {
-        self.lf(&["desktop", "task", issue, "--json"])["execution"]["work"]["workflow"].clone()
+    fn task_graph(&self, issue: &str) -> Value {
+        self.lf(&["desktop", "task", issue, "--json"])["execution"]["work"]["graph"].clone()
     }
 
     /// The steps of the Task's latest Graph `name`.
@@ -92,7 +92,8 @@ impl Built {
             .as_array()
             .unwrap()
             .iter()
-            .rfind(|graph| graph["name"] == name)
+            .filter(|graph| graph["name"] == name)
+            .max_by_key(|graph| graph["updated_at"].as_i64())
             .unwrap_or_else(|| panic!("{issue} ran no {name}"))["id"]
             .as_str()
             .unwrap()
@@ -188,8 +189,8 @@ fn lifecycle_world_reports_each_state() {
     assert_eq!(task("Abandoned attempt")["runtime"]["status"], "abandoned");
     let canceled = task("Canceled upstream");
     assert_eq!(canceled["task"]["state"], "canceled");
-    // Its stage-less `pursue` run took the route into `end`, which approves it to
-    // ship; with that run finished and nothing restarting it, it reads idle.
+    // Its `pursue` run ran into `end`; with that run finished and nothing
+    // restarting it, it reads idle.
     assert_eq!(canceled["runtime"]["status"], "idle");
     // Started local work survives an upstream cancel until someone disposes of it.
     assert_eq!(canceled["condition"]["unresolved_execution"], true);
@@ -348,9 +349,12 @@ fn world_sessions_resume_live_through_the_stub_provider() {
 fn one_task_waits_at_demo_after_an_eight_step_pursue() {
     let built = Built::new("one-task");
     let issue = built.issue_named("Search Session transcripts");
-    let workflow = built.workflow(&issue);
-    assert_eq!(workflow["name"], "feature");
-    assert_eq!(workflow["position"]["node"], "demo");
+    let graph = built.task_graph(&issue);
+    assert_eq!(graph["name"], "feature");
+    assert_eq!(
+        graph["position"],
+        serde_json::json!({"kind": "at", "step": "demo"})
+    );
     // `lf task status` says each fact once: the row, then what belongs to it.
     let status = built.lf(&["task", "status", &issue, "--json"]);
     let mut keys: Vec<_> = status.as_object().unwrap().keys().cloned().collect();
@@ -358,19 +362,12 @@ fn one_task_waits_at_demo_after_an_eight_step_pursue() {
     assert_eq!(keys, ["comments", "graph_processes", "sessions", "task"]);
     assert_eq!(status["task"]["state"], "active");
     assert_eq!(
-        status["task"]["workflow"],
-        serde_json::json!({"name": "feature", "stage": "demo"})
+        status["task"]["graph"],
+        serde_json::json!({"name": "feature", "step": "demo"})
     );
     assert_eq!(status["task"]["next"], format!("lf task run {issue}"));
-    let moves: Vec<&str> = workflow["history"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|step| step["kind"].as_str().unwrap())
-        .collect();
-    assert_eq!(moves, ["took_up", "chose", "arrived", "chose", "arrived"]);
 
-    let steps = built.graph_steps(&issue, "pursue");
+    let steps = built.graph_steps(&issue, "feature");
     let nodes: Vec<(u64, &str)> = steps
         .iter()
         .map(|step| {
@@ -396,14 +393,14 @@ fn one_task_waits_at_demo_after_an_eight_step_pursue() {
 }
 
 #[test]
-fn portfolio_has_a_stopped_edge_and_a_hand_moved_workflow() {
+fn portfolio_has_a_stopped_run_and_a_task_waiting_at_demo() {
     let built = Built::new("portfolio");
 
     let stopped = built.issue_named("Record a reader floor per migration");
-    let workflow = built.workflow(&stopped);
-    assert_eq!(workflow["position"]["kind"], "edge");
-    assert_eq!(workflow["position"]["running"], false);
-    let steps = built.graph_steps(&stopped, "pursue");
+    let graph = built.task_graph(&stopped);
+    assert_eq!(graph["position"]["kind"], "run");
+    assert_eq!(graph["position"]["running"], false);
+    let steps = built.graph_steps(&stopped, "code");
     let outcomes: Vec<&str> = steps
         .iter()
         .map(|step| step["outcome"].as_str().unwrap())
@@ -411,9 +408,9 @@ fn portfolio_has_a_stopped_edge_and_a_hand_moved_workflow() {
     assert_eq!(outcomes, ["succeeded", "succeeded", "failed"]);
     assert_eq!(steps[2]["label"], "sync");
 
-    let workflow = built.workflow(&built.issue_named("Open conversations faster"));
-    assert_eq!(workflow["position"]["node"], "demo");
-    let last = workflow["history"].as_array().unwrap().last().unwrap();
-    assert_eq!(last["kind"], "set");
-    assert_eq!(last["note"], "Built in the Session");
+    let graph = built.task_graph(&built.issue_named("Open conversations faster"));
+    assert_eq!(
+        graph["position"],
+        serde_json::json!({"kind": "at", "step": "demo"})
+    );
 }

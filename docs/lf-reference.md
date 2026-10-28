@@ -132,44 +132,6 @@ Synchronize a Task with its tracker; the change sent last wins
 | `--retry-updates` | Retry uncertain saved field/state updates after observing current Linear values Default: false. |
 | `--help / -h` | Print help |
 
-## lf task workflow
-
-Inspect or reset this Task's captured Workflow
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf task workflow move
-
-Move Workflow position without running anything; `end` requests completion
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `<stage>` | `start`, `end` or one of the graph's stages |
-| `--reason` | Why, kept in the Task's workflow history |
-| `--help / -h` | Print help |
-
-## lf task workflow show
-
-Show the Task's captured graph, position and history
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf task workflow restart
-
-Move the captured Workflow to start without executing or reloading it
-
-| Argument | What it does |
-|---|---|
-| `<issue>` | issue |
-| `--help / -h` | Print help |
-
 ## lf task checkout
 
 Ensure tracked Task Work and its worktree without launching a Graph
@@ -187,12 +149,13 @@ Ensure tracked Task Work and its worktree without launching a Graph
 
 ## lf task run
 
-Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`; returns once it runs (`-b` waits for its end)
+Run the Task's Graph in its worktree until the next interactive step; returns once it runs (`-b` runs every step headless and waits for the end)
 
 | Argument | What it does |
 |---|---|
 | `<issue>` | issue |
-| `<graph>` | A route from the Task's stage, or a graph to take up; the Task's only route or its Wave or repository default when omitted |
+| `<graph>` | A graph to take up in place of the Task's own |
+| `--from` | Start at this step instead: to go back, skip ahead, or wait at an interactive step |
 | `--name` | name |
 | `--stack-on` | Fork this Task's worktree from another Task's active PR |
 | `--directive` | directive |
@@ -204,7 +167,7 @@ Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GR
 
 ## lf task complete
 
-Complete a Task without moving its Workflow
+Complete a Task without moving its Graph
 
 | Argument | What it does |
 |---|---|
@@ -214,7 +177,7 @@ Complete a Task without moving its Workflow
 
 ## lf task reopen
 
-Reopen local planning without moving Workflow or replacing the PR
+Reopen local planning without moving its Graph or replacing the PR
 
 | Argument | What it does |
 |---|---|
@@ -463,35 +426,17 @@ Read chapter plans and Tasks without starting work; an explicit Wave includes hi
 | `--watch` | Print a JSON line now and each time the plan changes, until stdin closes Default: false. |
 | `--help / -h` | Print help |
 
-## lf wave workflow
+## lf wave graph
 
-Select and inspect the Wave default Workflow
+Select and inspect the graph the Wave's Tasks take up by default
 
 | Argument | What it does |
 |---|---|
 | `--help / -h` | Print help |
 
-## lf wave workflow source
+## lf wave graph show
 
-Print a graph from `.lf/graphs/` or the builtins
-
-| Argument | What it does |
-|---|---|
-| `<name>` | name |
-| `--help / -h` | Print help |
-
-## lf wave workflow list
-
-List graphs, including unavailable local files
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf wave workflow show
-
-Show the Wave's default Workflow
+Show the graph the Wave's Tasks take up by default
 
 | Argument | What it does |
 |---|---|
@@ -499,9 +444,9 @@ Show the Wave's default Workflow
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
-## lf wave workflow set
+## lf wave graph set
 
-Select the graph future Tasks take up; captured Tasks stay unchanged. Graphs are committed `.lf/graphs/<name>.yaml` files or builtins
+Select the graph future Tasks take up; Tasks that took one up keep it. Graphs are committed `.lf/graphs/<name>.yaml` files or builtins
 
 | Argument | What it does |
 |---|---|
@@ -626,7 +571,7 @@ Reconcile linked Waves to the repository's Linear Team
 
 ## lf ship
 
-Ship the Task: run every remaining step to merge and completion, standing in at each stage
+Ship the Task: run every remaining step to merge and completion, standing in at each interactive step
 
 | Argument | What it does |
 |---|---|
@@ -868,14 +813,6 @@ Print the repository file that defines a Graph, creating it from the builtin whe
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
-| `--help / -h` | Print help |
-
-## lf graph route
-
-Run the slice of the Task's graph its current route names; `lf task run` starts it
-
-| Argument | What it does |
-|---|---|
 | `--help / -h` | Print help |
 
 ## lf skill
@@ -1550,11 +1487,11 @@ Move idle Sessions still running a superseded lf onto the selected install
 
 ## lf monitor prune
 
-Reap orphan providers, remove dead process receipts, and release AgentProcess ancestry that was never recorded
+Reap orphan providers, remove dead receipts, forget finished Process rows and release unrecorded AgentProcess ancestry
 
 | Argument | What it does |
 |---|---|
-| `--dry-run` | Show exact targets without changing process or receipt state Default: false. |
+| `--dry-run` | Show exact targets without changing processes, receipts or the store Default: false. |
 | `--json` | Emit the versioned prune report as JSON Default: false. |
 | `--help / -h` | Print help |
 
@@ -2506,26 +2443,6 @@ Import previous Desktop membership only when no selection has been saved
 | Argument | What it does |
 |---|---|
 | `<paths>` | paths |
-| `--help / -h` | Print help |
-
-## lf disk
-
-Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
-
-| Argument | What it does |
-|---|---|
-| `--json` | json Default: false. |
-| `--help / -h` | Print help |
-
-## lf disk clean
-
-Reclaim finished worktrees and build output, dead receipts, old backups, store copies, captures and logs
-
-| Argument | What it does |
-|---|---|
-| `--dry-run` | Show what would be removed without removing anything Default: false. |
-| `--json` | json Default: false. |
-| `--keep-days` | Keep captures and logs modified within this many days Default: 7. |
 | `--help / -h` | Print help |
 
 ## lf scratch

@@ -7,9 +7,11 @@ pending and no relaxation of preservation, trust or storage authority is assumed
 2026-10-27: Jack Heart's current Task definition authorizes archiving the complete
 Task-local `.lf/tmp` after validation and an explicit-path checkpoint, leaving it
 absent for automatic sync. Checkpointing alone does not restore installed19 sync.
-This realign step's allocated destination is
+The preceding realign archive is
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-realign-hxkX9Mtm/tmp`.
-The final operation records the atomic move's result. Earlier archives and any
+The 2026-10-27 kickoff confirmed that directory exists and this checkout's `.lf/tmp`
+is absent. No new telemetry archive is needed unless it reappears before return.
+Earlier archives and any
 new telemetry remain separate; no logs are deleted or overwritten. No ignore-rule
 change, forced telemetry staging or suppressed Git error is authorized.
 This bridge changes neither writer proof nor Infrastructure's installation and

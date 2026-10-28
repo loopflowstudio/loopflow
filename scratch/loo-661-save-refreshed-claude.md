@@ -1,11 +1,11 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status: **Accepted outcome; writer design unresolved; diagnostics only.**
+Status: **Accepted outcome; implementation planning blocked on writer proof; diagnostics only.**
 Jack Heart authorized bounded repair and autonomous delivery of
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-Reviewed checkout: `44c8155bb509f43d9c6b0f358753afcfde2f6b9b`;
-realign reconciliation: 2026-10-27. The merge of `0d72f072a4` changes Task/Graph
+Reviewed checkout: `84e35e250300f06619364284437c01b12f2401a6`;
+kickoff reconciliation: 2026-10-27. The merge of `0d72f072a4` changes Task/Graph
 plumbing but leaves the auth, refresh, activation and account-status code unchanged
 from the prior reviewed `0373652051`. LOO-657 and v0.14.19 remain integrated.
 No remote freshness or installed upgrade is claimed.
@@ -32,6 +32,14 @@ remains. Findings 22–27 reject outer-transaction verification and explicit-acc
 alternatives without exhausting public interfaces. No product decision or
 additional authorization is pending. Production cutover depends on this proof;
 the acceptance sequence below then requires synthetic and installed verification.
+
+**Planning decision (2026-10-27):** retain the accepted outcome and existing
+acceptance plan. No supported replacement mechanism has met its prerequisites;
+“prove a compatible writer” is unresolved research, not an implementation choice.
+The evidence does not justify a production cutover or a ready-to-implement claim.
+Reopening a rejected route requires a concrete mechanism that addresses its recorded
+counterexample. This is a technical proof gap, not a request for Jack Heart to
+approve weaker preservation. The current diagnostics alone do not deliver LOO-661.
 
 **Demo:** after a naturally required refresh on the repaired installation,
 `lf account claude --json` accepts the same identity and capacity, and native
@@ -134,6 +142,18 @@ source/header review, except read-only installed dispatch inspection in 18.
   unavailable. Latest recorded observation: `1793156935`. Polls expose neither
   refresh occurrence nor storage stage, payload size or causality. They explain
   neither the earlier failure nor a browser sign-in dependency.
+- **Password-assisted access does not close the gap (28, 2026-10-27):**
+  Apple's documented [`kSecAttrAccess`](https://developer.apple.com/documentation/security/ksecattraccess)
+  supports access updates, but supplies no atomic data/access preservation guarantee.
+  The separately named `SecKeychainItemSetAccessWithPassword` is declared in
+  [`SecKeychainItemPriv.h`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItemPriv.h),
+  not the installed SDK's public `SecKeychainItem.h`. Its pinned
+  [implementation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItem.cpp)
+  constructs Keychain-passphrase credentials and edits existing access; it does
+  not accept replacement data or combine the two writes. This private API adds
+  a password dependency without providing the missing public atomic replacement.
+  It is excluded, not a new candidate. This finding is documentation/source/header
+  review only; no credential read, Keychain mutation or live account poll ran.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
@@ -216,4 +236,4 @@ Delivery retains the LOO-664 sync dependency. Jack Heart's Task revision of
 disposable reproduction proves the bridge, not installed repair. Infrastructure
 owns the prepared signed CLI/helper installation and verification.
 
-Check — realign (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reconciliation; no build/test rerun. Gate owns affected suites on the merged tree; native replacement and installed refresh acceptance remain unproved.
+Check — kickoff (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reconciliation and API review; no build/test rerun. Gate owns affected suites on the merged tree; native replacement and installed refresh acceptance remain unproved.

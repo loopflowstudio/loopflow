@@ -7,10 +7,12 @@ preservation pass; four large replacements still destroy old data. The defective
 `security -i` writer remains, with no eligible replacement established. The reader
 fix does not complete this repair or permit delivery.
 
-Implementation at `ed6c82b2b` (2026-10-28) closes finding 40 with finding 41;
-finding 42 assesses a public CSSM alternative without mutation. Finding 38's
-boundary was implemented in `1abbf832a` and simplified in `b909e2f71`. No acceptance
-constraint or delivery boundary changed.
+Reconciled October 28 against `5eead1b8b`: implementation at `ed6c82b2b` closes
+finding 40 with finding 41's Unicode proof. Finding 42 excludes only the examined
+public CSSM construction, without mutation or proof of API exhaustion. Finding
+38's boundary was implemented in `1abbf832a` and simplified in `b909e2f71`.
+No acceptance constraint or delivery boundary changed. Release's operation-entry
+lesson applies: native synthetic proof and installed live acceptance are separate.
 
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -236,4 +238,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check (reused from `ed6c82b2b`; this reduction changes prose only) — `cargo test -p loopflow --lib security_password_output_preserves_exact_json_bytes`: PASS (1); native command above: FAIL (8 cases executed, Unicode passes, 4 large-value failures, all cleaned; ld unwind-size warning); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, `lf context`: PASS. Cargo checks used `scripts/test_network.py` with inherited `LF_*` cleared and stdin closed. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.
+Check (October 28 realign; prose only) — `git diff --check` and `lf context`: PASS; reused `ed6c82b2b` decoder test: PASS (1), native command above: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned; ld unwind-size warning), format/Clippy: PASS. Cargo checks used `scripts/test_network.py` with inherited `LF_*` cleared and stdin closed. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.

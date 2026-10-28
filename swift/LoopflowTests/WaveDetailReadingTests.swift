@@ -8,10 +8,7 @@ import Testing
 struct WaveDetailReadingTests {
     @Test("a failed refresh discards volatile status and metric evidence")
     func failedRefreshDiscardsVolatileDetail() throws {
-        let detail = try JSONDecoder().decode(
-            WaveDetailSnapshot.self,
-            from: loadFixtureData("wave_detail.json")
-        )
+        let detail = try planningWave()
         var reading = WaveDetailReading()
 
         reading.update(detail)
@@ -28,10 +25,7 @@ struct WaveDetailReadingTests {
 
     @Test("a successful refresh clears the stale warning")
     func successfulRefreshClearsWarning() throws {
-        let detail = try JSONDecoder().decode(
-            WaveDetailSnapshot.self,
-            from: loadFixtureData("wave_detail.json")
-        )
+        let detail = try planningWave()
         var reading = WaveDetailReading()
         reading.recordFailure(RegistryQueryError("registry busy"))
 
@@ -43,16 +37,10 @@ struct WaveDetailReadingTests {
 
     @Test("a readable status with no chapter does not revive cached KRs")
     func missingCurrentChapterReplacesCachedPlan() throws {
-        let data = try loadFixtureData("wave_detail.json")
-        let cachedDetail = try JSONDecoder().decode(WaveDetailSnapshot.self, from: data)
-        let cached = WavePlan(objective: "Earlier objective", projects: cachedDetail.workMap.projects)
+        let cached = WavePlan(objective: "Earlier objective", projects: try planningWave().workMap.projects)
         #expect(cached.currentProject?.krs.isEmpty == false)
 
-        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        wire["projects"] = ["state": "unavailable", "reason": "Provider unavailable"]
-        let current = try JSONDecoder().decode(
-            WaveDetailSnapshot.self, from: JSONSerialization.data(withJSONObject: wire)
-        )
+        let current = try planningWave { $0["projects"] = ["state": "unavailable", "reason": "Provider unavailable"] }
         var reading = WaveDetailReading()
         reading.update(current)
 
@@ -154,6 +142,16 @@ struct WaveDetailReadingTests {
             #expect(row.value == "100%")
             #expect(row.reason == "Project target planning is unavailable.")
         }
+    }
+
+    /// `wave-1` of the planning fixture, after `edit` reshapes its wire entry.
+    private func planningWave(_ edit: (inout [String: Any]) -> Void = { _ in }) throws -> WaveRoadmap {
+        var wire = try #require(JSONSerialization.jsonObject(with: loadFixtureData("roadmap_snapshot.json")) as? [String: Any])
+        var waves = try #require(wire["waves"] as? [[String: Any]])
+        edit(&waves[0])
+        wire["waves"] = waves
+        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: wire))
+        return try #require(roadmap.waves.first { $0.wave.id == "wave-1" })
     }
 
     private func loadFixtureData(_ name: String, sourceFile: String = #filePath) throws -> Data {

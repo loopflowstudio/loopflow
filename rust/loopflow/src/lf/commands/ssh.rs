@@ -33,7 +33,7 @@ pub fn run(
         &cli.command,
         Some(crate::lf::Commands::Session {
             cmd: crate::lf::SessionCommand::Attach { .. }
-                | crate::lf::SessionCommand::List { .. }
+                | crate::lf::SessionCommand::List(_)
                 | crate::lf::SessionCommand::Connect { .. }
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }

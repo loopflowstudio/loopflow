@@ -93,7 +93,7 @@ private actor ControlsSource {
     func releaseList() { pending?.resume(); pending = nil }
 
     func read(_ args: [String]) async throws -> String {
-        if args.prefix(2) == ["session", "list"] {
+        if args.prefix(2) == ["desktop", "sessions"] {
             let snapshot = try JSONSerialization.data(withJSONObject: ["entries": [record], "next": NSNull()])
             if hold {
                 hold = false

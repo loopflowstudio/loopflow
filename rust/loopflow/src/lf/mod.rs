@@ -456,7 +456,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SkillCommand,
     },
-    /// Read durable Work history, recorded commands and provider usage
+    /// Read what Sessions did, tagged with their Work: turns, commands and provider usage
     #[command(args_conflicts_with_subcommands = true)]
     History {
         #[command(flatten)]
@@ -668,6 +668,66 @@ pub enum DesktopCommand {
         /// Print the opening receipt as JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Print the repository's default and saved Dashboard plans as JSON
+    Plans {
+        #[arg(long, required = true)]
+        json: bool,
+        /// Print a JSON line now and each time the plans change, until stdin closes
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Print the plan as Desktop shows it: each Task's section, condition and controls
+    Plan {
+        /// One Wave; omitted reads the repository's Waves
+        wave: Option<String>,
+        /// Only this Task, open or closed
+        #[arg(long)]
+        task: Option<String>,
+        /// Every repository's Waves
+        #[arg(long)]
+        all: bool,
+        #[arg(long, required = true)]
+        json: bool,
+        /// Print a JSON line now and each time the plan changes, until stdin closes
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Print one page of closed Tasks as Desktop shows them, most recently closed first
+    Done {
+        #[arg(long)]
+        wave: Option<String>,
+        /// Only Tasks closed since then: 7d, 24h, 30m or RFC3339
+        #[arg(long)]
+        since: Option<String>,
+        /// Previous page's `next` Task; keep the same filters
+        #[arg(long)]
+        after: Option<String>,
+        /// Closed Tasks per page
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// Print one Wave's Projects and Tasks as Desktop shows them
+    Wave {
+        wave: Option<String>,
+        #[arg(long, required = true)]
+        json: bool,
+    },
+    /// Print Sessions as Desktop's Session list shows them
+    Sessions {
+        #[command(flatten)]
+        list: SessionListArgs,
+    },
+    /// Print one Task as Desktop's Task pane shows it
+    Task {
+        issue: String,
+        #[arg(long, required = true)]
+        json: bool,
+        /// Print a JSON line now and each time the Task changes, until stdin closes
+        #[arg(long)]
+        watch: bool,
     },
     /// Create or edit a Dashboard query with revision checking; prints the Dashboard as JSON
     Query {
@@ -935,6 +995,23 @@ lf desktop do page -p tiles page=2\n  lf desktop do filter -p board days=14"
     },
 }
 
+impl DesktopCommand {
+    /// Reads of saved intent and Work that need no Desktop and change nothing.
+    pub fn is_read(&self) -> bool {
+        matches!(
+            self,
+            Self::View { .. }
+                | Self::Plans { .. }
+                | Self::Plan { .. }
+                | Self::Done { .. }
+                | Self::Wave { .. }
+                | Self::Sessions { .. }
+                | Self::Task { .. }
+                | Self::Layout { save: false, .. }
+        )
+    }
+}
+
 /// Which part of the view on screen a command acts on. `-p` is a path: a view part
 /// (`board`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
 /// `browser`, `shell:2`), a Dashboard or Wave view tile (`3`, `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
@@ -1100,6 +1177,46 @@ impl SessionConnectionArgs {
     }
 }
 
+/// Which Sessions `lf session list` and `lf desktop sessions` read.
+#[derive(Args, Debug, Clone)]
+pub struct SessionListArgs {
+    #[arg(long)]
+    pub json: bool,
+    /// Include Sessions from every repository on this machine
+    #[arg(long)]
+    pub all: bool,
+    /// Select interactive (true), headless (false), or both (all)
+    #[arg(long, value_enum, default_value = "true")]
+    pub interactive: SessionMode,
+    /// Include completed conversations and historical reviews
+    #[arg(long)]
+    pub history: bool,
+    /// Only conversations available for your input
+    #[arg(long)]
+    pub available: bool,
+    /// Maximum conversations; 0 reads the complete matching inventory
+    #[arg(long, default_value_t = 100)]
+    pub limit: usize,
+    #[arg(long, default_value_t = 0)]
+    pub offset: usize,
+    /// Return a bounded stable-ID page with a continuation cursor
+    #[arg(long, requires = "json", conflicts_with = "offset")]
+    pub page: bool,
+    /// Previous page's next identity; keep the same filters
+    #[arg(long, requires = "page")]
+    pub after: Option<String>,
+    #[arg(long)]
+    pub task: Option<String>,
+    /// Only Sessions without a Task association
+    #[arg(long, conflicts_with = "task")]
+    pub orphan: bool,
+    #[arg(long)]
+    pub search: Option<String>,
+    /// Print a JSON line now and each time the list changes, until stdin closes
+    #[arg(long)]
+    pub watch: bool,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum SessionCommand {
     /// Run the process a Session lives in while terminals come and go
@@ -1167,40 +1284,7 @@ pub enum SessionCommand {
         limit: usize,
     },
     /// List Sessions
-    List {
-        #[arg(long)]
-        json: bool,
-        /// Include Sessions from every repository on this machine
-        #[arg(long)]
-        all: bool,
-        /// Select interactive (true), headless (false), or both (all)
-        #[arg(long, value_enum, default_value = "true")]
-        interactive: SessionMode,
-        /// Include completed conversations and historical reviews
-        #[arg(long)]
-        history: bool,
-        /// Only conversations available for your input
-        #[arg(long)]
-        available: bool,
-        /// Maximum conversations; 0 reads the complete matching inventory
-        #[arg(long, default_value_t = 100)]
-        limit: usize,
-        #[arg(long, default_value_t = 0)]
-        offset: usize,
-        /// Return a bounded stable-ID page with a continuation cursor
-        #[arg(long, requires = "json", conflicts_with = "offset")]
-        page: bool,
-        /// Previous page's next identity; keep the same filters
-        #[arg(long, requires = "page")]
-        after: Option<String>,
-        #[arg(long)]
-        task: Option<String>,
-        /// Only Sessions without a Task association
-        #[arg(long, conflicts_with = "task")]
-        orphan: bool,
-        #[arg(long)]
-        search: Option<String>,
-    },
+    List(SessionListArgs),
     /// Open the ongoing conversation of this scope, or an exact Session
     #[command(
         visible_alias = "resume",
@@ -1291,6 +1375,9 @@ pub enum WaveCommand {
         /// Read every repository on this Machine
         #[arg(long)]
         all: bool,
+        /// Print a JSON line now and each time the plan changes, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
     },
     /// Select and inspect the graph the Wave's Tasks take up by default
     Graph {
@@ -1360,8 +1447,11 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
         /// Refresh planning from its provider (Git or Linear) before reading
-        #[arg(long)]
+        #[arg(long, conflicts_with = "watch")]
         sync: bool,
+        /// Print a JSON line now and each time the status changes, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
     },
     /// Rename or relocate an authored Wave and its provider mapping
     Rename {
@@ -1428,12 +1518,36 @@ pub struct SyncArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum TaskCommand {
-    /// List every Task in the selected repository
+    /// List the open Tasks in the selected repository
     List {
+        /// Only Tasks whose title or identifier contains this text
+        #[arg(conflicts_with = "done")]
+        query: Option<String>,
         #[arg(long)]
         wave: Option<String>,
+        /// Project ID, provider ID, slug or name
+        #[arg(long, conflicts_with = "done")]
+        project: Option<String>,
+        /// Only Tasks in this state
+        #[arg(long, conflicts_with = "done", value_parser = ["deferred", "unstarted", "idle", "active", "moving", "shipping"])]
+        state: Option<String>,
         #[arg(long)]
         json: bool,
+        /// Page closed (done or abandoned) Tasks instead, most recently closed first
+        #[arg(long)]
+        done: bool,
+        /// Only Tasks closed since then: 7d, 24h, 30m or RFC3339
+        #[arg(long, requires = "done")]
+        since: Option<String>,
+        /// Previous page's `next` Task; keep the same filters
+        #[arg(long, requires = "done")]
+        after: Option<String>,
+        /// Closed Tasks per page
+        #[arg(long, requires = "done", default_value_t = 50)]
+        limit: usize,
+        /// Print a JSON line now and each time the list changes, until stdin closes
+        #[arg(long, conflicts_with = "done")]
+        watch: bool,
     },
 
     /// Defer future Task execution without stopping live processes
@@ -1577,6 +1691,9 @@ terminal instead."
         issue: Option<String>,
         #[arg(long)]
         json: bool,
+        /// Print a JSON line now and each time the status changes, until stdin closes
+        #[arg(long)]
+        watch: bool,
     },
     /// Show this Task's patch or list its changed files
     Diff {
@@ -1966,6 +2083,14 @@ pub enum PlanningCommand {
     },
     /// Show selection, retained imports and held records without contacting Git
     Status {
+        #[arg(long)]
+        json: bool,
+        /// Keep the repository's planning exchanged, printing a JSON line now and each time the status changes, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
+    },
+    /// Show each destination's retained changes, including losing values, without contacting Git
+    Journal {
         #[arg(long)]
         json: bool,
     },
@@ -2479,7 +2604,7 @@ mod tests {
         assert!(matches!(
             cli.command,
             Some(Commands::Session {
-                cmd: SessionCommand::List { orphan: true, .. }
+                cmd: SessionCommand::List(SessionListArgs { orphan: true, .. })
             })
         ));
         assert!(

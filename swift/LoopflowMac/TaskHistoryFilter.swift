@@ -29,9 +29,36 @@ struct TaskHistoryFilter: Equatable {
         return date <= now && date >= now.addingTimeInterval(-Double(days) * 86_400)
     }
 
-    private static func completionDate(_ timestamp: String) -> Date? {
+    static func completionDate(_ timestamp: String) -> Date? {
         if let date = try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse(timestamp) { return date }
         return try? Date.ISO8601FormatStyle().parse(timestamp)
+    }
+}
+
+/// Closed Tasks paged from `lf task list --done`, most recently closed first.
+/// The Wave's status carries only open Tasks.
+struct ClosedTaskHistory {
+    private(set) var tasks: [RoadmapTask] = []
+    private(set) var next: String?
+    var isLoading = false
+    var error: String?
+
+    mutating func append(_ page: ClosedTaskPage) {
+        tasks += page.tasks
+        next = page.next
+    }
+
+    /// Whether the pages reach back to `date`.
+    func reaches(_ date: Date) -> Bool {
+        guard let oldest = tasks.last(where: { $0.task.completedAt != nil })?.task.completedAt,
+              let closed = TaskHistoryFilter.completionDate(oldest) else { return false }
+        return closed < date
+    }
+
+    /// The open inventory, then closed Tasks it does not already hold.
+    func merged(after open: [RoadmapTask]) -> [RoadmapTask] {
+        let ids = Set(open.map(\.id))
+        return open + tasks.filter { !ids.contains($0.id) }
     }
 }
 

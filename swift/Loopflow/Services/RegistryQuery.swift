@@ -1,7 +1,7 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
 // History and explicit lookups are one-shot queries. What a window shows is kept
-// current by one foreground workspace reader per window.
+// current by the same reads run with `--watch`, one process per part.
 //
 // Reads run `lf` subprocesses and decode shared wire types into app models.
 // The injected runner on macOS launches the `lf` shipped inside the app. There is no
@@ -192,19 +192,18 @@ public struct RegistryQuery: Sendable {
         return snapshots.map { $0.toWave() }
     }
 
-    /// Every current Wave the registry knows, scoped to one
-    /// repo. This replaces the old `/ws` connected snapshot — a point-in-time
-    /// read the caller re-queries on a cadence, not a stream.
-    public func waves(repoPath: String) async throws -> [Wave] {
-        let waves = try await allWaves()
-        let target = repoPath.normalizedFilePath
-        return waves.filter { $0.repo.normalizedFilePath == target }
+    /// One page of a Wave's closed Tasks, most recently closed first. The
+    /// Wave's status carries only its open Tasks.
+    public func closedTasks(wave: String, after: String? = nil, cwd: String) async throws -> ClosedTaskPage {
+        var args = ["desktop", "done", "--wave", wave, "--json"]
+        if let after { args += ["--after", after] }
+        return try Self.decode(ClosedTaskPage.self, from: await run(args, cwd))
     }
 
     /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
-        let stdout = try await run(["wave", "status", wave, "--json"], cwd)
+        let stdout = try await run(["desktop", "wave", wave, "--json"], cwd)
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
@@ -221,7 +220,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
-        var args = ["wave", "show"]
+        var args = ["desktop", "plan"]
         if let wave {
             args.append(wave)
         } else {
@@ -243,7 +242,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
-        var args = ["wave", "show", "--task", issue, "--json"]
+        var args = ["desktop", "plan", "--task", issue, "--json"]
         if repo == nil { args.append("--all") }
         return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
     }
@@ -256,11 +255,6 @@ public struct RegistryQuery: Sendable {
     public func localMachineId() async throws -> String {
         struct MachineIdentity: Decodable { let id: String }
         return try Self.decode(MachineIdentity.self, from: await run(["machine", "id", "--json"], nil)).id
-    }
-
-    public func userName() async throws -> String? {
-        let stdout = try await run(["config", "user", "--json"], nil)
-        return try Self.decode(String?.self, from: stdout)
     }
 
     /// Whether this transport keeps a workspace current by itself. Without one,
@@ -399,13 +393,6 @@ public struct RegistryQuery: Sendable {
         _ = try await run(["task", "abandon", issue], cwd)
     }
 
-    /// One planning Task's complete comment thread. Read-only; works before
-    /// the Task is prepared or started.
-    public func taskComments(id: String, cwd: String) async throws -> TaskComments {
-        let stdout = try await run(["task", "comment", id, "--json"], cwd)
-        return try Self.decode(TaskComments.self, from: stdout)
-    }
-
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
     public func taskHistory(task: String, cwd: String?) async throws -> [SessionHistory] {
@@ -446,15 +433,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
     }
 
-    /// One page of immediate directory entries in the Task checkout.
-    public func taskFiles(issue: String, directory: String, cursor: String? = nil,
-                          showIgnored: Bool = false) async throws -> TaskDirectory {
-        var args = ["task", "files", issue, directory.isEmpty ? "." : directory, "--json"]
-        if let cursor { args += ["--cursor", cursor] }
-        if showIgnored { args.append("--show-ignored") }
-        return try Self.decode(TaskDirectory.self, from: try await run(args, nil))
-    }
-
     /// Current contents of one file, constrained to the Task worktree.
     public func taskFile(
         issue: String,
@@ -473,17 +451,12 @@ public struct RegistryQuery: Sendable {
     /// One bounded page, ordered by stable Session identity.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
-        var args = ["session", "list", "--json", "--page"]
+        var args = ["desktop", "sessions", "--json", "--page"]
         if includingHeadless { args += ["--interactive", "all"] }
         args += ["--limit", "100"]
         if let after { args += ["--after", after] }
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionPage.self, from: stdout)
-    }
-
-    /// Include historical Waves for the deliberate first-use entry check.
-    public func repositoryWaves(cwd: String) async throws -> [WaveSnapshot] {
-        try Self.decode([WaveSnapshot].self, from: await run(["wave", "list", "--json"], cwd))
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.
@@ -560,19 +533,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-
-    /// A wave's measured bets from the local PM snapshot. Cache-only reads keep
-    /// rendering off the network; explicit and scheduled syncs refresh SQLite.
-    public func plan(
-        wave: String,
-        objective: String,
-        cwd: String?,
-        sync: Bool = false
-    ) async throws -> WavePlan {
-        let stdout = try await run(["wave", "status", wave, "--json"] + (sync ? ["--sync"] : []), cwd)
-        let snapshot = try Self.decode(WaveDetailSnapshot.self, from: stdout)
-        return WavePlan(objective: objective, projects: snapshot.projects)
-    }
 
     /// Direct provider-authored usage from retained Session history, optionally
     /// drilled through the shared Wave → Project → Task attribution.
@@ -702,6 +662,12 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// `lf task list --done --json`: closed Tasks and the Task to continue after.
+public struct ClosedTaskPage: Decodable, Sendable, Hashable {
+    public let tasks: [RoadmapTask]
+    public let next: String?
+}
+
 public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
     public let generatedAt: String
     public let waves: [WaveRoadmap]
@@ -738,6 +704,10 @@ public struct WaveRoadmap: Sendable, Hashable {
     /// This Wave's share of the roadmap's Tasks, which the wire sends once.
     public let tasks: WorkEvidence<RoadmapTask>
     public let unavailableTasks: [UnavailableTaskEvidence]
+
+    public var workMap: WaveWorkMap {
+        WaveWorkMap(objective: wave.goal, projects: projects, tasks: tasks)
+    }
 
     enum CodingKeys: String, CodingKey {
         case projectReadiness = "project_readiness"
@@ -787,7 +757,7 @@ public struct WaveDetailSnapshot: Decodable, Sendable {
     public let wave: WaveSnapshot
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
-    public let tasks: WorkEvidence<WaveTaskWork>
+    public let tasks: WorkEvidence<RoadmapTask>
     public let metricPortfolio: MetricPortfolio
     public let unavailableTasks: [UnavailableTaskEvidence]
     public let history: WorkEvidence<SessionHistory>

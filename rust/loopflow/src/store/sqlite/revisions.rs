@@ -314,18 +314,10 @@ mod tests {
         assert_eq!(record(1005, 1, 0, false), 0, "still streaming");
         assert_eq!(record(1010, 2, 0, false), 0, "another open tool");
         assert_eq!(record(1015, 0, 0, false), 1, "last tool returned");
-        // Counting toward quiet from the newest reading, with no write when it arrives.
-        assert_eq!(store.next_quiet_available(1020).unwrap(), Some(1135));
+        // Quiet arrives with no write; a reader's clock observes it.
         assert_eq!(record(1020, 0, 0, false), 0, "streaming text");
-        assert_eq!(store.next_quiet_available(1025).unwrap(), Some(1140));
-        assert_eq!(
-            store.next_quiet_available(1140).unwrap(),
-            None,
-            "already Available"
-        );
         assert_eq!(record(1140, 0, 0, false), 1, "activity after quiet");
         assert_eq!(record(1145, 0, 1, false), 1, "question asked");
-        assert_eq!(store.next_quiet_available(1146).unwrap(), None);
         assert_eq!(record(1150, 0, 0, false), 1, "question answered");
         assert_eq!(record(1155, 0, 0, true), 1, "turn handed back");
     }

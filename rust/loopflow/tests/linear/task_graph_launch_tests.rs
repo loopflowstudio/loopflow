@@ -498,7 +498,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains("pull request has not merged"), "{error}");
         assert_eq!(support::recorded_graphs(home.path()).len(), 3);
-        let status = run(&["task", "status", "INF-123", "--json"]);
+        let status = run(&["desktop", "task", "INF-123", "--json"]);
         assert!(
             status.status.success(),
             "{}",
@@ -669,7 +669,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
         let read = command(
             &caller,
             task.home.path(),
-            &["--task", "INF-123", "task", "status", "INF-123", "--json"],
+            &["--task", "INF-123", "desktop", "task", "INF-123", "--json"],
         )
         .output()
         .unwrap();
@@ -1101,7 +1101,7 @@ impl GraphTask {
     }
 
     fn status(&self) -> serde_json::Value {
-        let status = self.run(&["task", "status", "INF-123", "--json"]);
+        let status = self.run(&["desktop", "task", "INF-123", "--json"]);
         assert!(
             status.status.success(),
             "{}",

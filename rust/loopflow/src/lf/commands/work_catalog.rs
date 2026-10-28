@@ -18,7 +18,6 @@ pub(crate) struct WorkOwner {
     pub(crate) work: WorkRef,
     pub(crate) subject: String,
     pub(crate) selectors: Vec<String>,
-    pub(crate) created_at: Option<i64>,
 }
 
 impl WorkOwner {
@@ -76,7 +75,6 @@ impl WorkCatalog {
                     work: identity.work,
                     subject: identity.subject,
                     selectors,
-                    created_at: identity.created_at,
                 },
             );
         }

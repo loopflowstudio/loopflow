@@ -1,0 +1,345 @@
+{
+  "tasks": [
+    {
+      "task": {
+        "id": "ts_22222222222222222222222222222222",
+        "identifier": "INF-123",
+        "name": "Surface nightly failures",
+        "description": "Surface one focused failure.",
+        "rank": 1,
+        "assignee": "user-1",
+        "state": "completed",
+        "completed_at": "2026-07-14T18:30:00Z",
+        "due_date": null,
+        "sync": {
+          "connected": true,
+          "changes": [
+            {
+              "id": "create-task",
+              "field": "creation",
+              "state": "pending",
+              "local_value": {
+                "title": "Saved offline"
+              },
+              "linear_value": null,
+              "error": null
+            },
+            {
+              "id": "order-project",
+              "field": "task_order",
+              "state": "uncertain",
+              "local_value": [
+                "task-b",
+                "task-a"
+              ],
+              "linear_value": null,
+              "error": "Reply lost; awaiting readback"
+            },
+            {
+              "id": "title-task",
+              "field": "task_title",
+              "state": "adopted_linear",
+              "local_value": "Local title",
+              "linear_value": "Linear title",
+              "error": null
+            },
+            {
+              "id": "assignee-task",
+              "field": "task_assignee",
+              "state": "adopted_linear",
+              "local_value": "person-id",
+              "linear_value": null,
+              "error": null
+            },
+            {
+              "id": "comment-task",
+              "field": "comment",
+              "state": "pending",
+              "local_value": {
+                "body": "Saved comment",
+                "author": {
+                  "kind": "person",
+                  "name": "Maya"
+                },
+                "created_at": "2026-10-08T12:00:00Z"
+              },
+              "linear_value": null,
+              "error": "Offline"
+            }
+          ]
+        },
+        "linear_id": "issue-1",
+        "acquisition": {
+          "state": "available",
+          "observed_at": null
+        },
+        "repository_id": "repo_00000000000040008000000000000001",
+        "repo": "/src/loopflow",
+        "project_id": "proj_0123456789ab40008000000000000001",
+        "wave_id": "wave-1"
+      },
+      "reference": {
+        "issue_url": "https://linear.app/loopflow/issue/INF-123/surface-nightly-failures",
+        "workspace": {
+          "machine_id": "home_00000000000000000000000000000001",
+          "machine_label": "build-server",
+          "slug": "infrastructure-task",
+          "branch": "jack/infrastructure.task.20260713_1200",
+          "worktree": "/src/loopflow.infrastructure.task",
+          "local_exists": true,
+          "base_commit": "1111111111111111111111111111111111111111"
+        }
+      },
+      "runtime": {
+        "work_id": "ts_22222222222222222222222222222222",
+        "status": "done",
+        "completion_pending": null,
+        "reason": "done",
+        "updated_at": "2026-07-13T19:00:00Z",
+        "provider": "codex",
+        "owner": {
+          "person": "Jack Heart",
+          "person_key": "jack@loopflow.studio",
+          "machine": {
+            "id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b",
+            "label": "mini"
+          }
+        }
+      },
+      "next_move": {
+        "owner": "user",
+        "reason": "merge pull request head 333333333333 on GitHub"
+      },
+      "actions": {
+        "recommended": "open_pr",
+        "reason": "merge head 333333333333 on GitHub"
+      },
+      "condition": {
+        "state": "waiting",
+        "reason": "merge pull request head 333333333333 on GitHub",
+        "observed_at": "2026-07-13T21:00:00Z",
+        "evidence_age_secs": 7200,
+        "local_progress": {
+          "state": "observed",
+          "unsettled": true,
+          "dirty": false,
+          "authored_commits": true,
+          "recovery_required": false,
+          "reason": null
+        },
+        "unresolved_execution": true
+      },
+      "graph_name": "feature",
+      "latest_graph_process": {
+        "entry": {
+          "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
+          "name": "feature",
+          "state": "stopped",
+          "task_id": null,
+          "wave_id": null,
+          "updated_at": 1,
+          "repo": "/src/loopflow",
+          "ended_at": null
+        },
+        "compiled": {
+          "name": "feature",
+          "steps": [
+            {
+              "key": 0,
+              "id": "design",
+              "label": "task-design",
+              "kind": "skill",
+              "interactive": false,
+              "returns_to": null,
+              "sources": [
+                "feature"
+              ],
+              "paths": []
+            },
+            {
+              "key": 1,
+              "id": "implement",
+              "label": "implement",
+              "kind": "skill",
+              "interactive": false,
+              "returns_to": null,
+              "sources": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": 2,
+              "id": null,
+              "label": "realign",
+              "kind": "skill",
+              "interactive": false,
+              "returns_to": null,
+              "sources": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": 3,
+              "id": "decide",
+              "label": "loop-or-next",
+              "kind": "skill",
+              "interactive": false,
+              "returns_to": 1,
+              "sources": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": 4,
+              "id": "demo",
+              "label": "demo",
+              "kind": "skill",
+              "interactive": true,
+              "returns_to": null,
+              "sources": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": 5,
+              "id": "decide_delivery",
+              "label": "loop-or-next",
+              "kind": "skill",
+              "interactive": false,
+              "returns_to": 1,
+              "sources": [
+                "feature",
+                "pursue"
+              ],
+              "paths": []
+            },
+            {
+              "key": 6,
+              "id": null,
+              "label": "xor-route",
+              "kind": "xor",
+              "interactive": false,
+              "returns_to": null,
+              "sources": [
+                "feature"
+              ],
+              "paths": [
+                {
+                  "name": "fix",
+                  "description": "Repair the failing check",
+                  "steps": [
+                    {
+                      "key": 7,
+                      "id": "patch",
+                      "label": "patch",
+                      "kind": "skill",
+                      "interactive": false,
+                      "returns_to": null,
+                      "sources": [],
+                      "paths": []
+                    }
+                  ]
+                },
+                {
+                  "name": "skip",
+                  "description": "Nothing to repair",
+                  "steps": []
+                }
+              ]
+            },
+            {
+              "key": 8,
+              "id": null,
+              "label": "pr land -c",
+              "kind": "op",
+              "interactive": false,
+              "returns_to": null,
+              "sources": [
+                "feature",
+                "queue"
+              ],
+              "paths": []
+            }
+          ]
+        },
+        "current": 4,
+        "completed": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "returns": [
+          {
+            "decider": 3,
+            "traversals": 1
+          },
+          {
+            "decider": 5,
+            "traversals": 1
+          }
+        ],
+        "iterations": [
+          [
+            1,
+            1
+          ]
+        ],
+        "cwd": "/src/loopflow",
+        "steps": []
+      },
+      "execution": {
+        "state": "idle",
+        "reason": "Waiting for your review at demo",
+        "step": null,
+        "captured": null
+      },
+      "run_control": {
+        "unavailable": null
+      },
+      "pr": {
+        "id": "pr_33333333333333333333333333333333",
+        "sequence": 1,
+        "slug": "infrastructure-task",
+        "branch": "jack/infrastructure.task.20260713_1200",
+        "base_commit": "1111111111111111111111111111111111111111",
+        "phase": "open",
+        "empty": false,
+        "publication": {
+          "requested_at": "2026-07-13T18:45:00Z",
+          "presentation": {
+            "title": "Ship infrastructure task",
+            "body": "Explains the intent and proof for this head.",
+            "head_sha": "3333333333333333333333333333333333333333"
+          },
+          "github": {
+            "number": 912,
+            "url": "https://github.com/loopflowstudio/loopflow/pull/912"
+          },
+          "merge": {
+            "mode": "user",
+            "requested_at": "2026-07-13T18:46:00Z",
+            "head_sha": "3333333333333333333333333333333333333333"
+          }
+        },
+        "merge_commit": null,
+        "abandoned_at": null
+      },
+      "graph_source": "task",
+      "section": "later",
+      "ship_control": {
+        "unavailable": null
+      },
+      "shipping": null
+    }
+  ],
+  "next": "ts_22222222222222222222222222222222"
+}

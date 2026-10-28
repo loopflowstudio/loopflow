@@ -1,0 +1,58 @@
+{
+  "task": {
+    "id": "task_11111111111111111111111111111111",
+    "identifier": "LOO-2",
+    "title": "Route incoming mail",
+    "wave": "infrastructure",
+    "project": "Gmail",
+    "state": "active",
+    "reason": "Review the demo in the Task's conversation",
+    "graph": {
+      "name": "feature",
+      "step": "demo"
+    },
+    "pr": {
+      "number": 1719,
+      "url": "https://github.com/loopflowstudio/loopflow/pull/1719",
+      "phase": "open"
+    },
+    "next": "lf task run LOO-2"
+  },
+  "sessions": [
+    {
+      "id": "manual",
+      "title": "Checkout conversation",
+      "provider": "claude",
+      "interactive": false,
+      "state": "closed",
+      "available": false,
+      "cwd": "/src/loopflow.loo-2",
+      "agent_process_id": null
+    }
+  ],
+  "graph_processes": [
+    {
+      "id": "00000005-0000-4000-8000-000000000000",
+      "name": "feature",
+      "state": "current",
+      "step": "implement · pass 2",
+      "updated_at": "2026-09-23T08:05:00Z"
+    }
+  ],
+  "comments": {
+    "pending_sync": [],
+    "comments": [
+      {
+        "id": "c-1",
+        "body": "Moved to review.",
+        "author": {
+          "kind": "person",
+          "name": "Maya"
+        },
+        "created_at": "2026-09-23T08:00:00Z"
+      }
+    ],
+    "refresh_error": null,
+    "conflicts": {}
+  }
+}

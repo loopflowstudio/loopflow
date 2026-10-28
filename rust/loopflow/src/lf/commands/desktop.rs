@@ -3,6 +3,7 @@ use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use super::waves::Shape;
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
 use crate::ops::task_run::TaskRunControl;
@@ -478,7 +479,8 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "actions"] => Some(schema::<Vec<DesktopActionDescriptor>>()),
         ["desktop", "capture"] => Some(schema::<DesktopTextReading>()),
         ["desktop", "events"] => Some(schema::<DesktopChange>()),
-        ["desktop", "wait"] => None,
+        // Work reads print Desktop's presentation types, which carry no schema.
+        ["desktop", "wait" | "plan" | "done" | "wave" | "sessions" | "task"] => None,
         // Saved-intent commands answered above; `rename` writes a shared owner's record.
         ["desktop", verb] if !READING_VERBS.contains(verb) && *verb != "rename" => {
             Some(schema::<DesktopVerbResult>())
@@ -605,6 +607,57 @@ fn selection_repository(
         .repository_id(&repo.to_string())?
         .ok_or(crate::store::StoreError::NotFound)
         .context("repository has no recorded Work identity")
+}
+
+/// `lf desktop task`: what the Task pane shows, from the same reading as
+/// `lf task status`.
+fn task_pane(issue: &str, watch: bool) -> Result<()> {
+    let repo = crate::ops::task::task_repository(&crate::repo::working_directory()?, Some(issue))?;
+    let status = crate::ops::task::task_status(&repo, Some(issue))?;
+    if watch {
+        let task = status
+            .task
+            .context("only a registered Task can be watched")?;
+        return super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop);
+    }
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = crate::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .context("no Loopflow store exists on this Machine")?;
+        let pane = super::waves::task_pane(&store, status).await?;
+        println!("{}", serde_json::to_string(&pane)?);
+        Ok(())
+    })
+}
+
+/// `lf desktop plans`: every plan a repository window shows, the default and
+/// each saved Dashboard, as Desktop reads them.
+fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
+    if !watch {
+        let store = crate::store::read_existing_registry()?
+            .ok_or(crate::store::StoreError::NotFound)
+            .context("Work registry is unavailable")?;
+        let repository = selection_repository(cli, &store.sqlite)?;
+        println!(
+            "{}",
+            serde_json::to_string(&store.sqlite.selection_plans(&repository)?)?
+        );
+        return Ok(());
+    }
+    super::watch::run(
+        (),
+        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
+        |store, ()| {
+            let result = store
+                .ok_or(crate::store::StoreError::NotFound)
+                .context("Work registry is unavailable")
+                .and_then(|store| {
+                    let repository = selection_repository(cli, &store.sqlite)?;
+                    Ok(store.sqlite.selection_plans(&repository)?)
+                });
+            async move { result }
+        },
+    )
 }
 
 fn view_plan(
@@ -851,6 +904,44 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             plan,
             json,
         } => return view_plan(cli, expression.as_deref(), *plan, *json || cli.json),
+        DesktopCommand::Plans { watch, .. } => return plans(cli, *watch),
+        DesktopCommand::Plan {
+            wave,
+            task,
+            all,
+            watch,
+            ..
+        } => {
+            return if *watch {
+                super::waves::watch_show(wave.clone(), task.clone(), *all, Shape::Desktop)
+            } else {
+                super::waves::show(wave.as_deref(), task.as_deref(), true, *all, Shape::Desktop)
+            };
+        }
+        DesktopCommand::Done {
+            wave,
+            since,
+            after,
+            limit,
+            ..
+        } => {
+            return super::waves::list_closed_tasks(
+                &crate::repo::working_directory()?,
+                wave.as_deref(),
+                since.as_deref(),
+                after.as_deref(),
+                *limit,
+                true,
+                Shape::Desktop,
+            );
+        }
+        DesktopCommand::Wave { wave, .. } => {
+            return super::waves::status(wave.as_deref(), true, Shape::Desktop);
+        }
+        DesktopCommand::Sessions { list } => {
+            return super::session::list_sessions(list, Shape::Desktop);
+        }
+        DesktopCommand::Task { issue, watch, .. } => return task_pane(issue, *watch),
         _ => {}
     }
     // Arguments are checked before Desktop is contacted.
@@ -1291,6 +1382,12 @@ impl Verb {
                 )
             }
             DesktopCommand::View { .. }
+            | DesktopCommand::Plans { .. }
+            | DesktopCommand::Plan { .. }
+            | DesktopCommand::Done { .. }
+            | DesktopCommand::Wave { .. }
+            | DesktopCommand::Sessions { .. }
+            | DesktopCommand::Task { .. }
             | DesktopCommand::Query { .. }
             | DesktopCommand::Pin { .. }
             | DesktopCommand::Unpin { .. }
@@ -1468,6 +1565,12 @@ pub fn runs_without_desktop(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
     match command {
         DesktopCommand::View { .. }
+        | DesktopCommand::Plans { .. }
+        | DesktopCommand::Plan { .. }
+        | DesktopCommand::Done { .. }
+        | DesktopCommand::Wave { .. }
+        | DesktopCommand::Sessions { .. }
+        | DesktopCommand::Task { .. }
         | DesktopCommand::Query { .. }
         | DesktopCommand::Pin { .. }
         | DesktopCommand::Unpin { .. }
@@ -3374,9 +3477,14 @@ mod tests {
         let cli = <crate::lf::Cli as clap::CommandFactory>::command();
         let desktop = cli.find_subcommand("desktop").unwrap();
         let saved = ["view", "query", "pin", "unpin", "rename", "layout"];
+        let work_reads = ["plans", "plan", "done", "wave", "sessions", "task"];
         for verb in desktop.get_subcommands().map(clap::Command::get_name) {
             // `do` performs whichever registry action it names.
-            if verb == "do" || saved.contains(&verb) || super::READING_VERBS.contains(&verb) {
+            if verb == "do"
+                || saved.contains(&verb)
+                || work_reads.contains(&verb)
+                || super::READING_VERBS.contains(&verb)
+            {
                 continue;
             }
             assert!(names.contains(&verb), "{verb} is not a registry action");

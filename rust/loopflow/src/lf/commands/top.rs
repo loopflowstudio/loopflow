@@ -1,4 +1,4 @@
-//! Loopflow activity snapshots: `lf monitor ps` once, `lf monitor top` continuously on a TTY.
+//! Loopflow activity snapshots: `lf monitor ps` once or `--watch`ed, `lf monitor top` continuously on a TTY.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{IsTerminal, Write};
@@ -15,6 +15,7 @@ use crate::journal::{
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
 };
 use crate::lf::output::truncate;
+use crate::store::rows::unix_to_datetime;
 use crate::store::sqlite::SqliteStore;
 
 const SCHEMA_VERSION: u32 = 1;
@@ -60,14 +61,13 @@ pub struct ActivityNode {
     pub worktree: Option<String>,
     pub wave: Option<String>,
     pub pid: Option<u32>,
-    pub started_at: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub started_at: OffsetDateTime,
     pub state: ActivityState,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActivitySnapshot {
-    pub schema_version: u32,
-    pub observed_at: i64,
     pub nodes: Vec<ActivityNode>,
 }
 
@@ -84,27 +84,6 @@ pub struct ProcessPruneReport {
     /// Store retention; absent on a dry run or before the store exists.
     pub store: Option<crate::store::sqlite::retention::RetentionReport>,
     pub errors: u32,
-}
-
-/// Read-local OS evidence for a recorded AgentProcess; no inferred ownership.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AgentProcessObservation {
-    pub id: crate::id::LfProcessId,
-    pub pid: Option<u32>,
-    pub provider: String,
-    pub state: ActivityState,
-}
-
-pub(crate) fn observe_agent_process(
-    processes: Option<&[OsProcess]>,
-    agent: &crate::process::AgentProcess,
-) -> Option<AgentProcessObservation> {
-    Some(AgentProcessObservation {
-        id: agent.process.id.clone(),
-        pid: agent.process.pid,
-        provider: agent.provider.clone().unwrap_or_else(|| "unknown".into()),
-        state: activity_state(&agent.process, &Ok(None), processes)?,
-    })
 }
 
 /// Missing identity and failed sampling remain visible without granting control.
@@ -143,10 +122,9 @@ pub fn run_ps(json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_top(json: bool) -> Result<()> {
-    let interactive = !json && std::io::stdout().is_terminal();
-    if !interactive {
-        return run_ps(json);
+pub fn run_top() -> Result<()> {
+    if !std::io::stdout().is_terminal() {
+        return run_ps(false);
     }
 
     let mut stdout = std::io::stdout().lock();
@@ -157,6 +135,16 @@ pub fn run_top(json: bool) -> Result<()> {
         stdout.flush()?;
         thread::sleep(REFRESH_INTERVAL.saturating_sub(frame_started.elapsed()));
     }
+}
+
+/// Stream the call trees: Process rows change with the store, liveness and
+/// activity state only on the clock.
+pub fn watch_ps() -> Result<()> {
+    super::watch::run(
+        (),
+        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
+        |_, ()| async { load_snapshot() },
+    )
 }
 
 pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
@@ -240,11 +228,7 @@ pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let path = crate::store::database_path_from_env()?;
     if !path.exists() {
-        return Ok(ActivitySnapshot {
-            schema_version: SCHEMA_VERSION,
-            observed_at: now,
-            nodes: Vec::new(),
-        });
+        return Ok(ActivitySnapshot { nodes: Vec::new() });
     }
     let store = SqliteStore::open_processes_read_only(&path)?;
     let records = store.unfinished_processes()?;
@@ -253,19 +237,15 @@ pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
         tracing::warn!(%error, "activity OS observation unavailable");
     }
     // Each unfinished row reads its own receipt, so cost follows live work, not history.
-    collect_activity(
-        records,
-        processes.as_deref().ok(),
-        |record| recorded_process_receipt(&store, record),
-        now,
-    )
+    collect_activity(records, processes.as_deref().ok(), |record| {
+        recorded_process_receipt(&store, record)
+    })
 }
 
 fn collect_activity(
     records: Vec<crate::process::LfProcess>,
     processes: Option<&[OsProcess]>,
     mut receipt: impl FnMut(&crate::process::LfProcess) -> std::io::Result<Option<ProcessReceipt>>,
-    now: i64,
 ) -> Result<ActivitySnapshot> {
     let mut nodes = Vec::new();
     for record in records {
@@ -277,11 +257,11 @@ fn collect_activity(
             continue;
         };
         nodes.push(ActivityNode {
-            id: process_node_id(record.id.as_str()),
+            id: record.id.to_string(),
             parent_id: record
                 .parent_lf_process_id
                 .as_ref()
-                .map(|id| process_node_id(id.as_str())),
+                .map(ToString::to_string),
             kind: if agent {
                 ActivityNodeKind::AgentProcess
             } else {
@@ -292,17 +272,13 @@ fn collect_activity(
             worktree: record.cwd,
             wave: None,
             pid: record.pid,
-            started_at: record.started_at,
+            started_at: unix_to_datetime(record.started_at),
             state,
         });
     }
     fold_activity_state(&mut nodes)?;
     nodes.sort_by(|left, right| left.id.cmp(&right.id));
-    Ok(ActivitySnapshot {
-        schema_version: SCHEMA_VERSION,
-        observed_at: now,
-        nodes,
-    })
+    Ok(ActivitySnapshot { nodes })
 }
 
 pub(crate) fn command_label(command: Option<&str>, kind: crate::process::ProcessKind) -> String {
@@ -440,10 +416,6 @@ fn fold_process_state(base: ActivityState, children: &[ActivityState]) -> Activi
     base
 }
 
-fn process_node_id(id: &str) -> String {
-    format!("process:{id}")
-}
-
 fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(snapshot)?);
@@ -454,6 +426,7 @@ fn print_snapshot(snapshot: &ActivitySnapshot, json: bool) -> Result<()> {
 }
 
 fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     let mut output = String::new();
     output.push_str("LOOPFLOW ACTIVITY\n");
     output.push_str(&format!(
@@ -483,7 +456,7 @@ fn render_snapshot(snapshot: &ActivitySnapshot) -> String {
         let tree = RenderTree {
             index,
             children,
-            now: snapshot.observed_at,
+            now,
         };
         if let Some(roots) = tree.children.get(&None) {
             for root in roots {
@@ -570,11 +543,11 @@ fn render_node(
     };
     output.push_str(&format!(
         "{:>9}  {:>8}  {:<9}  {:<36}  {}{}{}\n",
-        format_duration(tree.now.saturating_sub(node.started_at)),
+        format_duration(tree.now.saturating_sub(node.started_at.unix_timestamp())),
         node.pid
             .map_or_else(|| "—".to_string(), |pid| pid.to_string()),
         node.state.label(),
-        node.id.strip_prefix("process:").unwrap_or(&node.id),
+        node.id,
         prefix,
         connector,
         truncate(&node.label, COMMAND_WIDTH),
@@ -627,7 +600,7 @@ mod tests {
             worktree: None,
             wave: None,
             pid: None,
-            started_at: 0,
+            started_at: time::OffsetDateTime::UNIX_EPOCH,
         };
         // Children can precede parents. Missing parents remain separate roots;
         // agent state is its own OS observation, not inherited child activity.
@@ -731,7 +704,7 @@ mod tests {
         let blockers = crate::ops::task_execution::task_execution_blockers(&store, &task).unwrap();
         assert_eq!(blockers.len(), 2);
         for node in &snapshot.nodes {
-            let id = node.id.strip_prefix("process:").unwrap();
+            let id = node.id.as_str();
             assert!(blockers.iter().any(|blocker| blocker.contains(id)));
             assert!(super::render_snapshot(&snapshot).contains(id));
         }
@@ -852,7 +825,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let before = ids(load_snapshot().unwrap());
-        assert_eq!(before, [(format!("process:{live}"), true)]);
+        assert_eq!(before, [(live.to_string(), true)]);
 
         for _ in 0..10_000 {
             let junk = LfProcessId::new();
@@ -906,26 +879,19 @@ mod tests {
             }]
         };
         let snapshot =
-            collect_activity(vec![record.clone()], Some(&os(100)), |_| Ok(None), 101).unwrap();
+            collect_activity(vec![record.clone()], Some(&os(100)), |_| Ok(None)).unwrap();
         assert_eq!(snapshot.nodes.len(), 1);
         assert_eq!(snapshot.nodes[0].kind, ActivityNodeKind::AgentProcess);
-        assert_eq!(snapshot.nodes[0].id, format!("process:{id}"));
-        assert_eq!(
-            snapshot.nodes[0].parent_id,
-            Some(format!("process:{parent}"))
-        );
+        assert_eq!(snapshot.nodes[0].id, id.to_string());
+        assert_eq!(snapshot.nodes[0].parent_id, Some(parent.to_string()));
         assert_eq!(snapshot.nodes[0].label, "codex app-server");
-        assert!(
-            collect_activity(vec![record], Some(&os(200)), |_| Ok(None), 201)
-                .unwrap()
-                .nodes
-                .is_empty()
-        );
-        assert!(
-            collect_activity(Vec::new(), Some(&os(100)), |_| Ok(None), 101)
-                .unwrap()
-                .nodes
-                .is_empty()
-        );
+        assert!(collect_activity(vec![record], Some(&os(200)), |_| Ok(None))
+            .unwrap()
+            .nodes
+            .is_empty());
+        assert!(collect_activity(Vec::new(), Some(&os(100)), |_| Ok(None))
+            .unwrap()
+            .nodes
+            .is_empty());
     }
 }

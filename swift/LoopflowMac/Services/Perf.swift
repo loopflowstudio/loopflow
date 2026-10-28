@@ -23,7 +23,6 @@ enum Perf {
     static let taskWorkspaceReady: StaticString = "task_workspace_ready"
     /// Task selection → header observes its cached or freshly delivered Workflow.
     static let workflowReady: StaticString = "workflow_ready"
-    static let workFrameDecode: StaticString = "work_frame_decode"
     static let workFrameApply: StaticString = "work_frame_apply"
     static let retainedWorkspaceAction: StaticString = "retained_workspace_action"
     /// One `lf` subprocess read; the message names the verb.

@@ -1,7 +1,6 @@
 {
   "dashboard_id": "picked",
   "repository": "repo_11111111111111111111111111111111",
-  "observed_at": 1792108800,
   "saved_revision": 3,
   "selection": {
     "id": "root",

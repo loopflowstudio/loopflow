@@ -198,9 +198,12 @@ def _await(check, message: str, seconds: int = 45) -> None:
 
 
 class Watch:
-    def __init__(self, fixture: dict, env: dict):
+    """One `lf <args> --json --watch`. `planning status` keeps the
+    repository's planning exchanged while it runs, as an open Desktop window does."""
+
+    def __init__(self, fixture: dict, env: dict, *args: str):
         self.process = subprocess.Popen(
-            [fixture["lf"], "monitor", "work", "--watch", "--json"],
+            [fixture["lf"], *args, "--json", "--watch"],
             cwd=fixture["repo"],
             env=env,
             stdin=subprocess.PIPE,
@@ -210,27 +213,10 @@ class Watch:
         self.frames = queue.Queue()
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
-        self.serial = 0
 
     def _read(self) -> None:
         for line in self.process.stdout:
             self.frames.put(json.loads(line))
-
-    def scope(self, repo: str | None, wave: str | None = None, task: str | None = None) -> None:
-        self.serial += 1
-        request = dict(
-            action="scope",
-            id=self.serial,
-            repo=repo,
-            wave=wave,
-            task=task,
-            headless=True,
-            activity=None,
-        )
-        self.process.stdin.write(json.dumps(request) + "\n")
-        self.process.stdin.flush()
-        # Wait for the public scope acknowledgement, not a timing guess.
-        self.frames.put(self.frame(lambda f: f["answers"] == self.serial))
 
     def frame(self, matches) -> dict:
         deadline = time.monotonic() + 45
@@ -276,8 +262,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         with server.lock:
             server.state["offline"] = True
         if mode == "watch":
-            watch = Watch(fixture, env)
-            watch.scope(str(repo))  # No Task or Wave selected.
+            watch = Watch(fixture, env, "planning", "status")
         else:
             # Graph admission requires a managed login, even with a contained provider.
             profile = root / "accounts/claude/reconnect"
@@ -409,11 +394,13 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             assert len([c for c in server.state["comments"] if c["id"] == comment_id]) == 1
             assert not server.state["unexpected"], server.state["unexpected"]
         if watch:
-            watch.frame(lambda f: f["part"] == "planning" and "INF-126" in json.dumps(f))
-            # Task selection only changes projection. Leaving it must not stop sync.
-            watch.scope(str(repo), task="INF-125")
-            watch.frame(lambda f: f["part"] == "task" and incoming["id"] in json.dumps(f))
-            watch.scope(str(repo), wave=fixture["wave"])
+            planning = Watch(fixture, env, "wave", "show", "--all")
+            planning.frame(lambda f: "INF-126" in json.dumps(f["body"]))
+            planning.close()
+            # Reading a Task is its own watch. Closing it must not stop sync.
+            task = Watch(fixture, env, "task", "status", "INF-125")
+            task.frame(lambda f: incoming["id"] in json.dumps(f["body"]))
+            task.close()
             later = _comment("After leaving Task", added["id"])
             with server.lock:
                 state["comments"].append(later)
@@ -439,8 +426,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             with server.lock:
                 assert not any(c["id"] == gap for c in state["comments"])
                 state["offline"] = False
-            watch = Watch(fixture, env)
-            watch.scope(str(repo), wave=fixture["wave"])
+            watch = Watch(fixture, env, "planning", "status")
             _await(
                 lambda: (
                     db.execute(
@@ -452,7 +438,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
                 "reopened Wave view did not deliver",
                 seconds=300,
             )
-            watch.scope(None)  # Connection remains open, but no repository is selected.
+            watch.close()  # No window shows the repository.
+            watch = None
             with server.lock:
                 state["offline"] = True
             detached = json.loads(
@@ -464,7 +451,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             assert db.execute(
                 "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?", (detached,)
             ).fetchone() == (0,)
-            watch.scope(str(repo))
+            watch = Watch(fixture, env, "planning", "status")
             _await(
                 lambda: (
                     db.execute(

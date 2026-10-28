@@ -352,3 +352,20 @@ Infrastructure-owned.
 The focused rerun also corrected stale ambient-order and path-spelling assertions.
 Attribution now proves the captured source resolves to the selected file and its
 label matches the submitted reference; it accepts macOS canonical path aliases.
+
+## Gate review — 2026-10-27
+
+Reviewed the complete change from Task base `61111f788f` through `3e14de2f24`.
+No further code or user-documentation repair was needed. Retain the earlier
+passing prompt, context-block, run-command, Session and golden tests: their
+inputs have not changed. The current plan covers the corrected context-launch
+and context tests, plus hook serialization, native reconnect and context-command
+consumers of `ContextDelivery`; `docs/config.md` reaches the website suite.
+The changed-aware runner also owns architecture, inventory, formatting and
+all-target Clippy. No provider transport or Desktop implementation changed.
+
+Check: `uv run python scripts/test.py --reuse-passing --rust-filter 'test(context_launch_tests::) | test(context_tests::) | test(harness::context::) | test(harness::codex_connection::) | test(lf::commands::context::)'` — PASS, 47 Rust tests, 72 website tests, architecture, inventory, formatting and all-target Clippy, 305s; inherited `LF_*` unset, stdin closed, stable Rust 1.99.1/Clippy 0.1.99, evidence `.lf/tmp/gate/run-76003`; no timeout or required-check deferral.
+
+The configured-provider receipts remain applicable to unchanged production code.
+Infrastructure still owns release, installation and installed verification;
+this gate makes no installed-success claim. The full matrix remains with CI.

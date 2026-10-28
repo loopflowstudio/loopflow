@@ -57,10 +57,6 @@ Neither dependency relaxes the preservation requirement or proves a native write
   Existing diagnostic/recovery fields carry failures; SQLite evidence is derived.
   Four diagnostic tests prove redaction, not preservation. No migration, DTO or Swift change.
 
-Refresh and redaction already have a direct shared path; retain it when replacing
-the transport. Compression removes repeated planning/receipt history, not evidence
-needed to choose that replacement.
-
 ## Evidence and excluded alternatives
 
 Complete pre-compression plan, citations, dependency history and archive chain:
@@ -70,8 +66,7 @@ Findings 1–33 and the retired command-boundary probe:
 October 28's `SecItemUpdate`/`kSecAttrAccess` and partition-password recheck
 established no new candidate; citations:
 `157cafb2a7b912a1573f839c2c2359e53088ec9f:scratch/loo-661-save-refreshed-claude.md`,
-“Required outcome and next decision.” Repeated planning dispositions:
-`aaa11b0433b9b096d54a50b8a65a170607497d67:scratch/loo-661-save-refreshed-claude.md`.
+“Required outcome and next decision.”
 Findings retain their original numbers below for lookup. The evidence constrains
 replacement; it is not production acceptance.
 
@@ -235,4 +230,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); current writer/refresh source still matches this plan. Retain the existing design: no new supported mechanism or live diagnosis was established, so implementation planning remains blocked. No code change, mutation probe or build/test rerun; both context budgets hold. Infrastructure owns installed acceptance.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 compress); prose only, no build/test rerun. Review found no further code reduction: refresh serializes once, shares the writer with activation, and retains only closed diagnostic categories. The writer's planned deletion still requires a proved replacement; Infrastructure owns installed acceptance.

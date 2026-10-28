@@ -1,10 +1,11 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status: **Implementation blocked on a verified native writer; diagnostics only.**
+Status: **Accepted outcome; writer design unresolved; diagnostics only.**
 Jack Heart authorized bounded repair and autonomous delivery of
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-reviewed checkout: `6ab664a7aa` (includes LOO-657 and v0.14.19).
+Reviewed checkout: `03736520510eba450d9fecd47db088f6b3c38098`
+(includes LOO-657 and v0.14.19); kickoff reconciliation: 2026-10-27.
 No remote freshness is claimed.
 
 ## Required outcome
@@ -29,6 +30,12 @@ remains. Findings 22–27 reject outer-transaction verification and explicit-acc
 alternatives without exhausting public interfaces. No product decision or
 additional authorization is pending. Production cutover depends on this proof;
 the acceptance sequence below then requires synthetic and installed verification.
+
+**Demo:** after a naturally required refresh on the repaired installation,
+`lf account claude --json` accepts the same identity and capacity, and native
+Claude continues using that login without reauthentication. Infrastructure owns
+installed execution. A synthetic 8 KiB replacement demonstrates storage transport
+only; an unexpired account poll demonstrates neither refresh nor repair.
 
 ## Surviving implementation
 
@@ -189,7 +196,8 @@ Heart's preservation requirement or selects the excluded concurrency redesign.
 
 ## Remaining implementation and acceptance
 
-1. Prove a supported mechanism that establishes encoding, access and failure
+1. **This slice — compatible-writer proof, still unresolved.** Prove a supported
+   mechanism that establishes encoding, access and failure
    preservation, then replace the transport and its exclusive fixture in one cut.
    Preserve JSON validation, readback, managed login locking,
    intervening-replacement checks, omitted refresh tokens, unknown fields and the
@@ -254,10 +262,17 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Delivery also depends on LOO-664: installed 0.14.19 sync cannot stage edits because
-of its ignored `.lf/tmp` exclusion. Until the repair is installed, checkpoint
-intended step edits with `lf commit <paths>` before sync, preserving unrelated
-staged/unstaged work and normal validation. Do not force-add telemetry or implement
-a competing repair; retain the dependency if checkpointing fails.
+Delivery also depends on LOO-664: installed 0.14.19's literal `.lf/tmp` exclusion
+fails even in a clean checkout. Explicit-path checkpoints preserve edits but do
+not restore sync. Jack Heart's Task revision of 2026-10-28 03:39 UTC authorizes a
+temporary Task-local bridge: after validation and checkpointing, atomically archive
+the complete `.lf/tmp` directory to a unique LOO-661 directory under the designated
+`installed-sync-hotfix-20261027/task-telemetry` archive. Preserve earlier archives
+and any newly produced telemetry separately; leave `.lf/tmp` absent immediately
+before automatic sync. The exact destination is recorded in `scratch/questions.md`.
+The supplied disposable reproduction establishes this workaround for installed19;
+it does not establish installed repair. Infrastructure owns the prepared signed
+CLI/helper installation and verification. No ignore-rule change, forced telemetry
+staging, suppressed Git error or competing publisher belongs in this Task.
 
-Check — compress (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only consolidation; no build/test rerun. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.
+Check — kickoff (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reconciliation; no build/test rerun. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.

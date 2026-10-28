@@ -7,13 +7,9 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app's main-Machine commands forward to the installed CLI.
-Select a private `LF_HOME` to use this checkout's bundled CLI with separate data.
-For populated data, use [offline data clones](../docs/data-clones.md):
-`lf clone run` selects the clone's pinned helper, confines Desktop and its embedded
-terminals, preserves source checkouts read-only, and reports copied Sessions'
-continuation limits. A bare SQLite copy provides no filesystem, provider or client
-isolation.
+The development app runs its bundled CLI on the main Machine's store, which it
+reads but never migrates. With a private `LF_HOME`, an explicit `LF_BIN` selects
+the CLI instead.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -673,7 +669,7 @@ xcodebuild -project LoopflowSwift.xcodeproj \
   build
 ```
 
-The generated app target builds a validation-only `lf` helper from
+The generated app target builds an `lf` helper from
 the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app never
 borrows a different `lf` from PATH.
 
@@ -745,8 +741,6 @@ made no visible change. Session commands can replay the reader's cached projecti
 after showing their authoritative returned record, without another query.
 Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
 reading stays on screen marked unavailable until a new reader answers.
-A build with unreleased migration drafts names its preview copy in every frame;
-the breadcrumbs then end with a **Preview** chip whose tooltip gives the path.
 
 Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds even while heartbeats arrive;

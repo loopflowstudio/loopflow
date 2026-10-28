@@ -17,29 +17,29 @@ crontab -l | grep loopflow:infrastructure
 
 ```bash
 lf install                                   # install the latest published release
+lf install --main                            # install the newest green main build
 uv run python scripts/install.py local        # build only under local-bin/
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable experiment
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
 `scripts/install.py local` builds this worktree's `lf`
-and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
-migration authority. Local builds never change the installed CLI or main Machine.
-Use an explicit disposable `LF_HOME` for experiments.
+and `Loopflow.app` into `<worktree>/local-bin/`. Local builds never change the
+installed CLI and never migrate the main Machine. Use an explicit disposable
+`LF_HOME` for schema work.
 
 Older installed CLIs still call `scripts/install.py refresh` after updating
 main. That upgrade entry point delegates to `release/install.sh`, which verifies
 the published artifacts and promotes them through the same transaction.
 
-Published promotion stops before compilation while draft migrations remain.
-Explicit experiments initialize the embedded schema in a fresh directory.
-Promotion also snapshots the shared store, applies candidate migrations to the
+Promotion refuses a candidate carrying migrations origin/main has not added.
+Explicit private Homes migrate themselves. Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
 Full installation restarts the replaced Desktop app and its bundled helpers.
 Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI without replacing or
 stopping Desktop and its clients. Promotion advances the shared store through
-the published migration boundary and retains the prior published artifacts;
+the install switch and retains the prior published artifacts;
 it does not restart Tasks or Flows.
 
 Use `release/` to keep the rationale and notes for each shipped version close
@@ -89,10 +89,10 @@ version as `lf --version` — no separate manifest to bump or drift.
 
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
-| Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
+| Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version` | `lf self install --main` installs it; artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` crontab line | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
-| Local | `scripts/install.py local` | Build validation-only `lf` and `Loopflow.app` into `local-bin/` | No |
+| Local | `scripts/install.py local` | Build `lf` and `Loopflow.app` into `local-bin/` | No |
 | Local | `lf install` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Machine |
 
 GitHub owns credential-free compilation. The maintained Loopflow host owns the

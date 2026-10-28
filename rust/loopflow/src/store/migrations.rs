@@ -4266,7 +4266,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_only_open_does_not_apply_an_unpublished_tail() {
+    fn validation_does_not_apply_a_pending_tail() {
         let conn = open();
         let published = prefix_before("durable_input_spine");
         apply_set(&conn, published, &mut Vec::new()).unwrap();
@@ -4276,14 +4276,14 @@ mod tests {
         assert_eq!(
             latest_applied_version_sqlite(&conn).unwrap(),
             published.last().map(Migration::version),
-            "a validation-only open advances nothing"
+            "validation advances nothing"
         );
         assert!(capture_status_accepts(&conn, "pruned"));
         // Bait for the withheld tail: the durable input migration creates the
         // stable Work tables. Their absence proves validation stayed read-only.
         assert!(
             conn.prepare("SELECT id FROM projects LIMIT 0").is_err(),
-            "a validation-only open must not run the tail's schema change"
+            "validation must not run the tail's schema change"
         );
     }
 

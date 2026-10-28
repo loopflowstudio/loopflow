@@ -2211,6 +2211,7 @@ Install the latest published Loopflow release from any directory
 
 | Argument | What it does |
 |---|---|
+| `--main` | Install the newest green main build instead (needs `gh` auth) Default: false. |
 | `--help / -h` | Print help |
 
 ## lf self install schedule
@@ -2263,54 +2264,6 @@ Show memory and scratch size targets, their sources, and current usage
 | `--json` | json Default: false. |
 | `--wave` | Inspect a Wave's local authored context |
 | `--task` | Inspect a Task's checkout and Wave context |
-| `--help / -h` | Print help |
-
-## lf clone
-
-Create and use an offline, isolated development data clone (macOS)
-
-| Argument | What it does |
-|---|---|
-| `--help / -h` | Print help |
-
-## lf clone create
-
-Snapshot a source Machine without copying credentials or live authority
-
-| Argument | What it does |
-|---|---|
-| `<directory>` | directory |
-| `--source` | source |
-| `--codex-home` | Explicit Codex history home; credentials and configuration are excluded |
-| `--claude-home` | Explicit Claude history home; credentials and configuration are excluded |
-| `--help / -h` | Print help |
-
-## lf clone run
-
-Run lf (or a Desktop executable after --) inside the offline clone
-
-| Argument | What it does |
-|---|---|
-| `<directory>` | directory |
-| `<command>` | command |
-| `--help / -h` | Print help |
-
-## lf clone show
-
-Show the snapshot inventory and continuation limitations
-
-| Argument | What it does |
-|---|---|
-| `<directory>` | directory |
-| `--help / -h` | Print help |
-
-## lf clone dispose
-
-Remove only this owned disposable directory (close its clients first)
-
-| Argument | What it does |
-|---|---|
-| `<directory>` | directory |
 | `--help / -h` | Print help |
 
 ## lf portfolio

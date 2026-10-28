@@ -41,22 +41,8 @@ uses a prior pass only when tracked and untracked file content, the worktree,
 and the selected command plan are identical. Full and optional hosted runs never
 reuse evidence.
 
-The Rust phase prepares one exact-tree fixture CLI after draft materialization,
-then supplies it through `LOOPFLOW_TEST_LF`. It builds the CLI with test targets
-so nextest and Cargo tests reuse that dependency graph. Preparation is offline;
-Cargo updates the disposable lockfile when materialization advances the package
-version. Development provenance and validation-only migration authority are
-explicit, including when the calling shell supplied release overrides.
-
-Verification uses `target/materialized-tests/`, separate from source builds and
-app-control output. `CARGO_TARGET_DIR` or `--target-dir` selects its parent;
-relative paths resolve against the originating checkout. Serialize materialized
-runs in a checkout, since they reuse that verification target. Generic wrapper
-commands prepare no CLI unless `--prepare-cli` is supplied:
-
-```sh
-uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow -E 'test(local_planning::public_local_task_places_and_runs_without_a_planning_provider)' --no-tests fail
-```
+The Rust phase builds the fixture CLI once and supplies it through
+`LOOPFLOW_TEST_LF`, so test processes run no Cargo build of their own.
 
 On a pull request, CI runs nextest with the `pr` profile (`.config/nextest.toml`):
 a test that runs past 2 minutes fails on that PR and names itself. The merge
@@ -64,11 +50,10 @@ queue and main use `default`, which only reports slow tests. Tests that were
 already slower are listed there with their own allowance; make one fast, then
 delete its entry. Reproduce locally with `cargo nextest run --profile pr`.
 
-Fixtures still create their own disposable Homes. Source and materialized schema
-frontiers stay separate; a version/schema mismatch is invalid verification
-evidence, never permission to alter an installed database.
+Fixtures still create their own disposable Homes; a test never alters an
+installed database.
 
-Runner/materializer changes also need the command-plan checks in
+Runner changes also need the command-plan checks in
 `python/tests/test_release_automation.py` during focused verification.
 
 Slow suites (`loopflow`, `e2e`) stay off in changed-mode even when
@@ -203,7 +188,7 @@ Path → suite mapping:
 | Changed | Suite | Runs |
 |---------|-------|------|
 | any changed path | architecture | `uv run python scripts/check_architecture.py` |
-| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then draft materialization in a disposable exact-tree worktree and `cargo nextest run --all` (falls back to `cargo test --all`) |
+| `rust/`, `Cargo.toml/lock` | rust | `cargo fmt`, `cargo clippy --all-targets`, then `cargo nextest run --all` (falls back to `cargo test --all`) |
 | `python/`, `scripts/*.py`, top-level `*.py`, `pyproject.toml` | python | `uv run pytest python/tests/` (scoped to changed `test_*.py` when no source moved) |
 | `website/`, `docs/` | website | `cd website && uv run python dev.py test` |
 | `swift/` | swift | `scripts/test_desktop.sh -Xswiftc -gnone`, then the multiplatform boundary check |

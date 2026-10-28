@@ -314,12 +314,10 @@ pub async fn wave_graph(
     } else {
         None
     };
-    let layers = crate::config::config_layers(Some(repo), wave.as_ref().map(|wave| wave.slug()))
-        .map_err(project_error)?;
-    let (name, layer) = crate::config::graph_setting(&layers).map_err(project_error)?;
-    let source = layer.map_or(SetupSource::Default, SetupSource::from);
+    let (name, source) =
+        crate::ops::task::scope_graph_default(repo, wave.as_ref().map(|wave| wave.slug()))?;
     Ok(WaveGraph {
-        graph: layer.map(|_| name.clone()),
+        graph: (source != SetupSource::Default).then(|| name.clone()),
         wave_id: wave.as_ref().map(|wave| wave.id().clone()),
         wave: wave.as_ref().map(|wave| wave.slug().into()),
         default: GraphDefault {

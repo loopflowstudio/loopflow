@@ -594,11 +594,18 @@ pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(Strin
         Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
         None => None,
     };
-    let layers = crate::config::config_layers(Some(&repo), wave.as_ref().map(|w| w.slug()))
-        .map_err(task_error)?;
+    scope_graph_default(&repo, wave.as_ref().map(|w| w.slug()))
+}
+
+/// The graph a new Task in this Wave, or the repository when `wave` is `None`,
+/// takes up. `lf wave graph show` reads it before any Task exists.
+pub(crate) fn scope_graph_default(
+    repo: &Path,
+    wave: Option<&str>,
+) -> OpsResult<(String, SetupSource)> {
+    let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
     let (name, layer) = crate::config::graph_setting(&layers).map_err(task_error)?;
-    let source = layer.map_or(SetupSource::Default, SetupSource::from);
-    Ok((name, source))
+    Ok((name, layer.map_or(SetupSource::Default, SetupSource::from)))
 }
 
 /// The graph a Task takes up when nothing else selects one.

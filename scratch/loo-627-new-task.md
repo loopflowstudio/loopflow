@@ -62,10 +62,10 @@ its own.
   conflicts with `--notes` and with piped stdin. Agents keep using
   `--title/--notes`, which do not change.
 - `--run` continues after creation in this order:
-  1. **Run.** Same as `lf task run <ID> [GRAPH]`: place the worktree, take up the
-     graph (`--graph`, otherwise Wave → repository `graph:` → `code`), and return
-     once the Graph registers. This reuses `run_task_graph_for` and
-     `select_task_run` unchanged.
+  1. **Run.** Runs `lf task run <ID> [GRAPH]` itself as a child process: it places
+     the worktree, takes up the graph (`--graph`, otherwise your `lf set graph` →
+     Wave → repository `graph:` → `code`), and returns once the Graph registers.
+     Placement, transport release and `-b` waiting stay on that one path.
   2. **Admit the conversation.** `primary::ensure_task` gets an optional
      `request: Option<String>`. It is used only when a new primary is admitted, and
      it fills `LfSession.request`, which `conversation_launch_args` already sends as
@@ -81,20 +81,19 @@ its own.
   and the command waits for `end`. No conversation is admitted.
 - `--graph` requires `--run`. Graph capture still happens at take-up; create stores
   no graph.
-- `--json` prints the receipt `{ task: <existing create JSON>, session_id, graph }`.
-  This is a new wire DTO, so it needs Rust and Swift fixture tests under
-  `tests/fixtures/dto/`.
+- `--json` prints the receipt `{ task: <existing create JSON>, graph, session_id }`;
+  `session_id` is null for a `-b` run. The run's own lines go to stderr. This is a
+  new wire DTO with Rust and Swift fixture tests under `tests/fixtures/dto/`.
 
 ### Default workflow read
 
-The sheet has to name the workflow before any Task exists. Today
-`task_graph_default(store, task)` is the only resolver, and it needs a Task. Change
-it to resolve from `(wave_id: Option<&WaveId>, repo: &Path)` and have both callers
-use it:
-- `select_task_run` (unchanged behavior)
+The sheet has to name the workflow before any Task exists, so the resolver works
+from a scope instead of a Task: `scope_graph_default(repo, wave: Option<&str>)`
+(main's config layers through `graph_setting`). Both callers use it:
+- `task_graph_default(store, task)` → `select_task_run` (unchanged behavior)
 - `lf wave graph show [WAVE] [--no-wave] --json`, which gains
-  `default: { name, source: "wave" | "repository" | "builtin" }`. `--no-wave`
-  selects the repository scope.
+  `default: { name, source: "personal" | "wave" | "repo" | "default" }`, and whose
+  `wave_id`/`wave` are null for `--no-wave` (the repository scope).
 
 Desktop shows this read. It never rebuilds the Wave → repository → `code` fallback
 chain itself.
@@ -255,9 +254,13 @@ open. Checks: `cargo test -p loopflow --lib task_create_run` (the fixture lives 
 `tests/linear/`, compiled into the lib), DTO fixtures, CLI reference, Swift
 `NewTaskTests` + `newTaskSelectsTheTask` + action registry fixture: pass.
 
-Compress (2026-10-28): `task_create` calls `primary::ensure_task` directly (no wrapper);
-`set_wave_graph` returns the Wave slug instead of a `WaveGraph` with a made-up default.
-`cargo test -p loopflow --lib -- wave_graph_selects_a_committed task_create_run`: pass; clippy clean.
+Compress (2026-10-28): `task_create` calls `primary::ensure_task` directly (no wrapper).
+Sync onto main (2026-10-28, #1751 `lf set`): `lf wave graph set` and `set_wave_graph` are gone;
+`wave graph show [--no-wave]` resolves `default` through main's config layers, so sources are
+`personal · wave · repo · default`, and the sheet labels them.
+Realign (2026-10-28): `wave_graph` had copied `task_graph_default`'s layer read; both
+now call `scope_graph_default`. Check: `cargo test -p loopflow --lib -- task_create_run wave_resolution_matrix`
+pass; clippy clean.
 
 Remaining: demo with a real provider (`code` stops at its interactive steps; `auto`
 reaches a merged PR), including whether the first reply leaves building to the

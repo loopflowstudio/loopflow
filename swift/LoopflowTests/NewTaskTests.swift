@@ -44,7 +44,7 @@ struct NewTaskTests {
         _ = try RegistryQuery.decode([WaveGraph].self, from: fixture("wave_graph.json"))
     }
 
-    @Test("The sheet shows the reported default and where it stops; Create waits for a request")
+    @Test("The sheet follows the scope's reported workflow, names whose default it is, and waits for a request")
     func sheetDefaultsToTheReportedWorkflow() async throws {
         let catalog = try fixture("graph_catalog.json")
         let defaultGraph = #"{"wave_id": null, "wave": null, "default": {"name": "feature", "source": "repo"}}"#
@@ -56,13 +56,13 @@ struct NewTaskTests {
         let model = WorkModel(query: query, repoPath: "/src/loopflow")
         await model.loadGraphCatalog()
         await model.loadGraphDefault(wave: nil)
-        let feature = try #require(model.workflowCatalog.value?.first { $0.name == "feature" })
         let sheet = try NewTaskSheet(model: model).inspect()
-        #expect(try sheet.find(text: "feature · repository default") != nil)
-        let stops = try sheet.find(viewWithAccessibilityIdentifier: "new-task-stops").text().string()
-        #expect(stops == NewTaskSheet.stops(feature.workflow))
+        _ = try sheet.find(text: "What do you want?")
+        _ = try sheet.find(text: "feature")
+        let named = try sheet.find(viewWithAccessibilityIdentifier: "new-task-default").text().string()
+        #expect(named == "· loopflow's default")
+        _ = try sheet.find(viewWithAccessibilityIdentifier: "new-task-steps")
         #expect(try sheet.find(viewWithAccessibilityIdentifier: "new-task-create").button().isDisabled())
-        _ = try sheet.find(text: #"lf task create "…" --run"#)
     }
 }
 #endif

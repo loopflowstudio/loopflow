@@ -2154,9 +2154,15 @@ final class WorkModel {
             throw error
         }
         navigation.palette = nil
-        try? await confirmWorkUpdate()
         let id = receipt.task.id
-        guard let runError else { return await openTaskConversation(id) }
+        guard let runError else {
+            // Open it from its own read now; waiting for every reading to confirm
+            // first left the window unchanged for seconds after Start.
+            await openTaskConversation(id)
+            try? await confirmWorkUpdate()
+            return
+        }
+        try? await confirmWorkUpdate()
         if let found = task(id: id) { openTaskDestination(wave: found.wave, task: found.task) }
         else { select(.task(id: id)) }
         navigation.taskRunDrafts[id] = TaskRunDraft(error: runError)

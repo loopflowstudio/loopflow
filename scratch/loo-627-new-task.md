@@ -12,6 +12,36 @@ title bar, a ＋ on each Wave row) on a fresh repository and a busy one, and cho
 selected-Wave rows, defaulting the sheet to the scope that list shows. No title-bar
 button and no per-Wave ＋.
 
+**Sheet layout and finish (Jack, 2026-10-28, demo).** After pressing the first build
+in the dev app, Jack compared three layouts (`sheet-layouts.html`: A Linear, B
+composer, C preview) and three finishes (`sheet-polish.html`: Paper, Score,
+Instrument) and chose **layout A+B, finish Paper+Instrument**. The reference is
+`scratch/new-task-prototypes/sheet-final.html`:
+- No small all-caps label anywhere (Jack, 2026-10-28: "a bit of a slopcannon tell").
+  The heading is **What do you want?** (Jack chose it, 2026-10-28) in Cormorant
+  italic, accent ink. The placeholder wording is open (switcher in the mock).
+- One raised composer box (inset, accent focus ring) holding the request
+  (placeholder "Describe it the way you'd say it to a teammate") with a tick strip of
+  the workflow's steps along its bottom edge, the ones that need you filled with the
+  accent. Not a segmented control: Jack noted pills don't scale to many workflows.
+- Under the box, one line ties the workflow to where the Task lives: "In **myapp ▾**,
+  running **code ▾** · myapp's default". A different choice reads "running **auto**
+  instead of product's **feature** · Use feature". The workflow menu searches the
+  whole catalog (Recent / Built in / This repository) and opens with "New Tasks in
+  product run feature. Pick another for this Task only."; after a departure it offers
+  "Make auto the default for every new product Task" (`lf --wave product set graph
+  auto`). Open: whether that means your value (`lf set`) or the Wave's committed
+  config. Then the stops line in Cormorant italic.
+- Under the box (Jack, 2026-10-28), two lines: the selector on its own line, "In
+  **product ▾**, running **feature ▾** · product's default" (a departure reads "· not
+  feature ↺"); below it, the workflow as a chart: a rail with one dot per step,
+  labelled only where you take part (explore, demo, verify in Cormorant italic,
+  accent dots). No command line, no "You'll step in…" sentence. Footer: Cancel and
+  a lit pill **Start ⌘↩** (was Create). Sheet: 16pt radius, soft spring entrance.
+- Start closes the sheet and the new Task is selected with its conversation open.
+  Jack observed in the first build that it was not: he selected it by hand. That is
+  a bug being fixed, not a design change.
+
 ## Problem
 
 Starting a Task takes three separate commands: `lf task create`, `lf task run` and

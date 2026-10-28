@@ -104,6 +104,39 @@ struct WorkDestinationTests {
         #expect(installedSession(model, registry)?.id == record.id)
     }
 
+    @Test("New Task selects the new Task before the window's other readings confirm")
+    func newTaskSelectsBeforeReadingsConfirm() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let receipt = """
+        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
+         "graph": "code", "session_id": "\(record.id)"}
+        """
+        let barrier = LinkedDestinationBarrier()
+        let held = OSAllocatedUnfairLock(initialState: true)
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["task", "create"]) { return receipt }
+            if args.contains("connect") { return encoded }
+            if args.starts(with: ["desktop", "plan"]) {
+                if held.withLock({ $0 }) { await barrier.wait("planning") }
+                return planning
+            }
+            throw RegistryQueryError("Unexpected New Task operation")
+        }
+        let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let creating = Task { try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !(await barrier.contains("planning")), ContinuousClock.now < deadline { await Task.yield() }
+        #expect(model.selection == .task(id: task.id))
+        held.withLock { $0 = false }
+        await barrier.release("planning")
+        try await creating.value
+    }
+
     @Test("A run that fails after New Task filed it selects the Task with the error; nothing is filed again")
     func newTaskRunFailureSelectsTheFiledTask() async throws {
         let planning = try fixture()

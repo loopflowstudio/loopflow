@@ -35,3 +35,4 @@ for each; the design (`scratch/loo-627-new-task.md`) depends on them.
   stopping", not "runs to a merged PR": a custom graph need not open a PR.
 - **LOOPFLOW.md's agent handoff** keeps `create --title` then `task run`; agents keep
   that path, so only the README moved to `create "…" --run`.
+- Jack Heart chose the sheet's layout (A Linear + B composer) and finish (Paper + Instrument); reference `scratch/new-task-prototypes/sheet-final.html`.

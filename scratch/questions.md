@@ -12,10 +12,15 @@ overwrite archives, change ignore rules, force staging or suppress Git errors.
 LOO-664 / #1754 is integrated; its disposable reproduction proves only the bridge.
 Infrastructure owns CLI/helper installation and installed acceptance.
 
-This realign pass reserves the telemetry archive destination:
+The earlier realign archive completed at:
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-ojie9_hk/tmp`.
-The sibling `receipt.json` records the checkpoint, byte verification and source
-absence after the atomic move. Reservation alone proves no move or installed repair.
+Its receipt records checkpoint `55054cd70c37da378c956c6ddbfce982762649ca`,
+exact byte verification and source absence at that move; later telemetry is separate.
+
+The current realign archive destination is `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-4yodp0fv/tmp`.
+Its sibling `receipt.json` records the checkpoint, byte verification and source
+absence after the move; the destination alone establishes neither archiving nor
+installed repair.
 
 Earlier archive receipts, the unused kickoff reservation and the last installed
 0.14.19 observation remain at

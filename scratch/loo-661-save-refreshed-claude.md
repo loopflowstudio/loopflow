@@ -230,4 +230,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 compress); consolidated repeated blocking conditions only, no build/test rerun. Both context budgets hold; writer mechanism and native acceptance remain unresolved; Infrastructure owns installed acceptance.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 realign); code, plan and relevant parent/Release memory agree, with no code change or test rerun. Both context budgets hold; native writer, preservation proof and live diagnosis remain open; Infrastructure owns installed acceptance.

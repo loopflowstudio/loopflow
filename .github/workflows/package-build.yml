@@ -64,8 +64,7 @@ jobs:
           set -euo pipefail
           cd target/${{ matrix.target }}/release
           tar czf ../../../lf-${{ matrix.target }}.tar.gz lf
-          # The reader floors this build knows, so an updater can tell
-          # whether it opens a store before downloading it.
+          # Lets an updater check store compatibility before downloading.
           ./lf self install reader-catalog > ../../../reader-catalog.txt
       - name: Smoke test package
         run: |

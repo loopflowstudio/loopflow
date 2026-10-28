@@ -2085,7 +2085,7 @@ fn finish_release_pr(
                 }
                 return Ok(commit);
             }
-            ReleasePrWait::NeedsIntegration(state) => {
+            ReleasePrWait::NeedsIntegration => {
                 let pair_path = minor_receipt_path(main_repo, target);
                 if pair_path.exists() {
                     let pair: MinorRelease = serde_json::from_slice(&fs::read(&pair_path)?)
@@ -2095,7 +2095,7 @@ fn finish_release_pr(
                     }
                 }
                 progress.status(&format!(
-                    "Release PR #{} is {state}; rebuilding on current main...",
+                    "Release PR #{} needs current main; rebuilding on it...",
                     prepared.pr_number
                 ));
                 fetch_release_branch(main_repo, &release_branch, &prepared.head_sha, lock)?;
@@ -3094,7 +3094,7 @@ fn current_release_pr(prs: Vec<GhReleasePr>) -> Option<GhReleasePr> {
 #[derive(Debug, PartialEq, Eq)]
 enum ReleasePrWait {
     Merged(String),
-    NeedsIntegration(String),
+    NeedsIntegration,
     /// The shared merge decision found a failure on this head for ci-fix.
     NeedsRepair(String),
 }
@@ -3140,28 +3140,19 @@ fn wait_for_pr_merge(
 
     loop {
         let observation = crate::ops::pr::observe_pr_merge(repo, pr_number)?;
-        let view = observation.pr;
-        let request = observation.request;
+        let view = &observation.pr;
+        let removal =
+            || crate::ops::pr_landing::read_merge_request_removal(repo, repo_id.as_str(), number);
 
-        if view.state == "open"
-            && crate::ops::pr::merge_needs_integration(
-                view.merge_state.as_deref(),
-                request.as_ref(),
-            )
-        {
-            return Ok(ReleasePrWait::NeedsIntegration(
-                view.merge_state.expect("integration state matched"),
-            ));
+        if view.state == "open" && crate::ops::pr::pr_requires_resync(&observation, removal)? {
+            return Ok(ReleasePrWait::NeedsIntegration);
         }
 
-        let decided = crate::ops::pr_landing::decide_merge(
-            view.clone(),
-            head_sha,
-            request,
-            || crate::ops::pr_landing::read_merge_request_removal(repo, repo_id.as_str(), number),
-            |head| merge_gate_state(repo, pr_number, head),
-        )?;
-        if let Some(wait) = release_wait(&view, decided)? {
+        let decided =
+            crate::ops::pr_landing::decide_merge(&observation, head_sha, removal, |head| {
+                merge_gate_state(repo, pr_number, head)
+            })?;
+        if let Some(wait) = release_wait(view, decided)? {
             return Ok(wait);
         }
 
@@ -4716,7 +4707,8 @@ mod tests {
     #[test]
     fn merge_request_removals_decide_landing_and_release_alike() {
         use crate::ops::pr::{
-            ManualRemoval, MergeGateReading, MergeRequestRemoval, PrInfo, RepairWindow,
+            ManualRemoval, MergeGateReading, MergeRequestRemoval, PrInfo, PrMergeObservation,
+            RepairWindow,
         };
         use crate::ops::pr_landing::{decide_merge, LandingObservation};
         use crate::work::task::CiCheck;
@@ -4887,9 +4879,8 @@ mod tests {
             let removal: MergeRequestRemoval =
                 crate::ops::pr::removal_from_timeline(&timeline, &repairs, runs).unwrap();
             let observed = decide_merge(
-                pr.clone(),
+                &PrMergeObservation::fixture(pr.clone(), None, true),
                 "head",
-                None,
                 || Ok(removal),
                 |_| {
                     Ok(Some(MergeGateReading {

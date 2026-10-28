@@ -1,0 +1,98 @@
+name: macOS on main
+
+# The queue proves the Linux suite; this proves macOS after merge. One run
+# tests main while one waits, and a newer push replaces the waiting run, so
+# each run covers every commit since `last-green`. Green advances the tag;
+# red bisects the batch and opens a revert PR for the culprit.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit to test
+        required: true
+        type: string
+      jobs:
+        description: Space-separated macOS jobs to run
+        required: true
+        type: string
+      request:
+        description: Bisection request that names this run
+        required: true
+        type: string
+
+run-name: ${{ inputs.request && format('macOS bisect {0}', inputs.request) || github.event.head_commit.message }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.request || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.select.outputs.sha }}
+      last-green: ${{ steps.select.outputs.last-green }}
+      any: ${{ steps.select.outputs.any }}
+      swift-test: ${{ steps.select.outputs.swift-test }}
+      macos-process-test: ${{ steps.select.outputs.macos-process-test }}
+      loopflow-ui-test: ${{ steps.select.outputs.loopflow-ui-test }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - name: Select the batch since last-green, or the requested jobs
+        id: select
+        env:
+          SHA: ${{ inputs.sha || github.sha }}
+          JOBS: ${{ inputs.jobs }}
+        run: |
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            for job in swift-test macos-process-test loopflow-ui-test; do
+              case " $JOBS " in
+                *" $job "*) echo "$job=true" ;;
+                *) echo "$job=false" ;;
+              esac
+            done >> "$GITHUB_OUTPUT"
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last_green=$(git ls-remote origin refs/tags/last-green | cut -f1)
+          echo "last-green=$last_green" >> "$GITHUB_OUTPUT"
+          uv run python scripts/macos_inputs.py "$last_green" "$SHA"
+
+  macos:
+    needs: select
+    if: needs.select.outputs.any == 'true'
+    uses: ./.github/workflows/macos.yml
+    with:
+      ref: ${{ needs.select.outputs.sha }}
+      swift-test: ${{ needs.select.outputs.swift-test == 'true' }}
+      macos-process-test: ${{ needs.select.outputs.macos-process-test == 'true' }}
+      loopflow-ui-test: ${{ needs.select.outputs.loopflow-ui-test == 'true' }}
+
+  settle:
+    needs: [select, macos]
+    if: ${{ !cancelled() && github.event_name == 'push' && needs.select.result == 'success' }}
+    runs-on: ubuntu-latest
+    # Each bisection step waits for hosted macOS runners.
+    timeout-minutes: 340
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - name: Advance last-green, or bisect and open a revert
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ needs.macos.result }}
+        run: >-
+          uv run python scripts/macos_main.py "$RESULT"
+          "${{ needs.select.outputs.last-green }}" "${{ needs.select.outputs.sha }}"

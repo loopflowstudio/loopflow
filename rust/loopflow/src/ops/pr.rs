@@ -626,15 +626,32 @@ pub(crate) enum MergeRequest {
     Queued(String),
 }
 
-pub(crate) fn merge_needs_integration(state: Option<&str>, request: Option<&MergeRequest>) -> bool {
-    if matches!(request, Some(MergeRequest::Queued(_))) {
-        return false;
+/// Whether an open PR can merge only after main is merged into it: GitHub
+/// reports a conflict, requires an up-to-date head with no queue to provide
+/// one, or the queue evicted the PR for a conflict. Queue membership tests an
+/// integrated commit and takes precedence. Anything else, including a failed
+/// check, is repaired on top of the branch against the same base. `removal`
+/// runs only for an unarmed PR on a queue.
+pub(crate) fn pr_requires_resync(
+    observation: &PrMergeObservation,
+    removal: impl FnOnce() -> OpsResult<MergeRequestRemoval>,
+) -> OpsResult<bool> {
+    if matches!(observation.request, Some(MergeRequest::Queued(_))) {
+        return Ok(false);
     }
-    state.is_some_and(|state| {
-        state.eq_ignore_ascii_case("dirty")
-            || (state.eq_ignore_ascii_case("behind")
-                && !matches!(request, Some(MergeRequest::AwaitingQueue)))
-    })
+    let state = observation.pr.merge_state.as_deref().unwrap_or_default();
+    if state.eq_ignore_ascii_case("dirty")
+        || (state.eq_ignore_ascii_case("behind") && !observation.merge_queue_enabled)
+    {
+        return Ok(true);
+    }
+    if observation.request.is_some() || !observation.merge_queue_enabled {
+        return Ok(false);
+    }
+    Ok(matches!(
+        removal()?,
+        MergeRequestRemoval::Evicted { reason, .. } if reason.eq_ignore_ascii_case("merge_conflict")
+    ))
 }
 
 #[derive(Debug)]
@@ -643,6 +660,26 @@ pub(crate) struct PrMergeObservation {
     pub request: Option<MergeRequest>,
     merge_queue_enabled: bool,
     methods: MergeMethods,
+}
+
+#[cfg(test)]
+impl PrMergeObservation {
+    pub(crate) fn fixture(
+        pr: PrInfo,
+        request: Option<MergeRequest>,
+        merge_queue_enabled: bool,
+    ) -> Self {
+        Self {
+            pr,
+            request,
+            merge_queue_enabled,
+            methods: MergeMethods {
+                merge_commit_allowed: true,
+                squash_merge_allowed: true,
+                rebase_merge_allowed: true,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -2509,13 +2546,16 @@ mod tests {
                 "mergeStateStatus":"BEHIND", "isMergeQueueEnabled":queue_enabled, "isInMergeQueue":false,
                 "autoMergeRequest":auto, "mergeQueueEntry":entry
             }}}});
-            let observation = super::parse_pr_merge(&serde_json::to_vec(&value).unwrap()).unwrap();
+            let mut observation =
+                super::parse_pr_merge(&serde_json::to_vec(&value).unwrap()).unwrap();
+            let unknown = || Ok(super::MergeRequestRemoval::Unknown);
             assert_eq!(
-                super::merge_needs_integration(Some("behind"), observation.request.as_ref()),
+                super::pr_requires_resync(&observation, unknown).unwrap(),
                 behind
             );
+            observation.pr.merge_state = Some("dirty".into());
             assert_eq!(
-                super::merge_needs_integration(Some("dirty"), observation.request.as_ref()),
+                super::pr_requires_resync(&observation, unknown).unwrap(),
                 dirty
             );
         }
@@ -2523,10 +2563,10 @@ mod tests {
 
     use super::{
         classify_pr_read_failure, disable_auto_merge, enable_auto_merge, is_missing_pr,
-        merge_gate_state, merge_needs_integration, normalize_task_pr_copy, observe_merge_request,
-        parse_generated_pr_copy, parse_pr_merge, pr_number_from_url, project_checks,
-        required_contexts, GhCheck, GhRestHead, GhRestPr, MergeGateReading, MergeRequest, PrCopy,
-        RequiredChecks, RequiredProducers, TaskPrCopyLifecycle,
+        merge_gate_state, normalize_task_pr_copy, observe_merge_request, parse_generated_pr_copy,
+        parse_pr_merge, pr_number_from_url, pr_requires_resync, project_checks, required_contexts,
+        GhCheck, GhRestHead, GhRestPr, MergeGateReading, MergeRequest, MergeRequestRemoval, PrCopy,
+        PrInfo, PrMergeObservation, RequiredChecks, RequiredProducers, TaskPrCopyLifecycle,
     };
     use crate::ops::task::TaskPrContext;
     use serde_json::{json, Value};
@@ -2619,27 +2659,74 @@ esac
     }
 
     #[test]
-    fn queue_requests_integrate_advancing_bases_but_not_prequeue_conflicts() {
-        for (request, behind, dirty) in [
-            (None, true, true),
-            (Some(MergeRequest::Auto), true, true),
-            (Some(MergeRequest::AwaitingQueue), false, true),
+    fn one_rule_decides_when_a_pr_needs_main_merged() {
+        let evicted = |reason: &str| MergeRequestRemoval::Evicted {
+            reason: reason.to_string(),
+            run_url: None,
+        };
+        // (request, queue, removal, behind, dirty, clean)
+        for (request, queue, removal, behind, dirty, clean) in [
+            (None, false, MergeRequestRemoval::Unknown, true, true, false),
+            (
+                Some(MergeRequest::Auto),
+                false,
+                MergeRequestRemoval::Unknown,
+                true,
+                true,
+                false,
+            ),
+            // A repair disarm on a queue: the queue brings the base up to date.
+            (
+                None,
+                true,
+                MergeRequestRemoval::ByLoopflow,
+                false,
+                true,
+                false,
+            ),
+            (
+                Some(MergeRequest::AwaitingQueue),
+                true,
+                evicted("merge_conflict"),
+                false,
+                true,
+                false,
+            ),
+            (None, true, evicted("merge_conflict"), true, true, true),
+            (None, true, evicted("failed_checks"), false, true, false),
             (
                 Some(MergeRequest::Queued("pr-id".to_string())),
+                true,
+                MergeRequestRemoval::Unknown,
+                false,
                 false,
                 false,
             ),
         ] {
-            assert_eq!(
-                merge_needs_integration(Some("BEHIND"), request.as_ref()),
-                behind
+            let take = || Ok(removal.clone());
+            let mut observation = PrMergeObservation::fixture(
+                PrInfo {
+                    url: "https://example.com/pr/1".into(),
+                    number: 1,
+                    state: "open".into(),
+                    branch: "feature".into(),
+                    merge_commit: None,
+                    merged_at: None,
+                    head_sha: Some("head".into()),
+                    merge_state: None,
+                },
+                request,
+                queue,
             );
-            assert_eq!(
-                merge_needs_integration(Some("dirty"), request.as_ref()),
-                dirty
-            );
-            assert!(!merge_needs_integration(Some("clean"), request.as_ref()));
-            assert!(!merge_needs_integration(None, request.as_ref()));
+            for (state, expected) in [("BEHIND", behind), ("dirty", dirty), ("clean", clean)] {
+                observation.pr.merge_state = Some(state.into());
+                assert_eq!(
+                    pr_requires_resync(&observation, take).unwrap(),
+                    expected,
+                    "{state} {:?} queue={queue}",
+                    observation.request
+                );
+            }
         }
     }
 

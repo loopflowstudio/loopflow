@@ -7,7 +7,7 @@ lf session connect SESSION
 ```
 
 These commands use the current parser. This guide specifies the accepted
-lifecycle; [cutover status](../architecture-reference.md#cutover-status) records
+lifecycle; [cutover status](reference-cutover.md#cutover-status) records
 which owners and proofs remain unfinished.
 
 The command has a process. The agent has an LfSession. A Graph is one lf process and the step processes it starts. Their completion and authority are different
@@ -288,7 +288,7 @@ Session lists support contains-search and title/ID ordering; stable ID pages ser
 Desktop's complete-inventory reconciliation. Names, readiness text and iteration
 tuples vary in size, and listing checks exact client receipts. The query therefore
 has no constant-byte or constant-time guarantee. Measurement status belongs in
-the [cutover status](../architecture-reference.md#cutover-status).
+the [cutover status](reference-cutover.md#cutover-status).
 
 Typed Task/Wave links survive landing and provider replacement and takeover. Readers
 never use live PR eligibility, path names or mutable manifests to recover identity.

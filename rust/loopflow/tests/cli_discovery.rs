@@ -670,13 +670,14 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
             Some(Commands::History { cmd: Some(_), .. })
         ));
     }
-    for verb in ["ps", "top", "active"] {
+    for verb in ["ps", "top"] {
         assert!(matches!(
             parse(&["lf", verb]).command,
             Some(Commands::Monitor { .. })
         ));
     }
     assert!(Cli::try_parse_from(["lf", "monitor", "activity"]).is_err());
+    assert!(Cli::try_parse_from(["lf", "monitor", "active"]).is_err());
     assert!(Cli::command().find_subcommand("replay").is_none());
 }
 
@@ -863,8 +864,7 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "public",
             "remove",
             "rename",
-            "status",
-            "use"
+            "status"
         ]
     );
     let help =
@@ -1286,7 +1286,17 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         .unwrap()
         .iter()
         .filter(|command| {
-            command["command"] != "lf desktop rename" && command["command"] != "lf desktop wait"
+            // Desktop's Work reads print its presentation types, which carry no schema.
+            ![
+                "lf desktop rename",
+                "lf desktop wait",
+                "lf desktop plan",
+                "lf desktop done",
+                "lf desktop wave",
+                "lf desktop sessions",
+                "lf desktop task",
+            ]
+            .contains(&command["command"].as_str().unwrap())
         })
         .all(|command| command["result_schema"].is_object()));
 }

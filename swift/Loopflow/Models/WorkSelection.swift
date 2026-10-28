@@ -178,7 +178,6 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     }
     public let dashboardID: String?
     public let repository: String
-    public let observedAt: Int64
     public let selection: WorkSelection
     public let savedRevision: Int64?
     public let resolution: WorkSelectionResolution
@@ -189,7 +188,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let contents: [Content]
     enum CodingKeys: String, CodingKey {
         case repository, selection, resolution, arrangement, projection, slots, contents, name, pinned
-        case dashboardID = "dashboard_id", observedAt = "observed_at", savedRevision = "saved_revision"
+        case dashboardID = "dashboard_id", savedRevision = "saved_revision"
     }
 }
 

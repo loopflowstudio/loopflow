@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::{Mapping, Value};
-use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::warn;
-
-use crate::prompt::context_budget::BudgetKey;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum WaveConfigError {
@@ -13,7 +10,7 @@ pub(crate) enum WaveConfigError {
         path: std::path::PathBuf,
         source: std::io::Error,
     },
-    #[error("invalid wave goal frontmatter in {path}: {source}")]
+    #[error("invalid wave config in {path}: {source}")]
     Parse {
         path: std::path::PathBuf,
         source: serde_yaml_ng::Error,
@@ -39,28 +36,21 @@ pub enum WaveChatConfig {
     },
 }
 
-/// Machine policy read from the checkout Wave goal frontmatter.
+/// Keys only a Wave's `config.yaml` carries; every other key is shared
+/// `Config` layered over the repository's (see `crate::config::load_wave_config`).
+const WAVE_ONLY_KEYS: [&str; 3] = ["id", "linear", "chat"];
+
+/// The Wave's own identity and bindings from its `config.yaml`.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WaveConfig {
     pub id: Option<crate::id::WaveId>,
-    #[serde(default)]
-    pub context_budgets: BTreeMap<BudgetKey, usize>,
-    pub agent: Option<String>,
-    pub skill_agents: Option<HashMap<String, String>>,
     pub linear: Option<WaveLinearConfig>,
     /// One external presentation binding. Discord is the only supported
     /// provider and remains a concrete variant rather than a registry.
     pub chat: Option<WaveChatConfig>,
 }
 
-fn parse_wave_config(content: &str) -> Result<WaveConfig, serde_yaml_ng::Error> {
-    match split_frontmatter(content) {
-        Some((frontmatter, _)) => serde_yaml_ng::from_str(&frontmatter),
-        None => Ok(WaveConfig::default()),
-    }
-}
-
-/// Read Wave intent from its checkout goal frontmatter.
+/// Read the Wave's identity and bindings.
 pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     match try_read_wave_config(repo, name) {
         Ok(config) => config,
@@ -71,19 +61,16 @@ pub fn read_wave_config(repo: &Path, name: &str) -> Option<WaveConfig> {
     }
 }
 
-/// Read Wave policy and surface malformed frontmatter to callers that
-/// must fail closed before starting external side effects.
+/// Read the Wave's identity and bindings and surface a malformed file to
+/// callers that must fail closed before starting external side effects.
 pub(crate) fn try_read_wave_config(
     repo: &Path,
     name: &str,
 ) -> Result<Option<WaveConfig>, WaveConfigError> {
-    let path = goal_path(repo, name);
-    let content = match std::fs::read_to_string(&path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(source) => return Err(WaveConfigError::Read { path, source }),
+    let Some((path, mapping)) = read_wave_file(repo, name)? else {
+        return Ok(None);
     };
-    parse_wave_config(&content)
+    serde_yaml_ng::from_value(Value::Mapping(mapping))
         .map(Some)
         .map_err(|source| WaveConfigError::Parse { path, source })
 }
@@ -94,6 +81,57 @@ pub(crate) fn try_read_wave_chat_config(
     repo: &Path,
     name: &str,
 ) -> Result<Option<WaveChatConfig>, WaveConfigError> {
+    let Some((path, mapping)) = read_wave_file(repo, name)? else {
+        return Ok(None);
+    };
+    let Some(chat) = mapping.get("chat") else {
+        return Ok(None);
+    };
+    serde_yaml_ng::from_value(chat.clone())
+        .map(Some)
+        .map_err(|source| WaveConfigError::Parse { path, source })
+}
+
+/// The Wave's shared `Config` values and the file they came from, without
+/// its own identity and bindings.
+pub(crate) fn read_wave_layer(
+    repo: &Path,
+    name: &str,
+) -> Result<Option<(PathBuf, Value)>, WaveConfigError> {
+    let Some((path, mut mapping)) = read_wave_file(repo, name)? else {
+        return Ok(None);
+    };
+    for key in WAVE_ONLY_KEYS {
+        mapping.remove(key);
+    }
+    Ok(Some((path, Value::Mapping(mapping))))
+}
+
+/// The graph the Wave's own `config.yaml` selects for its Tasks.
+pub(crate) fn wave_graph(repo: &Path, name: &str) -> Result<Option<String>, WaveConfigError> {
+    Ok(read_wave_layer(repo, name)?.and_then(|(_, layer)| {
+        ["graph", "workflow"]
+            .iter()
+            .find_map(|key| layer.get(*key)?.as_str().map(str::to_owned))
+    }))
+}
+
+/// The Wave's `config.yaml`, or else its GOAL.md frontmatter.
+///
+/// Released lf reads Wave settings from GOAL.md frontmatter, so a checkout keeps
+/// that frontmatter while either build may run in it; a Wave without
+/// `config.yaml` reads the keys `config.yaml` holds from it. LOO-640 removes
+/// this fallback once a release reading `config.yaml` is installed.
+fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>, WaveConfigError> {
+    let path = config_path(repo, name);
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let mapping = parse_mapping(&path, &content)?;
+            return Ok(Some((path, mapping)));
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(source) => return Err(WaveConfigError::Read { path, source }),
+    }
     let path = goal_path(repo, name);
     let content = match std::fs::read_to_string(&path) {
         Ok(content) => content,
@@ -101,23 +139,24 @@ pub(crate) fn try_read_wave_chat_config(
         Err(source) => return Err(WaveConfigError::Read { path, source }),
     };
     let Some((frontmatter, _)) = split_frontmatter(&content) else {
-        return Ok(None);
+        return Ok(Some((path, Mapping::new())));
     };
-    let value = serde_yaml_ng::from_str::<Value>(&frontmatter).map_err(|source| {
-        WaveConfigError::Parse {
-            path: path.clone(),
+    let mut mapping = parse_mapping(&path, &frontmatter)?;
+    let shared = crate::config::wave_config_keys();
+    mapping.retain(|key, _| {
+        key.as_str()
+            .is_some_and(|key| WAVE_ONLY_KEYS.contains(&key) || shared.contains(key))
+    });
+    Ok(Some((path, mapping)))
+}
+
+fn parse_mapping(path: &Path, content: &str) -> Result<Mapping, WaveConfigError> {
+    serde_yaml_ng::from_str::<Option<Mapping>>(content)
+        .map(Option::unwrap_or_default)
+        .map_err(|source| WaveConfigError::Parse {
+            path: path.to_path_buf(),
             source,
-        }
-    })?;
-    let Some(chat) = value
-        .as_mapping()
-        .and_then(|mapping| mapping.get(Value::String("chat".to_string())))
-    else {
-        return Ok(None);
-    };
-    serde_yaml_ng::from_value(chat.clone())
-        .map(Some)
-        .map_err(|source| WaveConfigError::Parse { path, source })
+        })
 }
 
 /// One-line Wave objective for status, PM, and API projections.
@@ -158,8 +197,13 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
     Some((frontmatter.to_string(), body))
 }
 
-fn goal_path(repo: &Path, name: &str) -> std::path::PathBuf {
+fn goal_path(repo: &Path, name: &str) -> PathBuf {
     repo.join(".lf/wave").join(name).join("GOAL.md")
+}
+
+/// The committed file holding a Wave's shared setup.
+pub fn config_path(repo: &Path, name: &str) -> PathBuf {
+    repo.join(".lf/wave").join(name).join("config.yaml")
 }
 
 fn markdown_section(content: &str, heading: &str) -> String {
@@ -200,42 +244,33 @@ fn first_prose_paragraph(content: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Update checkout Wave frontmatter, preserving its objective body.
-pub(crate) fn update_wave_goal_config(
+/// Update the Wave's `config.yaml`. A Wave without one starts from the
+/// values its GOAL.md frontmatter carried, so moving loses nothing.
+pub(crate) fn update_wave_config(
     repo: &Path,
     name: &str,
     update: impl FnOnce(&mut Mapping) -> Result<(), String>,
 ) -> Result<(), String> {
-    let path = goal_path(repo, name);
-    let content = std::fs::read_to_string(&path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let (mut value, body) = match split_frontmatter(&content) {
-        Some((frontmatter, body)) => {
-            let value = serde_yaml_ng::from_str::<Value>(&frontmatter)
-                .map_err(|error| format!("invalid yaml in {}: {error}", path.display()))?;
-            (value, body)
-        }
-        None => (Value::Mapping(Mapping::new()), content),
-    };
-    let map = value.as_mapping_mut().ok_or_else(|| {
-        format!(
-            "wave goal frontmatter at {} must be a mapping",
-            path.display()
-        )
-    })?;
-    update(map)?;
-
-    let frontmatter = serde_yaml_ng::to_string(&value)
-        .map_err(|error| format!("failed to render wave goal frontmatter: {error}"))?;
-    std::fs::write(&path, format!("---\n{frontmatter}---\n{body}"))
+    let directory = repo.join(".lf/wave").join(name);
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("failed to create {}: {error}", directory.display()))?;
+    let mut mapping = read_wave_file(repo, name)
+        .map_err(|error| error.to_string())?
+        .map(|(_, mapping)| mapping)
+        .unwrap_or_default();
+    update(&mut mapping)?;
+    let path = config_path(repo, name);
+    let content = serde_yaml_ng::to_string(&Value::Mapping(mapping))
+        .map_err(|error| format!("failed to render {}: {error}", path.display()))?;
+    std::fs::write(&path, content)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        read_wave_config, read_wave_summary, try_read_wave_chat_config, try_read_wave_config,
-        update_wave_goal_config, WaveChatConfig, WaveConfigError,
+        read_wave_config, read_wave_layer, read_wave_summary, try_read_wave_chat_config,
+        try_read_wave_config, update_wave_config, WaveChatConfig, WaveConfigError,
     };
     use std::path::Path;
 
@@ -255,6 +290,12 @@ mod tests {
         fn write(&self, content: &str) -> std::io::Result<()> {
             std::fs::write(self.path().join(".lf/wave/scan/GOAL.md"), content)
         }
+        fn write_config(&self, content: &str) {
+            std::fs::write(self.path().join(".lf/wave/scan/config.yaml"), content).unwrap();
+        }
+        fn layer(&self) -> serde_yaml_ng::Value {
+            read_wave_layer(self.path(), "scan").unwrap().unwrap().1
+        }
     }
 
     #[test]
@@ -262,54 +303,71 @@ mod tests {
         let repo = ConfigRepo::new();
         let unrelated = repo.path().join("wave/scan");
         std::fs::create_dir_all(&unrelated).unwrap();
-        let original = "---\nagent: unrelated\n---\nRepository content\n";
-        std::fs::write(unrelated.join("GOAL.md"), original).unwrap();
+        let original = "linear:\n  initiative: unrelated\n";
+        std::fs::write(unrelated.join("config.yaml"), original).unwrap();
         assert!(read_wave_config(repo.path(), "scan").is_none());
 
-        repo.write("---\nagent: codex\n---\nWave objective\n")
-            .unwrap();
-        assert_eq!(
-            read_wave_config(repo.path(), "scan")
-                .unwrap()
-                .agent
-                .as_deref(),
-            Some("codex")
-        );
-        update_wave_goal_config(repo.path(), "scan", |map| {
+        repo.write_config("agent: codex\n");
+        update_wave_config(repo.path(), "scan", |map| {
             map.insert("agent".into(), "claude".into());
             Ok(())
         })
         .unwrap();
+        assert_eq!(repo.layer()["agent"].as_str(), Some("claude"));
         assert_eq!(
-            read_wave_config(repo.path(), "scan")
-                .unwrap()
-                .agent
-                .as_deref(),
-            Some("claude")
-        );
-        assert_eq!(
-            std::fs::read_to_string(unrelated.join("GOAL.md")).unwrap(),
+            std::fs::read_to_string(unrelated.join("config.yaml")).unwrap(),
             original
         );
     }
 
     #[test]
-    fn frontmatter_edits_do_not_create_missing_goals() {
+    fn config_yaml_wins_over_goal_frontmatter() {
         let repo = ConfigRepo::new();
-        assert!(update_wave_goal_config(repo.path(), "scan", |_| Ok(())).is_err());
-        assert!(!repo.path().join(".lf/wave/scan/GOAL.md").exists());
+        repo.write("---\nowner: jack\nagent: codex\nid: 6155f18a-1b7f-418c-9af3-8d6fa5ce4989\n---\nDrive the work.\n")
+            .unwrap();
+        assert_eq!(repo.layer()["agent"].as_str(), Some("codex"));
+        assert!(repo.layer().get("owner").is_none());
+        assert!(repo.layer().get("id").is_none());
+        assert!(read_wave_config(repo.path(), "scan").unwrap().id.is_some());
+
+        repo.write_config("agent: claude\n");
+        assert_eq!(repo.layer()["agent"].as_str(), Some("claude"));
+        assert!(read_wave_config(repo.path(), "scan").unwrap().id.is_none());
+
+        // An empty file still replaces the old frontmatter.
+        for empty in ["", " \n", "# No overrides\n", "null\n"] {
+            repo.write_config(empty);
+            assert!(repo.layer().as_mapping().unwrap().is_empty());
+            assert!(read_wave_config(repo.path(), "scan").unwrap().id.is_none());
+        }
     }
 
     #[test]
-    fn read_wave_config_parses_machine_frontmatter() {
-        let temp = ConfigRepo::new();
-        temp.write(
-            "---\nowner: jack\nhome: build.example.com\nagent: codex\n---\nDrive the work.\n",
-        )
-        .expect("write");
-
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        assert_eq!(config.agent.as_deref(), Some("codex"));
+    fn first_edit_carries_frontmatter_into_config_yaml() {
+        let repo = ConfigRepo::new();
+        let body = "\n## Objective\n\nKeep tokens λ.\n";
+        repo.write(&format!(
+            "---\nagent: codex\nlinear:\n  initiative: lin-123\n---\n{body}"
+        ))
+        .unwrap();
+        update_wave_config(repo.path(), "scan", |map| {
+            map.insert("graph".into(), "code".into());
+            Ok(())
+        })
+        .unwrap();
+        let goal = std::fs::read_to_string(repo.path().join(".lf/wave/scan/GOAL.md")).unwrap();
+        assert!(goal.ends_with(body));
+        assert_eq!(repo.layer()["agent"].as_str(), Some("codex"));
+        assert_eq!(repo.layer()["graph"].as_str(), Some("code"));
+        assert_eq!(
+            read_wave_config(repo.path(), "scan")
+                .unwrap()
+                .linear
+                .unwrap()
+                .initiative
+                .as_deref(),
+            Some("lin-123")
+        );
     }
 
     #[test]
@@ -327,56 +385,32 @@ mod tests {
     }
 
     #[test]
-    fn read_wave_config_parses_linear_binding() {
-        let temp = ConfigRepo::new();
-        temp.write("---\nlinear:\n  initiative: \"lin-123\"\n---\nDrive the work.\n")
-            .expect("write");
-
-        let config = read_wave_config(temp.path(), "scan").expect("config should parse");
-        let linear = config.linear.expect("Linear binding should exist");
-        assert_eq!(linear.initiative.as_deref(), Some("lin-123"));
-    }
-
-    #[test]
     fn discord_chat_config_is_typed_and_invalid_bindings_fail_closed() {
         let temp = ConfigRepo::new();
-        temp.write(
-            "---\nchat:\n  provider: discord\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
-        )
-        .expect("write");
+        temp.write_config("chat:\n  provider: discord\n  guild_id: guild\n  channel_id: channel\n");
         let config = read_wave_config(temp.path(), "scan").expect("config should parse");
         assert!(matches!(
             config.chat,
             Some(WaveChatConfig::Discord { guild_id, channel_id })
                 if guild_id == "guild" && channel_id == "channel"
         ));
-        assert!(matches!(
-            try_read_wave_chat_config(temp.path(), "scan"),
-            Ok(Some(WaveChatConfig::Discord { guild_id, channel_id }))
-                if guild_id == "guild" && channel_id == "channel"
-        ));
 
-        // The binding is local: `machine_id` is no longer a Discord-config field.
-        // `deny_unknown_fields` rejects it, so a stale GOAL.md fails closed.
-        temp.write(
-            "---\nchat:\n  provider: discord\n  machine_id: home_11111111111111111111111111111111\n  guild_id: guild\n  channel_id: channel\n---\nDrive the work.\n",
-        )
-        .expect("write stale machine_id");
+        // `deny_unknown_fields` rejects a stale `machine_id`, so the binding fails closed.
+        temp.write_config(
+            "chat:\n  provider: discord\n  machine_id: home_1\n  guild_id: guild\n  channel_id: channel\n",
+        );
         assert!(matches!(
             try_read_wave_chat_config(temp.path(), "scan"),
             Err(WaveConfigError::Parse { .. })
         ));
 
-        // A missing required field still fails closed.
-        temp.write("---\nchat:\n  provider: discord\n  guild_id: guild\n---\nDrive the work.\n")
-            .expect("write missing channel");
+        temp.write_config("chat:\n  provider: discord\n  guild_id: guild\n");
         assert!(matches!(
             try_read_wave_chat_config(temp.path(), "scan"),
             Err(WaveConfigError::Parse { .. })
         ));
 
-        temp.write("---\nchat:\n  provider: local\n---\nDrive the work.\n")
-            .expect("write local chat");
+        temp.write_config("chat:\n  provider: local\n");
         assert!(matches!(
             try_read_wave_config(temp.path(), "scan")
                 .expect("local config")
@@ -384,8 +418,7 @@ mod tests {
             Some(WaveChatConfig::Local)
         ));
 
-        temp.write("---\nowner: [not-a-string]\n---\nDrive the work.\n")
-            .expect("write unrelated invalid policy");
+        temp.write_config("agent: [not-a-string]\n");
         assert!(matches!(
             try_read_wave_chat_config(temp.path(), "scan"),
             Ok(None)
@@ -396,29 +429,5 @@ mod tests {
     fn read_wave_config_returns_none_for_missing() {
         let temp = ConfigRepo::new();
         assert!(read_wave_config(temp.path(), "nonexistent").is_none());
-    }
-
-    #[test]
-    fn frontmatter_edits_preserve_the_authored_body_and_unrelated_fields() {
-        let repo = ConfigRepo::new();
-        let body = "\n## Objective\n\nKeep tokens λ.\n";
-        repo.write(&format!("---\nagent: codex\n---\n{body}"))
-            .unwrap();
-        update_wave_goal_config(repo.path(), "scan", |map| {
-            map.insert(
-                "linear".into(),
-                serde_yaml_ng::from_str("initiative: lin-123").unwrap(),
-            );
-            Ok(())
-        })
-        .unwrap();
-        let content = std::fs::read_to_string(repo.path().join(".lf/wave/scan/GOAL.md")).unwrap();
-        assert!(content.ends_with(body));
-        let config = read_wave_config(repo.path(), "scan").unwrap();
-        assert_eq!(config.agent.as_deref(), Some("codex"));
-        assert_eq!(
-            config.linear.unwrap().initiative.as_deref(),
-            Some("lin-123")
-        );
     }
 }

@@ -1,63 +1,122 @@
-# v0.14.19
+# v0.15.0
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.19 keeps work connected as conversations move between logins and Machines, Tasks move through delivery, and installed binaries change. It brings a Wave standup board to Desktop, restores provider context hooks, and makes store cleanup and stalled Sessions easier to diagnose. This release raises the store compatibility floor: **lf < 0.14.19 can no longer open the store (raised by: drop_steer_adapter_thread)**; **lf < 0.14.19 can no longer open the store (raised by: forget_fly_rentals)**. Upgrade every CLI and macOS app that shares the store together.
+v0.15.0 collects the 0.14.11–0.14.20 cycle into one release: a Task can now be handed off and left to finish. One Graph carries it from first step to merged PR, `lf ship` or Auto-Ship lands it, and it can run on a Machine you own or one you rent. Two people can share a repository without crossing claims or branches. The store has been cut down to facts, so installs, live views and idle processes stop slowing down as history grows. This cut adds no new compatibility break: older 0.14.x builds already lost the store at 0.14.20, and that floor stays where it is.
 
-## Move the work without losing the conversation
+## Hand a Task off and let it finish
 
-Changing accounts or Machines used to leave native conversation history behind. Sessions now carry that history with them, and Task moves preserve the Workflow position and branch. Follow-up fixes make an open Codex conversation movable and close its old terminal cleanly. (#1720, #1740, #1746)
+The cycle started with three overlapping models of a Task's progress: Flows, Workflow stages and routes, and per-Task automation holds for CI. It ends with one. Flow became Graph everywhere (#1643). Workflows then folded into the Graph file itself, which now says where a person takes part (#1733). Bare `lf task run` returns once the Graph is running (#1675), and `lf ship` runs the rest of it through CI repair and merge (#1652).
 
-- **Resume on another login or Machine.** `lf --account codex=<login> resume <session>` moves an open Codex conversation to the selected login. `lf --machine <machine> resume <session>` commits and pushes the branch, carries the provider transcript, and opens the same Session on the target. Resuming from the source follows the recorded destination. Missing transcripts and unusable named accounts produce errors instead of silently starting an empty conversation. (#1720, #1740)
-- **Move a Task with its work.** `lf task move <task> --machine <machine>` stops its Graph and step Processes, commits and pushes the worktree, and transfers its Workflow record and Session. Run `lf task run` on the target to run the stopped route again. Target readiness is checked before stopping or pushing; a worktree mid-merge or mid-rebase cannot move. (#1720)
-- **The old Codex terminal tells you where to go.** After takeover by another terminal, account or Machine, it exits, restores terminal settings, and prints the destination notice. Its exit no longer resets the conversation's account pin to the old login. (#1746)
-- **Claude context survives `/clear`.** The new conversation receives its Task brief and pending steers, later hooks keep working, and resume follows the selected conversation. This does not add support for switching conversations with `/new` or `/resume` inside one Pi process. (#1731)
-- **Codex context hooks run again.** Loopflow supplies thread trust for its own hooks, restoring context, prompt, tool and stop callbacks while preserving wrapper hooks and saved host trust decisions. (#1734)
+- **One Graph per Task.** A Task captures one Graph and its position in it. `interactive:` steps run in place under `lf graph`. Under `lf task run`, the run stops before them and the Task waits in its conversation. `-i`/`-b` choose for every step, and `--from <step>` starts anywhere. A Task with no Graph takes its Wave's default, then repository `graph:`, then builtin `code`. (#1733)
+- **Runs leave your shell.** `lf task run` returns once the Graph registers. `lf -b task run` still waits. `lf task interrupt` now stops a running Graph. It used to record a request that nothing acted on. (#1675, #1678)
+- **Steps default to headless.** A Graph started from a terminal no longer opens every step as a conversation. Headless Claude steps stay alive until any commands they backgrounded have finished. (#1628, #1688)
+- **Ship in one move.** Click **Auto-Ship** or run `lf ship`, and Loopflow runs the remaining steps, repairs CI, merges the PR and completes the Task. A route into `end` also approves Auto-Ship. A two-tier approval that briefly stopped this (#1736) was reverted (#1741). `lf ship --stop` withdraws approval. (#1652, #1741)
+- **Agents handle conflicts themselves.** A PR that conflicts with or falls behind `main` is synced and resolved by the agent; it no longer goes to a person as ready for review. Graph `sync` keeps branch commits and checkpoints uncommitted edits before merging, so conflicts reach the resolver rather than a stash. (#1624, #1672, #1748)
+- **Choose a direction before building.** The feature Graph starts at `explore`. It lays out several visions as pages you can read in Desktop's Files view, so you pick one before any code is written. (#1687)
+- **Finished work goes quiet.** Completed and abandoned Tasks with old failed runs no longer ask for attention. Completed Tasks stay complete through Linear rate limits and unrelated edits. (#1621, #1742)
 
-## See the Wave and keep delivery moving
+## Land PRs without babysitting the merge queue
 
-Desktop puts the Wave conversation beside a standup board so the plan and the work stay visible together. Delivery fixes preserve completed Tasks through unrelated tracker edits and keep uncommitted work in branch history when syncing. (#1705, #1742, #1748)
+Landing and release each guessed why a PR's auto-merge had disappeared, and they guessed in opposite directions. Now only a person removing the merge request stops them (#1680). Every other kind of removal gets repaired.
 
-- **One board, four sections.** Backlog, Working, Autonomous and Done show the Wave's Tasks; Working includes Available or Busy Session markers, and Done has a remembered day filter. Working Tasks appear three to a page below the board and conversation. The repository view uses the same layout across its Tasks. (#1705)
-- **Arrange the view from Desktop or the CLI.** Resize, zoom or hide its parts and restore them through `Show…`. `lf desktop state` exposes their layout; `lf desktop do` runs registered actions, including board section and filter changes. Dashboards remain available through `lf desktop view` but leave the sidebar, menus and command palette. (#1705)
-- **Completion survives Linear rate limits.** When a completion write has an uncertain outcome, Linear state history distinguishes an unrelated comment from an actual reopening. Unrelated edits permit an automatic retry; a real state change is adopted. State updates are delivered before comments. (#1742)
-- **Sync checkpoints edits before merging.** When merging the target into a feature branch, `lf sync` commits uncommitted edits, excluding `.lf/tmp/`, before resolving conflicts. Overlaps reach the merge resolver instead of being stranded in a stash. This adds a checkpoint commit and commits previously staged edits too. `--manual` keeps edits local; main, an existing merge/rebase, and other sync strategies retain their previous behavior. (#1748)
-- **Auto-Ship has one approval.** The temporary split between route and landing approval was reverted. `lf ship` or a route into `end` approves shipping through landing; `lf ship --stop` withdraws it. There is no `--recover` flag or separate landing grant. The revert also removes automatic delivery of an open PR already left at `end`: that Task reports `already at its end`, and refused completion still fails the ship run. (#1741, reverting #1736)
+- Removals Loopflow makes itself during CI repair, and drops by GitHub's merge queue, are repaired instead of read as withdrawal. `lf land` no longer drops the request on PRs that are already green. (#1673, #1679, #1684)
+- CI repair and sync run alongside an open Session in the Task checkout, and sync no longer holds its lock across network fetches or conflict resolution. (#1714)
+- `lf land` merges `main` only when GitHub or the queue requires it. Other repairs push on top of the base CI already tested. (#1749)
+- Rust-only PRs skip hosted macOS runners. macOS jobs run once per PR, and only when the PR's paths can affect them. `main` is tested after merge, and a failure is bisected to open an unarmed revert PR. (#1646, #1749)
 
-## Find the old process and recover the Session
+## Run work on a Machine you own or one you rent
 
-Store growth, lock contention and processes left on older binaries made failures hard to explain. This release removes disposable Process history, identifies slow writers and superseded binaries, and adds supported recovery for idle Sessions and a specific broken-ancestry case. (#1718, #1724, #1729, #1747)
+Tasks used to run where they started. Now each has a single owner: a person on a Machine, or nobody. That owner can be claimed, handed to another Machine or released (#1610). A Task can also go to free capacity and come back with its history.
 
-- **Finished Processes are deleted when nothing needs them.** Agent-issued commands, results a running parent may read, referenced Processes and agent Processes are retained. The same rule replaces seven-day retention and cleans up interrupted exits. Unreferenced outcomes, including failures, no longer remain as historical Process rows. Desktop file, diff, save and Graph-history queries also stop counting as execution in the Task checkout. (#1718)
-- **Lock diagnostics name binaries and processes.** Every `lf.log` line carries PID, version and revision. Writers holding the store lock for at least three seconds log their duration and call site; `lf doctor` groups recent contention by binary. The hourly prune now waits for the write lock. This improves diagnosis, not a guarantee that contention is eliminated. (#1724, #1726)
-- **See what still runs the old install.** `lf monitor ps`, `lf doctor` and promotion output identify superseded binaries and those below the store's reader floor. `lf monitor rollover --dry-run` previews eligible Sessions; `lf monitor rollover` resumes idle, detached Sessions on the selected install from saved provider history. Attached terminals, active turns, Graph steps and headless Runs are left with a reason. (#1729)
-- **Repair missing ancestry without discarding history.** When an ended agent retained an attachment to an lf process whose start was never recorded, `lf monitor prune` can release that ancestry and record the repair in Session history. `lf doctor` identifies repairable cases. New attachments write their owner's start record in the same transaction, preventing this failure from recurring. (#1747)
-- **Abandoned snapshots stop lingering.** The next snapshot, hourly rotation or `lf disk clean` removes abandoned `.tmp*` copies when the copies lock is free. `lf disk` reports private blocks for APFS clones rather than counting shared storage as reclaimable space. (#1727)
+- **Ownership is explicit.** Claims follow the repository's Git `user.email` rather than display names. Moving a Task to another of your Machines carries its conversation, which is no longer completed on the way. (#1610, #1651, #1720)
+- **Rent capacity.** `lf task run --pool lab --rent code` sends a Task to a free owned Machine or rents one, and gives it back with its history afterwards (#1653). By the end of the cycle the providers are Daytona, Modal, RunPod and AWS, with GPU and spot options where the provider has them. A Wave can send its Tasks to rented machines by default. (#1704, #1707)
+- **Fly is gone.** Fly arrived in #1707 and was removed in #1743. AWS rentals now use a pinned region, a working Claude login, a Git identity for claims, and Linear planning. (#1743)
+- **Fresh Linux machines work.** Claude, Codex, OpenCode and Pi run on a newly rented Linux box. The fixes cover OpenCode login forwarding, Pi startup, Codex under Ubuntu's default umask, and npm-installed agents over SSH. (#1649)
+- **Conversations move with their history.** `lf resume` moves a conversation to another login or Machine with its native history intact. Open Codex conversations are pinned to their login so a move finds them, and the terminal a conversation left closes and says where it went. (#1720, #1740, #1746)
+- **Launch on the account with the most room.** Shared-mode Claude and Codex launches pick the account with the most remaining usage. They no longer stay on the signed-in account until it reaches 95%. (#1717)
 
-## Run Tasks on rented Machines with their planning access
+## Share a repository with someone else
 
-An AWS Task run exposed gaps in region selection, Git identity and provider credentials. Rentals now carry the setup needed to claim the Task and use Linear, while the laptop keeps the refresh grant. Fly support is removed because its disk could not hold the Rust build. (#1743)
+Before this cycle, two people in one repository saw separate plans, and a takeover opened a new branch and PR. Now they share one plan and one branch per Task.
 
-- AWS rents in the priced `AWS_REGION`; preparation copies the repository's Git identity and installs a Claude token with inference scope. GitHub repositories clone over HTTPS and bind to the Task's repository identity.
-- Linear repositories receive a fresh access token lasting about 24 hours after the login is checked. The refresh grant stays on the laptop.
-- Failed preparation gives the Machine back immediately. Rentals still booting an hour after admission are also returned.
-- Fly's provider and stored rental records are removed, along with scope assignments pointing at those rentals. Removing the records does not destroy leftover Fly apps or end their IPv4 billing.
+- Git planning defaults to the shared ref `refs/loopflow/planning/shared/main` on `origin`. (#1639)
+- A takeover keeps the Task's branch and PR. Comments and crons stay with the person who owns them. (#1651)
+- `repo-operate` and `wave-operate` work only on your own existing Tasks. They no longer edit plans, file Tasks or reach into other people's work. (#1642)
+- Asana and Notion can be a repository's tracker as well as Linear, set in `.lf/config.yaml`. (#1607)
+- Briefs for new Tasks name any open PRs already rewriting the same files. (#1682)
+- The website, README and docs now lead with building software together and with what `lf` does for you. Reference detail has moved into the docs. (#1637, #1671)
+
+## Desktop shows the work you're doing
+
+Desktop used to treat opening a Task and arranging panes as the same act. Its views also re-rendered and re-read far more than they displayed.
+
+- **Dashboards and a working sidebar.** Saved Dashboards put Tasks side by side, and pane layouts and drafts survive relaunch. At every scope the sidebar lists only started Tasks of the selected Wave or Dashboard, and ⌘1–9 follow those rows. (#1580, #1660, #1669, #1703)
+- **Wave standup board.** A Wave opens as one board beside its conversation, showing what's waiting, in progress, shipping and landed. (#1705)
+- **Less churn.** Scrolling and hovering no longer re-render every row and tile. The Files view no longer re-reads itself from the journal trace it causes. Each Desktop part runs its own `--watch` read over open Tasks. (#1641, #1660, #1719)
+- **Scriptable from `lf desktop`.** Agents can arrange panes and read back the result, and exit status distinguishes a missing pane from an unreachable Desktop. `lf desktop` and `lf open` address the Desktop they run inside, Loopflow Dev included. (#1664, #1677)
+- **Checked against real data.** Every public Desktop read decodes output from a source-built `lf-world`, so a Rust wire change can't silently break a screen. (#1619, #1617, #1640)
+
+## A smaller, cheaper store
+
+On Jack's store (about 10 GB, 943k processes, 2.7M session events), `lf install` took minutes, idle relays burned CPU scanning Sessions nobody watched, and a single live reader cost about 48 s of CPU per minute. The store now keeps only the facts Loopflow reads back.
+
+- **Facts only.** The duplicate provider stream copy is gone. The store keeps one usage row per provider turn, and `events.jsonl` is no longer written. Conversations are read from provider transcripts, and `lf history` shows what a provider will remove next. (#1666, #1698, #1700, #1706)
+- **Fewer Process rows.** Hooks and Desktop polls no longer create Processes, and finished rows nothing references are deleted. Store retention is in `lf monitor prune`. (#1667, #1718, #1744)
+- **Faster opens and idle checks.** Each store's schema is read once per process instead of on each of the ~17 opens per launch. Sessions are indexed by execution owner. Idle relays and the Desktop feed stop rescanning. (#1650, #1690, #1692)
+- **`--watch` on ordinary reads.** `lf task list`, `lf task status`, `lf session list`, `lf wave show`, `lf ps` and more stream `{answers, unavailable, body}` lines and exit when their reader goes away. This replaces `lf monitor work`. (#1719)
+- **Lock contention has a name.** `lf.log` and `lf doctor` name the process and binary holding the write lock. The hourly prune waits for the lock instead of failing, and usage updates no longer scan `session_events` under it. (#1713, #1724, #1726)
+
+## Commands you can see and run
+
+`lf`'s root help listed about thirty unordered peer groups, and Graphs, Desktop and hooks drove it through hidden `__` commands.
+
+- Root help leads with Task, Wave, Session, Graph and Skill. Delivery, machine and account plumbing moved under `lf ops`. (#1708)
+- Hidden commands became ordinary, documented ones, so `lf help` shows what Graphs and Desktop run. (#1697)
+- Undesigned surface was removed, including the public `lf transport` group, the `--create-pr` alias and cron-only global flags. `lf skill customize` was added. (#1615)
+- `lf wave workflow`, `lf task workflow`, `lf graph route`, `lf monitor work`, `lf monitor active` and `lf disk` are gone. See Operational notes for their replacements. (#1719, #1733, #1744)
+
+## Sessions that behave in your terminal
+
+- `lf` keeps your screen, scrollback and the "Continue with: lf resume …" hint. Warnings and diagnostics-path banners go to logs, not the terminal. (#1635, #1691)
+- Inside tmux, `lf open` opens Work in tmux. A Session whose terminal closed reads as reconnectable, and `lf connect <Task-ID>` connects right away; it used to search provider history for about 26 s. (#1635, #1674)
+- `lf resume` continues the last conversation in a worktree no Task, Wave or repository owns. (#1665)
+- An unviewed Session stops its agent after a day (`session.end_detached_after`). (#1638)
+- Claude opens in lf-created worktrees without a folder-trust prompt. Steers and Task context keep arriving after `/clear`. Codex Sessions receive Loopflow's context hooks again. (#1648, #1731, #1734)
+- Sessions started under an older `lf` stay stoppable after an upgrade removes a hook they still call. (#1629, #1630)
+- A viewer whose execution owner stalls names the owner; it no longer dies with `EAGAIN`. Steps whose agent exited under heavy load now finish. (#1644, #1689)
+- Selected documents (`--docs`, config and skill `docs:`) reach the agent as full bodies, matching preview and capture. (#1752)
+
+## Cleanup that keeps your work
+
+Cleanup policy used to live in three places. Under some of those rules it could delete the only copy of committed work.
+
+- `scripts/disk-cleanup.sh install` runs an hourly cleanup skill from the main checkout. `~/.lf` rotates by age, after seven days, instead of chasing a 20 GB budget it could never meet. Idle ignored build output is reclaimed. (#1696, #1744)
+- Live caches like SwiftPM's are left intact, the uv cache lock no longer hangs cleanup, and staging directories from killed draft builds are removed. (#1628, #1633, #1727)
+- `lf wt prune` removes a checkout only when a merged or closed PR matches its exact local head. (#1753)
+- `lf sync` checkpoints ordinary edits and leaves `.lf/tmp/` as it found it. That fixes automatic sync stopping partway on Apple Git 2.50.1. (#1754)
 
 ## Operational notes
 
-- **Upgrade the shared store's readers together.** Both `drop_steer_adapter_thread` and `forget_fly_rentals` raise the minimum reader to 0.14.19. Update the CLI, Desktop helper and cron installations that open that store. Installing a new binary does not replace already-running processes: inspect them with `lf monitor ps`. Rollover leaves Graph runners running; compatible runners use the selected install for later steps, Desktop-bundled runners need a Desktop update, and runners below the store floor fail at their next step and need rerunning. (#1731, #1743, #1729)
-- **Update Machine-move scripts.** Replace `lf machine use --task` with `lf task move <task> --machine <machine>`. Bare `lf machine use` now selects the worktree's Wave, otherwise the repository. Moves require a successful branch push. (#1720)
-- **Reinstall release schedules on the cron host.** From main, run `scripts/bootstrap-cron-host.sh infrastructure`. The final bootstrap writes short crontab lines calling `.lf/cron/<wave>.<job>.sh` wrappers, verifies both schedules, then removes old launchd jobs. Wrappers pin the installed lf gate and avoid cron's 999-byte command limit. An unplaced Wave runs locally; pin its Machine before bootstrapping on multiple hosts to avoid duplicate schedules. Rerun bootstrap after path changes, and inspect `.lf/logs/release-run.log` after the next scheduled run. The supplied evidence does not establish a successful live cron cutover. (#1711, #1732, #1738)
-- **Clean up remaining Fly apps explicitly.** Use `fly apps destroy` for apps left behind to stop their IPv4 charges. Automatic rental return after Task completion and the grace period was not verified live; the recorded AWS run was returned manually. (#1743)
-- **Uncertain tracker writes may need a retry.** If Linear history is unavailable or truncated, or the provider is Asana or Notion, an uncertain update stays pending. `lf task complete` or `lf task sync --retry-updates` explicitly retries it. (#1742)
-- **Hotfixes can use a plain release build.** A build with no migration drafts and an exact match to the store frontier can promote without claiming published-release authority. Version output, receipts and doctor identify hotfix/development provenance. Only a published release may change or pass the frontier; promotion does not establish how close the source is to its release tag. (#1730)
-- **Read contention reports with their limits.** Slow holds are logged only when they end; a writer that never commits or rolls back remains unnamed. Time before the first statement and WAL writes at commit are not measured. Older log lines group as unidentified binaries. (#1724)
-- **Desktop has remaining polish work.** The standup-board PR records a case where the board does not fill its part, and canceled planning Tasks may remain in Backlog until marked abandoned locally. (#1705)
+- **Store floor.** Releases in this cycle raised the store's minimum reader at 0.14.12, 0.14.15, 0.14.16, 0.14.17, 0.14.19 and 0.14.20. Coming from anything before 0.14.20, upgrade every CLI, Desktop helper and cron install that shares the store at the same time. v0.15.0 doesn't raise the floor again.
+- **Find stale processes.** Running Sessions and Graph runners keep the binary they started with. `lf monitor ps` shows which ones are behind, and idle Sessions can move to the new install. (#1729)
+- **Update scripts.** `lf wave workflow` → `lf wave graph`. `lf task workflow` and `lf graph route` → `lf task run`, `--from` and `lf task status`. `lf monitor work` → `--watch` on each read. `lf monitor active` → `lf session list --watch` with `lf ps --watch`. `lf disk` → `scripts/disk-cleanup.sh` and `lf monitor prune`. Plumbing commands now live under `lf ops`. (#1708, #1719, #1733, #1744)
+- **Repository `workflow:`** is still accepted as an alias for `graph:`. LOO-637 tracks its removal. (#1733)
+- **Old records still read.** Task events recorded as `flow_finished` and Graph records that use `human` both still load after the renames. Cron jobs installed by 0.14.14 with `--flow` keep running. (#1655, #1668, #1722)
+- **Release and cron host.** Rerun `scripts/bootstrap-cron-host.sh`. It retires leftover launchd agents, accepts a Wave with no Machine default, and keeps crontab commands under cron's 999-byte limit. (#1711, #1732, #1738)
+- **Release run.** `lf release run` builds fixes merged after an unbuilt release PR, and repair cuts no longer fail promotion over an existing `BREAKING.md`. A release stops when someone takes its PR out of the queue. Hotfixes promote from a plain release build and are labeled as hotfixes; the `hotfix` skill describes how. (#1661, #1662, #1668, #1712, #1730)
+- **Install cleanup.** Run `scripts/disk-cleanup.sh install` and check the cron entry. Checkouts lost to the old pruning rules are not recovered, and checkouts with no matching PR now need explicit disposal. (#1744, #1753)
+- **macOS regressions surface after merge.** A PR the classifier skipped can break macOS on `main`. The revert PR the bisect opens is unarmed, so someone has to merge it. (#1749)
 
 ## Small changes
 
-- cmux workspaces use `<Task title> · <identifier>` and follow Task title changes, while tabs follow Session names and standing. Hand-set workspace names are preserved unless they resemble an lf-generated name. Taskless Sessions stop renaming workspaces. (#1716)
-- Desktop removes the workspace's extra outer border and squares both top corners while retaining pane outlines and rounded lower corners. (#1728)
-- `lf ops people` lists repository Task owners with GitHub identities resolved from commit authorship. (#1705)
-- Repository skills can declare `docs:` frontmatter to include documents as `--docs` does. Builtin gate and implement guidance calls for affected suites and focused tests, one build at a time; Loopflow's test runner adds `--rust-filter`, runs Clippy after tests, and moves the shared command list to `scripts/testing.md`. (#1745)
-- Graph step discovery tracks the Graph's own children, avoiding missed steps when unrelated finished Process rows are deleted. (#1746)
+- Rust tests no longer write test logins into your real Codex or Claude home. (#1693)
+- Each provider has one decoder and one writer for what it records. (#1702)
+- Agent ancestry that was never recorded is repaired, and `lf self doctor` passes `lineage` again. (#1747)
+- cmux workspaces are named `<Task title> · …` and keep names you set by hand. (#1716)
+- Gate and implement run only the tests a change reaches, one build at a time. PRs fail when their tests run too long and name the slow ones. Swift tests fail on a leaked continuation. (#1647, #1683, #1745)
+- `lf-world` Swift tests were removed until world builds are fast (LOO-564). The Swift 6.2.3 release-optimizer crash is avoided. (#1645, #1699)
+- `lf wt prune --branches` keeps its protections and summary in one place. `lf sync` borrows its plan instead of cloning it. (#1626, #1676)
+- `TESTING.md` says to reproduce races by delaying or repeating tests, never by loading the CPU. (#1686)
+- The Desktop workspace drops its outer border and squares its top corners. (#1728)
+- ruff 0.17.1. (#1657)

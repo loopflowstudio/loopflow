@@ -2,15 +2,22 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context};
 
+use serde::{Deserialize, Serialize};
+
+use super::waves::Shape;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
-use crate::ops::human_session::{OpenMode, SessionState};
+use crate::lf::SessionListArgs;
+use crate::ops::human_session::{OpenMode, SessionRecord, SessionState};
 use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
 pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     if let SessionCommand::Serve { terminal, argv } = command {
         return crate::transport::serve(argv, *terminal);
+    }
+    if let SessionCommand::List(args) = command {
+        return list_sessions(args, Shape::Tasks);
     }
     let runtime = tokio::runtime::Runtime::new()?;
     if matches!(
@@ -182,43 +189,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::List {
-            json,
-            all,
-            interactive,
-            history,
-            available,
-            limit,
-            offset,
-            page,
-            after,
-            task,
-            orphan,
-            search,
-        } => {
-            let store = open_shared_store().await?;
-            list(
-                &store,
-                *json,
-                &crate::session::SessionFilter {
-                    available: *available,
-                    repo: if *all {
-                        None
-                    } else {
-                        crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
-                    },
-                    task: task.clone(),
-                    orphan: *orphan,
-                    search: search.clone(),
-                    interactive: interactive.interactive(),
-                    history: *history,
-                    limit: *limit,
-                    offset: *offset,
-                    after: page.then(|| after.clone().unwrap_or_default()),
-                },
-            )
-            .await
-        }
+        SessionCommand::List(_) => unreachable!("lists return before any runtime"),
         SessionCommand::Connect {
             all: true,
             connection,
@@ -339,42 +310,208 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
     }
 }
 
+/// `lf session list --json`: one Session and the Work it belongs to. Wire
+/// type; no defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionRow {
+    #[serde(flatten)]
+    pub session: SessionFacts,
+    pub task: Option<crate::durable::TaskId>,
+    /// Wave name, as `--wave` takes it.
+    pub wave: Option<String>,
+}
+
+/// One Session's own facts; `lf task status` lists its Task's Sessions with them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionFacts {
+    pub id: crate::id::LfSessionId,
+    pub title: String,
+    /// The provider its current input launched with; `null` before a first launch.
+    pub provider: Option<String>,
+    /// A Session a person works in; `false` for a headless Run.
+    pub interactive: bool,
+    /// What its AgentProcess shows: active, detached, closed or unknown.
+    pub state: SessionState,
+    /// Ready for a person's input.
+    pub available: bool,
+    pub cwd: String,
+    /// The provider's current AgentProcess, as `lf ps` lists it.
+    pub agent_process_id: Option<crate::id::LfProcessId>,
+}
+
+impl SessionRow {
+    fn of(session: SessionRecord, waves: &std::collections::HashMap<String, String>) -> Self {
+        Self {
+            task: match &session.work {
+                Some(crate::durable::WorkRef::Task(task)) => Some(task.clone()),
+                _ => None,
+            },
+            wave: session
+                .wave_id
+                .as_ref()
+                .and_then(|wave| waves.get(&wave.to_string()).cloned()),
+            session: SessionFacts::of(session),
+        }
+    }
+}
+
+impl SessionFacts {
+    pub(crate) fn of(session: SessionRecord) -> Self {
+        Self {
+            id: session.id,
+            title: session.title,
+            provider: session.provider,
+            interactive: session.interactive,
+            state: session.state,
+            available: session.availability.is_some(),
+            cwd: session.cwd,
+            agent_process_id: session.agent_process_id,
+        }
+    }
+}
+
+/// `lf session list` (`Shape::Tasks`) and `lf desktop sessions` (`Shape::Desktop`).
+pub fn list_sessions(args: &SessionListArgs, shape: Shape) -> anyhow::Result<()> {
+    let filter = list_filter(args)?;
+    if args.watch {
+        return watch_list(filter, shape);
+    }
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_shared_store().await?;
+        list(&store, args.json || shape == Shape::Desktop, &filter, shape).await
+    })
+}
+
+/// `lf session list`'s selection: this repository's unless `--all`.
+fn list_filter(args: &SessionListArgs) -> anyhow::Result<crate::session::SessionFilter> {
+    Ok(crate::session::SessionFilter {
+        available: args.available,
+        repo: if args.all {
+            None
+        } else {
+            crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
+        },
+        task: args.task.clone(),
+        orphan: args.orphan,
+        search: args.search.clone(),
+        interactive: args.interactive.interactive(),
+        history: args.history,
+        limit: args.limit,
+        offset: args.offset,
+        after: args.page.then(|| args.after.clone().unwrap_or_default()),
+    })
+}
+
+/// What a `lf session list --watch` request can select instead.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SessionWatchArgs {
+    /// Canonical repository; `null` reads every repository.
+    repo: Option<String>,
+    task: Option<String>,
+    search: Option<String>,
+    /// `null` selects interactive and headless Sessions.
+    interactive: Option<bool>,
+}
+
+fn watch_list(filter: crate::session::SessionFilter, shape: Shape) -> anyhow::Result<()> {
+    let args = SessionWatchArgs {
+        repo: filter.repo.clone(),
+        task: filter.task.clone(),
+        search: filter.search.clone(),
+        interactive: filter.interactive,
+    };
+    super::watch::run(
+        args,
+        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
+        |store, args| {
+            let filter = crate::session::SessionFilter {
+                repo: args.repo,
+                task: args.task,
+                search: args.search,
+                interactive: args.interactive,
+                ..filter.clone()
+            };
+            async move {
+                match store {
+                    Some(store) => read_list(&store, &filter, shape).await,
+                    None => Ok(serde_json::Value::Array(Vec::new())),
+                }
+            }
+        },
+    )
+}
+
+/// What `lf session list --json` prints: a page with `--page`, else every row.
+async fn read_list(
+    store: &Arc<Store>,
+    filter: &crate::session::SessionFilter,
+    shape: Shape,
+) -> anyhow::Result<serde_json::Value> {
+    let waves = match shape {
+        Shape::Desktop => None,
+        Shape::Tasks => Some(
+            store
+                .list_waves(None)
+                .await?
+                .iter()
+                .map(|wave| (wave.id().to_string(), wave.name().to_owned()))
+                .collect::<std::collections::HashMap<_, _>>(),
+        ),
+    };
+    let rows = |sessions: Vec<SessionRecord>| -> anyhow::Result<Vec<serde_json::Value>> {
+        sessions
+            .into_iter()
+            .map(|session| match &waves {
+                None => serde_json::to_value(session),
+                Some(waves) => serde_json::to_value(SessionRow::of(session, waves)),
+            })
+            .collect::<Result<_, _>>()
+            .map_err(Into::into)
+    };
+    if filter.after.is_none() {
+        return Ok(serde_json::to_value(rows(
+            crate::ops::human_session::list(store, filter).await?,
+        )?)?);
+    }
+    anyhow::ensure!(
+        filter.limit > 0,
+        "paged Session inventory requires a positive limit"
+    );
+    let mut selection = filter.clone();
+    selection.limit = filter
+        .limit
+        .checked_add(1)
+        .context("Session page limit is too large")?;
+    let mut entries = crate::ops::human_session::list(store, &selection).await?;
+    let next = if entries.len() > filter.limit {
+        entries.pop();
+        entries.last().map(|session| session.id.to_string())
+    } else {
+        None
+    };
+    Ok(serde_json::to_value(
+        crate::ops::human_session::SessionPage {
+            entries: rows(entries)?,
+            next,
+        },
+    )?)
+}
+
 async fn list(
     store: &Arc<Store>,
     json: bool,
     filter: &crate::session::SessionFilter,
+    shape: Shape,
 ) -> anyhow::Result<()> {
-    if filter.after.is_some() {
-        anyhow::ensure!(
-            filter.limit > 0,
-            "paged Session inventory requires a positive limit"
-        );
-        let mut selection = filter.clone();
-        selection.limit = filter
-            .limit
-            .checked_add(1)
-            .context("Session page limit is too large")?;
-        let mut entries = crate::ops::human_session::list(store, &selection).await?;
-        let next = if entries.len() > filter.limit {
-            entries.pop();
-            entries.last().map(|session| session.id.to_string())
-        } else {
-            None
-        };
+    if json || filter.after.is_some() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&crate::ops::human_session::SessionPage {
-                entries,
-                next
-            })?
+            serde_json::to_string_pretty(&read_list(store, filter, shape).await?)?
         );
         return Ok(());
     }
     let sessions = crate::ops::human_session::list(store, filter).await?;
-    if json {
-        println!("{}", serde_json::to_string_pretty(&sessions)?);
-        return Ok(());
-    }
     // Sessions copied from given-back Machines are history, never available here.
     let copied = if filter.available || filter.orphan {
         Vec::new()

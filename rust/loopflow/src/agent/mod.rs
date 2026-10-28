@@ -307,6 +307,11 @@ fn resolve_account_route_blocking(
             provider,
             launch.resume_token.clone(),
             account_id,
+            launch
+                .env
+                .get(crate::work::wave::context::WAVE_ID_ENV)
+                .and_then(|id| crate::id::WaveId::parse(id).ok())
+                .or_else(crate::work::wave::context::ambient_wave_id),
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),

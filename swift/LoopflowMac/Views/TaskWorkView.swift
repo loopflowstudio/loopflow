@@ -759,7 +759,7 @@ struct GraphProcessLog: View {
     }
 }
 
-/// Diagnostic history is observed only while explicitly expanded.
+/// The shown Task's recorded work, from its status watch, behind a disclosure.
 struct TaskDiagnosticsView: View {
     let model: WorkModel
     let task: RoadmapTask
@@ -769,8 +769,6 @@ struct TaskDiagnosticsView: View {
         DisclosureGroup("Debug", isExpanded: $expanded) {
             if expanded { TaskWorkView(model: model, task: task) }
         }
-        .onChange(of: expanded) { _, visible in model.observeTaskDiagnostics(task, visible: visible) }
-        .onDisappear { model.observeTaskDiagnostics(task, visible: false) }
     }
 }
 
@@ -785,7 +783,7 @@ struct TaskWorkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
             WorkSectionHeading(title: "Work") {
-                Button("Refresh") { model.observeTaskDiagnostics(task, visible: true) }
+                Button("Refresh") { model.rescanWork() }
             }
             if let work = model.taskDiagnostics[task.id].value {
                 ForEach(work.sessions) { session in
@@ -802,7 +800,7 @@ struct TaskWorkView: View {
             }
             if let error = model.taskDiagnostics[task.id].errorMessage {
                 Text("Work could not be read: \(error)")
-                Button("Retry") { model.observeTaskDiagnostics(task, visible: true) }
+                Button("Retry") { model.rescanWork() }
             }
         }
         .font(Typography.body(12))

@@ -570,11 +570,11 @@ read-only, and backing delivery trouble stays visible above the transcript.
 Commands, tools, file edits, and loop bookkeeping stay in the journal;
 decisions, deliveries, and actionable failures remain visible. The detail pane
 reads the current chapter plan, Tasks, decisions, PR delivery, and Task conditions
-from `lf wave status <wave> --json`.
+from `lf desktop wave <wave> --json`.
 
 Open a Task from the roadmap in its repository window, start its legal Graph,
 or open its PR. **Worktree** opens the recorded checkout in Warp.
-Rows show the shared condition and reason from `lf wave show`; unknown means
+Rows show the shared condition and reason from `lf desktop plan`; unknown means
 the required evidence could not be read.
 
 Open **Go → Telemetry** for token spend, codebase growth, a token-weighted
@@ -712,44 +712,42 @@ xcodebuild -quiet \
 The repository-wide gate is `uv run python scripts/test.py --all`.
 
 ```bash
-lf monitor work --watch --json    # what a window shows, as it changes
+lf desktop plan --all --json --watch       # the plan: Waves, Projects, open Tasks as Desktop shows them
+lf desktop task LOO-1 --json --watch       # the shown Task: work, Graphs, comments
+lf desktop sessions --json --watch         # the repository's Sessions as Desktop lists them
+lf planning status --json --watch          # sync receipts; keeps planning exchanged
 ```
 
-Each window keeps one such reader open through `RegistryQuery.watchWork()`.
-Its frames carry planning, the repository's Sessions, the shown Task's work
-with its Workflow and every Graph process, the shown Wave's detail and activity.
-Mechanical Process history is a separate `task_history` subscription, enabled
-only while the Task's Debug disclosure is open. Closing it stops those queries;
-retained history and cached readings are not deleted. The ordinary header never
-waits for the diagnostic history scan.
-After Task actions and Workflow changes, the window waits for a checkpoint:
-the reader delivers changed subscriptions before confirming the committed state.
-Unchanged subscriptions do not query again. A part arrives again only when a commit
-changed what it shows, so a Task created by `lf`, a worker or another window
-appears without a refresh. A file written or a commit made in a Task checkout
-shows within a few seconds, and token totals within about ten. A Session
-turns **Waiting** after two quiet minutes on the reader's clock, with no write.
-Nothing in the window reads on a timer. Stored Workflow definitions follow the
-stream’s planning revision, even when only a heartbeat changes. File definitions
-are reread when the app becomes active or after customization.
-Selected Task and Wave frames are read first and delivered as soon as ready,
-without waiting for portfolio projections. Confirmation still follows all affected
-frames. Database joins and their revisions share one read snapshot; Git, file and process
-observations remain separate from that transactional guarantee. Each request
-carries an id. A checkpoint follows its changed frames even when the command
-made no visible change. Session commands can replay the reader's cached projection
-after showing their authoritative returned record, without another query.
-Explicit Retry and recovery after sleep still force fresh readings. If the reader ends, the last
-reading stays on screen marked unavailable until a new reader answers.
+A window runs `--watch` reads, one process per part, through
+`RegistryQuery.watchWork()`: the plan, the repository's Dashboard plans
+(`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
+activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
+internally consistent; panes do not share one snapshot. Changing what the window
+shows restarts only the watches whose read changed; the rest answer from their last frame without reading again.
+
+A part arrives again only when a commit changed what it shows, so a Task created
+by `lf`, a worker or another window appears without a refresh. A file written or
+a commit made in a Task checkout shows within a few seconds. Sessions and the
+shown Task are also read on a two-second clock, which is how a quiet Session
+turns **Waiting**. Stored Workflow definitions follow the planning revision every
+frame carries. File definitions are reread when the app becomes active or after
+customization.
+
+After Task actions and Workflow changes, the window waits for a checkpoint: each
+running watch answers the request with a reading begun after the command, and
+the checkpoint follows once all have, even when nothing visibly changed. Session
+commands confirm only the Sessions watch. Explicit Retry and recovery after sleep
+ask every watch to read again. If a watch ends, the window reopens all of them;
+the last readings stay on screen marked unavailable until new ones arrive. Every
+frame names its Loopflow home.
 
 Task actions distinguish the running command from confirmation of its updated
-reading. Confirmation expires after ten seconds even while heartbeats arrive;
-an accepted command is never automatically repeated. Refresh readings requests
-fresh observation without repeating the Task action.
+reading. Confirmation expires after ten seconds; an accepted command is never
+automatically repeated.
 
-The reader's pipes drain off the main actor. Ten seconds without a frame ends
-the reading; cancellation closes stdin, then terminates and reaps only the
-owned reader if necessary.
+Each watch's pipes drain off the main actor. A watch speaks only on change, so
+silence is not a stall; cancellation closes stdin, then terminates and reaps only
+the owned process if necessary.
 
 ## Headless checks
 

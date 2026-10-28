@@ -36,10 +36,10 @@ struct SessionChromeProofTests {
         let surface = try #require(terminal.surface)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "wave" where args.dropFirst().first == "show": return #"{"generated_at":1,"waves":[]}"#
+            case "desktop" where args.dropFirst().first == "plan": return #"{"generated_at":1,"waves":[]}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session": return #"{"entries":[],"next":null}"#
-            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":[],"next":null}"#
+            case "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Keybinds must not launch or mutate: \(args)")
             }
         }
@@ -121,8 +121,8 @@ struct SessionChromeProofTests {
         let graphs = try String(contentsOf: repoRoot.appendingPathComponent("tests/fixtures/dto/graph_catalog.json"), encoding: .utf8)
         let inventory = PaletteSessionInventory(sessions)
         let query = RegistryQuery { args, _ in
-            if args.prefix(2) == ["wave", "show"] { return roadmap }
-            if args.first == "session" { return await inventory.read() }
+            if args.prefix(2) == ["desktop", "plan"] { return roadmap }
+            if args.prefix(2) == ["desktop", "sessions"] { return await inventory.read() }
             if args.first == "graph" { return graphs }
             if args.first == "wave" { return "[]" }
             throw RegistryQueryError("No launch or mutation authorized by palette inspection")

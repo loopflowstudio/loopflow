@@ -1562,6 +1562,366 @@ fn cli_sync_to_explicit_local_branch_needs_no_remote_access() {
 }
 
 #[test]
+fn sync_preserves_work_with_ignored_telemetry() {
+    assert_sync_preserves_work_with_telemetry(true);
+}
+
+#[test]
+fn sync_preserves_work_with_unignored_telemetry() {
+    assert_sync_preserves_work_with_telemetry(false);
+}
+
+fn create_telemetry_sync_repo(ignored: bool) -> TestRepo {
+    let repo = TestRepo::new();
+    repo.create_file(
+        ".gitignore",
+        if ignored {
+            "/.lf/tmp/\n/ignored.txt\n"
+        } else {
+            "/ignored.txt\n"
+        },
+    );
+    for path in ["modified.txt", "deleted.txt", "renamed.txt"] {
+        repo.create_file(path, "original\n");
+    }
+    repo.stage_all();
+    repo.commit("base files");
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature\n");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.checkout("main");
+    repo.create_file("upstream.txt", "upstream\n");
+    repo.stage_all();
+    repo.commit("upstream work");
+    repo.push();
+    repo.checkout("feature");
+    repo
+}
+
+fn run_sync_cli(repo: &TestRepo) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["sync", "origin/main"])
+        .current_dir(repo.path())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap()
+}
+
+fn assert_sync_succeeds(repo: &TestRepo) {
+    let output = run_sync_cli(repo);
+    assert!(
+        output.status.success(),
+        "lf sync failed in {}: {}\n{}",
+        repo.path().display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn assert_sync_preserves_work_with_telemetry(ignored: bool) {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_telemetry_sync_repo(ignored);
+    let original_head = repo.head_sha();
+    repo.create_file("modified.txt", "staged edit\n");
+    repo.create_file("staged.txt", "staged addition\n");
+    git(repo.path(), &["mv", "renamed.txt", "renamed file.txt"]);
+    git(repo.path(), &["add", "modified.txt", "staged.txt"]);
+    repo.create_file("modified.txt", "staged edit\nunstaged edit\n");
+    std::fs::remove_file(repo.path().join("deleted.txt")).unwrap();
+    let additions = [
+        "space name.txt",
+        "日本語.txt",
+        "line\nbreak.txt",
+        "-leading.txt",
+        ":(exclude)literal.txt",
+        ".lf/tmp-neighbor/user.txt",
+        "nested/.lf/tmp/user.txt",
+    ];
+    for path in additions {
+        repo.create_file(path, "new work\n");
+    }
+    let telemetry = [".lf/tmp/metrics/ops.jsonl", ".lf/tmp/.hidden/nested.jsonl"];
+    for path in telemetry {
+        repo.create_file(path, "{\"existing\":true}\n");
+    }
+    repo.create_file("ignored.txt", "ignored bytes\n");
+
+    assert_sync_succeeds(&repo);
+    let checkpoint = git(repo.path(), &["rev-parse", "HEAD^1"]);
+    assert_eq!(
+        git(repo.path(), &["rev-parse", &format!("{checkpoint}^")]),
+        original_head
+    );
+    git(
+        repo.path(),
+        &["merge-base", "--is-ancestor", "origin/main", "HEAD"],
+    );
+    for (path, expected) in [
+        ("modified.txt", "staged edit\nunstaged edit"),
+        ("staged.txt", "staged addition"),
+        ("renamed file.txt", "original"),
+    ]
+    .into_iter()
+    .chain(additions.map(|path| (path, "new work")))
+    {
+        for revision in [&checkpoint, "HEAD"] {
+            assert_eq!(
+                git(repo.path(), &["show", &format!("{revision}:{path}")]),
+                expected
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join(path)).unwrap(),
+            format!("{expected}\n")
+        );
+    }
+    for revision in [&checkpoint, "HEAD"] {
+        assert!(git(
+            repo.path(),
+            &[
+                "ls-tree",
+                "-r",
+                "--name-only",
+                revision,
+                "--",
+                ".lf/tmp",
+                "ignored.txt",
+                "deleted.txt",
+                "renamed.txt",
+            ],
+        )
+        .is_empty());
+    }
+    assert_eq!(git(repo.path(), &["show", "HEAD:upstream.txt"]), "upstream");
+    let synced_head = repo.head_sha();
+    assert_sync_succeeds(&repo);
+    assert_eq!(repo.head_sha(), synced_head);
+    for path in telemetry {
+        // Sync appends to ops.jsonl; preserve its existing bytes as well.
+        assert!(std::fs::read_to_string(repo.path().join(path))
+            .unwrap()
+            .starts_with("{\"existing\":true}\n"));
+    }
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("ignored.txt")).unwrap(),
+        "ignored bytes\n"
+    );
+    assert!(git(repo.path(), &["diff", "HEAD"]).is_empty());
+    assert!(git(repo.path(), &["stash", "list"]).is_empty());
+}
+
+#[test]
+fn sync_preserves_work_with_whitespace_only_filename() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_telemetry_sync_repo(true);
+    repo.create_file("   ", "ordinary work\n");
+
+    assert_sync_succeeds(&repo);
+    for revision in ["HEAD^1", "HEAD"] {
+        assert_eq!(
+            git(repo.path(), &["show", &format!("{revision}:   ")]),
+            "ordinary work"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("   ")).unwrap(),
+        "ordinary work\n"
+    );
+}
+
+#[test]
+fn sync_preserves_work_with_prestaged_telemetry() {
+    let _env = EnvGuard::new(&[]);
+    for ignored in [false, true] {
+        for ordinary_edits in [false, true] {
+            let repo = create_telemetry_sync_repo(ignored);
+            let modified = ".lf/tmp/modified.jsonl";
+            let deleted = ".lf/tmp/deleted.jsonl";
+            for path in [modified, deleted] {
+                repo.create_file(path, "committed telemetry\n");
+            }
+            git(repo.path(), &["add", "-f", "--", modified, deleted]);
+            repo.commit("existing telemetry baseline");
+            let original_head = repo.head_sha();
+            let telemetry_tree = git(repo.path(), &["rev-parse", "HEAD:.lf/tmp"]);
+            let telemetry = ".lf/tmp/.hidden/staged\ntelemetry.jsonl";
+            for path in [telemetry, modified] {
+                repo.create_file(path, "staged telemetry\n");
+            }
+            git(repo.path(), &["rm", "--", deleted]);
+            git(repo.path(), &["add", "-f", "--", telemetry, modified]);
+            let staged_telemetry = git(repo.path(), &["diff", "--cached", "--binary"]);
+            for path in [telemetry, modified] {
+                repo.create_file(path, "staged telemetry\nworking telemetry\n");
+            }
+            let working_telemetry = git(repo.path(), &["diff", "--binary"]);
+            if ordinary_edits {
+                repo.create_file("modified.txt", "staged work\n");
+                repo.create_file("ignored.txt", "explicitly staged work\n");
+                git(repo.path(), &["add", "-f", "modified.txt", "ignored.txt"]);
+                repo.create_file("modified.txt", "staged work\nworking work\n");
+                repo.create_file("new.txt", "new work\n");
+            }
+
+            assert_sync_succeeds(&repo);
+            let parent = git(repo.path(), &["rev-parse", "HEAD^1"]);
+            if ordinary_edits {
+                assert_eq!(
+                    git(repo.path(), &["rev-parse", &format!("{parent}^")]),
+                    original_head
+                );
+                for revision in [&parent, "HEAD"] {
+                    for (path, content) in [
+                        ("modified.txt", "staged work\nworking work"),
+                        ("ignored.txt", "explicitly staged work"),
+                        ("new.txt", "new work"),
+                    ] {
+                        assert_eq!(
+                            git(repo.path(), &["show", &format!("{revision}:{path}")]),
+                            content
+                        );
+                    }
+                }
+            } else {
+                assert_eq!(parent, original_head);
+            }
+            for revision in [&parent, "HEAD"] {
+                assert_eq!(
+                    git(repo.path(), &["rev-parse", &format!("{revision}:.lf/tmp")]),
+                    telemetry_tree
+                );
+            }
+            assert_eq!(git(repo.path(), &["show", "HEAD:upstream.txt"]), "upstream");
+            let synced_head = repo.head_sha();
+            assert_sync_succeeds(&repo);
+            assert_eq!(repo.head_sha(), synced_head);
+            assert_eq!(
+                git(repo.path(), &["diff", "--cached", "--binary"]),
+                staged_telemetry
+            );
+            assert_eq!(git(repo.path(), &["diff", "--binary"]), working_telemetry);
+            assert!(!repo.path().join(deleted).exists());
+            assert!(git(repo.path(), &["stash", "list"]).is_empty());
+        }
+    }
+}
+
+#[test]
+fn sync_preserves_work_with_missing_or_only_telemetry_without_checkpoint() {
+    let _env = EnvGuard::new(&[]);
+    for ignored in [false, true] {
+        for present in [false, true] {
+            let repo = create_telemetry_sync_repo(ignored);
+            let original_head = repo.head_sha();
+            if present {
+                repo.create_file(".lf/tmp/local.jsonl", "local telemetry\n");
+            }
+            assert_sync_succeeds(&repo);
+            assert_eq!(git(repo.path(), &["rev-parse", "HEAD^1"]), original_head);
+            assert!(git(repo.path(), &["ls-tree", "-r", "HEAD", "--", ".lf/tmp"]).is_empty());
+            assert_eq!(git(repo.path(), &["show", "HEAD:upstream.txt"]), "upstream");
+            if present {
+                assert_eq!(
+                    std::fs::read_to_string(repo.path().join(".lf/tmp/local.jsonl")).unwrap(),
+                    "local telemetry\n"
+                );
+            }
+            assert!(git(repo.path(), &["stash", "list"]).is_empty());
+        }
+    }
+}
+
+#[test]
+fn sync_preserves_work_with_conflicting_telemetry_in_recovery_stash() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    let telemetry = ".lf/tmp/local.jsonl";
+    repo.create_file(".gitignore", "/.lf/tmp/\n");
+    repo.create_file(telemetry, "baseline\n");
+    git(repo.path(), &["add", "-f", ".gitignore", telemetry]);
+    repo.commit("tracked telemetry baseline");
+    repo.create_branch("feature");
+    repo.create_file("feature.txt", "feature\n");
+    repo.stage_all();
+    repo.commit("feature work");
+    repo.checkout("main");
+    repo.create_file(telemetry, "upstream\n");
+    repo.stage_all();
+    repo.commit("upstream telemetry");
+    repo.push();
+    repo.checkout("feature");
+    repo.create_file(telemetry, "staged telemetry\n");
+    git(repo.path(), &["add", "-f", telemetry]);
+    repo.create_file(telemetry, "working telemetry\n");
+    repo.create_file("ordinary.txt", "ordinary work\n");
+
+    let output = run_sync_cli(&repo);
+    assert!(!output.status.success());
+    let stash = git(repo.path(), &["rev-parse", "refs/stash"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(&format!("git stash apply --index {stash}")),
+        "{stderr}"
+    );
+    for (revision, content) in [
+        ("HEAD^1", "baseline"),
+        ("HEAD", "upstream"),
+        ("refs/stash^2", "staged telemetry"),
+        ("refs/stash", "working telemetry"),
+    ] {
+        assert_eq!(
+            git(repo.path(), &["show", &format!("{revision}:{telemetry}")]),
+            content
+        );
+    }
+    assert_eq!(
+        git(repo.path(), &["show", "HEAD:ordinary.txt"]),
+        "ordinary work"
+    );
+    assert!(!repo.path().join(".lf/tmp/metrics/ops.jsonl").exists());
+}
+
+#[test]
+fn sync_preserves_work_with_locked_index_and_reports_failure() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_telemetry_sync_repo(true);
+    repo.create_file("modified.txt", "staged\n");
+    git(repo.path(), &["add", "modified.txt"]);
+    repo.create_file("modified.txt", "staged\nunstaged\n");
+    repo.create_file("untracked.txt", "new work\n");
+    repo.create_file(".lf/tmp/local.jsonl", "local telemetry\n");
+    let head = repo.head_sha();
+    let index = std::fs::read(repo.path().join(".git/index")).unwrap();
+    let status = git(repo.path(), &["status", "--porcelain"]);
+    repo.create_file(".git/index.lock", "lock owner\n");
+
+    let output = run_sync_cli(&repo);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("index.lock"), "{stderr}");
+    assert_eq!(repo.head_sha(), head);
+    assert_eq!(
+        std::fs::read(repo.path().join(".git/index")).unwrap(),
+        index
+    );
+    assert_eq!(git(repo.path(), &["status", "--porcelain"]), status);
+    for (path, expected) in [
+        ("modified.txt", "staged\nunstaged\n"),
+        ("untracked.txt", "new work\n"),
+        (".lf/tmp/local.jsonl", "local telemetry\n"),
+        (".git/index.lock", "lock owner\n"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join(path)).unwrap(),
+            expected
+        );
+    }
+    assert!(!repo.path().join(".lf/tmp/metrics/ops.jsonl").exists());
+    assert!(git(repo.path(), &["stash", "list"]).is_empty());
+}
+
+#[test]
 fn ordinary_scratch_changes_are_authored_work() {
     let _env = EnvGuard::new(&[]);
     let repo = TestRepo::new();

@@ -356,7 +356,6 @@ fn plan_in(
         pinned: saved.is_some_and(|saved| saved.pinned),
         dashboard_id: saved.map(|saved| saved.id.clone()),
         repository: repository.to_string(),
-        observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
         selection,
         saved_revision: saved.map(|saved| saved.revision),
         resolution,

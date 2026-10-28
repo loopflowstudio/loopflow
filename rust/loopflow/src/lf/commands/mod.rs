@@ -16,7 +16,6 @@ pub mod install;
 pub mod list;
 pub mod machine;
 mod machine_credentials;
-pub mod machine_use;
 pub mod monitor;
 pub mod open;
 pub mod ops;
@@ -30,18 +29,19 @@ pub mod run;
 pub mod session;
 pub mod session_history;
 pub mod session_move;
-mod session_watch;
+pub mod setting;
 pub mod ship;
 pub mod ssh;
+pub mod task_row;
 pub mod tokens;
 pub mod top;
 pub mod usage;
 pub mod util;
+pub mod watch;
 pub mod wave_rename;
 pub mod waves;
 pub(crate) mod work_catalog;
 pub mod work_route;
-pub mod work_watch;
 
 /// One drill over the Wave → Project → Task Work hierarchy.
 #[derive(Debug, Clone, Copy, Default)]

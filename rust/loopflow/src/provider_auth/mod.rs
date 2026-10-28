@@ -2941,7 +2941,7 @@ fn extract_codex_token(home_dir: &Path) -> Option<ProviderToken> {
     extract_codex_token_from_home(&home_dir.join(".codex"))
 }
 
-fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
+pub(crate) fn extract_codex_token_from_home(codex_home: &Path) -> Option<ProviderToken> {
     let auth_path = codex_home.join("auth.json");
     let content = fs::read_to_string(auth_path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&content).ok()?;
@@ -2986,7 +2986,13 @@ pub(crate) fn codex_identity_from_home(
     home: &Path,
 ) -> Option<crate::provider_account::identity::AccountIdentity> {
     let raw = fs::read(home.join("auth.json")).ok()?;
-    let json: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+    codex_identity_from_credential(&raw)
+}
+
+pub(crate) fn codex_identity_from_credential(
+    raw: &[u8],
+) -> Option<crate::provider_account::identity::AccountIdentity> {
+    let json: serde_json::Value = serde_json::from_slice(raw).ok()?;
     let id_token = json
         .get("id_token")
         .or_else(|| json.pointer("/tokens/id_token"))?

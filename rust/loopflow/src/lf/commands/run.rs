@@ -459,8 +459,15 @@ fn build_prompt_at(
     };
     let confine = confine_checkout_agent(task_checkout, is_interactive);
     let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
+    let wave = cli.wave.clone().or_else(|| {
+        cli.resume
+            .is_none()
+            .then(crate::work::wave::context::resolve_ambient_wave_name)
+            .flatten()
+    });
     let config_start = Instant::now();
-    let config = crate::config::load_config(Some(&repo_root))?.unwrap_or_default();
+    let config =
+        crate::config::load_wave_config(Some(&repo_root), wave.as_deref())?.unwrap_or_default();
     debug!(
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
@@ -488,12 +495,6 @@ fn build_prompt_at(
         Surface::Headless
     };
 
-    let wave = cli.wave.clone().or_else(|| {
-        cli.resume
-            .is_none()
-            .then(crate::work::wave::context::resolve_ambient_wave_name)
-            .flatten()
-    });
     if let Some(skill) = &discovered_skill {
         match crate::definition::name::portable_name(&skill.name).as_str() {
             "task-session" => anyhow::ensure!(

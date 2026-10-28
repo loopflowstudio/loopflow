@@ -969,9 +969,9 @@ mod tests {
             assert!(!root.join("loopflow/SKILL.md").exists());
             assert!(!root.join("review-open-work/SKILL.md").exists());
             let control = fs::read_to_string(root.join("repo-operate/SKILL.md")).unwrap();
-            assert!(control.contains("lf machine use"));
+            assert!(control.contains("--repo <repo> set machine"));
             let implement = fs::read_to_string(root.join("implement/SKILL.md")).unwrap();
-            assert!(!implement.contains("lf machine use"));
+            assert!(!implement.contains("--repo <repo> set machine"));
         }
     }
 

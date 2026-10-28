@@ -207,14 +207,6 @@
             }
           }
         },
-        "directive": {
-          "version": 2,
-          "kind": "replacement",
-          "text": "Surface verification failures before publish failures.",
-          "applied_at": "2026-07-13T18:30:00Z",
-          "incorporated_at": "2026-07-13T18:31:00Z",
-          "incorporated_summary": "Verification failures are now first."
-        },
         "next_move": {
           "owner": "user",
           "reason": "merge pull request head 333333333333 on GitHub"
@@ -446,7 +438,8 @@
           "merge_commit": null,
           "abandoned_at": null
         },
-        "graph_source": "task"
+        "graph_source": "task",
+        "section": "waiting"
       },
       {
         "task": {
@@ -531,7 +524,6 @@
           "workspace": null
         },
         "runtime": null,
-        "directive": null,
         "next_move": {
           "owner": "wave",
           "reason": "Task is ready to start"
@@ -571,7 +563,8 @@
         },
         "shipping": null,
         "pr": null,
-        "graph_source": "task"
+        "graph_source": "task",
+        "section": "not_started"
       }
     ],
     "truncated": false
@@ -648,5 +641,41 @@
     "observed_at": null,
     "pending_successor": null,
     "activation": null
+  },
+  "setup": {
+    "graph": {
+      "value": "code",
+      "source": "wave"
+    },
+    "agent": {
+      "value": "claude",
+      "source": "repo"
+    },
+    "skill_agents": {
+      "implement": {
+        "value": "claude:opus",
+        "source": "wave"
+      }
+    },
+    "tasks_machine": {
+      "value": "home_00000000000000000000000000000001",
+      "source": "personal"
+    },
+    "session_machine": {
+      "value": "home_00000000000000000000000000000002",
+      "source": "default"
+    },
+    "accounts": {
+      "claude": {
+        "accounts": [
+          "work"
+        ],
+        "source": "personal"
+      },
+      "codex": {
+        "accounts": [],
+        "source": "default"
+      }
+    }
   }
 }

@@ -177,11 +177,11 @@ private actor RenameSource {
     }
 
     func read(_ args: [String]) async throws -> String {
-        if args == ["wave", "show", "--all", "--json"] {
+        if args == ["desktop", "plan", "--all", "--json"] {
             return try roadmapJSON()
         }
-        guard args.count >= 2, args[0] == "session" else { return "[]" }
-        let verb = args[1]
+        let verb = args.prefix(2) == ["desktop", "sessions"] ? "list" : args.count >= 2 && args[0] == "session" ? args[1] : nil
+        guard let verb else { return "[]" }
         let snapshot = records
         if holds.remove(verb) != nil {
             await withCheckedContinuation { continuation in

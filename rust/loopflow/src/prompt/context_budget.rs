@@ -1,7 +1,6 @@
 //! Measure authored context against size targets without changing launch input.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use crate::config::Config;
 use crate::error::CoreError;
@@ -57,8 +56,8 @@ pub struct BudgetLimit {
 pub struct ContextBudgets(BTreeMap<BudgetKey, BudgetLimit>);
 
 impl ContextBudgets {
-    pub fn resolve(config: &Config, repo: &Path, wave: Option<&str>) -> Result<Self, CoreError> {
-        let mut limits: BTreeMap<_, _> = BudgetKey::ALL
+    pub fn resolve(config: &Config) -> Result<Self, CoreError> {
+        let limits: BTreeMap<_, _> = BudgetKey::ALL
             .into_iter()
             .map(|key| {
                 let value = config
@@ -81,24 +80,6 @@ impl ContextBudgets {
                 (key, BudgetLimit { value, source })
             })
             .collect();
-        if let Some(wave) = wave {
-            let wave_config = crate::work::wave::config::try_read_wave_config(repo, wave)
-                .map_err(|err| CoreError::ExecutionFailed(err.to_string()))?;
-            if let Some(config) = wave_config {
-                for (key, value) in config.context_budgets {
-                    limits.insert(
-                        key,
-                        BudgetLimit {
-                            value,
-                            source: repo
-                                .join(format!(".lf/wave/{wave}/GOAL.md"))
-                                .display()
-                                .to_string(),
-                        },
-                    );
-                }
-            }
-        }
         for (key, limit) in &limits {
             if limit.value == 0 {
                 return Err(CoreError::ExecutionFailed(format!(
@@ -228,7 +209,7 @@ mod tests {
             content: "😀 exact source\r\n".repeat(1000),
             source: DocumentSource::Scratch,
         }];
-        let budgets = ContextBudgets::resolve(&config, repo.path(), None).unwrap();
+        let budgets = ContextBudgets::resolve(&config).unwrap();
         let report = measure_context(&docs, budgets);
         assert_eq!(report.usage[0].bytes, docs[0].content.len());
         assert!(report.render().contains("over by"));

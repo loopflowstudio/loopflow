@@ -245,7 +245,7 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
         .unwrap();
     // A Wave selects a graph by name; its definition is the committed graph.
     let definition = repo.path().join(".lf/graphs/feature.yaml");
-    let selected = run(&["wave", "graph", "set", "feature", "proof"]);
+    let selected = run(&["--wave", "proof", "set", "graph", "feature"]);
     assert!(
         selected.status.success(),
         "{}",
@@ -257,7 +257,7 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
         "feature"
     );
     std::fs::write(&definition, "invalid: true\n").unwrap();
-    assert!(!run(&["wave", "graph", "set", "feature", "proof"])
+    assert!(!run(&["--wave", "proof", "set", "graph", "feature"])
         .status
         .success());
     assert!(entry(&run(&["graph", "list", "--json"]))["unavailable"].is_string());

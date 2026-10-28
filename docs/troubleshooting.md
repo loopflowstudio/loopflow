@@ -91,12 +91,12 @@ names the exact path and branch to restore before launching.
 ## The Task is idle, but waiting on something
 
 Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
-`deferred`, …). What it is waiting on (a child Task, review, CI, merge) lives in
-its condition:
+`deferred`, …). What it is waiting on (a child Task, review, CI, merge) is its
+`reason`; Desktop's condition, with the evidence behind it, is in `lf desktop task`:
 
 ```bash
 lf task status <ID> --json
-lf wave status <wave> --json
+lf desktop task <ID> --json
 ```
 
 Resolve the named fact: open the conversation, inspect the child, repair CI,
@@ -175,12 +175,17 @@ each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
 ## Stale worktrees and branches
 
 ```bash
-lf wt prune --dry-run              # finished or week-stale worktrees
+lf wt prune --dry-run              # finished worktrees
 lf wt prune                        # remove them and their branches
 lf wt prune --branches --dry-run   # finished branches on origin and locally, with reasons
 ```
 
-A branch goes only with evidence at its exact head: a merged or closed PR, a
+Worktree pruning requires a merged or closed PR at the exact local head.
+Unpublished commits survive even when their remote branch is absent or their
+checkout has been idle for weeks. It removes only clean, unprotected checkouts
+and their local branch refs.
+
+With `--branches`, a branch goes only with evidence at its exact head: a merged or closed PR, a
 finished Task already in the default branch, or a release candidate whose tag
 exists. An open PR, a worktree or an unfinished Task always keeps it. Prune
 always preserves uncommitted files; `lf wt delete <name> --force` is for when

@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::id::WaveId;
-use crate::steer::Steer;
 
 use crate::id::prefixed_uuid_id;
 
@@ -141,9 +140,9 @@ pub enum TaskExecutionSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "wave", rename_all = "snake_case")]
 pub enum OwningMachineSource {
-    /// `lf machine use <machine> <wave>`, set on the Task's Wave or a parent Wave.
+    /// `lf --wave <wave> set machine <machine>`, set on the Task's Wave or a parent Wave.
     Wave(String),
-    /// `lf --repo <repo> machine use <machine>`, set on the Task's repository.
+    /// `lf set machine <machine>`, set on the Task's repository.
     Repository,
     /// No default is set: the Machine running the command.
     ThisMachine,
@@ -331,27 +330,6 @@ impl std::fmt::Display for Author {
             Self::Imported(selector) => write!(f, "imported {selector}"),
         }
     }
-}
-
-/// A steer comment surfaced for the cross-Work `lf history` timeline: the read
-/// model plus the Work it targets and when it was issued.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SteerComment {
-    pub work: WorkRef,
-    pub steer: Steer,
-    pub issued_at: OffsetDateTime,
-}
-
-pub fn render_steers(steers: &[Steer]) -> String {
-    if steers.is_empty() {
-        return String::new();
-    }
-    let direction = steers
-        .iter()
-        .map(|steer| format!("- {}", steer.text))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("<lf:steers>\n{direction}\n</lf:steers>")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -554,27 +532,7 @@ impl GraphStepProcess {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_steers, WorkStatus};
-    use crate::durable::Author;
-    use crate::steer::Steer;
-
-    #[test]
-    fn ordered_steers_render_as_one_input_projection() {
-        let steer = |sequence: i64, text: &str| Steer {
-            id: crate::id::SteerId::new(),
-            sequence,
-            source: format!("fixture:{sequence}"),
-            revision: "1".into(),
-            author: Author::User,
-            text: text.to_string(),
-        };
-        let steers = vec![steer(1, "first"), steer(2, "second")];
-
-        assert_eq!(
-            render_steers(&steers),
-            "<lf:steers>\n- first\n- second\n</lf:steers>"
-        );
-    }
+    use super::WorkStatus;
 
     #[test]
     fn work_status_fixture_round_trips_every_current_variant() {

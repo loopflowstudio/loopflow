@@ -84,11 +84,14 @@ struct DesktopPerformanceTests {
         child["LF_HOME"] = home
         let reader = child
         let query = RegistryQuery(watchWork: {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: lf)
-            process.arguments = ["monitor", "work", "--watch", "--json"]
-            process.environment = reader
-            return try LocalWorkObservation.start(process: process, configurationChanged: { false })
+            try LocalWorkObservation.start(process: { args, cwd in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: lf)
+                process.arguments = args
+                process.environment = reader
+                if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
+                return process
+            }, configurationChanged: { false })
         }) { args, _ in
             // The window under measurement reads through its one reader.
             throw RegistryQueryError("write-to-visible ran lf \(args.joined(separator: " "))")
@@ -1031,10 +1034,10 @@ struct DesktopPerformanceTests {
             await planning.count(args)
             switch args.first {
             case "machine" where args.dropFirst().first == "id": return "{\"id\":\"\(fixtureMachineId)\"}"
-            case "wave" where args.dropFirst().first == "show": return await planning.read()
+            case "desktop" where args.dropFirst().first == "plan": return await planning.read()
             case "graph" where args.dropFirst().first == "list" && args.contains("--json"): return catalogJSON
             case "wave" where args.dropFirst().first == "list": return "[]"
-            case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessionJSON),"next":null}"#
+            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessionJSON),"next":null}"#
             case "usage": return args.contains("--context") ? contextJSON : historyJSON
             case "task" where args.dropFirst().first == "status": return "{\"work\":\(workJSON)}"
             case "task" where args.dropFirst().first == "comment" && args.contains("--json"): return commentsJSON
@@ -1042,7 +1045,7 @@ struct DesktopPerformanceTests {
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","base_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head_commit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","files":[{"path":"notes.txt","old_path":null,"committed":true,"staged":false,"unstaged":false,"untracked":false}],"scratch":[],"scratch_truncated":false,"recovery_directory":null}"#
             case "task" where args.dropFirst().first == "file":
                 return #"{"issue_identifier":"PERF-0","task_id":"perf-work-0","path":"notes.txt","content":"Original notes","state":"text","revision":"fixed","size_bytes":14,"recoveries":[],"read_only_reason":null}"#
-            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Benchmark does not launch providers or mutate planning")
             }
         }
@@ -1124,10 +1127,9 @@ private final class PerformanceReader {
     private func answer(_ request: WorkRequest) async {
         if case .scope(_, let scope) = request { self.scope = scope }
         let roadmap = await planning.read()
-        send("planning", request.id, #"{"roadmap":\#(roadmap),"waves":[]}"#)
-        guard let scope, let repo = scope.repo else { return }
-        send("sessions", request.id,
-             #"{"repo":"\#(repo)","includes_headless":\#(scope.headless),"entries":\#(sessions)}"#)
+        send(.planning, request.id, roadmap)
+        guard let scope, scope.repo != nil else { return }
+        send(.sessions, request.id, sessions)
         guard let task = scope.task else { return }
         // Only the first Task has a Graph process.
         let graphs = task == "PERF-0" ? #"""
@@ -1147,16 +1149,20 @@ private final class PerformanceReader {
                 }
             }
         }
-        send("task", request.id, #"""
-            {"task":"\#(task)","work":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}}
+        send(.task, request.id, #"""
+            {"overview":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
             """#)
     }
 
-    private func send(_ part: String, _ answers: Int, _ body: String) {
+    /// One watch line, as `lf … --json --watch` prints it for this scope.
+    private func send(_ part: WorkPart, _ answers: Int, _ body: String) {
+        let scope = scope ?? WorkScope(repo: nil, headless: false, task: nil, activity: nil)
         sequence += 1
-        let line = #"{"part":"\#(part)","sequence":\#(sequence),"answers":\#(answers),"home":"benchmark-fixture","revisions":null,"unavailable":null,"body":\#(body)}"#
+        let line = #"{"answers":\#(answers),"unavailable":null,"body":\#(body)}"#
         // A frame this file wrote; one that does not decode fails the wait on it.
-        if let frame = try? WorkFrame.decode(line: Data(line.utf8)) { continuation?.yield(frame) }
+        if let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: Data(line.utf8)) {
+            continuation?.yield(frame)
+        }
     }
 }
 
@@ -1474,8 +1480,8 @@ actor SnapshotReads {
             }.value
             guard let fixture else { return .success(output) }
             var value = try JSONSerialization.jsonObject(with: Data(output.utf8))
-            if args.prefix(2) == ["wave", "show"], !args.contains("--task") {
-                let owned = try await fixture.read(["wave", "show", "--all", "--json"])
+            if args.prefix(2) == ["desktop", "plan"], !args.contains("--task") {
+                let owned = try await fixture.read(["desktop", "plan", "--all", "--json"])
                 var page = try #require(value as? [String: Any])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [String: Any])
                 page["waves"] = (try #require(page["waves"] as? [Any])) + (try #require(extra["waves"] as? [Any]))
@@ -1487,7 +1493,7 @@ actor SnapshotReads {
                 // The synthetic conversation remains explicitly discoverable after
                 // client exit. Copied entries and their paging cursor stay intact.
                 if let page = value as? [String: Any], !(page["next"] is NSNull) { return .success(output) }
-                let owned = try await fixture.read(["session", "list", "--all", "--history", "--json"])
+                let owned = try await fixture.read(["desktop", "sessions", "--all", "--history", "--json"])
                 let extra = try #require(JSONSerialization.jsonObject(with: Data(owned.utf8)) as? [Any])
                 if var page = value as? [String: Any] {
                     if page["next"] is NSNull { page["entries"] = (try #require(page["entries"] as? [Any])) + extra }

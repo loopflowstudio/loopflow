@@ -103,8 +103,8 @@ work_values! {
     (TaskTeam, "task_team", Option<String>),
     (CommentTask, "comment_task", String),
     (HistoricalProjectWorkflow, "workflow", String),
-    // Released peers and stored edits name it `wave_workflow`.
-    (WaveGraph, "wave_workflow", Option<String>),
+    // Released peers recorded the Wave default here; it lives in the Wave config.yaml.
+    (HistoricalWaveWorkflow, "wave_workflow", Option<String>),
     (Krs, "krs", Vec<crate::work::project::ProjectKR>),
     (MetricTargets, "metric_targets", Vec<crate::work::wave::metrics::MetricTarget>),
     (Disposition, "disposition", Disposition),

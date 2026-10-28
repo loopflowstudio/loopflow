@@ -131,12 +131,38 @@ pub(crate) async fn peer_status(
     store: &Store,
     repo: &str,
 ) -> OpsResult<Vec<crate::store::PeerPlanningStatus>> {
+    let Some(active) = active_destination(store, repo).await? else {
+        return Ok(Vec::new());
+    };
+    store
+        .peer_planning_status(repo, active.as_deref())
+        .await
+        .map_err(message)
+}
+
+/// `lf planning journal`: each destination's retained changes.
+pub(crate) async fn peer_journal(
+    store: &Store,
+    repo: &str,
+) -> OpsResult<Vec<crate::store::PlanningJournal>> {
+    let Some(active) = active_destination(store, repo).await? else {
+        return Ok(Vec::new());
+    };
+    store
+        .peer_planning_journal(repo, active.as_deref())
+        .await
+        .map_err(message)
+}
+
+/// The Git destination this repository plans through: `None` when it does not
+/// plan through Git, `Some(None)` outside a checkout.
+async fn active_destination(store: &Store, repo: &str) -> OpsResult<Option<Option<String>>> {
     use crate::config::{load_config, GitPlan, PlanningConfig};
     let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
     let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     let key = match plan {
         GitPlan::Shared(_) => None,
@@ -161,10 +187,7 @@ pub(crate) async fn peer_status(
     } else {
         None
     };
-    store
-        .peer_planning_status(repo, active.as_deref())
-        .await
-        .map_err(message)
+    Ok(Some(active))
 }
 
 /// A World build is this process's only writer to a remote nobody else reads,

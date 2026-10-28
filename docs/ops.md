@@ -162,6 +162,12 @@ lf wt create spike                  # a worktree beside the repository, in its l
 lf wt prune --branches --dry-run    # branches of merged PRs and finished Tasks
 ```
 
+Before merging into a feature branch, automatic sync checkpoints staged and
+unstaged edits together. It leaves generated telemetry under `.lf/tmp/` local,
+even without an ignore rule or when already staged: its staged and working
+contents survive sync without entering the checkpoint. Other ignored files stay
+ignored unless explicitly staged. Previously committed telemetry stays in history.
+
 Sync follows a stack parent through its squash merge. Stack one Task on
 another's open PR, even a draft:
 
@@ -178,7 +184,7 @@ lf machine add mini                              # save an SSH destination; offe
 lf machine connect mini claude jack@example.com  # a login of its own, approved in this laptop's browser
 lf --machine mini task list                      # any command, run there
 lf task move LOO-12 --machine mini               # move a Task there with its Session; you stay its person
-lf machine use mini product                      # new Tasks in Wave `product` run there
+lf --wave product set machine mini               # new Tasks in Wave `product` run there
 ```
 
 `--machine` runs the whole command on the target, in its saved repository.
@@ -194,7 +200,7 @@ lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-us
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
 lf task run LOO-570 --pool lab --rent code           # a free lab machine, else rent one
-lf machine use code infrastructure                   # the Wave's new Tasks rent from code
+lf --wave infrastructure set machine code            # the Wave's new Tasks rent from code
 lf machine end code-1                                # give a rented machine back now
 ```
 
@@ -209,8 +215,8 @@ us-east-1's, so AWS names the region it rents in and the region it priced. When
 the repository plans in Linear, a rented machine gets an access token this
 laptop just refreshed; the refresh grant stays here, so Linear works there for
 the token's lifetime (about a day). Its provider deletes a rented machine at
-its deadline. `lf machine use code infrastructure`
-(or `--repo`) sends a scope's unowned Tasks to `code` when they run. A machine
+its deadline. `lf --wave infrastructure set machine code`
+(or no `--wave`, for the repository) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
 Processes are copied home, so `lf session list` shows them "from code-1".
 Unpushed work refuses the give-back unless you pass `--force`.
@@ -220,7 +226,7 @@ Unpushed work refuses the give-back unless you pass `--force`.
 ```bash
 lf account                                         # access and capacity for every login
 lf account connect codex work@example.com --chrome-profile Work
-lf account route set codex work@ personal@         # this repository: work first
+lf set account.codex work@,personal@               # this repository: work first
 lf account codex use work@                         # sign ~/.codex in as work@, for lf and plain codex
 ```
 

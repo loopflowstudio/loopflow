@@ -246,7 +246,7 @@ running Workflow-edge proof. Prepare the script's uv dependencies before
 running it through `scripts/test_network.py`.
 
 Only attempted effects acknowledge; equal-desired provider readback can instead
-retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
+retire an unattempted intention without another write. The portable `watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.
 Run these through the same external-network denial wrapper as other CLI fixtures.
 
@@ -749,7 +749,7 @@ must retain Wave identity before projecting accepted Projects.
 ### Shared identity fixtures
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`work_watch` together. Direct SQL fixtures must carry both the attachment
+`world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment
 token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.

@@ -116,7 +116,7 @@ impl Pair {
     }
 
     fn branch(&self, person: Person, task: &str) -> String {
-        self.json(person, &["task", "status", task, "--json"])["task"]["branch"]
+        self.json(person, &["desktop", "task", task, "--json"])["task"]["branch"]
             .as_str()
             .unwrap()
             .to_string()
@@ -160,7 +160,7 @@ fn two_people_share_one_repository() {
     let branch = pair.branch(Maya, &task);
     assert!(branch.starts_with("maya/"), "{branch}");
     // Maya pushes work and opens PR #1 on the World's GitHub.
-    let status = pair.json(Maya, &["task", "status", &task, "--json"]);
+    let status = pair.json(Maya, &["desktop", "task", &task, "--json"]);
     let worktree = PathBuf::from(status["execution"]["worktree"].as_str().unwrap());
     std::fs::write(worktree.join("gpu.txt"), "fallback\n").unwrap();
     pair.git(&worktree, &["add", "gpu.txt"]);
@@ -249,7 +249,7 @@ fn two_people_share_one_repository() {
     pair.ok(Lee, &["task", "run", &task, "takeover"]);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let taken = loop {
-        let status = pair.json(Lee, &["task", "status", &task, "--json"]);
+        let status = pair.json(Lee, &["desktop", "task", &task, "--json"]);
         if status["execution"]["work"]["graph"]["position"]
             == serde_json::json!({"kind": "at", "step": "review"})
         {
@@ -264,18 +264,21 @@ fn two_people_share_one_repository() {
         "{taken}"
     );
 
-    // 7. Graph definitions are committed files; a Wave selects a name.
-    let rejected = pair.run(
-        Maya,
-        &["wave", "graph", "set", "review", "infra", "--file", "x"],
-    );
+    // 7. Graph definitions are committed files; a Wave's committed
+    // config.yaml selects a name.
+    let rejected = pair.run(Maya, &["set", "graph", "review", "--file", "x"]);
     assert_eq!(rejected.status.code(), Some(2));
     std::fs::write(
         maya.join(".lf/graphs/review.yaml"),
         "- implement\n- interactive: {name: demo, id: review}\n",
     )
     .unwrap();
-    pair.git(&maya, &["add", ".lf/graphs"]);
+    let wave_config = maya.join(".lf/wave/infra/config.yaml");
+    std::fs::create_dir_all(wave_config.parent().unwrap()).unwrap();
+    let mut config = std::fs::read_to_string(&wave_config).unwrap_or_default();
+    config.push_str("workflow: review\n");
+    std::fs::write(&wave_config, config).unwrap();
+    pair.git(&maya, &["add", ".lf/graphs", ".lf/wave/infra/config.yaml"]);
     pair.git(
         &maya,
         &[
@@ -287,7 +290,6 @@ fn two_people_share_one_repository() {
         ],
     );
     pair.git(&maya, &["push", "origin", "main"]);
-    pair.ok(Maya, &["wave", "graph", "set", "review", "infra"]);
     pair.ok(Maya, &["wave", "status", "infra", "--sync"]);
     pair.git(&pair.repo(Lee), &["pull", "--ff-only"]);
     pair.ok(Lee, &["wave", "status", "infra", "--sync"]);

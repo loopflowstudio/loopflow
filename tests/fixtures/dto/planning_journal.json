@@ -1,0 +1,84 @@
+[
+  {
+    "destination": "held-plan",
+    "changes": {
+      "held-title": {
+        "clock": 1,
+        "parents": [],
+        "edit": {
+          "target": "retained-task",
+          "change": {
+            "field": "task_title",
+            "value": "Held title"
+          }
+        }
+      }
+    },
+    "candidates": [
+      "held-title"
+    ]
+  },
+  {
+    "destination": "healthy-plan",
+    "changes": {
+      "title-loser": {
+        "clock": 1,
+        "parents": [],
+        "edit": {
+          "target": "retained-task",
+          "change": {
+            "field": "task_title",
+            "value": "Retained title"
+          }
+        }
+      },
+      "title-head": {
+        "clock": 2,
+        "parents": [
+          "title-loser"
+        ],
+        "edit": {
+          "target": "retained-task",
+          "change": {
+            "field": "task_title",
+            "value": "Current title"
+          }
+        }
+      },
+      "assignee-head": {
+        "clock": 3,
+        "parents": [],
+        "edit": {
+          "target": "retained-task",
+          "change": {
+            "field": "task_assignee",
+            "value": "Maya"
+          }
+        }
+      },
+      "comment-head": {
+        "clock": 4,
+        "parents": [],
+        "edit": {
+          "target": "retained-comment",
+          "change": {
+            "field": "comment_content",
+            "value": {
+              "body": "Direction",
+              "author": {
+                "kind": "person",
+                "name": "Maya"
+              },
+              "created_at": "2026-10-10T12:00:00Z"
+            }
+          }
+        }
+      }
+    },
+    "candidates": [
+      "assignee-head",
+      "comment-head",
+      "title-head"
+    ]
+  }
+]

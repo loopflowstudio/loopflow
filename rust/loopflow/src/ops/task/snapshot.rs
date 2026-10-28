@@ -31,6 +31,8 @@ pub fn task_snapshot(task: &Task) -> OpsResult<TaskSnapshot> {
 pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsResult<TaskSnapshot> {
     let wave = owning_wave(store, &task).await?;
     let repo = repository_for_task(store, &task)?;
+    let personal =
+        crate::config::PersonalSettings::read(Some(&repo), wave.as_ref().map(|w| w.slug()));
     let project = match &task.project_id {
         Some(id) => Some(
             store
@@ -55,7 +57,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .work_status(&work)
         .await
         .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-    let execution = crate::ops::task_execution::task_execution(store, &task.id)
+    let execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
     let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;
@@ -90,7 +92,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         let launch_refusal = if worktree_blocker.is_some() {
             None
         } else {
-            task_configuration_refusal(&task, None)
+            task_configuration_refusal(&task, wave.as_ref().map(|w| w.slug()), &personal, None)
                 .or_else(|| task_event_process_refusal(latest_event.as_ref()).map(str::to_string))
         };
         let action_evidence = TaskActionEvidence {
@@ -112,6 +114,8 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     };
     let agent = resolve_task_agent(
         task.worktree.as_deref().unwrap_or(&repo),
+        wave.as_ref().map(|w| w.slug()),
+        &personal,
         task.agent.as_deref(),
         None,
     );

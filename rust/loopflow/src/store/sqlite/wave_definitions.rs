@@ -82,13 +82,13 @@ fn seed_wave_files(directory: &Path, id: &WaveId, name: &str) -> StoreResult<()>
     use std::io::Write;
     std::fs::create_dir_all(directory)
         .map_err(|error| StoreError::InvalidData(format!("{}: {error}", directory.display())))?;
-    for (file, content) in [
-        (
-            "GOAL.md",
-            format!("---\nid: {id}\n---\n\n## Objective\n\n{name}\n"),
-        ),
+    // A Wave authored before config.yaml keeps its id in GOAL.md frontmatter.
+    let config =
+        (!directory.join("GOAL.md").exists()).then(|| ("config.yaml", format!("id: {id}\n")));
+    for (file, content) in config.into_iter().chain([
+        ("GOAL.md", format!("## Objective\n\n{name}\n")),
         ("MEMORY.md", format!("# {name} wave memory\n")),
-    ] {
+    ]) {
         let path = directory.join(file);
         match std::fs::OpenOptions::new()
             .write(true)
@@ -128,7 +128,10 @@ mod tests {
                 .unwrap(),
             id
         );
+        let parent = crate::work::wave::config::read_wave_config(repo.path(), "tools").unwrap();
+        assert!(parent.id.is_some());
         assert!(repo.path().join(".lf/wave/tools/GOAL.md").is_file());
+        assert!(!directory.join("config.yaml").exists());
         assert!(directory.join("MEMORY.md").is_file());
         std::fs::write(directory.join("MEMORY.md"), "Edited directly.\n").unwrap();
         assert_eq!(

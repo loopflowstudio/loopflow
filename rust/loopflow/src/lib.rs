@@ -99,6 +99,9 @@ mod task_adoption_tests;
 #[path = "../tests/linear/task_graph_launch_tests.rs"]
 mod task_graph_launch_tests;
 #[cfg(test)]
+#[path = "../tests/linear/watch.rs"]
+mod watch;
+#[cfg(test)]
 #[path = "../tests/linear/wave_repository_ownership.rs"]
 mod wave_repository_ownership;
 #[cfg(test)]
@@ -107,9 +110,6 @@ mod wave_resolution_matrix;
 #[cfg(test)]
 #[path = "../tests/linear/wave_resolution_tests.rs"]
 mod wave_resolution_tests;
-#[cfg(test)]
-#[path = "../tests/linear/work_watch.rs"]
-mod work_watch;
 
 #[cfg(unix)]
 pub mod transport;

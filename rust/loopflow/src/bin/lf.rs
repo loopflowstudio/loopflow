@@ -820,17 +820,21 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             use loopflow::lf::WaveGraphCommand;
             tokio::runtime::Runtime::new()?.block_on(async {
                 match cmd {
-                    WaveGraphCommand::Show { wave, json } => {
-                        let selected = project::wave_graph(repo, wave.as_deref()).await?;
+                    WaveGraphCommand::Show {
+                        wave,
+                        no_wave,
+                        json,
+                    } => {
+                        let selected =
+                            project::wave_graph(repo, wave.as_deref(), !*no_wave).await?;
                         if *json {
                             println!("{}", serde_json::to_string_pretty(&selected)?);
                         } else {
                             println!(
-                                "{} · {}",
-                                selected.wave,
-                                selected.graph.as_deref().unwrap_or(
-                                    "no graph selected; Tasks take up the repository's `graph:`, or code"
-                                )
+                                "{} · {} ({} default)",
+                                selected.wave.as_deref().unwrap_or("repository"),
+                                selected.default.name,
+                                selected.default.source.as_str()
                             );
                         }
                     }
@@ -941,7 +945,7 @@ fn read_task_draft() -> anyhow::Result<String> {
     Ok(String::from_utf8(bytes)?)
 }
 
-fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
+fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Claim { issue, json } | TaskCommand::Unclaim { issue, json } => {
             use loopflow::ops::task_ownership::{change, render, OwnershipChange};
@@ -1032,14 +1036,20 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
         TaskCommand::Create {
+            request,
             no_wave,
             wave,
             title,
             notes,
+            run,
+            graph,
             json,
         } => {
-            let report = match notes {
-                Some(notes) => Some(notes.clone()),
+            if let Some(graph) = graph {
+                loopflow::lf::commands::task_create::check_graph(repo, graph)?;
+            }
+            let report = match request.as_ref().or(notes.as_ref()) {
+                Some(text) => Some(text.clone()),
                 None => piped_task_report()?,
             };
             let issue = loopflow::ops::task::task_create(
@@ -1048,10 +1058,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 title.clone(),
                 report,
             )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&issue)?);
-            } else {
-                println!("{} · {}", issue.title, issue.identifier);
+            match (*json, *run) {
+                (false, _) => println!("{} · {}", issue.title, issue.identifier),
+                (true, false) => println!("{}", serde_json::to_string_pretty(&issue)?),
+                // `--run --json` prints one receipt once the run settles.
+                (true, true) => {}
             }
             if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
                 .planning_transport()
@@ -1062,6 +1073,16 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
                     issue.identifier
                 );
+            }
+            if *run {
+                loopflow::lf::commands::task_create::start(
+                    cli,
+                    repo,
+                    &issue,
+                    graph.as_deref(),
+                    request.as_deref(),
+                    *json,
+                )?;
             }
             Ok(())
         }
@@ -1983,6 +2004,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         Some(Commands::Task {
             cmd:
                 TaskCommand::Create {
+                    request,
                     title,
                     notes,
                     wave,
@@ -1990,10 +2012,10 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     ..
                 },
         }) => {
-            piped_notes = if notes.is_none() {
-                piped_task_report()?
-            } else {
-                None
+            piped_notes = match request {
+                Some(request) => Some(request.clone()),
+                None if notes.is_none() => piped_task_report()?,
+                None => None,
             };
             Some((
                 if *no_wave {
@@ -2716,11 +2738,11 @@ fn execute_command(
                 | TaskCommand::File { .. }
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
-        }) => run_task_command(&std::env::current_dir()?, cmd),
+        }) => run_task_command(cli, &std::env::current_dir()?, cmd),
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
             let repo = selected_task_repository(cli, &directory, cmd.selector())?;
-            with_runtime(&repo, args, || run_task_command(&repo, cmd))
+            with_runtime(&repo, args, || run_task_command(cli, &repo, cmd))
         }
         Some(Commands::Context { json, wave, task }) => {
             loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())

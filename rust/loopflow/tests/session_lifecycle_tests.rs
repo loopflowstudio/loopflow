@@ -1899,7 +1899,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     };
     assert_eq!(graphs.len(), 1);
     assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
-    let status = fixture.json(&["task", "status", "INF-123", "--json"]);
+    let status = fixture.json(&["desktop", "task", "INF-123", "--json"]);
     assert_eq!(
         status["execution"]["work"]["graph"]["position"],
         serde_json::json!({"kind": "at", "step": "demo"})

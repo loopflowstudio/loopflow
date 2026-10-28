@@ -79,7 +79,7 @@ jobs:
           # Only close when a required check failed. Flakes in non-required
           # jobs (e.g. loopflow-ui-test) must not kill otherwise-good PRs.
           FAILED=$(gh pr view "$PR" --repo "$REPO" --json statusCheckRollup \
-            --jq '[.statusCheckRollup[] | select(.conclusion == "FAILURE") | .name] | join(" ")')
+            --jq '[.statusCheckRollup[] | select(.conclusion == "FAILURE") | .name | sub("^.* / "; "")] | join(" ")')
           HARD_FAIL=""
           for check in $REQUIRED_CHECKS; do
             case " $FAILED " in

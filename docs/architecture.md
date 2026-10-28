@@ -10,7 +10,7 @@ Process records an lf command and its outcome; LfSession records a conversation;
 and the step processes it starts.
 
 This guide specifies the accepted model. The reference owns
-[cutover status](architecture-reference.md#cutover-status), the remaining work
+[cutover status](architecture/reference-cutover.md#cutover-status), the remaining work
 map and the checked current-source inventory.
 
 This guide is for developers changing Loopflow. It starts with the smallest
@@ -50,7 +50,7 @@ Processes rather than bypassing installation authority to create a receipt.
 LfSession history records provider outcomes, retries and usage. Process records
 the command's outcome. A provider can finish successfully before a later command
 operation fails; neither result overwrites the other. Missing telemetry stays
-missing. The [execution contract](architecture-reference.md#core-models-and-apis)
+missing. The [execution contract](architecture/reference-models.md#core-models-and-apis)
 defines these ownership boundaries.
 
 The implementation follows the same order as the diagram:
@@ -257,7 +257,7 @@ prove untouched backlog. Rotation converges from fresh provider facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.
 
-The [reference](architecture-reference.md#core-models-and-apis) owns the field and
+The [reference](architecture/reference-models.md#core-models-and-apis) owns the field and
 write contracts and the current-state conversion boundary. Process and LfSession
 are the execution owners; Run has no separate lifecycle.
 

@@ -15,7 +15,7 @@ Project owns Tasks, KRs and targets. A Chapter is the shared
 name of those current Projects across the repository. The rotation below describes
 the explicit shared Project binding. Rotation retains exact destinations and selected
 issue IDs for recovery, while unreviewed backlog stays in its original Project.
-[Cutover status](../architecture-reference.md#cutover-status) records
+[Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
 
 ## Planning authority and identity

@@ -695,7 +695,12 @@ mod tests {
         let goal = "---\ncrons: []\n---\n## Objective\nShip a reliable release.\n\n## Bounds\nKeep rollback available.\n";
         std::fs::write(tmp.path().join(".lf/wave/release/GOAL.md"), goal).unwrap();
         let seed = super::render_wave_context(tmp.path(), "release", "");
-        for message in [None, Some(seed)] {
+        for (message, explicit) in [
+            (None, false),
+            (Some(seed.clone()), false),
+            (None, true),
+            (Some(seed), true),
+        ] {
             let prepared = crate::prompt::process::prepare_process_prompt(
                 &crate::config::Config {
                     diff_files: false,
@@ -706,7 +711,11 @@ mod tests {
                 crate::prompt::process::ProcessPromptInput {
                     repo_root: tmp.path().to_path_buf(),
                     wave: Some("release".into()),
-                    docs: vec![".lf/wave/release/GOAL.md".into()],
+                    docs: if explicit {
+                        vec![".lf/wave/release/GOAL.md".into()]
+                    } else {
+                        vec![]
+                    },
                     message,
                     ..Default::default()
                 },
@@ -720,8 +729,13 @@ mod tests {
                 .block(crate::context_block::ContextMoment::Start)
                 .unwrap()
                 .text;
-            assert_eq!(block.matches("Ship a reliable release.").count(), 1);
-            assert_eq!(block.matches("Keep rollback available.").count(), 1);
+            for content in ["Ship a reliable release.", "Keep rollback available."] {
+                assert_eq!(block.matches(content).count(), usize::from(!explicit));
+                assert_eq!(
+                    prepared.config.task_prompt.matches(content).count(),
+                    usize::from(explicit)
+                );
+            }
             assert!(!prepared.config.system_prompt.contains(goal));
             let context = crate::lf::commands::run::attributed_context(
                 &prepared.components,
@@ -743,10 +757,23 @@ mod tests {
                     .count(),
                 0
             );
-            assert!(context.decisions.iter().any(|decision| {
-                decision.source_path.as_deref() == Some(".lf/wave/release/GOAL.md")
-                    && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
-            }));
+            assert_eq!(
+                context
+                    .task
+                    .assets
+                    .iter()
+                    .filter(|asset| {
+                        asset.source_path.as_deref() == Some(".lf/wave/release/GOAL.md")
+                    })
+                    .count(),
+                usize::from(explicit)
+            );
+            if explicit {
+                assert!(context.decisions.iter().any(|decision| {
+                    decision.source_path.as_deref() == Some(".lf/wave/release/GOAL.md")
+                        && decision.decision == crate::trace::ContextDecisionKind::Deduplicated
+                }));
+            }
         }
     }
 

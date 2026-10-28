@@ -1,40 +1,79 @@
-"""Decide whether a change can reach the macOS CI jobs.
+"""Decide which macOS CI jobs a change can reach.
 
-swift-test builds and drives the source `lf`, decodes CLI JSON fixtures and
-runs scripts, and macos-process-test runs Rust, so Rust, fixtures, scripts
-and CI changes all reach them. Only the paths below cannot; any other path,
-or an unknown diff, runs the macOS jobs.
+Rust reaches the Swift app only through the `lf --json` wire, and Linux tests
+hold Rust and `tests/fixtures/dto/` in lockstep, so a wire change edits a
+fixture. Each macOS job therefore runs only for its own inputs. CI changes,
+this classifier, an unknown diff or a failed classifier run all of them.
 
-    macos_inputs.py BASE_SHA    # writes macos=true|false to $GITHUB_OUTPUT
+    macos_inputs.py BASE_SHA [HEAD]   # writes one true|false output per job
 """
 
 import os
+import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
-_UNAFFECTED = ("docs/", "website/", "scratch/", ".lf/wave/", "python/loopflow/", "python/tests/")
-# swift-test runs this check, and pytest loads any conftest beside it.
-_STILL_AFFECTED = ("python/tests/test_desktop_performance.py", "python/tests/conftest.py")
+SWIFT_TEST = "swift-test"
+MACOS_PROCESS_TEST = "macos-process-test"
+LOOPFLOW_UI_TEST = "loopflow-ui-test"
+JOBS = (SWIFT_TEST, MACOS_PROCESS_TEST, LOOPFLOW_UI_TEST)
+
+_EVERY_JOB = (".github/workflows/", "scripts/macos_inputs.py")
+# The app sources, project.yml and GhosttyKit patches all live under swift/.
+_UI_INPUTS = ("swift/", "scripts/build_xcode_ci.py", "scripts/swift_cache.py")
+_SWIFT_TEST_INPUTS = (
+    "swift/",
+    "tests/fixtures/dto/",
+    "scripts/swift_",
+    "scripts/test_desktop.sh",
+    "scripts/test_network.py",
+    "scripts/desktop_performance.py",
+    "scripts/desktop-",
+    "scripts/check_swift_multiplatform_boundaries.py",
+    # swift-test runs this check, and pytest loads any conftest beside it.
+    "python/tests/test_desktop_performance.py",
+    "python/tests/conftest.py",
+)
+_PROCESS_INPUTS = (
+    "rust/loopflow/src/data_clone.rs",
+    "rust/loopflow/src/store/copy.rs",
+    "rust/loopflow/src/journal/os_process.rs",
+    "rust/loopflow/src/lf/commands/install",
+    "rust/loopflow/tests/data_clones.rs",
+)
+_MACOS_CFG = re.compile(r'target_os\s*=\s*"macos"')
 
 
-def _affects(path: str) -> bool:
-    if path in _STILL_AFFECTED:
+def _reaches_process_test(path: str, read: Callable[[str], str | None]) -> bool:
+    if path.startswith(_PROCESS_INPUTS):
         return True
-    if "/" not in path and path.endswith(".md"):
+    if not path.endswith(".rs"):
         return False
-    return not path.startswith(_UNAFFECTED)
+    text = read(path)
+    return text is not None and _MACOS_CFG.search(text) is not None
 
 
-def affects_macos(paths: list[str]) -> bool:
-    return not paths or any(_affects(path) for path in paths)
+def affected_jobs(paths: list[str] | None, read: Callable[[str], str | None]) -> set[str]:
+    """Name the macOS jobs that `paths` reach; `read` returns a changed file's text."""
+    if not paths or any(path.startswith(_EVERY_JOB) for path in paths):
+        return set(JOBS)
+    jobs = set()
+    if any(path.startswith(_UI_INPUTS) for path in paths):
+        jobs.add(LOOPFLOW_UI_TEST)
+    if any(path.startswith(_SWIFT_TEST_INPUTS) for path in paths):
+        jobs.add(SWIFT_TEST)
+    if any(_reaches_process_test(path, read) for path in paths):
+        jobs.add(MACOS_PROCESS_TEST)
+    return jobs
 
 
-def _changed(base: str) -> list[str] | None:
+def _changed(base: str, head: str) -> list[str] | None:
     try:
         subprocess.run(["git", "fetch", "--no-tags", "--depth=1", "origin", base], check=True)
         result = subprocess.run(
-            ["git", "diff", "--name-only", base, "HEAD"], capture_output=True, text=True, check=True
+            ["git", "diff", "--name-only", base, head], capture_output=True, text=True, check=True
         )
     except (OSError, subprocess.CalledProcessError) as error:
         print(f"Changed paths unavailable ({error}); running the macOS jobs.", file=sys.stderr)
@@ -42,19 +81,36 @@ def _changed(base: str) -> list[str] | None:
     return result.stdout.splitlines()
 
 
+def _reader(base: str, head: str) -> Callable[[str], str | None]:
+    # A deleted file's last text still says whether it was macOS code.
+    def read(path: str) -> str | None:
+        for rev in (head, base):
+            result = subprocess.run(
+                ["git", "show", f"{rev}:{path}"], capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                return result.stdout
+        return None
+
+    return read
+
+
 def main() -> None:
     # Empty on events without a base, such as a manual run.
     base = sys.argv[1]
-    paths = _changed(base) if base else None
-    macos = paths is None or affects_macos(paths)
+    head = sys.argv[2] if len(sys.argv) > 2 else "HEAD"
+    paths = _changed(base, head) if base else None
+    jobs = affected_jobs(paths, _reader(base, head))
     summary = (
-        "macOS inputs changed; running the macOS jobs."
-        if macos
-        else f"Only {len(paths)} non-macOS paths changed; skipping the macOS jobs."
+        f"Running macOS jobs: {', '.join(sorted(jobs))}."
+        if jobs
+        else f"No macOS job reaches the {len(paths or [])} changed paths; skipping them."
     )
     print(summary)
     with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
-        output.write(f"macos={'true' if macos else 'false'}\n")
+        for job in JOBS:
+            output.write(f"{job}={'true' if job in jobs else 'false'}\n")
+        output.write(f"any={'true' if jobs else 'false'}\n")
     with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as output:
         output.write(summary + "\n")
 

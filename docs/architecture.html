@@ -1754,6 +1754,16 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 <a href="https://loopflow.studio/architecture/codebase">Codebase map</a>                </li>
                 <li class="docs-nav-child">
 <a href="https://loopflow.studio/architecture/reference">Checked reference</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-cutover">Cutover status</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-models">Models and vocabulary</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-code">Code, persistence and public APIs</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-runtime">Launch, Graphs and delivery</a>                </li>
+                <li class="docs-nav-child">
+<a href="https://loopflow.studio/architecture/reference-processes">Locks, processes and Machines</a>                </li>
               </ul>
             </div>
 <a href="https://loopflow.studio/docs" class="docs-nav-public-link">Public user docs ↗</a>          </div>
@@ -1771,7 +1781,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
 and the step processes it starts.</p>
 <p>This guide specifies the accepted model. The reference owns
-<a href="https://loopflow.studio/architecture/reference#cutover-status">cutover status</a>, the remaining work
+<a href="https://loopflow.studio/architecture/reference-cutover#cutover-status">cutover status</a>, the remaining work
 map and the checked current-source inventory.</p>
 <p>This guide is for developers changing Loopflow. It starts with the smallest
 complete path, then opens into the six areas that own the system. Command
@@ -1802,7 +1812,7 @@ Processes rather than bypassing installation authority to create a receipt.</p>
 <p>LfSession history records provider outcomes, retries and usage. Process records
 the command's outcome. A provider can finish successfully before a later command
 operation fails; neither result overwrites the other. Missing telemetry stays
-missing. The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">execution contract</a>
+missing. The <a href="https://loopflow.studio/architecture/reference-models#core-models-and-apis">execution contract</a>
 defines these ownership boundaries.</p>
 <p>The implementation follows the same order as the diagram:</p>
 <table tabindex="0">
@@ -2100,7 +2110,7 @@ also checks authored work, PRs and Graphs; missing history alone cannot
 prove untouched backlog. Rotation converges from fresh provider facts using the
 explicit target name and stable Project identities. A partially rotated repository
 must be retryable; unrelated competing plans remain unresolved.</p>
-<p>The <a href="https://loopflow.studio/architecture/reference#core-models-and-apis">reference</a> owns the field and
+<p>The <a href="https://loopflow.studio/architecture/reference-models#core-models-and-apis">reference</a> owns the field and
 write contracts and the current-state conversion boundary. Process and LfSession
 are the execution owners; Run has no separate lifecycle.</p>
 <h2 id="follow-the-common-paths">Follow the common paths<a class="anchor-link" href="#follow-the-common-paths" title="Link to this section">#</a></h2>

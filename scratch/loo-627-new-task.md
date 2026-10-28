@@ -300,6 +300,12 @@ Check (a63a9f365 tree): `task_create_run`, `wave_resolution_matrix`, integration
 `graph_catalog_and_wave_selection` + `dto_fixtures`, clippy, Swift
 `NewTaskTests|WorkDestinationTests` (59): pass.
 
+Check (gate, after 736e3c0ff; only Swift changed since a63a9f365): `cargo fmt --check`,
+`scripts/test_desktop.sh` (643 tests, 81 suites), Swift multiplatform boundaries: pass.
+`scripts/test.py` itself stopped at its resource preflight (measuring `~/.cache/uv`
+exceeded 15s), so CI owns the runner's own pass. Gate also made the workflow chooser
+name the default the way the sheet does ("your default" for a personal one).
+
 Remaining: demo with a real provider (`code` stops at its interactive steps; `auto`
 reaches a merged PR), including whether the first reply leaves building to the
 running Graph. Owner: demo/review.

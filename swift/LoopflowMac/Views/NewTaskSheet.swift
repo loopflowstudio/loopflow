@@ -114,7 +114,9 @@ struct NewTaskSheet: View {
             .buttonStyle(.plain).fixedSize()
             .accessibilityIdentifier("new-task-workflow")
             .popover(isPresented: $choosingWorkflow, arrowEdge: .bottom) {
-                WorkflowChooser(catalog: catalog, defaultName: reported?.name, scope: scopeName, chosen: chosen) { name in
+                WorkflowChooser(catalog: catalog, defaultName: reported?.name,
+                                defaultPhrase: reported.map { Self.defaultPhrase($0, scope: scopeName) },
+                                scope: scopeName, chosen: chosen) { name in
                     graph = name == reported?.name ? nil : name
                     choosingWorkflow = false
                 }
@@ -227,6 +229,7 @@ struct WorkflowSteps: View {
 private struct WorkflowChooser: View {
     let catalog: [WorkflowCatalogEntry]
     let defaultName: String?
+    let defaultPhrase: String?
     let scope: String
     let chosen: String?
     let choose: (String) -> Void
@@ -274,7 +277,7 @@ private struct WorkflowChooser: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
                             Text(entry.name).font(Typography.strong(13))
-                            if entry.name == defaultName { Text("\(scope)'s default").foregroundStyle(palette.textSecondary) }
+                            if entry.name == defaultName, let defaultPhrase { Text(defaultPhrase).foregroundStyle(palette.textSecondary) }
                             if entry.name == chosen { Image(systemName: "checkmark").foregroundStyle(palette.emphasisInk) }
                         }.font(Typography.body(11.5))
                         if let workflow = entry.workflow { WorkflowSteps(workflow: workflow).scaleEffect(0.9, anchor: .leading) }

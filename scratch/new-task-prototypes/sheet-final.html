@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Task sheet</title>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=JetBrains+Mono:wght@400;500&family=Cormorant+Garamond:ital,wght@1,500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page:#e9e4dc; --background:#faf8f5; --surface:#fffdf9; --surface-muted:#f3eee7; --element:#ece6dd;
+  --border:#e6dfd6; --border-strong:#d6ccc0; --border-active:#c2b5a6; --text:#2a2624; --text2:#5f5752; --text3:#685f58;
+  --accent:#722f37; --accent-text:#faf8f5; --emph:#722f37; --titlebar:#722f37; --shadow:rgba(42,38,36,.2); --sel:#e1d9ce; --working:#3269aa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    --page:#1f2328; --background:#2b3036; --surface:#343b44; --surface-muted:#3c4550; --element:#444e59;
+    --border:#46505b; --border-strong:#56606b; --border-active:#6b7683; --text:#f5f1ea; --text2:#c8c1b8; --text3:#c7bfb7;
+    --emph:#cebfa9; --titlebar:#4a3238; --shadow:rgba(0,0,0,.55); --sel:#515a65; --working:#a5c0e1;
+  }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--page); color:var(--text); font:14px/1.45 Lato,-apple-system,sans-serif; }
+.page { max-width:1000px; margin:0 auto; padding:28px 16px 60px; }
+h1 { font:italic 500 30px/1.1 "Cormorant Garamond",serif; margin:0 0 6px; }
+.lede { color:var(--text2); margin:0 0 18px; max-width:760px; }
+.win { position:relative; height:540px; border-radius:12px; overflow:hidden; border:1px solid var(--border-strong); box-shadow:0 18px 50px rgba(0,0,0,.14);
+  display:grid; grid-template-rows:40px 1fr; background:var(--background); }
+.tb { background:var(--titlebar); color:#fff; font-weight:700; font-size:13px; display:flex; align-items:center; gap:10px; padding:0 12px; }
+.tb i { display:inline-block; width:11px; height:11px; border-radius:50%; background:rgba(255,255,255,.35); margin-right:6px; }
+.tb .dim { opacity:.6; font-weight:400; }
+.body { display:grid; grid-template-columns:220px 1fr; min-height:0; }
+aside { background:var(--surface-muted); border-right:1px solid var(--border); padding:8px; display:flex; flex-direction:column; gap:5px; }
+.srow { display:flex; padding:9px 10px; border-radius:6px; font-size:13px; box-shadow:inset 0 0 0 1px var(--border-strong); }
+.srow span { margin-left:auto; font:10px "JetBrains Mono",monospace; color:var(--text2); }
+.newrow { display:flex; align-items:center; gap:8px; padding:9px 10px; border-radius:6px; font-size:13px; cursor:pointer; }
+.newrow:hover { background:var(--element); }
+.newrow kbd { margin-left:auto; }
+.trow { position:relative; padding:11px 12px 11px 14px; border-radius:6px; background:var(--sel); animation:fade .2s; }
+.trow::before { content:""; position:absolute; left:4px; top:11px; bottom:11px; width:2px; background:var(--working); }
+.trow b { display:block; font-size:13px; } .trow small { font:11px "JetBrains Mono",monospace; color:var(--text2); }
+@keyframes fade { from { opacity:0; } }
+main { display:flex; flex-direction:column; min-width:0; }
+.hint { margin:auto; color:var(--text2); }
+.conv { flex:1; margin:10px; border-radius:7px; background:var(--surface); border:1px solid var(--border); padding:14px; font:12.5px/1.6 "JetBrains Mono",monospace; white-space:pre-wrap; }
+.conv .me { color:var(--emph); }
+kbd { font:10px/1 "JetBrains Mono",monospace; border:1px solid var(--border-strong); border-radius:4px; padding:2px 4px; color:var(--text2); background:var(--surface); }
+.scrim { position:absolute; inset:40px 0 0 0; background:rgba(30,24,22,.22); display:none; z-index:2; }
+.open .scrim { display:block; }
+
+/* the sheet */
+.sheet { display:none; position:absolute; z-index:3; top:72px; left:50%; transform:translateX(-50%); width:min(560px,92%);
+  background:var(--surface); border-radius:16px;
+  box-shadow:0 0 0 1px var(--border-strong), 0 1px 0 rgba(255,255,255,.55) inset, 0 40px 80px -24px var(--shadow), 0 12px 24px -12px var(--shadow); }
+.open .sheet { display:block; animation:rise .3s cubic-bezier(.2,.9,.3,1.15) both; }
+@keyframes rise { from { opacity:0; transform:translate(-50%,8px) scale(.985); } }
+.in { padding:22px 22px 18px; }
+h3 { font:italic 500 29px/1.1 "Cormorant Garamond",serif; color:var(--emph); margin:4px 0 14px; }
+.box { border-radius:12px; background:var(--background); box-shadow:0 0 0 1px var(--border-strong) inset, 0 1px 2px rgba(0,0,0,.06) inset; padding:13px 14px 9px; transition:box-shadow .15s; }
+.box:focus-within { box-shadow:0 0 0 1px var(--accent) inset, 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+textarea { width:100%; resize:none; border:0; background:transparent; color:var(--text); font:16px/1.5 Lato,sans-serif; min-height:72px; padding:0; }
+textarea:focus { outline:none; }
+.tools { display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.seg { display:inline-flex; background:var(--element); border-radius:8px; padding:2px; box-shadow:0 1px 0 var(--border-strong) inset; }
+.seg button { all:unset; cursor:pointer; padding:3px 11px; border-radius:6px; font-size:12px; color:var(--text2); transition:background .15s; }
+.seg button.on { background:var(--surface); color:var(--text); font-weight:700; box-shadow:0 1px 2px rgba(0,0,0,.12), 0 0 0 .5px var(--border-strong); }
+.ticks { display:inline-flex; align-items:center; gap:4px; margin-left:auto; }
+.ticks .d { width:8px; height:8px; border-radius:2.5px; background:var(--element); box-shadow:0 0 0 1px var(--border-strong) inset; }
+.ticks .d.you { background:var(--accent); box-shadow:none; }
+.ticks .ln { width:10px; height:1px; background:var(--border-strong); }
+.stops { font:italic 500 17px "Cormorant Garamond",serif; color:var(--text2); margin:10px 2px 0; }
+.foot { display:flex; align-items:center; gap:10px; padding:11px 22px 14px; border-top:1px solid var(--border); }
+.cmd { flex:1; font:11px "JetBrains Mono",monospace; color:var(--text3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ghost { all:unset; cursor:pointer; color:var(--text2); font-size:13px; padding:6px 8px; }
+.go { border:0; cursor:pointer; color:var(--accent-text); font:700 13px Lato,sans-serif; padding:7px 15px; border-radius:999px;
+  background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 86%, white), var(--accent)); box-shadow:0 1px 0 rgba(255,255,255,.25) inset, 0 1px 2px rgba(0,0,0,.25); }
+.go:disabled { opacity:.4; cursor:default; }
+.go kbd { color:var(--accent-text); border-color:rgba(255,255,255,.35); background:transparent; margin-left:6px; }
+.menu { position:absolute; top:calc(100% + 6px); left:0; min-width:200px; background:var(--surface); border-radius:9px; padding:4px; display:none; z-index:5;
+  box-shadow:0 0 0 1px var(--border-strong), 0 14px 30px -10px var(--shadow); text-transform:none; letter-spacing:0; font:13px Lato,sans-serif; color:var(--text); }
+.menu.show { display:block; }
+.menu div { padding:6px 9px; border-radius:6px; } .menu div:hover { background:var(--element); }
+.menu small { display:block; color:var(--text3); font-size:11.5px; }
+.where { margin:14px 2px 0; display:flex; align-items:baseline; gap:5px; white-space:nowrap; font-size:13.5px; color:var(--text2); }
+.where > span:not(.pick) { margin-left:-3px; }
+.wfmenu, .menu { white-space:normal; }
+.chart { position:relative; margin:12px 2px 0; height:34px; }
+.chart .rail { position:absolute; left:4px; right:4px; top:5px; height:1px; background:var(--border-strong); }
+.chart .st { position:absolute; top:0; height:auto; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:5px; }
+.chart .st i { display:block; width:9px; height:9px; border-radius:50%; background:var(--surface); border:1.5px solid var(--border-active); box-sizing:border-box; }
+.chart .st.you i { width:11px; height:11px; margin-top:-1px; background:var(--accent); box-shadow:none; }
+.chart .st span { font:italic 500 15px/1 "Cormorant Garamond",serif; color:var(--emph); white-space:nowrap; }
+.chart .end { position:absolute; right:0; top:-1px; font-size:11.5px; color:var(--text3); }
+.pick { position:relative; cursor:pointer; color:var(--text); border-bottom:1px dotted var(--text3); padding-bottom:1px; }
+.pick:hover { border-bottom-color:var(--text); }
+.why { color:var(--text3); font-size:12.5px; }
+.why button { all:unset; cursor:pointer; color:var(--emph); margin-left:4px; }
+.tickl { font-size:12px; color:var(--text3); margin-left:8px; }
+.wfhead { padding:10px 12px 8px; font-size:12.5px; color:var(--text2); border-bottom:1px solid var(--border); }
+.wfhead b { color:var(--text); }
+.wffoot { border-top:1px solid var(--border); padding:8px 12px; font-size:12.5px; color:var(--text2); display:none; }
+.wffoot.show { display:block; }
+.wffoot label { display:flex; gap:7px; align-items:flex-start; cursor:pointer; }
+.wffoot code { font:11px "JetBrains Mono",monospace; color:var(--text3); display:block; margin-top:2px; }
+.wfb { position:relative; }
+.wfbtn { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:7px; font-size:12.5px; background:var(--element); box-shadow:0 1px 0 var(--border-strong) inset; }
+.wfbtn:hover { background:var(--sel); } .wfbtn b { font-weight:700; } .wfbtn span { color:var(--text3); }
+.wfmenu { position:absolute; left:-40px; top:calc(100% + 8px); text-align:left; top:calc(100% + 8px); width:340px; max-height:300px; display:none; flex-direction:column; background:var(--surface); border-radius:11px; z-index:6;
+  box-shadow:0 0 0 1px var(--border-strong), 0 20px 40px -12px var(--shadow); overflow:hidden; }
+.wfmenu.show { display:flex; }
+.wfmenu input { border:0; border-bottom:1px solid var(--border); background:transparent; color:var(--text); font:13px Lato,sans-serif; padding:9px 12px; }
+.wfmenu input:focus { outline:none; }
+#wflist { overflow:auto; padding:4px; }
+.wfrow { display:grid; grid-template-columns:1fr auto; gap:2px 10px; padding:7px 9px; border-radius:7px; cursor:pointer; }
+.wfrow:hover, .wfrow.hi { background:var(--element); }
+.wfrow b { font-size:13px; } .wfrow b em { font-style:normal; font-weight:400; color:var(--text3); font-size:11.5px; margin-left:6px; }
+.wfrow small { grid-column:1/3; color:var(--text3); font-size:11.5px; line-height:1.35; }
+.wfrow .ticks { margin:0; }
+.wfsec { font:600 13px Lato,sans-serif; color:var(--text2); padding:9px 9px 3px; }
+@media (max-width:700px) { .body { grid-template-columns:1fr; } aside { display:none; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>New Task</h1>
+  <p class="lede">Layout A + B, finish Paper + Instrument. Click ＋ New Task, type, switch the workflow, press ⌘↩. The Task appears selected with its conversation open at once.</p>
+  <p class="lede" id="opts" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">Placeholder: </p>
+  <div class="win" id="w">
+    <div class="tb"><span><i></i><i></i><i></i></span><span id="crumb">myapp</span></div>
+    <div class="body">
+      <aside><div class="srow">myapp<span id="count">0</span></div><div class="newrow" id="new">＋ New Task <kbd>⌘N</kbd></div><div id="rows"><div style="color:var(--text2);font-size:12px;padding:8px 10px">No working Tasks in this list</div></div></aside>
+      <main id="main"><div class="hint">Press ⌘N or click ＋ New Task</div></main>
+    </div>
+    <div class="scrim" id="scrim"></div>
+    <div class="sheet">
+      <div class="in">
+                <h3>What do you want?</h3>
+        <div class="box">
+          <textarea id="req" rows="3" placeholder="Describe it the way you'd say it to a teammate"></textarea>
+        </div>
+        <div class="where">In <span class="pick" id="scopeBtn"><b id="scope">myapp</b> ▾<div class="menu" id="scopeMenu"><div data-s="myapp">myapp<small>No Wave · runs code</small></div><div data-s="product">product<small>Wave · runs feature</small></div><div data-s="systems">systems<small>Wave · follows myapp: code</small></div></div></span><span>, running</span> <span class="wfb pick" id="wfb"><b id="wfname"></b> ▾<div class="wfmenu" id="wfmenu"><div class="wfhead" id="wfhead"></div><input id="wfq" placeholder="Find a workflow" autocomplete="off"><div id="wflist"></div><div class="wffoot" id="wffoot"></div></div></span> <span id="why" class="why"></span></div>
+        <div class="chart" id="chart"></div>
+      </div>
+      <div class="foot"><span style="flex:1"></span><button class="ghost" id="cancel">Cancel</button><button class="go" id="go" disabled>Start<kbd>⌘↩</kbd></button></div>
+    </div>
+  </div>
+</div>
+<script>
+const WF = {
+  code:{d:"Build, deliver and verify. You try the change, then check it on main.",steps:[["pursue"],["demo",1],["deliver"],["verify",1]],line:"You'll step in at demo and verify.",src:"repository default"},
+  auto:{d:"Request to merged PR without a person: build and publish, then deliver.",steps:[["pursue"],["deliver"]],line:"Runs on its own to a merged PR."},
+  feature:{d:"Explore, build, deliver and verify. You choose what to build first.",steps:[["kickoff"],["explore",1],["pursue"],["demo",1],["deliver"],["verify",1]],line:"You'll step in at explore, demo and verify."},
+  research:{d:"Investigate and report, with no PR. Ends on findings you accept.",steps:[["research",1]],line:"You'll step in at research."},
+  "task-design":{d:"Draft the Task design. Its review happens in the conversation.",steps:[["design"]],line:"Runs on its own to its end."},
+  deliver:{d:"Gate the branch, then land it and stay until it merges.",steps:[["gate"],["land"]],line:"Runs on its own to its end."},
+  refresh:{d:"Integrate upstream changes, then reconcile the plan and code.",steps:[["sync"],["realign"]],line:"Runs on its own to its end."},
+  incident:{d:"Respond to a failure in production.",steps:[["triage"],["fix"],["verify",1]],line:"You'll step in at verify."},
+  "pursue-auto":{d:"Repository graph · build until the plan is done.",steps:[["implement"],["compress"],["sync"]],line:"Runs on its own to its end.",repo:1},
+  "kickoff-demo":{d:"Repository graph · kickoff, then a demo with you.",steps:[["kickoff"],["demo",1]],line:"You'll step in at demo.",repo:1},
+  "release-run":{d:"Repository graph · cut and publish a release.",steps:[["release"],["verify",1]],line:"You'll step in at verify.",repo:1},
+};
+const RECENT=["code","auto","feature"];
+const SCOPES={ myapp:{kind:"repository",def:"code",from:"myapp's default"}, product:{kind:"Wave",def:"feature",from:"product's default"}, systems:{kind:"Wave",def:"code",from:"systems follows myapp"} };
+let chosen=null; // null = follow the scope's default
+const cur=()=>chosen||SCOPES[scope].def;
+let wf="code", scope="myapp", n=0;
+const $=id=>document.getElementById(id), w=$("w"), req=$("req");
+const esc=s=>s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+function draw(){
+  wf=cur(); const sc=SCOPES[scope];
+  $("wfname").textContent=wf; $("scope").textContent=scope;
+  $("why").innerHTML=chosen&&chosen!==sc.def?`· not ${sc.def} <button id="reset" title="Use ${scope}'s default, ${sc.def}">↺</button>`:`· ${sc.from}`;
+  const r=$("reset"); if(r) r.onclick=e=>{ e.stopPropagation(); chosen=null; draw(); req.focus(); };
+  { const st=WF[wf].steps, n=st.length;
+    $("chart").innerHTML='<span class="rail"></span>'+st.map((x,i)=>`<span class="st ${x[1]?"you":""}" style="left:${n===1?50:4+i*(88/(n-1))}%" title="${x[0]}"><i></i>${x[1]?`<span>${x[0]}</span>`:""}</span>`).join("")+(st.some(x=>x[1])?"":'<span class="end">runs on its own</span>'); }
+  $("go").disabled=!req.value.trim();
+
+}
+function ticks(k){ return WF[k].steps.map((x,i)=>(i?'<span class="ln"></span>':"")+`<span class="d ${x[1]?"you":""}" title="${x[0]}${x[1]?" · you":""}"></span>`).join(""); }
+function row(k){ return `<div class="wfrow" data-wf="${k}"><b>${k}${k===SCOPES[scope].def?`<em>${scope}'s default</em>`:""}${k===wf?"<em>✓</em>":""}</b><span class="ticks">${ticks(k)}</span><small>${WF[k].d}</small></div>`; }
+function list(){
+  const q=$("wfq").value.trim().toLowerCase();
+  const keys=Object.keys(WF).filter(k=>!q||k.includes(q)||WF[k].d.toLowerCase().includes(q));
+  let h="";
+  if(q) h=keys.map(row).join("")||`<div class="wfsec">No workflow matches</div>`;
+  else h=`<div class="wfsec">Recent</div>`+RECENT.map(row).join("")+`<div class="wfsec">Built in</div>`+keys.filter(k=>!RECENT.includes(k)&&!WF[k].repo).map(row).join("")+`<div class="wfsec">This repository</div>`+keys.filter(k=>WF[k].repo).map(row).join("");
+  $("wflist").innerHTML=h;
+  const sc=SCOPES[scope];
+  $("wfhead").innerHTML=`New Tasks in <b>${scope}</b> run <b>${sc.def}</b>${sc.kind==="Wave"&&sc.from.includes("follows")?" (it follows myapp)":""}. Pick another for this Task only.`;
+  $("wffoot").classList.toggle("show", !!chosen && chosen!==sc.def);
+  $("wffoot").innerHTML=`<label><input type="checkbox" id="mkdef"><span>Make <b>${wf}</b> the default for every new ${scope} Task<code>lf ${sc.kind==="Wave"?"--wave "+scope+" ":""}set graph ${wf}</code></span></label>`;
+  $("wflist").querySelectorAll("[data-wf]").forEach(r=>r.onclick=e=>{ e.stopPropagation(); chosen=r.dataset.wf===SCOPES[scope].def?null:r.dataset.wf; draw(); list(); });
+}
+$("wfb").onclick=e=>{ if(e.target.closest(".wfmenu")) return; const m=$("wfmenu"); m.classList.toggle("show"); if(m.classList.contains("show")){ $("wfq").value=""; list(); $("wfq").focus(); } };
+document.addEventListener("click",e=>{ if(!e.target.closest("#wfb")) $("wfmenu").classList.remove("show"); });
+$("wfq").oninput=list;
+$("wfq").onkeydown=e=>{ if(e.key==="Escape"){ $("wfmenu").classList.remove("show"); req.focus(); } if(e.key==="Enter"){ const f=$("wflist").querySelector("[data-wf]"); if(f) f.click(); } };
+function open(){ w.classList.add("open"); draw(); req.focus(); }
+function close(){ w.classList.remove("open"); $("wfmenu").classList.remove("show"); $("scopeMenu").classList.remove("show"); }
+function start(){
+  const t=req.value.trim(); if(!t) return; n++;
+  const title=t.split("\n")[0].slice(0,46);
+  close(); req.value="";
+  $("count").textContent=n; $("crumb").innerHTML=`myapp <span class="dim">›</span> ${esc(title)}`;
+  $("rows").innerHTML=`<div class="trow"><b>${esc(title)}</b><small>Starting…</small></div>`;
+  $("main").innerHTML=`<div class="conv"><span class="me">› ${esc(t)}</span>\n\n<span style="opacity:.6">Starting ${wf}…</span></div>`;
+  setTimeout(()=>{ $("rows").querySelector("small").textContent=`${WF[wf].steps[0][0]} · running`;
+    $("main").innerHTML=`<div class="conv"><span class="me">› ${esc(t)}</span>\n\n${WF[wf].steps[0][0]} is working on it in the Task's worktree; I'm not editing alongside it.\n${WF[wf].line}</div>`; },1200);
+}
+$("new").onclick=open; $("scrim").onclick=close; $("cancel").onclick=close; $("go").onclick=start;
+req.oninput=draw;
+req.onkeydown=e=>{ if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)) start(); if(e.key==="Escape") close(); };
+$("scopeBtn").onclick=e=>{ const d=e.target.closest("[data-s]"); if(d){ scope=d.dataset.s; if(chosen===SCOPES[scope].def) chosen=null; $("scopeMenu").classList.remove("show"); draw(); req.focus(); } else $("scopeMenu").classList.toggle("show"); };
+const PH=[
+ ["Teammate","Describe it the way you'd say it to a teammate"],
+ ["Short","Say it in your own words"],
+ ["Example","e.g. The retry test fails one run in ten; find out why and fix it"],
+ ["Rotating examples","(cycles: a bug, a feature, a question)"],
+ ["From this Wave","(an example drawn from the scope's recent Tasks)"],
+ ["Kinds of work","A bug to fix, something to build, or a question to answer"],
+ ["Outcome","What should be true when this is done?"],
+ ["Empty","(no placeholder)"],
+];
+const ROT=["The retry test fails one run in ten; find out why and fix it","Add a dark mode toggle to Settings","Why does sync take 40 seconds on a cold start?"];
+const RECENTS={myapp:"calc.add subtracts instead of adding; fix it and add a test",product:"Desktop rows feel cramped at 13pt; try 12 with more air",systems:"Store revision triggers for the tasks table"};
+let rot=0, rotTimer=null;
+function setPH(i){
+  clearInterval(rotTimer); const [k,t]=PH[i];
+  if(k==="Rotating examples"){ const f=()=>{ req.placeholder="e.g. "+ROT[rot++%ROT.length]; }; f(); rotTimer=setInterval(f,2600); }
+  else if(k==="From this Wave"){ req.placeholder="Like: "+RECENTS[scope]; }
+  else if(k==="Empty"){ req.placeholder=""; }
+  else req.placeholder=t;
+  document.querySelectorAll("#opts button").forEach((b,j)=>b.style.borderColor=j===i?"var(--accent)":"var(--border-strong)");
+  open();
+}
+$("opts").innerHTML+=PH.map((h,i)=>`<button data-p="${i}" title="${h[1].replace(/"/g,"&quot;")}" style="font:13px Lato;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);border-radius:999px;padding:3px 10px;cursor:pointer">${h[0]}</button>`).join("");
+$("opts").querySelectorAll("button").forEach(b=>b.onclick=()=>setPH(+b.dataset.p));
+draw();
+</script>
+</body>
+</html>

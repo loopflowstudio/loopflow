@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-627 demo</title>
+<style>
+:root { --bg:#faf8f5; --ink:#2a2624; --mute:#5f5752; --line:#e6dfd6; --code:#f3eee7; --ok:#3b734c; --bad:#b0443b; --todo:#87601b; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme=light]) { --bg:#2b3036; --ink:#f5f1ea; --mute:#c8c1b8; --line:#46505b; --code:#343b44; --ok:#a7c5af; --bad:#e3b2ae; --todo:#d3bb8e; } }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif; }
+.col { max-width:760px; margin:0 auto; padding:32px 16px 80px; }
+h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:17px; margin:36px 0 8px; }
+.meta { color:var(--mute); font-size:13px; }
+code, pre { font-family:ui-monospace,Menlo,monospace; font-size:13px; }
+pre { background:var(--code); padding:10px 12px; border-radius:7px; overflow-x:auto; white-space:pre-wrap; }
+.step { border-top:1px solid var(--line); padding:14px 0; }
+.step b.ok { color:var(--ok); } .step b.bad { color:var(--bad); } .step b.todo { color:var(--todo); }
+.saw { color:var(--mute); font-size:14px; margin-top:6px; }
+textarea { width:100%; min-height:44px; margin-top:6px; background:transparent; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; font-size:14px; }
+ol li { margin-bottom:6px; }
+</style>
+</head>
+<body><div class="col">
+<h1>LOO-627 · New Task demo</h1>
+<p class="meta">Task LOO-627 · step: demo · 2026-10-28 · PR #1761 · built from <code>scratch/demo-new-task.md</code> and <code>scratch/loo-627-new-task.md</code></p>
+
+<p><b>Decision needed:</b> how to finish the proof. The terminal mechanics work in an isolated store. Seeing a real agent pick up the request, and the Desktop sheet at all, needs either an account in the demo home or Loopflow.app on v0.15.0 (question 1).</p>
+
+<h2>Terminal: what the agent already ran</h2>
+<p class="meta">Isolated <code>LF_HOME</code> and a fresh <code>myapp</code> repository in the session scratchpad, using the branch build.</p>
+
+<div class="step"><b class="ok">Worked</b> · Unknown workflow is refused before anything is filed
+<pre>$ lf task create "…" --run --graph nope
+Error: graph "nope" is unavailable: add .lf/graphs/nope.yaml … Available: auto, code, deliver, feature, …
+$ lf task list        # (empty)</pre></div>
+
+<div class="step"><b class="ok">Worked</b> · The default is read from one place
+<pre>$ lf wave graph show --no-wave --json
+{ "default": { "name": "code", "source": "default" } }</pre></div>
+
+<div class="step"><b class="ok">Worked</b> · One command files, starts and admits the conversation (2.6s)
+<pre>$ lf task create "calc.add subtracts instead of adding; fix it and add a test" --run --json &lt; /dev/null
+a1d61e · code from start running as Graph process e5f4a92d…
+{ "task": {…"identifier": "a1d61e"…}, "graph": "code", "session_id": "04df12…" }</pre>
+<p class="saw">The conversation's stored request is the typed text, word for word. Step sessions carry none.</p></div>
+
+<div class="step"><b class="bad">Failed (environment)</b> · The Graph's first step could not start an agent
+<pre>implement: failed to select provider account: no eligible managed codex account
+The run of code from start failed 3 times; this Task run stops here.</pre>
+<p class="saw">The isolated home has no signed-in accounts and defaults to codex. This is the demo setup, not the feature, but it means no agent has worked a request yet.</p></div>
+
+<h2>For you to try (after question 1)</h2>
+
+<div class="step"><b class="todo">Not yet seen</b> · Terminal, in a real terminal
+<pre>lf task create "calc.add subtracts instead of adding; fix it and add a test" --run</pre>
+Expected: the title and ID are printed, then <code>Graph code: running from start</code>, then the conversation opens here with your request as its first turn. The agent says <code>implement</code> is running and that it will stop for you at <code>demo</code>; it doesn't edit alongside the run.
+<textarea placeholder="What you saw"></textarea></div>
+
+<div class="step"><b class="todo">Not yet seen</b> · Desktop: the ＋ New Task row
+Expected: a permanent <b>＋ New Task</b> row at the top of the sidebar's Task list, under the repository and selected-Wave rows. ⌘N and File ▸ New Task open the same sheet.
+<textarea placeholder="What you saw"></textarea></div>
+
+<div class="step"><b class="todo">Not yet seen</b> · Desktop: the sheet
+Expected: the request field is focused. Wave defaults to what the list shows. Workflow shows <code>code</code> and where it comes from, with "stops for you at demo, verify"; picking <code>auto</code> changes the line to "runs to its end without stopping". ⌘↩ closes the sheet, selects the Task and opens its conversation with your words in it, with the Graph running.
+<textarea placeholder="What you saw"></textarea></div>
+
+<div class="step"><b class="todo">Not yet seen</b> · <code>auto</code> to a merged PR
+Expected: choosing <code>auto</code> runs <code>pursue</code> then <code>deliver</code>, and the Task ends with its PR merged, without stopping.
+<textarea placeholder="What you saw"></textarea></div>
+
+<h2>Questions</h2>
+<ol>
+<li>How should the proof finish?
+  <br>a) Sign in to Claude in the demo home (your store untouched), terminal only
+  <br>b) Update Loopflow.app to v0.15.0, then try terminal and Desktop for real (recommended; also fixes the <code>.lf/tmp</code> sync bug)
+  <br>c) Accept the mechanics above and leave the Desktop look to verify on main</li>
+<li>The agent path stays <code>create --title</code> then <code>task run</code>, and only the README teaches <code>create "…" --run</code>. a) fine b) teach agents the one command too</li>
+<li>A graph with no step that needs you shows "runs to its end without stopping", not "to a merged PR" (a custom graph may not open one). a) fine b) say "merged PR" for <code>auto</code> specifically</li>
+</ol>
+</div></body>
+</html>

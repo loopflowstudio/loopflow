@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Task sheet polish</title>
+<link href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=JetBrains+Mono:wght@400;500&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --page:#e9e4dc; --background:#faf8f5; --surface:#fffdf9; --surface-muted:#f3eee7; --element:#ece6dd;
+  --border:#e6dfd6; --border-strong:#d6ccc0; --border-active:#c2b5a6; --text:#2a2624; --text2:#5f5752; --text3:#685f58;
+  --accent:#722f37; --accent-hover:#5e2630; --accent-text:#faf8f5; --accent-ink:#722f37; --emph:#722f37;
+  --working:#3269aa; --available:#5d3539; --available-fill:#efeae8; --titlebar:#722f37; --shadow:rgba(42,38,36,.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    --page:#1f2328; --background:#2b3036; --surface:#343b44; --surface-muted:#3c4550; --element:#444e59;
+    --border:#46505b; --border-strong:#56606b; --border-active:#6b7683; --text:#f5f1ea; --text2:#c8c1b8; --text3:#c7bfb7;
+    --accent-ink:#cebfa9; --emph:#cebfa9; --working:#a5c0e1; --available:#c8b9c1; --available-fill:#33363c; --titlebar:#4a3238; --shadow:rgba(0,0,0,.5);
+  }
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--page); color:var(--text); font:14px/1.45 Lato,-apple-system,sans-serif; }
+.page { max-width:1000px; margin:0 auto; padding:28px 16px 80px; }
+h1 { font:600 30px/1.1 "Cormorant Garamond",serif; margin:0 0 6px; }
+.lede { color:var(--text2); max-width:780px; margin:0; }
+h2 { font:600 22px/1.2 "Cormorant Garamond",serif; margin:46px 0 2px; }
+h2 + p { margin:0 0 14px; color:var(--text2); max-width:820px; }
+.stage { position:relative; border-radius:12px; overflow:hidden; height:470px; border:1px solid var(--border-strong);
+  background:linear-gradient(var(--titlebar) 0 40px, var(--background) 40px); box-shadow:0 18px 50px rgba(0,0,0,.14); }
+.stage::before { content:""; position:absolute; left:0; top:40px; bottom:0; width:200px; background:var(--surface-muted); border-right:1px solid var(--border); }
+.stage::after { content:""; position:absolute; inset:40px 0 0 0; background:rgba(30,24,22,.22); }
+.stage .sheet { position:absolute; z-index:2; left:50%; transform:translateX(-50%); }
+.mono { font-family:"JetBrains Mono",ui-monospace,monospace; }
+kbd { font:10px/1 "JetBrains Mono",monospace; border:1px solid var(--border-strong); border-radius:4px; padding:2px 4px; color:var(--text2); }
+textarea { width:100%; resize:none; border:0; background:transparent; color:var(--text); padding:0; }
+textarea:focus { outline:none; }
+.notes { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:12px; }
+.notes div { background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:10px 14px; font-size:13.5px; }
+.notes h5 { margin:0 0 4px; font:10px "JetBrains Mono",monospace; text-transform:uppercase; letter-spacing:.07em; color:var(--text3); }
+.notes ul { margin:0; padding-left:18px; }
+
+/* 1 · Paper */
+.paper .sheet { top:40px; width:min(560px,92%); background:var(--surface); border:1px solid var(--border-strong); border-top:0;
+  border-radius:0 0 14px 14px; padding:26px 30px 18px; box-shadow:0 30px 60px -20px var(--shadow), 0 1px 0 var(--border) inset; }
+.paper .eyebrow { font:10px "JetBrains Mono",monospace; letter-spacing:.12em; text-transform:uppercase; color:var(--text3); }
+.paper h3 { font:italic 500 30px/1.1 "Cormorant Garamond",serif; margin:4px 0 14px; color:var(--emph); }
+.paper textarea { font:16px/1.55 Lato,sans-serif; min-height:84px; border-bottom:1px solid var(--border); padding-bottom:10px; }
+.paper .meta { display:flex; gap:22px; margin-top:14px; font-size:13px; flex-wrap:wrap; }
+.paper .meta label { display:block; font:10px "JetBrains Mono",monospace; letter-spacing:.1em; text-transform:uppercase; color:var(--text3); margin-bottom:2px; }
+.paper .meta button { all:unset; cursor:pointer; border-bottom:1px dotted var(--text3); }
+.paper .line { margin-top:12px; font:italic 500 17px "Cormorant Garamond",serif; color:var(--text2); }
+.paper .foot { display:flex; align-items:center; gap:12px; margin-top:20px; }
+.paper .foot .cmd { flex:1; font:11px "JetBrains Mono",monospace; color:var(--text3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.paper .go { border:0; background:var(--accent); color:var(--accent-text); border-radius:999px; padding:8px 18px; font:700 13px Lato,sans-serif; cursor:pointer; letter-spacing:.02em; }
+.paper .go kbd { color:var(--accent-text); border-color:rgba(255,255,255,.35); margin-left:6px; }
+.paper .ghost { all:unset; color:var(--text2); cursor:pointer; font-size:13px; }
+
+/* 2 · Score */
+.score .sheet { top:40px; width:min(580px,92%); background:var(--surface); border:1px solid var(--border-strong); border-top:0; border-radius:0 0 12px 12px; overflow:hidden; box-shadow:0 24px 50px -16px var(--shadow); }
+.score .band { background:var(--titlebar); color:#fff; padding:12px 18px 10px; display:flex; align-items:baseline; gap:10px; }
+.score .band b { font:600 21px "Cormorant Garamond",serif; }
+.score .band span { opacity:.75; font-size:12.5px; }
+.score .in { padding:16px 18px; }
+.score textarea { font:15px/1.5 Lato,sans-serif; min-height:74px; background:var(--background); border:1px solid var(--border-strong); border-radius:8px; padding:10px 12px; }
+.score .wfs { display:flex; gap:6px; margin:14px 0 6px; }
+.score .wfs button { all:unset; cursor:pointer; padding:3px 11px; border-radius:999px; font-size:12.5px; border:1px solid var(--border-strong); color:var(--text2); }
+.score .wfs button.on { background:var(--text); color:var(--background); border-color:var(--text); }
+.score svg { width:100%; height:86px; display:block; }
+.score svg .staff { stroke:var(--border-strong); }
+.score svg .note { fill:var(--surface); stroke:var(--text2); stroke-width:1.5; }
+.score svg .note.you { fill:var(--accent); stroke:var(--accent); }
+.score svg text { font:11px "JetBrains Mono",monospace; fill:var(--text2); }
+.score svg text.you { fill:var(--emph); font-weight:500; }
+.score .foot { display:flex; align-items:center; gap:10px; border-top:1px solid var(--border); padding:10px 18px; background:var(--surface-muted); }
+.score .foot .cmd { flex:1; font:11px "JetBrains Mono",monospace; color:var(--text3); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.score .go { border:0; background:var(--accent); color:var(--accent-text); border-radius:6px; padding:7px 14px; font:700 13px Lato,sans-serif; cursor:pointer; }
+
+/* 3 · Instrument */
+.inst .sheet { top:78px; width:min(560px,92%); border-radius:16px; padding:1px;
+  background:linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, white), var(--surface));
+  box-shadow:0 0 0 1px var(--border-strong), 0 1px 0 rgba(255,255,255,.6) inset, 0 40px 80px -24px var(--shadow), 0 12px 24px -12px var(--shadow);
+  animation:rise .32s cubic-bezier(.2,.9,.3,1.2) both; }
+@keyframes rise { from { opacity:0; transform:translate(-50%,8px) scale(.98); } }
+.inst .in { padding:18px 18px 12px; }
+.inst .top { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.inst .crumb { display:inline-flex; align-items:center; gap:6px; background:var(--element); border-radius:7px; padding:3px 9px; font-size:12.5px; box-shadow:0 1px 0 var(--border-strong); }
+.inst .crumb i { width:6px; height:6px; border-radius:50%; background:var(--accent); display:inline-block; }
+.inst .top .t { font:700 13px Lato,sans-serif; color:var(--text2); }
+.inst .field { border-radius:10px; background:var(--background); box-shadow:0 0 0 1px var(--border-strong) inset, 0 1px 2px rgba(0,0,0,.06) inset; padding:12px 14px; transition:box-shadow .15s; }
+.inst .field:focus-within { box-shadow:0 0 0 1px var(--accent) inset, 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+.inst textarea { font:16px/1.5 Lato,sans-serif; min-height:70px; }
+.inst .seg { display:inline-flex; background:var(--element); border-radius:9px; padding:3px; margin-top:12px; box-shadow:0 1px 0 var(--border-strong) inset; }
+.inst .seg button { all:unset; cursor:pointer; padding:5px 14px; border-radius:7px; font-size:12.5px; color:var(--text2); transition:background .15s,color .15s; }
+.inst .seg button.on { background:var(--surface); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.12), 0 0 0 .5px var(--border-strong); font-weight:700; }
+.inst .ticks { display:flex; align-items:center; gap:6px; margin-top:10px; font-size:12.5px; color:var(--text2); flex-wrap:wrap; }
+.inst .ticks .d { width:9px; height:9px; border-radius:3px; background:var(--element); box-shadow:0 0 0 1px var(--border-strong) inset; }
+.inst .ticks .d.you { background:var(--accent); box-shadow:none; }
+.inst .ticks .ln { width:14px; height:1px; background:var(--border-strong); }
+.inst .foot { display:flex; align-items:center; gap:10px; padding:10px 18px 12px; border-top:1px solid var(--border); }
+.inst .foot .cmd { flex:1; font:11px "JetBrains Mono",monospace; color:var(--text3); overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.inst .go { border:0; cursor:pointer; color:var(--accent-text); font:700 13px Lato,sans-serif; padding:7px 14px; border-radius:8px;
+  background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent)); box-shadow:0 1px 0 rgba(255,255,255,.25) inset, 0 1px 2px rgba(0,0,0,.25); }
+.inst .go kbd { color:var(--accent-text); border-color:rgba(255,255,255,.35); margin-left:6px; }
+.inst .ghost { all:unset; cursor:pointer; color:var(--text2); font-size:13px; padding:6px 8px; }
+@media (max-width:640px) { .notes { grid-template-columns:1fr; } .stage::before { display:none; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>The New Task sheet: three finishes</h1>
+  <p class="lede">The same sheet and fields (scope, request, workflow, where it stops for you, the command, Start), drawn in Loopflow's own materials: Cormorant for voice, Lato for reading, JetBrains Mono for machinery, warm paper and the burgundy accent. Type, switch workflows; each one redraws.</p>
+  <div id="out"></div>
+</div>
+<script>
+const WF = {
+  code: { steps:[["pursue"],["demo",1],["deliver"],["verify",1]], line:"You'll step in at demo and verify." },
+  auto: { steps:[["pursue"],["deliver"]], line:"Runs on its own to a merged PR." },
+  feature: { steps:[["kickoff"],["explore",1],["pursue"],["demo",1],["deliver"],["verify",1]], line:"You'll step in at explore, demo and verify." },
+};
+const S = { paper:{wf:"code",req:""}, score:{wf:"code",req:""}, inst:{wf:"code",req:""} };
+const D = [
+  { k:"paper", name:"1 · Paper", pitch:"Editorial and quiet. A Cormorant italic question as the heading, your words on a ruled line, Wave and workflow as small-caps labels you click, and the stops line in serif italic, like a margin note. The only color is Start.",
+    good:["Calmest; matches the website and the Wave pages' type.","Puts your words first: the field is the page."], cost:["Pickers as underlined text are less obviously clickable.","Serif italic for status may read as decoration."] },
+  { k:"score", name:"2 · Score", pitch:"The conductor theme, used structurally. The sheet hangs from the burgundy title bar like a band; the workflow is drawn as a staff with one note per step, filled where you step in. Switching workflow rewrites the score.",
+    good:["The most Loopflow-specific; the workflow is visible, not described.","Teaches stages without a sentence."], cost:["The metaphor has to stay consistent elsewhere (Task header, history).","More ink than the others."] },
+  { k:"inst", name:"3 · Instrument", pitch:"Native and tactile: a raised sheet with a soft spring entrance, an inset field with a burgundy focus ring, a segmented control for the workflow, small keycaps and a lightly lit Start button. Polish through material, not ornament.",
+    good:["Feels most like a finished Mac app.","Segmented control makes the three workflows a glance."], cost:["Gradients and inner shadows must stay subtle in dark mode.","A segmented control stops scaling past four or five workflows."] },
+];
+const esc=s=>s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const cmd=s=>{ const q=(s.req.trim().split("\n")[0]||"…").replace(/"/g,'\\"'); return `lf task create "${q}" --run`+(s.wf!=="code"?` --graph ${s.wf}`:""); };
+function score(wf){
+  const st=WF[wf].steps, w=520, gap=w/(st.length+1);
+  const lines=[0,1,2,3,4].map(i=>`<line class="staff" x1="8" x2="${w-8}" y1="${18+i*8}" y2="${18+i*8}"/>`).join("");
+  const notes=st.map((x,i)=>{ const cx=gap*(i+1), cy=x[1]?26:42; return `<ellipse class="note ${x[1]?"you":""}" cx="${cx}" cy="${cy}" rx="7" ry="5.2" transform="rotate(-18 ${cx} ${cy})"/><line class="staff" x1="${cx+6.5}" x2="${cx+6.5}" y1="${cy}" y2="${cy-24}" style="stroke:${x[1]?"var(--accent)":"var(--text2)"}"/><text class="${x[1]?"you":""}" x="${cx}" y="78" text-anchor="middle">${x[0]}${x[1]?" · you":""}</text>`; }).join("");
+  return `<svg viewBox="0 0 ${w} 86" preserveAspectRatio="xMidYMid meet">${lines}${notes}</svg>`;
+}
+function sheet(k){
+  const s=S[k], w=WF[s.wf];
+  if(k==="paper") return `<div class="sheet"><div class="eyebrow">myapp · New Task</div><h3>What do you want?</h3>
+    <textarea rows="3" placeholder="Describe it the way you'd say it to a teammate">${esc(s.req)}</textarea>
+    <div class="meta"><div><label>In</label><button>myapp</button></div><div><label>Workflow</label>${Object.keys(WF).map(x=>`<button data-wf="${x}" style="${x===s.wf?"color:var(--emph);font-weight:700":"color:var(--text3);border:0"}">${x}</button>`).join(" · ")}</div></div>
+    <div class="line">${w.line}</div>
+    <div class="foot"><span class="cmd">${esc(cmd(s))}</span><button class="ghost">Cancel</button><button class="go">Start<kbd>⌘↩</kbd></button></div></div>`;
+  if(k==="score") return `<div class="sheet"><div class="band"><b>New Task</b><span>in myapp</span></div><div class="in">
+    <textarea rows="3" placeholder="Describe what you want">${esc(s.req)}</textarea>
+    <div class="wfs">${Object.keys(WF).map(x=>`<button data-wf="${x}" class="${x===s.wf?"on":""}">${x}</button>`).join("")}</div>
+    ${score(s.wf)}</div>
+    <div class="foot"><span class="cmd">${esc(cmd(s))}</span><button class="go">Start ⌘↩</button></div></div>`;
+  return `<div class="sheet"><div class="in"><div class="top"><span class="crumb"><i></i>myapp ▾</span><span class="t">New Task</span></div>
+    <div class="field"><textarea rows="3" placeholder="Describe what you want">${esc(s.req)}</textarea></div>
+    <div class="seg">${Object.keys(WF).map(x=>`<button data-wf="${x}" class="${x===s.wf?"on":""}">${x}</button>`).join("")}</div>
+    <div class="ticks">${w.steps.map((x,i)=>(i?'<span class="ln"></span>':"")+`<span class="d ${x[1]?"you":""}" title="${x[0]}"></span>`).join("")}<span style="margin-left:6px">${w.line}</span></div></div>
+    <div class="foot"><span class="cmd">${esc(cmd(s))}</span><button class="ghost">Cancel</button><button class="go">Start<kbd>⌘↩</kbd></button></div></div>`;
+}
+function render(focusK){
+  document.getElementById("out").innerHTML=D.map(d=>`<h2>${d.name}</h2><p>${d.pitch}</p><div class="stage ${d.k}" data-k="${d.k}">${sheet(d.k)}</div>
+  <div class="notes"><div><h5>Good</h5><ul>${d.good.map(x=>`<li>${x}</li>`).join("")}</ul></div><div><h5>Cost</h5><ul>${d.cost.map(x=>`<li>${x}</li>`).join("")}</ul></div></div>`).join("");
+  document.querySelectorAll(".stage").forEach(st=>{ const k=st.dataset.k, s=S[k];
+    const ta=st.querySelector("textarea"); ta.oninput=()=>{ s.req=ta.value; st.querySelector(".cmd").textContent=cmd(s); };
+    st.querySelectorAll("[data-wf]").forEach(b=>b.onclick=()=>{ s.wf=b.dataset.wf; render(k); });
+  });
+  if(focusK){ const t=document.querySelector(`.stage.${focusK} textarea`); t.focus(); t.setSelectionRange(t.value.length,t.value.length); }
+}
+render();
+</script>
+</body>
+</html>

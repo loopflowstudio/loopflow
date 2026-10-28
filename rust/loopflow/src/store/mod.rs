@@ -809,6 +809,18 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.set_provider_route(&route)).await
     }
 
+    pub async fn clear_provider_route(
+        &self,
+        scope: &RouteScope,
+        provider: Provider,
+    ) -> StoreResult<bool> {
+        let scope = scope.clone();
+        run_sqlite(&self.sqlite, move |store| {
+            store.clear_provider_route(&scope, provider)
+        })
+        .await
+    }
+
     pub async fn provider_route(
         &self,
         scope: &RouteScope,

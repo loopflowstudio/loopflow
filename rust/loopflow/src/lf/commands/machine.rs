@@ -236,7 +236,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Connect { .. } | MachineCommand::Credentials { .. } => {
             unreachable!("credential commands dispatch before opening the store")
         }
-        MachineCommand::Use { .. } => unreachable!("machine use dispatches with its repository"),
         MachineCommand::End { .. }
         | MachineCommand::Pool { .. }
         | MachineCommand::Ondemand { .. } => {

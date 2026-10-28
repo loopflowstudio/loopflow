@@ -45,13 +45,13 @@ pub use directory::{task_files, TaskDirectory, TaskFileEntry, TaskFileKind};
 pub use file_save::{task_save, TaskFileRecovery, TaskFileSave};
 
 use crate::work::task::comment::TaskComments;
+use crate::work::wave::setup::SetupSource;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::agent::checkout_execution_boundary;
 use crate::child::ChildRef;
-use crate::config::load_config_or_default;
 use crate::durable::{TaskState, WorkStatus};
 use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
@@ -586,23 +586,19 @@ impl TaskRunSelection {
     }
 }
 
-/// The graph a Task with none takes up: its Wave's, its repository's, else `code`.
-pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, &'static str)> {
-    if let Some(wave) = &task.wave_id {
-        if let Some(name) = store.sqlite.selected_wave_graph(wave).map_err(task_error)? {
-            crate::task_graph::validate_graph_name(&name).map_err(task_error)?;
-            return Ok((name, "wave"));
-        }
-    }
+/// The graph a Task takes up when it names none: your `lf set graph`, then its
+/// Wave's and the repository's `graph:`, then the builtin `code`.
+pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(String, SetupSource)> {
     let repo = repository_for_task(store, task)?;
-    let name = crate::config::load_repo_config(&repo)
-        .map_err(task_error)?
-        .and_then(|c| c.graph);
-    if let Some(name) = name {
-        crate::task_graph::validate_graph_name(&name).map_err(task_error)?;
-        return Ok((name, "repository"));
-    }
-    Ok((DEFAULT_TASK_GRAPH.into(), "builtin"))
+    let wave = match &task.wave_id {
+        Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
+        None => None,
+    };
+    let layers = crate::config::config_layers(Some(&repo), wave.as_ref().map(|w| w.slug()))
+        .map_err(task_error)?;
+    let (name, layer) = crate::config::graph_setting(&layers).map_err(task_error)?;
+    let source = layer.map_or(SetupSource::Default, SetupSource::from);
+    Ok((name, source))
 }
 
 /// The graph a Task takes up when nothing else selects one.
@@ -644,7 +640,10 @@ pub(crate) fn select_task_run(
         (None, None) => {
             let (name, source) = task_graph_default(store, task)?;
             let repo = repository_for_task(store, task)?;
-            (load(&name, &format!("{source} default "), &repo)?, None)
+            (
+                load(&name, &format!("{} default ", source.as_str()), &repo)?,
+                None,
+            )
         }
     };
     let take_up = row.is_none();
@@ -1534,12 +1533,19 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
     title
 }
 
+/// The Task's agent, else its Wave's and repository's configuration.
 pub(crate) fn resolve_task_agent(
     worktree: &Path,
+    wave: Option<&str>,
+    personal: &crate::config::PersonalSettings,
     agent: Option<&str>,
     skill: Option<&crate::graph::Skill>,
 ) -> String {
-    crate::prompt::process::resolve_agent(agent, skill, &load_config_or_default(Some(worktree)))
+    let config = crate::config::load_wave_config_with(Some(worktree), wave, personal)
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    crate::prompt::process::resolve_agent(agent, skill, &config)
 }
 
 async fn select_task_agent(
@@ -1559,11 +1565,16 @@ async fn select_task_agent(
     Ok(())
 }
 
-fn task_configuration_refusal(task: &Task, skill: Option<&crate::graph::Skill>) -> Option<String> {
+fn task_configuration_refusal(
+    task: &Task,
+    wave: Option<&str>,
+    personal: &crate::config::PersonalSettings,
+    skill: Option<&crate::graph::Skill>,
+) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     checkout_execution_boundary(
         worktree,
-        &resolve_task_agent(worktree, task.agent.as_deref(), skill),
+        &resolve_task_agent(worktree, wave, personal, task.agent.as_deref(), skill),
     )
     .err()
     .map(|error| error.to_string())
@@ -1573,9 +1584,11 @@ fn task_configuration_refusal(task: &Task, skill: Option<&crate::graph::Skill>) 
 /// non-resumable failure as its latest event.
 pub(crate) fn task_process_refusal_after(
     task: &Task,
+    wave: Option<&str>,
+    personal: &crate::config::PersonalSettings,
     latest: Option<&crate::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, None)
+    task_configuration_refusal(task, wave, personal, None)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 

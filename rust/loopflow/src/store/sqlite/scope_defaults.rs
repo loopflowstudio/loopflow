@@ -5,6 +5,11 @@
 //! Tasks run and where its primary Session runs. A Task's own Machine is its
 //! ownership claim. In place of a Tasks Machine, a scope may name capacity: a
 //! pool or on-demand that `lf task run` takes a machine from.
+//!
+//! Scope settings are your overrides of shared setup (`graph`, `agent`,
+//! `skill_agents.<skill>`) for a Wave, a repository or every repository.
+use std::collections::BTreeMap;
+
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::durable::{
@@ -118,6 +123,19 @@ pub(super) fn owning_machine_in(
     ))
 }
 
+/// Your overrides of shared setup that apply in one repository and Wave, by
+/// key, for each scope.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScopeSettings {
+    pub global: BTreeMap<String, String>,
+    pub repository: BTreeMap<String, String>,
+    pub wave: BTreeMap<String, String>,
+}
+
+fn settings_key(scope: Option<&DefaultScope>) -> (&'static str, &str) {
+    scope.map_or(("global", ""), scope_key)
+}
+
 impl SqliteStore {
     /// Your Machine for a Wave's new Tasks or its Wave Session.
     pub fn wave_owning_machine(
@@ -173,6 +191,120 @@ impl SqliteStore {
             params![kind, id, machine.as_str(), crate::store::rows::now_unix()],
         )?;
         Ok(())
+    }
+
+    /// Clear one Machine setting at a scope, with the Tasks capacity it may
+    /// name; false when it held none.
+    pub fn clear_machine_default(
+        &self,
+        scope: &DefaultScope,
+        setting: MachineSetting,
+    ) -> StoreResult<bool> {
+        let (kind, id) = scope_key(scope);
+        let (set, held) = match setting {
+            MachineSetting::Tasks => (
+                "tasks_machine_id=NULL,tasks_capacity=NULL",
+                "(tasks_machine_id IS NOT NULL OR tasks_capacity IS NOT NULL)",
+            ),
+            MachineSetting::Session => {
+                ("session_machine_id=NULL", "session_machine_id IS NOT NULL")
+            }
+        };
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let transaction = conn.transaction()?;
+        let cleared = transaction.execute(
+            &format!(
+                "UPDATE scope_defaults SET {set} WHERE scope_kind=?1 AND scope_id=?2 AND {held}"
+            ),
+            [kind, id],
+        )? > 0;
+        transaction.execute(
+            "DELETE FROM scope_defaults WHERE scope_kind=?1 AND scope_id=?2
+             AND tasks_machine_id IS NULL AND session_machine_id IS NULL AND tasks_capacity IS NULL",
+            [kind, id],
+        )?;
+        transaction.commit()?;
+        Ok(cleared)
+    }
+
+    /// Set your override of a shared setting; `None` is every repository.
+    pub fn set_scope_setting(
+        &self,
+        scope: Option<&DefaultScope>,
+        key: &str,
+        value: &str,
+    ) -> StoreResult<()> {
+        let (kind, id) = settings_key(scope);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO scope_settings(scope_kind,scope_id,key,value,set_at) VALUES(?1,?2,?3,?4,?5)
+             ON CONFLICT(scope_kind,scope_id,key) DO UPDATE SET value=excluded.value,set_at=excluded.set_at",
+            params![kind, id, key, value, crate::store::rows::now_unix()],
+        )?;
+        Ok(())
+    }
+
+    /// Clear your override of a shared setting; false when there was none.
+    pub fn clear_scope_setting(
+        &self,
+        scope: Option<&DefaultScope>,
+        key: &str,
+    ) -> StoreResult<bool> {
+        let (kind, id) = settings_key(scope);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "DELETE FROM scope_settings WHERE scope_kind=?1 AND scope_id=?2 AND key=?3",
+            [kind, id, key],
+        )? > 0)
+    }
+
+    /// Whether you have set any override, so readers skip finding the repository.
+    pub fn has_scope_settings(&self) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // A store older than this build has no table, and so no values.
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'scope_settings')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )? && conn.query_row("SELECT EXISTS(SELECT 1 FROM scope_settings)", [], |row| {
+            row.get(0)
+        })?)
+    }
+
+    /// Your overrides for work in `repo` (its canonical main checkout) and,
+    /// when named, the Wave at `wave_slug` there.
+    pub fn scope_settings(
+        &self,
+        repo: Option<&str>,
+        wave_slug: Option<&str>,
+    ) -> StoreResult<ScopeSettings> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut statement = conn.prepare(
+            "SELECT scope_kind,key,value FROM scope_settings
+             WHERE scope_kind='global'
+                OR (scope_kind='repository' AND scope_id IN
+                    (SELECT id FROM repository_plans WHERE repo=?1 AND selected=1))
+                OR (scope_kind='wave' AND scope_id IN
+                    (SELECT id FROM wave_addresses WHERE repo=?1 AND slug=?2 AND retired_at IS NULL))",
+        )?;
+        let rows = statement.query_map(params![repo, wave_slug], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut settings = ScopeSettings::default();
+        for row in rows {
+            let (kind, key, value) = row?;
+            let scope = match kind.as_str() {
+                "global" => &mut settings.global,
+                "repository" => &mut settings.repository,
+                _ => &mut settings.wave,
+            };
+            scope.insert(key, value);
+        }
+        Ok(settings)
     }
 
     /// Send a scope's new Tasks to a pool or on-demand, replacing its Tasks

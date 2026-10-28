@@ -204,11 +204,49 @@ command in your own crontab:
 # 0 9 * * *  cd ~/src/product && lf -b --wave billing wave-operate
 ```
 
+### Set it up once
+
+```yaml
+# .lf/wave/billing/config.yaml: committed, inherited by the Wave's Tasks
+graph: code
+agent: claude
+skill_agents:
+  implement: claude:opus
+context_budgets:
+  memory_tokens: 20000
+```
+
+```bash
+lf --wave billing set machine mini                        # your Machine for its Tasks
+lf --wave billing set account.claude work@example.com     # the login that pays
+lf --wave billing set agent codex                         # your agent here; the team's stays claude
+lf set account.claude me@example.com --global             # every repository
+lf wave status billing                                    # each setting and its source
+```
+
+`config.yaml` has the shape of `.lf/config.yaml` and holds only what the Wave
+changes; launches in the Wave layer it over the repository's and your
+`~/.lf/config.yaml`. Repository settings (`planning`, `release`, `exclude`,
+`merge_method`, `land`, `pr`) are an error there. It also carries the Wave's
+`id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
+settings.
+
+`lf set` never edits committed config. It stores your own value on this
+Machine for the repository, a Wave (`lf --wave <wave> set`) or every repository
+(`--global`); without `--wave` it sets the repository, even in a Wave's Task
+worktree. Your `graph`, `agent` or `skill_agents.<skill>` wins over the
+committed value for you only, and `lf wave status` reports it as `personal`.
+Machines (`machine`, `machine.tasks`, `machine.session`) and account routes
+(`account.<provider>`) exist only this way; a launch uses the nearest of Wave,
+repository and global. `lf unset <key>` hands the choice back.
+
+A Wave without `config.yaml` reads these keys from `GOAL.md` frontmatter, which
+released lf still reads (LOO-640 removes that).
+
 ### Plan a chapter: Projects and KRs
 
 ```bash
 lf wave update-plan --wave billing --plan plan.json
-lf wave graph set feature billing        # the graph its new Tasks take up
 ```
 
 ```json
@@ -236,7 +274,7 @@ comes first and applies with no Wave selected.
 ### Talk to it from Discord
 
 ```yaml
-# .lf/wave/billing/GOAL.md frontmatter
+# .lf/wave/billing/config.yaml
 chat:
   provider: discord
   guild_id: "123456789012345678"

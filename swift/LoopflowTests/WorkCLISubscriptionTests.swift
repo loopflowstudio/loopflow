@@ -19,7 +19,7 @@ struct WorkCLISubscriptionTests {
         let seedID = try #require(seed["id"] as? String)
         let status = try await fixture.json(["desktop", "task", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
-        _ = try await fixture.run(["wave", "graph", "set", "proof", waveName])
+        _ = try await fixture.run(["--wave", waveName, "set", "graph", "proof"])
         let query = fixture.lf.query
         let model = WorkModel(query: query, repoPath: fixture.repo.path)
         let keeping = Task { await model.keepWorkCurrent() }

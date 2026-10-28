@@ -759,11 +759,6 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
         } => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
         OpsCommand::People { json } => loopflow::lf::commands::people::run(*json),
         OpsCommand::Tokens { json, days } => loopflow::lf::commands::tokens::run(*json, *days),
-        OpsCommand::Machine {
-            cmd: cmd @ loopflow::lf::MachineCommand::Use { .. },
-        } => in_directory_runtime(args, |repo| {
-            loopflow::lf::commands::machine_use::run(repo, cmd, cli.selects_repository())
-        }),
         OpsCommand::Machine { cmd } => loopflow::lf::commands::machine::run(cmd, cli.batch),
         OpsCommand::Pr { cmd } => in_repo_runtime(args, |_| {
             loopflow::lf::commands::ops::run_pr(cmd.as_ref(), cli.agent.as_deref())
@@ -838,10 +833,6 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
                                 )
                             );
                         }
-                    }
-                    WaveGraphCommand::Set { wave, name } => {
-                        let saved = project::set_wave_graph(repo, wave.as_deref(), name).await?;
-                        println!("{}: Tasks take up {name}", saved.wave);
                     }
                 }
                 Ok(())
@@ -2473,6 +2464,30 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         journal::admit_process(&std::env::current_dir()?, args);
         return loopflow::lf::commands::session::run(cmd, &cli);
     }
+    // Your own settings scope by the `--wave` typed, never by the worktree's
+    // Work, so they dispatch before Work binding.
+    let setting = match &cli.command {
+        Some(Commands::Set {
+            key,
+            value,
+            global,
+            here,
+        }) => Some((key, Some(value.as_str()), *global, *here)),
+        Some(Commands::Unset { key, global, here }) => Some((key, None, *global, *here)),
+        _ => None,
+    };
+    if let Some((key, value, global, here)) = setting {
+        return in_directory_runtime(args, |repo| {
+            loopflow::lf::commands::setting::run(
+                repo,
+                cli.wave.as_deref(),
+                key,
+                value,
+                global,
+                here,
+            )
+        });
+    }
     // Task run/checkout own preparation above; ordinary invocations bind existing
     // Work. Admit this Process at the directory reached, even if binding fails.
     let mut _work_declaration = None;
@@ -2618,6 +2633,9 @@ fn execute_command(
         }) => loopflow::lf::commands::context::emit_block(delivery.as_deref(), *moment),
         Some(Commands::Session { .. }) => unreachable!("Session dispatch precedes Work binding"),
         Some(Commands::Ship { .. }) => unreachable!("ship dispatch precedes Work binding"),
+        Some(Commands::Set { .. } | Commands::Unset { .. }) => {
+            unreachable!("settings dispatch precedes Work binding")
+        }
         Some(Commands::Ops { cmd }) => dispatch_ops(cmd, cli, args),
         Some(Commands::Self_ {
             cmd:

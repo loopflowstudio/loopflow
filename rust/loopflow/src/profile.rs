@@ -193,8 +193,11 @@ pub struct AuthBrowserBinding {
     pub profile_id: ProfileId,
 }
 
+/// Where an account route applies; a launch uses the nearest: Wave, then
+/// repository, then default.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RouteScope {
+    Wave(crate::id::WaveId),
     Repo(RepoId),
     Default,
 }
@@ -202,6 +205,7 @@ pub enum RouteScope {
 impl RouteScope {
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::Wave(_) => "wave",
             Self::Repo(_) => "repo",
             Self::Default => "default",
         }
@@ -209,6 +213,7 @@ impl RouteScope {
 
     pub fn id(&self) -> &str {
         match self {
+            Self::Wave(wave_id) => wave_id.as_str(),
             Self::Repo(repo_id) => repo_id.as_str(),
             Self::Default => "",
         }

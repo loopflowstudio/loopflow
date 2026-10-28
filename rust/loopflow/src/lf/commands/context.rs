@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Result};
 use serde::Serialize;
 
-use crate::config::load_config;
+use crate::config::load_wave_config;
 use crate::prompt::context_budget::{measure_context, ContextBudgetReport, ContextBudgets};
 use crate::prompt::{gather_documents, GatherSpec};
 use crate::steer::NativeBoundary;
@@ -59,8 +59,8 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
         crate::durable::WorkRef::Task(id) => Some(id.to_string()),
         _ => None,
     });
-    let config = load_config(Some(&repo))?.unwrap_or_default();
-    let budgets = ContextBudgets::resolve(&config, &repo, wave.as_deref())?;
+    let config = load_wave_config(Some(&repo), wave.as_deref())?.unwrap_or_default();
+    let budgets = ContextBudgets::resolve(&config)?;
     // Size targets concern authored memory and scratch, not a prospective launch.
     let docs = gather_documents(&GatherSpec {
         repo_root: repo.clone(),

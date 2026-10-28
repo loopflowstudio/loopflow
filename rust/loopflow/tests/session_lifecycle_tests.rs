@@ -1849,9 +1849,12 @@ fn declared_agent_can_start_another_tasks_graph() {
     // Y's mechanical Graph never starts a provider; X's OpenCode issues the command.
     store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
-    store
-        .select_wave_graph(target.task.wave_id.as_ref().unwrap(), "switch-proof")
-        .unwrap();
+    support::select_wave_graph(
+        fixture.repo.path(),
+        &store,
+        target.task.wave_id.as_ref().unwrap(),
+        "switch-proof",
+    );
     let bin = fixture.home.path().join("bin");
     std::fs::remove_file(bin.join("lf")).unwrap();
     std::fs::write(

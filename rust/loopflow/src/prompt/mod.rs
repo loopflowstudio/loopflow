@@ -2010,9 +2010,9 @@ mod tests {
                 procedures.contains("lf task run") || procedures.contains("lf task-operate");
             assert_eq!(advances_tasks, orchestrates, "{name}");
             assert_eq!(
-                prompt.contains("lf machine use"),
+                prompt.contains("--repo <repo> set machine"),
                 scope == Some("repo"),
-                "{name}: lf machine use"
+                "{name}: lf set machine"
             );
             if scope.is_none() {
                 assert!(!prompt.contains("doppler run"), "{name}");

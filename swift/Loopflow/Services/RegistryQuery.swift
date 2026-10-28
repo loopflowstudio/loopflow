@@ -369,11 +369,12 @@ public struct RegistryQuery: Sendable {
         try Self.decode([Machine].self, from: await run(["machine", "list", "--json"], cwd))
     }
 
-    /// Hand a Task to `machine`, or set a Wave's default Machine, through `lf machine use`.
+    /// Move a Task to `machine` through `lf task move --machine`, or set your
+    /// Machine for a Wave through `lf set machine`.
     public func useMachine(_ machine: String, for target: WorkMachineTarget, cwd: String?) async throws {
         switch target {
-        case .task(let issue): _ = try await run(["machine", "use", machine, "--task", issue, "--json"], cwd)
-        case .wave(let id): _ = try await run(["machine", "use", machine, id, "--json"], cwd)
+        case .task(let issue): _ = try await run(["task", "move", issue, "--machine", machine, "--json"], cwd)
+        case .wave(let id): _ = try await run(["--wave", id, "set", "machine", machine], cwd)
         }
     }
 

@@ -292,38 +292,13 @@ pub struct WaveGraph {
 pub async fn wave_graph(repo: &Path, selector: Option<&str>) -> OpsResult<WaveGraph> {
     let store = read_store()?;
     let wave = graph_wave(&store, repo, selector).await?;
+    let layers =
+        crate::config::config_layers(Some(repo), Some(wave.slug())).map_err(project_error)?;
+    let (name, layer) = crate::config::graph_setting(&layers).map_err(project_error)?;
     Ok(WaveGraph {
-        graph: store
-            .sqlite
-            .selected_wave_graph(wave.id())
-            .map_err(project_error)?,
+        graph: layer.map(|_| name),
         wave_id: wave.id().clone(),
         wave: wave.slug().into(),
-    })
-}
-
-pub async fn set_wave_graph(
-    repo: &Path,
-    selector: Option<&str>,
-    name: &str,
-) -> OpsResult<WaveGraph> {
-    let store = super::planning_sync::planning_store().await?;
-    let wave = graph_wave(&store, repo, selector).await?;
-    if crate::task_graph::CapturedGraph::load(name, repo)
-        .map_err(project_error)?
-        .is_none()
-    {
-        return Err(project_error(crate::task_graph::missing_graph(name)));
-    }
-    let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
-    store
-        .sqlite
-        .select_wave_graph(wave.id(), name)
-        .map_err(project_error)?;
-    Ok(WaveGraph {
-        wave_id: wave.id().clone(),
-        wave: wave.slug().into(),
-        graph: Some(name.into()),
     })
 }
 

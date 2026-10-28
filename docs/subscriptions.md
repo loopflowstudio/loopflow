@@ -12,8 +12,8 @@ lf account connect claude personal@example.com --chrome-profile personal@example
 lf account connect codex work@example.com --chrome-profile work@example.com
 lf account
 
-lf account route set claude personal@
-lf account route set codex work@ personal@
+lf set account.claude personal@
+lf set account.codex work@,personal@
 lf account route
 ```
 
@@ -226,18 +226,20 @@ automatic account behaves as `explicit-only` until the date is cleared.
 
 ## Route a repository
 
-A repository account route is an ordered list of subscription logins to try for
-one provider in one repository:
+An account route is an ordered list of subscription logins to try for one
+provider in one repository, one Wave or every repository:
 
 ```bash
-lf account route set claude personal@ work@
-lf account route set codex work@ personal@
-lf account route set codex work@ --default
+lf set account.claude personal@,work@
+lf --wave billing set account.codex work@
+lf set account.codex work@ --global
+lf unset account.codex
 lf account route --json
 ```
 
-Show lists eligible launch candidates in order without selecting one. Explicit
-`--repo` and `--default` work outside Git; a write without either requires a
+A launch uses the nearest of Wave, repository and global routes. Show lists
+eligible launch candidates in order without selecting one; its explicit
+`--repo` and `--default` work outside Git. A repository route requires a
 repository origin.
 
 It is account-selection metadata, not an SSH or network route, and it contains

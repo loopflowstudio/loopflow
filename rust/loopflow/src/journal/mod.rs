@@ -687,6 +687,14 @@ pub fn open_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     SqliteStore::new(&ledger_db_path()?)
 }
 
+/// This Process's retained connection to the store at `path`, if a receipt
+/// already opened one; reusing it skips another read of the whole schema.
+pub(crate) fn retained_ledger(path: &Path) -> Option<SqliteStore> {
+    current_context()
+        .filter(|context| context.ledger_path == path)
+        .and_then(|context| context.ledger.get().cloned())
+}
+
 /// This Process's retained ledger connection, opening one only when no receipt
 /// has yet; every open revalidates the schema.
 pub(crate) fn process_ledger() -> Result<SqliteStore, crate::store::StoreError> {

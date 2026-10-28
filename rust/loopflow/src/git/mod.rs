@@ -518,13 +518,7 @@ pub(crate) fn delete_local_branch_at(
         });
     }
     let reference = format!("refs/heads/{branch}");
-    let output = run_git(repo, &["update-ref", "-d", &reference, head])?;
-    if !output.status.success() {
-        return Err(GitError::CommandFailed {
-            command: format!("git update-ref -d {reference} {head}"),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
-    }
+    git_stdout(repo, &["update-ref", "-d", &reference, head])?;
     Ok(())
 }
 

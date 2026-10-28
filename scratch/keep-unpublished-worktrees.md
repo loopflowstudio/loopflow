@@ -22,44 +22,19 @@ build and branch cleanup too. A second run has nothing further eligible to remov
 This serves Infrastructure's preservation and reliable unattended-work objective
 and its chapter's plumbing/continuity KRs. No quantitative target was supplied.
 
-## Findings at base 5c9c22ac36f327d11368654218902a63f3f88b1b
+## Evidence
 
-- `git/worktrees.rs::apply_network_enrichment` sets `remote_gone` whenever a
-  nonempty remote branch set omits a local name. `worktree_prune_reason` treats
-  this as terminal. `manual_prune_removes_recent_remote_gone_branch` already
-  constructs a never-pushed unique commit and asserts its deletion: replace this
-  incorrect regression contract.
-- `lf/commands/ops/mod.rs::prune_repo_worktrees` always chooses
-  `WorktreePrunePolicy::manual()`. The hourly script calls ordinary `lf wt prune`,
-  so changing only `automatic()` would not fix the installed route. Seven-day
-  inactivity also deletes undelivered work through `abandoned_prune_reason`.
-  A non-GitHub remote counts as known-empty PR evidence even when its ref read
-  fails, so an absent remote is not the only unsafe path.
-- PR enrichment already uses `head_pull_request`: merged/closed evidence applies
-  only to the exact local head. Extra local commits invalidate the earlier PR.
-  Preserve this mechanism. `local_states` deliberately calls contained/no-delta
-  branches fresh; ancestry alone cannot distinguish a new checkout from finished
-  work. Its `squash_merged && !fresh` prune arm is unreachable for ordinary local
-  states (squash equivalence sets fresh).
-- `task_ownership` reads unfinished Task paths plus process activity, and checks
-  the selected and production registries. Read errors stop cleanup. Existing
-  `running_paths`, path protections, persistent-worktree checks and checkout leases
-  remain authoritative; no Task state or Session lifecycle redesign is needed.
-- `remove_worktree_target` calls `worktree_remove`, whose leased implementation
-  always invokes Git with `--force`, then deletes the branch without an expected
-  head. Classification precedes removal, leaving room for changes between them.
-  `ops/wt.rs` already checks expected heads for branch deletion; use that existing
-  mechanism for the local ref rather than adding another branch deletion policy.
-- `ops/branch_prune.rs` already requires positive evidence at each copy's exact
-  head and protects checked-out branches. Its behavior survives unchanged; it is
-  the downstream consumer that must not erase the retained calibration ref.
-- Existing Python cleanup tests stub `lf` as success. They prove file-retention
-  rules, but cannot detect this bug. The acceptance fixture must execute real
-  worktree pruning, not only assert the shell invoked it.
-- Disposable Git probe: nonempty origin omitted a clean local branch with one
-  unique commit; non-force worktree removal refused untracked files. Git still
-  removed a checkout containing only ignored files. Non-force removal therefore
-  does not promise preservation of ignored artifacts in a finished checkout.
+The original investigation and alternatives are preserved at
+`315e2deda34e7e1ee6675ea8429d8fd6cec58b62:scratch/keep-unpublished-worktrees.md`.
+At base `5c9c22ac36`, ordinary and hourly pruning both selected the manual policy:
+remote absence or seven-day inactivity authorized forced removal. Existing tests
+even required deletion of a never-pushed unique commit. PR enrichment already
+matched the exact local head; reuse that evidence and the ownership/lease readers.
+
+Non-force Git removal refuses tracked/untracked edits but can remove ignored
+files. This hotfix does not promise ignored-artifact preservation in a finished
+checkout. Earlier shell tests stubbed `lf`; the added fixture executes the built
+CLI so it can detect the original deletion rather than just its invocation.
 
 ## Chosen approach
 
@@ -95,34 +70,26 @@ query, fetch loop, new cache, daemon or retry. Dry-run uses the same classificat
 and performs no checkout/ref deletion. Real pruning retains its existing main
 refresh; acceptance fixtures hold facts constant across dry-run and mutation.
 
-### Alternatives and failure cases
-
-- Merely deleting the `RemoteGone` arm leaves stale-age deletion exposed.
-- Recording whether a branch was ever pushed cannot prove its current commits
-  were delivered; it adds state without resolving the safety question.
-- Treating ancestry or squash equivalence as completion confuses newly created
-  checkouts with finished work. Keep their listing semantics, not deletion rights.
-- Disabling cleanup permanently loses the accepted disk-reclamation outcome.
-
-Success is boring: finished checkouts disappear while an old unpushed experiment
-is still available next month. Failure would be a hidden caller retaining the
-old age policy, using an earlier PR head, or forcing away edits after listing.
-The deletion inventory and end-to-end fixture specifically cover these cases.
-
 ## Delete — do not maintain
 
-- Remove `WorktreePrunePolicy`, `abandoned_prune_reason`, `branch_is_stale`, their
-  exclusive timestamp plumbing, and the policy argument at all callers.
-- Remove prune reasons `RemoteGone`, `Stale`, the unreachable `SquashMerged`
-  route, and unused `Terminal` if the final caller inventory confirms no use.
-  Preserve listing `remote_gone`, `squash_merged` and `fresh` observations.
-- Replace tests asserting remote-gone/stale deletion with preservation assertions.
-  Delete exclusive policy/age tests that no longer describe supported behavior.
-- Remove forced removal as an implicit property of every worktree deletion;
-  make callers' intended semantics explicit in the existing primitive.
-- Update the pruning contract comments and user-facing documentation in place.
-  No second cleanup policy, publication-history table, fallback, compatibility
-  adapter or silent-success branch is part of this change.
+Completed; no remaining deletion targets:
+
+- Removed `WorktreePrunePolicy`, `abandoned_prune_reason`, `branch_is_stale`,
+  timestamp plumbing and every policy argument.
+- Removed prune reasons `RemoteGone`, `Stale`, `SquashMerged` and `Terminal`;
+  listing observations remain. Removed `Listing.pull_requests_known` and the
+  optional `RemoteFacts.pull_requests` wrapper it alone needed. `RemoteOutcome`
+  still reports network failure; missing PR evidence never authorizes removal.
+- Inlined the surviving two-state PR decision after protections and dirty-file
+  handling. Removed `worktree_prune_reason` and its three exclusive unit tests;
+  real-CLI tests prove dirty retention and closed-PR removal on the surviving path.
+- Prune targets require a branch and matched head. Detached targets and the
+  removal helper's repeated default-branch check are gone; classification already
+  excludes both. The lease-time branch/head/cleanliness checks remain.
+- Removed implicit force from the shared removal primitive; each caller now
+  names its semantics. Reuse shared Git diagnostics for conditional ref deletion.
+
+No second cleanup policy, publication ledger or compatibility path is needed.
 
 ## Implementation and remaining work
 
@@ -198,4 +165,4 @@ redesign, Git gc/prune recovery operations and account configuration are exclude
 Ignored build-output retention remains governed by the existing script contract;
 this hotfix does not redefine ignored files as source or claim they are backed up.
 
-Check: 2026-10-27 `cargo test` filters `wt_prune_branches::worktree_prune` (integration), `git::worktrees::tests::prune_`, `git::tests::local_branch_deletion_retains_a_new_head`, `ops::wt::tests::` (lib) — 13 passed; `uv run pytest python/tests/test_disk_cleanup.py::test_real_cleanup_preserves_unpublished_work_and_removes_finished_checkouts -q` — passed; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `uv run ruff check python/tests/test_disk_cleanup.py` — passed. Gate owns affected suites; the operator owns installed acceptance.
+Check: 2026-10-27 `cargo test -p loopflow --lib git::worktrees::tests::prune_`, `cargo test -p loopflow --lib git::tests::local_branch_deletion_retains_a_new_head`, `cargo test -p loopflow --test integration wt_prune_branches::worktree_prune` — 7 passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` — passed. Prior explicit-force and macOS script acceptance receipts: `315e2deda34e7e1ee6675ea8429d8fd6cec58b62:scratch/keep-unpublished-worktrees.md`. Gate owns affected suites; the operator owns installed acceptance.

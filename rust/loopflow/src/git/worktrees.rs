@@ -105,7 +105,7 @@ impl WorktreePruneReason {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreePruneTarget {
     pub head: String,
-    pub branch: Option<String>,
+    pub branch: String,
     pub path: PathBuf,
     pub reason: WorktreePruneReason,
 }
@@ -1119,8 +1119,8 @@ fn local_states(
 
 #[derive(Debug)]
 struct RemoteFacts {
-    /// `None` when GitHub was applicable but unavailable.
-    pull_requests: Option<HashMap<String, PullRequestState>>,
+    /// PR evidence matched to the observed local heads; absent evidence retains work.
+    pull_requests: HashMap<String, PullRequestState>,
     /// Empty when the remote could not be read.
     branches: HashSet<String>,
     outcome: RemoteOutcome,
@@ -1145,16 +1145,15 @@ fn remote_facts(
         .collect();
     if branch_heads.is_empty() {
         return RemoteFacts {
-            pull_requests: Some(HashMap::new()),
+            pull_requests: HashMap::new(),
             branches: HashSet::new(),
             outcome: RemoteOutcome::NotAsked,
         };
     }
     let Some(nwo) = github_repo_nwo(repo) else {
-        // A non-GitHub remote has no GitHub PR state: known, and empty.
         let listed = list_remote_branches(repo);
         return RemoteFacts {
-            pull_requests: Some(HashMap::new()),
+            pull_requests: HashMap::new(),
             outcome: listed
                 .as_ref()
                 .map_or_else(RemoteOutcome::from, |_| RemoteOutcome::Answered),
@@ -1178,7 +1177,7 @@ fn remote_facts(
                 })
                 .collect();
             RemoteFacts {
-                pull_requests: Some(pull_requests),
+                pull_requests,
                 branches: github.existing,
                 outcome: RemoteOutcome::Answered,
             }
@@ -1186,7 +1185,7 @@ fn remote_facts(
         // PR state stays unknown whatever the fallback learns about branches.
         // A GitHub that used the whole limit leaves none for a second call.
         Err(failure) => RemoteFacts {
-            pull_requests: None,
+            pull_requests: HashMap::new(),
             branches: match failure {
                 RemoteFailure::TimedOut => HashSet::new(),
                 _ => list_remote_branches(repo).unwrap_or_default(),
@@ -1267,7 +1266,7 @@ pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     apply_network_enrichment(
         &mut worktrees,
         &default_branch,
-        &remote.pull_requests.unwrap_or_default(),
+        &remote.pull_requests,
         &remote.branches,
     );
     Ok(Listing {
@@ -1300,17 +1299,6 @@ pub fn list_worktrees(repo: &Path) -> Result<Vec<WorktreeState>, GitError> {
     list_worktrees_timed(repo).map(|listing| listing.worktrees)
 }
 
-fn worktree_prune_reason(state: &WorktreeState) -> Option<WorktreePruneReason> {
-    if state.dirty {
-        return None;
-    }
-    match state.pull_request {
-        Some(PullRequestState::Merged) => Some(WorktreePruneReason::Merged),
-        Some(PullRequestState::Closed) => Some(WorktreePruneReason::ClosedPullRequest),
-        _ => None,
-    }
-}
-
 fn prune_stale_worktree_metadata(repo: &Path) -> Result<(), GitError> {
     let output = Command::new("git")
         .arg("-C")
@@ -1326,13 +1314,9 @@ fn prune_stale_worktree_metadata(repo: &Path) -> Result<(), GitError> {
     })
 }
 
-fn remove_worktree_target(
-    repo: &Path,
-    default_branch: &str,
-    target: &WorktreePruneTarget,
-) -> Result<(), GitError> {
+fn remove_worktree_target(repo: &Path, target: &WorktreePruneTarget) -> Result<(), GitError> {
     let lease = acquire_worktree_lease(repo, &target.path, "worktree pruning")?;
-    if current_branch(&target.path)? != target.branch
+    if current_branch(&target.path)?.as_deref() != Some(target.branch.as_str())
         || rev_parse(&target.path, "HEAD")? != target.head
         || !is_clean(&target.path)?
     {
@@ -1342,12 +1326,7 @@ fn remove_worktree_target(
         });
     }
     worktree_remove_owned(repo, &target.path, false, &lease, &|_| {})?;
-    if let Some(branch) = target.branch.as_deref() {
-        if branch != default_branch {
-            delete_local_branch_at(repo, branch, &target.head)?;
-        }
-    }
-    Ok(())
+    delete_local_branch_at(repo, &target.branch, &target.head)
 }
 
 fn path_is_protected(path: &Path, protected_paths: &HashSet<PathBuf>) -> bool {
@@ -1393,15 +1372,21 @@ pub fn prune_worktrees(
             report.retained_dirty.push(state.path.clone());
             continue;
         }
-        let Some(reason) = worktree_prune_reason(&state) else {
-            continue;
+        let reason = match state.pull_request {
+            Some(PullRequestState::Merged) => WorktreePruneReason::Merged,
+            Some(PullRequestState::Closed) => WorktreePruneReason::ClosedPullRequest,
+            _ => continue,
         };
-        let Some(branch) = state.branch.as_ref().and_then(|name| branches.get(name)) else {
+        let Some((name, branch)) = state
+            .branch
+            .as_ref()
+            .and_then(|name| branches.get_key_value(name))
+        else {
             continue;
         };
         report.candidates.push(WorktreePruneTarget {
             head: branch.head.clone(),
-            branch: state.branch,
+            branch: name.clone(),
             path: state.path,
             reason,
         });
@@ -1412,7 +1397,7 @@ pub fn prune_worktrees(
     }
 
     for target in report.candidates.clone() {
-        match remove_worktree_target(repo, &default_branch, &target) {
+        match remove_worktree_target(repo, &target) {
             Ok(()) => report.removed.push(target),
             Err(error) => report.failed.push(WorktreePruneFailure {
                 target,
@@ -1872,9 +1857,9 @@ mod tests {
         apply_network_enrichment, diff_shortstats, ensure_agent_worktree, git_common_dir,
         head_pull_request, list_worktrees, move_default_agent_to_worktree, parse_existing_branches,
         parse_graphql_budget, parse_pull_request_nodes, plan_placement, remote_stdout,
-        wave_agent_segment, whole_github_answer, worktree_path, worktree_prune_reason,
-        GithubBranches, GraphqlBudget, PlacementError, PlacementStrategy, PullRequestNode,
-        PullRequestState, RemoteFailure, WorktreePruneReason, WorktreeSegment, WorktreeState,
+        wave_agent_segment, whole_github_answer, worktree_path, GithubBranches, GraphqlBudget,
+        PlacementError, PlacementStrategy, PullRequestNode, PullRequestState, RemoteFailure,
+        WorktreePruneReason, WorktreeSegment, WorktreeState,
     };
     use std::collections::{HashMap, HashSet};
     use std::fs;
@@ -2316,7 +2301,7 @@ mod tests {
             git(&path, &["add", "."]);
             git(&path, &["commit", "-qm", "delivered"]);
             let target = super::WorktreePruneTarget {
-                branch: Some("finished".to_string()),
+                branch: "finished".to_string(),
                 head: crate::git::rev_parse(&path, "HEAD").unwrap(),
                 path: path.clone(),
                 reason: WorktreePruneReason::Merged,
@@ -2328,7 +2313,7 @@ mod tests {
                 "untracked" => fs::write(path.join("notes.txt"), "unfinished").unwrap(),
                 _ => unreachable!(),
             }
-            assert!(super::remove_worktree_target(fixture.path(), "main", &target).is_err());
+            assert!(super::remove_worktree_target(fixture.path(), &target).is_err());
             assert!(path.exists());
             assert!(crate::git::rev_parse(fixture.path(), "finished").is_ok());
             if matches!(change, "tracked" | "untracked") {
@@ -2353,69 +2338,15 @@ mod tests {
             &HashSet::from([path.join("nested")])
         ));
         let target = super::WorktreePruneTarget {
-            branch: Some("protected".to_string()),
+            branch: "protected".to_string(),
             head: crate::git::rev_parse(&path, "HEAD").unwrap(),
             path: path.clone(),
             reason: WorktreePruneReason::Merged,
         };
         let _lease =
             crate::git::acquire_worktree_lease(fixture.path(), &path, "live operation").unwrap();
-        assert!(super::remove_worktree_target(fixture.path(), "main", &target).is_err());
+        assert!(super::remove_worktree_target(fixture.path(), &target).is_err());
         assert!(path.exists());
-    }
-
-    #[test]
-    fn prune_retains_dirty_landed_worktrees() {
-        let state = WorktreeState {
-            branch: Some("landed".to_string()),
-            path: Path::new("/tmp/repo.landed").to_path_buf(),
-            base_branch: None,
-            merged: true,
-            squash_merged: false,
-            fresh: false,
-            dirty: true,
-            remote_gone: true,
-            pull_request: Some(PullRequestState::Merged),
-        };
-
-        assert_eq!(worktree_prune_reason(&state), None);
-    }
-
-    #[test]
-    fn prune_retains_unmerged_dirty_worktrees() {
-        let state = WorktreeState {
-            branch: Some("abandoned".to_string()),
-            path: Path::new("/tmp/repo.abandoned").to_path_buf(),
-            base_branch: None,
-            merged: false,
-            squash_merged: false,
-            fresh: false,
-            dirty: true,
-            remote_gone: false,
-            pull_request: None,
-        };
-
-        assert_eq!(worktree_prune_reason(&state), None);
-    }
-
-    #[test]
-    fn closed_pull_request_is_terminal_without_an_age_gate() {
-        let state = WorktreeState {
-            branch: Some("closed".to_string()),
-            path: Path::new("/tmp/repo.closed").to_path_buf(),
-            base_branch: None,
-            merged: false,
-            squash_merged: false,
-            fresh: false,
-            dirty: false,
-            remote_gone: false,
-            pull_request: Some(PullRequestState::Closed),
-        };
-
-        assert_eq!(
-            worktree_prune_reason(&state),
-            Some(WorktreePruneReason::ClosedPullRequest)
-        );
     }
 
     #[test]

@@ -352,7 +352,8 @@ fn worktree_prune_requires_terminal_evidence_at_the_current_head() {
         if matches!(branch, "merged" | "squashed" | "closed") {
             finished.push((branch, path));
         } else {
-            retained.push((branch, path, head));
+            let content = fs::read(path.join("work.txt")).unwrap();
+            retained.push((branch, path, head, content));
         }
     }
     git(repo.path(), &["push", "origin", "main"]);
@@ -383,23 +384,18 @@ fn worktree_prune_requires_terminal_evidence_at_the_current_head() {
         assert!(!local_heads(&repo).contains(&branch.to_string()));
     }
     assert!(origin_heads(&repo).contains(&"closed".to_string()));
-    for (branch, path, head) in &retained {
+    for (branch, path, head, content) in &retained {
         assert!(path.exists(), "{branch}");
         assert_eq!(&git(path, &["rev-parse", "HEAD"]), head);
         assert_eq!(&git(repo.path(), &["rev-parse", branch]), head);
+        assert_eq!(&fs::read(path.join("work.txt")).unwrap(), content);
+        if *branch == "untracked" {
+            assert_eq!(
+                fs::read_to_string(path.join("notes.txt")).unwrap(),
+                "unfinished notes"
+            );
+        }
     }
-    assert_eq!(
-        fs::read_to_string(
-            retained
-                .iter()
-                .find(|(branch, _, _)| *branch == "dirty")
-                .unwrap()
-                .1
-                .join("work.txt")
-        )
-        .unwrap(),
-        "unfinished edits"
-    );
     assert!(fresh.exists());
     let again = run_lf(&repo, &gh, &["wt", "prune"]);
     assert!(again.status.success());

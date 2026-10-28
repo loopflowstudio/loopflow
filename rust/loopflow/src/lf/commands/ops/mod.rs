@@ -1614,7 +1614,7 @@ fn wt_prune(dry_run: bool) -> Result<()> {
         for target in &report.candidates {
             println!(
                 "  {} ({reason})  {}",
-                target.branch.as_deref().unwrap_or("detached"),
+                target.branch,
                 target.path.display(),
                 reason = target.reason.as_str(),
             );

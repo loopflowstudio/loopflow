@@ -246,4 +246,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — compress (2026-10-28): `git diff --check` and `lf context` pass; notes only, no build/test rerun. Gate owns affected checks; native writer proof and Infrastructure's installed acceptance after supported reconnection remain pending.
+Check — realign (2026-10-28): `git diff --check` and `lf context` pass; source, upstream and relevant parent/child memory agree with the plan. Notes only; no build/test rerun. Native writer proof, affected gate checks and Infrastructure's installed acceptance after supported reconnection remain pending.

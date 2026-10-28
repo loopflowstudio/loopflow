@@ -1502,22 +1502,15 @@ fn incompatible(conn: &rusqlite::Connection) -> StoreError {
     ))
 }
 
-/// The build that wrote the ledger's newest row, when it recorded itself.
+/// The build that wrote the ledger's newest row, when it recorded itself. A
+/// ledger without provenance columns fails the query and names no build.
 fn last_migrated_by(conn: &rusqlite::Connection) -> Option<String> {
-    if !migration_ledger_has_provenance(conn).ok()? {
-        return None;
-    }
-    let (version, revision) = conn
+    let (version, revision): (Option<String>, Option<String>) = conn
         .query_row(
             "SELECT package_version, source_revision FROM schema_migrations
              ORDER BY applied_at DESC, rowid DESC LIMIT 1",
             [],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            },
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .ok()?;
     let version = version?;

@@ -1,6 +1,6 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Blocked on a compatible native writer.** The production
+Status (2026-10-28): **Native writer unresolved; implementation incomplete.** The production
 `security -i` transport remains defective; no native acceptance fixture exists.
 Findings 35–36 reject the tested access constructions and authentication/group
 retention alternatives. A distinct supported mechanism is required before another
@@ -300,4 +300,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — compress (2026-10-28): `git diff --check` and `lf context` pass; prose only, no build or mutation probe rerun. Gate owns affected checks; writer mechanism, native acceptance and installed acceptance remain unresolved.
+Check — realign (2026-10-28): `git diff --check` and `lf context` pass; source inspection agrees with the remaining plan, no code or probe rerun. Gate owns affected checks; writer mechanism, native acceptance and installed acceptance remain unresolved.

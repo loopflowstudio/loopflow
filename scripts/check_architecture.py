@@ -254,7 +254,8 @@ def _discover_executable_edges(root: Path) -> set[str]:
     source_root = root / "rust/loopflow/src"
     for path in sorted(source_root.rglob("*.rs")):
         relative = path.relative_to(root)
-        if "tests" in relative.parts or MIGRATIONS in relative.parents:
+        # `tests.rs` is an out-of-line `#[cfg(test)] mod tests;`.
+        if "tests" in relative.parts or path.name == "tests.rs" or MIGRATIONS in relative.parents:
             continue
         # `#[cfg(test)] mod foo_tests;` sibling files are test-only.
         if path.stem == "tests" or path.stem.endswith("_tests"):

@@ -43,10 +43,10 @@ enum Integration {
     Completed,
 }
 
-/// Prepare one PR: commit, sync onto main, apply configured cleanup, mark ready, and
-/// finalize per `finalize`. `arm` requests auto-merge; `submit` leaves the PR
-/// for manual merge. Neither rotates the worktree. Returns the resulting PR,
-/// or `None` for a local merge.
+/// Prepare one PR: commit, merge main when GitHub needs it, apply configured
+/// cleanup, mark ready, and finalize per `finalize`. `arm` requests auto-merge;
+/// `submit` leaves the PR for manual merge. Neither rotates the worktree.
+/// Returns the resulting PR, or `None` for a local merge.
 fn prepare_pr(
     repo: &Path,
     options: &LandOptions,
@@ -78,7 +78,7 @@ fn prepare_pr(
     };
     let feature_branch = current_branch(&repo_root)?
         .ok_or_else(|| OpsError::Message("not on a branch".to_string()))?;
-    {
+    let resync = {
         let _mutation = crate::ops::task::lock_task_pr_mutation(&repo_root)?;
         if matches!(finalize, Finalize::AutoMerge) && matches!(integration, Integration::Required) {
             if let Some((number, head)) = crate::ops::task::matching_task_pr_merge_request(
@@ -112,6 +112,10 @@ fn prepare_pr(
                 }
             }
         }
+        // Read GitHub's merge state before disarming: a dequeue replaces the
+        // eviction that may be the only record of a conflict.
+        let resync =
+            matches!(integration, Integration::Required) && needs_resync(&repo_root, options)?;
         let cleared_task_request = crate::ops::task::clear_task_pr_merge_before_head_mutation(
             &repo_root, true, inherit_pr,
         )?;
@@ -130,7 +134,8 @@ fn prepare_pr(
                 crate::ops::pr::disable_auto_merge(&repo_root, number, inherit_pr)?;
             }
         }
-    }
+        resync
+    };
     match integration {
         Integration::Required => prepare_land(&repo_root, options, progress)?,
         Integration::Completed if !is_clean(&repo_root)? => {
@@ -167,7 +172,11 @@ fn prepare_pr(
     }
     crate::ops::task::require_task_pr_range_nonempty(&repo_root)?;
     let main_branch = match integration {
-        Integration::Required => sync_land(&repo_root, &main_repo, progress)?,
+        Integration::Required if resync => sync_land(&repo_root, &main_repo, progress)?,
+        Integration::Required => {
+            crate::ops::commit::push_with_upstream_if_needed(&repo_root, &|_| {})?;
+            get_default_branch(&main_repo)?
+        }
         Integration::Completed => accept_completed_integration(&repo_root, &main_repo)?,
     };
     // Sync may advance the fork point. Re-run the authoritative proof to heal
@@ -369,6 +378,22 @@ fn prepare_land(
     }
 
     Ok(())
+}
+
+/// Merge main only when the land needs it: a local merge, a first publication,
+/// a stacked child whose parent landed, or a PR GitHub cannot merge as it is.
+/// A CI repair on a mergeable PR goes on top and keeps its tested base.
+fn needs_resync(repo_root: &Path, options: &LandOptions) -> OpsResult<bool> {
+    if options.local || crate::ops::task::stack_for_landing(repo_root)?.is_some() {
+        return Ok(true);
+    }
+    match crate::ops::pr::current_pr(repo_root)? {
+        Some(pr) => crate::ops::pr::pr_requires_resync(
+            &crate::ops::pr::observe_pr_merge(repo_root, pr.number)?,
+            || crate::ops::pr::merge_request_removal(repo_root, pr.number, &[]),
+        ),
+        None => Ok(true),
+    }
 }
 
 fn sync_land(repo_root: &Path, main_repo: &Path, progress: &impl Progress) -> OpsResult<String> {

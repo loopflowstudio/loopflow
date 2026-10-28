@@ -31,7 +31,7 @@ first, then the engineering words it borrows.
 | **Scratch** | The `scratch/` folder, for working notes. `lf scratch clear` removes added files; existing files and edits remain. |
 
 Historical capture paths and immutable receipts retain their encoding; see
-[cutover status](architecture-reference.md#cutover-status). They are not a fourth
+[cutover status](architecture/reference-cutover.md#cutover-status). They are not a fourth
 execution owner in the accepted model.
 
 ## Borrowed from software engineering

@@ -1,0 +1,144 @@
+[
+  {
+    "mode": "rebuild_without_integrity",
+    "size": 2048,
+    "original_apple_tool": true,
+    "probe_exit": 0,
+    "api": {
+      "prepare": 0,
+      "create": -25293
+    },
+    "original_access_exact": true,
+    "old_read_exit": 0,
+    "old_exact": true,
+    "new_read_exit": 44,
+    "new_exact": false,
+    "new_cleanup_exit": 44,
+    "old_cleanup_exit": 0
+  },
+  {
+    "mode": "rebuild_without_integrity",
+    "size": 8192,
+    "original_apple_tool": true,
+    "probe_exit": 0,
+    "api": {
+      "prepare": 0,
+      "create": -25293
+    },
+    "original_access_exact": true,
+    "old_read_exit": 0,
+    "old_exact": true,
+    "new_read_exit": 44,
+    "new_exact": false,
+    "new_cleanup_exit": 44,
+    "old_cleanup_exit": 0
+  },
+  {
+    "mode": "rebuild_without_partition",
+    "size": 2048,
+    "original_apple_tool": true,
+    "probe_exit": 0,
+    "api": {
+      "prepare": 0,
+      "create": 0
+    },
+    "candidate_partition_decoded": true,
+    "candidate_apple_tool": false,
+    "original_access_exact": true,
+    "old_read_exit": 0,
+    "old_exact": true,
+    "new_read_timeout": true,
+    "new_cleanup_exit": 0,
+    "old_cleanup_exit": 0
+  },
+  {
+    "mode": "rebuild_without_partition",
+    "size": 8192,
+    "original_apple_tool": true,
+    "probe_exit": 0,
+    "api": {
+      "prepare": 0,
+      "create": 0
+    },
+    "candidate_partition_decoded": true,
+    "candidate_apple_tool": false,
+    "original_access_exact": true,
+    "old_read_exit": 0,
+    "old_exact": true,
+    "new_read_timeout": true,
+    "new_cleanup_exit": 0,
+    "old_cleanup_exit": 0
+  },
+  {
+    "mode": "rebuild_without_both",
+    "size": 2048,
+    "original_apple_tool": true,
+    "probe_exit": 0,
+    "api": {
+      "prepare": 0,
+      "create": 0
+    },
+    "candidate_partition_decoded": true,
+    "candidate_apple_tool": false,
+    "original_access_exact": true,
+    "old_read_exit": 0,
+    "old_exact": true,
+    "new_read_timeout": true,
+    "new_cleanup_exit": 0,
+    "old_cleanup_exit": 0
+  },
+  {
+    "mode": "rebuild_without_both",
+    "size": 8192,
+    "original_apple_tool": true,
+    "probe_exit": 0,
+    "api": {
+      "prepare": 0,
+      "create": 0
+    },
+    "candidate_partition_decoded": true,
+    "candidate_apple_tool": false,
+    "original_access_exact": true,
+    "old_read_exit": 0,
+    "old_exact": true,
+    "new_read_timeout": true,
+    "new_cleanup_exit": 0,
+    "old_cleanup_exit": 0
+  },
+  {
+    "mode": "explicit_security",
+    "size": 2048,
+    "original_apple_tool": true,
+    "probe_exit": 0,
+    "api": {
+      "prepare": 0,
+      "create": 0
+    },
+    "candidate_partition_decoded": true,
+    "candidate_apple_tool": false,
+    "original_access_exact": true,
+    "old_read_exit": 0,
+    "old_exact": true,
+    "new_read_timeout": true,
+    "new_cleanup_exit": 0,
+    "old_cleanup_exit": 0
+  },
+  {
+    "mode": "explicit_security",
+    "size": 8192,
+    "original_apple_tool": true,
+    "probe_exit": 0,
+    "api": {
+      "prepare": 0,
+      "create": 0
+    },
+    "candidate_partition_decoded": true,
+    "candidate_apple_tool": false,
+    "original_access_exact": true,
+    "old_read_exit": 0,
+    "old_exact": true,
+    "new_read_timeout": true,
+    "new_cleanup_exit": 0,
+    "old_cleanup_exit": 0
+  }
+]

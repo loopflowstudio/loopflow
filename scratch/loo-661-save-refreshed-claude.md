@@ -8,6 +8,8 @@ requirements. Public interfaces are not exhausted; revisit rejected routes only
 with a mechanism addressing their counterexamples. Implementation depends on that
 proof; live acceptance separately requires supported reconnection for
 jack@loopflow.studio. Neither dependency relaxes Jack Heart's accepted outcome.
+Finding 35 isolates the copied partition entry as the creation obstacle and rejects
+explicit trusted-application construction as a reader-compatible replacement.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -170,6 +172,65 @@ finding numbers so the archived evidence stays addressable.
   no sign-in or route change was attempted. Further polling without recovery adds
   no acceptance evidence.
 
+### 35. Explicit access and partition isolation (2026-10-28)
+
+The implement return requested a distinct public construction and an explanation
+for finding 34. Eight new native cases reconstructed access with
+`SecAccessGetOwnerAndACL` / `SecAccessCreateFromOwnerAndACL`, or constructed it
+with `SecAccessCreate` trusting only `/usr/bin/security`. Each used a separate
+synthetic original/candidate pair at exactly 2,048 or 8,192 bytes. No original
+was updated, deleted for replacement, or assigned different access.
+
+| Candidate access | Creation, both sizes | Independent `security` reader |
+| --- | --- | --- |
+| Original owner/ACLs, omit integrity only | `-25293` | Candidate absent (44) |
+| Original owner/ACLs, omit partition only | 0 | 15-second timeout |
+| Original owner/ACLs, omit partition and integrity | 0 | 15-second timeout |
+| Fresh `SecAccessCreate`, trusted `/usr/bin/security` | 0 | 15-second timeout |
+
+Fresh metadata processes decoded one partition ACL on each successful candidate;
+all lacked `apple-tool:`, which every original contained. Every original's exact
+bytes and semantic ACL fingerprint survived. The fingerprint covers owner,
+subjects, authorization tags, delegation, entry tags and validity, excluding
+allocation addresses/handles; it does not prove storage-group identity. All
+original and created-candidate deletions succeeded; absent candidates returned 44.
+Every child had a 15-second deadline and was reaped. Only statuses, sizes and
+comparisons reached output. No real credential, route, Session or global trust
+setting changed. No candidate passed the required reader round trip, so no
+promotion, transaction or real-account write followed.
+
+This isolates the retained partition entry rather than payload size or copied
+owner as the obstacle in this construction. The published implementation supplies
+the corresponding authorization explanation: `changeAcl` protects the partition
+tag unless supplied credentials authenticate the database; the ordinary creation
+maker supplies temporary group credentials. Adding the protected tag is denied.
+Integrity installation also checks partition membership. This is source-backed
+inference, not tracing of the installed securityd binary:
+[securityd ACL authorization](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/securityd/src/acls.cpp#L70-L99),
+[protected-tag rejection](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_cdsa_utilities/lib/objectacl.cpp#L370-L380),
+[creation access installation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Item.cpp#L950-L991).
+An explicit trusted-application list does not grant partition membership.
+
+An initial eight-case differential used `SecACLRemove` on copied objects.
+Removing integrity yielded `-67702` (invalid ACL), while removing only partition
+allowed creation but timed out on read. This is not evidence that reconstruction
+without integrity fails: the fresh construction above succeeds when both entries
+are omitted. Published `ACL::remove` leaves an invalid-form tombstone that
+`addIntegrity` can find; `setIntegrity` rejects that form. Initial C/runner/results
+are Git blobs `3fa49ed9df2c9e4fe00cea37163b6cb442b97620`,
+`528e91cb672a36cc6310dfdf02682c056f650bb4`,
+`b28b756191d59cfd9872e5897a0064cbf5c57738`.
+The corrected reproducible probe and full sanitized results live in
+`scratch/keychain-access-probe/`; run `uv run python scratch/keychain-access-probe/run.py`.
+These are investigation cases, not production native acceptance tests.
+
+The replacement design remains unresolved. Repeating copied access, omitting
+its partition, or supplying a trusted-application list alone cannot satisfy the
+recorded counterexamples. A next candidate must explain compatible partition
+authority and atomic failure preservation before production implementation.
+Public interfaces are not declared exhausted. Historical save-failure diagnosis,
+native production acceptance and Infrastructure's installation remain open.
+
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
 would select LOO-325. Local preservation must prove readable old bytes and unchanged
@@ -252,4 +313,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — realign (2026-10-28): `git diff --check` and `lf context` pass; code/evidence inspection only, no build/test rerun. Writer proof, affected gate checks and Infrastructure's installed acceptance after supported reconnection remain pending.
+Check — implement (2026-10-28): `uv run python scratch/keychain-access-probe/run.py` executed 8 corrected native cases (plus 8 initial removal cases), rejecting all candidates while preserving original bytes/access; `git diff --check` and `lf context` pass. No production change; writer proof, native acceptance fixture, gate and Infrastructure's installed acceptance remain pending.

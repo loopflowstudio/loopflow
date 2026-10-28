@@ -16,6 +16,11 @@ Claude recovery. The temporary sync bridge and archive receipts live in
 
 ## Required outcome and next decision
 
+**Demo:** after a naturally required refresh, `lf account claude --json` accepts
+the same identity with capacity, and native Claude continues using that login.
+Synthetic gate coverage must first demonstrate exact 2,048/8,192-byte replacement
+and readable old credentials after failed saves through the production writer.
+
 Repair native persistence while preserving service/account identity, reader format/access,
 previously usable credentials on failure and active Sessions. Never expose credentials in
 argv, logs, chat or assertions. No global trust changes, real-account deletion, forced
@@ -39,6 +44,16 @@ Browser reconnection unblocks live diagnosis only: `invalid_grant` returns befor
 `write_claude_login`. Local rollback cannot establish server token validity after
 OAuth rotation because refresh precedes saving without a shared transaction.
 Neither dependency relaxes the preservation requirement or proves a native writer.
+
+Planning disposition (2026-10-28): retain this design and its accepted outcome.
+Inspection at `56541b779b94500348267372d85aee3cd97c5549` confirms the writer still
+uses `security -i`, ordinary login tests still select files, and `invalid_grant`
+returns before saving. No new mechanism or changed authorization was supplied.
+The next implementation slice therefore remains blocked on compatible native
+persistence; browser reconnection addresses only the independent live-diagnosis
+dependency. Repeating rejected probes or publishing diagnostics cannot satisfy
+either missing proof. No production edit or credential operation follows from
+this planning pass.
 
 ## Surviving implementation
 
@@ -230,4 +245,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 realign); code, plan and relevant parent/Release memory agree, with no code change or test rerun. Both context budgets hold; native writer, preservation proof and live diagnosis remain open; Infrastructure owns installed acceptance.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); plan-only clarification, no code change or test rerun. Both context budgets hold; native writer, preservation proof and live diagnosis remain open; Infrastructure owns installed acceptance.

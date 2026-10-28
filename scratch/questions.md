@@ -27,3 +27,7 @@ Earlier archive receipts, the unused kickoff reservation and the last installed
 `d498137af513522569d19da82e4b26c33656687b:scratch/questions.md`.
 Those archives remain intact. Integrated source v0.15.0 proves no installed or
 credential recovery.
+
+This kickoff reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-znbdhg6v/tmp` for the authorized telemetry bridge.
+Its sibling `receipt.json` records completion and the checkpoint; a reservation
+alone proves no archive or installed repair.

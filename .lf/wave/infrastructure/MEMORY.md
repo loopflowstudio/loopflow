@@ -773,10 +773,11 @@ Explicit account selection, not launch-time switching, reconciles the shared dae
 with five-minute turn grace. Configured acceptance remains open.
 
 LOO-665 (2026-10-28): Jack Heart authorized the same-login Codex hotfix through
-merge; Infrastructure retains coordinated installation and cross-Machine acceptance.
-Mini's labelled receipts show stored live limits succeeding while native limits
-return HTTP 401 despite successful account/read. Neither identity equality nor
-account/read proves usable access; token-rotation order remains unknown.
+merge; Infrastructure owns installation/acceptance. Mini's stored limits succeed
+while native returns 401 despite account/read; rotation order remains unknown.
+Jack's 04:13 UTC steer reports isolated same-Session marker recall after upgrading
+Codex to 0.165.0, but shared status still unavailable. This proves neither shared
+recovery nor a fresh 401 diagnosis. Identity alone proves no usable access.
 
 Recovery needs definite target rejection and alternate acceptance; transient
 failure stays unknown. Keep conversation placement independent of credential

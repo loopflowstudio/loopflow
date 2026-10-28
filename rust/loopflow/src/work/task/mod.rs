@@ -515,7 +515,9 @@ pub struct Task {
     pub parent_pr_id: Option<TaskPrId>,
     /// Explicit choice for every Graph step; None uses the step/config defaults.
     pub agent: Option<String>,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
     /// Per-command view derived from the active PR's durable observation cache.
     #[serde(skip)]

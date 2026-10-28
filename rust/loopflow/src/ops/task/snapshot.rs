@@ -55,7 +55,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .work_status(&work)
         .await
         .map_err(|error| task_error(format!("failed to derive Task Work status: {error}")))?;
-    let execution = crate::ops::task_execution::task_execution(store, &task.id)
+    let execution = crate::ops::task_execution::task_execution(store, &task)
         .await
         .map_err(task_error)?;
     let work_set = store.sqlite.task_work(&task.id).map_err(task_error)?;

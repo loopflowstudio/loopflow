@@ -244,7 +244,6 @@ mod tests {
             )
             .unwrap());
         assert!(store.session_summaries(&filter, 500).unwrap().is_empty());
-        assert_eq!(store.next_quiet_available(1).unwrap(), None);
         records.records.push(Report {
             state: State::Blocked,
             id: Some("worker".into()),

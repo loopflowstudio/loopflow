@@ -134,7 +134,7 @@ struct DesktopPaneControlTests {
         let members = [a, b].map { WorkMemberRef(source: ["root"], work: $0) }
         func plan(dashboard: String?, expression: WorkSelection.Expression, also: [WorkWorkspaceKey] = []) -> WorkViewPlan {
             WorkViewPlan(name: dashboard, pinned: false, dashboardID: dashboard, repository: repository,
-                observedAt: 0, selection: WorkSelection(id: "root", expression: expression), savedRevision: dashboard == nil ? nil : 1,
+                selection: WorkSelection(id: "root", expression: expression), savedRevision: dashboard == nil ? nil : 1,
                 resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
                 arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
                 projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
@@ -208,7 +208,7 @@ struct DesktopPaneControlTests {
         let keys = ["a", "b"].map { WorkWorkspaceKey(repository: repository, kind: .task, id: $0) }
         let members = keys.map { WorkMemberRef(source: ["root"], work: $0) }
         let plan = WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: repository,
-            observedAt: 0, selection: WorkSelection(id: "root", expression: .repository), savedRevision: nil,
+            selection: WorkSelection(id: "root", expression: .repository), savedRevision: nil,
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),

@@ -1,7 +1,7 @@
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Machine, MachineId, SteerComment, TaskId, ToolResponseReceipt,
-    ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Machine, MachineId, TaskId, ToolResponseReceipt, ToolResponseWrite, WorkRef,
+    WorkStatus,
 };
 use crate::steer::Steer;
 
@@ -95,10 +95,6 @@ impl Store {
     pub async fn task_steers(&self, task_id: &TaskId) -> StoreResult<Vec<Steer>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_steers(&task_id)).await
-    }
-
-    pub async fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
-        run_sqlite(&self.sqlite, move |store| store.steers_since(since)).await
     }
 
     pub async fn append_interrupt(&self, work: &WorkRef) -> StoreResult<i64> {

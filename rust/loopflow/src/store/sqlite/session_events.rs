@@ -379,24 +379,6 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// When the next open Session becomes Available through quiet alone, which
-    /// no write announces. `None` when no reading is counting toward it.
-    pub(crate) fn next_quiet_available(&self, now: i64) -> StoreResult<Option<i64>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let quiet = crate::session::AVAILABILITY_QUIET_SECONDS;
-        Ok(conn.query_row(
-            "SELECT MIN(act.observed_at)+?2 FROM session_activity act
-             JOIN agent_sessions s ON s.id=act.session_id
-             JOIN processes p ON p.id=s.agent_process_id
-             WHERE s.completed_at IS NULL AND act.attachment_token=p.attachment_token
-             AND act.agent_process_id=p.id AND act.program_status IS NULL
-             AND act.pending_input=0 AND act.open_tools=0
-             AND NOT (s.interactive=1 AND act.yielded=1) AND ?1-act.observed_at<?2",
-            params![now, quiet],
-            |row| row.get(0),
-        )?)
-    }
-
     /// Retain a provider observation even when its attachment has
     /// changed. Observation grants neither native write nor Graph authority.
     pub(crate) fn record_session_event(

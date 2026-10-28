@@ -1,22 +1,31 @@
 import Foundation
 
-/// One foreground reader per window: `lf monitor work --watch --json`.
-/// Each part arrives again only when a commit changed what it shows.
+/// What a window shows, kept current by one `lf … --json --watch` process per
+/// part: the same reads any client runs, each internally consistent.
 public struct WorkObservation: Sendable {
     public let frames: AsyncThrowingStream<WorkFrame, any Error>
     /// Requests are delivered in the order they are made.
     public let request: @Sendable (WorkRequest) -> Void
-    /// Returns only after the owned reader has exited.
+    /// Returns only after every owned watch has exited.
     public let cancel: @Sendable () async -> Void
+    /// The preview copy directory a draft-carrying build reads; nil on the shared store.
+    public let copy: String?
 
     public init(
         frames: AsyncThrowingStream<WorkFrame, any Error>,
         request: @escaping @Sendable (WorkRequest) -> Void,
-        cancel: @escaping @Sendable () async -> Void
+        cancel: @escaping @Sendable () async -> Void,
+        copy: String?
     ) {
         self.frames = frames
         self.request = request
         self.cancel = cancel
+        self.copy = copy
+    }
+
+    /// The copy `lf --version` names on its `copy:` line.
+    public static func copy(fromVersion output: String) -> String? {
+        output.split(separator: "\n").first { $0.hasPrefix("copy: ") }.map { String($0.dropFirst(6)) }
     }
 }
 
@@ -25,8 +34,8 @@ public enum WorkObservationError: Error, Sendable {
     case configurationChanged
 }
 
-/// The Work whose activity is shown. Mirrors Rust `WorkActivityScope`.
-public struct WorkActivityScope: Decodable, Equatable, Sendable {
+/// The Work whose activity is shown: `lf history`'s filters.
+public struct WorkActivityScope: Equatable, Sendable {
     public let wave: String?
     public let project: String?
     public let task: String?
@@ -38,176 +47,138 @@ public struct WorkActivityScope: Decodable, Equatable, Sendable {
     }
 }
 
-/// What a window shows. Mirrors the Rust reader's `scope` request.
+/// What a window shows; it selects which watches run and with what arguments.
 public struct WorkScope: Equatable, Sendable {
     public let repo: String?
     public let headless: Bool
     /// Task identifier whose work is shown.
     public let task: String?
-    /// Wave id whose detail is shown.
-    public let wave: String?
     public let activity: WorkActivityScope?
 
-    public init(repo: String?, headless: Bool, task: String?, wave: String?, activity: WorkActivityScope?) {
+    public init(repo: String?, headless: Bool, task: String?, activity: WorkActivityScope?) {
         self.repo = repo
         self.headless = headless
         self.task = task
-        self.wave = wave
         self.activity = activity
     }
 }
 
-/// Every request carries an id; a frame's `answers` names the newest one
-/// handled before that frame was read.
+/// Every request carries an id; a frame's `answers` names the newest one its
+/// reading began after.
 public enum WorkRequest: Equatable, Sendable {
     case scope(id: Int, WorkScope)
-    case taskHistory(id: Int, task: String?)
     case refresh(id: Int)
-    /// Confirm delivery through a post-command snapshot. Replay only readings
-    /// superseded by an authoritative command result; this does not force queries.
+    /// Confirm delivery after a command's commit: each named part's watch, or
+    /// every running watch when `replay` is empty, answers before the
+    /// checkpoint frame follows.
     case checkpoint(id: Int, replay: [String])
 
     public var id: Int {
         switch self {
-        case .scope(let id, _), .refresh(let id), .checkpoint(let id, _), .taskHistory(let id, _): id
+        case .scope(let id, _), .refresh(let id), .checkpoint(let id, _): id
         }
     }
+}
 
-    /// One newline-terminated JSON line. Absent values are written as `null`.
-    public var line: Data {
-        var object: [String: Any] = ["id": id]
+/// One watch a window runs, and the `lf` read behind it.
+public enum WorkPart: String, CaseIterable, Sendable {
+    case task, sessions, planning, selections, activity
+    case peerPlanning = "peer_planning"
+    case workActivity = "work_activity"
+
+    /// The read this part watches for `scope`, and the directory it runs in;
+    /// nil when the scope shows no such part.
+    public func command(for scope: WorkScope) -> (args: [String], cwd: String?)? {
         switch self {
-        case .scope(_, let scope):
-            object["action"] = "scope"
-            object["repo"] = scope.repo ?? NSNull()
-            object["headless"] = scope.headless
-            object["task"] = scope.task ?? NSNull()
-            object["wave"] = scope.wave ?? NSNull()
-            object["activity"] = scope.activity.map { activity -> Any in
-                ["wave": activity.wave ?? NSNull(), "project": activity.project ?? NSNull(),
-                 "task": activity.task ?? NSNull()] as [String: Any]
-            } ?? NSNull()
-        case .taskHistory(_, let task):
-            object["action"] = "task_history"
-            object["task"] = task ?? NSNull()
-        case .refresh: object["action"] = "refresh"
-        case .checkpoint(_, let replay):
-            object["action"] = "checkpoint"
-            object["replay"] = replay
+        case .planning: return (["desktop", "plan", "--all"], nil)
+        case .activity: return (["monitor", "ps"], nil)
+        case .selections:
+            return scope.repo.map { (["desktop", "plans"], $0) }
+        case .peerPlanning:
+            return scope.repo.map { (["planning", "status"], $0) }
+        case .sessions:
+            return scope.repo.map { (["desktop", "sessions"] + (scope.headless ? ["--interactive", "all"] : []), $0) }
+        case .task:
+            return scope.task.map { (["desktop", "task", $0], scope.repo) }
+        case .workActivity:
+            guard let activity = scope.activity else { return nil }
+            var args = ["history", "--since", "7d", "--limit", "50"]
+            if let wave = activity.wave { args += ["--wave", wave] }
+            if let project = activity.project { args += ["--project", project] }
+            if let task = activity.task { args += ["--task", task] }
+            return (args, nil)
         }
-        // The values above are all JSON types.
-        var data = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
-        data.append(10)
-        return data
     }
 }
 
-/// Store revisions a frame was read at. Mirrors Rust `StoreRevisions`.
-public struct StoreRevisions: Decodable, Equatable, Sendable {
-    public let planning: Int64
-    public let sessions: Int64
-    public let graphs: Int64
-    public let processes: Int64
-    public let usage: Int64
-}
-
-/// One line of the stream. Mirrors Rust `WorkFrame`: the body is the same
-/// wire type the one-shot `--json` read prints.
-public struct WorkFrame: Decodable, Sendable {
-    public struct Planning: Decodable, Sendable {
-        public let selections: [WorkViewPlan]?
+/// One part's reading as a window applies it, decoded from its watch's frame.
+public struct WorkFrame: Sendable {
+    /// `lf wave show --all`; Waves are the plan's own.
+    public struct Planning: Sendable {
         public let roadmap: RoadmapSnapshot
         public let waves: [WaveSnapshot]
     }
 
-    public struct PeerPlanning: Decodable, Sendable {
+    public struct PeerPlanning: Sendable {
         public let repo: String
         public let destinations: [PeerPlanningStatus]
     }
 
-    public struct Sessions: Decodable, Sendable {
+    public struct Sessions: Sendable {
         public let repo: String
         public let includesHeadless: Bool
         public let entries: [SessionRecord]
-
-        enum CodingKeys: String, CodingKey {
-            case repo, entries
-            case includesHeadless = "includes_headless"
-        }
     }
 
-    /// A Task's work and each of its Graph processes, in the order of `work.graphProcesses`.
-    public struct TaskPart: Decodable, Sendable {
+    /// `lf task status`: a Task's work, each of its Graph processes in the
+    /// order of `work.graphProcesses`, comments, and its recorded execution.
+    public struct TaskPart: Sendable {
         public let task: String
+        /// The Task's row, current even after the Task leaves the plan.
+        public let row: RoadmapTask?
         public let work: TaskOverview
         public let graphProcesses: [GraphProcessDetail]
         public let comments: TaskComments
-
-        enum CodingKeys: String, CodingKey {
-            case task, work, comments
-            case graphProcesses = "graph_processes"
-        }
+        public let diagnostics: TaskWork?
     }
 
-    public struct WavePart: Decodable, Sendable {
-        public let wave: String
-        public let detail: WaveDetailSnapshot
-    }
-
-    public struct WorkActivityPart: Decodable, Sendable {
+    public struct WorkActivityPart: Sendable {
         public let scope: WorkActivityScope
         public let snapshot: WorkActivitySnapshot
     }
 
-    public struct Heartbeat: Decodable, Sendable {
-        /// Readings per part since the reader started, sent or not.
-        public let projections: [String: Int]
-    }
-
     /// A `nil` body is a reading that failed; `unavailable` says why.
-    public struct TaskHistoryPart: Decodable, Sendable {
-        public let task: String
-        public let work: TaskWork
-    }
-
     public enum Content: Sendable {
         case planning(Planning?)
+        case selections([WorkViewPlan]?)
         case peerPlanning(PeerPlanning?)
         case sessions(Sessions?)
         case task(TaskPart?)
-        case taskHistory(TaskHistoryPart?)
-        case wave(WavePart?)
         case workActivity(WorkActivityPart?)
         case activity(ActivitySnapshot?)
-        case heartbeat(Heartbeat)
         case checkpoint
 
         public var part: String {
             switch self {
-            case .planning: "planning"
-            case .peerPlanning: "peer_planning"
-            case .sessions: "sessions"
-            case .task: "task"
-            case .taskHistory: "task_history"
-            case .wave: "wave"
-            case .workActivity: "work_activity"
-            case .activity: "activity"
-            case .heartbeat: "heartbeat"
+            case .planning: WorkPart.planning.rawValue
+            case .selections: WorkPart.selections.rawValue
+            case .peerPlanning: WorkPart.peerPlanning.rawValue
+            case .sessions: WorkPart.sessions.rawValue
+            case .task: WorkPart.task.rawValue
+            case .workActivity: WorkPart.workActivity.rawValue
+            case .activity: WorkPart.activity.rawValue
             case .checkpoint: "checkpoint"
             }
         }
     }
 
+    /// Orders every frame of one observation.
     public let sequence: Int
     public let answers: Int?
-    public let home: String
-    /// The preview copy directory a draft-carrying build runs on; nil on the shared store.
-    public let copy: String?
-    public let revisions: StoreRevisions?
     public let unavailable: String?
     public let content: Content
     /// Wire text of the parts a saved workspace keeps, exactly as a one-shot
-    /// read would have printed them. Present only on frames decoded from a line.
+    /// read would have printed them.
     public let wire: Wire?
 
     public struct Wire: Sendable {
@@ -216,69 +187,311 @@ public struct WorkFrame: Decodable, Sendable {
         public let sessionPage: String?
     }
 
-    enum CodingKeys: String, CodingKey {
-        case sequence, answers, home, copy, revisions, unavailable, part, body
-    }
-
-    public init(sequence: Int, answers: Int?, home: String, copy: String?, revisions: StoreRevisions?,
-                unavailable: String?, content: Content, wire: Wire?) {
+    public init(sequence: Int, answers: Int?, unavailable: String?, content: Content, wire: Wire?) {
         self.sequence = sequence
         self.answers = answers
-        self.home = home
-        self.copy = copy
-        self.revisions = revisions
         self.unavailable = unavailable
         self.content = content
         self.wire = wire
     }
 
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        sequence = try container.decode(Int.self, forKey: .sequence)
-        answers = try container.decode(Int?.self, forKey: .answers)
-        home = try container.decode(String.self, forKey: .home)
-        copy = try container.decode(String?.self, forKey: .copy)
-        revisions = try container.decode(StoreRevisions?.self, forKey: .revisions)
-        unavailable = try container.decode(String?.self, forKey: .unavailable)
-        wire = nil
-        let part = try container.decode(String.self, forKey: .part)
-        switch part {
-        case "planning": content = .planning(try container.decode(Planning?.self, forKey: .body))
-        case "peer_planning": content = .peerPlanning(try container.decode(PeerPlanning?.self, forKey: .body))
-        case "sessions": content = .sessions(try container.decode(Sessions?.self, forKey: .body))
-        case "task_history": content = .taskHistory(try container.decode(TaskHistoryPart?.self, forKey: .body))
-        case "task": content = .task(try container.decode(TaskPart?.self, forKey: .body))
-        case "wave": content = .wave(try container.decode(WavePart?.self, forKey: .body))
-        case "work_activity": content = .workActivity(try container.decode(WorkActivityPart?.self, forKey: .body))
-        case "activity": content = .activity(try container.decode(ActivitySnapshot?.self, forKey: .body))
-        case "heartbeat": content = .heartbeat(try container.decode(Heartbeat.self, forKey: .body))
-        case "checkpoint": content = .checkpoint
-        default:
-            throw DecodingError.dataCorruptedError(forKey: .part, in: container,
-                                                   debugDescription: "unknown work part \(part)")
+    /// The same reading answering a later request.
+    func answering(_ answers: Int, sequence: Int) -> WorkFrame {
+        WorkFrame(sequence: sequence, answers: answers, unavailable: unavailable, content: content, wire: wire)
+    }
+
+    /// Every field is required; an absent one is a parse error, not a nil.
+    private struct Envelope<Body: Decodable>: Decodable {
+        let answers: Int?
+        let unavailable: String?
+        let body: Body?
+
+        enum CodingKeys: String, CodingKey { case answers, unavailable, body }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            answers = try container.decode(Int?.self, forKey: .answers)
+            unavailable = try container.decode(String?.self, forKey: .unavailable)
+            body = try container.decode(Body?.self, forKey: .body)
         }
     }
 
-    /// Decode one stream line, keeping the wire text a saved workspace needs.
-    public static func decode(line: Data) throws -> WorkFrame {
-        let frame = try JSONDecoder().decode(WorkFrame.self, from: line)
-        let wire: Wire?
-        switch frame.content {
-        case .planning(.some), .sessions(.some):
-            let body = (try JSONSerialization.jsonObject(with: line) as? [String: Any])?["body"] as? [String: Any]
-            func text(_ value: Any?) -> String? {
-                guard let value, let data = try? JSONSerialization.data(withJSONObject: value) else { return nil }
-                return String(data: data, encoding: .utf8)
-            }
-            wire = Wire(
-                roadmap: text(body?["roadmap"]),
-                waves: text(body?["waves"]),
-                sessionPage: body?["entries"].flatMap { text(["entries": $0, "next": NSNull()] as [String: Any]) })
-        default:
-            wire = nil
+    private struct TaskStatusReading: Decodable {
+        struct Execution: Decodable { let work: TaskWork }
+        let overview: TaskOverview?
+        let graphProcesses: [GraphProcessDetail]
+        let comments: TaskComments?
+        let execution: Execution?
+        let row: RoadmapTask?
+
+        enum CodingKeys: String, CodingKey {
+            case overview, comments, execution, row
+            case graphProcesses = "graph_processes"
         }
-        return WorkFrame(sequence: frame.sequence, answers: frame.answers, home: frame.home,
-                              copy: frame.copy, revisions: frame.revisions, unavailable: frame.unavailable,
-                              content: frame.content, wire: wire)
+    }
+
+    private struct PeerPlanningReading: Decodable {
+        let destinations: [PeerPlanningStatus]
+    }
+
+    /// Decode one line of `part`'s watch, read for `scope`.
+    public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data) throws -> WorkFrame {
+        func envelope<Body: Decodable>(_: Body.Type) throws -> Envelope<Body> {
+            try JSONDecoder().decode(Envelope<Body>.self, from: line)
+        }
+        func frame<Body>(_ envelope: Envelope<Body>, _ content: Content, unavailable: String? = nil,
+                         wire: Wire? = nil) -> WorkFrame {
+            WorkFrame(sequence: sequence, answers: envelope.answers, unavailable: envelope.unavailable ?? unavailable,
+                      content: content, wire: wire)
+        }
+        func text(_ value: Any?) -> String? {
+            guard let value, let data = try? JSONSerialization.data(withJSONObject: value) else { return nil }
+            return String(data: data, encoding: .utf8)
+        }
+        func body() throws -> Any? {
+            (try JSONSerialization.jsonObject(with: line) as? [String: Any])?["body"]
+        }
+        switch part {
+        case .planning:
+            let read = try envelope(RoadmapSnapshot.self)
+            guard let roadmap = read.body else { return frame(read, .planning(nil)) }
+            let waves = roadmap.waves.map(\.wave).sorted { ($0.repo, $0.name) < ($1.repo, $1.name) }
+            let raw = try body()
+            let rows = ((raw as? [String: Any])?["waves"] as? [[String: Any]] ?? [])
+                .compactMap { $0["wave"] as? [String: Any] }
+                .sorted { ($0["repo"] as? String ?? "", $0["name"] as? String ?? "")
+                    < ($1["repo"] as? String ?? "", $1["name"] as? String ?? "") }
+            return frame(read, .planning(Planning(roadmap: roadmap, waves: waves)),
+                         wire: Wire(roadmap: text(raw), waves: text(rows), sessionPage: nil))
+        case .selections:
+            let read = try envelope([WorkViewPlan].self)
+            return frame(read, .selections(read.body))
+        case .peerPlanning:
+            let read = try envelope(PeerPlanningReading.self)
+            return frame(read, .peerPlanning(read.body.map {
+                PeerPlanning(repo: scope.repo ?? "", destinations: $0.destinations)
+            }))
+        case .sessions:
+            let read = try envelope([SessionRecord].self)
+            let entries = try body() as? [Any]
+            return frame(read, .sessions(read.body.map {
+                Sessions(repo: scope.repo ?? "", includesHeadless: scope.headless, entries: $0)
+            }), wire: Wire(roadmap: nil, waves: nil,
+                           sessionPage: entries.flatMap { text(["entries": $0, "next": NSNull()] as [String: Any]) }))
+        case .task:
+            let read = try envelope(TaskStatusReading.self)
+            guard let task = scope.task, let status = read.body else { return frame(read, .task(nil)) }
+            guard let work = status.overview, let comments = status.comments else {
+                return frame(read, .task(nil), unavailable: "Task \(task) is not registered on this Machine")
+            }
+            return frame(read, .task(TaskPart(task: task, row: status.row, work: work,
+                                              graphProcesses: status.graphProcesses,
+                                              comments: comments, diagnostics: status.execution?.work)))
+        case .workActivity:
+            let read = try envelope(WorkActivitySnapshot.self)
+            return frame(read, .workActivity(zip(scope.activity, read.body).map {
+                WorkActivityPart(scope: $0, snapshot: $1)
+            }))
+        case .activity:
+            let read = try envelope(ActivitySnapshot.self)
+            return frame(read, .activity(read.body))
+        }
+    }
+}
+
+private func zip<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
+    guard let a, let b else { return nil }
+    return (a, b)
+}
+
+/// One owned `lf … --json --watch` process speaking newline-delimited JSON.
+public struct LineWatch: Sendable {
+    public let lines: AsyncThrowingStream<Data, any Error>
+    /// Queue one newline-terminated request line.
+    public let send: @Sendable (Data) -> Void
+    /// Returns only after the process has exited.
+    public let cancel: @Sendable () async -> Void
+
+    public init(lines: AsyncThrowingStream<Data, any Error>, send: @escaping @Sendable (Data) -> Void,
+                cancel: @escaping @Sendable () async -> Void) {
+        self.lines = lines
+        self.send = send
+        self.cancel = cancel
+    }
+}
+
+/// Runs the watches a window's scope selects and merges their frames into one
+/// observation. A scope change restarts only the watches whose read changed;
+/// the others answer it from their last frame without reading again.
+public final class WorkWatches: @unchecked Sendable {
+    /// Starts `lf <args> --json --watch` in `cwd`.
+    public typealias Launch = @Sendable (_ args: [String], _ cwd: String?) throws -> LineWatch
+
+    private struct Running {
+        let generation: Int
+        let args: [String]
+        let cwd: String?
+        let watch: LineWatch
+        let reader: Task<Void, Never>
+        /// The request it was started after: every reading it makes is newer.
+        let launched: Int
+        /// The newest request its arguments answer.
+        var floor: Int
+        var last: WorkFrame?
+    }
+
+    private let launch: Launch
+    private let lock = NSLock()
+    private let continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation
+    private var running: [WorkPart: Running] = [:]
+    private var scope = WorkScope(repo: nil, headless: false, task: nil, activity: nil)
+    private var sequence = 0
+    private var generation = 0
+    /// Checkpoints waiting on these parts' answers.
+    private var checkpoints: [(id: Int, waiting: Set<WorkPart>, failed: [String])] = []
+    private var finished = false
+
+    public static func observe(copy: String?, launch: @escaping Launch) throws -> WorkObservation {
+        let (frames, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
+        let watches = WorkWatches(launch: launch, continuation: continuation)
+        try watches.lock.withLock { try watches.select(id: 0) }
+        return WorkObservation(frames: frames, request: { watches.handle($0) }, cancel: { await watches.stop() },
+                               copy: copy)
+    }
+
+    private init(launch: @escaping Launch, continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) {
+        self.launch = launch
+        self.continuation = continuation
+    }
+
+    private func handle(_ request: WorkRequest) {
+        lock.withLock {
+            guard !finished else { return }
+            do {
+                switch request {
+                case .scope(let id, let next):
+                    scope = next
+                    try select(id: id)
+                case .refresh(let id):
+                    for watch in running.values { watch.watch.send(Self.confirm(id)) }
+                case .checkpoint(let id, let replay):
+                    let parts = replay.isEmpty ? Set(running.keys)
+                        : Set(replay.compactMap(WorkPart.init(rawValue:))).intersection(running.keys)
+                    for part in parts { running[part]?.watch.send(Self.confirm(id)) }
+                    checkpoints.append((id, parts, []))
+                    settleCheckpoints()
+                }
+            } catch { fail(error) }
+        }
+    }
+
+    /// Start, stop or keep each part's watch for the current scope. A kept
+    /// watch answers `id` with its last reading.
+    private func select(id: Int) throws {
+        var stopped: [Running] = []
+        for part in WorkPart.allCases {
+            let command = part.command(for: scope)
+            if var current = running[part], let command, current.args == command.args, current.cwd == command.cwd {
+                current.floor = id
+                running[part] = current
+                if let last = current.last { yield(part, last) }
+                continue
+            }
+            if let current = running.removeValue(forKey: part) { stopped.append(current) }
+            guard let command else { continue }
+            let watch = try launch(command.args + ["--json", "--watch"], command.cwd)
+            generation += 1
+            let generation = generation
+            let reader = Task { [weak self] in
+                do {
+                    for try await line in watch.lines { self?.receive(part, generation, line: line) }
+                    self?.ended(part, generation, error: nil)
+                } catch {
+                    self?.ended(part, generation, error: error)
+                }
+            }
+            running[part] = Running(generation: generation, args: command.args, cwd: command.cwd, watch: watch,
+                                    reader: reader, launched: id, floor: id)
+        }
+        if !stopped.isEmpty {
+            Task { for watch in stopped { watch.reader.cancel(); await watch.watch.cancel() } }
+        }
+        // A part that stopped no longer holds a checkpoint back.
+        settleCheckpoints()
+    }
+
+    private func receive(_ part: WorkPart, _ generation: Int, line: Data) {
+        lock.withLock {
+            guard !finished, var current = running[part], current.generation == generation else { return }
+            do {
+                sequence += 1
+                let decoded = try WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: line)
+                let frame = decoded.answering(max(decoded.answers ?? 0, current.floor), sequence: sequence)
+                current.last = frame
+                running[part] = current
+                continuation.yield(frame)
+                // Only a reading that began after the request confirms it.
+                let read = max(decoded.answers ?? 0, current.launched)
+                for index in checkpoints.indices where checkpoints[index].id <= read
+                    && checkpoints[index].waiting.remove(part) != nil {
+                    if let reason = frame.unavailable { checkpoints[index].failed.append("\(part.rawValue): \(reason)") }
+                }
+                settleCheckpoints()
+            } catch {
+                fail(RegistryQueryError("Invalid \(part.rawValue) watch frame: \(error)"))
+            }
+        }
+    }
+
+    private func ended(_ part: WorkPart, _ generation: Int, error: (any Error)?) {
+        lock.withLock {
+            // A watch that ends on its own ends the observation; the window reopens it.
+            guard !finished, running[part]?.generation == generation else { return }
+            fail(error ?? RegistryQueryError("The \(part.rawValue) watch ended"))
+        }
+    }
+
+    private func yield(_ part: WorkPart, _ last: WorkFrame) {
+        sequence += 1
+        continuation.yield(last.answering(max(last.answers ?? 0, running[part]?.floor ?? 0), sequence: sequence))
+    }
+
+    /// A checkpoint follows once every watch it waits on has answered; a
+    /// watch that stopped no longer shows anything to confirm.
+    private func settleCheckpoints() {
+        for index in checkpoints.indices {
+            checkpoints[index].waiting = checkpoints[index].waiting.filter { running[$0] != nil }
+        }
+        while let first = checkpoints.first, first.waiting.isEmpty {
+            checkpoints.removeFirst()
+            sequence += 1
+            let reason = first.failed.isEmpty ? nil
+                : "Work confirmation unavailable: \(first.failed.joined(separator: ", "))"
+            continuation.yield(WorkFrame(sequence: sequence, answers: first.id,
+                                         unavailable: reason, content: .checkpoint, wire: nil))
+        }
+    }
+
+    private func fail(_ error: any Error) {
+        guard !finished else { return }
+        finished = true
+        continuation.finish(throwing: error)
+    }
+
+    private func stop() async {
+        let watches: [Running] = lock.withLock {
+            finished = true
+            continuation.finish()
+            defer { running = [:] }
+            return Array(running.values)
+        }
+        for watch in watches {
+            watch.reader.cancel()
+            await watch.watch.cancel()
+        }
+    }
+
+    private static func confirm(_ id: Int) -> Data {
+        Data("{\"id\":\(id)}\n".utf8)
     }
 }

@@ -1,18 +1,16 @@
 //! One real Task/Graph population, with provider side effects isolated in fixtures.
 use crate::test_linear_input::SeedLinearSqlite;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::{mpsc, Arc, Mutex};
+use std::process::{Child, Command};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::{extract::State, routing::post, Json, Router};
 use serde_json::{json, Value};
 
 use crate::id::WaveId;
-use crate::lf::commands::work_watch::{WorkContent, WorkFrame};
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::linear::{LinearRefresh, LinearTestContext, LINEAR_TEST_CONTEXT};
 use crate::store::{open_ephemeral_store, CredentialType, ProviderToken, StorageConfig};
@@ -73,64 +71,22 @@ fn task_row(roadmap: &Value) -> Value {
 }
 
 fn capture(binary: &Path, repo: &Path, home: &Path) -> Value {
-    let status = read(binary, repo, home, &["task", "status", "FIX-1", "--json"]);
-    let roadmap = read(binary, repo, home, &["wave", "show", "--all", "--json"]);
+    let status = read(binary, repo, home, &["desktop", "task", "FIX-1", "--json"]);
+    // A completed Task has left the open plan; the exact lookup still finds it.
+    let roadmap = read(
+        binary,
+        repo,
+        home,
+        &["desktop", "plan", "--task", "FIX-1", "--json"],
+    );
     let row = task_row(&roadmap);
-    let mut monitor = Running {
-        release: None,
-        child: command(
-            binary,
-            repo,
-            home,
-            &["monitor", "work", "--watch", "--json"],
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap(),
-    };
-    let stdout = monitor.child.stdout.take().unwrap();
-    let (send, receive) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines() {
-            if send
-                .send(serde_json::from_str::<WorkFrame>(&line.unwrap()).unwrap())
-                .is_err()
-            {
-                break;
-            }
-        }
-    });
-    writeln!(
-        monitor.child.stdin.as_mut().unwrap(),
-        "{}",
-        json!({"action": "scope", "id": 1, "repo": repo, "headless": true, "task": "FIX-1", "wave": null, "activity": null})
-    )
-    .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let mut planning = None;
-    let mut task = None;
-    while planning.is_none() || task.is_none() {
-        let frame = receive
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .unwrap();
-        assert!(frame.unavailable.is_none(), "{frame:?}");
-        match &frame.content {
-            WorkContent::Planning(Some(part)) => {
-                let projected = task_row(&serde_json::to_value(&part.roadmap).unwrap());
-                assert_eq!(projected["runtime"]["status"], row["runtime"]["status"]);
-                planning = Some(frame);
-            }
-            WorkContent::Task(Some(part)) => {
-                let work = serde_json::to_value(&part.work).unwrap();
-                assert_eq!(work["graph"], status["execution"]["work"]["graph"]);
-                task = Some(frame);
-            }
-            _ => {}
-        }
-    }
-    json!({"status": status, "row": row, "planning_frame": planning, "task_frame": task})
+    let overview = &status["overview"];
+    assert_eq!(overview["graph"], status["execution"]["work"]["graph"]);
+    assert_eq!(
+        overview["graph_processes"].as_array().unwrap().len(),
+        status["graph_processes"].as_array().unwrap().len()
+    );
+    json!({"status": status, "row": row})
 }
 
 // Compare behavior, retaining generated IDs, clock readings and paths as evidence
@@ -141,7 +97,7 @@ fn contract(population: &Value) -> Value {
         let capture = &population[phase];
         let execution = &capture["status"]["execution"];
         let graph = &execution["work"]["graph"];
-        let graphs: Vec<_> = capture["task_frame"]["body"]["graph_processes"].as_array().unwrap().iter()
+        let graphs: Vec<_> = capture["status"]["graph_processes"].as_array().unwrap().iter()
             .map(|graph| json!({"state":graph["entry"]["state"], "steps":graph["steps"].as_array().unwrap().iter()
                 .map(|step| step["outcome"].clone()).collect::<Vec<_>>()})).collect();
         phases.insert(phase.into(), json!({

@@ -184,17 +184,17 @@ struct WaveLensTests {
         return try JSONDecoder().decode(TaskConditionSnapshot.self, from: Data(json.utf8))
     }
 
-    private func makeTask(state: String, reason: String) throws -> WaveTaskWork {
+    private func makeTask(state: String, reason: String) throws -> RoadmapTask {
         let json = """
         {"task":{"repository_id":"repo_00000000000040008000000000000001","repo":"/src/loopflow","project_id":"project-1","wave_id":"wave-1","id":"\(reason)","identifier":"W2-1","name":"n","description":"","rank":1,"state":"unstarted","completed_at":null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},"assignee":null},
-        "reference":{"issue_url":null,"workspace":null},"runtime":null,"directive":null,
+        "reference":{"issue_url":null,"workspace":null},"runtime":null,
         "graph_name":"feature","graph_source":"wave","latest_graph_process":null,"execution":null,"run_control":{"unavailable":null},"ship_control":{"unavailable":null},"shipping":null,
         "next_move":{"owner":"task","reason":"\(reason)"},
         "condition":{"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"unresolved_execution":false},
         "actions":{"recommended":null,"reason":"Task is ready to start"},
-        "pr":null}
+        "pr":null,"section":"now"}
         """
-        return try JSONDecoder().decode(WaveTaskWork.self, from: Data(json.utf8))
+        return try JSONDecoder().decode(RoadmapTask.self, from: Data(json.utf8))
     }
 
 }

@@ -91,12 +91,12 @@ names the exact path and branch to restore before launching.
 ## The Task is idle, but waiting on something
 
 Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
-`deferred`, …). What it is waiting on (a child Task, review, CI, merge) lives in
-its condition:
+`deferred`, …). What it is waiting on (a child Task, review, CI, merge) is its
+`reason`; Desktop's condition, with the evidence behind it, is in `lf desktop task`:
 
 ```bash
 lf task status <ID> --json
-lf wave status <wave> --json
+lf desktop task <ID> --json
 ```
 
 Resolve the named fact: open the conversation, inspect the child, repair CI,

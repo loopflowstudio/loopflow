@@ -32,7 +32,7 @@ mod sessions;
 pub mod sqlite;
 mod token_crypto;
 
-pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict};
+pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
 
 /// Availability of retained planning facts, independent of execution permission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -2779,40 +2779,6 @@ mod tests {
                 .map(|steer| steer.text.as_str())
                 .collect::<Vec<_>>(),
             ["inspect the failing test", "preserve the public behavior"]
-        );
-
-        // The cross-Work `lf history` timeline reads the same comments through
-        // `steers_since`, attributed to their Work and ordered by time. Stamp the
-        // two events so the `since` filter has something to bite on.
-        let conn = rusqlite::Connection::open(&database_path).unwrap();
-        conn.execute(
-            "UPDATE steers SET created_at=1700000001 WHERE id=?1",
-            [first.id],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE steers SET created_at=1700000021 WHERE id=?1",
-            [second.id.clone()],
-        )
-        .unwrap();
-        let timeline = store.steers_since(0).await.unwrap();
-        assert_eq!(
-            timeline
-                .iter()
-                .map(|comment| comment.steer.text.as_str())
-                .collect::<Vec<_>>(),
-            ["inspect the failing test", "preserve the public behavior"]
-        );
-        assert!(timeline.iter().all(|comment| comment.work == work));
-        assert_eq!(
-            store
-                .steers_since(1_700_000_010)
-                .await
-                .unwrap()
-                .into_iter()
-                .map(|comment| comment.steer.id)
-                .collect::<Vec<_>>(),
-            [second.id]
         );
     }
 

@@ -93,13 +93,62 @@ real shell tab, so the tab outlives the command.
 
 ## Build your own view
 
-Every read is JSON, and the shapes are published:
+A herdr, tmux or other GUI pane uses the reads below. Each streams with
+`--watch --json`: one JSON line now, another each time its answer changes,
+until stdin closes.
 
 ```bash
-lf monitor --json                         # waiting, blocked, active and finished work, with next actions
-lf task list --json                       # open Tasks, as your sidebar would list them
-lf task status LOO-12 --json              # one Task: its plan, PR, Graph steps and conversations
-lf session list --json                    # conversations, with which ones are available for you
+lf wave show --all --watch --json         # every Wave's plan and Tasks
+lf task list --watch --json               # open Tasks, as your sidebar would list them
+lf task status LOO-12 --watch --json      # one Task with its conversations, Graph processes and comments
+lf session list --watch --json            # conversations, with which ones are available for you
+lf history --since 7d --watch --json      # what Sessions did, tagged with their Task and Wave
+lf ps --watch --json                      # live lf call trees
+lf planning status --watch --json         # planning sync; keeps it exchanged while it runs
+lf desktop plans --watch --json           # every plan a repository window shows
+```
+
+```json
+{"answers": null, "unavailable": null, "body": {…}}
+```
+
+Every Task read prints the same Task row, each fact once:
+
+```json
+{"id": "task_…", "identifier": "LOO-12", "title": "Search transcripts", "wave": "infra",
+ "project": "Search", "state": "active", "reason": "…", "workflow": {"name": "code", "stage": "review"},
+ "pr": {"number": 1719, "url": "…", "phase": "open"}, "next": "lf task run LOO-12"}
+```
+
+`state` is one of `deferred`, `unstarted`, `idle`, `active`, `moving`,
+`shipping`, `done` or `abandoned`; `next` is the command that moves the Task
+on, `null` while it moves by itself.
+
+A Session row:
+
+```json
+{"id": "session_…", "title": "Search transcripts", "provider": "claude", "interactive": true,
+ "state": "active", "available": true, "task": "task_…", "wave": "infra",
+ "cwd": "/src/loopflow.loo-12", "agent_process_id": "…"}
+```
+
+`state` is what its agent process shows (`active`, `detached`, `closed`,
+`unknown`); `available` says it is ready for your next turn. `lf connect <id>`
+opens it.
+
+Desktop's own presentation (sections, conditions, controls) is
+`lf desktop plan`, `lf desktop task`, `lf desktop wave`, `lf desktop done` and
+`lf desktop sessions`, with the same `--watch`.
+
+`body` is what the same command prints with `--json` alone. Write
+`{"id": 1, "args": {"query": "parser"}}` to stdin to change what it reads; the
+next line answers `1`. The protocol is in [Work](work.md#see-where-it-stands).
+A development build with unreleased migrations reads a preview copy; its
+`lf --version` adds `copy: <directory>`.
+
+One-shot reads for everything else:
+
+```bash
 lf desktop view 'wave:product' --plan     # what a Dashboard would show, for your own host; opens nothing
 lf --task LOO-12 open --link --json       # the target, its fallback command and the route it would take
 lf desktop events --json                  # Desktop's window and pane changes, one line each

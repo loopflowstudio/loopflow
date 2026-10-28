@@ -8,7 +8,14 @@ use crate::lf::PlanningCommand;
 use crate::store::{RegistryUnavailable, Store};
 
 pub fn run(cmd: &PlanningCommand) -> Result<()> {
-    let repo = crate::git::worktrees::main_repo_root(&super::util::find_repo_root()?)?;
+    // A Work folder without Git still has stored planning status.
+    let repo = match super::util::find_repo_root() {
+        Ok(root) => crate::git::worktrees::main_repo_root(&root)?,
+        Err(_) => std::env::current_dir()?,
+    };
+    if let PlanningCommand::Status { watch: true, .. } = cmd {
+        return watch_status(&repo);
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(&repo, cmd))
 }
@@ -83,19 +90,71 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
             }
             println!("{key}");
         }
-        PlanningCommand::Status { json } => print_status(&store, &repo_key, *json).await?,
+        PlanningCommand::Status { json, .. } => print_status(&store, &repo_key, *json).await?,
+        PlanningCommand::Journal { json } => print_journal(&store, &repo_key, *json).await?,
     }
     Ok(())
+}
+
+/// Transport selection lives in config, so it changes without a store write.
+const STATUS_CLOCK: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// `lf planning status --watch`: the repository's planning is exchanged while
+/// the watch runs, and `lf planning status --json` printed now and each time it
+/// changes. Exchanges commit to the store and wake the watch like any writer.
+fn watch_status(repo: &Path) -> Result<()> {
+    let repo_key = repo.to_string_lossy().into_owned();
+    let runtime = tokio::runtime::Runtime::new()?;
+    let database = crate::store::database_path_from_env()?;
+    // Nothing here creates a store; without one there is nothing to exchange.
+    let _sync = database
+        .exists()
+        .then(|| {
+            runtime.block_on(async {
+                let store = std::sync::Arc::new(
+                    crate::store::open_store(&crate::store::StorageConfig::sqlite(database))
+                        .await?,
+                );
+                crate::ops::planning_sync::PlanningSync::start_watch(store, repo_key.clone())
+                    .map_err(anyhow::Error::from)
+            })
+        })
+        .transpose()
+        .inspect_err(|error| tracing::warn!(%error, "cannot start repository planning sync"))
+        .ok()
+        .flatten();
+    super::watch::run(
+        (),
+        super::watch::Watched::every(STATUS_CLOCK),
+        |store, ()| {
+            let repo_key = repo_key.clone();
+            async move {
+                let config =
+                    crate::config::load_config(Some(Path::new(&repo_key)))?.unwrap_or_default();
+                if let Some(provider) = config.planning_transport().remote_name() {
+                    return Ok(remote_status(provider));
+                }
+                let destinations = match store {
+                    Some(store) => {
+                        crate::ops::planning_sync::peer_status(&store, &repo_key).await?
+                    }
+                    None => Vec::new(),
+                };
+                Ok(serde_json::json!({"transport": "git", "destinations": destinations}))
+            }
+        },
+    )
+}
+
+fn remote_status(provider: &str) -> serde_json::Value {
+    serde_json::json!({"transport": provider.to_ascii_lowercase(), "destinations": []})
 }
 
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
     if let Some(provider) = config.planning_transport().remote_name() {
         if json {
-            println!(
-                "{}",
-                serde_json::json!({"transport":provider.to_ascii_lowercase(),"destinations":[]})
-            );
+            println!("{}", remote_status(provider));
         } else {
             println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
         }
@@ -161,13 +220,26 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         for conflict in destination.conflicts {
             println!("  Held {}: {}", conflict.target, conflict.reason);
         }
-        for (id, change) in destination.changes {
+    }
+    println!("Import retention is not publication; `lf planning journal` lists retained values.");
+    Ok(())
+}
+
+async fn print_journal(store: &Store, repo: &str, json: bool) -> Result<()> {
+    let journals = crate::ops::planning_sync::peer_journal(store, repo).await?;
+    if json {
+        println!("{}", serde_json::to_string(&journals)?);
+        return Ok(());
+    }
+    for journal in journals {
+        println!("{}", journal.destination);
+        for (id, change) in journal.changes {
             println!(
                 "  {} {} [{}; {}]: {}",
                 change.edit.target,
                 change.edit.change.field(),
                 id,
-                if destination.candidates.contains(&id) {
+                if journal.candidates.contains(&id) {
                     "candidate, not confirmed"
                 } else {
                     "retained alternative"
@@ -176,6 +248,6 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             );
         }
     }
-    println!("Copy a retained value into an ordinary edit to save it again. Import retention is not publication.");
+    println!("Copy a retained value into an ordinary edit to save it again.");
     Ok(())
 }

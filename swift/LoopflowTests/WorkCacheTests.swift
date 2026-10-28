@@ -17,7 +17,7 @@ struct WorkCacheTests {
         model.confirmMachine("machine-a")
         await model.refreshSessions()
         #expect(model.sessions.value?.isEmpty == false)
-        await source.hold(["session", "list"])
+        await source.hold(["desktop", "sessions"])
         let pending = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.confirmMachine("machine-b")
@@ -181,7 +181,7 @@ struct WorkCacheTests {
         let source = try Source()
         let cache = WorkCache(directory: directory)
         let model = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
-        await source.hold(["session", "list"])
+        await source.hold(["desktop", "sessions"])
         let read = Task { await model.refreshSessions() }
         await source.waitForHeldRead()
         model.setRepoPath("/src/other")
@@ -202,7 +202,7 @@ struct WorkCacheTests {
         saving.flush()
 
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: WorkCache(directory: directory))
-        await source.hold(["wave", "show"])
+        await source.hold(["desktop", "plan"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
 
@@ -231,7 +231,7 @@ struct WorkCacheTests {
         let cache = WorkCache(directory: directory)
         let returning = WorkModel(query: source.query, repoPath: Self.repo, cache: cache)
         #expect(returning.selection == nil)
-        await source.hold(["wave", "show"])
+        await source.hold(["desktop", "plan"])
         let read = Task { await returning.refresh() }
         await source.waitForHeldRead()
         returning.select(.wave(id: "wave-1"))
@@ -369,10 +369,10 @@ private actor Source {
             }
         }
         switch args.first {
-        case "wave" where args.dropFirst().first == "show": return roadmap
-        case "session": return sessions
+        case "desktop" where args.dropFirst().first == "plan": return roadmap
+        case "desktop" where args.dropFirst().first == "sessions": return sessions
         case "wave": return "[]"
-        case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        case "history": return #"{"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")
         }
     }

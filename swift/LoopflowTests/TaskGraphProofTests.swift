@@ -216,8 +216,8 @@ struct TaskGraphTests {
                 return try await reader.ensure(issue: args[3])
             case ("session", "attach"):
                 return try await reader.ensure(issue: String(args[2].dropFirst("ensured-".count)))
-            case ("session", "list"): return try await reader.inventory()
-            case ("wave", "show"): return roadmapJSON
+            case ("desktop", "sessions"): return try await reader.inventory()
+            case ("desktop", "plan"): return roadmapJSON
             case ("machine", "id"): return #"{"id":"\#(fixtureMachineId)"}"#
             default: throw RegistryQueryError("The fixture has no \(args.prefix(2).joined(separator: " "))")
             }
@@ -317,8 +317,8 @@ private actor CallLog {
     func add(_ args: [String]) { calls.append(args) }
 }
 
-/// A scripted workspace reader: every request is answered with the planning,
-/// Sessions and Task parts as they stand, the way `lf monitor work` does.
+/// Scripted watches: every request is answered with the plan, Sessions and
+/// Task status as they stand.
 @MainActor
 private final class ScriptedReader {
     private let repo: String
@@ -339,7 +339,7 @@ private final class ScriptedReader {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in self.answer(request) }
-        }, cancel: { continuation.finish() })
+        }, cancel: { continuation.finish() }, copy: nil)
     }
 
     /// `lf session connect --task --prepare`: the Task gets one conversation, its primary.
@@ -368,20 +368,26 @@ private final class ScriptedReader {
         case .scope(let request, let scope): (id, task) = (request, scope.task)
         case .refresh(let request): id = request
         case .checkpoint(let request, _): id = request
-        case .taskHistory(let request, _): id = request
         }
-        send("planning", answers: id, body: planning)
-        send("sessions", answers: id, body: ["repo": repo, "includes_headless": false, "entries": sessions])
-        if let task { send("task", answers: id, body: ["task": task, "work": work, "graph_processes": runs, "comments": ["identifier": task, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]) }
-        if case .checkpoint = request { send("checkpoint", answers: id, body: [:]) }
+        send(.planning, answers: id, body: planning["roadmap"] as Any)
+        send(.sessions, answers: id, body: sessions)
+        if task != nil {
+            send(.task, answers: id, body: ["overview": work, "graph_processes": runs, "execution": NSNull(),
+                                            "comments": ["identifier": task as Any, "comments": [], "pending_sync": [],
+                                                         "conflicts": [String: String](), "refresh_error": NSNull()]])
+        }
+        if case .checkpoint = request {
+            sequence += 1
+            continuation?.yield(WorkFrame(sequence: sequence, answers: id, unavailable: nil, content: .checkpoint, wire: nil))
+        }
     }
 
-    private func send(_ part: String, answers: Int, body: [String: Any]) {
+    private func send(_ part: WorkPart, answers: Int, body: Any) {
         sequence += 1
-        let line: [String: Any] = ["part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId, "copy": NSNull(),
-                                   "revisions": NSNull(), "unavailable": NSNull(), "body": body]
+        let line: [String: Any] = ["answers": answers, "unavailable": NSNull(), "body": body]
+        let scope = WorkScope(repo: repo, headless: false, task: task, activity: nil)
         guard let data = try? JSONSerialization.data(withJSONObject: line),
-              let frame = try? WorkFrame.decode(line: data) else { return }
+              let frame = try? WorkFrame.decode(part: part, scope: scope, sequence: sequence, line: data) else { return }
         continuation?.yield(frame)
     }
 }
@@ -690,11 +696,11 @@ private actor GraphSource {
 
     func respond(_ args: [String]) throws -> String {
         switch (args.first, args.dropFirst().first) {
-        case ("wave", "show"):
+        case ("desktop", "plan"):
             return String(decoding: try JSONSerialization.data(withJSONObject: roadmap), as: UTF8.self)
         case ("wave", "list"): return "[]"
-        case ("history", _): return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
-        case ("session", "list"): return #"{"entries":\#(session),"next":null}"#
+        case ("history", _): return #"{"truncated":false,"items":[]}"#
+        case ("desktop", "sessions"): return #"{"entries":\#(session),"next":null}"#
         case ("graph", "list"): return catalog
         case ("-b", "task") where args.dropFirst(2).first == "run":
             controls.append(args)

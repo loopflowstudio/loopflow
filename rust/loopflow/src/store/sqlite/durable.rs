@@ -4,8 +4,8 @@ use time::OffsetDateTime;
 
 use crate::child::ChildRef;
 use crate::durable::{
-    AbandonReceipt, Author, Machine, MachineId, ProjectId, SteerComment, TaskId, TaskState,
-    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    AbandonReceipt, Author, Machine, MachineId, ProjectId, TaskId, TaskState, ToolResponseId,
+    ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
 };
 use crate::id::WaveId;
 use crate::store::rows::now_unix;
@@ -237,27 +237,6 @@ impl SqliteStore {
             .query_map([task_id.as_str()], super::steers::read_steer)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(steers)
-    }
-
-    pub fn steers_since(&self, since: i64) -> StoreResult<Vec<SteerComment>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!("SELECT {},task_id,project_id,created_at FROM steers p
-            WHERE created_at>=?1 AND (task_id IS NOT NULL OR project_id IS NOT NULL) ORDER BY created_at,seq", super::steers::COLUMNS))?;
-        let result = query
-            .query_map([since], |row| {
-                let task: Option<String> = row.get(6)?;
-                let work = match task {
-                    Some(task) => WorkRef::Task(TaskId::from_raw(task)),
-                    None => WorkRef::Project(ProjectId::from_raw(row.get::<_, String>(7)?)),
-                };
-                Ok(SteerComment {
-                    work,
-                    steer: super::steers::read_steer(row)?,
-                    issued_at: crate::store::rows::unix_to_datetime(row.get(8)?),
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(result)
     }
 
     #[cfg(test)]

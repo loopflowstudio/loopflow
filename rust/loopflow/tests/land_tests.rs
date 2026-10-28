@@ -2214,7 +2214,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         "the Graph must settle completion before returning, without a status command"
     );
     let status = command()
-        .args(["task", "status", "INF-123", "--json"])
+        .args(["desktop", "task", "INF-123", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -2349,7 +2349,7 @@ esac
     };
     let pending = || {
         let output = command()
-            .args(["task", "status", "INF-123", "--json"])
+            .args(["desktop", "task", "INF-123", "--json"])
             .output()
             .unwrap();
         assert!(

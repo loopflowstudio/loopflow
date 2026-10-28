@@ -89,7 +89,7 @@ impl Fixture {
     }
 
     fn sessions(&self) -> Vec<Value> {
-        serde_json::from_value(self.json(&["session", "list", "--all", "--json"])).unwrap()
+        serde_json::from_value(self.json(&["desktop", "sessions", "--all", "--json"])).unwrap()
     }
 
     fn launches(&self) -> Vec<String> {
@@ -404,7 +404,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     assert!(prompt.contains("What do you want to work on?"));
     assert!(prompt.contains("do not require a Wave, Task, setup checklist or operating pass first"));
     assert!(prompt.contains("When Work exists, apply it"));
-    let empty = fixture.json(&["wave", "show", "--all", "--json"]);
+    let empty = fixture.json(&["desktop", "plan", "--all", "--json"]);
     let primary = fixture.json(&["session", "connect", "--prepare", "--json"]);
     let again = fixture.json(&["session", "connect", "--prepare", "--json"]);
     assert_eq!(primary["id"], again["id"]);
@@ -450,8 +450,8 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
         "primary": primary,
         "reopened": again,
         "task_primary": task_primary,
-        "sessions": fixture.json(&["session", "list", "--history", "--all", "--json"]),
-        "roadmap": fixture.json(&["wave", "show", "--all", "--json"]),
+        "sessions": fixture.json(&["desktop", "sessions", "--history", "--all", "--json"]),
+        "roadmap": fixture.json(&["desktop", "plan", "--all", "--json"]),
     });
     assert_eq!(fixture.count("agent_sessions"), 3);
     assert_eq!(fixture.count("graph_processes"), 0);
@@ -602,7 +602,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     assert!(run.status.success(), "{run:?}");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let final_status = loop {
-        let status = fixture.json(&["task", "status", task_id, "--json"]);
+        let status = fixture.json(&["desktop", "task", task_id, "--json"]);
         let finished = support::recorded_graphs(fixture.home.path())
             .first()
             .is_some_and(|graph| graph.0.is_some());
@@ -651,7 +651,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     assert_eq!(fixture.count("agent_sessions"), 2);
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
-    let history = fixture.json(&["task", "status", task_id, "--json"]);
+    let history = fixture.json(&["desktop", "task", task_id, "--json"]);
     assert_eq!(history["planning_state"], "removed");
     assert_eq!(
         history["execution"]["actions"]["reason"],
@@ -1162,7 +1162,7 @@ fn binding_leaves_ownership_and_prior_work_unchanged() {
         fixture.sessions().is_empty(),
         "binding preserves completion"
     );
-    let listed = fixture.json(&["session", "list", "--history", "--all", "--json"]);
+    let listed = fixture.json(&["desktop", "sessions", "--history", "--all", "--json"]);
     assert_eq!(listed.as_array().unwrap().len(), 1);
     assert_eq!(
         listed[0]["work"],
@@ -1526,7 +1526,9 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert_eq!(members("INF-124").len(), 3);
     // The listing marks it, so a reader finds it without choosing one.
     let marked: Vec<String> = fixture
-        .json(&["session", "list", "--all", "--task", "INF-124", "--json"])
+        .json(&[
+            "desktop", "sessions", "--all", "--task", "INF-124", "--json",
+        ])
         .as_array()
         .unwrap()
         .iter()
@@ -1900,7 +1902,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     };
     assert_eq!(graphs.len(), 1);
     assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
-    let status = fixture.json(&["task", "status", "INF-123", "--json"]);
+    let status = fixture.json(&["desktop", "task", "INF-123", "--json"]);
     assert_eq!(
         status["execution"]["work"]["graph"]["position"],
         serde_json::json!({"kind": "at", "step": "demo"})

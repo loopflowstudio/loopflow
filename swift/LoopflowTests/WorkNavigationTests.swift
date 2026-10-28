@@ -722,10 +722,10 @@ struct WorkNavigationTests {
         let gate = PlanningGate()
         let model = WorkModel(query: RegistryQuery { args, _ in
             switch args.first {
-            case "wave" where args.dropFirst().first == "show": await gate.wait(); return snapshot
-            case "session": return #"{"entries":\#(records),"next":null}"#
+            case "desktop" where args.dropFirst().first == "plan": await gate.wait(); return snapshot
+            case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(records),"next":null}"#
             case "wave" where args.dropFirst().first == "list": return "[]"
-            default: return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            default: return #"{"truncated":false,"items":[]}"#
             }
         }, repoPath: "/src/loopflow")
         let refresh = Task { await model.refresh() }
@@ -1044,7 +1044,7 @@ struct WorkNavigationTests {
         let members = review.map { WorkMemberRef(source: ["root"], work: $0.work) }
         let hidden = WorkMemberRef(source: ["root"], work: .init(repository: "repo", kind: .task, id: "issue-available"))
         let dashboard = WorkViewPlan(name: "Review", pinned: true, dashboardID: "review", repository: "repo",
-            observedAt: 0, selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
+            selection: WorkSelection(id: "root", expression: .filter(.state(.open))), savedRevision: 1,
             resolution: WorkSelectionResolution(attention: [], members: members + [hidden], unavailable: []),
             arrangement: WorkArrangement(order: members + [hidden], hidden: [hidden], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
@@ -1115,10 +1115,10 @@ private actor ReadingSource {
     func read(_ args: [String]) throws -> String {
         if failed { throw RegistryQueryError("offline") }
         switch args.first {
-        case "wave" where args.dropFirst().first == "show": return roadmap
-        case "session": return #"{"entries":\#(sessions),"next":null}"#
+        case "desktop" where args.dropFirst().first == "plan": return roadmap
+        case "desktop" where args.dropFirst().first == "sessions": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
-        case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+        case "history": return #"{"truncated":false,"items":[]}"#
         default: throw RegistryQueryError("unexpected command")
         }
     }

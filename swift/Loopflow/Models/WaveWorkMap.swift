@@ -4,9 +4,9 @@ public struct WaveWorkMap: Sendable, Hashable {
     public let objective: String
     public let projects: WorkEvidence<ProjectPlanningSnapshot>
     public var currentProject: ProjectPlanningSnapshot? { projects.currentProject }
-    public let tasks: WorkEvidence<WaveTaskWork>
+    public let tasks: WorkEvidence<RoadmapTask>
 
-    public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot>, tasks: WorkEvidence<WaveTaskWork>) {
+    public init(objective: String, projects: WorkEvidence<ProjectPlanningSnapshot>, tasks: WorkEvidence<RoadmapTask>) {
         self.objective = objective
         self.projects = projects
         self.tasks = tasks
@@ -39,37 +39,6 @@ extension WorkEvidence where Item == ProjectPlanningSnapshot {
     public var currentProject: ProjectPlanningSnapshot? {
         let current = items.filter { $0.current }
         return current.count == 1 ? current[0] : nil
-    }
-}
-
-public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
-    public var id: String { task.id }
-
-    public let task: TaskPlanningSnapshot
-    public let reference: TaskReferenceSnapshot
-    public let runtime: TaskRuntimeSnapshot?
-    public let graphName: String?
-    public let graphSource: String?
-    public let latestGraphProcess: GraphProcessDetail?
-    public let execution: TaskExecutionSnapshot?
-    public let runControl: TaskRunControl
-    public let shipControl: TaskRunControl
-    public let shipping: ShippingSnapshot?
-    public let directive: WorkDirectiveSnapshot?
-    public let nextMove: WorkNextMove
-    public let condition: TaskConditionSnapshot
-    public let actions: TaskActionModel
-    public let pr: PrSnapshot?
-
-    enum CodingKeys: String, CodingKey {
-        case task, reference, runtime, directive, condition, actions, pr, execution
-        case graphName = "graph_name"
-        case graphSource = "graph_source"
-        case latestGraphProcess = "latest_graph_process"
-        case runControl = "run_control"
-        case shipControl = "ship_control"
-        case shipping
-        case nextMove = "next_move"
     }
 }
 
@@ -276,28 +245,6 @@ public struct ShippingSnapshot: Decodable, Sendable, Hashable {
         case state, reason
         case shippedAt = "shipped_at"
     }
-}
-
-public struct WorkDirectiveSnapshot: Decodable, Sendable, Hashable {
-    public let version: UInt32
-    public let kind: WorkDirectiveKind
-    public let text: String
-    public let appliedAt: String?
-    public let incorporatedAt: String?
-    public let incorporatedSummary: String?
-
-    enum CodingKeys: String, CodingKey {
-        case version, kind, text
-        case appliedAt = "applied_at"
-        case incorporatedAt = "incorporated_at"
-        case incorporatedSummary = "incorporated_summary"
-    }
-}
-
-public enum WorkDirectiveKind: String, Decodable, Sendable, Hashable {
-    case initial
-    case replacement
-    case workRevised = "work_revised"
 }
 
 public enum WorkNextMoveOwner: String, Decodable, Sendable, Hashable {

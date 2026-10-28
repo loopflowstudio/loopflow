@@ -498,9 +498,10 @@ struct TaskFilesTests {
         let roadmap = try String(contentsOf: root.appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json"), encoding: .utf8)
         let query = RegistryQuery { args, _ in
             switch args.first {
-            case "wave" where args.dropFirst().first == "show": return roadmap
-            case "ls", "session": return "[]"
-            case "history": return #"{"generated_at":1,"since":0,"limit":50,"truncated":false,"items":[]}"#
+            case "desktop" where args.dropFirst().first == "plan": return roadmap
+            case "ls": return "[]"
+            case "desktop" where args.dropFirst().first == "sessions": return "[]"
+            case "history": return #"{"truncated":false,"items":[]}"#
             default: throw RegistryQueryError("Unexpected file/launch request")
             }
         }

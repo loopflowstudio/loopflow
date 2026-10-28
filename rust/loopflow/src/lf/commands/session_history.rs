@@ -3,49 +3,10 @@
 use anyhow::{anyhow, Result};
 
 use crate::lf::commands::WorkFilter;
-pub use crate::session_record::active::{ActiveSessionsSnapshot, DiscoveryState};
 pub use crate::session_record::SessionHistory;
 
 const WINDOW_DAYS: i64 = 7;
 const MAX_SESSIONS: usize = 50;
-
-pub fn list_active(json: bool, watch: bool, task: Option<&str>) -> Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let (home, store, task) = runtime.block_on(async {
-        let home = crate::store::lf_home_dir();
-        let config = crate::store::StorageConfig::sqlite(crate::store::database_path_from_env()?);
-        let store = std::sync::Arc::new(crate::store::open_store(&config).await?);
-        let task = match task {
-            Some(task) => Some(crate::durable::WorkRef::Task(
-                store
-                    .get_task_by_issue(task)
-                    .await?
-                    .ok_or_else(|| anyhow!("Task {task:?} is not registered"))?
-                    .id,
-            )),
-            None => None,
-        };
-        Ok::<_, anyhow::Error>((home, store, task))
-    })?;
-    if watch {
-        return super::session_watch::run(&home, &store, task);
-    }
-    let snapshot = crate::session_record::active::snapshot(&home, &store.sqlite, task);
-    if json {
-        println!("{}", serde_json::to_string(&snapshot)?);
-    } else {
-        for session in &snapshot.sessions {
-            println!("{}  {}", session.id, session.title);
-        }
-        for gap in &snapshot.gaps {
-            println!("Unavailable: {gap}");
-        }
-        if snapshot.sessions.is_empty() && snapshot.gaps.is_empty() {
-            println!("No active Sessions.");
-        }
-    }
-    Ok(())
-}
 
 /// Shared Session history, newest input first. SQL selects the recent budget
 /// before decoding; exact Task and caller-input drills remain complete.

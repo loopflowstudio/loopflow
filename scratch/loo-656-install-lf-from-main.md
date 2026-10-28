@@ -165,7 +165,7 @@ that choice:
    `reader-catalog.txt` in each `lf-<target>` artifact. LOO-669 publishes it next
    to `SHA256SUMS` and calls `can_open`; nothing in LOO-656 calls it yet.
 
-### Concept review of the pursue (headless, 2026-10-28) — next implement direction
+### Concept review of the pursue (headless, 2026-10-28) — implemented
 
 Jack asked for "refusals that name the build to install". The newer-schema
 refusal does: it names the floor migration and `lf self install --main`.
@@ -186,6 +186,8 @@ Reviewed and unchanged: `reader_catalog`/`can_open` match the LOO-669 split
 (`can_open` has no caller until LOO-669 publishes catalogs, as agreed), and
 `lf self install reader-catalog` stays a hidden packaging command. The docs
 changes match the request. No open product choice.
+
+Implemented: `incompatible(conn)` + `last_migrated_by`; `pending_migrations` takes the conn. Check: `cargo test -p loopflow --lib store::migrations::` 121 passed; fmt and clippy clean; full `store::`, Swift and `release_tests` stay with gate/CI.
 
 ## Not in this change: contract enforcement (decision belongs to LOO-669)
 

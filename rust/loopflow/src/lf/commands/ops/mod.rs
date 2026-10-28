@@ -404,7 +404,8 @@ fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress
     let run = |args: &[&str]| crate::git::git_stdout_inheriting(repo, args, &inherit_index);
     run(&["read-tree", staged_tree.trim()])?;
     run(&["reset", "-q", "HEAD", "--", ":(top,glob)[.]lf/tmp/**"])?;
-    if run(&["diff", "--cached", "--name-only"])?.trim().is_empty() {
+    // Filenames can consist entirely of whitespace.
+    if run(&["diff", "--cached", "--name-only"])?.is_empty() {
         return Ok(false);
     }
     progress.status("Committing uncommitted edits before merging...");

@@ -1712,6 +1712,25 @@ fn assert_sync_preserves_work_with_telemetry(ignored: bool) {
 }
 
 #[test]
+fn sync_preserves_work_with_whitespace_only_filename() {
+    let _env = EnvGuard::new(&[]);
+    let repo = create_telemetry_sync_repo(true);
+    repo.create_file("   ", "ordinary work\n");
+
+    assert_sync_succeeds(&repo);
+    for revision in ["HEAD^1", "HEAD"] {
+        assert_eq!(
+            git(repo.path(), &["show", &format!("{revision}:   ")]),
+            "ordinary work"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(repo.path().join("   ")).unwrap(),
+        "ordinary work\n"
+    );
+}
+
+#[test]
 fn sync_preserves_work_with_prestaged_telemetry() {
     let _env = EnvGuard::new(&[]);
     for ignored in [false, true] {

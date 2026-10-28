@@ -1,17 +1,16 @@
 # LOO-664: Keep sync working with ignored telemetry
 
-2026-10-27. Accepted outcome; selective checkpoint implemented; gate and delivery remain.
+2026-10-27. Selective checkpoint implemented; gate and delivery remain.
 Jack Heart authorized the bounded hotfix and autonomous shipping in comment
 `297df81a-24b3-4431-8336-a0dfeb3660ab`. Iteration feedback rejects the previous
-pre-staged telemetry exception. The implementation mechanism follows source and
-fixture evidence; it was not separately reviewed.
+pre-staged telemetry exception. The mechanism follows source and fixture evidence,
+without separate design review.
 
 ## Outcome and demo
 
 Installed 0.14.19 stopped LOO-661 after staging ordinary edits because Apple Git
-2.50.1 rejected the ignored telemetry exclusion. The repair serves Infrastructure's
-KR that a Session can advance a Task without interruption by Loopflow plumbing;
-no numeric target was supplied.
+2.50.1 rejected the ignored telemetry exclusion. Infrastructure's relevant KR is
+advancing Tasks without interruption by Loopflow plumbing; no numeric target.
 
 Automatic feature-branch sync must checkpoint ordinary staged and working edits,
 merge upstream, and preserve local `.lf/tmp/` telemetry's staged/working partition.
@@ -50,12 +49,9 @@ working contents and recovery objects.
    Ignored untracked telemetry stays on disk; tracked and non-ignored edits use
    the existing preservation path.
 
-Checkpoint errors prevent merging and preserve real edits. A refresh failure after
-commit reports that the checkpoint was saved, without implying rollback or success.
-
-Upstream changes to tracked telemetry can conflict during restoration. Existing
-recovery retains the stash and reports its exact restore command; sync must fail
-without deleting that recovery entry.
+Checkpoint errors prevent merging and preserve edits. A refresh failure after
+commit reports that the checkpoint was saved. Upstream telemetry conflicts fail
+with the retained stash and its exact restore command.
 
 ### Delete — do not maintain
 
@@ -73,13 +69,13 @@ Pre-compression design and evidence: `3796c6c8f9:scratch/loo-664-keep-lf-sync.md
 
 ## Acceptance and remaining work
 
-**This slice:** the selective checkpoint and six `sync_preserves_work_with_`
-regressions remain one change. They cover ignored/unignored telemetry; additions,
-modifications, deletions and renames; unusual names and neighboring/nested ordinary directories;
+Seven `sync_preserves_work_with_` regressions cover ignored/unignored telemetry;
+additions, modifications, deletions and renames; unusual names and neighboring/nested directories;
 explicitly staged ignored user files; existing telemetry history; repeat sync;
 index-lock failure retaining HEAD/index/work; and upstream telemetry conflicts
-retaining staged/working bytes in the named recovery stash without reporting
-success. Binary diffs check telemetry's full staged/working partition.
+retaining staged/working bytes in the named recovery stash. Binary diffs check
+telemetry's full staged/working partition. A whitespace-only filename regression
+guards against trimming `diff --name-only` into a false empty checkpoint.
 
 Gate, publication and landing remain. Gate includes existing resolver/Graph-sync
 tests and commit-boundary suites:
@@ -88,24 +84,17 @@ tests and commit-boundary suites:
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(commit_tests::) | test(agent_startup_tests::) | test(release_tests::) | test(release_lock_tests::)' < /dev/null
 ```
 
-The affected gate must exit zero, including formatting and Clippy; CI owns
-cross-platform coverage. `commit_tests::` covers the reused separate-index pattern
-and Git failure diagnostics; the test runner isolates inherited `LF_*` variables.
-Caller Graph owns publication and landing. Infrastructure
-owns the single coordinated release/install and installed LOO-661 readback; this
-Task supplies its merged revision, with no competing publisher or installation.
-Source fixtures establish no installed recovery.
-
-Done when the actual CLI scenarios above pass, genuine Git failures retain work
-and actionable recovery, and the repair lands with an exact merged revision for
-Infrastructure's release. Installed LOO-661 recovery remains a separate readback
-after that release; a passing source fixture cannot close that obligation.
+Gate must pass, including formatting and Clippy; CI owns cross-platform coverage.
+`commit_tests::` covers the reused separate-index pattern and Git diagnostics;
+the runner isolates inherited `LF_*`. Caller Graph owns publication and landing,
+then supplies Infrastructure the exact merged revision. Infrastructure alone owns
+coordinated release/install and installed LOO-661 readback. Source fixtures and
+landing cannot close that installed verification obligation.
 
 The self-hosting blocker recorded in the Task definition is resolved by
 `0f6969856dcda27735c9e67520116f9e7684616d`: the authorized LOO-664 Wave-memory
-contribution now describes selective checkpoints and is committed. The 2026-10-27
-kickoff readback found a clean index and worktree, with code and test content
-unchanged since the recorded focused checks. Gate and delivery remain; this
-checkpoint does not establish installed recovery.
+contribution describes selective checkpoints and is committed; compress started
+with a clean index and worktree. Until installation, checkpoint each step's intended
+edits with explicit-path `lf commit` before returning to installed Graph sync.
 
-Check: `git diff --check` and `lf context` passed on 2026-10-27 (both budgets within limits); prior unchanged-source evidence: `scripts/test_network.py cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 6 passed, `cargo +stable fmt --all -- --check` and network-isolated `cargo +stable clippy --all-targets -- -D warnings` passed; affected suites remain with gate.
+Check (2026-10-27, rustup stable 1.99.1): `uv run python scripts/test_network.py /Users/jack/.cargo/bin/cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 7 passed; rustup-first `cargo +stable fmt --all -- --check` and network-isolated `cargo +stable clippy --all-targets -- -D warnings` passed; `git diff --check` and `lf context` passed, both budgets within limits; affected suites remain with gate.

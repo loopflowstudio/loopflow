@@ -66,133 +66,78 @@ database migration, DTO change or Swift change exists.
 
 ## Evidence and excluded alternatives
 
-Full evidence before this consolidation is preserved at
-`31c2ed7565da481c0a2274ef448189fe15f70397:scratch/loo-661-save-refreshed-claude.md`
-(blob `47bcef7ebe8d8f75a0e7f9526169c891914d0110`), including earlier archives,
-source URLs, process IDs and probe blobs. The conclusions below group the findings
-by mechanism so the next investigation need not replay them.
-The complete plan before this consolidation is at
-`c751de406824a3ff60f9e50cf52c63989fa0ffdd:scratch/loo-661-save-refreshed-claude.md`.
-The earlier uncommitted memory/assumptions are preserved as Git blobs
-`a7a634b98304be1599c7039139496e8eb8dec209` /
-`5ddde1b3c97907dcfb356bd1fde5ab3e64022705` before reconciliation/checkpointing.
-Apple source review used Security commit
-`db15acbe6a7f257a859ad9a3bb86097bfe0679d9` unless an archived link says `main`;
-source inspection does not prove
-installed binary equivalence or exhaust every public interface.
+Full findings, probe source/runner/result blobs, timestamps and source URLs:
+`0288f9d611755301b85bd36316a7b310ed8d9d3a:scratch/loo-661-save-refreshed-claude.md`.
+Earlier raw evidence: `31c2ed7565da481c0a2274ef448189fe15f70397:scratch/loo-661-save-refreshed-claude.md`
+(blob `47bcef7ebe8d8f75a0e7f9526169c891914d0110`). Previously uncommitted
+memory/assumptions were preserved as blobs `a7a634b98304be1599c7039139496e8eb8dec209`
+and `5ddde1b3c97907dcfb356bd1fde5ab3e64022705`.
 
-Native probes used disposable `loopflow-LOO-661-*-probe-<uuid>` services and
-synthetic data, bounded/reaped subprocesses, captured outputs and successful cleanup.
-No real credential was directly read or printed. Findings 8–20 were source/header
-review except read-only installed dispatch inspection in 18.
+These conclusions retain the rejected mechanisms so investigation need not repeat
+them. Native probes used disposable `loopflow-LOO-661-*-probe-<uuid>` services,
+synthetic bytes, bounded/reaped children, captured output and successful cleanup.
+No real credential was directly read or printed. Apple source evidence uses
+Security commit `db15acbe6a7f257a859ad9a3bb86097bfe0679d9`; it does not prove
+installed binary equivalence or exhaust public interfaces. Findings 8–20 were
+source/header review, except read-only installed dispatch inspection in 18.
 
-- **Input ceilings (1–2):** `security -i` has a 4,096-byte buffer. Values of
-  64/1,242 bytes round-tripped; 2,048 failed with old bytes retained. Hex alone
-  fills the buffer at 2 KiB; raw JSON cannot fit 8 KiB. Help/parser expose no
-  file/FD indirection. Detached `security … -w` returned zero at 128/2,048/8,192
-  bytes but truncated large inputs to 128 bytes (`_PASSWORD_LEN + 1`).
-  Source recheck on October 27 also excludes a PTY or repeated password options
-  as a larger transport: `security.c::main` uses the same fixed input buffer
-  with or without a PTY; `isatty` only controls the prompt. Each command receives one password
-  buffer, and `-w`/`-X` replace it rather than append. Multiple commands perform
-  separate replacements. This is source evidence, not another native probe.
-  Sources: [security.c](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/SecurityTool/macOS/security.c),
-  [keychain_add.c](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/SecurityTool/macOS/keychain_add.c).
-- **Access loss (3–5, 8–9, 11, 21):** `SecKeychainItemModifyAttributesAndData`
+- **Transport (1–2):** `security -i`'s 4,096-byte input buffer round-tripped
+  64/1,242-byte values; 2,048 bytes failed with old bytes retained. Hex fills the
+  buffer at 2 KiB; raw JSON cannot fit 8 KiB. Detached `security … -w` returned
+  zero but truncated larger values to 128 bytes. Source excludes PTYs, file/FD
+  indirection and repeated password options: `-w`/`-X` replace rather than append;
+  multiple commands perform separate replacements.
+- **Access (3–5, 8–9, 11, 21, 27):** `SecKeychainItemModifyAttributesAndData`
   returned zero at 2/8 KiB but the `security` reader exited 128; `ModifyContent`
-  left reads timing out. Native writes replaced `apple-tool:` with the writer's
+  left reads timing out. Native writes replaced `apple-tool:` with writer
   `cdhash:`. Non-null data creates a new group and strips partition ACLs; null
-  leaves bytes unchanged. `security-framework` 3.7.0 uses the same modifier.
-  Combined updates commit data before restoring access. Apple-signed
-  `osascript`/`SecItemUpdate` and copied `SecAccessRef` restoration returned zero
-  but left reads timing out. Explicit partition editing succeeded locally, then
-  applying access failed with `-25293` under disabled UI. Initial JXA `-50`
-  errors were bridge failures. Apple-anchored `com.apple.security` gets
-  `apple-tool:`; other Apple code gets `apple:`. Neither a signed interpreter nor
-  disabled writer UI proves reader access. Apple's update guide supports
-  `SecItemUpdate` with `kSecAttrAccess`, but promises no atomic preservation of
-  existing partitions; pinned `keychain_add.c:131–155` modifies data first.
-- **No public encoder found (10, 12–15):** raw `CSSM_DL_DataModify` reaches
-  `SSUniqueRecordImpl`, bypassing encrypted `SSDbUniqueRecordImpl::modify`;
-  raw JSON would replace encoded storage. Public passthroughs expose no password
-  encoder; private `DB_MODIFY_WITHOUT_ENCRYPTION` expects encoded blobs.
-  `CSSM_EncryptData` still needs private group/label/IV/ciphertext composition.
-  `SecKeychainSetBatchMode` is private. Public FileDL `TOGGLE_AUTOCOMMIT`,
-  `COMMIT`, `ROLLBACK` and `DB_GET_HANDLE` do exist; their high-level limitation
-  is established below. Private envelope reconstruction/internal C++ ABI remain out.
-- **Other interfaces (16–20):** import handles key/certificate containers; copy
-  strips access/integrity ACLs and inserts a new group; creation rejects valid
-  duplicates. macOS 26.0.1 (25A362) read-only dispatch inspection resolves arm64e
-  `KCSetData`/`KCUpdateItem` to staged `SecKeychainItemSetData`/`SecKeychainItemUpdate`,
-  whose published paths create new groups. This proves dispatch, not full source
-  equivalence. `SecAddSharedWebCredential` uses a different website/account
-  authority and pinned macOS source returns `errSecUnimplemented`. None establishes
-  compatible replacement; no mutation probe through these interfaces ran.
-- **Outer transactions cannot verify replacement before commit (22–26):**
-  published `Item.cpp:809–905` creates a new group/removes partition ACLs and
-  wraps replacement in `CSPDLTransaction`, which defers settlement when autocommit
-  is already disabled (`CSPDLTransaction.cpp:39–73`). Disposable Keychains seeded
-  by `security -i` with default access tested public FileDL controls around that
-  modifier, with native UI disabled. Modifications returned zero at 2,048/8,192
-  bytes, but retained-item reads and fresh `SecKeychainFindGenericPassword`
-  lookups returned `-25300`; metadata reads succeeded.
-
-  A subsequent public CSSM probe read new encoded records by unique ID (2,084/8,228
-  bytes), while group-key queries returned `CSSMERR_DL_ENDOFDATA` (`-2147413715`).
-  Fresh CSPDL/FileDL password queries returned the original 52-byte encoded record
-  and its key. Thus the replacement record was not simply absent; its new group
-  was unavailable to decoding. Published `AppleDatabase.cpp:1634–1670` routes
-  `DbModifier::getRecord` to modified tables but `createCursor` to the pre-write
-  snapshot; `securestorage.cpp:253–277` uses that cursor for group-key lookup.
-  This explains the published implementation's split and matches the probe,
-  without establishing installed binary equivalence or post-commit behavior.
-
-  Rollback and autocommit restoration returned zero; fresh `security` readers
-  recovered exact old bytes after each attempt. This proves those recoveries,
-  not general rollback safety, unchanged ACL identity or verified replacement.
-  No commit or access-restoration probe ran. Reacquiring an item or opening another
-  reader cannot supply the proposed pre-commit verification; committing first
-  abandons that boundary and leaves partition-access failure unresolved. Reject
-  this sequence rather than repeat another lookup/transaction wrapper.
-
-  Probe source blobs: `f8fd3265b3c6a5375cb0cdd0ca86cb5d08cd0c40` (22),
-  `0c32548b0168c0e38e08948ca991b2f6905c1334` (23),
-  `1755401719a564fefa372d652310292725e084c8` (25). Finding 25's runner/results:
-  `4db66134850366576a038ce689b1527d6060ddff` /
-  `d6c97155d988c0d1453f82bc4c108f24f11e8d70`; reconstruct its temporary directory
-  locator beside the compiled probe. All transaction subprocesses were bounded
-  to 10/15 seconds; outputs contained only status, lengths and comparisons.
-- **Explicit access is not an update escape hatch (27):** at the same pinned
-  Apple revision, `ItemImpl::addWithCopyInfo` passes `mAccess` into
-  `updateSSGroup`; `ItemImpl::update` calls it without that argument. The latter
-  copies the old group's access and removes partition/integrity ACLs.
-  `SecKeychainItemCreateFromContent` supplies initial access to a new item;
-  `SecKeychainItemSetAccess` immediately changes the current group's access,
-  rather than staging access for the next data update. Thus an explicit-access
-  branch inside the private helper is not a public replacement mechanism.
-  Creation still does not replace a valid duplicate (finding 16), and setting
-  access before modification does not avoid the modifier's removal. This is
-  source evidence, not a new native mutation result or proof of installed binary
-  equivalence. Sources: [Item.cpp](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Item.cpp),
-  [SecKeychainItem.cpp](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItem.cpp).
-- **Live failure remains undiagnosed (6):** a recorded launch reported native
-  write/readback failure without status; two others reported expired OAuth.
-  Supported installed 0.14.18 polls accepted jack@loopflow.studio and
-  jackstah@gmail.com at `1793140722/1793140723`; 0.14.19 accepted both at
-  `1793152261/1793152262` and `1793156935`, with verified capacity and no diagnostic
-  or recovery instruction. The uninspected local row remained unavailable.
-  Captured output was reduced to identity, verification, diagnostic presence and
-  observation timestamps. These reports expose neither refresh occurrence nor
-  storage stage. Payload size/causality remain unknown; no browser sign-in
-  dependency is established. Successful polls cannot explain the earlier failure.
+  leaves bytes unchanged. `security-framework` 3.7.0 uses that modifier. Combined
+  updates commit data before restoring access. Apple-signed `osascript`/
+  `SecItemUpdate` and copied `SecAccessRef` restoration returned zero but reads
+  timed out. Applying edited partition access failed with `-25293` under disabled
+  UI; initial JXA `-50` errors were bridge failures. Apple-anchored
+  `com.apple.security` gets `apple-tool:`, other Apple code `apple:`.
+  Public creation supplies explicit access but rejects valid duplicates;
+  `SecKeychainItemSetAccess` changes the current group immediately, not the next
+  update. Source's explicit-access helper branch is called by creation, not
+  replacement. Neither signed interpreters nor disabled UI prove reader access.
+- **Encoding and other interfaces (10, 12–20):** raw `CSSM_DL_DataModify` bypasses
+  encrypted modification; JSON would replace encoded storage. No public password
+  encoder was found; `CSSM_EncryptData` still needs private group/label/IV/ciphertext
+  composition. Private envelope reconstruction/C++ ABI remain excluded.
+  `SecKeychainSetBatchMode` is private; public FileDL transaction controls exist
+  but have the limitation below. Import handles keys/certificates; copy strips
+  access/integrity ACLs and creates a new group. macOS 26.0.1 (25A362) dispatch
+  resolves `KCSetData`/`KCUpdateItem` to staged APIs whose published paths create
+  new groups. Shared web credentials use another authority and the pinned macOS
+  source returns `errSecUnimplemented`. No mutation probe through these alternatives
+  established compatible replacement.
+- **Outer transactions (22–26):** public FileDL controls deferred commit around
+  2,048/8,192-byte modifications, which returned zero. Retained-item and fresh
+  password reads returned `-25300`; metadata succeeded. Record-by-ID reads found
+  new encoded bytes (2,084/8,228), but group-key queries returned end-of-data
+  (`-2147413715`); fresh password queries found the original 52-byte encoded record
+  and its key. Published source reads modified records by ID but queries the
+  pre-write snapshot, matching the unavailable decoding group. Another lookup
+  or transaction wrapper cannot supply the proposed pre-commit verification.
+  Rollback/autocommit restoration returned zero and fresh `security` readers
+  recovered exact old bytes. This proves those recoveries, not general rollback
+  safety or unchanged ACL identity. No commit/access-restoration probe ran;
+  committing first abandons verification and leaves partition access unresolved.
+- **Live failure (6):** launches reported one native write/readback failure
+  without status and two expired OAuth errors. Later supported 0.14.18/0.14.19
+  polls accepted jack@loopflow.studio and jackstah@gmail.com with verified capacity
+  and no diagnostic/recovery instruction; the uninspected local row remained
+  unavailable. Latest recorded observation: `1793156935`. Polls expose neither
+  refresh occurrence nor storage stage, payload size or causality. They explain
+  neither the earlier failure nor a browser sign-in dependency.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
 would select LOO-325. Local preservation must prove readable old bytes and unchanged
 access, but cannot prove server validity after OAuth rotation: `fresh_claude_token`
 receives the refresh response before saving, with no provider/Keychain transaction.
-Live acceptance must verify actual login use. Neither limitation relaxes Jack
-Heart's preservation requirement or selects the excluded concurrency redesign.
+Neither limitation relaxes Jack Heart's requirements.
 
 ## Remaining implementation and acceptance
 
@@ -275,4 +220,4 @@ it does not establish installed repair. Infrastructure owns the prepared signed
 CLI/helper installation and verification. No ignore-rule change, forced telemetry
 staging, suppressed Git error or competing publisher belongs in this Task.
 
-Check — kickoff (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reconciliation; no build/test rerun. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.
+Check — compress (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reduction; no build/test rerun. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.

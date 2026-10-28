@@ -1,19 +1,18 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
 Status: **Implementation blocked on writer design; diagnostics only.**
-Implementation review 2026-10-27: the checked-in writer still uses the transport
-invalidated by finding 30. No compatible replacement mechanism is selected or
-proved. Dependent implementation and delivery cannot proceed from this draft;
-the next design must address both the command-buffer corruption and native
-partition-access counterexamples before replacing production code. This is a
-technical prerequisite, not a request to relax Jack Heart's accepted constraints.
-Kickoff reviewed 2026-10-27: replacement writer remains unproved; a new disposable
-counterexample establishes destructive failure in the existing transport (finding 30).
+The checked-in writer still uses the transport invalidated by finding 30.
+Prove a replacement that preserves native reader access and readable old bytes
+on failure before implementation or delivery. No product decision or relaxation
+of preservation requirements is pending; exclusions below do not exhaust public
+interfaces. Reopen a rejected route only with a mechanism addressing its
+counterexample.
+
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-Full plan and evidence before this reduction:
-`e3f012685c3fa12791da4deac9b71b9979576d6f:scratch/loo-661-save-refreshed-claude.md`.
+complete pre-compression plan:
+`ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/loo-661-save-refreshed-claude.md`.
 PR #1749's CI selection, LOO-657 and v0.14.19 are integrated.
 LOO-664 / #1754 (`fefda39493`) is now integrated through `15f32f8605`:
 source sync handles ignored and pre-staged telemetry. This supplies no installed
@@ -35,30 +34,10 @@ Infrastructure's primary conversation owns release, CLI/Desktop/helper installat
 and installed acceptance. This Task serves its reliable-auth objective and KR about
 advancing work without plumbing failures; no quantitative Wave target is selected.
 
-**Next: prove a compatible writer.** No tested replacement preserves reader access
-and readable old credentials on failure. The `security -i` ceiling remains;
-successful status or post-write repair is insufficient. Keep the accepted outcome
-and acceptance sequence below. No product decision or authorization is pending.
-Reopen a rejected route only with a mechanism addressing its counterexample;
-the exclusions below do not exhaust public interfaces. Diagnostics alone cannot
-deliver LOO-661.
-
-## Demo and implementation decision
-
-After a naturally required refresh, `lf account claude --json` shows the same
-accepted identity and capacity, and native Claude continues using that login
-without reauthentication. Before that installed demo, the native acceptance
-fixture demonstrates exact 2/8 KiB replacement and readable old bytes after an
-injected save failure, using the production writer and existing reader together.
-
-The target remains one native writer replacing the interactive command transport,
-shared by refresh and activation. Choosing a supported atomic data/access mechanism
-is still a technical prerequisite, not an accepted design decision. On 2026-10-27,
-the agent retained Jack Heart's preservation requirements and rejected treating
-diagnostics, a size refusal, or successful API status as the repair. No tested
-candidate meets the contract; kickoff cannot declare the implementation ready.
-The failure to avoid is a reported save error that has already destroyed the
-usable login. Finding 30 now demonstrates that failure on disposable items.
+The target is one native writer shared by refresh and activation. Diagnostics,
+a size refusal, successful API status or post-write repair cannot establish the
+required preservation. The acceptance sequence below separates disposable native
+storage proof from the installed refresh demo; neither can replace the other.
 
 ## Surviving implementation
 
@@ -82,9 +61,8 @@ usable login. Finding 30 now demonstrates that failure on disposable items.
   derived, not credential authority.
 
 Four diagnostic tests cover hostile output, mismatch, numeric IO errors and
-unstructured errors; they prove redaction, not native preservation. No replacement
-writer or native acceptance fixture exists. This repair adds no migration, DTO or
-Swift change; merged Task/Graph work supplies no credential acceptance.
+unstructured errors; they prove redaction, not native preservation. No native
+acceptance fixture exists. This repair adds no migration, DTO or Swift change.
 The current writer still waits without a deadline; the 15-second subprocess bound
 below is remaining implementation, not a property of these diagnostics.
 
@@ -236,6 +214,9 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Delete — do not maintain
 
+- No deletion can be completed before the replacement writer is proved. The
+  surviving diagnostics already retain the original secret and serialize once;
+  keep that path and its redaction boundary without adding another abstraction.
 - Replace the `security -i` spawn, hex script and command-string escaping restrictions
   inside `write_claude_keychain_credential` once a compatible writer is proven.
   Replace its exclusive stand-in in
@@ -267,4 +248,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — implement (2026-10-27): source inspection confirms the unchanged writer; `git diff --check` and `lf context` pass. No Rust changes or repeated probes/tests; native-writer design remains blocked and installed-refresh acceptance remains unproved.
+Check — compress (2026-10-27): `git diff --check` and `lf context` pass; prose-only reduction, no build/test rerun. Gate owns the affected suite; native-writer design and installed-refresh acceptance remain unresolved.

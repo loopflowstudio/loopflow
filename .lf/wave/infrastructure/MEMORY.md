@@ -792,27 +792,24 @@ with five-minute turn grace. Configured acceptance remains open.
 
 Jack Heart authorized bounded repair and delivery, preserving native access,
 credentials and active Sessions; Infrastructure owns release/installation.
-Synthetic 2 KiB values exceeded `security -i`'s command buffer. Native writes
-changed partitions and broke the `security` reader; access restoration failed.
-Published source commits data before restoring access. Compatible writing remains
-unproved; exclusions do not prove exhaustion.
+`security -i` exceeds its buffer at 2 KiB. Later 2/8 KiB prefix probes exited 1
+but left neither old nor intended bytes: earlier old-byte retention was fixture
+specific. Native API writes broke reader partitions; access restoration failed.
+Published source commits data before restoring access. No compatible writer is
+proved; excluded routes do not exhaust public interfaces.
 
-FileDL rollbacks recovered old bytes at 2/8 KiB; replacement reads failed.
-Record-by-ID reads found new encoded bytes, but group-key queries did not.
-Published source's pre-write query snapshot is consistent with failed pre-commit
-verification. Rollback safety and unchanged ACL identity remain unproved.
-Rollback cannot establish server validity after OAuth rotation: refresh
-precedes saving, with no shared provider/Keychain transaction.
+FileDL rollback recovered old bytes at 2/8 KiB; replacement reads failed and
+group-key queries did not find the new group despite record-by-ID reads finding
+new encoded bytes. Published source's pre-write snapshot matches that failure.
+General rollback safety and unchanged ACL identity remain unproved. Local rollback
+cannot establish server validity after OAuth rotation; refresh precedes saving.
 
-Closed stages/statuses keep secrets out of diagnostics. Save failures stay
-`Unavailable`; failed readback/mismatch proves neither rollback nor safe retry.
-Launches reported save failure and expired OAuth; later polls accepted both accounts
-without proving refresh. Synthetic storage proof cannot replace installed refresh
-acceptance. LOO-325 concurrency remains unselected. Evidence:
-`e3f012685c:scratch/loo-661-save-refreshed-claude.md`.
-Production unit tests select file storage even on macOS: a passing refresh test
-or selected macOS CI job cannot establish native Keychain acceptance. Release's
-entry-point lesson requires exercising the production writer and reader together.
+Closed diagnostics keep secrets out and save failures `Unavailable`; failed
+readback proves neither rollback nor safe retry. Launches reported save failure
+and expired OAuth; later accepted polls prove no refresh or live cause. Unit tests
+select files even on macOS; acceptance must exercise the production writer and
+reader, then an installed refresh. LOO-325 concurrency remains unselected.
+Evidence: `ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/loo-661-save-refreshed-claude.md`.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-10)
 

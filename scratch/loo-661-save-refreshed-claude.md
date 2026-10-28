@@ -61,27 +61,16 @@ Neither dependency relaxes the preservation requirement or proves a native write
 
 ## Evidence and excluded alternatives
 
-Complete pre-compression plan, citations, dependency history and archive chain:
-`055c8a3005aed51af7551794fc3f34d7a7827cca:scratch/loo-661-save-refreshed-claude.md`.
-Findings 1–33 and the retired command-boundary probe:
-`c871ddfb0c4956fdb816c079c61d71e68767733f:scratch/`.
-October 28's `SecItemUpdate`/`kSecAttrAccess` and partition-password recheck
-established no new candidate; citations:
-`157cafb2a7b912a1573f839c2c2359e53088ec9f:scratch/loo-661-save-refreshed-claude.md`,
-“Required outcome and next decision.”
-October 28's TN3137 review found file-keychain ACLs still distinct from
-access groups, and no new compatible atomic writer. Its backup-entropy addition
-changed neither conclusion. Full review and link:
-`2cd63f38cfe9c16422feb37b4c6200da57342208:scratch/loo-661-save-refreshed-claude.md`,
-“Planning decision, 2026-10-28.” No mutation or live refresh was repeated.
-Findings retain their original numbers below for lookup. The evidence constrains
-replacement; it establishes neither production acceptance nor API exhaustion.
+Full findings, citations, dependency history and archive chain:
+`108095b26cfe5950c7ce42b6115e936601547ede:scratch/loo-661-save-refreshed-claude.md`,
+“Evidence and excluded alternatives.” Finding numbers below retain that lookup.
+This archive also points to retired harnesses and complete source reviews.
 
-Native probes used disposable `loopflow-LOO-661-*-probe-<uuid>` services, synthetic
-bytes, bounded/reaped children, captured output and successful cleanup. They neither
-read real credentials directly nor changed routes, Sessions or global trust. Source
-conclusions use Apple Security `db15acbe6a7f257a859ad9a3bb86097bfe0679d9`; they do not
-establish installed binary equivalence or exhaust public interfaces.
+Probes used disposable `loopflow-LOO-661-*-probe-<uuid>` items, synthetic bytes,
+bounded/reaped children, captured output and successful cleanup. They neither
+read real credentials directly nor changed routes, Sessions or global trust.
+Source conclusions use Apple Security `db15acbe6a7f257a859ad9a3bb86097bfe0679d9`;
+they establish neither installed binary equivalence nor public-API exhaustion.
 
 - **Transport (1–2, 30):** `security -i` has a 4,096-byte input buffer. Early
   64/1,242-byte round trips passed and a 2,048-byte failure retained old bytes.
@@ -94,35 +83,32 @@ establish installed binary equivalence or exhaust public interfaces.
   not append a password across commands.
 - **Native access (3–5, 8–9, 11, 21, 27–29, 31, 33):**
   `SecKeychainItemModifyAttributesAndData` returned zero at 2/8 KiB, but independent
-  reads exited 128; `ModifyContent`, Apple-signed `osascript`/`SecItemUpdate` and
-  copied-access restoration left reads timing out. Writes replaced `apple-tool:`
-  with writer `cdhash:`. Published non-null updates create a group and strip
-  partition/integrity ACLs; null data leaves bytes unchanged. `security-framework`
-  3.7.0 uses that modifier. Partition edits failed `-25293` with UI disabled;
-  initial JXA `-50` was a bridge failure. Signing/trusting an application alone
-  supplies no partition authority. Combined data/access updates modify data first
-  without encompassing rollback; pre-setting access affects only the old group.
-  Public creation rejects duplicates. Private password-based repair, TN3137's file
-  shim and another data-protection authority supply no accepted atomic replacement.
+  reads exited 128. Writes replaced `apple-tool:` with writer `cdhash:`;
+  published non-null updates create a group and strip partition/integrity ACLs.
+  `ModifyContent`, Apple-signed `osascript`/`SecItemUpdate` and copied-access
+  restoration supplied no safe replacement. `security-framework` 3.7.0 uses the
+  same modifier. Partition edits failed `-25293` with UI disabled; JXA's initial
+  `-50` was a bridge error. Signing/trusting the writer grants no partition
+  authority. Combined data/access updates modify data before access without
+  encompassing rollback; pre-setting access affects only the old group. Public
+  creation rejects duplicates. Null-data updates leave bytes unchanged.
 - **Other interfaces (10, 12–20):** raw `CSSM_DL_DataModify` bypasses encryption;
   `CSSM_EncryptData` needs private envelope composition; `SecKeychainSetBatchMode`
-  is private. Import handles keys/certificates; copy strips access/integrity ACLs
-  when creating a group. Read-only macOS 26.0.1 dispatch inspection found
-  `KCSetData`/`KCUpdateItem` use staged APIs with published new-group paths. Shared
-  web credentials select another authority and pinned source returns
-  `errSecUnimplemented`. Other findings were source/header review.
-- **Outer transactions (22–26):** FileDL deferred commit around successful
-  2,048/8,192-byte modifications. Password reads failed `-25300` while metadata
-  succeeded; by-ID reads saw new encoded data, queries saw the old snapshot and
-  could not find its decoding group. This prevented pre-commit verification.
-  Rollback/autocommit restoration returned zero and independent readers recovered
-  old bytes, proving neither unchanged ACL identity nor general rollback safety.
-  No commit/access-restoration probe ran.
-- **Copied-access creation (34):** `SecKeychainItemCreateFromContent` with copied
-  access failed `-25293` at both sizes with UI disabled. Old bytes remained exact;
-  candidates were absent (44). Promotion/transactions were not tested. This rejects
-  that construction, not every explicit-access creation. Receipts:
-  `78530325c1:scratch/loo-661-save-refreshed-claude.md`, finding 34.
+  is private. Import handles keys/certificates; copy strips partition/integrity
+  access on group creation. Read-only macOS 26.0.1 dispatch inspection connected
+  `KCSetData`/`KCUpdateItem` to staged new-group paths. Shared web credentials,
+  TN3137's file shim and data-protection storage supplied no compatible atomic
+  replacement. The TN3137 backup-entropy change left this conclusion unchanged.
+- **Outer transactions (22–26):** FileDL deferred commit of successful 2/8 KiB
+  modifications, but password reads failed `-25300` while metadata succeeded.
+  By-ID reads saw new encoded data; queries saw the old snapshot without its
+  decoding group, preventing pre-commit verification. Rollback/autocommit
+  restoration recovered old bytes, not proof of unchanged ACL identity or general
+  rollback safety. No commit/access-restoration probe ran.
+- **Copied-access creation (34):** `SecKeychainItemCreateFromContent` failed
+  `-25293` at both sizes with UI disabled; originals stayed exact and candidates
+  were absent (44). No promotion/transaction was tested. This rejects copied
+  access, not every explicit-access construction.
 - **Explicit access (35):** eight 2,048/8,192-byte cases reconstructed access with
   `SecAccessGetOwnerAndACL` / `SecAccessCreateFromOwnerAndACL`, or used
   `SecAccessCreate` trusting `/usr/bin/security`. Omitting integrity only failed
@@ -134,8 +120,7 @@ establish installed binary equivalence or exhaust public interfaces.
   Published `changeAcl` requires database-authenticated credentials for partition
   edits, while creation supplies temporary group credentials. Integrity installation
   also checks partition membership. Earlier `SecACLRemove` failure `-67702` reflects
-  an invalid-form tombstone, not a contradiction of fresh construction. Full citations:
-  `1266f97dfeb8bf8b08731868dd57f2917145524b:scratch/loo-661-save-refreshed-claude.md`.
+  an invalid-form tombstone, not a contradiction of fresh construction.
   Corrected probe and receipts:
   `66ae255389e2800111dfc056c5009d380bab512a:scratch/keychain-access-probe/`.
 - **Authentication/group retention (36):** pinned-source review found
@@ -147,16 +132,14 @@ establish installed binary equivalence or exhaust public interfaces.
   `ItemImpl::updateSSGroup` reaches it only with null new data. Public
   `SSDLSession::DataModify` dispatches through raw `DbUniqueRecordImpl`, not that
   encoder. Retaining references cannot alter dispatch; internal C++/envelope
-  reconstruction crosses the private-interface boundary. Citations: same
-  `1266f97dfeb8bf8b08731868dd57f2917145524b` plan, finding 36.
+  reconstruction crosses the private-interface boundary.
 - **Local authentication context (37):** read-only documentation/source review
   found LAContext externalization in the data-protection implementation. The
   separate file-keychain update modifies content before access, without handling
   `kSecUseAuthenticationContext` or `kSecUseCredentialReference`. This identifies
   no context-to-database-credential bridge or atomic preservation path; it is not
   an installed securityd trace or public-API impossibility proof. Findings 36–37
-  performed no authentication, unlock, mutation or real credential read. Full
-  citations: pre-compression plan above, finding 37.
+  performed no authentication, unlock, mutation or real credential read.
 - **Live observations (6, 32):** launches reported a write/readback failure without
   status and two expired OAuth errors. Later 0.14.18/0.14.19 polls accepted both
   managed accounts with capacity, including three verified windows at `1793163454`;
@@ -172,8 +155,8 @@ establish installed binary equivalence or exhaust public interfaces.
 
 ## Remaining implementation and acceptance
 
-1. **This slice — mechanism proof (blocked).** Prove a distinct supported mechanism addressing findings 35–37 on disposable
-   synthetic items before replacing the production transport and exclusive fixture.
+1. Prove the mechanism described above on disposable synthetic items before
+   replacing the production transport and exclusive fixture.
    Preserve JSON validation, readback, managed login locking, replacement checks,
    omitted refresh tokens, unknown fields and the 15-second HTTP timeout. No extra
    OAuth request or automatic retry. Bound new subprocesses to 15 seconds, close
@@ -201,9 +184,7 @@ establish installed binary equivalence or exhaust public interfaces.
    sanitized stage/code, storage kind and whether refresh occurred. Never force
    expiry, revoke tokens, switch routes or damage a real item. Keep recovery docs
    aligned; report browser dependency without bypassing it. Infrastructure's demo
-   must show a naturally required refresh on the repaired installation leaving
-   `lf account claude --json` accepting the same identity/capacity and native Claude
-   usable without reauthentication. Unexpired polls and synthetic success cannot
+   must meet the demo above. Unexpired polls and synthetic success cannot
    establish live acceptance or complete the Task.
 
 ## Delete — do not maintain
@@ -237,4 +218,8 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff, code unchanged from `b5db5546f`); current writer and refresh control flow still match the saved findings. Existing design retained; no new mechanism proof, native acceptance or live recovery. No code tests repeated for this prose-only reconciliation.
+Compression rationale: the surviving refresh/diagnostic path needs no further
+indirection or deletion. Leave the obsolete writer and its exclusive stand-in
+untouched until replacement is proved; the archive retains detailed probe history.
+
+Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only compression, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.

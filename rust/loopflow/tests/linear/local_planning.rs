@@ -384,7 +384,7 @@ fn public_local_plan_matches_desktop() {
         &time::format_description::well_known::Rfc3339
     )
     .is_ok());
-    let roadmap = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
+    let roadmap = lf(repo.path(), home.path(), &["desktop", "plan", "--json"]);
     let mut task = roadmap["tasks"]["items"][0].clone();
     assert_eq!(task["task"]["id"], id);
     assert!(task["reference"]["workspace"].is_null());
@@ -499,7 +499,7 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "status", "inbox", "--json"],
+        &["desktop", "wave", "inbox", "--json"],
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 2);
     assert_eq!(wave["tasks"]["items"][0]["task"]["id"], id);
@@ -557,7 +557,7 @@ fn nested_waves_create_files_and_store_project_identity() {
         home.path(),
         &["wave", "status", "instruments/parser", "--json"],
     );
-    assert_eq!(renamed["tasks"]["items"][0]["task"]["id"], created["id"]);
+    assert_eq!(renamed["tasks"]["items"][0]["id"], created["id"]);
     lf(
         repo.path(),
         home.path(),
@@ -1403,7 +1403,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             let status = lf(
                 repo.path(),
                 home.path(),
-                &["wave", "status", "product", "--json"],
+                &["desktop", "wave", "product", "--json"],
             );
             {
                 let rows = &status["tasks"]["items"];
@@ -1985,7 +1985,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         let desktop = lf(
             repo.path(),
             home.path(),
-            &["wave", "status", "product", "--json"],
+            &["desktop", "wave", "product", "--json"],
         );
         let task = desktop["tasks"]["items"]
             .as_array()
@@ -2849,7 +2849,7 @@ fn wave_documents_and_workflows_follow_files() {
             &["wave", "status", "instruments/parser", "--json"],
         );
         assert_eq!(status["wave"]["goal"], "");
-        assert_eq!(status["tasks"]["items"][0]["task"]["id"], task_id);
+        assert_eq!(status["tasks"]["items"][0]["id"], task_id);
         assert!(!repo.path().join(".lf/wave").exists());
         assert_eq!(
             std::fs::read_to_string(repo.path().join("authored-wave/tools/GOAL.md")).unwrap(),
@@ -3607,7 +3607,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         let wave = lf(
             repo.path(),
             home.path(),
-            &["wave", "status", "inbox", "--json"],
+            &["desktop", "wave", "inbox", "--json"],
         );
         let summary = &wave["tasks"]["items"][0]["task"];
         assert_eq!(
@@ -3788,11 +3788,10 @@ fn waveless_task_lifecycle() {
     let counts: (u32, u32, u32) = db.query_row("SELECT (SELECT count(*) FROM tasks),(SELECT count(*) FROM waves),(SELECT count(*) FROM projects)", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
     assert_eq!(counts, (1, 0, 0));
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
-    assert_eq!(listed[0]["task"]["id"], id);
-    assert_eq!(listed[0]["workflow_name"], "proof");
-    assert_eq!(listed[0]["workflow_source"], "repository");
+    assert_eq!(listed[0]["id"], id);
+    assert_eq!(listed[0]["workflow"]["name"], "proof");
     let inventory = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
-    assert_eq!(inventory["tasks"]["items"][0]["task"]["id"], id);
+    assert_eq!(inventory["tasks"]["items"][0]["id"], id);
     let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
     lf(repo.path(), home.path(), &["-b", "task", "run", id]);
     let before = lf(
@@ -3824,9 +3823,8 @@ fn waveless_task_lifecycle() {
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     let detached = lf(repo.path(), home.path(), &["task", "list", "--json"]);
-    assert_eq!(detached[0]["task"]["id"], id);
-    assert!(detached[0]["task"]["wave_id"].is_null());
-    assert_eq!(detached[0]["workflow_source"], "task");
+    assert_eq!(detached[0]["id"], id);
+    assert!(detached[0]["wave"].is_null());
     lf(
         repo.path(),
         home.path(),
@@ -3881,8 +3879,7 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_workflow() {
     );
     let id = created["id"].as_str().unwrap();
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
-    assert_eq!(listed[0]["workflow_name"], "code");
-    assert_eq!(listed[0]["workflow_source"], "builtin");
+    assert_eq!(listed[0]["workflow"]["name"], "code");
     lf(repo.path(), home.path(), &["-b", "task", "run", id]);
     let shown = lf(
         repo.path(),
@@ -3946,10 +3943,9 @@ fn wave_workflow_set_selects_the_builtin_auto() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|task| task["task"]["id"] == created["id"])
+        .find(|task| task["id"] == created["id"])
         .unwrap();
-    assert_eq!(task["workflow_name"], "auto");
-    assert_eq!(task["workflow_source"], "wave");
+    assert_eq!(task["workflow"]["name"], "auto");
 }
 
 #[test]

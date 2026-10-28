@@ -198,7 +198,7 @@ def _await(check, message: str, seconds: int = 45) -> None:
 
 
 class Watch:
-    """One `lf <args> --json --watch`. `repo planning status` keeps the
+    """One `lf <args> --json --watch`. `planning status` keeps the
     repository's planning exchanged while it runs, as an open Desktop window does."""
 
     def __init__(self, fixture: dict, env: dict, *args: str):
@@ -262,7 +262,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         with server.lock:
             server.state["offline"] = True
         if mode == "watch":
-            watch = Watch(fixture, env, "repo", "planning", "status")
+            watch = Watch(fixture, env, "planning", "status")
         else:
             # Graph admission requires a managed login, even with a contained provider.
             profile = root / "accounts/claude/reconnect"
@@ -426,7 +426,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             with server.lock:
                 assert not any(c["id"] == gap for c in state["comments"])
                 state["offline"] = False
-            watch = Watch(fixture, env, "repo", "planning", "status")
+            watch = Watch(fixture, env, "planning", "status")
             _await(
                 lambda: (
                     db.execute(
@@ -451,7 +451,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             assert db.execute(
                 "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?", (detached,)
             ).fetchone() == (0,)
-            watch = Watch(fixture, env, "repo", "planning", "status")
+            watch = Watch(fixture, env, "planning", "status")
             _await(
                 lambda: (
                     db.execute(

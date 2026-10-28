@@ -159,7 +159,10 @@ impl TaskNames {
             identifier: summary.identifier,
             title: summary.name,
             state,
-            reason: task.next_move.reason,
+            // An approved Task waits on its ship, whatever its next move says.
+            reason: task
+                .shipping
+                .map_or(task.next_move.reason, |shipping| shipping.reason),
             workflow: task.workflow_name.map(|name| TaskRowWorkflow {
                 name,
                 stage: task.stage,

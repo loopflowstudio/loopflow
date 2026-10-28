@@ -1287,7 +1287,17 @@ fn structured_help_describes_pane_creation_and_read_results_without_desktop() {
         .unwrap()
         .iter()
         .filter(|command| {
-            command["command"] != "lf desktop rename" && command["command"] != "lf desktop wait"
+            // Desktop's Work reads print its presentation types, which carry no schema.
+            ![
+                "lf desktop rename",
+                "lf desktop wait",
+                "lf desktop plan",
+                "lf desktop done",
+                "lf desktop wave",
+                "lf desktop sessions",
+                "lf desktop task",
+            ]
+            .contains(&command["command"].as_str().unwrap())
         })
         .all(|command| command["result_schema"].is_object()));
 }

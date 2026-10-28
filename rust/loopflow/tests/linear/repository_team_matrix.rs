@@ -276,9 +276,17 @@ fn repository_team_matrix() {
     }
 
     for (wave, issue) in [("survival", "LOO-1"), ("survival/infrastructure", "LOO-2")] {
-        let show = run_lf(&home, &repo, &["wave", "status", wave, "--json"]);
-        let stdout = assert_success(&show, "Wave status");
-        assert!(stdout.contains(issue), "{wave} snapshot lost {issue}");
+        // Done Tasks leave the plan; the Wave's closed Tasks list them.
+        let show = run_lf(
+            &home,
+            &repo,
+            &["task", "list", "--done", "--wave", wave, "--json"],
+        );
+        let stdout = assert_success(&show, "Closed Tasks");
+        assert!(
+            stdout.contains(issue),
+            "{wave} snapshot lost {issue}: {stdout}"
+        );
 
         let checkout = run_lf(&home, &repo, &["task", "checkout", issue]);
         let error = String::from_utf8_lossy(&checkout.stderr);
@@ -296,8 +304,8 @@ fn repository_team_matrix() {
     assert!(status.contains("survival/infrastructure"));
     // Another repository's same-named Wave does not hide this repository's work.
     let roadmap = assert_success(
-        &run_lf(&home, &repo, &["wave", "show", "--json"]),
-        "roadmap",
+        &run_lf(&home, &repo, &["task", "list", "--done", "--json"]),
+        "closed Tasks",
     );
     assert!(roadmap.contains("LOO-1"));
     assert!(roadmap.contains("LOO-2"));

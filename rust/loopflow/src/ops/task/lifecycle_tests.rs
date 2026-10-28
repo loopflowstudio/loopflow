@@ -77,7 +77,7 @@ fn capture(binary: &Path, repo: &Path, home: &Path) -> Value {
         binary,
         repo,
         home,
-        &["wave", "show", "--task", "FIX-1", "--json"],
+        &["desktop", "plan", "--task", "FIX-1", "--json"],
     );
     let row = task_row(&roadmap);
     let overview = &status["overview"];

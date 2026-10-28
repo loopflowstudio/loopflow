@@ -519,7 +519,7 @@ fn an_offline_comment_reaches_the_open_task_status() {
         let body = watch.body(Duration::from_secs(30), |body| {
             body["comments"]["comments"].as_array().map(Vec::len) == Some(count)
         });
-        serde_json::from_value::<loopflow::work::task::comment::TaskComments>(
+        serde_json::from_value::<loopflow::lf::commands::task_row::TaskThread>(
             body["comments"].clone(),
         )
         .unwrap()
@@ -529,6 +529,7 @@ fn an_offline_comment_reaches_the_open_task_status() {
     let saved: loopflow::work::task::comment::TaskComments =
         serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(saved.pending_sync, [saved.comments[0].id.clone()]);
+    let saved = loopflow::lf::commands::task_row::TaskThread::from(saved);
     assert_eq!(thread(&watch, 1), saved);
     let reopened = home.watch(&["task", "status", "FIX-1"]);
     assert_eq!(thread(&reopened, 1), saved);

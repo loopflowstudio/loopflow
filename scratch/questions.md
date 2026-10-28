@@ -1,11 +1,11 @@
 # LOO-656 open questions and assumptions (headless implement, 2026-10-27)
 
-- **Released lf ≤ 0.14.19 on a store with slug rows.** It parses ledger versions
-  as numeric ids, so `task_graphs` makes it print "incompatible Loopflow
-  database; delete loopflow.db" — wrong advice. `task_graphs` drops
-  `task_workflows`, so 0.14.19 could not read the store anyway. Assumed
-  acceptable (solo Machine, install switch backs up first); long-lived 0.14.19
-  processes need a restart after `lf self install --main`.
+- **Released lf ≤ 0.15.0 on a store with slug rows.** It parses ledger versions
+  as numeric ids, so the first slug row makes it print "incompatible Loopflow
+  database; delete loopflow.db" — wrong advice this branch's refusals no longer
+  give. Assumed acceptable (solo Machine, install switch backs up first);
+  long-lived released processes need a restart after `lf self install --main`,
+  and one release right after merge gives Desktop the slug-aware reader.
 - **Children of a worktree build on `~/.lf`** still resolve the installed entry
   (`resolve_lf_binary`), not the worktree binary. Kept as is; the top-level
   command runs its own code.

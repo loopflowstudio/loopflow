@@ -32,7 +32,9 @@ runs its own code on the live store. Main never carries a "draft".
   it). The ledger's `reader_floor` stores it. A binary admits a store holding
   unknown rows only when every unknown row's floor is a version it knows, and the
   objects it knows survive (`validate_schema_within`). Released rows keep release
-  floors, so ≤0.14.19 still reads a store until the first slug migration lands.
+  floors, so released lf (≤0.15.0) still reads a store until the first slug
+  migration lands; after that it fails to parse the slug row and prints its own
+  "delete loopflow.db" refusal (questions.md).
 - **Who migrates `~/.lf/loopflow.db`.** Only the install switch
   (`open_as_promotion_boundary`, under the promotion lock, after the in-transaction
   backup). It refuses unmerged migrations. Ordinary opens validate and refuse a
@@ -93,7 +95,7 @@ Settled by the accepted contract, recorded so later steps don't relitigate:
   still finds the previous green commit. Wait for the run; the refusal and the
   install output already name the migration and the installed commit.
 
-## Concept review with Jack (2026-10-28) — open
+## Concept review with Jack (2026-10-28) — Desktop and schedule questions moved to LOO-669
 
 Mismatch: "installed Loopflow" is two programs. `lf self install --main`
 replaces the CLI; Loopflow.app keeps running its bundled release lf
@@ -163,30 +165,20 @@ that choice:
    `reader-catalog.txt` in each `lf-<target>` artifact. LOO-669 publishes it next
    to `SHA256SUMS` and calls `can_open`; nothing in LOO-656 calls it yet.
 
-**Contract enforcement is out of this PR; the decision belongs to LOO-669.**
+## Not in this change: contract enforcement (decision belongs to LOO-669)
+
 Jack, 2026-10-28, as relayed from LOO-669: "i also declined contract enforcement
 as a separate PR. I just want to decide here in this task." This PR ships no
 `CONTRACT_WAIT` and no `-- contract:` header. A breaking slug keeps raising the
-floor, and the catalog in item 3 makes that visible to updaters.
-
-## Not in this change (Jack: design still open)
-
-Expand → wait 30 days → contract enforcement for destructive changes. Today a
-breaking slug migration simply raises the floor; install prints which migration
-locks older builds out.
+floor; install prints which migration locks older builds out, and the reader
+catalog makes it visible to updaters.
 
 ## Remaining work
 
-- Refresh the PR description at publish: the floor is now 0.15.0, `copy:` is gone
-  from `lf --version`, stream/Desktop follow-through belongs to LOO-669, and every
-  package ships `reader-catalog.txt`.
-- Expand → wait → contract enforcement (design open).
+- Refresh the PR description at publish: its risk line names ≤0.14.19 where
+  released lf ≤0.15.0 is meant, `copy:` is gone from `lf --version`,
+  stream/Desktop follow-through belongs to LOO-669, refusals no longer suggest
+  deletion, and every package ships `reader-catalog.txt`.
 - First real `lf self install --main` needs a green `Packages (main)` run after merge.
 
-Check (2026-10-27): focused Rust store/install/release modules, clippy `--all-targets`, Python migration/release/install tests pass; three canonical-ids tests and one contention test fail only in the full parallel module run (pass alone); Swift and `release_tests` run left to gate/CI.
-
-Check (2026-10-28, top-3 pursue): 8 focused `store::migrations` tests (refusals, reader catalog, `can_open`) pass; clippy `--all-targets` clean; full `store::` module timed out locally at 10 min, left to gate.
-
-Check (2026-10-28, implement): `lf self install reader-catalog` with an empty `HOME`/`LF_HOME` prints the five released floors and creates nothing.
-
-Check (2026-10-28, compress passes, latest inlines `raised_floor_over`): 12 `store::migrations::tests::a_*` pass; clippy lib+tests and `cargo fmt` clean.
+Check (2026-10-28, realign): focused `store::migrations` tests, clippy `--all-targets` and `cargo fmt` clean at e75d1c578; `lf self install reader-catalog` with empty `HOME`/`LF_HOME` prints every released batch and creates nothing; full `store::` module (times out locally), Swift and `release_tests` left to gate/CI.

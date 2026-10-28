@@ -804,9 +804,9 @@ pub(crate) async fn open(
                 )
                 .await?
             }
-            Err(_) => false,
+            Err(_) => None,
         },
-        _ => false,
+        _ => None,
     };
     // An agent that already exited, whose identity was never recorded, has
     // nothing to stop.
@@ -819,11 +819,19 @@ pub(crate) async fn open(
                     == crate::journal::ProcessIdentityEvidence::Live
             }))
     };
-    if moving && running()? {
-        crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+    if let Some(account) = &moving {
+        if running()? {
+            crate::harness::agent_process::stop_session_agent(
+                &store.sqlite,
+                &session.id,
+                crate::process::Departure::Account {
+                    account: account.clone(),
+                },
+            )?;
+        }
     }
     if resume {
-        if session.interactive && !moving {
+        if session.interactive && moving.is_none() {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
                     && owner_running(&store.sqlite, &owner)?
@@ -867,7 +875,11 @@ pub(crate) async fn open(
         return Ok(surface);
     };
     if resume && mode == OpenMode::Takeover {
-        crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+        crate::harness::agent_process::stop_session_agent(
+            &store.sqlite,
+            &session.id,
+            crate::process::Departure::Terminal,
+        )?;
     }
     let mut result = surface(store, session).await?;
     if resume {
@@ -941,7 +953,7 @@ async fn transition_headless_to_native(
     let id = session.id.clone();
     tokio::task::spawn_blocking(move || {
         let attachment = sqlite.claim_session_attachment(&id, Some(&expected), &process, false)?;
-        sqlite.finish_session_attachment(&id, &attachment, "interrupted", || {
+        sqlite.finish_session_attachment(&id, &attachment, "interrupted", None, || {
             if !crate::harness::agent_process::close_session_agent_process(&sqlite, &id)? {
                 return Err(crate::store::StoreError::InvalidAuthority(
                     "Headless AgentProcess identity is unavailable".into(),
@@ -1017,7 +1029,11 @@ async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
         .ok_or_else(|| session_not_found(id))?;
     let session = primary::admit_workspace(store, session).await?;
     let request = conversation_log::continuation(&store.sqlite, &session)?;
-    crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+    crate::harness::agent_process::stop_session_agent(
+        &store.sqlite,
+        &session.id,
+        crate::process::Departure::Terminal,
+    )?;
     let mut next = session;
     let (provider, model) = crate::config::parse_agent(agent);
     next.provider = Some(provider);
@@ -1391,7 +1407,11 @@ pub(crate) fn resume_native_session(
         }
     }
     crate::lf::commands::util::require_provider_session_process(&native.dir)?;
-    crate::harness::agent_process::stop_session_agent(&store.sqlite, &session.id)?;
+    crate::harness::agent_process::stop_session_agent(
+        &store.sqlite,
+        &session.id,
+        crate::process::Departure::Terminal,
+    )?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
     crate::agent_input_timing::record("native_resume_selected", &session.id);
@@ -2283,7 +2303,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let attachment = store
-            .claim_session_attachment(&session.id, None, &crate::id::LfProcessId::new(), true)
+            .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
             .unwrap();
         let publication = store.record_agent_process_identity(
             &session.id,

@@ -80,6 +80,45 @@
       "keys": []
     },
     {
+      "name": "page",
+      "title": "Turn Wave Tasks to Page",
+      "scope": "window",
+      "arguments": [
+        {
+          "name": "page",
+          "kind": "integer",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "section",
+      "title": "Show Wave Board Section",
+      "scope": "window",
+      "arguments": [
+        {
+          "name": "section",
+          "kind": "string",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
+      "name": "filter",
+      "title": "Set Wave Board Done Days",
+      "scope": "window",
+      "arguments": [
+        {
+          "name": "days",
+          "kind": "integer",
+          "required": true
+        }
+      ],
+      "keys": []
+    },
+    {
       "name": "focus",
       "title": "Focus Pane",
       "scope": "pane",
@@ -106,6 +145,11 @@
           "name": "on",
           "kind": "boolean",
           "required": false
+        },
+        {
+          "name": "part",
+          "kind": "string",
+          "required": false
         }
       ],
       "keys": [
@@ -116,7 +160,13 @@
       "name": "hide",
       "title": "Hide Pane",
       "scope": "pane",
-      "arguments": [],
+      "arguments": [
+        {
+          "name": "part",
+          "kind": "string",
+          "required": false
+        }
+      ],
       "keys": []
     },
     {
@@ -132,7 +182,13 @@
       "name": "show",
       "title": "Show Pane",
       "scope": "pane",
-      "arguments": [],
+      "arguments": [
+        {
+          "name": "part",
+          "kind": "string",
+          "required": false
+        }
+      ],
       "keys": []
     },
     {
@@ -176,6 +232,11 @@
           "name": "ratio",
           "kind": "ratio",
           "required": true
+        },
+        {
+          "name": "part",
+          "kind": "string",
+          "required": false
         }
       ],
       "keys": []

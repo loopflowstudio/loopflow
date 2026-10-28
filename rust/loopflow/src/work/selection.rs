@@ -377,25 +377,17 @@ impl Selection {
                                     .unavailable
                                     .push(format!("Task {} state is unavailable", item.name));
                             }
-                            // The repository lists Working Tasks: idle, active or
-                            // moving. A Wave lists all its uncompleted Tasks, so
-                            // unstarted ones can offer Start. Shipping Tasks leave
-                            // both for `state:shipping`.
+                            // The repository and a Wave list Working Tasks: idle,
+                            // active or moving. Unstarted Tasks live on the Wave
+                            // board's Backlog; Shipping Tasks leave for `state:shipping`.
                             in_scope
-                                && !item.states.contains(&SelectionState::Shipping)
-                                && match wave {
-                                    None => [
-                                        SelectionState::Idle,
-                                        SelectionState::Active,
-                                        SelectionState::Moving,
-                                    ]
-                                    .iter()
-                                    .any(|state| item.states.contains(state)),
-                                    Some(_) => {
-                                        item.open.is_some()
-                                            && !item.states.contains(&SelectionState::Done)
-                                    }
-                                }
+                                && [
+                                    SelectionState::Idle,
+                                    SelectionState::Active,
+                                    SelectionState::Moving,
+                                ]
+                                .iter()
+                                .any(|state| item.states.contains(state))
                         }
                     };
                     if included {
@@ -601,6 +593,17 @@ impl SlotLayout {
                         children: (3..7).map(slot).collect(),
                     },
                 ],
+            },
+        }
+    }
+
+    /// `count` equal slots side by side: the Wave view's footer of Tasks.
+    pub fn strip(count: usize) -> Self {
+        Self {
+            root: SlotNode::Split {
+                axis: SplitAxis::Vertical,
+                weights: vec![1.0; count],
+                children: (0..count).map(|slot| SlotNode::Slot { slot }).collect(),
             },
         }
     }

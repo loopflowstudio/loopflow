@@ -1,48 +1,62 @@
 //! A native client's exit text names its own resume commands, which bypass lf
 //! and, for a remote Codex client, a relay that no longer exists. While a client
 //! runs, the owner withholds what it prints after restoring the terminal and
-//! shows lf's return line instead.
+//! shows lf's return line instead. A client that ends without restoring its
+//! terminal (Codex on SIGTERM) gets it restored here, before that line.
 
 use std::os::fd::RawFd;
 use std::time::{Duration, Instant};
 
+use super::terminal::AlternateScreen;
 use super::LIMIT;
 
 /// Output after a client restores its terminal is exit text only if the client
 /// exits within this window; otherwise it was ordinary output.
 const EXIT_WINDOW: Duration = Duration::from_secs(5);
 
+/// Input and display modes a full-screen client may leave on: kitty keyboard,
+/// focus, mouse, bracketed paste, then cursor visibility and attributes.
+const RESET_MODES: &[u8] =
+    b"\x1b[<u\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m";
+
 #[derive(Debug)]
 pub(super) struct NativeClient {
     exit: String,
     pub detach: String,
-    raw: bool,
+    /// The terminal the client last wrote to, once it was raw.
+    raw: Option<RawFd>,
     held: Vec<u8>,
     since: Option<Instant>,
+    alternate: AlternateScreen,
+    /// The terminal's modes before any client ran.
+    cooked: Option<libc::termios>,
 }
 
 impl NativeClient {
-    pub fn new(exit: String, detach: String) -> Self {
+    pub fn new(exit: String, detach: String, cooked: Option<libc::termios>) -> Self {
         Self {
             exit,
             detach,
-            raw: false,
+            raw: None,
             held: Vec::new(),
             since: None,
+            alternate: AlternateScreen::default(),
+            cooked,
         }
     }
 
     /// Bytes to deliver now from output read while the terminal at `fd` is in
     /// its current mode.
     pub fn accept(&mut self, fd: RawFd, bytes: &[u8]) -> Vec<u8> {
+        self.alternate.observe(bytes);
         if is_raw(fd) {
-            self.raw = true;
+            self.raw = Some(fd);
             self.since = None;
             let mut ready = std::mem::take(&mut self.held);
             ready.extend_from_slice(bytes);
             return ready;
         }
-        if !self.raw {
+        if self.raw.is_none() {
             return bytes.to_vec();
         }
         self.held.extend_from_slice(bytes);
@@ -73,7 +87,7 @@ impl NativeClient {
 
     /// The client exited: keep its terminal restoration, replace its text.
     /// The replaced text goes to the owner's log, so a provider's last error
-    /// is never lost.
+    /// is never lost. A client that died raw is restored first.
     pub fn finish(self) -> Vec<u8> {
         if self.held.iter().any(|byte| !byte.is_ascii_whitespace()) {
             eprintln!(
@@ -81,7 +95,20 @@ impl NativeClient {
                 String::from_utf8_lossy(&self.held)
             );
         }
-        let mut bytes = controls(&self.held);
+        let mut bytes = Vec::new();
+        if let Some(fd) = self.raw.filter(|fd| is_raw(*fd)) {
+            if let Some(cooked) = &self.cooked {
+                // SAFETY: restores attributes read from this terminal before the client ran.
+                unsafe {
+                    libc::tcsetattr(fd, libc::TCSANOW, cooked);
+                }
+            }
+            if self.alternate.entered {
+                bytes.extend_from_slice(b"\x1b[?1049l");
+            }
+            bytes.extend_from_slice(RESET_MODES);
+        }
+        bytes.extend(controls(&self.held));
         bytes.extend_from_slice(format!("\r\n{}\r\n", self.exit).as_bytes());
         bytes
     }
@@ -191,7 +218,7 @@ mod tests {
     #[test]
     fn exit_text_after_terminal_restoration_becomes_the_lf_line() {
         let (master, slave) = terminal();
-        let mut client = NativeClient::new("Left it.".into(), "Detached.".into());
+        let mut client = NativeClient::new("Left it.".into(), "Detached.".into(), None);
         assert_eq!(
             client.accept(master.as_raw_fd(), b"Starting\r\n"),
             b"Starting\r\n"
@@ -204,10 +231,59 @@ mod tests {
         assert_eq!(client.finish(), b"\x1b[?1049l\x1b[?25h\r\nLeft it.\r\n");
     }
 
+    fn cooked(fd: i32) -> libc::termios {
+        // SAFETY: tcgetattr writes into a live termios.
+        unsafe {
+            let mut termios = std::mem::zeroed::<libc::termios>();
+            assert_eq!(libc::tcgetattr(fd, &mut termios), 0);
+            termios
+        }
+    }
+
+    #[test]
+    fn a_client_that_dies_raw_on_the_alternate_screen_is_restored_before_the_lf_line() {
+        let (master, slave) = terminal();
+        set_raw(slave.as_raw_fd(), false);
+        let mut client = NativeClient::new(
+            "Left it.".into(),
+            "Detached.".into(),
+            Some(cooked(master.as_raw_fd())),
+        );
+        set_raw(slave.as_raw_fd(), true);
+        client.accept(master.as_raw_fd(), b"\x1b[?1049h\x1b[?1000h\x1b[>5uframe");
+        assert_eq!(
+            client.finish(),
+            [
+                b"\x1b[?1049l".as_slice(),
+                super::RESET_MODES,
+                b"\r\nLeft it.\r\n"
+            ]
+            .concat()
+        );
+        assert!(!super::is_raw(slave.as_raw_fd()));
+    }
+
+    #[test]
+    fn an_inline_client_that_dies_raw_keeps_its_screen() {
+        let (master, slave) = terminal();
+        set_raw(slave.as_raw_fd(), false);
+        let mut client = NativeClient::new(
+            "Left it.".into(),
+            "Detached.".into(),
+            Some(cooked(master.as_raw_fd())),
+        );
+        set_raw(slave.as_raw_fd(), true);
+        client.accept(master.as_raw_fd(), b"\x1b[?2004hframe");
+        assert_eq!(
+            client.finish(),
+            [super::RESET_MODES, b"\r\nLeft it.\r\n"].concat()
+        );
+    }
+
     #[test]
     fn output_after_a_client_returns_to_its_terminal_is_delivered() {
         let (master, slave) = terminal();
-        let mut client = NativeClient::new("Left it.".into(), "Detached.".into());
+        let mut client = NativeClient::new("Left it.".into(), "Detached.".into(), None);
         set_raw(slave.as_raw_fd(), true);
         client.accept(master.as_raw_fd(), b"frame");
         set_raw(slave.as_raw_fd(), false);

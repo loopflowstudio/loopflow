@@ -450,6 +450,54 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
 
     #[test]
+    fn a_step_lands_after_its_graphs_mark_when_an_unrelated_rowid_is_reused() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let process = |parent: Option<&crate::id::LfProcessId>, pid: u32| {
+            let process = crate::process::LfProcess {
+                id: crate::id::LfProcessId::new(),
+                pid: Some(pid),
+                kind: crate::process::ProcessKind::Lf,
+                agent_session_id: None,
+                os_started_at: None,
+                trace_id: crate::id::TraceId::new(),
+                parent_lf_process_id: parent.cloned(),
+                via_agent: Some(false),
+                caller_session_id: None,
+                caller_agent_process_id: None,
+                command: None,
+                repo: None,
+                cwd: None,
+                started_at: 1,
+                completed_at: None,
+                outcome: None,
+                exit_code: None,
+                signal: None,
+                error: None,
+            };
+            store.record_process(&process).unwrap();
+            process
+        };
+        let graph = process(None, 10);
+        // A concurrent `lf task status` holds the highest rowid when the Graph
+        // marks, then exits and is forgotten before the step registers.
+        let status = process(None, 11);
+        let mark = store.process_mark(&graph.id).unwrap();
+        store
+            .record_process(&crate::process::LfProcess {
+                completed_at: Some(2),
+                outcome: Some("succeeded".into()),
+                ..status
+            })
+            .unwrap();
+        let step = process(Some(&graph.id), 12);
+        assert_eq!(
+            store.child_process_after(&graph.id, mark).unwrap(),
+            Some(step.id)
+        );
+    }
+
+    #[test]
     fn step_input_is_read_through_transport_delegation() {
         let directory = tempfile::tempdir().unwrap();
         let store = SqliteStore::new(&directory.path().join("loopflow.db")).unwrap();

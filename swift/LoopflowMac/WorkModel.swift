@@ -739,8 +739,132 @@ final class WorkModel {
             reading: reading, reason: workStatus.message,
             task: inspectSelectedTask(), session: inspectSelectedSession(),
             list: desktopList(repository: workspaceRepository ?? repository),
-            actions: DesktopAction.all.map(\.descriptor), workspaces: workspaces.inspect(), openWork: workspaces.openWork, view: selectedViewPlan, opening: selectionOpening ?? taskOpening)
+            actions: DesktopAction.all.map(\.descriptor), workspaces: workspaces.inspect(), openWork: workspaces.openWork,
+            view: selectedViewPlan ?? navigation.waveView.flatMap { boardPlan($0) }, viewParts: desktopViewParts(repository: repository),
+            opening: selectionOpening ?? taskOpening)
     }
+
+    /// A Wave view's board, conversation and strip; other views have no named parts yet.
+    func desktopViewParts(repository: String) -> [DesktopViewPart] {
+        guard let view = navigation.waveView else { return [] }
+        let doneDays = WaveStandupDefaults.doneDays
+        let tiles = boardTiles(view)
+        let pages = boardPlan(view)?.slots.pages(tiles) ?? [tiles]
+        let page = min(navigation.wavePages[view] ?? 0, pages.count - 1)
+        let ratios = navigation.waveRatios[view] ?? WaveViewRatios()
+        let zoomed = zoomedPart(in: view)
+        return [
+            DesktopViewPart(name: "board", kind: .board, work: nil, section: boardSection(view).rawValue,
+                            doneDays: doneDays, text: standupText(view, doneDays: doneDays),
+                            page: nil, pages: nil, visible: [], hidden: isHidden(.board, in: view),
+                            ratio: 1 - ratios.session, zoomed: zoomed == .board,
+                            actions: ["section", "filter", "hide", "show", "zoom", "resize"]),
+            DesktopViewPart(name: "session", kind: .session, work: viewWork(view, repository: workspaceRepository ?? repository),
+                            section: nil, doneDays: nil, text: nil, page: nil, pages: nil, visible: [],
+                            hidden: isHidden(.session, in: view), ratio: ratios.session, zoomed: zoomed == .session,
+                            actions: []),
+            DesktopViewPart(name: "tiles", kind: .strip, work: nil, section: nil, doneDays: nil, text: nil,
+                            page: page + 1, pages: pages.count, visible: pages[page].map(\.work),
+                            hidden: isHidden(.tiles, in: view), ratio: 1 - ratios.band, zoomed: zoomed == .tiles,
+                            actions: ["page", "hide", "show", "zoom", "resize"]),
+        ]
+    }
+
+    /// The Work whose conversation a Wave view shows.
+    private func viewWork(_ view: WorkNavigation.Board, repository: String) -> WorkWorkspaceKey {
+        if case .wave(let id) = view { WorkWorkspaceKey(repository: repository, kind: .wave, id: id) }
+        else { WorkWorkspaceKey(repository: repository, kind: .repository, id: repository) }
+    }
+
+    /// The retained workspace of the Work this window shows.
+    var shownWorkspace: SessionsWorkspace? {
+        workspaceRegistry?.selectedWork.flatMap { workspaceRegistry?.retained($0) }
+    }
+
+    /// The Wave view's conversation workspace, once it is retained.
+    private func viewWorkspace(_ view: WorkNavigation.Board) -> SessionsWorkspace? {
+        guard let repository = workspaceRepository else { return nil }
+        return workspaceRegistry?.retained(viewWork(view, repository: repository))
+    }
+
+    /// The board and strip hide in navigation; the conversation hides as its session
+    /// pane does, so `lf desktop hide -p session` and the hover button agree.
+    func isHidden(_ part: WaveViewPart, in view: WorkNavigation.Board) -> Bool {
+        guard part == .session else { return navigation.hiddenViewParts[view, default: []].contains(part) }
+        guard let store = viewWorkspace(view)?.multiplexer, let pane = store.sessionPane else { return false }
+        return store.collapsedPaneIds.contains(pane.id)
+    }
+
+    func setHidden(_ part: WaveViewPart, _ hidden: Bool, in view: WorkNavigation.Board) {
+        // A hidden part is no longer zoomed; a collapsed session pane unzooms itself.
+        guard part == .session else {
+            if hidden {
+                navigation.hiddenViewParts[view, default: []].insert(part)
+                if navigation.zoomedViewParts[view] == part { navigation.zoomedViewParts[view] = nil }
+            } else { navigation.hiddenViewParts[view]?.remove(part) }
+            return
+        }
+        guard let workspace = viewWorkspace(view), let pane = workspace.multiplexer.sessionPane else { return }
+        workspace.setCollapsed(paneId: pane.id, collapsed: hidden)
+    }
+
+    /// The part filling a Wave view. The board and strip zoom in navigation; the
+    /// conversation zooms as its session pane, so `lf desktop zoom -p session` agrees.
+    func zoomedPart(in view: WorkNavigation.Board) -> WaveViewPart? {
+        if let part = navigation.zoomedViewParts[view] { return part }
+        guard let store = viewWorkspace(view)?.multiplexer, let pane = store.sessionPane,
+              store.zoomedPaneId == pane.id else { return nil }
+        return .session
+    }
+
+    /// Zoom one part to fill the view, or return the view to its layout with nil.
+    func setZoomed(_ part: WaveViewPart?, in view: WorkNavigation.Board) {
+        navigation.zoomedViewParts[view] = part == .session ? nil : part
+        guard let workspace = viewWorkspace(view), let pane = workspace.multiplexer.sessionPane else { return }
+        let zoomed = part == .session
+        if (workspace.multiplexer.zoomedPaneId == pane.id) != zoomed {
+            workspace.multiplexer.setZoom(pane.id, enabled: zoomed)
+        }
+    }
+
+    /// A Wave view's Tasks bucketed for its board, with owners' GitHub users and Sessions.
+    func standup(_ tasks: [RoadmapTask], doneDays: Int) -> WaveStandup {
+        var sessions: [String: WaveStandup.SessionAttention] = [:]
+        for task in tasks {
+            let open = taskSessions(task.id).filter { $0.state != .closed }
+            if open.contains(where: { $0.availability == .available }) { sessions[task.id] = .available }
+            else if !open.isEmpty { sessions[task.id] = .busy }
+        }
+        return WaveStandup(tasks: tasks, closed: tasks, doneDays: doneDays, now: .now, github: githubPeople,
+                           sessions: sessions)
+    }
+
+    func boardSection(_ view: WorkNavigation.Board) -> WaveBoardSection {
+        navigation.boardSections[view] ?? .backlog
+    }
+
+    /// The board as `lf desktop capture -p board` reads it.
+    private func standupText(_ view: WorkNavigation.Board, doneDays: Int) -> String? {
+        let scope = view == .repository ? "Repository" : "Wave"
+        switch standupTasks(view) {
+        case .available(let tasks, _):
+            let heading = if case .wave(let id) = view, let roadmap = wave(id: id) { WaveStandup.heading(roadmap) }
+                else { [repositoryName] }
+            return standup(tasks, doneDays: doneDays).text(heading: heading, section: boardSection(view))
+        case .unavailable(let reason): return "\(scope) planning unavailable · \(reason)"
+        case nil: return nil
+        }
+    }
+
+    /// The Tasks a Wave view's board buckets: the Wave's, or every Task in the repository.
+    func standupTasks(_ view: WorkNavigation.Board) -> WorkEvidence<RoadmapTask>? {
+        if case .wave(let id) = view { return wave(id: id)?.tasks }
+        guard view == .repository, let tasks = roadmap.value?.tasks else { return nil }
+        guard case .available(_, let truncated) = tasks else { return tasks }
+        return .available(items: visibleTasks, truncated: truncated)
+    }
+
+    var repositoryName: String { repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Repository" }
 
     /// The Working Tasks ⌘1–9 select, in that order.
     func desktopList(repository: String) -> [DesktopListEntry] {
@@ -769,6 +893,7 @@ final class WorkModel {
         case .entered(.saved(let id), let work): return .entered(from: .dashboard(id), work: key(work))
         case .entered(.workingTasks, let work): return .entered(from: .workingTasks, work: key(work))
         case .entered(.wave(let id), let work): return .entered(from: .wave(id), work: key(work))
+        case .entered(.repository, let work): return .entered(from: .repository, work: key(work))
         }
     }
 
@@ -1537,6 +1662,19 @@ final class WorkModel {
         await refreshWorkActivity()
     }
 
+    /// Task owners' GitHub users by lowercase email, read once per repository.
+    private(set) var githubPeople: [String: GitHubPerson] = [:]
+    private var githubPeopleRepo: String?
+
+    /// Without GitHub the board keeps owners' names and initials.
+    func loadGitHubPeople() async {
+        guard !usesFixedFixture, let repo = repoPath, repo != githubPeopleRepo else { return }
+        githubPeopleRepo = repo
+        guard let people = try? await query.repoPeople(cwd: repo), repo == repoPath else { return }
+        githubPeople = Dictionary(people.compactMap { person in person.github.map { (person.email.lowercased(), $0) } },
+                                  uniquingKeysWith: { first, _ in first })
+    }
+
     private var portfolioGeneration = 0
 
     /// Consume the shared membership; only authored Wave discovery is window-local.
@@ -1648,7 +1786,8 @@ final class WorkModel {
         }
     }
 
-    /// A Task on the shown Dashboard keeps its board in the trail, as its tile does.
+    /// A Task on the shown Dashboard or Wave view keeps that view in the trail, as its
+    /// tile does; the strip turns to the Task's page.
     func select(_ requested: WorkReference?) {
         if let requested, requested.kind == .task, let board = navigation.trailBoard,
            taskIDs(on: board).contains(task(id: requested.id)?.task.id ?? requested.id) {
@@ -1669,11 +1808,7 @@ final class WorkModel {
     private var sidebarMembers: [WorkMemberRef] {
         switch navigation.sidebarScope {
         case .repository: return builtInPlan(.repository)?.resolution.members ?? []
-        case .wave(let id):
-            // Working Tasks only, as at the repository; the Wave board keeps unstarted ones.
-            let working = Set(workingTaskMembers.map(\.work))
-            return (builtInPlan(.wave(id))?.resolution.members ?? [])
-                .filter { $0.work.kind != .task || working.contains($0.work) }
+        case .wave(let id): return builtInPlan(.wave(id))?.resolution.members ?? []
         case .dashboard(let id): return dashboard(id)?.projection.visible ?? []
         }
     }
@@ -1691,11 +1826,7 @@ final class WorkModel {
 
     /// A Dashboard's visible Tasks in arrangement order; Working Tasks and a Wave's in plan order.
     private func taskIDs(on board: WorkNavigation.Board) -> [String] {
-        switch board {
-        case .workingTasks: workingTaskIDs
-        case .saved(let id): taskIDs(in: dashboard(id)?.projection.visible ?? [])
-        case .wave(let id): taskIDs(in: waveTiles(id))
-        }
+        taskIDs(in: boardTiles(board))
     }
 
     /// Members name Tasks by Work ID; rows use the planning ID when it is known.
@@ -2550,31 +2681,44 @@ extension WorkModel {
     }
 
     /// The Working Tasks Dashboard's Tasks, in the sidebar's order.
-    var workingTaskMembers: [WorkMemberRef] {
-        var seen = Set<WorkWorkspaceKey>()
-        return (builtInPlan(.repository)?.resolution.members ?? [])
-            .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
-    }
+    var workingTaskMembers: [WorkMemberRef] { boardTiles(.workingTasks) }
 
+    /// Entering from a Wave view turns its strip to the entered Task's page.
     func enter(_ work: WorkReference, from board: WorkNavigation.Board) {
+        showWaveTile(work, in: board)
         selectDestination(.entered(from: board, work: work), recordingHistory: true)
     }
 
-    /// A Wave view's tiles: its Tasks in the shared order, beside its conversation.
-    func waveTiles(_ id: String) -> [WorkMemberRef] {
-        var seen = Set<WorkWorkspaceKey>()
-        return (builtInPlan(.wave(id))?.resolution.members ?? [])
-            .filter { $0.work.kind == .task && seen.insert($0.work).inserted }
+    /// Turn a Wave view's footer to the page holding `work`; positions count the whole list.
+    /// Only Wave views read the page; a Dashboard's grid keeps its own.
+    private func showWaveTile(_ work: WorkReference, in view: WorkNavigation.Board) {
+        guard let plan = boardPlan(view),
+              let index = taskIDs(in: boardTiles(view)).firstIndex(of: task(id: work.id)?.task.id ?? work.id) else { return }
+        navigation.wavePages[view] = index / max(1, plan.slots.count)
     }
 
-    func wavePlan(_ id: String) -> WorkViewPlan? { builtInPlan(.wave(id)) }
+    /// A board's Task tiles: a Dashboard's visible ones in arrangement order, a Wave's
+    /// in the shared order; the repository page's are its Working Tasks.
+    func boardTiles(_ board: WorkNavigation.Board) -> [WorkMemberRef] {
+        let members = if case .saved = board { boardPlan(board)?.projection.visible } else { boardPlan(board)?.resolution.members }
+        var seen = Set<WorkWorkspaceKey>()
+        return (members ?? []).filter { $0.work.kind == .task && seen.insert($0.work).inserted }
+    }
 
-    /// The Wave stays selected; its Tasks open after it, in tile order, so a
+    func boardPlan(_ board: WorkNavigation.Board) -> WorkViewPlan? {
+        switch board {
+        case .saved(let id): dashboard(id)
+        case .workingTasks, .repository: builtInPlan(.repository)
+        case .wave(let id): builtInPlan(.wave(id))
+        }
+    }
+
+    /// The Wave view stays selected; its Tasks open after it, in tile order, so a
     /// script addresses them as it does a Dashboard's.
     private func presentWaveTiles() {
-        guard let registry = workspaceRegistry, case .work = navigation.destination,
-              let key = registry.selectedWork, key.kind == .wave, let plan = wavePlan(key.id) else { return }
-        let tiles = waveTiles(key.id).map(\.work)
+        guard let registry = workspaceRegistry, let view = navigation.waveView,
+              let key = registry.selectedWork, key.kind != .task, let plan = boardPlan(view) else { return }
+        let tiles = boardTiles(view).map(\.work)
         openTiles(plan, tiles, in: registry)
         registry.present(open: [key] + tiles)
     }

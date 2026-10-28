@@ -182,13 +182,14 @@ struct WorkObservationTransportTests {
         #expect(!process.isRunning)
     }
 
-    @Test("Silence expires a reader that must speak, not a watch")
+    @Test("Silence after the first frame expires a reader that must speak, not a watch")
     func stalled() async throws {
-        let process = shell("exec /bin/sleep 30")
+        let process = shell("echo ready; exec /bin/sleep 30")
         let reader = try LocalLineObservation<Data>.start(
             name: "Task files", process: process, frameLimit: 32,
             configurationChanged: { false }, decode: { $0 })
         var iterator = reader.frames.makeAsyncIterator()
+        #expect(try await iterator.next() == Data("ready".utf8))
         do {
             _ = try await iterator.next()
             Issue.record("A stalled pipe was accepted")

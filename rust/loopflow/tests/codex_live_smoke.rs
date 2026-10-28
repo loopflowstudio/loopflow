@@ -64,8 +64,16 @@ async fn codex_live_one_turn_smoke() {
             None,
         )
         .expect("session");
+    let parent = LfProcessId::new();
+    rusqlite::Connection::open(&database)
+        .expect("store")
+        .execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+            [&parent],
+        )
+        .expect("record attaching lf Process");
     let attachment = store
-        .claim_session_attachment("smoke", None, &LfProcessId::new(), true)
+        .claim_session_attachment("smoke", None, &parent, true)
         .expect("attachment");
     let config = AgentConfig {
         agent: Some("codex".to_string()),

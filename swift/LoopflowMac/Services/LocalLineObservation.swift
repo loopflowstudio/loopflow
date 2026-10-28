@@ -24,6 +24,9 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
     private var stderr = Data()
     private var pendingInput = Data()
     private var lastFrame = ProcessInfo.processInfo.systemUptime
+    /// A reader is silent while its process starts, which a loaded Mac can
+    /// stretch past the steady limit; a first frame proves it alive.
+    private var silenceLimit: TimeInterval?
     private var lastConfigurationCheck = ProcessInfo.processInfo.systemUptime
     private var stoppingAt: TimeInterval?
     private var terminated = false
@@ -84,6 +87,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
         self.process = process
         self.frameLimit = frameLimit
         self.silence = silence
+        self.silenceLimit = silence.map { max($0, 60) }
         self.continuation = continuation
         self.configurationChanged = configurationChanged
         self.decode = decode
@@ -153,6 +157,7 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
                 do {
                     let frame = try decode(Data(bytes[..<end]))
                     lastFrame = ProcessInfo.processInfo.systemUptime
+                    silenceLimit = silence
                     continuation.yield(frame)
                 } catch {
                     fail(RegistryQueryError("Invalid \(name.prefix(1).lowercased() + name.dropFirst()) observation: \(error)"))
@@ -208,8 +213,8 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
                     return
                 }
             }
-            if let silence, now - lastFrame >= silence {
-                fail(RegistryQueryError("\(name) reader sent no observation for \(Int(silence)) seconds"))
+            if let silenceLimit, now - lastFrame >= silenceLimit {
+                fail(RegistryQueryError("\(name) reader sent no observation for \(Int(silenceLimit)) seconds"))
                 return
             }
             flushRequest()

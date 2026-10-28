@@ -42,7 +42,7 @@ struct DesktopPaneControlTests {
             DesktopWindowInspection(repository: repository, window: window.uuidString, path: scene.path,
                 destination: .work(WorkWorkspaceKey(repository: repository, kind: .repository, id: repository)), history: DesktopHistory(back: 0, forward: 0), reading: "current", reason: nil,
                 task: nil, session: nil, list: [], actions: [], workspaces: registry.inspect(),
-                openWork: registry.openWork, view: nil, opening: nil)
+                openWork: registry.openWork, view: nil, viewParts: [], opening: nil)
         }, perform: { _ in throw RegistryQueryError("No mutation expected") },
         readText: { _ in throw RegistryQueryError("No terminal expected") }, receive: { _ in })
         let window = try #require(router.inspect().windows.first)
@@ -123,7 +123,7 @@ struct DesktopPaneControlTests {
                 DesktopWindowInspection(repository: repository, window: incarnation.uuidString, path: "/repo",
                     destination: .work(WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")), history: DesktopHistory(back: 0, forward: 0), reading: "unavailable", reason: "Offline",
                     task: nil, session: nil, list: [], actions: [],
-                    workspaces: registry.inspect(), openWork: registry.openWork, view: nil, opening: nil)
+                    workspaces: registry.inspect(), openWork: registry.openWork, view: nil, viewParts: [], opening: nil)
             }, perform: { try DesktopAction.perform($0, model: model, workspaces: registry) }, readText: { try registry.readText($0) }) { _ in }
     }
 

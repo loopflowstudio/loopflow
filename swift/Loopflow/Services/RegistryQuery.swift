@@ -326,6 +326,12 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
     }
 
+    /// The repository's Task owners with their GitHub users; lf caches each email's lookup.
+    public func repoPeople(cwd: String?) async throws -> [RepoPerson] {
+        let stdout = try await run(["ops", "people", "--json"], cwd)
+        return try Self.decode([RepoPerson].self, from: stdout)
+    }
+
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
         try await run(["graph", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }

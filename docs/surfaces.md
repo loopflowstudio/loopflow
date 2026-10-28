@@ -45,6 +45,12 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **Task workspace**: three panes, the `session` conversation, a `shell` at the
   Task's checkout and a `browser` for Files, the Graph log and local pages.
 - **Dashboards**: Tasks side by side, chosen by a query.
+- **Wave view**: the Wave conversation beside a standup board, with the Tasks
+  being worked on three to a page below. The board shows one section at a time:
+  Backlog, Working (with each Session Available or Busy), Autonomous (shipping)
+  and Done. The repository page is the same view over every repository Task.
+  Every pane and view part zooms and hides from buttons on hover, its dividers
+  drag, and the header's `Show…` menu brings hidden parts back.
 - **⌘K**: search Waves, Tasks, Sessions, Graphs and Workflows.
 
 ```bash
@@ -70,12 +76,16 @@ lf --task LOO-12 desktop send -p session 'also cover the timeout path'   # into 
 lf desktop browse http://localhost:5173
 lf desktop move -p browser --destination session --axis vertical
 lf desktop goto 2                                 # what ⌘2 does
+lf desktop do section -p board section=working    # the Wave board: backlog, working, autonomous or done
+lf desktop do filter -p board days=14             # Done covers 14 days; kept on this Mac
+lf desktop zoom --on -p board                     # the board fills the view; --off returns
 ```
 
 Without `-p`, a command acts on the terminal it runs in, so an agent's own tool
 call reaches its own pane. `-p` is a path on the screen: a pane (`session`,
-`shell`, `browser`), a tab (`shell:2`), a Dashboard tile (`3`, `LOO-12`) or
-`TILE/PANE`. Each part matches full ID, then label, then position, then an ID
+`shell`, `browser`), a Wave view part (`board`, `tiles`), a tab (`shell:2`), a
+Dashboard tile (`3`, `LOO-12`) or `TILE/PANE`. `lf desktop state` lists each
+view's parts under `view_parts`, with their ratio, hidden and zoomed state. Each part matches full ID, then label, then position, then an ID
 suffix. Nothing follows focus: an ambiguous target lists the choices and changes nothing.
 
 `send` types without submitting; `send-key enter` submits. `run` types into a

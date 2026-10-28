@@ -67,18 +67,6 @@ extension TaskPlanningSnapshot {
     func isCurrent(_ condition: TaskConditionSnapshot) -> Bool { !isTerminal || condition.unresolvedExecution }
 }
 
-/// A Wave's current Tasks by rank, split by whether someone owns them.
-struct WaveTaskGroups {
-    let owned: [RoadmapTask]
-    let unowned: [RoadmapTask]
-
-    init(_ tasks: [RoadmapTask]) {
-        let current = tasks.sorted { $0.task.rank < $1.task.rank }.filter { $0.task.isCurrent($0.condition) }
-        owned = current.filter { $0.runtime?.owner != nil }
-        unowned = current.filter { $0.runtime?.owner == nil }
-    }
-}
-
 struct TaskHistoryControls: View {
     @Binding var filter: TaskHistoryFilter
     @Environment(\.palette) private var palette

@@ -634,7 +634,6 @@ Ship the Task: run every remaining step to merge and completion, standing in at 
 | `--graph` | Take up this graph in place of the Task's remaining steps |
 | `--reason` | Why, kept in the Task's history |
 | `--stop` | Stop Auto-Ship: end the ship process and disarm auto-merge it armed Default: false. |
-| `--recover` | Continue the existing approval with only the authority it has, as automatic restart does Default: false. |
 | `--help / -h` | Print help (see more with '--help') |
 
 ## lf session
@@ -1197,7 +1196,7 @@ Wait for a shell tab's command to finish (exits with its status), else for the p
 | Argument | What it does |
 |---|---|
 | `--for` | Longest wait, e.g. 30s, 5m (default: no limit) |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1274,6 +1273,19 @@ Enter a member of the shown Dashboard as full Work, as a tile click does
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
+## lf desktop do
+
+Perform any registry action by name, as `lf desktop actions` lists them
+
+| Argument | What it does |
+|---|---|
+| `<action>` | Action name from `lf desktop actions` |
+| `<args>` | Action arguments as KEY=VALUE |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--window` | Desktop window: ID, position or ID suffix |
+| `--json` | json Default: false. |
+| `--help / -h` | Print help |
+
 ## lf desktop send
 
 Insert literal text at a terminal's cursor (stdin when omitted); never submits
@@ -1281,7 +1293,7 @@ Insert literal text at a terminal's cursor (stdin when omitted); never submits
 | Argument | What it does |
 |---|---|
 | `<text>` | Unicode text without control characters (use send-key for Enter/Tab) |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1293,7 +1305,7 @@ Send one key to a terminal, without following focus
 | Argument | What it does |
 |---|---|
 | `<key>` | key |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1307,7 +1319,7 @@ Print a terminal's text, without following focus
 | `--region` | region Default: screen. |
 | `--trim` | Drop trailing spaces and blank lines Default: false. |
 | `--max-bytes` | max bytes Default: 65536. |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1319,7 +1331,7 @@ Add a shell tab at the Task's location and type LINE into it, as if typed; focus
 | Argument | What it does |
 |---|---|
 | `<line>` | One shell line, e.g. 'cargo test -p loopflow'; omitted opens an empty shell |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1332,7 +1344,7 @@ Zoom a pane, or return it to the layout, without changing selection
 |---|---|
 | `--on` | on Default: false. |
 | `--off` | off Default: false. |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1344,7 +1356,7 @@ Focus a pane, or the pane in a direction, opening its retained workspace when ne
 | Argument | What it does |
 |---|---|
 | `--direction` | direction |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1355,7 +1367,7 @@ Hide a pane without closing its Session or process; on a Dashboard, hide a tile 
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1366,7 +1378,7 @@ Show a hidden pane without selecting Work or acquiring a client; on a Dashboard,
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1377,7 +1389,7 @@ Close a shell or browser tab, as ⌘W does; a session pane hides
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1388,7 +1400,7 @@ Undo the Task's last close, as ⇧⌘T does
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1401,7 +1413,7 @@ Move a pane beside another pane of the same Task; on a Dashboard or Wave view, a
 |---|---|
 | `--destination` | Pane to place it beside, or tile whose place it takes, as for -p |
 | `--axis` | Split axis for a pane; tiles take the destination's place |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1414,7 +1426,7 @@ Resize the divider between two panes or Dashboard tiles; ratio is the addressed 
 |---|---|
 | `--toward` | The other pane or tile, as for -p |
 | `--ratio` | ratio |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1425,7 +1437,7 @@ Show the Task's Files in the browser
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1436,7 +1448,7 @@ Show the Task's Graph processes in the browser
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1448,7 +1460,7 @@ Open an http(s) page in a browser tab
 | Argument | What it does |
 |---|---|
 | `<url>` | url |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1459,7 +1471,7 @@ Go back in a web page
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1470,7 +1482,7 @@ Go forward in a web page
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1481,7 +1493,7 @@ Reload a web page, as ⌘R does
 
 | Argument | What it does |
 |---|---|
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1493,7 +1505,7 @@ Show another of the Task's conversations in its session pane
 | Argument | What it does |
 |---|---|
 | `<session>` | Session ID |
-| `--pane / -p` | Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
+| `--pane / -p` | Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix |
 | `--window` | Desktop window: ID, position or ID suffix |
 | `--json` | json Default: false. |
 | `--help / -h` | Print help |
@@ -1538,7 +1550,7 @@ Move idle Sessions still running a superseded lf onto the selected install
 
 ## lf monitor prune
 
-Reap registered orphan providers and remove dead process receipts
+Reap orphan providers, remove dead process receipts, and release AgentProcess ancestry that was never recorded
 
 | Argument | What it does |
 |---|---|
@@ -1784,7 +1796,7 @@ Merge upstream into the current branch (default: main or stack parent)
 | Argument | What it does |
 |---|---|
 | `--plan` | Print the planned sync strategy without mutating git Default: false. |
-| `--manual` | Keep the sync local and leave conflicts for this process to resolve Default: false. |
+| `--manual` | Keep the sync and uncommitted edits local; leave conflicts for this process to resolve Default: false. |
 | `--continue` | Stage resolved conflict paths and continue the local sync Default: false. |
 | `--abort` | Abort the local sync in progress Default: false. |
 | `--adopt` | Explicitly claim a raw sync that has no Loopflow owner Default: false. |
@@ -2120,6 +2132,15 @@ Forget it; its rentals' history stays
 | Argument | What it does |
 |---|---|
 | `<name>` | name |
+| `--help / -h` | Print help |
+
+## lf ops people
+
+List the people who own this repository's Tasks, with their GitHub identity
+
+| Argument | What it does |
+|---|---|
+| `--json` | json Default: false. |
 | `--help / -h` | Print help |
 
 ## lf ops tokens

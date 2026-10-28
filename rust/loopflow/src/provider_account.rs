@@ -748,16 +748,16 @@ pub(crate) async fn resolve_provider_account(
     resolve_provider_account_exact(provider, agent_session, None).await
 }
 
-/// Whether this launch's `--account` names a `provider` login other than the
-/// one conversation `agent_session` is pinned to: a request to move it.
+/// The `provider` login this launch's `--account` names when it differs from
+/// the one conversation `agent_session` is pinned to: a request to move it.
 pub(crate) async fn names_another_account(
     store: &SharedStore,
     provider: Provider,
     agent_session: &AgentSessionId,
-) -> Result<bool, ProviderAccountError> {
+) -> Result<Option<ProviderAccountId>, ProviderAccountError> {
     let selection = selection::AccountSelection::from_env()?;
     if selection.is_default() {
-        return Ok(false);
+        return Ok(None);
     }
     let named = selection
         .resolved_accounts(&store.list_provider_accounts(None).await?)?
@@ -768,7 +768,10 @@ pub(crate) async fn names_another_account(
     let pinned = store
         .provider_session_account(provider, agent_session)
         .await?;
-    Ok(!named.is_empty() && !pinned.is_some_and(|pinned| named.contains(&pinned)))
+    if pinned.is_some_and(|pinned| named.contains(&pinned)) {
+        return Ok(None);
+    }
+    Ok(named.into_iter().next())
 }
 
 /// The route a launch takes. A conversation it resumes is brought into the

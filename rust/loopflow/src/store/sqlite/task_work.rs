@@ -405,23 +405,19 @@ fn choose_edge_in(
             task,
             by,
             &format!("{} runs to the end with no stage left", chosen.name),
-            false,
         )?;
     }
     Ok(true)
 }
 
 /// A Task handed off to finish on its own: since when, this Machine's
-/// process carrying it there, how many times in a row that process was
-/// started again after it failed, and whether the handoff may land its PR.
+/// process carrying it there, and how many times in a row that process was
+/// started again after it failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskShipping {
     pub shipped_at: i64,
     pub process: Option<LfProcessId>,
     pub restarts: u32,
-    /// Someone handed it off with `lf ship`. A route into `end` approves only
-    /// running that route.
-    pub lands: bool,
 }
 
 pub(super) fn shipping_in(
@@ -430,26 +426,20 @@ pub(super) fn shipping_in(
 ) -> StoreResult<Option<TaskShipping>> {
     use rusqlite::OptionalExtension;
     conn.query_row(
-        "SELECT shipped_at,ship_lf_process_id,ship_restarts,ship_lands FROM tasks
+        "SELECT shipped_at,ship_lf_process_id,ship_restarts FROM tasks
          WHERE id=?1 AND shipped_at IS NOT NULL",
         [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )
     .optional()?
-    .map(|(shipped_at, process, restarts, lands)| shipping(shipped_at, process, restarts, lands))
+    .map(|(shipped_at, process, restarts)| shipping(shipped_at, process, restarts))
     .transpose()
 }
 
-fn shipping(
-    shipped_at: i64,
-    process: Option<String>,
-    restarts: u32,
-    lands: bool,
-) -> StoreResult<TaskShipping> {
+fn shipping(shipped_at: i64, process: Option<String>, restarts: u32) -> StoreResult<TaskShipping> {
     Ok(TaskShipping {
         shipped_at,
         restarts,
-        lands,
         process: process
             .map(|id| {
                 LfProcessId::parse(&id)
@@ -474,21 +464,18 @@ pub(super) fn unship_in(
             ),
         )?;
         conn.execute(
-            "UPDATE tasks SET ship_lf_process_id=NULL,ship_restarts=0,ship_lands=0 WHERE id=?1",
+            "UPDATE tasks SET ship_lf_process_id=NULL,ship_restarts=0 WHERE id=?1",
             [task.as_str()],
         )?;
     }
     Ok(shipping)
 }
 
-/// Approve the Task to finish on its own, carried by `by`. `lands` grants a new
-/// approval landing its PR; an approval that already began keeps its own.
 fn ship_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
     by: &LfProcessId,
     note: &str,
-    lands: bool,
 ) -> StoreResult<TaskShipping> {
     let state = super::durable::task_state_in(tx, task)?;
     if state.is_terminal() {
@@ -496,39 +483,36 @@ fn ship_in(
             "Task is {state}; it cannot ship"
         )));
     }
-    let before = shipping_in(tx, task)?;
-    if lands && before.as_ref().is_some_and(|before| !before.lands) {
-        super::children::insert_task_event_in(
-            tx,
-            task,
-            &crate::work::task::TaskEventKind::Progress {
-                summary: format!("Shipping may land its PR: {note}"),
-            },
-        )?;
-    }
-    if before.is_none() {
-        let now = crate::store::rows::now_unix();
-        super::planning_write::local(
-            tx,
-            &crate::work::edit::WorkEdit::for_target(
-                task.as_str(),
-                &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
-            ),
-        )?;
-        super::children::insert_task_event_in(
-            tx,
-            task,
-            &crate::work::task::TaskEventKind::Progress {
-                summary: format!("Shipping: {note}"),
-            },
-        )?;
-    }
-    // Landing, once granted, stays with the approval until it ends.
+    let shipped_at = match shipping_in(tx, task)? {
+        Some(shipping) => shipping.shipped_at,
+        None => {
+            let now = crate::store::rows::now_unix();
+            super::planning_write::local(
+                tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    task.as_str(),
+                    &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
+                ),
+            )?;
+            super::children::insert_task_event_in(
+                tx,
+                task,
+                &crate::work::task::TaskEventKind::Progress {
+                    summary: format!("Shipping: {note}"),
+                },
+            )?;
+            now
+        }
+    };
     tx.execute(
-        "UPDATE tasks SET ship_lands=(ship_lands OR ?2),ship_lf_process_id=?3 WHERE id=?1",
-        rusqlite::params![task.as_str(), lands, by.as_str()],
+        "UPDATE tasks SET ship_lf_process_id=?2 WHERE id=?1",
+        rusqlite::params![task.as_str(), by.as_str()],
     )?;
-    shipping_in(tx, task)?.ok_or(crate::store::StoreError::NotFound)
+    Ok(TaskShipping {
+        shipped_at,
+        process: Some(by.clone()),
+        restarts: shipping_in(tx, task)?.map_or(0, |shipping| shipping.restarts),
+    })
 }
 
 fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
@@ -1077,29 +1061,27 @@ impl SqliteStore {
         Ok(set)
     }
 
-    /// Hand the Task off to finish on its own, carried by `by`; `lands` grants
-    /// landing its PR. Shipping that already began keeps its start and any
-    /// landing it was granted; `lands` false changes only the carrier.
+    /// Hand the Task off to finish on its own, carried by `by`. Shipping that
+    /// already began keeps its start; only the carrier changes.
     pub(crate) fn ship_task(
         &self,
         task: &TaskId,
         by: &LfProcessId,
         note: &str,
-        lands: bool,
     ) -> StoreResult<TaskShipping> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let shipping = ship_in(&tx, task, by, note, lands)?;
+        let shipping = ship_in(&tx, task, by, note)?;
         tx.commit()?;
         Ok(shipping)
     }
 
-    /// End a Task's Auto-Ship approval, recording `summary` as Progress. Returns
-    /// the approval and the process that carried it, when it was approved.
-    pub(crate) fn end_shipping(
+    /// Withdraw a Task's Auto-Ship approval. Returns the approval and the process
+    /// that carried it, when it was approved.
+    pub(crate) fn stop_shipping(
         &self,
         task: &TaskId,
-        summary: &str,
+        note: &str,
     ) -> StoreResult<Option<TaskShipping>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
@@ -1110,7 +1092,7 @@ impl SqliteStore {
             &tx,
             task,
             &crate::work::task::TaskEventKind::Progress {
-                summary: summary.to_owned(),
+                summary: format!("Stopped shipping: {note}"),
             },
         )?;
         tx.commit()?;
@@ -1127,7 +1109,7 @@ impl SqliteStore {
     pub(crate) fn local_shipping_tasks(&self) -> StoreResult<Vec<(TaskId, TaskShipping)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT id,shipped_at,ship_lf_process_id,ship_restarts,ship_lands FROM tasks
+            "SELECT id,shipped_at,ship_lf_process_id,ship_restarts FROM tasks
              WHERE shipped_at IS NOT NULL
              AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')",
         )?;
@@ -1138,15 +1120,14 @@ impl SqliteStore {
                     row.get(1)?,
                     row.get(2)?,
                     row.get(3)?,
-                    row.get(4)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
-            .map(|(id, shipped_at, process, restarts, lands)| {
+            .map(|(id, shipped_at, process, restarts)| {
                 let id = TaskId::parse(&id)
                     .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-                Ok((id, shipping(shipped_at, process, restarts, lands)?))
+                Ok((id, shipping(shipped_at, process, restarts)?))
             })
             .collect()
     }
@@ -1325,8 +1306,6 @@ mod tests {
         assert_eq!(state(), crate::durable::TaskState::Shipping);
         let shipping = store.task_shipping(&task).unwrap().unwrap();
         assert_eq!(shipping.process, Some(by.clone()));
-        // That handoff runs the route; it grants no landing.
-        assert!(!shipping.lands);
         // Only the checkout's Machine restarts its ship process.
         assert!(store.local_shipping_tasks().unwrap().is_empty());
         store
@@ -1347,25 +1326,15 @@ mod tests {
         assert_eq!(state(), crate::durable::TaskState::Deferred);
         store.set_task_deferred(&task, false).unwrap();
         assert_eq!(state(), crate::durable::TaskState::Shipping);
-        // Recovery keeps when it began and grants nothing; a handoff grants landing.
-        let recovered = store.ship_task(&task, &by, "again", false).unwrap();
-        assert_eq!(recovered, shipping);
-        let again = store.ship_task(&task, &by, "again", true).unwrap();
+        // Shipping again keeps when it began.
+        let again = store.ship_task(&task, &by, "again").unwrap();
         assert_eq!(again.shipped_at, shipping.shipped_at);
-        assert!(again.lands);
-        assert!(store.ship_task(&task, &by, "again", false).unwrap().lands);
         // Stop withdraws the approval; the route still running keeps it moving.
-        assert_eq!(
-            store.end_shipping(&task, "Stopped shipping: stop").unwrap(),
-            Some(again)
-        );
+        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), Some(shipping));
         assert_eq!(state(), crate::durable::TaskState::Moving);
-        assert_eq!(
-            store.end_shipping(&task, "Stopped shipping: stop").unwrap(),
-            None
-        );
+        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), None);
         // Approved again with nothing running, it is idle until its ship process restarts.
-        assert!(store.ship_task(&task, &by, "again", true).unwrap().lands);
+        store.ship_task(&task, &by, "again").unwrap();
         store
             .conn
             .lock()

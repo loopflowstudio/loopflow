@@ -76,7 +76,7 @@ mod tests {
                 let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
                 store.test_session("session", &crate::session_record::new_artifact_key());
                 let attachment = store
-                    .claim_session_attachment("session", None, &LfProcessId::new(), true)
+                    .claim_session_attachment("session", None, &store.test_lf_process(), true)
                     .unwrap();
                 let mut child = Child(
                     std::process::Command::new("/bin/sleep")

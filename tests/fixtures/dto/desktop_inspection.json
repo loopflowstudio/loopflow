@@ -124,6 +124,7 @@
       },
       "opening": null,
       "view": null,
+      "view_parts": [],
       "open_work": [
         {
           "repository": "repo_22222222222222222222222222222222",
@@ -195,6 +196,76 @@
       "session": null,
       "opening": null,
       "view": null,
+      "view_parts": [
+        {
+          "name": "board",
+          "kind": "board",
+          "work": null,
+          "section": "backlog",
+          "done_days": 7,
+          "text": "product · Active\n\n[Backlog 0] · Working 0 · Autonomous 0 · Done 0\n  None",
+          "page": null,
+          "pages": null,
+          "visible": [],
+          "hidden": false,
+          "ratio": 0.618,
+          "zoomed": false,
+          "actions": [
+            "section",
+            "filter",
+            "hide",
+            "show",
+            "zoom",
+            "resize"
+          ]
+        },
+        {
+          "name": "session",
+          "kind": "session",
+          "work": {
+            "repository": "repo_22222222222222222222222222222222",
+            "kind": "wave",
+            "id": "wave_11111111111111111111111111111111"
+          },
+          "section": null,
+          "done_days": null,
+          "text": null,
+          "page": null,
+          "pages": null,
+          "visible": [],
+          "hidden": true,
+          "ratio": 0.382,
+          "zoomed": false,
+          "actions": []
+        },
+        {
+          "name": "tiles",
+          "kind": "strip",
+          "work": null,
+          "section": null,
+          "done_days": null,
+          "text": null,
+          "page": 2,
+          "pages": 3,
+          "visible": [
+            {
+              "repository": "repo_22222222222222222222222222222222",
+              "kind": "task",
+              "id": "task_44444444444444444444444444444444"
+            }
+          ],
+          "hidden": false,
+          "ratio": 0.382,
+          "zoomed": true,
+          "actions": [
+            "page",
+            "hide",
+            "show",
+            "zoom",
+            "resize"
+          ]
+        }
+      ],
       "open_work": [],
       "list": [],
       "actions": []

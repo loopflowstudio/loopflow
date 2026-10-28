@@ -772,6 +772,29 @@ Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
 with five-minute turn grace. Configured acceptance remains open.
 
+## Claude credential preservation (LOO-661, 2026-10-27)
+
+Jack Heart authorized bounded repair and delivery, preserving native access,
+credentials and active Sessions; Infrastructure owns release/installation.
+Synthetic probes exposed `security -i`'s 2 KiB hex-input ceiling. Native writes
+changed partitions and broke the `security` reader; access restoration failed.
+Published source commits data before restoring access. Compatible writing remains
+unproved; exclusions do not prove exhaustion.
+
+FileDL transactions recovered exact old bytes after specific 2/8 KiB rollbacks,
+but replacement reads failed. Public record-by-ID reads found new encoded bytes;
+group-key queries did not. Published source reads modified records by ID but
+queries the pre-write snapshot, consistent with that failure. The proposed
+pre-commit verification fails; other mechanisms remain open. General rollback
+safety and unchanged ACL identity remain unproved.
+
+Closed stages/statuses keep secrets out of diagnostics. Save failures stay
+`Unavailable`; failed readback/mismatch proves neither rollback nor safe retry.
+Launches reported save failure and expired OAuth; later polls accepted both accounts
+without proving refresh. Synthetic storage proof cannot replace installed refresh
+acceptance. LOO-325 concurrency remains unselected. Detailed evidence:
+`31c2ed7565:scratch/loo-661-save-refreshed-claude.md`.
+
 ## Account auth consolidation (LOO-320, curated 2026-10-10)
 
 Jack Heart approved delivery, excluding cross-account continuation, native refresh

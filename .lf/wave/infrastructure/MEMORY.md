@@ -783,9 +783,11 @@ failure stays unknown. Keep conversation placement independent of credential
 selection. Compare-before-rename cannot preserve an uncooperative writer: retain
 the displaced inode, including later descriptor writes, and refuse stale evidence.
 Save-back must honor the same evidence or it can recreate the failure. General
-refresh coordination and Claude changes remain separate. Release's entry-point
-lesson applies: resolver tests do not prove public launch/resume, installation,
-or completed inference.
+refresh coordination and Claude changes remain separate. Explicit continuation
+of a completed Session retains retirement and prior captures; fresh atomic input/
+attachment admission still rejects stale completion snapshots and live owners.
+Release's entry-point lesson applies: public status/launch/resume fixtures prove
+stand-in continuity, not real-provider inference or installed recovery.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-10)
 

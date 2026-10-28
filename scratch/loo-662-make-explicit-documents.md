@@ -5,9 +5,10 @@
 2026-10-27. Jack Heart authorized repairing explicit document delivery and shipping
 the fix through the selected workflow. [LOO-662](https://linear.app/loopflow/issue/LOO-662)
 owns the accepted outcome; the mechanisms below are the kickoff design, not an
-additional product approval. The implementation is present in the working tree;
-gate acceptance remains. The 2026-10-27 implementation recheck preserves the
-complete delivery cut and confirms the retained preview/capture receipts. The
+additional product approval. Implementation is checkpointed at
+`0a153351613043ba3c80cc0af9a91f1bbfbb78f0`; publication acceptance is recorded at the end of this plan.
+The 2026-10-27 reconciliation confirms the delivery cut and retained
+preview/capture receipts without finding a bounded code repair. The
 earlier Graph stopped because its older lf could not read the upgraded database;
 that failure does not invalidate the source receipts or establish installed success.
 
@@ -42,8 +43,12 @@ turn supplies that document without replaying the initial skill or old document.
 
 ## Findings and choices
 
-Source inspected at `61111f788fc7cfcbdfc8412bb1210a7359fe8cbe` (base release
-0.14.19).
+The following root-cause findings describe the pre-repair source at
+`61111f788fc7cfcbdfc8412bb1210a7359fe8cbe` (base release 0.14.19).
+The local `origin/main` reference still names that commit at reconciliation;
+this is local reference evidence, not a fresh upstream observation. The repair
+preserves the skill-frontmatter docs introduced by LOO-655 and leaves LOO-496's
+hook transport unchanged.
 
 * `prompt::gather_context` already gathers command/config docs and skill-frontmatter
   docs. `prompt::process::prepare_prompt` merges these sources, then builds
@@ -199,7 +204,55 @@ Excluded: ambient context redesign, broader compaction guarantees, remote teleme
 provider memory services, document attachment/search APIs, account configuration
 changes, unrelated Session repair, release publication and migration edits.
 
-## This slice — verify the complete delivery cut
+## Concept review — 2026-10-27
+
+**Outcome: nothing to change; no open product choice.** Jack Heart's accepted
+no-tools delivery outcome already settles the consequential mismatch: a selected
+document must be submitted reference text, not a path whose retrieval depends
+on the agent. The implemented model matches that experience. No additional
+implementation direction or approval is introduced by this review.
+
+The interaction is `--docs long.txt` → preview the submitted reference → launch
+with that reference → inspect its immutable capture. A later
+`lf -b connect ID --message TEXT --docs next.txt` supplies the current selection
+to that turn. Re-select a changed file to supply its new contents; the earlier
+capture remains evidence of the earlier input. Preview and launch each gather
+their own snapshot, so equality presumes unchanged files between those commands.
+
+The concepts and APIs are sufficient: `gather_doc_targets` produces `Document`
+snapshots; `format_task_prompt` supplies shared ordinary/native reference text;
+`preview_prompt` exposes that assembly; `attributed_context` records the actual
+submitted channels. Files own authored content, the invocation owns its snapshot,
+and capture owns historical evidence. `ContextDelivery.submitted_docs` holds
+only canonical identities for ambient suppression, accumulated by `resume`.
+Removing those identities would reintroduce duplicate ambient delivery; turning
+them into another document store would add an unnecessary lifecycle. Existing
+provider transports and capture persistence suffice, without a schema change.
+
+Failure and recovery preserve that model. An exact missing, unreadable or
+nontext file fails with its path; fix the selection and invoke again. Excluded
+or empty traversals remain visible, and the file ceiling fails rather than
+silently choosing a subset. External paths use only applicable exclusions, not
+an unrelated root's matcher. Provider rejection remains a failed attempt with
+its attempted input preserved; recovery never silently shortens the document.
+On supported resume, old documents remain in native history while new selections
+enter current task text. Retired or attached Session refusals do not justify
+changing Session ownership or claiming a resumed turn ran.
+
+`docs/config.md` already expresses the resulting usage contract. No skill needs
+an instruction to retrieve selected documents: requiring that action would undo
+the accepted experience. Preserve the existing distinction between active skill
+instructions and escaped reference text, native-instruction deduplication, and
+ambient-only refresh. No usage or skill rewrite is needed here.
+
+The retained counterexample remains decisive: a correct marker recovered by a
+tool does not prove delivery. A differing submitted body, an old capture altered
+by a file edit, or replay of an old document into a new turn would invalidate
+the implementation. The next proof remains the already specified gate acceptance;
+Infrastructure owns installed verification. This review adds no test run or
+installed-success claim. The accompanying view is `scratch/concept-review.html`.
+
+## Remaining work and retained evidence
 
 The delivery cut is implemented. Ordinary and native skills share document
 assembly; explicit selections win same-source dedup; preview omits their redundant
@@ -210,23 +263,20 @@ wrappers carry source attribution. These path identities are suppression metadat
 not another document payload or evidence of historical delivery. No schema or
 provider transport changed.
 
-The indivisible implementation order remains: remove path-only explicit delivery
-and unsafe matcher input; share task rendering across ordinary/native skills and
-cut preview/capture over together; preserve resumed-turn selection and ambient
-deduplication; verify the complete path. All four changes are present. Remaining
-work is gate acceptance and any repairs it identifies, followed by the selected
-delivery workflow. The focused boundary is
+Acceptance is complete as recorded below. Remaining work follows the selected
+delivery workflow; Infrastructure owns installed verification. The focused boundary is
 `context_launch_tests::explicit_documents_`; the gate command below includes it.
 
 Gate owns the affected suites and `explicit_documents_*` CLI acceptance tests.
-Those regressions cover short/long relative, absolute and external selections,
+Those regressions are written to cover short/long relative, absolute and external selections,
 config/frontmatter docs, native skills, terminal delivery, exact preview/capture/
-provider text, immutable captures, and new-turn document selection. The integration
-binary is built; its acceptance tests have not been run early.
+provider text, immutable captures, and new-turn document selection. The integration acceptance tests pass after the fixture corrections recorded below.
 
 Configured source proof (2026-10-27) is retained at
-`/private/tmp/loo662-verified-0fx2pjp5`, with probe scripts
-`/tmp/loo662-verify.py` and `/tmp/loo662-native.py`. Relative and absolute launches
+`/private/tmp/loo662-verified-0fx2pjp5`. Historical probe scripts
+`/tmp/loo662-verify.py` and `/tmp/loo662-native.py` retain the initial failed resume
+setups described below; they are not passing end-to-end acceptance commands.
+Relative and absolute launches
 of the original 244,852-byte input each submitted 245,926 task bytes, matching
 preview and capture, and returned FIR-3826. First requests measured 78,801 and
 78,799 tokens; both recorded zero tool results/output tokens. The external file
@@ -240,7 +290,9 @@ prepared by `lf connect --fresh --prepare --json`, then two headless turns on th
 same native history. Its new turn returned ASPEN-662-c72a, captured the new document
 once without the prior document or initial skill, and recorded zero tool output.
 All probe providers exited. This changes proof setup, not retirement/attachment
-semantics; the regression follows that supported lifecycle.
+semantics; the regression follows that supported lifecycle. The terminal receipt
+uses a Loopflow skill; native-skill invocation remains separately covered by the
+focused unit pass and the pending deterministic acceptance test.
 
 Infrastructure still owns coordinated release, installation and installed
 verification. No installed-success claim follows from these source receipts.
@@ -280,4 +332,23 @@ from the deterministic gate scenario. Infrastructure performs the final installe
 verification after coordinated release; this Task reports that remaining owner
 without asserting installed success.
 
-Check (2026-10-27): `cargo test -p loopflow --lib prompt::` passes (99 tests, inherited LF variables unset and stdin closed; nonfatal macOS unwind-table linker warning); `cargo fmt --check`, `git diff --check` and `lf context` pass within both budgets; configured-provider receipts remain recorded above, affected suites/Clippy remain with gate, installed verification with Infrastructure.
+Check (2026-10-27): `git diff --check` and `lf context` pass; retained `cargo test -p loopflow --lib prompt::` pass (99 tests) and `cargo fmt --check` remain applicable to unchanged code; affected suites/Clippy remain with gate, installed verification with Infrastructure.
+
+## Publication acceptance — 2026-10-27
+
+`lf sync --manual` completed without conflicts against main. Review of the full
+range found two stale acceptance expectations: native skill metadata does not
+interpret Loopflow `docs:`, and an explicitly selected Wave goal correctly changes
+from ambient Wave classification to Docs. The fixtures now preserve those
+contracts; no production repair was needed. Docs clarify Loopflow frontmatter.
+
+Check: affected gate run `.lf/tmp/gate/run-21088` passed architecture, formatting,
+173 Rust tests and 72 website tests; two expectation failures repaired, with
+focused rerun passed both tests (nextest 937f7fa2-7d30-4545-9c9b-da5f5e8fe40a);
+`cargo clippy --all-targets -- -D warnings` passed; `cargo fmt --all` passed. Production code is unchanged
+from the retained configured-provider proof. Installed verification remains
+Infrastructure-owned.
+
+The focused rerun also corrected stale ambient-order and path-spelling assertions.
+Attribution now proves the captured source resolves to the selected file and its
+label matches the submitted reference; it accepts macOS canonical path aliases.

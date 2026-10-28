@@ -513,10 +513,18 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
             ".lf/wave/infrastructure/GOAL.md",
             ".lf/wave/infrastructure/MEMORY.md",
             ".lf/wave/infrastructure/README.md",
-            ".lf/wave/infrastructure/release/GOAL.md",
             ".lf/wave/infrastructure/release/MEMORY.md",
             ".lf/wave/infrastructure/release/notes.md",
         ]
+    );
+    assert_eq!(
+        components
+            .docs
+            .iter()
+            .find(|doc| doc.path == ".lf/wave/infrastructure/release/GOAL.md")
+            .unwrap()
+            .source,
+        DocumentSource::Docs
     );
     let prompt = components
         .docs
@@ -536,7 +544,7 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
     ] {
         assert_eq!(prompt.matches(content).count(), 1, "{content}");
     }
-    assert!(prompt.find("Parent decisions").unwrap() < prompt.find("Release goal").unwrap());
+    assert!(prompt.find("Parent decisions").unwrap() < prompt.find("Release decisions").unwrap());
     assert!(prompt.find("Repository decisions").unwrap() < prompt.find("Parent goal").unwrap());
     for excluded in [
         "Sibling secrets",

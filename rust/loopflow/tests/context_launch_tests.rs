@@ -927,7 +927,10 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
                 "diff: false\ndiff_files: false\npaste: false\ndocs: [config.txt]\n",
             );
             if native {
-                repo.create_file(".agents/skills/probe/SKILL.md", "---\nname: probe\ndescription: Probe docs\ndocs: [frontmatter.txt]\n---\nRead the supplied reference.");
+                repo.create_file(
+                    ".agents/skills/probe/SKILL.md",
+                    "---\nname: probe\ndescription: Probe docs\n---\nRead the supplied reference.",
+                );
             } else {
                 repo.create_file(
                     ".lf/skills/probe.md",
@@ -963,7 +966,7 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
             assert!(expected.contains(&body.replace('$', "&#36;")));
             assert_eq!(expected.matches("FIRST-662").count(), 1);
             assert!(expected.contains("CONFIG-DOCUMENT-662"));
-            assert!(expected.contains("FRONTMATTER-DOCUMENT-662"));
+            assert_eq!(expected.contains("FRONTMATTER-DOCUMENT-662"), !native);
             assert!(preview["references"].as_array().unwrap().is_empty());
             assert!(!repo.path().join(".lf/prompts").exists());
             assert!(!home.path().join("native-argv.jsonl").exists());
@@ -986,17 +989,20 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
             let contexts = explicit_document_captures(home.path());
             assert_eq!(contexts.len(), 1);
             assert_eq!(contexts[0]["context"]["task"]["text"], expected);
-            let source_path = if selection == "external" {
-                selected.as_str()
-            } else {
-                "document.txt"
-            };
             assert!(contexts[0]["context"]["task"]["assets"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|asset| {
-                    asset["kind"] == "document" && asset["source_path"] == source_path
+                    asset["kind"] == "document"
+                        && asset["source_path"].as_str().is_some_and(|source| {
+                            repo.path().join(source).canonicalize().unwrap()
+                                == path.canonicalize().unwrap()
+                                && expected.contains(&format!(
+                                    "Document: {}",
+                                    serde_json::to_string(source).unwrap()
+                                ))
+                        })
                 }));
             fs::write(&path, "Changed after submission").unwrap();
             assert_eq!(explicit_document_captures(home.path()), contexts);

@@ -155,7 +155,7 @@ in a provider request. The harness loads its repo guide natively.
 | Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | Standalone native skills retain their own guidance |
 | Skill and request | First turn | Selected skill and launch message |
 | Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
-| Explicit docs | Complete reference bodies in the submitted turn | `docs:` in config or skill frontmatter, or `--docs` |
+| Explicit docs | Complete reference bodies in the submitted turn | `docs:` in config or Loopflow skill frontmatter, or `--docs` |
 | Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
 | Codebase summaries | Complete private reference files | `summaries:` |
 | Clipboard | Tagged block after the request in the first turn | `-c` |

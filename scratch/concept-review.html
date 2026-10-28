@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-662 · Document delivery concept review</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.6; }
+  body { max-width: 46rem; margin: 3rem auto; padding: 0 1.25rem 3rem; }
+  header { font-size: .85rem; opacity: .75; }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 2rem 0 1rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; }
+  p, li { max-width: 70ch; }
+  code { font-size: .88em; overflow-wrap: anywhere; }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; border: 1px solid #8886; }
+  blockquote { margin: 1.5rem 0; padding-left: 1rem; border-left: 3px solid #888; }
+  a { color: inherit; text-underline-offset: .2em; }
+  li + li { margin-top: .8rem; }
+  @media (max-width: 36rem) { body { margin-top: 1.5rem; } h1 { font-size: 1.65rem; } }
+</style>
+<header>
+  LOO-662 · concept-review · 2026-10-27<br>
+  Built from <a href="loo-662-make-explicit-documents.md">the working design</a>,
+  <code>docs/config.md</code>, <code>prompt/{mod,process}.rs</code>,
+  <code>context_block.rs</code>, <code>lf/commands/run.rs</code> and
+  <code>tests/context_launch_tests.rs</code> in <code>rust/loopflow</code>.<br>
+  Implementation reviewed: <code>0a15335161</code>.
+</header>
+<main>
+  <h1>Keep the accepted design.<br>No open product choice.</h1>
+  <p>Jack Heart authorized complete document delivery. Selecting a document gives
+  the agent its contents in the submitted turn. No additional retrieval action
+  belongs in the workflow.</p>
+
+  <h2>The mismatch this resolves</h2>
+  <p><strong>Before:</strong> preview showed the file body; execution supplied a
+  path. A correct final marker could come from a file-read tool after omission.</p>
+  <blockquote><strong>Implemented on this branch:</strong> selection → document
+  snapshot → submitted reference text → provider and immutable capture.
+  Preview uses the same assembly.</blockquote>
+  <p>Gate acceptance is pending. Installed behavior has not been verified.
+  No new behavior is proposed by this review.</p>
+
+  <h2>One interaction, through the model</h2>
+  <pre><code>lf --context --json --docs long.txt skill default 'Report the final marker without tools.'
+lf -b -a codex --docs long.txt skill default 'Report the final marker without tools.'</code></pre>
+  <p><code>gather_doc_targets</code> reads a <code>Document</code> snapshot.
+  <code>format_task_prompt</code> renders its complete escaped reference for both
+  ordinary and native skills. <code>preview_prompt</code> shows the assembly;
+  <code>attributed_context</code> records submitted bytes and their source.</p>
+  <p>Files own authored content; each invocation owns its snapshot; capture owns
+  historical evidence. Preview and launch agree when their source files are
+  unchanged. Editing a file later cannot rewrite an earlier capture.</p>
+
+  <h2>Failure and recovery</h2>
+  <p>An exact unreadable or nontext selection names the path and fails. Correct
+  it and invoke again. Exclusions stay visible; external files never enter an
+  unrelated repository matcher. Provider limits remain failures with attempted
+  input preserved, without automatic document shortening.</p>
+  <pre><code>lf -b connect ID --message 'Read the next document.' --docs next.txt</code></pre>
+  <p>On a supported conversation, <code>resume</code> sends the new selection;
+  old documents stay in native history. Re-selecting a changed file sends its new
+  snapshot. <code>ContextDelivery.submitted_docs</code> retains only identities
+  to suppress ambient duplicates. No document store or new lifecycle is needed.</p>
+
+  <h2>Review questions, settled by the accepted contract</h2>
+  <ol>
+    <li><strong>Must an agent read selected files itself?</strong> No. Complete
+    submitted references satisfy the accepted no-tools outcome. Existing usage
+    docs describe this; skills need no retrieval instruction.</li>
+    <li><strong>Should old documents be replayed into each turn?</strong> No.
+    Preserve native history and immutable captures; supply the current selection.
+    Ambient-only context retains its refresh behavior.</li>
+    <li><strong>What proof remains?</strong> The specified gate checks must compare
+    preview, provider input and capture, including resume. A marker obtained by a
+    tool remains a counterexample. Infrastructure owns release, installation and
+    installed verification.</li>
+  </ol>
+</main>
+</html>

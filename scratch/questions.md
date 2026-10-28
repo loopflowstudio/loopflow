@@ -16,3 +16,8 @@ attached Session refuses another input owner. Native resume verification therefo
 uses a disposable repository conversation prepared by `lf connect --fresh
 --prepare --json`, followed by two headless turns. This exercises existing native
 history without changing Session retirement or attachment ownership.
+
+Publication review preserves native skill metadata semantics: `docs:` frontmatter
+belongs to Loopflow skills. Native skill acceptance uses CLI/config documents;
+its fixture does not introduce a new native frontmatter extension. An explicitly
+selected Wave goal is classified as Docs and supplied once in task text.

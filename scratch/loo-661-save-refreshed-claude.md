@@ -28,13 +28,13 @@ argv, logs, chat or assertions. No global trust changes, real-account deletion, 
 sign-out, account-route changes, alternate credential authority, delete/recreate, file
 migration or unprotected post-commit ACL repair.
 
-**Blocked at mechanism selection.** Before another mutation probe, identify a
-distinct supported writer addressing findings 35–37: creation with the necessary
-partition authority, or replacement retaining the existing encoding group/access.
-A password alone is unproved; do not collect one speculatively or repeat rejected
-probes. Private interfaces, trust changes and provider-owned refresh require a
-scope decision Jack Heart has not made. Ordinary repair remains authorized; the
-gap is technical. Diagnostics alone cannot ship this repair.
+**Unresolved mechanism.** No supported writer yet addresses findings 35–37:
+creation with the necessary partition authority, or replacement retaining the
+existing encoding group/access. A password alone is unproved. Private interfaces,
+trust changes and provider-owned refresh are unaccepted scope alternatives, not
+selected designs awaiting implementation. Ordinary repair remains authorized;
+the gap is technical, with no concrete product choice ready for decision.
+Diagnostics alone cannot ship this repair.
 
 Browser reconnection unblocks live diagnosis only: `invalid_grant` returns before
 `write_claude_login`. Local rollback cannot establish server token validity after
@@ -218,8 +218,11 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Compression rationale: the surviving refresh/diagnostic path needs no further
-indirection or deletion. Leave the obsolete writer and its exclusive stand-in
-untouched until replacement is proved; the archive retains detailed probe history.
+Reconciled 2026-10-28 against `95ffdead7` and the locally available upstream
+`acd37dde7`: the surviving diff supplies diagnostics, not a replacement writer.
+Infrastructure and its sole immediate child, Release, were read in full; their
+operation-entry and installed-proof lessons remain applicable. No new mechanism
+or accepted scope change follows from that context. The next implementation
+still owns the writer and its exclusive stand-in together.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only compression, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.
+Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only reconciliation, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.

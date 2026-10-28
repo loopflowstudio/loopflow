@@ -793,8 +793,8 @@ with five-minute turn grace. Configured acceptance remains open.
 Jack Heart authorized preservation-first repair; Infrastructure owns installation.
 Command probes found destructive `security -i` failures at 2/8 KiB, contradicting
 earlier preservation. Copied partition access denied creation; omitting it or
-trusting `security` caused reader timeouts. Original bytes/semantic ACLs survived;
-group identity and production replacement remain unproved.
+trusting `security` caused reader timeouts. Creation probes preserved originals;
+group identity and safe production replacement remain unproved.
 Source review identified no creation authority, group retention or file-keychain
 LAContext bridge; no installed trace or API exhaustion is proved.
 A password alone is unproved.

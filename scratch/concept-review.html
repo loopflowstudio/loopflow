@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-666 · Cleanup contract</title>
+<style>
+  :root { color-scheme: light dark; font: 17px/1.65 system-ui, sans-serif; }
+  body { max-width: 48rem; margin: 4rem auto; padding: 0 1.4rem 3rem; }
+  h1, h2 { line-height: 1.2; } h1 { font-size: 2rem; } h2 { margin-top: 2.5rem; font-size: 1.3rem; }
+  header, small { color: light-dark(#555, #bbb); } code { overflow-wrap: anywhere; font-size: .9em; }
+  pre { padding: 1rem; background: light-dark(#f2f4f5, #24282b); white-space: pre-wrap; }
+  blockquote { margin: 2rem 0; border-left: 3px solid light-dark(#366774, #83c2d0); padding-left: 1rem; }
+  li { margin: .8rem 0; } a { color: light-dark(#245b90, #9acbff); }
+  @media (max-width: 600px) { body { margin-top: 2rem; } }
+</style>
+<header>LOO-666 · concept-review · 2026-10-27<br>
+Built from <code>scratch/keep-unpublished-worktrees.md</code>,
+<code>docs/troubleshooting.md</code>, <code>.lf/skills/disk-cleanup.md</code>,
+<code>scripts/disk-cleanup.sh</code>, <code>git/worktrees.rs</code>,
+<code>git/mod.rs</code>, <code>lf/commands/ops/mod.rs</code>, and pruning fixtures.</header>
+<main>
+<h1>No new product decision is needed</h1>
+<p>The implemented change matches Jack Heart’s accepted contract: reclaim finished
+checkouts while preserving unpublished, unfinished, live, and uncertain work.
+No redesign is proposed. Gate and installed acceptance remain pending.</p>
+<blockquote>A remote branch being absent says where work is stored.
+It does not say that the work can be discarded.</blockquote>
+<h2>Actions → concepts → APIs</h2>
+<pre><code>lf wt prune --dry-run   # preview eligible finished checkouts
+lf wt prune             # remove them and their local branch refs</code></pre>
+<p>Hourly cleanup calls the same operation. Deliberate disposal remains
+<code>lf wt delete &lt;name&gt; --force</code>.</p>
+<p><strong>Before, installed behavior:</strong> clean checkout + missing remote
+branch or old activity → prune candidate → forced Git removal.</p>
+<p><strong>After, implemented on this branch:</strong> clean, unprotected checkout
++ merged or closed PR at its exact head → <code>WorktreePruneTarget</code>
+→ lease, branch/head/cleanliness recheck → non-force Git removal
+→ conditional local-ref deletion.</p>
+<p><code>prune_repo_worktrees</code> supplies ownership and process protections;
+<code>prune_worktrees</code> owns the single classification;
+<code>remove_worktree_target</code> applies it. Listing’s <code>remote_gone</code>
+remains an observation. No new persisted state or wire model is needed.</p>
+<h2>Normal use, failure, recovery</h2>
+<ul>
+<li>A clean checkout with an exact-head merged PR can go. A closed PR is the
+accepted abandonment signal, not a claim of delivery.</li>
+<li>A never-pushed branch, a new commit after delivery, or an open PR stays.
+Missing provider facts cannot manufacture permission; failed ownership or process
+inspection stops cleanup.</li>
+<li>A candidate changed before removal stays. A branch advanced after removal
+keeps its new ref. Retrying reads fresh facts.</li>
+<li>Later branch cleanup respects remaining checkouts. Idle ignored build output
+keeps its existing separate cleanup rules.</li>
+</ul>
+<p>MTG-193’s preserved ref and verified bundle establish committed-history
+recovery only. Unknown uncommitted or ignored data remains unknown. Its active
+checkout and Task stay untouched; the operator coordinates restoration and
+installed verification before restoring the hourly entry.</p>
+<h2>Review questions, resolved from the accepted design</h2>
+<ol>
+<li>Does ordinary pruning need a separate aggressive policy? No. CLI and hourly
+cleanup share the preservation contract.</li>
+<li>Does missing evidence require a new decision record? No. Retain the checkout;
+explicit deletion already expresses deliberate disposal.</li>
+<li>Is another product choice open? No. The next proof is the planned gate and
+operator-owned installed disposable acceptance.</li>
+</ol>
+</main>
+</html>

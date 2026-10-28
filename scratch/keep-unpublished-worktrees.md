@@ -151,4 +151,34 @@ redesign, Git gc/prune recovery operations and account configuration are exclude
 Ignored build-output retention remains governed by the existing script contract;
 this hotfix does not redefine ignored files as source or claim they are backed up.
 
+## Concept review — 2026-10-27
+
+Outcome: no design change and no open product choice. Jack Heart's accepted
+preservation requirement is represented by one interaction: preview finished
+checkouts with `lf wt prune --dry-run`, then reclaim them with `lf wt prune`;
+hourly cleanup invokes that same operation. The updated troubleshooting examples
+already express this experience. The disk-cleanup skill delegates deletion to
+the script and needs no new policy or instruction.
+
+The consequential mismatch was treating a remote observation as disposal
+authority. `remote_gone` remains useful listing data; only an exact-head merged
+or closed PR makes a clean, unprotected checkout eligible. Closed means explicit
+abandonment under the accepted design, not delivery. No extra lifecycle, schema,
+DTO, or operator decision is required. `WorktreePruneTarget` carries the observed
+branch/head through the existing lease into non-force removal and conditional
+local-ref deletion; the remote ref survives this operation.
+
+Counterexamples remain binding: a never-pushed commit, a new commit after an old
+PR, an open PR, or failed evidence/ownership inspection cannot authorize removal.
+If a candidate changes before removal, retain it and report failure; if its ref
+changes after checkout removal, conditional ref deletion preserves the new head.
+Retry recomputes facts rather than resuming a deletion plan. The later branch
+cleanup retains branches with checkouts; idle ignored build cleanup retains its
+separate accepted contract. Neither successful pruning nor a retained recovery
+ref establishes recovery of unknown uncommitted/ignored calibration data.
+
+Next proof remains the existing affected gate and operator-owned installed
+disposable acceptance. This review inspected code and fixtures; it did not rerun
+tests, alter implementation, restore a checkout, or change the hourly schedule.
+
 Check: 2026-10-27 `git diff --check` — passed; `lf context` — memory/scratch within both limits. Reused unchanged-code results: `cargo test -p loopflow --lib git::worktrees::tests::prune_`, `cargo test -p loopflow --lib git::tests::local_branch_deletion_retains_a_new_head`, `cargo test -p loopflow --test integration wt_prune_branches::worktree_prune` — 7 passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` — passed. Prior explicit-force and macOS script acceptance receipts: `315e2deda34e7e1ee6675ea8429d8fd6cec58b62:scratch/keep-unpublished-worktrees.md`. Gate owns affected suites; the operator owns installed acceptance.

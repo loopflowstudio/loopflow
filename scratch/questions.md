@@ -23,9 +23,9 @@ errors. Infrastructure owns coordinated CLI/helper installation and installed
 acceptance; neither is established by source integration or this bridge.
 
 Prior conversation observations, assumptions and archive reservations remain at
-`c98606d8703498f44f35843dae1868a2f5c4003a:scratch/questions.md` and its references.
+`166809f6a4c089e6a13681a71270b966ee42b733:scratch/questions.md` and its references.
 Do not reuse reservations. Each archive's sibling `receipt.json` records the
 checkpoint and verified move, or source absence; a reservation proves no archive.
 
-This compress step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-3_2ebo_t/tmp` for telemetry after checkpointing.
+This realign step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-03mf_7z0/tmp` for telemetry after checkpointing.
 Its sibling `receipt.json` records the verified move or source absence.

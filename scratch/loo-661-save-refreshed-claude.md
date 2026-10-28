@@ -9,9 +9,10 @@ preservation pass; four large replacements still destroy old data. The defective
 fix does not complete this repair or permit delivery.
 
 `ed6c82b2b` closes finding 40 with finding 41's Unicode proof. Findings 42–43
-exclude two examined public CSSM bridges, not all public APIs. Review at
-`c98606d8703498f44f35843dae1868a2f5c4003a` confirms the writer and fixture still
-match these findings. Neither native synthetic proof nor release evidence
+exclude two examined public CSSM bridges, not all public APIs. Reconciliation at
+`166809f6a4c089e6a13681a71270b966ee42b733` confirms the writer and fixture still
+match these findings; the local upstream ref remains the checkout base. Infrastructure
+and its Release child retain the distinction between source proof and installed acceptance. Neither native synthetic proof nor release evidence
 establishes installed Claude recovery.
 
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
@@ -292,4 +293,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check (October 28 compress; prose only) — `git diff --check` and `lf context`: PASS; no code changes or test rerun. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.
+Check (October 28 realign; prose only) — `git diff --check` and `lf context`: PASS; no code changes or test rerun. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.

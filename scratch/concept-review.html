@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-656 concept review</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--muted:#6b675f;--rule:#e2ded5;--code:#f1eee7;--new:#1f6f43;--newbg:#e6f3ea;--warn:#8a4b0f;--warnbg:#fbeedd;--old:#7a2e2e}
+@media (prefers-color-scheme:dark){:root{--bg:#18181a;--fg:#e9e6df;--muted:#9a958b;--rule:#2f2e2c;--code:#232226;--new:#7fd1a0;--newbg:#16291e;--warn:#f0b878;--warnbg:#2c2014;--old:#e59a9a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:720px;margin:0 auto;padding:40px 16px 80px}
+header{color:var(--muted);font-size:13px;border-bottom:1px solid var(--rule);padding-bottom:16px;margin-bottom:32px}
+header b{color:var(--fg)}
+h1{font-size:26px;line-height:1.25;margin:0 0 12px}
+h2{font-size:18px;margin:44px 0 10px}
+p{margin:10px 0}
+code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:14px 16px;border-radius:6px;overflow-x:auto;white-space:pre}
+.lede{font-size:18px}
+.flow{border-left:3px solid var(--rule);padding:2px 0 2px 16px;margin:16px 0}
+.flow p{margin:6px 0}
+.break{border-left-color:var(--warn);background:var(--warnbg);padding:10px 16px;border-radius:0 6px 6px 0}
+.tag{font:600 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:3px;margin-right:6px;vertical-align:1px}
+.exists{color:var(--muted);border:1px solid var(--rule)}
+.proposed{color:var(--new);background:var(--newbg)}
+table{width:100%;border-collapse:collapse;font-size:14px;margin:12px 0}
+th,td{text-align:left;vertical-align:top;padding:8px 8px 8px 0;border-bottom:1px solid var(--rule)}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+.opt{margin:18px 0;padding-left:16px;border-left:3px solid var(--rule)}
+.opt h3{font-size:16px;margin:0 0 4px}
+.cost{color:var(--muted);font-size:14px}
+ol.q>li{margin:14px 0}
+ol.q ol{list-style:lower-alpha;margin-top:6px}
+.small{font-size:14px;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<header>
+<b>LOO-656</b> · Install lf from main · concept review, after the <code>code</code> Graph reached demo · 2026-10-28<br>
+Built from <code>scratch/loo-656-install-lf-from-main.md</code>, <code>scratch/questions.md</code>,
+<code>swift/LoopflowMac/MacLocalWaveAgentLauncher.swift</code> (<code>controlLfPath</code>),
+<code>rust/loopflow/src/lf/commands/install/published.rs</code>, <code>.github/workflows/main-packages.yml</code>
+</header>
+
+<h1>Does “install from main” install all of Loopflow, or only the CLI?</h1>
+<p class="lede">The branch updates the CLI. Loopflow.app runs its own bundled lf, a release build, against the same <code>~/.lf</code>. The first migration that merges after this PR can lock Desktop out of the store until the next release, which brings back the release-to-update loop for the window you use most.</p>
+
+<h2>One interaction, start to finish</h2>
+<div class="flow">
+<p><span class="tag exists">today</span>A Task adds <code>add_wave_colour.sql</code> and merges. <code>Packages (main)</code> goes green.</p>
+<p><span class="tag exists">today</span>You run <code>lf self install --main</code>. It backs up, applies <code>add_wave_colour</code> and switches <code>~/.local/bin/lf</code>. The terminal works.</p>
+<p class="break"><span class="tag exists">today</span>Loopflow.app reads through <code>Contents/MacOS/lf</code>, a v0.15.0 build. That reader parses ledger versions as release ids, so it rejects the slug row with “incompatible Loopflow database; delete loopflow.db”. Desktop shows <b>Couldn't update</b> until a release ships an app with the new reader.</p>
+<p><span class="tag exists">today</span>Recovery: cut a release, or restore the backup and stay behind main. The overnight <code>lf install</code> LaunchAgent follows releases, so it never brings you to main either.</p>
+</div>
+<p class="small">After a release that includes this PR, additive slugs are fine, because the new reader admits unknown additive rows. Every breaking slug still locks Desktop out until the following release.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+<tr><th>You do</th><th>Concept</th><th>Before (this branch)</th><th>Proposed</th></tr>
+<tr><td>Merge a PR with a migration</td><td>Slug migration, ordered by main</td><td><code>build.rs</code> first-parent order</td><td>unchanged</td></tr>
+<tr><td>Get main on your Machine</td><td><b>Installed channel</b></td><td><code>lf self install --main</code>: one-shot, CLI only</td><td>Installs CLI <i>and</i> app from one main commit, and records <code>channel: main</code></td></tr>
+<tr><td>Leave it overnight</td><td>Schedule</td><td>LaunchAgent runs <code>lf install</code> → latest release</td><td>Runs <code>lf install</code> on the recorded channel</td></tr>
+<tr><td>Open Desktop</td><td>The app's lf</td><td>Bundled helper, the release it shipped with</td><td>Depends on 1 (below)</td></tr>
+<tr><td>Run a worktree build</td><td>Build on the live store</td><td>Runs its own code when it knows the store's migrations</td><td>unchanged</td></tr>
+</table>
+
+<h2>Three ways Desktop can follow main</h2>
+<div class="opt">
+<h3>a · Main packages include the app</h3>
+<p><code>Packages (main)</code> also builds, signs and notarizes Loopflow.app. <code>lf self install --main</code> replaces both together, so CLI and app are always the same commit.</p>
+<p class="cost">Cost: a macOS runner and notarization on every green main, so slower packages and a larger post-merge window. Keeps the rule that the app runs its own bundled lf.</p>
+</div>
+<div class="opt">
+<h3>b · The app runs the installed lf</h3>
+<p><code>controlLfPath</code> uses the installed entry when it's newer than the bundled helper. One lf per Machine, whichever you installed.</p>
+<p class="cost">Cost: the app's Swift DTOs and the CLI can come from different commits. DTOs have no defaults, so a renamed or added required field fails to parse in the app. The skew moves from the store to the wire.</p>
+</div>
+<div class="opt">
+<h3>c · Desktop stays on releases</h3>
+<p>Keep the branch as is. Release once before the first slug migration merges, and again before installing any breaking slug.</p>
+<p class="cost">Cost: “push a release to update my Machine” comes back for every breaking migration, the case Jack wanted gone.</p>
+</div>
+
+<h2>Proposed usage text (option a)</h2>
+<pre>lf self install --main     # newest green main: CLI and Loopflow.app, then migrate ~/.lf
+lf self install            # back to the latest release (store must not be ahead of it)
+lf self install schedule   # keep following whichever channel you last installed</pre>
+<p class="small">Proposed only. Two stale docs need fixing whichever option you pick: <code>swift/README.md</code> says schema changes require “a published release installed through <code>lf install</code>”, and <code>store/MIGRATIONS.md</code> says a private <code>LF_HOME</code> shows schema work “on real data”, but it starts empty.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>How should Desktop follow main?
+  <ol><li>Main packages build the app; install replaces both.</li>
+      <li>The app runs the installed lf when it's newer.</li>
+      <li>Desktop stays on releases; release before the first slug migration and before each breaking one.</li></ol></li>
+<li>Should the schedule follow the channel you last installed?
+  <ol><li>Yes. After <code>install --main</code>, overnight refreshes stay on main.</li>
+      <li>No. The schedule stays on releases, and main stays a manual command.</li></ol></li>
+<li>Does this PR wait for 1, or ship and leave 1 to a follow-up Task?
+  <ol><li>Wait: ship this PR and the Desktop answer together.</li>
+      <li>Ship now, then cut a release right after merge, so Desktop's reader is current before any slug migration lands.</li></ol></li>
+</ol>
+</main>
+</body>
+</html>

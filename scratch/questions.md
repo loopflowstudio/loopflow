@@ -19,8 +19,12 @@
   reclaiming them after a week rather than leaving GBs behind.
 - **One migration per Task** is guidance (`new_migration.py`), not a CI failure:
   merge-queue groups carry several Tasks' migrations at once.
-- **Proposed Wave memory update** (not written; `.lf/wave/` is read-only here):
-  infrastructure MEMORY.md's notes on draft migrations, release-cut ids,
-  copy-on-draft and validation-only builds describe the retired model; replace
-  them with "migrations get ids at merge; `lf self install --main` installs green
-  main".
+- **Wave memory curated in compress** (2026-10-28): the compress step's
+  context budget asked for it, so infrastructure MEMORY.md now replaces the
+  LOO-344 draft section with "Migrations get ids at merge (LOO-656)", drops the
+  draft-materialization gotcha and copy/validation-only references, and trims
+  historical detail already kept behind git refs (15995/16000 tokens).
+- **Reader catalog source** (2026-10-28): the package file comes from the built
+  binary (`lf self install reader-catalog`, read from the `build.rs`-ordered
+  catalog) rather than a second file `build.rs` writes, so the floors have one
+  source. Each `lf-<target>` artifact carries an identical copy.

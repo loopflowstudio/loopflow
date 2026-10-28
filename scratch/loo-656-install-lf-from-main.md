@@ -93,6 +93,82 @@ Settled by the accepted contract, recorded so later steps don't relitigate:
   still finds the previous green commit. Wait for the run; the refusal and the
   install output already name the migration and the installed commit.
 
+## Concept review with Jack (2026-10-28) — open
+
+Mismatch: "installed Loopflow" is two programs. `lf self install --main`
+replaces the CLI; Loopflow.app keeps running its bundled release lf
+(`Contents/MacOS/lf`, `controlLfPath`) against the same `~/.lf`. Every
+migration has been released by now (`0.15.0.001_release` is the last), so the
+first slug migration that merges, followed by `install --main`, writes a ledger
+row that released readers don't parse (questions.md). Desktop then refuses the
+store until a release ships an app with the new reader. After that release, only
+breaking slugs lock Desktop out. The laptop schedule (`lf install` LaunchAgent)
+also still follows releases, so a scheduled refresh never moves to main.
+
+Proposed (not accepted): an installed *channel*, either release or main, covering CLI and
+app, which the schedule keeps following. Open questions, on `scratch/concept-review.html`:
+1. How Desktop follows main: (a) `Packages (main)` builds the app and
+   `install --main` replaces both, (b) the app runs the installed lf instead of its
+   bundled helper, (c) Desktop stays on releases and a release goes out before the
+   first slug migration and before each breaking one.
+2. Whether the schedule follows the channel last installed.
+
+Jack leans 1a ("probably", 2026-10-28); not yet final. Consequences recorded for
+that choice:
+- CI holds no Developer ID; `scripts/release-loopflow.py` signs with the local
+  keychain. 1a needs the cert in CI (Doppler → GitHub secret → temporary
+  keychain on a macOS job). That's outward-facing setup, so it goes in its own Task.
+- Main packages likely need Developer ID signing but not notarization: Gatekeeper
+  checks quarantined files, and the expectation is that a `gh` download unpacked
+  by the installer carries no quarantine flag (unverified, check on a real
+  download). Ad-hoc signing would reset TCC grants on every install.
+- Alternative: `install --main` builds the app locally from the same commit
+  with the keychain identity. No CI secrets, but slow, and only on Machines
+  holding the cert.
+- Proposed sequencing: 2a (the schedule follows the recorded channel) and 3b (merge this PR,
+  cut a release right after so the app's reader admits additive slugs, then do
+  1a as a follow-up Task). Awaiting Jack.
+
+### Split with LOO-669 (agreed between the Task conversations, 2026-10-28; Jack asked for the division)
+
+- LOO-669 owns streams (dev/latest/stable pointers), the recorded stream with
+  schedule/self-update following it (Q2), how Desktop follows each stream including
+  Developer ID signing for main packages (Q1a), minors from main and the release docs.
+- LOO-656 owns migrations, `lf self install --main` as the dev-stream
+  fetch-and-switch, the open-store predicate, and contract enforcement. LOO-656
+  lands first. LOO-669 redoes only its minor-pairing removals on top, so
+  LOO-656 doesn't touch `MinorRelease`, the closing patch, `prepared_tree`,
+  `NeedsIntegration` or the fix-forward ban.
+- **Predicate over published data.** Each package (main and release) carries a
+  small catalog file listing the reader-breaking migration ids the build knows.
+  LOO-656 generates it in `build.rs`/packaging and provides
+  `can_open(store_applied, candidate_catalog)`. LOO-669 publishes the file next to
+  `SHA256SUMS` for each release and stream pointer, and calls the predicate before
+  downloading.
+- **`CONTRACT_WAIT` = 30 days, one constant**, which must exceed stable lag (7-day
+  soak + ≤ 1 day cadence). LOO-669's stream docs reference it.
+- One ordinary release right after LOO-656 merges (a patch if minors-from-main
+  isn't in yet).
+
+### Top-3 pursue (Jack, 2026-10-28) — implemented 2026-10-28
+
+1. Refusals keep the store: `incompatible()` names the lf that last migrated
+   it or `lf self install --main`; the newer-schema refusal names
+   `lf self install --main`. No message suggests deletion.
+2. `swift/README.md` names `lf self install --main` and `lf install`;
+   `MIGRATIONS.md` says a private `LF_HOME` starts empty.
+3. `store::migrations::reader_catalog()` (released batches + breaking slugs)
+   and `can_open(conn, catalog)` (catalog holds the floor of the store's newest
+   row). `lf self install reader-catalog` prints it; `package-build.yml` ships
+   `reader-catalog.txt` in each `lf-<target>` artifact. LOO-669 publishes it next
+   to `SHA256SUMS` and calls `can_open`; nothing in LOO-656 calls it yet.
+
+**Contract enforcement is out of this PR; the decision belongs to LOO-669.**
+Jack, 2026-10-28, as relayed from LOO-669: "i also declined contract enforcement
+as a separate PR. I just want to decide here in this task." This PR ships no
+`CONTRACT_WAIT` and no `-- contract:` header. A breaking slug keeps raising the
+floor, and the catalog in item 3 makes that visible to updaters.
+
 ## Not in this change (Jack: design still open)
 
 Expand → wait 30 days → contract enforcement for destructive changes. Today a
@@ -101,7 +177,14 @@ locks older builds out.
 
 ## Remaining work
 
+- Refresh the PR description at publish: the floor is now 0.15.0, `copy:` is gone
+  from `lf --version`, stream/Desktop follow-through belongs to LOO-669, and every
+  package ships `reader-catalog.txt`.
 - Expand → wait → contract enforcement (design open).
 - First real `lf self install --main` needs a green `Packages (main)` run after merge.
 
 Check (2026-10-27): focused Rust store/install/release modules, clippy `--all-targets`, Python migration/release/install tests pass; three canonical-ids tests and one contention test fail only in the full parallel module run (pass alone); Swift and `release_tests` run left to gate/CI.
+
+Check (2026-10-28, top-3 pursue): 8 focused `store::migrations` tests (refusals, reader catalog, `can_open`) pass; clippy `--all-targets` clean; full `store::` module timed out locally at 10 min, left to gate.
+
+Check (2026-10-28, compress): `store::migrations::tests::a_candidate_opens…` passes, `cargo fmt --check` clean; doc-comment and memory edits only otherwise.

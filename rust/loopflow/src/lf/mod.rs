@@ -1955,6 +1955,11 @@ pub enum InstallCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Print the reader floors this build knows, one per line. Packages ship
+    /// them so an updater can tell whether a build opens a store before
+    /// downloading it.
+    #[command(hide = true)]
+    ReaderCatalog,
     /// Advance the receipt-selected store with this exact candidate's registry.
     #[command(hide = true)]
     AdvanceSwitch {

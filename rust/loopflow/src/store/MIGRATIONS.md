@@ -41,10 +41,11 @@ immutable. Fix it with a new forward migration, even when it merged an hour ago.
 | `~/.lf/loopflow.db`, ordinary open | nothing; refuses when this build knows a migration the store lacks |
 | `~/.lf/loopflow.db`, install switch | pending merged migrations, after a backup, under the promotion lock |
 
-To see schema work on real data, run the branch's lf with a private `LF_HOME`.
-Editing an unmerged migration that a private Home already applied is a checksum
-mismatch; start a fresh `LF_HOME`. A branch build without a new migration runs
-its own code on `~/.lf` directly. Install a main build with
+To try schema work, run the branch's lf with a private `LF_HOME`. It starts
+empty: the branch's migrations build a fresh store there, apart from the
+Machine's data. Editing an unmerged migration that a private Home already
+applied is a checksum mismatch; start a fresh `LF_HOME`. A branch build without
+a new migration runs its own code on `~/.lf` directly. Install a main build with
 `lf self install --main`; the install switch refuses a candidate whose pending
 migrations `origin/main` does not carry.
 
@@ -98,8 +99,18 @@ Install previews name the breaking migration a candidate would apply. Promotion
 never applies history it does not know; selecting an older build the floor
 admits, as a rollback does, applies nothing and is allowed.
 
-Rename, drop and reshape directly for now; the floor rises at that migration.
-Staged expand → wait → contract is not enforced yet.
+Rename, drop and reshape directly; the floor rises at that migration.
+
+## Reader catalog
+
+```bash
+lf self install reader-catalog    # the floors this build knows, one per line
+```
+
+Every package (green main and release) ships this list as `reader-catalog.txt`
+beside its archive. A build opens a store when its catalog holds the floor of
+the store's newest migration; `store::migrations::can_open(store, catalog)`
+answers that, so an updater can rule out a candidate before downloading it.
 
 New code must accept what an older writer leaves behind. While older lf still
 runs, it writes rows without the new columns, so read `NULL` there sensibly, and
@@ -138,7 +149,9 @@ applied versions, checksums and reader floors are read on every open.
 | Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
 | Newer migrations whose floor this build knows | opens; this build's schema must survive unchanged |
 | Newer migrations whose floor this build does not know | names the migration the store needs |
-| Skipped a migration, or drifted from the chain's schema | *delete loopflow.db and rerun* |
+| Skipped a migration, or drifted from the chain's schema | keep `loopflow.db`; open it with the lf that last migrated it, or `lf self install --main` |
+
+Every refusal names a build that opens the store; none suggests deleting it.
 
 ## Why there is no separate "schema change without a migration" check
 

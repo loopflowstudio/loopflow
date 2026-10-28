@@ -120,9 +120,6 @@ const CONVERGED_VERSIONS: &[&str] = &[
 /// bookkeeping rename, not a schema change.
 const LEGACY_BASELINE_VERSION: &str = "001_initial";
 
-const RECREATE_MESSAGE: &str =
-    "incompatible Loopflow database; delete loopflow.db and rerun the command";
-
 // -- Applying -----------------------------------------------------------------
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {
@@ -1239,6 +1236,31 @@ fn raised_floor_over(
         .map(Migration::version))
 }
 
+// -- Reader catalog -----------------------------------------------------------
+
+/// The reader floors this build knows, in catalog order: every released batch
+/// and every breaking migration. Packages ship it (`lf self install
+/// reader-catalog`) so an updater can rule out a candidate before downloading it.
+pub fn reader_catalog() -> Vec<&'static str> {
+    MIGRATIONS
+        .iter()
+        .filter(|migration| migration.breaks_readers())
+        .map(|migration| migration.version)
+        .collect()
+}
+
+/// Whether a build whose reader catalog is `catalog` opens this store: it knows
+/// the floor of the store's newest migration. It then applies what it knows
+/// that the store lacks, or reads past additive migrations it does not know.
+pub fn can_open(conn: &rusqlite::Connection, catalog: &[String]) -> StoreResult<bool> {
+    _read_snapshot(conn, |conn| {
+        if !has_ledger(conn)? {
+            return Ok(true);
+        }
+        Ok(store_reader_floor(conn)?.is_none_or(|floor| catalog.contains(&floor)))
+    })
+}
+
 /// Pending migrations origin/main has not added. The shared store never
 /// applies them; they belong in a private `LF_HOME`.
 pub(crate) fn pending_unmerged(conn: &rusqlite::Connection) -> StoreResult<Vec<String>> {
@@ -1327,10 +1349,10 @@ fn validate_schema_within(conn: &rusqlite::Connection, set: &[Migration]) -> Sto
         .find(|old| !actual.iter().any(|new| schema_object_within(old, new)))
     {
         return Err(StoreError::InvalidData(format!(
-            "a newer lf changed {} {}, which lf {} reads; install the newer release with lf install",
+            "a newer lf changed {} {}, which lf {} reads; install the newer build with `lf self install --main`",
             missing.object_type,
             missing.name,
-            env!("CARGO_PKG_VERSION")
+            crate::build_info::BUILD_VERSION
         )));
     }
     Ok(())
@@ -1469,8 +1491,15 @@ pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreRes
     })
 }
 
+/// A history or schema no build of this catalog produced. The data is still
+/// someone's: name the builds that can open it and never suggest deletion.
 fn incompatible() -> StoreError {
-    StoreError::InvalidData(RECREATE_MESSAGE.to_string())
+    StoreError::InvalidData(format!(
+        "this Loopflow database's migration history or schema differs from lf {} (latest known {}); \
+         keep loopflow.db and open it with the lf that last migrated it, or install the newest with `lf self install --main`",
+        crate::build_info::BUILD_VERSION,
+        latest_known_version(),
+    ))
 }
 
 #[cfg(test)]
@@ -1484,11 +1513,11 @@ mod tests {
     use super::apply_newer_migration;
     use super::{
         applied_versions, apply_set, apply_sqlite, apply_sqlite_transaction,
-        apply_sqlite_with_backup, backup_before_migration, latest_applied_version_sqlite,
+        apply_sqlite_with_backup, backup_before_migration, can_open, latest_applied_version_sqlite,
         latest_known_version, latest_version_sqlite, migration_checksum, pending_migrations,
-        product_schema, prune_migration_backups, validate_foreign_keys, validate_persisted_json,
-        validate_schema, validate_set, validate_sqlite, validate_sqlite_schema, Migration,
-        MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
+        product_schema, prune_migration_backups, reader_catalog, validate_foreign_keys,
+        validate_persisted_json, validate_schema, validate_set, validate_sqlite,
+        validate_sqlite_schema, Migration, MigrationId, DIVERGENT_MIGRATIONS, MIGRATIONS,
     };
 
     const GATE_PROPOSAL_REPAIR_NAME: &str = "repair_legacy_task_gate_proposals";
@@ -1523,6 +1552,42 @@ mod tests {
 
     fn open() -> rusqlite::Connection {
         rusqlite::Connection::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn the_reader_catalog_lists_released_and_breaking_migrations_only() {
+        let catalog = reader_catalog();
+        assert!(catalog.contains(&"0.15.0.001_release"), "{catalog:?}");
+        assert!(MIGRATIONS
+            .iter()
+            .filter(|migration| !migration.breaks_readers())
+            .all(|migration| !catalog.contains(&migration.version)));
+    }
+
+    #[test]
+    fn a_candidate_opens_a_store_only_when_its_catalog_knows_the_store_floor() {
+        let current: Vec<String> = reader_catalog().into_iter().map(str::to_string).collect();
+        let older = current[..current.len() - 1].to_vec();
+        let conn = open();
+        assert!(
+            can_open(&conn, &older).unwrap(),
+            "an empty store opens anywhere"
+        );
+
+        apply_set(&conn, MIGRATIONS, &mut Vec::new()).unwrap();
+        assert!(can_open(&conn, &current).unwrap());
+        assert!(!can_open(&conn, &older).unwrap());
+
+        for (additive, opens) in [(true, true), (false, false)] {
+            let newer = open();
+            apply_set(&newer, MIGRATIONS, &mut Vec::new()).unwrap();
+            apply_newer_migration(&newer, "CREATE TABLE newer_table (id TEXT);", additive).unwrap();
+            assert_eq!(
+                can_open(&newer, &current).unwrap(),
+                opens,
+                "additive: {additive}"
+            );
+        }
     }
 
     #[test]
@@ -5891,12 +5956,18 @@ mod tests {
         assert!(message.contains("lf self install --main"), "{message}");
     }
 
+    fn assert_keeps_the_store(error: &crate::store::StoreError) {
+        let message = error.to_string();
+        assert!(!message.contains("delete"), "{message}");
+        assert!(message.contains("keep loopflow.db"), "{message}");
+        assert!(message.contains("lf self install --main"), "{message}");
+    }
+
     /// The pre-loop store's flat ledger (`001_initial`, `002_...`, …) was abandoned
-    /// when the runtime collapsed to waves, projects, and tasks. Its databases are
-    /// not ours to upgrade, and telling their owners to upgrade `lf` would send
-    /// them in a circle.
+    /// when the runtime collapsed to waves, projects, and tasks. No build upgrades
+    /// it, but its data is still the owner's: the build that wrote it opens it.
     #[test]
-    fn a_database_from_the_abandoned_flat_ledger_tells_the_user_to_recreate() {
+    fn a_database_from_the_abandoned_flat_ledger_keeps_the_store_and_names_the_newest_build() {
         let conn = open();
         conn.execute_batch(
             "CREATE TABLE schema_migrations (
@@ -5910,21 +5981,21 @@ mod tests {
         .unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
-        assert!(error.to_string().contains("delete loopflow.db"));
+        assert_keeps_the_store(&error);
     }
 
     #[test]
-    fn a_stale_edit_of_a_shipped_migration_tells_the_user_to_recreate() {
+    fn a_stale_edit_of_a_shipped_migration_keeps_the_store_and_names_the_newest_build() {
         let conn = open();
         apply_sqlite(&conn).unwrap();
         conn.execute_batch("DROP INDEX idx_tasks_project").unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
-        assert!(error.to_string().contains("delete loopflow.db"));
+        assert_keeps_the_store(&error);
     }
 
     #[test]
-    fn a_skipped_migration_tells_the_user_to_recreate() {
+    fn a_skipped_migration_keeps_the_store_and_names_the_newest_build() {
         let conn = open();
         apply_set(&conn, &[baseline()], &mut Vec::new()).unwrap();
         conn.execute(
@@ -5939,7 +6010,7 @@ mod tests {
             &mut Vec::new(),
         )
         .unwrap_err();
-        assert!(error.to_string().contains("delete loopflow.db"));
+        assert_keeps_the_store(&error);
     }
 
     #[test]
@@ -6257,7 +6328,7 @@ mod tests {
             .unwrap();
 
         let error = apply_sqlite(&conn).unwrap_err();
-        assert!(error.to_string().contains("delete loopflow.db"));
+        assert_keeps_the_store(&error);
     }
 
     #[test]

@@ -1797,6 +1797,12 @@ fn run() -> anyhow::Result<()> {
             Some(InstallCommand::Preflight { json }) => {
                 loopflow::lf::commands::install::preflight(*json)
             }
+            Some(InstallCommand::ReaderCatalog) => {
+                for floor in loopflow::store::migrations::reader_catalog() {
+                    println!("{floor}");
+                }
+                Ok(())
+            }
             Some(InstallCommand::AdvanceSwitch { switch }) => {
                 loopflow::lf::commands::install::advance_switch(switch)
             }

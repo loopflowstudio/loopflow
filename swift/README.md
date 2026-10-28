@@ -8,8 +8,9 @@ uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
 The development app runs its bundled CLI on the main Machine's store, which it
-reads but never migrates. With a private `LF_HOME`, an explicit `LF_BIN` selects
-the CLI instead.
+reads but never migrates. Only an install advances the store's schema:
+`lf self install --main` for a green main build, `lf install` for a release.
+With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -20,10 +21,8 @@ opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
 **Couldn't update** line. Repeated identical Session errors leave the displayed
 reading unchanged; failed per-Wave or truncated replacements keep previously readable planning,
-including its saved copy. A new error or recovery updates it.
-The bundled helper cannot migrate the installed store: schema changes require a
-published release installed through `lf install`. Delete the file to start
-from **Loading workspace…**.
+including its saved copy. A new error or recovery updates it. Delete the file to start from
+**Loading workspace…**.
 
 ```sh
 uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took

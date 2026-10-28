@@ -43,7 +43,50 @@ pub struct DesktopWindowInspection {
     /// remain inspectable.
     pub open_work: Vec<WorkWorkspaceKey>,
     pub view: Option<crate::work::selection::ViewPlan>,
+    /// The view's named parts that are neither panes nor tiles, such as a Wave
+    /// view's board; `-p` names them before tiles and panes.
+    pub view_parts: Vec<DesktopViewPart>,
     pub opening: Option<DesktopOpening>,
+}
+
+/// One named view part. Each kind reports its own state; `actions` names the
+/// verbs it accepts, so a new view is new data rather than new grammar.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesktopViewPart {
+    pub name: String,
+    pub kind: DesktopViewPartKind,
+    /// The Work a session part converses with.
+    pub work: Option<WorkWorkspaceKey>,
+    /// A board's shown section: `backlog`, `working`, `autonomous` or `done`.
+    pub section: Option<String>,
+    /// A board's Done window in days; 0 includes all ages.
+    pub done_days: Option<u32>,
+    /// A board as rendered text, what `lf desktop capture -p board` prints.
+    pub text: Option<String>,
+    /// A strip's page, from 1, and its page count.
+    pub page: Option<u32>,
+    pub pages: Option<u32>,
+    /// A strip's tiles on the shown page; positions still count the whole list.
+    pub visible: Vec<WorkWorkspaceKey>,
+    /// Hidden with `lf desktop hide` or the part's hover button; the view's
+    /// `Show…` menu lists it. A session part is hidden as its pane is.
+    pub hidden: bool,
+    /// The part's share of its split, as its divider and `lf desktop resize` set it:
+    /// the conversation's and board's of the top band's width, the strip's of the
+    /// view's height.
+    pub ratio: f64,
+    /// Filling the whole view, as `lf desktop zoom` or its hover button set it.
+    pub zoomed: bool,
+    pub actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum DesktopViewPartKind {
+    Board,
+    Session,
+    Strip,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -146,8 +189,11 @@ pub enum DesktopDestination {
 pub enum DesktopBoard {
     Dashboard(String),
     WorkingTasks,
-    /// A Wave view, whose Tasks are tiles beside its conversation.
+    /// A Wave view: its standup board and conversation above, its Tasks as tiles below.
     Wave(String),
+    /// The repository page, the default Wave's view: every repository Task on its
+    /// board, the repository conversation, its Working Tasks as tiles.
+    Repository,
 }
 
 /// Destinations back and forward reach, as the window's chevrons do.
@@ -870,6 +916,21 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             max_bytes,
             trim,
         } => {
+            // A view part with text, such as a Wave board, captures as rendered.
+            if let Some(part) = window.view_part(verb.target.pane.as_deref()) {
+                let text = part.text.as_deref().ok_or_else(|| {
+                    DesktopError::Target(format!(
+                        "{} has no text to capture; capture a pane instead.",
+                        part.name
+                    ))
+                })?;
+                if json {
+                    println!("{}", serde_json::json!({ "part": part.name, "text": text }));
+                } else {
+                    println!("{text}");
+                }
+                return Ok(());
+            }
             let pane = scope
                 .pane(window, verb.target.pane.as_deref(), PaneNeed::Terminal)
                 .map_err(DesktopError::target)?;
@@ -888,6 +949,53 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             wait(desktop, WaitTarget::of(window, pane), *timeout, json)
         }
         VerbKind::Action { name, args } => {
+            // A view part accepts only the verbs it lists; the verb then acts on the window.
+            let part = window.view_part(verb.target.pane.as_deref());
+            if let Some(part) = part.filter(|part| !part.actions.contains(name)) {
+                return Err(DesktopError::Target(format!(
+                    "{} does not accept {name}; it accepts {}. Nothing changed.",
+                    part.name,
+                    part.actions.join(", ")
+                ))
+                .into());
+            }
+            // A pane verb (hide, show, zoom, resize) on a view part acts on that part
+            // in the view. Resizing the conversation toward a part names the part too.
+            let pane_verb = window
+                .actions
+                .iter()
+                .any(|action| action.name == *name && action.scope == DesktopActionScope::Pane);
+            let toward_part = args
+                .get("toward")
+                .filter(|_| name == "resize")
+                .and_then(|toward| window.view_part_named(toward))
+                .and(verb.target.pane.as_deref());
+            if let Some(part) = part
+                .map(|part| part.name.as_str())
+                .or(toward_part)
+                .filter(|_| pane_verb)
+            {
+                let mut args = args.clone();
+                args.insert("part".into(), part.to_owned());
+                return perform(
+                    &mut desktop,
+                    DesktopActionRequest {
+                        repository: window.repository.clone(),
+                        window: window.window.clone(),
+                        pane: None,
+                        action: name.clone(),
+                        args,
+                    },
+                    DesktopResolution {
+                        window: window.window.clone(),
+                        work: None,
+                        pane: None,
+                        tab: None,
+                        rule: DesktopTargetRule::Window,
+                    },
+                    json,
+                );
+            }
             if let Some(request) =
                 scope.tile_request(window, name, verb.target.pane.as_deref(), args)?
             {
@@ -1058,6 +1166,25 @@ impl Verb {
                 action("enter", vec![("tile", tile.clone())]),
                 window(target),
             ),
+            DesktopCommand::Do {
+                action: name,
+                args,
+                target,
+            } => {
+                let args = args
+                    .iter()
+                    .map(|pair| {
+                        pair.split_once('=')
+                            .map(|(key, value)| (key, value.to_owned()))
+                            .ok_or_else(|| {
+                                argument(format!(
+                                    "Action arguments are KEY=VALUE; got {pair}. Nothing changed."
+                                ))
+                            })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                (action(name, args), target.clone())
+            }
             DesktopCommand::Send { text, target } => {
                 let text = match text {
                     Some(text) => text.clone(),
@@ -2020,7 +2147,8 @@ impl<'a> Scope<'a> {
     }
 
     /// The window shows tiles: a Dashboard (saved, Working Tasks or an unsaved
-    /// query) or a Wave view, whose Tasks are tiles beside its conversation.
+    /// query) or a Wave view (the repository page is one), whose Tasks are tiles
+    /// below its board and conversation.
     fn shows_board(window: &DesktopWindowInspection) -> bool {
         matches!(
             &window.destination,
@@ -2030,9 +2158,10 @@ impl<'a> Scope<'a> {
         ) || Self::wave_view(window).is_some()
     }
 
+    /// A Wave's view or the repository page, which is the same view over every Task.
     fn wave_view(window: &DesktopWindowInspection) -> Option<&WorkWorkspaceKey> {
         match &window.destination {
-            DesktopDestination::Work { work } if work.kind == WorkWorkspaceKind::Wave => Some(work),
+            DesktopDestination::Work { work } if work.kind != WorkWorkspaceKind::Task => Some(work),
             _ => None,
         }
     }
@@ -2664,6 +2793,20 @@ impl DesktopInspection {
                     ));
                 }
             }
+            if !window.view_parts.is_empty() {
+                let parts = window
+                    .view_parts
+                    .iter()
+                    .map(|part| {
+                        if part.hidden {
+                            format!("({})", part.name)
+                        } else {
+                            part.name.clone()
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                lines.push(format!("  Parts: {}", parts.join(" ")));
+            }
             lines.push(format!(
                 "  Actions: {} (lf desktop actions)",
                 window.actions.len()
@@ -2685,6 +2828,18 @@ impl DesktopInspection {
 }
 
 impl DesktopWindowInspection {
+    /// The view part a lone `-p` names; part names are fixed words, matched first.
+    /// A session part is its Work's session pane, so it resolves as a pane.
+    fn view_part(&self, path: Option<&str>) -> Option<&DesktopViewPart> {
+        self.view_part_named(path?)
+            .filter(|part| part.kind != DesktopViewPartKind::Session)
+    }
+
+    /// Any view part by name, the conversation included.
+    fn view_part_named(&self, name: &str) -> Option<&DesktopViewPart> {
+        self.view_parts.iter().find(|part| part.name == name)
+    }
+
     /// One `lf desktop events` line: what the window shows and where focus is.
     fn render_change(&self) -> String {
         let selected = self.workspaces.iter().find(|workspace| workspace.selected);
@@ -2803,6 +2958,7 @@ impl std::fmt::Display for DesktopBoard {
             Self::Dashboard(id) => write!(f, "query:{id}"),
             Self::WorkingTasks => write!(f, "working-tasks"),
             Self::Wave(id) => write!(f, "wave:{id}"),
+            Self::Repository => write!(f, "repository"),
         }
     }
 }
@@ -3087,6 +3243,30 @@ mod tests {
     }
 
     #[test]
+    fn a_wave_view_names_its_board_and_strip_before_tiles_and_its_session_as_a_pane() {
+        let (inspection, _) = fixture();
+        let window = &inspection.windows[1];
+        assert_eq!(
+            window.view_part(Some("board")).map(|part| part.kind),
+            Some(super::DesktopViewPartKind::Board)
+        );
+        assert_eq!(
+            window
+                .view_part(Some("tiles"))
+                .map(|part| part.actions.clone()),
+            Some(
+                ["page", "hide", "show", "zoom", "resize"]
+                    .map(str::to_owned)
+                    .to_vec()
+            )
+        );
+        // `-p session` stays the conversation pane, so send and capture reach it.
+        assert!(window.view_part(Some("session")).is_none());
+        assert!(window.view_part(Some("board/session")).is_none());
+        assert!(inspection.windows[0].view_part(Some("board")).is_none());
+    }
+
+    #[test]
     fn enter_names_a_tile_as_p_does_on_dashboards_and_wave_views() {
         let (mut inspection, work) = fixture();
         let task = inspection.windows[0].workspaces[0].work.clone();
@@ -3116,6 +3296,18 @@ mod tests {
         assert!(entered(&inspection, "2")
             .unwrap_err()
             .contains("No tile at position 2"));
+        // The repository page is a Wave view: its conversation is not a tile either.
+        let repository = super::WorkWorkspaceKey {
+            kind: super::WorkWorkspaceKind::Repository,
+            id: task.repository.clone(),
+            ..task.clone()
+        };
+        let window = &mut inspection.windows[0];
+        window.destination = super::DesktopDestination::Work {
+            work: repository.clone(),
+        };
+        window.open_work = vec![repository, task.clone()];
+        assert_eq!(entered(&inspection, "1").unwrap(), task.id);
         let window = &mut inspection.windows[0];
         window.destination = super::DesktopDestination::WorkingTasks;
         window.open_work = vec![task.clone()];
@@ -3183,7 +3375,8 @@ mod tests {
         let desktop = cli.find_subcommand("desktop").unwrap();
         let saved = ["view", "query", "pin", "unpin", "rename", "layout"];
         for verb in desktop.get_subcommands().map(clap::Command::get_name) {
-            if saved.contains(&verb) || super::READING_VERBS.contains(&verb) {
+            // `do` performs whichever registry action it names.
+            if verb == "do" || saved.contains(&verb) || super::READING_VERBS.contains(&verb) {
                 continue;
             }
             assert!(names.contains(&verb), "{verb} is not a registry action");

@@ -10,7 +10,7 @@ and Accessibility permission. Use an already configured host for a demo or
 integration investigation. They are not release or Task Flow prerequisites.
 Jack Heart retired the required hosted gate and five-run quota on 2026-09-30
 (LOO-357). Required Desktop checks build the app and exercise production views
-headless through the `swift` suite in gate and CI; see [TESTING.md](../TESTING.md).
+headless through the `swift` suite in gate and CI; see [Swift testing](../swift/README.md#testing).
 Publisher preparation and public artifact verification do not run this diagnostic
 or require a saved UI-host receipt.
 

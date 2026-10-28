@@ -476,15 +476,28 @@ struct SessionPaneView: View {
                     .foregroundStyle(theme.palette.available)
                     .accessibilityLabel("Session ready")
             }
-            if isFocused {
-                HoverRevealed(flag: hover) {
-                    HStack(spacing: 2) {
-                        stripButton("xmark", label: "Close view", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
+            // Every pane zooms and hides on hover; the breadcrumb zooms out and the
+            // view header's Show… brings a hidden pane back.
+            HoverRevealed(flag: hover) {
+                HStack(spacing: 2) {
+                    let zoomed = store.zoomedPaneId == pane.id
+                    stripButton(zoomed ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
+                                label: zoomed ? "Zoom out" : "Zoom pane", id: "pane-zoom",
+                                help: zoomed ? "Return to the layout (⌘⇧↩)" : "Fill the view with this pane (⌘⇧↩)",
+                                disabled: !store.canClose) {
+                        workspace.toggleFocus(pane.id)
+                    }
+                    if isFocused, pane.content.selectedTabID != nil {
+                        stripButton("xmark", label: "Close tab", id: "pane-close", help: closeHelp, disabled: !store.canClose) {
                             closePane()
                         }
                     }
-                    .accessibilityIdentifier("pane-actions")
+                    stripButton("eye.slash", label: "Hide pane", id: "pane-hide",
+                                help: "Hide this pane; Show… in the header brings it back", disabled: !store.canClose) {
+                        workspace.setCollapsed(paneId: pane.id, collapsed: true)
+                    }
                 }
+                .accessibilityIdentifier("pane-actions")
             }
         }
         .padding(.leading, 12)
@@ -589,7 +602,7 @@ struct SessionPaneView: View {
 
     private var closeHelp: String {
         if case .shell = pane.content { return "Close this shell (⌘W)" }
-        return "Close this view; the Session keeps running (⌘W)"
+        return "Close this tab (⌘W)"
     }
 
     private func closePane() { workspace.closePane(pane.id) }
@@ -927,7 +940,7 @@ struct SessionPaneView: View {
 
 /// Hover over a pane strip, tracked by an AppKit tracking area so it stays
 /// reliable beside a Metal-backed terminal. It never takes a click.
-private struct PaneHoverRegion: NSViewRepresentable {
+struct PaneHoverRegion: NSViewRepresentable {
     let identifier: String
     let onChange: (Bool) -> Void
 

@@ -187,6 +187,16 @@ impl SqliteStore {
         Ok(Some((graph, entry)))
     }
 
+    /// Whether `process` is a Graph process.
+    pub(crate) fn runs_graph(&self, process: &LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=?1)",
+            [process],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Graphs run from `cwd`, oldest first.
     pub(crate) fn graphs_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<GraphProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -367,6 +377,54 @@ mod tests {
     use crate::durable::GraphProcessFilter;
     use crate::session::GraphProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn a_step_lands_after_its_graphs_mark_when_an_unrelated_rowid_is_reused() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let process = |parent: Option<&crate::id::LfProcessId>, pid: u32| {
+            let process = crate::process::LfProcess {
+                id: crate::id::LfProcessId::new(),
+                pid: Some(pid),
+                kind: crate::process::ProcessKind::Lf,
+                agent_session_id: None,
+                os_started_at: None,
+                trace_id: crate::id::TraceId::new(),
+                parent_lf_process_id: parent.cloned(),
+                via_agent: Some(false),
+                caller_session_id: None,
+                caller_agent_process_id: None,
+                command: None,
+                repo: None,
+                cwd: None,
+                started_at: 1,
+                completed_at: None,
+                outcome: None,
+                exit_code: None,
+                signal: None,
+                error: None,
+            };
+            store.record_process(&process).unwrap();
+            process
+        };
+        let graph = process(None, 10);
+        // A concurrent `lf task status` holds the highest rowid when the Graph
+        // marks, then exits and is forgotten before the step registers.
+        let status = process(None, 11);
+        let mark = store.process_mark(&graph.id).unwrap();
+        store
+            .record_process(&crate::process::LfProcess {
+                completed_at: Some(2),
+                outcome: Some("succeeded".into()),
+                ..status
+            })
+            .unwrap();
+        let step = process(Some(&graph.id), 12);
+        assert_eq!(
+            store.child_process_after(&graph.id, mark).unwrap(),
+            Some(step.id)
+        );
+    }
 
     #[test]
     fn step_input_is_read_through_transport_delegation() {

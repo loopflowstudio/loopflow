@@ -422,8 +422,7 @@ pub enum Commands {
     /// Returns once the Task is shipping and runs on to its end (`-b` waits for
     /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
     /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
-    /// Shipping grants landing the Task's PR, even to an approval a route into
-    /// `end` began. `--stop` withdraws the approval and takes back its merge request.
+    /// `--stop` withdraws the approval and takes back its merge request.
     Ship {
         issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
@@ -435,9 +434,6 @@ pub enum Commands {
         /// Stop Auto-Ship: end the ship process and disarm auto-merge it armed
         #[arg(long)]
         stop: bool,
-        /// Continue the existing approval with only the authority it has, as automatic restart does
-        #[arg(long, conflicts_with_all = ["stop", "graph"])]
-        recover: bool,
     },
     /// Inspect and continue Sessions
     Session {
@@ -630,6 +626,11 @@ pub enum OpsCommand {
         #[command(subcommand)]
         cmd: MachineCommand,
     },
+    /// List the people who own this repository's Tasks, with their GitHub identity
+    People {
+        #[arg(long)]
+        json: bool,
+    },
     /// Measure this codebase: lines and tokens per directory (tracked files only)
     Tokens {
         /// Emit as JSON
@@ -792,6 +793,20 @@ pub enum DesktopCommand {
         #[command(flatten)]
         target: DesktopWindowArgs,
     },
+    /// Perform any registry action by name, as `lf desktop actions` lists them
+    #[command(
+        after_help = "Arguments are KEY=VALUE pairs. `-p` may name a view part \
+(`board`, `session`, `tiles` on a Wave view), which must accept the action:\n  \
+lf desktop do page -p tiles page=2\n  lf desktop do filter -p board days=14"
+    )]
+    Do {
+        /// Action name from `lf desktop actions`
+        action: String,
+        /// Action arguments as KEY=VALUE
+        args: Vec<String>,
+        #[command(flatten)]
+        target: DesktopTargetArgs,
+    },
     /// Insert literal text at a terminal's cursor (stdin when omitted); never submits
     Send {
         /// Unicode text without control characters (use send-key for Enter/Tab)
@@ -922,14 +937,14 @@ pub enum DesktopCommand {
     },
 }
 
-/// Which part of the view on screen a command acts on. `-p` is a path: a pane
-/// (`session`, `shell`, `browser`, `shell:2`), a Dashboard or Wave view tile (`3`,
-/// `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
+/// Which part of the view on screen a command acts on. `-p` is a path: a view part
+/// (`board`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
+/// `browser`, `shell:2`), a Dashboard or Wave view tile (`3`, `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
 /// saved record's tile by Work key without Desktop. Root `--task`/`--wave` set the
 /// base view; without either, a command acts on the terminal it runs in (`LF_TERMINAL_ID`).
 #[derive(Args, Debug, Clone, Default)]
 pub struct DesktopTargetArgs {
-    /// Pane path: session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
+    /// Pane path: a view part (board), session, shell:2, a tile (3, LOO-519) or TILE/PANE; each part resolves by ID, label, position, ID suffix
     #[arg(short = 'p', long = "pane", value_name = "PATH")]
     pub pane: Option<String>,
     /// Desktop window: ID, position or ID suffix
@@ -1425,7 +1440,7 @@ pub struct SyncArgs {
     /// Print the planned sync strategy without mutating git
     #[arg(long, conflicts_with_all = ["manual", "continue_sync", "abort"])]
     pub plan: bool,
-    /// Keep the sync local and leave conflicts for this process to resolve
+    /// Keep the sync and uncommitted edits local; leave conflicts for this process to resolve
     #[arg(long, conflicts_with_all = ["plan", "continue_sync", "abort"])]
     pub manual: bool,
     /// Stage resolved conflict paths and continue the local sync
@@ -2182,7 +2197,7 @@ pub enum OndemandCommand {
         vcpus: u32,
         #[arg(long)]
         memory_gb: u32,
-        /// Modal and Fly size disk themselves
+        /// Modal sizes disk itself
         #[arg(long, default_value_t = 10)]
         disk_gb: u32,
         /// One GPU, on runpod (A40, A6000, L4, RTX4090, L40S, A100, H100),

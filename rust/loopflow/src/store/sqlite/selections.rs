@@ -232,6 +232,9 @@ fn definitions(catalog: &[Dashboard]) -> BTreeMap<DashboardId, Selection> {
         .collect()
 }
 
+/// Selection IDs of the built-in plan behind each Wave view.
+const WAVE_DEFAULT_PREFIX: &str = "wave-default:";
+
 fn plan_in(
     conn: &Connection,
     repository: &RepositoryId,
@@ -339,6 +342,15 @@ fn plan_in(
         }
         contents.push(content);
     }
+    // A Wave view's built-in plan fills its footer strip, the repository's included
+    // (the repository page is its default Wave); saved and unsaved queries start golden.
+    let default_slots = if selection.id.0.starts_with(WAVE_DEFAULT_PREFIX)
+        || selection.id == repository_default().id
+    {
+        SlotLayout::strip(3)
+    } else {
+        SlotLayout::golden()
+    };
     Ok(ViewPlan {
         name: saved.and_then(|saved| saved.name.clone()),
         pinned: saved.is_some_and(|saved| saved.pinned),
@@ -352,7 +364,7 @@ fn plan_in(
         arrangement,
         slots: saved
             .and_then(|saved| saved.slots.clone())
-            .unwrap_or_else(SlotLayout::golden),
+            .unwrap_or(default_slots),
         contents,
     })
 }
@@ -420,7 +432,7 @@ impl SqliteStore {
                 repository,
                 Selection {
                     id: crate::work::selection::SelectionId(format!(
-                        "wave-default:{}",
+                        "{WAVE_DEFAULT_PREFIX}{}",
                         wave.key.id
                     )),
                     expression: crate::work::selection::SelectionExpression::Wave {
@@ -941,7 +953,8 @@ mod tests {
                     && plan.resolution.members.len() > 1
             })
             .unwrap();
-        assert_eq!(wave.resolution.task_ids(), [two, one, three]);
+        // The Wave strip lists Working Tasks; unstarted FIX-3 waits in Backlog.
+        assert_eq!(wave.resolution.task_ids(), [two, one]);
 
         store
             .conn
@@ -970,6 +983,26 @@ mod tests {
             store.view_plan(&repo, None).unwrap().resolution.task_ids(),
             [three, two, one]
         );
+    }
+
+    #[test]
+    fn wave_default_plan_uses_three_slot_strip() {
+        use crate::work::selection::{SlotLayout, SlotNode, SplitAxis};
+        let (_dir, store, repo) = fixture();
+        let plans = store.selection_plans(&repo).unwrap();
+        let wave = plans
+            .iter()
+            .find(|plan| plan.selection.id.0.starts_with(super::WAVE_DEFAULT_PREFIX))
+            .expect("fixture has a Wave");
+        assert_eq!(wave.slots, SlotLayout::strip(3));
+        let SlotNode::Split { axis, weights, .. } = &wave.slots.root else {
+            panic!("a strip splits");
+        };
+        assert_eq!(*axis, SplitAxis::Vertical);
+        assert_eq!(weights, &[1.0; 3]);
+        assert_eq!(wave.slots.slots(), [0, 1, 2]);
+        // The repository page is a Wave view too.
+        assert_eq!(plans[0].slots, SlotLayout::strip(3));
     }
 
     #[test]
@@ -1012,7 +1045,7 @@ mod tests {
         use crate::work::selection::{SlotLayout, SlotNode, SplitAxis};
         let (_dir, store, repo) = fixture();
         assert_eq!(
-            store.view_plan(&repo, None).unwrap().slots,
+            store.view_plan(&repo, Some("state:open")).unwrap().slots,
             SlotLayout::golden()
         );
         assert_eq!(SlotLayout::golden().slots().len(), 7);
@@ -1584,12 +1617,7 @@ mod tests {
             conn.execute("UPDATE agent_sessions SET repo='/repo', task_id='task_22222222222222222222222222222222', wave_id='11111111-1111-1111-1111-111111111111' WHERE id='selection-session'", []).unwrap();
         }
         let attachment = store
-            .claim_session_attachment(
-                "selection-session",
-                None,
-                &crate::id::LfProcessId::new(),
-                true,
-            )
+            .claim_session_attachment("selection-session", None, &store.test_lf_process(), true)
             .unwrap();
         store
             .record_agent_process_identity(
@@ -1690,7 +1718,7 @@ mod tests {
         }
         let unattached = store.resolve_selection(&repo, &running).unwrap();
         let attachment = store
-            .claim_session_attachment("before-boot", None, &crate::id::LfProcessId::new(), true)
+            .claim_session_attachment("before-boot", None, &store.test_lf_process(), true)
             .unwrap();
         let started: i64 = store
             .conn

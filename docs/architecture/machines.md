@@ -226,7 +226,7 @@ Session bindings retain membership independently of checkout location.
 
 A **pool** names machines you own (`machines.pool`, with `cost_usd` and
 `expires_at`); it knows no provider. An **on-demand** (`ondemands`) is a
-provider (Daytona, Modal, RunPod, AWS or Fly), hardware with at most one GPU
+provider (Daytona, Modal, RunPod or AWS), hardware with at most one GPU
 (RunPod, AWS and Modal rent them; `--vcpus`/`--memory-gb` are floors its machine
 meets) and optionally spot (AWS and RunPod), and a budget: machines at once and the
 most per hour. They share one namespace. A **rental** (`rentals`, `rent_…` ids)
@@ -239,7 +239,8 @@ unfinished Task and has not expired; there is no queue. `--rent R` admits
 (limit, then the price from the provider's published per-second rates), writes
 the rental as `requested` with its sandbox name `lf-<id>` before the create,
 creates once, waits for SSH, installs `lf`, adds the Machine, forwards GitHub
-and installs every Claude account's long-lived token, clones and binds the
+and installs every Claude account's long-lived token (and, when the repository
+plans in Linear, a freshly refreshed Linear access token), clones and binds the
 repository, then hands off. A sandbox that never answers SSH is deleted at once.
 An unanswered create is `unconfirmed` until its name finds it (then deleted,
 since it has no route) or the create's window passes (`lost`); it is never
@@ -256,24 +257,24 @@ is not copied to your other Machines.
 
 Providers are reached through one embedded bridge
 (`rust/loopflow/src/rental/sandbox.py`) under `uv`, with the provider's pinned
-SDK where it has one (RunPod and Fly speak plain HTTP). It creates, finds and
+SDK where it has one (RunPod speaks plain HTTP). It creates, finds and
 deletes machines by the name lf gave them. Daytona and Modal build an image (an
-`lf` user, git, gh, Node and Claude Code, Rust, uv); RunPod, AWS and Fly boot
+`lf` user, git, gh, Node and Claude Code, Rust, uv); RunPod and AWS boot
 stock Ubuntu 24.04 and install the same tools before admitting `lf`. Modal runs
 key-only sshd behind a TCP tunnel; Daytona's SSH gateway takes a token valid for
 the sandbox's life, which rides in the Machine route; RunPod maps port 22 on a
-public IP, AWS opens 22 in a `loopflow-rentals` security group, and each Fly
-rental is its own app with a dedicated IPv4.
+public IP, and AWS opens 22 in a `loopflow-rentals`
+security group.
 
 The hard deadline never needs the laptop. Daytona (`ttl_minutes`) and Modal
 (`timeout`) hold it themselves; elsewhere the guardian
 (`rust/loopflow/src/rental/guardian.py`) does, starting before anything else on
-the machine. On RunPod and Fly it is the main process and the setup its child:
-when it exits Fly destroys the Machine, and on RunPod it deletes its pod with
+the machine. On RunPod it is the main process and the setup its child: when it
+exits it deletes its pod with
 the pod-scoped key RunPod injects, after reading the price charged so the
 budget can shorten the deadline. On AWS it powers the instance off, which
 terminates it. A guardian only ever shortens the deadline. A machine found
-ended is still deleted, freeing what it leaves (a Fly app's IPv4, a pod's disk).
+ended is still deleted, freeing what it leaves (a pod's disk).
 The laptop gives back
 when a Task rental has drained and its last Task finished 15 minutes ago, at
 the soft deadline (15 minutes before the hard one), or on `lf machine end`; any

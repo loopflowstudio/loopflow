@@ -57,6 +57,8 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public let actions: [DesktopActionDescriptor]
     public let workspaces: [DesktopWorkspaceInspection]
     public let view: WorkViewPlan?
+    /// The view's named parts that are neither panes nor tiles, such as a Wave view's board.
+    public let viewParts: [DesktopViewPart]
     /// Work shown in this window, in slot fill order.
     public let openWork: [WorkWorkspaceKey]
     public let opening: DesktopOpening?
@@ -64,15 +66,59 @@ public struct DesktopWindowInspection: Codable, Sendable, Equatable {
     public init(repository: String, window: String, path: String?, destination: DesktopDestination, history: DesktopHistory,
                 reading: String, reason: String?, task: DesktopTaskInspection?,
                 session: DesktopSessionInspection?, list: [DesktopListEntry], actions: [DesktopActionDescriptor],
-                workspaces: [DesktopWorkspaceInspection], openWork: [WorkWorkspaceKey], view: WorkViewPlan?, opening: DesktopOpening?) {
+                workspaces: [DesktopWorkspaceInspection], openWork: [WorkWorkspaceKey], view: WorkViewPlan?,
+                viewParts: [DesktopViewPart], opening: DesktopOpening?) {
         self.repository = repository; self.window = window; self.path = path
         self.destination = destination; self.history = history
         self.reading = reading; self.reason = reason; self.task = task
-        self.session = session; self.list = list; self.actions = actions; self.workspaces = workspaces; self.openWork = openWork; self.view = view; self.opening = opening
+        self.session = session; self.list = list; self.actions = actions; self.workspaces = workspaces; self.openWork = openWork; self.view = view
+        self.viewParts = viewParts; self.opening = opening
     }
     enum CodingKeys: String, CodingKey {
         case repository, window, path, destination, history, reading, reason, task, session, list, actions, workspaces, view, opening
         case openWork = "open_work"
+        case viewParts = "view_parts"
+    }
+}
+
+/// A named part of a view that `-p` addresses before tiles and panes. Each kind
+/// reports its own state; `actions` names the verbs it accepts.
+public struct DesktopViewPart: Codable, Sendable, Equatable {
+    public enum Kind: String, Codable, Sendable { case board, session, strip }
+    public let name: String
+    public let kind: Kind
+    /// The Work a session part converses with.
+    public let work: WorkWorkspaceKey?
+    /// A board's shown section: `backlog`, `working`, `autonomous` or `done`.
+    public let section: String?
+    /// A board's Done window in days; 0 includes all ages.
+    public let doneDays: Int?
+    /// A board as rendered text, what `lf desktop capture -p board` prints.
+    public let text: String?
+    /// A strip's page, from 1, and its page count.
+    public let page: Int?
+    public let pages: Int?
+    /// A strip's tiles on the shown page; positions still count the whole list.
+    public let visible: [WorkWorkspaceKey]
+    /// Hidden by `lf desktop hide` or its hover button; the view's `Show…` menu lists it.
+    public let hidden: Bool
+    /// The part's share of its split: the conversation's and board's of the top
+    /// band's width, the strip's of the view's height.
+    public let ratio: Double
+    /// Filling the whole view, as `lf desktop zoom` or its hover button set it.
+    public let zoomed: Bool
+    public let actions: [String]
+
+    public init(name: String, kind: Kind, work: WorkWorkspaceKey?, section: String?, doneDays: Int?, text: String?,
+                page: Int?, pages: Int?, visible: [WorkWorkspaceKey], hidden: Bool, ratio: Double, zoomed: Bool,
+                actions: [String]) {
+        self.name = name; self.kind = kind; self.work = work; self.section = section; self.doneDays = doneDays
+        self.text = text; self.page = page; self.pages = pages; self.visible = visible; self.hidden = hidden
+        self.ratio = ratio; self.zoomed = zoomed; self.actions = actions
+    }
+    enum CodingKeys: String, CodingKey {
+        case name, kind, work, section, text, page, pages, visible, hidden, ratio, zoomed, actions
+        case doneDays = "done_days"
     }
 }
 
@@ -235,20 +281,24 @@ public enum DesktopDestination: Codable, Sendable, Equatable {
     }
 }
 
-/// `{"dashboard": id}`, `{"wave": id}` or `"working_tasks"`, matching Rust's external tagging.
+/// `{"dashboard": id}`, `{"wave": id}`, `"working_tasks"` or `"repository"`, matching Rust's external tagging.
 public enum DesktopBoard: Codable, Sendable, Equatable {
     case dashboard(String)
     case workingTasks
     case wave(String)
+    /// The repository page, the default Wave's view.
+    case repository
 
     private enum CodingKeys: String, CodingKey { case dashboard, wave }
 
     public init(from decoder: Decoder) throws {
         if let name = try? decoder.singleValueContainer().decode(String.self) {
-            guard name == "working_tasks" else {
+            switch name {
+            case "working_tasks": self = .workingTasks
+            case "repository": self = .repository
+            default:
                 throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown board \(name)"))
             }
-            self = .workingTasks
         } else {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             if let wave = try values.decodeIfPresent(String.self, forKey: .wave) { self = .wave(wave) }
@@ -267,6 +317,9 @@ public enum DesktopBoard: Codable, Sendable, Equatable {
         case .wave(let id):
             var values = encoder.container(keyedBy: CodingKeys.self)
             try values.encode(id, forKey: .wave)
+        case .repository:
+            var value = encoder.singleValueContainer()
+            try value.encode("repository")
         }
     }
 }

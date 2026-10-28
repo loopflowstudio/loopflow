@@ -133,7 +133,14 @@ fn activity_state(
 
 pub fn run_ps(json: bool) -> Result<()> {
     let snapshot = load_snapshot()?;
-    print_snapshot(&snapshot, json)
+    print_snapshot(&snapshot, json)?;
+    if !json {
+        match super::rollover::inventory() {
+            Ok(inventory) => print!("{}", super::rollover::render_binaries(&inventory)),
+            Err(error) => tracing::warn!(%error, "lf binary inventory unavailable"),
+        }
+    }
+    Ok(())
 }
 
 pub fn run_top(json: bool) -> Result<()> {
@@ -160,9 +167,9 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         read_process_receipts_at(&lf_home).context("failed to read live Process receipts")?;
     // Attached LfProcess death is proven from Process receipts, so reap before
     // pruning them.
-    let agents = crate::harness::agent_process::reap_agent_processes(dry_run)?;
+    let agents = crate::harness::agent_process::prune_agent_processes(dry_run)?;
     for error in &agents.errors {
-        tracing::warn!(%error, "failed to reap orphaned AgentProcess");
+        tracing::warn!(%error, "failed to clean up AgentProcess");
     }
     let mut report = ProcessPruneReport {
         schema_version: SCHEMA_VERSION,
@@ -298,7 +305,7 @@ fn collect_activity(
     })
 }
 
-fn command_label(command: Option<&str>, kind: crate::process::ProcessKind) -> String {
+pub(crate) fn command_label(command: Option<&str>, kind: crate::process::ProcessKind) -> String {
     if kind == crate::process::ProcessKind::Agent {
         let argv = command.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok());
         let program = argv

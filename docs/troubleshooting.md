@@ -205,6 +205,16 @@ references, and compacts the store; a dry run changes none of it. A
 missing PID, a completed Task or an old Session does not prove the agent
 exited: unresolved records keep protecting their checkouts.
 
+When `lf self doctor` fails `lineage` and says `lf monitor prune` repairs the
+parents, an AgentProcess points at an lf process that was never recorded:
+
+```bash
+lf monitor prune --dry-run         # lists the ancestry it would release
+lf monitor prune                   # releases it; the Session can resume
+```
+
+The release is kept as a Session fact in `lf history show <session>`.
+
 ## A Wave isn't moving
 
 Wave passes are finite; nothing runs between them unless you schedule one.

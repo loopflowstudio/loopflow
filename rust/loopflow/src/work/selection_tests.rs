@@ -26,7 +26,7 @@ fn member(source: &str, id: &str) -> MemberRef {
     }
 }
 #[test]
-fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_filters() {
+fn defaults_include_child_waves_and_working_wave_tasks() {
     let root = WaveId::new();
     let child = WaveId::new();
     let empty = WaveId::new();
@@ -92,13 +92,7 @@ fn defaults_include_child_waves_and_uncompleted_wave_tasks_without_execution_fil
             .iter()
             .map(|member| member.work.id.as_str())
             .collect::<Vec<_>>(),
-        [
-            work[1].key.id.as_str(),
-            empty.as_str(),
-            "deferred",
-            "idle",
-            "backlog"
-        ]
+        [work[1].key.id.as_str(), empty.as_str(), "idle"]
     );
     assert_eq!(wave.unavailable.len(), 1);
     let filtered = Selection::parse(&format!("wave:{root} state:open"), None)
@@ -593,7 +587,7 @@ fn working_tasks_are_idle_active_or_moving_and_shipping_has_its_own_query() {
             "wave",
             SelectionExpression::Wave { wave: wave.clone() }
         )),
-        ["idle", "active", "moving", "unstarted", "deferred"]
+        ["idle", "active", "moving"]
     );
     assert_eq!(
         ids(Selection::parse("state:shipping", None).unwrap()),

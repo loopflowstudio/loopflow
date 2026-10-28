@@ -11,8 +11,8 @@ pub struct TaskWork {
     pub sessions: Vec<TaskSession>,
     pub graph_processes: Vec<GraphProcessInventoryEntry>,
     pub processes: Vec<LfProcess>,
-    /// The Task's Workflow; `None` when it runs only ad hoc Graphs.
-    pub workflow: Option<crate::ops::workflow::Workflow>,
+    /// The graph the Task took up; `None` until its first `lf task run`.
+    pub graph: Option<crate::task_graph::TaskGraph>,
 }
 
 /// Workspace facts needed before opening diagnostic Process history.
@@ -20,7 +20,7 @@ pub struct TaskWork {
 pub struct TaskOverview {
     pub sessions: Vec<TaskSession>,
     pub graph_processes: Vec<GraphProcessInventoryEntry>,
-    pub workflow: Option<crate::ops::workflow::Workflow>,
+    pub graph: Option<crate::task_graph::TaskGraph>,
 }
 
 /// Conversation identity and completion, without loading its input or transcript.

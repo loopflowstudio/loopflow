@@ -1,4 +1,4 @@
-//! Invocation readings share Workflow choice and launch admission, never preparation.
+//! Invocation readings share the Task run's choice and launch admission, never preparation.
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -12,15 +12,22 @@ use super::{select_task_run, TaskProcessOptions, TaskRunSelection};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TaskRunAction {
-    Edge {
-        workflow: String,
+    /// Run `graph` from the step `from` until the interactive step
+    /// `stops_at`, or to the end when `None`.
+    Run {
+        graph: String,
         take_up: bool,
         from: String,
-        to: String,
-        name: String,
-        /// Whether the edge runs steps, or enters `end` running nothing.
-        runs: bool,
+        stops_at: Option<String>,
     },
+    /// Put the Task at the interactive step `step`, running nothing.
+    Wait {
+        graph: String,
+        take_up: bool,
+        step: String,
+    },
+    /// Nothing remains: the Task reaches `end`, requesting completion.
+    End { graph: String, take_up: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,23 +41,31 @@ pub struct TaskRunExplanation {
 
 impl TaskRunExplanation {
     pub fn render(&self) -> String {
+        let take = |graph: &str, take_up: bool| {
+            format!("{}graph {graph}", if take_up { "take up " } else { "" })
+        };
         let action = match &self.action {
-            Some(TaskRunAction::Edge {
-                workflow,
+            Some(TaskRunAction::Run {
+                graph,
                 take_up,
                 from,
-                to,
-                name,
-                runs,
+                stops_at,
             }) => format!(
-                "{}graph {workflow}: {from} → {to}; {}",
-                if *take_up { "take up " } else { "" },
-                if *runs {
-                    format!("run {name}")
-                } else {
-                    "run nothing".into()
-                },
+                "{}: run from {from} {}",
+                take(graph, *take_up),
+                match stops_at {
+                    Some(step) => format!("until {step}"),
+                    None => "to the end".into(),
+                }
             ),
+            Some(TaskRunAction::Wait {
+                graph,
+                take_up,
+                step,
+            }) => format!("{}: wait at {step}; run nothing", take(graph, *take_up)),
+            Some(TaskRunAction::End { graph, take_up }) => {
+                format!("{}: nothing remains; reach end", take(graph, *take_up))
+            }
             None => "unavailable".into(),
         };
         let mut lines = vec![
@@ -80,6 +95,7 @@ pub async fn explain_task_run(
     cwd: &Path,
     selection: WorkSelection<'_>,
     options: &TaskProcessOptions,
+    through: bool,
 ) -> TaskRunExplanation {
     let resolution = crate::ops::context::explain_context(store, cwd, selection, None, None).await;
     let mut report = TaskRunExplanation {
@@ -88,7 +104,7 @@ pub async fn explain_task_run(
         impediments: Vec::new(),
         unavailable: Vec::new(),
     };
-    if let Err(error) = read_task_run(store, options, &mut report).await {
+    if let Err(error) = read_task_run(store, options, through, &mut report).await {
         report.unavailable.push(error.to_string());
     }
     report
@@ -97,6 +113,7 @@ pub async fn explain_task_run(
 async fn read_task_run(
     store: &SharedStore,
     options: &TaskProcessOptions,
+    through: bool,
     report: &mut TaskRunExplanation,
 ) -> anyhow::Result<()> {
     let task = read_local_task(store, &mut report.resolution).await?;
@@ -137,7 +154,13 @@ async fn read_task_run(
             checkout.display()
         );
     }
-    let choice = match select_task_run(store, &task, checkout, options.graph.as_deref()) {
+    let choice = match select_task_run(
+        store,
+        &task,
+        checkout,
+        options.graph.as_deref(),
+        options.from.as_deref(),
+    ) {
         Ok(choice) => choice,
         Err(error) => {
             report.impediments.push(error.to_string());
@@ -145,22 +168,36 @@ async fn read_task_run(
         }
     };
     let TaskRunSelection {
-        workflow,
-        index,
+        graph,
         take_up,
+        start,
+        ..
     } = choice;
-    let edge = &workflow.definition.edges[index as usize];
-    let runs = workflow.edge_runs(index);
-    if !runs {
-        report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
-    }
-    report.action = Some(TaskRunAction::Edge {
-        workflow: workflow.definition.name.clone(),
-        take_up: take_up.is_some(),
-        from: edge.from.clone(),
-        to: edge.to.clone(),
-        name: edge.name.clone(),
-        runs,
+    let name = graph.name.clone();
+    report.action = Some(match start {
+        None => {
+            report.unavailable.push("Arrival requests planning completion; PR gates and eligible checkout cleanup are evaluated during settlement, not by this preview".into());
+            TaskRunAction::End {
+                graph: name,
+                take_up,
+            }
+        }
+        Some(place) => match graph.interactive_at(&place).filter(|_| !through) {
+            Some(step) => TaskRunAction::Wait {
+                graph: name,
+                take_up,
+                step: step.into(),
+            },
+            None => TaskRunAction::Run {
+                from: graph.step_name(&place).into(),
+                stops_at: (!through)
+                    .then(|| graph.next_interactive(&place))
+                    .flatten()
+                    .map(str::to_owned),
+                graph: name,
+                take_up,
+            },
+        },
     });
     report
         .unavailable
@@ -168,112 +205,7 @@ async fn read_task_run(
     Ok(())
 }
 
-/// An explicit position change, not an edge execution or review approval.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskMoveAction {
-    pub workflow: Option<String>,
-    pub from: Option<crate::ops::workflow::WorkflowPosition>,
-    pub to: String,
-    pub reason: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskMoveExplanation {
-    pub resolution: ContextExplanation,
-    pub action: Option<TaskMoveAction>,
-    pub impediments: Vec<String>,
-    pub unavailable: Vec<String>,
-}
-
-impl TaskMoveExplanation {
-    pub fn render(&self) -> String {
-        let mut lines = vec![self.resolution.render()];
-        if let Some(action) = &self.action {
-            lines.push(format!(
-                "Intended action: put Task at {}{}; {}",
-                action.to,
-                action
-                    .workflow
-                    .as_ref()
-                    .map(|name| format!(" of Workflow {name}"))
-                    .unwrap_or_default(),
-                if action.to == crate::workflow::END {
-                    "record arrival then request completion; settlement checks PR gates and eligible checkout cleanup"
-                } else {
-                    "run nothing; leave existing Processes alone"
-                },
-            ));
-            if let Some(reason) = &action.reason {
-                lines.push(format!("Reason: {reason}"));
-            }
-        } else {
-            lines.push("Intended action: unavailable".into());
-        }
-        lines.extend(
-            self.impediments
-                .iter()
-                .map(|reason| format!("Impediment: {reason}")),
-        );
-        lines.extend(
-            self.unavailable
-                .iter()
-                .map(|reason| format!("Unavailable: {reason}")),
-        );
-        lines.push("Observation only; execution re-reads the Workflow and completion evidence. Nothing was executed.".into());
-        lines.join("\n")
-    }
-}
-
-pub async fn explain_task_move(
-    store: &SharedStore,
-    cwd: &Path,
-    selection: WorkSelection<'_>,
-    node: &str,
-    reason: Option<&str>,
-) -> TaskMoveExplanation {
-    let resolution = crate::ops::context::explain_context(store, cwd, selection, None, None).await;
-    let mut report = TaskMoveExplanation {
-        resolution,
-        action: None,
-        impediments: Vec::new(),
-        unavailable: Vec::new(),
-    };
-    if let Err(error) = read_task_move(store, node, reason, &mut report).await {
-        report.unavailable.push(error.to_string());
-    }
-    report
-}
-
-async fn read_task_move(
-    store: &SharedStore,
-    node: &str,
-    reason: Option<&str>,
-    report: &mut TaskMoveExplanation,
-) -> anyhow::Result<()> {
-    let task = read_local_task(store, &mut report.resolution).await?;
-    let workflow = store.sqlite.workflow(&task.id)?;
-    if let Err(error) = super::validate_workflow_move(workflow.as_ref(), &task.identifier, node) {
-        report.impediments.push(error.to_string());
-        return Ok(());
-    }
-    report.action = Some(TaskMoveAction {
-        workflow: workflow
-            .as_ref()
-            .map(|workflow| workflow.definition.name.clone()),
-        from: workflow.map(|workflow| workflow.position),
-        to: node.into(),
-        reason: reason
-            .map(str::trim)
-            .filter(|reason| !reason.is_empty())
-            .map(str::to_owned),
-    });
-    if node == crate::workflow::END {
-        report.unavailable.push("Arrival, completion reconciliation and eligible checkout cleanup are execution effects; none were performed. This is not completion permission".into());
-    }
-    Ok(())
-}
-
-// Workflow position stays on the execution Machine, never in portable planning.
+// A Task's Graph position stays on the execution Machine, never in portable planning.
 pub(super) async fn read_local_task(
     store: &SharedStore,
     resolution: &mut ContextExplanation,

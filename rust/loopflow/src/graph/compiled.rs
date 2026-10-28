@@ -21,7 +21,6 @@ use crate::graph::ConcreteStep;
 pub struct CompiledGraph {
     pub name: String,
     pub steps: Vec<GraphNode>,
-    pub interactions: Box<InteractionGraph>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -184,157 +183,11 @@ pub fn graph_catalog_entry(
     })
 }
 
-/// Participation stages and bounded references to the captured automated routes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InteractionGraph {
-    pub stages: Vec<String>,
-    pub transitions: Vec<InteractionTransition>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InteractionTransition {
-    /// Structural interactive stage or `@start` / `@end` anchor.
-    pub from: String,
-    pub to: String,
-    pub nodes: Vec<String>,
-    pub routes: Vec<InteractionRoute>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InteractionRoute {
-    pub from: String,
-    pub to: String,
-    /// Authored XOR path name, or the deciding occurrence's repeat/advance route.
-    pub condition: Option<String>,
-}
-
-fn project_interaction_nodes(steps: &[GraphNode]) -> InteractionGraph {
-    use std::collections::BTreeSet;
-    fn connect(
-        steps: &[GraphNode],
-        end: &str,
-        routes: &mut Vec<InteractionRoute>,
-        stages: &mut Vec<String>,
-    ) {
-        for (index, node) in steps.iter().enumerate() {
-            let next = steps
-                .get(index + 1)
-                .map_or_else(|| end.to_string(), |node| node.key.to_string());
-            if node.interactive {
-                stages.push(node.key.to_string());
-            }
-            if node.kind == GraphNodeKind::Xor {
-                for path in &node.paths {
-                    routes.push(InteractionRoute {
-                        from: node.key.to_string(),
-                        to: path
-                            .steps
-                            .first()
-                            .map_or_else(|| next.clone(), |node| node.key.to_string()),
-                        condition: Some(path.name.clone()),
-                    });
-                    connect(&path.steps, &next, routes, stages);
-                }
-            } else {
-                routes.push(InteractionRoute {
-                    from: node.key.to_string(),
-                    to: next,
-                    condition: node.returns_to.as_ref().map(|_| "advance".into()),
-                });
-            }
-            if let Some(target) = &node.returns_to {
-                routes.push(InteractionRoute {
-                    from: node.key.to_string(),
-                    to: target.to_string(),
-                    condition: Some("repeat".into()),
-                });
-            }
-        }
-    }
-    let mut routes = vec![InteractionRoute {
-        from: "@start".into(),
-        to: steps
-            .first()
-            .map_or_else(|| "@end".to_string(), |node| node.key.to_string()),
-        condition: None,
-    }];
-    let mut stages = Vec::new();
-    connect(steps, "@end", &mut routes, &mut stages);
-    let boundaries: BTreeSet<_> = stages.iter().map(String::as_str).chain(["@end"]).collect();
-    let mut transitions = Vec::new();
-    for source in std::iter::once("@start").chain(stages.iter().map(String::as_str)) {
-        let mut visited = BTreeSet::new();
-        let mut pending = vec![source];
-        let mut reachable_routes = Vec::new();
-        let mut targets = BTreeSet::new();
-        while let Some(current) = pending.pop() {
-            if !visited.insert(current) {
-                continue;
-            }
-            for route in routes.iter().filter(|route| route.from == current) {
-                reachable_routes.push(route);
-                if boundaries.contains(route.to.as_str()) {
-                    targets.insert(route.to.as_str());
-                } else {
-                    pending.push(route.to.as_str());
-                }
-            }
-        }
-        for target in targets {
-            // Stop at every other stage before walking backward. In particular,
-            // a repeat back to the source cannot leak work into its exit edge.
-            let candidates: Vec<_> = reachable_routes
-                .iter()
-                .copied()
-                .filter(|route| route.to == target || !boundaries.contains(route.to.as_str()))
-                .collect();
-            let mut ancestors = BTreeSet::from([target]);
-            loop {
-                let before = ancestors.len();
-                for route in &candidates {
-                    if ancestors.contains(route.to.as_str()) {
-                        ancestors.insert(route.from.as_str());
-                    }
-                }
-                if ancestors.len() == before {
-                    break;
-                }
-            }
-            let selected: Vec<_> = candidates
-                .into_iter()
-                .filter(|route| ancestors.contains(route.to.as_str()))
-                .cloned()
-                .collect();
-            let nodes = selected
-                .iter()
-                .flat_map(|route| [&route.from, &route.to])
-                .filter(|key| !key.starts_with('@') && !boundaries.contains(key.as_str()))
-                .cloned()
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect();
-            transitions.push(InteractionTransition {
-                from: source.into(),
-                to: target.into(),
-                nodes,
-                routes: selected,
-            });
-        }
-    }
-    InteractionGraph {
-        stages,
-        transitions,
-    }
-}
-
 impl CompiledGraph {
     pub fn new(name: impl Into<String>, steps: &[ConcreteStep]) -> Self {
-        let steps = nodes(steps, &mut 0);
-        let interactions = Box::new(project_interaction_nodes(&steps));
         Self {
             name: name.into(),
-            steps,
-            interactions,
+            steps: nodes(steps, &mut 0),
         }
     }
 
@@ -462,7 +315,7 @@ pub(crate) fn location(
 
 /// Ordered backward-edge traversal counts at each active nesting level, outermost
 /// first. Empty levels are retained so nested counts never masquerade as root
-/// counts. Visit tokens used for stage identity are deliberately absent.
+/// counts. Visit tokens used for step identity are deliberately absent.
 pub fn graph_iterations(steps: &[ConcreteStep], cursor: &ExecutionCursor) -> Vec<Vec<u32>> {
     let counts = (0..steps.len())
         .filter(|index| return_target(steps, *index).is_some())
@@ -706,11 +559,16 @@ mod tests {
         project_position(&CompiledGraph::new("", steps), key, &iterations, false)
     }
 
-    fn skill(name: &str, id: Option<&str>, human: bool, returns: Option<usize>) -> ConcreteStep {
+    fn skill(
+        name: &str,
+        id: Option<&str>,
+        interactive: bool,
+        returns: Option<usize>,
+    ) -> ConcreteStep {
         ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named(name),
             id: id.map(str::to_string),
-            interactive: human,
+            interactive,
             returns,
             sources: Vec::new(),
         })
@@ -735,126 +593,6 @@ mod tests {
         let missing = r#"{"key":0,"id":null,"label":"demo","kind":"skill",
             "returns_to":null,"sources":[],"paths":[]}"#;
         assert!(serde_json::from_str::<super::GraphNode>(missing).is_err());
-    }
-
-    #[test]
-    fn participation_preserves_loops_repeated_skills_and_background_only_graphs() {
-        let steps = vec![
-            skill("review", Some("start"), true, None),
-            skill("implement", Some("build"), false, None),
-            skill("decide", None, false, Some(1)),
-            skill("review", Some("second"), true, None),
-            skill("decide", None, false, Some(4)),
-        ];
-        let compiled = CompiledGraph::new("example", &steps);
-        let projection = super::project_interaction_nodes(&compiled.steps);
-        assert_eq!(projection.stages, ["0", "3"]);
-        let edge = projection
-            .transitions
-            .iter()
-            .find(|e| e.from == "0" && e.to == "3")
-            .unwrap();
-        assert_eq!(edge.nodes, ["1", "2"]);
-        assert!(edge
-            .routes
-            .iter()
-            .any(|r| r.from == "2" && r.to == "1" && r.condition.as_deref() == Some("repeat")));
-        assert!(projection
-            .transitions
-            .iter()
-            .any(|e| e.from == "3" && e.to == "0"));
-        let background = CompiledGraph::new("background", &steps[1..3]);
-        assert!(background.interactions.stages.is_empty());
-        assert_eq!(background.interactions.transitions.len(), 1);
-        assert_eq!(background.interactions.transitions[0].nodes, ["0", "1"]);
-    }
-
-    #[test]
-    fn participation_exit_excludes_work_that_requires_another_review() {
-        let compiled = CompiledGraph::new(
-            "review-loop",
-            &[
-                skill("build", Some("build"), false, None),
-                skill("review", None, true, None),
-                skill("decide", None, false, Some(2)),
-            ],
-        );
-        let exit = compiled
-            .interactions
-            .transitions
-            .iter()
-            .find(|edge| edge.from == "1" && edge.to == "@end")
-            .unwrap();
-        assert_eq!(exit.nodes, ["2"]);
-        assert_eq!(exit.routes.len(), 2);
-        assert!(exit.routes.iter().all(|route| route.to != "0"));
-        let repeat = compiled
-            .interactions
-            .transitions
-            .iter()
-            .find(|edge| edge.from == "1" && edge.to == "1")
-            .unwrap();
-        assert_eq!(repeat.nodes, ["0", "2"]);
-    }
-
-    #[test]
-    fn participation_fixtures_preserve_exact_branch_alternatives() {
-        let entries: Vec<super::GraphCatalogEntry> = serde_json::from_str(include_str!(
-            "../../../../tests/fixtures/dto/graph_catalog.json"
-        ))
-        .unwrap();
-        for entry in entries {
-            if let Some(compiled) = entry.compiled {
-                assert_eq!(
-                    *compiled.interactions,
-                    super::project_interaction_nodes(&compiled.steps)
-                );
-            }
-        }
-        let compiled = CompiledGraph::new(
-            "branch",
-            &[
-                skill("review", None, true, None),
-                ConcreteStep::Xor(ConcreteXor {
-                    router: Skill::named("route"),
-                    paths: HashMap::from([
-                        (
-                            "build".into(),
-                            ConcretePath {
-                                description: "build it".into(),
-                                steps: vec![
-                                    skill("implement", None, false, None),
-                                    skill("review", None, true, None),
-                                ],
-                            },
-                        ),
-                        (
-                            "skip".into(),
-                            ConcretePath {
-                                description: "skip it".into(),
-                                steps: vec![],
-                            },
-                        ),
-                    ]),
-                    sources: vec![],
-                }),
-                skill("finish", None, true, None),
-            ],
-        );
-        assert_eq!(compiled.interactions.stages, ["0", "3", "4"]);
-        let edges: Vec<_> = compiled
-            .interactions
-            .transitions
-            .iter()
-            .filter(|edge| edge.from == "0")
-            .collect();
-        assert_eq!(edges.len(), 2);
-        let skipped = edges.iter().find(|edge| edge.to == "4").unwrap();
-        assert!(skipped
-            .routes
-            .iter()
-            .any(|r| r.condition.as_deref() == Some("skip")));
-        assert!(!skipped.nodes.contains(&"2".into()));
     }
 
     #[test]
@@ -883,7 +621,7 @@ mod tests {
             ("deliver", &["gate", "land --wait-and-fix"], &[], 0),
             ("vsm-operate", &["s1", "s2", "s3", "s4", "s5"], &[], 0),
         ];
-        for (name, labels, humans, returns) in cases {
+        for (name, labels, interactive, returns) in cases {
             let graph = load_graph(name, repo.path()).unwrap();
             let compiled = CompiledGraph::new(*name, &compile_graph(&graph, repo.path()).unwrap());
             assert_eq!(
@@ -902,7 +640,7 @@ mod tests {
                     .enumerate()
                     .filter_map(|(i, s)| s.interactive.then_some(i))
                     .collect::<Vec<_>>(),
-                *humans,
+                *interactive,
                 "{name}"
             );
             assert_eq!(

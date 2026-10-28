@@ -4,14 +4,12 @@
 use std::collections::HashMap;
 
 use crate::durable::TaskId;
+use crate::graph::runner::ExecutionCursor;
 use crate::id::LfProcessId;
-use crate::ops::workflow::{
-    Workflow, WorkflowActor, WorkflowMove, WorkflowMoveKind, WorkflowPosition,
-};
 use crate::process::LfProcess;
 use crate::store::StoreResult;
+use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition, END, START};
 use crate::task_work::{TaskSession, TaskWork};
-use crate::workflow::{CapturedGraph, Route, WorkflowDefinition, END, START};
 
 use super::SqliteStore;
 
@@ -192,27 +190,35 @@ fn latest_task_graphs(
         .collect()
 }
 
-/// The Task's workflow row: the graph it took up and its projection, the
-/// stage it waits at or left, and the edge it is on with the Process carrying it.
-struct WorkflowRow {
-    graph: CapturedGraph,
-    definition: WorkflowDefinition,
-    routes: Vec<Route>,
-    node: String,
-    edge: Option<(u32, LfProcess)>,
+/// The Task's Graph row: the graph it took up, the step it stands at or its
+/// run left, and that run with the cursor it began from.
+pub(crate) struct TaskGraphRow {
+    pub graph: CapturedGraph,
+    pub step: String,
+    pub run: Option<(ExecutionCursor, LfProcess)>,
 }
 
-fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<WorkflowRow>> {
+/// A Task's Graph as another Machine takes it up: the graph it took up, the
+/// step it stands at, and the cursor its run began from, if it is on one. The
+/// run's Process stays behind.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct TaskGraphRecord {
+    pub graph: CapturedGraph,
+    pub step: String,
+    pub run_start: Option<ExecutionCursor>,
+}
+
+fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
     use rusqlite::OptionalExtension;
-    let Some((graph, node, edge, process)) = conn
+    let Some((graph, step, start, process)) = conn
         .query_row(
-            "SELECT graph,node,edge,lf_process_id FROM task_workflows WHERE task_id=?1",
+            "SELECT graph,step,run_start,lf_process_id FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
-                    row.get::<_, Option<u32>>(2)?,
+                    row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
                 ))
             },
@@ -221,9 +227,9 @@ fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Optio
     else {
         return Ok(None);
     };
-    let edge = match edge.zip(process) {
-        Some((edge, process)) => Some((
-            edge,
+    let run = match start.zip(process) {
+        Some((start, process)) => Some((
+            serde_json::from_str(&start)?,
             conn.query_row(
                 &format!("{} WHERE e.id=?1", super::processes::PROCESS_SELECT),
                 [process],
@@ -232,173 +238,53 @@ fn workflow_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Optio
         )),
         None => None,
     };
-    let graph: CapturedGraph = serde_json::from_str(&graph)?;
-    let (definition, routes) = graph.project().map_err(|error| {
-        crate::store::StoreError::InvalidData(format!(
-            "captured graph {} cannot be routed: {error}",
-            graph.name
-        ))
-    })?;
-    Ok(Some(WorkflowRow {
-        graph,
-        definition,
-        routes,
-        node,
-        edge,
+    Ok(Some(TaskGraphRow {
+        graph: serde_json::from_str(&graph)?,
+        step,
+        run,
     }))
 }
 
-fn workflow_moves(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Vec<WorkflowMove>> {
-    conn.prepare(
-        "SELECT m.workflow,m.kind,m.from_node,m.to_node,m.edge,m.lf_process_id,e.caller_session_id,m.note,m.at
-         FROM task_workflow_moves m LEFT JOIN processes e ON e.id=m.lf_process_id
-         WHERE m.task_id=?1 ORDER BY m.seq",
-    )?
-    .query_and_then([task.as_str()], |row| {
-        let kind: String = row.get(1)?;
-        let kind = WorkflowMoveKind::parse(&kind).ok_or_else(|| {
-            crate::store::StoreError::InvalidData(format!("unknown workflow move {kind:?}"))
-        })?;
-        // An arrival is the edge's own; any other move is its caller's.
-        let session_id = row
-            .get::<_, Option<String>>(6)?
-            .filter(|_| kind != WorkflowMoveKind::Arrived);
-        Ok(WorkflowMove {
-            workflow: row.get(0)?,
-            kind,
-            from: row.get(2)?,
-            to: row.get(3)?,
-            edge: row.get(4)?,
-            lf_process_id: row.get(5)?,
-            actor: match (kind, &session_id) {
-                (WorkflowMoveKind::Arrived, _) => WorkflowActor::Edge,
-                (_, Some(_)) => WorkflowActor::Conversation,
-                (_, None) => WorkflowActor::Person,
-            },
-            session_id: session_id.map(Into::into),
-            note: row.get(7)?,
-            at: row.get(8)?,
-        })
-    })?
-    .collect()
-}
-
+/// Put the Task on a run from `start`, carried by `by`, if it still stands
+/// where the caller read it: at `step`, with `stopped` the run that last left
+/// it, if any. With `ships`, the run reaches `end` and hands the Task off,
+/// granting merge authority.
 #[allow(clippy::too_many_arguments)]
-fn append_workflow_move(
-    conn: &rusqlite::Connection,
-    task: &TaskId,
-    workflow: &str,
-    kind: WorkflowMoveKind,
-    (from, to): (&str, &str),
-    edge: Option<u32>,
-    by: Option<&LfProcessId>,
-    note: Option<&str>,
-) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,lf_process_id,note,at)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-        rusqlite::params![
-            task.as_str(),
-            workflow,
-            kind.as_str(),
-            from,
-            to,
-            edge,
-            by,
-            note,
-            crate::store::rows::now_unix()
-        ],
-    )?;
-    Ok(())
-}
-
-/// A Task's Workflow as another Machine takes it up: the graph it took up,
-/// where it stands, and every move so far.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct WorkflowRecord {
-    pub graph: CapturedGraph,
-    pub node: String,
-    /// The route it is on; the Graph carrying it stayed behind.
-    pub edge: Option<u32>,
-    pub moves: Vec<WorkflowMoveRecord>,
-}
-
-/// One move, without the Process that made it, which lives where it ran.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct WorkflowMoveRecord {
-    pub workflow: String,
-    pub kind: WorkflowMoveKind,
-    pub from: String,
-    pub to: String,
-    pub edge: Option<u32>,
-    pub note: Option<String>,
-    pub at: i64,
-}
-
-/// How a Task reaches `end`.
-#[derive(Debug, Clone)]
-pub(crate) enum EndMove {
-    /// The edge the calling process carried it along succeeded.
-    Arrive,
-    /// It leaves by an edge that runs nothing.
-    Choose { workflow: Workflow, edge: u32 },
-    /// It is put there. A Task with no Workflow is put at the end of one
-    /// with nothing between.
-    Set,
-}
-
-fn choose_edge_in(
+fn start_run_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
-    workflow: &Workflow,
-    edge: u32,
-    by: Option<&LfProcessId>,
-    note: Option<&str>,
+    (step, stopped): (&str, Option<&LfProcessId>),
+    start: &ExecutionCursor,
+    by: &LfProcessId,
+    ships: bool,
 ) -> StoreResult<bool> {
     if super::durable::task_state_in(tx, task)? == crate::durable::TaskState::Deferred {
         return Err(crate::store::StoreError::InvalidAuthority(
             "Task is deferred; resume it before running a Graph".into(),
         ));
     }
-    let chosen = &workflow.definition.edges[edge as usize];
-    let stopped = match &workflow.position {
-        WorkflowPosition::Node { .. } => None,
-        WorkflowPosition::Edge { lf_process_id, .. } => Some(lf_process_id.as_str()),
-    };
-    let carried = workflow.edge_runs(edge);
     let left = tx.execute(
-        "UPDATE task_workflows SET node=?2,edge=?3,lf_process_id=?4,updated_at=?5
-         WHERE task_id=?1 AND node=?6 AND lf_process_id IS ?7",
+        "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,updated_at=?4
+         WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
         rusqlite::params![
             task.as_str(),
-            if carried { &chosen.from } else { &chosen.to },
-            carried.then_some(edge),
-            by.filter(|_| carried),
+            serde_json::to_string(start)?,
+            by.as_str(),
             crate::store::rows::now_unix(),
-            chosen.from,
-            stopped
+            step,
+            stopped.map(LfProcessId::as_str)
         ],
     )?;
     if left == 0 {
         return Ok(false);
     }
-    append_workflow_move(
-        tx,
-        task,
-        &workflow.definition.name,
-        WorkflowMoveKind::Chose,
-        (&chosen.from, &chosen.to),
-        Some(edge),
-        by,
-        note,
-    )?;
-    // No person takes part on a route into `end`: taking one hands the Task off.
-    if let (true, Some(by)) = (chosen.to == END, by) {
+    // No person takes part on the rest of the graph: running it hands the Task off.
+    if ships {
         ship_in(
             tx,
             task,
             by,
-            &format!("{} runs to the end with no stage left", chosen.name),
+            "it runs to the end with no interactive step left",
         )?;
     }
     Ok(true)
@@ -413,7 +299,6 @@ pub(crate) struct TaskShipping {
     pub process: Option<LfProcessId>,
     pub restarts: u32,
 }
-
 pub(super) fn shipping_in(
     conn: &rusqlite::Connection,
     task: &TaskId,
@@ -509,147 +394,42 @@ fn ship_in(
     })
 }
 
-fn arrive_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
-    let Some(WorkflowRow {
-        definition,
-        edge: Some((edge, carrier)),
-        ..
-    }) = workflow_row(tx, task)?
-    else {
-        return Ok(());
-    };
-    if &carrier.id != by {
-        return Ok(());
-    }
-    let arrived = &definition.edges[edge as usize];
-    tx.execute(
-        "UPDATE task_workflows SET node=?2,edge=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
-        rusqlite::params![task.as_str(), arrived.to, crate::store::rows::now_unix()],
-    )?;
-    append_workflow_move(
-        tx,
-        task,
-        &definition.name,
-        WorkflowMoveKind::Arrived,
-        (&arrived.from, &arrived.to),
-        Some(edge),
-        Some(by),
-        None,
-    )
-}
-
-fn set_node_in(
+/// The run `carrier` started stopped at `step`, or reached `end`: put the
+/// Task there. A Task another run or a person moved meanwhile stays put.
+/// Returns whether this put the Task at `end`, which requests completion.
+fn arrive_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
-    node: &str,
-    by: Option<&LfProcessId>,
-    note: Option<&str>,
+    carrier: &LfProcessId,
+    step: &str,
 ) -> StoreResult<bool> {
-    let Some(WorkflowRow {
-        graph,
-        node: from,
-        edge,
-        ..
-    }) = workflow_row(tx, task)?
-    else {
-        return Ok(false);
-    };
-    tx.execute(
-        "UPDATE task_workflows SET node=?2,edge=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
-        rusqlite::params![task.as_str(), node, crate::store::rows::now_unix()],
-    )?;
-    append_workflow_move(
-        tx,
-        task,
-        &graph.name,
-        WorkflowMoveKind::Set,
-        (&from, node),
-        edge.map(|(edge, _)| edge),
-        by,
-        note,
-    )?;
-    Ok(true)
+    let arrived = tx.execute(
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,updated_at=?3
+         WHERE task_id=?1 AND lf_process_id=?4",
+        rusqlite::params![
+            task.as_str(),
+            step,
+            crate::store::rows::now_unix(),
+            carrier.as_str()
+        ],
+    )? > 0;
+    let ended = arrived && step == END;
+    if ended {
+        // A routed path may reach end even though another path had an
+        // interactive step, so launch-time prediction is not sufficient.
+        if !super::durable::task_state_in(tx, task)?.is_terminal() {
+            ship_in(tx, task, carrier, "its run reached the end")?;
+        }
+        super::children::request_completion_in(tx, task, None)?;
+    }
+    Ok(ended)
 }
 
-/// Where a graph taken up now places the Task: the last recorded position
-/// when it is one of the graph's stages, else `start`.
-fn placement_in(
-    conn: &rusqlite::Connection,
-    task: &TaskId,
-    definition: &WorkflowDefinition,
-) -> StoreResult<String> {
-    use rusqlite::OptionalExtension;
-    let last: Option<String> = conn
-        .query_row(
-            "SELECT to_node FROM task_workflow_moves WHERE task_id=?1 ORDER BY seq DESC LIMIT 1",
-            [task.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(last
-        .filter(|node| definition.node(node).is_some())
-        .unwrap_or_else(|| START.to_string()))
-}
-
-fn stands_at_end(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<bool> {
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_workflows WHERE task_id=?1 AND node=?2 AND edge IS NULL)",
-        [task.as_str(), END],
-        |row| row.get(0),
-    )?)
-}
-
-/// Make `how` for the Task. Returns whether this move put it at `end`: false
-/// when it already stood there, or when the move no longer applied.
-pub(super) fn reach_end_in(
-    tx: &rusqlite::Transaction<'_>,
-    task: &TaskId,
-    how: &EndMove,
-    by: Option<&LfProcessId>,
-    note: Option<&str>,
-) -> StoreResult<bool> {
-    if stands_at_end(tx, task)? {
-        return Ok(false);
-    }
-    match how {
-        EndMove::Arrive => {
-            if let Some(by) = by {
-                arrive_in(tx, task, by)?;
-            }
-        }
-        EndMove::Choose { workflow, edge } => {
-            choose_edge_in(tx, task, workflow, *edge, by, note)?;
-        }
-        EndMove::Set => {
-            if !set_node_in(tx, task, END, by, note)? {
-                let unplanned = CapturedGraph::unplanned();
-                tx.execute(
-                    "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
-                    rusqlite::params![
-                        task.as_str(),
-                        serde_json::to_string(&unplanned)?,
-                        END,
-                        crate::store::rows::now_unix()
-                    ],
-                )?;
-                append_workflow_move(
-                    tx,
-                    task,
-                    &unplanned.name,
-                    WorkflowMoveKind::Set,
-                    (START, END),
-                    None,
-                    by,
-                    note,
-                )?;
-            }
-        }
-    }
-    let arrived = stands_at_end(tx, task)?;
-    if arrived {
-        super::children::request_completion_in(tx, task, note)?;
-    }
-    Ok(arrived)
+fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
+    Ok(tx.execute(
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
+        rusqlite::params![task.as_str(), step, crate::store::rows::now_unix()],
+    )? > 0)
 }
 
 /// Match unfinished Processes through checkout, Session history and attachments.
@@ -703,20 +483,6 @@ fn members(
 }
 
 impl SqliteStore {
-    pub(crate) fn reach_workflow_end(
-        &self,
-        task: &TaskId,
-        how: &EndMove,
-        note: Option<&str>,
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let by = crate::journal::current_lf_process_id();
-        let moved = reach_end_in(&tx, task, how, by.as_ref(), note)?;
-        tx.commit()?;
-        Ok(moved)
-    }
-
     pub(crate) fn session_task_ids(&self, session: &str) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
@@ -736,14 +502,13 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graph_processes) = members(&tx, task)?;
-        let workflow = workflow_row(&tx, task)?;
-        let history = workflow_moves(&tx, task)?;
+        let graph = task_graph_row(&tx, task)?;
         tx.commit()?;
         drop(conn);
         Ok(crate::task_work::TaskOverview {
             sessions,
             graph_processes,
-            workflow: workflow.map(|row| self.read_workflow(row, history)),
+            graph: graph.map(|row| self.read_task_graph(row)),
         })
     }
 
@@ -760,16 +525,14 @@ impl SqliteStore {
             ))?
             .query_map([task.as_str()], super::processes::read_process)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let workflow = workflow_row(&tx, task)?;
-        let history = workflow_moves(&tx, task)?;
+        let graph = task_graph_row(&tx, task)?;
         tx.commit()?;
         drop(conn);
-        let workflow = workflow.map(|row| self.read_workflow(row, history));
         Ok(TaskWork {
             sessions,
             graph_processes: graphs,
             processes,
-            workflow,
+            graph: graph.map(|row| self.read_task_graph(row)),
         })
     }
 
@@ -795,43 +558,48 @@ impl SqliteStore {
             != crate::journal::ProcessIdentityEvidence::Dead
     }
 
-    /// The Task's Workflow with its history.
-    pub(crate) fn workflow(&self, task: &TaskId) -> StoreResult<Option<Workflow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let Some(row) = workflow_row(&conn, task)? else {
-            return Ok(None);
-        };
-        let history = workflow_moves(&conn, task)?;
-        drop(conn);
-        Ok(Some(self.read_workflow(row, history)))
+    /// The Task's Graph and where it stands.
+    pub(crate) fn task_graph(&self, task: &TaskId) -> StoreResult<Option<TaskGraph>> {
+        let row = self.task_graph_row(task)?;
+        Ok(row.map(|row| self.read_task_graph(row)))
     }
 
-    /// Whether the carrying Graph still runs is its Process's, read here.
-    fn read_workflow(&self, row: WorkflowRow, history: Vec<WorkflowMove>) -> Workflow {
-        let position = match row.edge {
-            None => WorkflowPosition::Node { node: row.node },
-            Some((edge, process)) => WorkflowPosition::Edge {
-                edge,
+    /// The Task's Graph as captured, for running it.
+    pub(crate) fn task_graph_row(&self, task: &TaskId) -> StoreResult<Option<TaskGraphRow>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        task_graph_row(&conn, task)
+    }
+
+    /// Whether the carrying run still runs is its Process's, read here.
+    fn read_task_graph(&self, row: TaskGraphRow) -> TaskGraph {
+        let position = match row.run {
+            None => TaskGraphPosition::At { step: row.step },
+            Some((_, process)) => TaskGraphPosition::Run {
+                step: row.step,
                 lf_process_id: process.id.to_string(),
                 running: process.completed_at.is_none() && self.process_may_run(&process),
             },
         };
-        Workflow::new(row.definition, row.routes, position, history)
+        TaskGraph {
+            name: row.graph.name.clone(),
+            interactive_steps: row.graph.interactive_summary(),
+            position,
+        }
     }
 
-    /// The Task's Workflow as it moves to another Machine.
-    pub(crate) fn workflow_record(&self, task: &TaskId) -> StoreResult<Option<WorkflowRecord>> {
+    /// The Task's Graph as it moves to another Machine.
+    pub(crate) fn task_graph_record(&self, task: &TaskId) -> StoreResult<Option<TaskGraphRecord>> {
         use rusqlite::OptionalExtension;
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let Some((graph, node, edge)) = conn
+        let Some((graph, step, run_start)) = conn
             .query_row(
-                "SELECT graph,node,edge FROM task_workflows WHERE task_id=?1",
+                "SELECT graph,step,run_start FROM task_graphs WHERE task_id=?1",
                 [task.as_str()],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, Option<u32>>(2)?,
+                        row.get::<_, Option<String>>(2)?,
                     ))
                 },
             )
@@ -839,188 +607,116 @@ impl SqliteStore {
         else {
             return Ok(None);
         };
-        let moves = workflow_moves(&conn, task)?
-            .into_iter()
-            .map(|step| WorkflowMoveRecord {
-                workflow: step.workflow,
-                kind: step.kind,
-                from: step.from,
-                to: step.to,
-                edge: step.edge,
-                note: step.note,
-                at: step.at,
-            })
-            .collect();
-        Ok(Some(WorkflowRecord {
+        Ok(Some(TaskGraphRecord {
             graph: serde_json::from_str(&graph)?,
-            node,
-            edge,
-            moves,
+            step,
+            run_start: run_start.as_deref().map(serde_json::from_str).transpose()?,
         }))
     }
 
-    /// Take up a Workflow that moved here. A Task on a route stays on it,
-    /// carried by `by`, the receiving Process: it ends with the move, so the
-    /// route reads as stopped and `lf task run` runs its slice again. Moves
-    /// this Machine already holds, from an earlier stay, are not repeated.
-    pub(crate) fn place_moved_workflow(
+    /// Take up a Graph that moved here. A Task on a run stays on it, carried
+    /// by `by`, the receiving Process: it ends with the move, so the run reads
+    /// as stopped and the next `lf task run` starts it again from where it began.
+    pub(crate) fn place_moved_task_graph(
         &self,
         task: &TaskId,
-        record: &WorkflowRecord,
+        record: &TaskGraphRecord,
         by: Option<&LfProcessId>,
     ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let edge = record.edge.zip(by);
-        tx.execute(
-            "INSERT OR REPLACE INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at)
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let run = record.run_start.as_ref().zip(by);
+        conn.execute(
+            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
              VALUES(?1,?2,?3,?4,?5,?6)",
             rusqlite::params![
                 task.as_str(),
                 serde_json::to_string(&record.graph)?,
-                record.node,
-                edge.map(|(edge, _)| edge),
-                edge.map(|(_, by)| by),
+                record.step,
+                run.map(|(start, _)| serde_json::to_string(start)).transpose()?,
+                run.map(|(_, by)| by.as_str()),
                 crate::store::rows::now_unix()
             ],
         )?;
-        for step in &record.moves {
-            tx.execute(
-                "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,edge,note,at)
-                 SELECT ?1,?2,?3,?4,?5,?6,?7,?8 WHERE NOT EXISTS(
-                     SELECT 1 FROM task_workflow_moves WHERE task_id=?1 AND workflow=?2 AND kind=?3
-                     AND from_node=?4 AND to_node=?5 AND edge IS ?6 AND note IS ?7 AND at=?8)",
-                rusqlite::params![
-                    task.as_str(),
-                    step.workflow,
-                    step.kind.as_str(),
-                    step.from,
-                    step.to,
-                    step.edge,
-                    step.note,
-                    step.at
-                ],
-            )?;
-        }
-        Ok(tx.commit()?)
+        Ok(())
     }
 
-    /// The stage a graph taken up now is placed at: the Task's last recorded
-    /// position when the graph has that stage, else `start`.
-    pub(crate) fn workflow_placement(
-        &self,
-        task: &TaskId,
-        definition: &WorkflowDefinition,
-    ) -> StoreResult<String> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        placement_in(&conn, task, definition)
-    }
-
-    /// Take up `graph` for the Task as it is defined now, placed by its
-    /// history. It replaces the Task's earlier Workflow; the history stays.
-    pub(crate) fn take_up_workflow(
+    /// Take up `graph` for the Task as it is defined now, at `start`. It
+    /// replaces the Task's earlier Graph.
+    pub(crate) fn take_up_task_graph(
         &self,
         task: &TaskId,
         graph: &CapturedGraph,
-        by: &LfProcessId,
-        note: Option<&str>,
     ) -> StoreResult<()> {
-        let (definition, _) = graph
-            .project()
-            .map_err(crate::store::StoreError::InvalidData)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        let placed = placement_in(&tx, task, &definition)?;
-        tx.execute(
-            "INSERT OR REPLACE INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,?3,?4)",
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT OR REPLACE INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,?3,?4)",
             rusqlite::params![
                 task.as_str(),
                 serde_json::to_string(graph)?,
-                placed,
+                START,
                 crate::store::rows::now_unix()
             ],
         )?;
-        append_workflow_move(
-            &tx,
-            task,
-            &graph.name,
-            WorkflowMoveKind::TookUp,
-            (START, &placed),
-            None,
-            Some(by),
-            note,
-        )?;
-        Ok(tx.commit()?)
+        Ok(())
     }
 
-    /// The slice a Task on an edge runs: its captured graph, where the run
-    /// begins, the edge's name and the Process carrying it. `None` when the
-    /// Task is not on an edge that runs steps.
-    pub(crate) fn workflow_edge_slice(
+    /// Put the Task on a run from `start`, carried by `by`. Returns false,
+    /// writing nothing, when the Task no longer stands where `row` read it, so
+    /// two runs cannot both set out.
+    pub(crate) fn start_task_graph_run(
         &self,
         task: &TaskId,
-    ) -> StoreResult<
-        Option<(
-            CapturedGraph,
-            crate::graph::runner::ExecutionCursor,
-            String,
-            LfProcess,
-        )>,
-    > {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let Some(row) = workflow_row(&conn, task)? else {
-            return Ok(None);
-        };
-        let Some((edge, carrier)) = row.edge else {
-            return Ok(None);
-        };
-        let Some(start) = row.routes[edge as usize].start.clone() else {
-            return Ok(None);
-        };
-        let name = row.definition.edges[edge as usize].name.clone();
-        Ok(Some((row.graph, start, name, carrier)))
-    }
-
-    /// Leave by `edge`, one of `workflow.outgoing`. An edge with a Graph puts
-    /// the Task on it, carried by `by`; one that runs nothing puts it at its
-    /// target. Returns false, writing nothing, when the Task is no longer
-    /// where `workflow` read it, so two choosers cannot both leave.
-    pub(crate) fn choose_workflow_edge(
-        &self,
-        task: &TaskId,
-        workflow: &Workflow,
-        edge: u32,
+        row: &TaskGraphRow,
+        start: &ExecutionCursor,
         by: &LfProcessId,
-        note: Option<&str>,
+        ships: bool,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let left = choose_edge_in(&tx, task, workflow, edge, Some(by), note)?;
+        let stopped = row.run.as_ref().map(|(_, process)| &process.id);
+        let started = start_run_in(&tx, task, (&row.step, stopped), start, by, ships)?;
         tx.commit()?;
-        Ok(left)
+        Ok(started)
     }
 
-    /// The edge `by` carried the Task along succeeded: put the Task at its
-    /// target. A Task no longer on that edge stays where it was put.
-    pub(crate) fn arrive_workflow_edge(&self, task: &TaskId, by: &LfProcessId) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction()?;
-        arrive_in(&tx, task, by)?;
-        Ok(tx.commit()?)
-    }
-
-    /// Put the Task at `node` of its Workflow, running nothing. Returns
-    /// false when the Task has no Workflow.
-    pub(crate) fn set_workflow_node(
+    /// The run `carrier` carries stopped at `step` (or reached `end`): put the
+    /// Task there. Returns whether it reached `end`, requesting completion.
+    pub(crate) fn arrive_task_graph(
         &self,
         task: &TaskId,
-        node: &str,
-        by: &LfProcessId,
-        note: Option<&str>,
+        carrier: &LfProcessId,
+        step: &str,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let set = set_node_in(&tx, task, node, Some(by), note)?;
+        let ended = arrive_in(&tx, task, carrier, step)?;
+        tx.commit()?;
+        Ok(ended)
+    }
+
+    /// Put the Task at `end` with nothing left to run, requesting completion.
+    /// Returns whether it reached `end` now.
+    pub(crate) fn end_task_graph(&self, task: &TaskId, by: &LfProcessId) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let ended = tx.execute(
+            "UPDATE task_graphs SET step=?2,updated_at=?3 WHERE task_id=?1 AND step!=?2 AND lf_process_id IS NULL",
+            rusqlite::params![task.as_str(), END, crate::store::rows::now_unix()],
+        )? > 0;
+        if ended {
+            ship_in(&tx, task, by, "its run reached the end")?;
+            super::children::request_completion_in(&tx, task, None)?;
+        }
+        tx.commit()?;
+        Ok(ended)
+    }
+
+    /// Put the Task at `step` without running anything. Returns false when the
+    /// Task has no Graph.
+    pub(crate) fn set_task_graph_step(&self, task: &TaskId, step: &str) -> StoreResult<bool> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction()?;
+        let set = set_step_in(&tx, task, step)?;
         tx.commit()?;
         Ok(set)
     }
@@ -1116,23 +812,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The node `by`'s edge enters, while the Task is still on that edge.
-    pub(crate) fn workflow_edge_target(
-        &self,
-        task: &TaskId,
-        by: &LfProcessId,
-    ) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(match workflow_row(&conn, task)? {
-            Some(WorkflowRow {
-                definition,
-                edge: Some((edge, carrier)),
-                ..
-            }) if &carrier.id == by => Some(definition.edges[edge as usize].to.clone()),
-            _ => None,
-        })
-    }
-
     /// Each Task's most recently launched Graph, read for every Task at once.
     pub(crate) fn latest_task_graphs(
         &self,
@@ -1164,7 +843,7 @@ mod tests {
     use crate::store::sqlite::SqliteStore;
 
     #[test]
-    fn pause_holds_the_lifecycle_and_a_route_into_end_ships() {
+    fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
         let store = SqliteStore::open_ephemeral(&path).unwrap();
@@ -1218,7 +897,7 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-        let definition = crate::workflow::CapturedGraph {
+        let definition = crate::task_graph::CapturedGraph {
             name: "proof".into(),
             steps: vec![crate::graph::ConcreteStep::Skill(
                 crate::graph::ConcreteSkill {
@@ -1230,10 +909,10 @@ mod tests {
                 },
             )],
         };
-        store
-            .take_up_workflow(&task, &definition, &by, None)
-            .unwrap();
-        let before = store.workflow(&task).unwrap().unwrap();
+        store.take_up_task_graph(&task, &definition).unwrap();
+        let before = store.task_graph(&task).unwrap().unwrap();
+        let row = store.task_graph_row(&task).unwrap().unwrap();
+        let start = crate::graph::runner::ExecutionCursor::default();
         store.set_task_deferred(&task, true).unwrap();
         store.set_task_deferred(&task, true).unwrap();
         assert_eq!(
@@ -1241,9 +920,9 @@ mod tests {
             crate::durable::TaskState::Deferred
         );
         assert!(store
-            .choose_workflow_edge(&task, &before, 0, &LfProcessId::new(), None)
+            .start_task_graph_run(&task, &row, &start, &LfProcessId::new(), true)
             .is_err());
-        assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
+        assert_eq!(store.task_graph(&task).unwrap().unwrap(), before);
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         assert_eq!(
@@ -1255,15 +934,19 @@ mod tests {
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Idle
         );
-        assert_eq!(store.workflow(&task).unwrap().unwrap(), before);
+        assert_eq!(store.task_graph(&task).unwrap().unwrap(), before);
         assert_eq!(
             store.task(&task).unwrap().unwrap().worktree,
             Some(std::path::PathBuf::from("/repo/task"))
         );
 
-        // No stage remains on the route into `end`: taking it hands the Task off.
+        // No interactive step remains ahead: running it hands the Task off.
         assert!(store
-            .choose_workflow_edge(&task, &before, 0, &by, None)
+            .start_task_graph_run(&task, &row, &start, &by, true)
+            .unwrap());
+        // A second run reading the same position cannot also set out.
+        assert!(!store
+            .start_task_graph_run(&task, &row, &start, &LfProcessId::new(), true)
             .unwrap());
         let state = || store.task_state(&task).unwrap();
         assert_eq!(state(), crate::durable::TaskState::Shipping);
@@ -1292,7 +975,7 @@ mod tests {
         // Shipping again keeps when it began.
         let again = store.ship_task(&task, &by, "again").unwrap();
         assert_eq!(again.shipped_at, shipping.shipped_at);
-        // Stop withdraws the approval; the route still running keeps it moving.
+        // Stop withdraws the approval; the run still going keeps it moving.
         assert_eq!(store.stop_shipping(&task, "stop").unwrap(), Some(shipping));
         assert_eq!(state(), crate::durable::TaskState::Moving);
         assert_eq!(store.stop_shipping(&task, "stop").unwrap(), None);
@@ -1325,22 +1008,43 @@ mod tests {
             conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)",params![project.as_str(),wave]).unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
             conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,worktree,workspace_slug,branch,base_commit,created_at,updated_at,issue_title,issue_description,pm_snapshot_synced_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','/repo','proof','proof','head',1,1,'Findings','Accepted findings',1)",params![task.as_str(),project.as_str()]).unwrap();
+            let carrier = LfProcessId::new();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                params![carrier, TraceId::new()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,'{\"name\":\"findings\",\"steps\":[]}','start','{\"index\":0}',?2,1)",
+                params![task.as_str(), carrier],
+            )
+            .unwrap();
             conn.execute_batch("CREATE TRIGGER refuse_request BEFORE INSERT ON task_events WHEN json_extract(NEW.kind_json,'$.kind')='completion_requested' BEGIN SELECT RAISE(ABORT,'unavailable'); END").unwrap();
+            let at_end = |conn: &rusqlite::Connection| -> bool {
+                conn.query_row(
+                    "SELECT step='end' FROM task_graphs WHERE task_id=?1",
+                    [task.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            };
             {
                 let tx = conn.transaction().unwrap();
-                assert!(super::reach_end_in(&tx, &task, &super::EndMove::Set, None, None).is_err());
+                assert!(super::arrive_in(&tx, &task, &carrier, super::END).is_err());
             }
-            assert!(!super::stands_at_end(&conn, &task).unwrap());
+            assert!(!at_end(&conn));
+            assert!(super::shipping_in(&conn, &task).unwrap().is_none());
             conn.execute_batch("DROP TRIGGER refuse_request").unwrap();
             let tx = conn.transaction().unwrap();
-            assert!(super::reach_end_in(&tx, &task, &super::EndMove::Set, None, None).unwrap());
+            assert!(super::arrive_in(&tx, &task, &carrier, super::END).unwrap());
             tx.commit().unwrap();
         }
+        assert!(store.task_shipping(&task).unwrap().is_some());
         let (request, _) = store.task_completion_pending(&task).unwrap().unwrap();
         store
             .fail_task_completion(&task, request, "provider unavailable")
             .unwrap();
-        let workflow = store.workflow(&task).unwrap();
+        let graph = store.task_graph(&task).unwrap();
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
         assert_eq!(
@@ -1351,7 +1055,7 @@ mod tests {
         assert!(store.complete_task(&retained, request).unwrap());
         assert!(store.complete_task(&retained, request).unwrap());
         assert!(store.task_completion_pending(&task).unwrap().is_none());
-        assert_eq!(store.workflow(&task).unwrap(), workflow);
+        assert_eq!(store.task_graph(&task).unwrap(), graph);
         let conn = store.conn.lock().unwrap();
         assert_eq!(
             super::super::durable::task_state_in(&conn, &task).unwrap(),
@@ -1363,11 +1067,56 @@ mod tests {
         store.reopen_task(&task, Some("Continue findings")).unwrap();
         assert!(!store.complete_task(&retained, request).unwrap());
         assert!(store.task_completion_pending(&task).unwrap().is_none());
-        assert_eq!(store.workflow(&task).unwrap(), workflow);
+        assert_eq!(store.task_graph(&task).unwrap(), graph);
         assert_ne!(
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Done
         );
+    }
+
+    #[test]
+    fn reaching_end_without_remaining_steps_approves_shipping() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("db")).unwrap();
+        let task = TaskId::new();
+        let by = LfProcessId::new();
+        store
+            .create_task(&crate::work::task::NewTask {
+                repository_id: store.ensure_repository("/repo").unwrap(),
+                id: task.clone(),
+                project_id: None,
+                title: "Finish review".into(),
+                description: "No steps remain".into(),
+                due_date: None,
+            })
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                params![by, TraceId::new()],
+            )
+            .unwrap();
+        store
+            .take_up_task_graph(
+                &task,
+                &crate::task_graph::CapturedGraph {
+                    name: "review".into(),
+                    steps: Vec::new(),
+                },
+            )
+            .unwrap();
+        store.set_task_graph_step(&task, "review").unwrap();
+        assert!(store.task_shipping(&task).unwrap().is_none());
+        assert!(store.end_task_graph(&task, &by).unwrap());
+        assert!(store.task_completion_pending(&task).unwrap().is_some());
+        assert_eq!(
+            store.task_shipping(&task).unwrap().unwrap().process,
+            Some(by.clone())
+        );
+        assert!(!store.end_task_graph(&task, &by).unwrap());
     }
 
     #[test]

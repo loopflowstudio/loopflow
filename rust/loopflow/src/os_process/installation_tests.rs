@@ -68,6 +68,7 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
         home: home.clone(),
         wave: None,
         skill_file: None,
+        submitted_docs: None,
         references: Vec::new(),
     };
     let delivery_path = files.path().join("delivery.json");

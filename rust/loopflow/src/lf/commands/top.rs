@@ -81,6 +81,8 @@ pub struct ProcessPruneReport {
     pub orphaned_agent_process_groups: Vec<u32>,
     pub reaped_agent_process_groups: u32,
     pub agent_process_records: Vec<crate::harness::agent_process::AgentProcessCleanup>,
+    /// Store retention; absent on a dry run or before the store exists.
+    pub store: Option<crate::store::sqlite::retention::RetentionReport>,
     pub errors: u32,
 }
 
@@ -178,9 +180,22 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
         orphaned_agent_process_groups: agents.orphaned,
         reaped_agent_process_groups: agents.reaped,
         agent_process_records: agents.records,
+        store: None,
         errors: u32::try_from(agents.errors.len()).unwrap_or(u32::MAX),
     };
     if !dry_run {
+        // Retention closes rows from receipt evidence, so it runs before
+        // their receipts go.
+        let database = crate::store::database_path_from_env()?;
+        if database.exists() {
+            match crate::store::sqlite::retention::prune(&database, now) {
+                Ok(store) => report.store = Some(store),
+                Err(error) => {
+                    tracing::warn!(%error, "failed to apply store retention");
+                    report.errors += 1;
+                }
+            }
+        }
         match prune_process_receipts_at(&lf_home, &report.stale_process_receipt_pids) {
             Ok(removed) => report.removed_process_receipts = removed,
             Err(error) => {
@@ -219,22 +234,6 @@ fn stale_process_receipt_pids(processes: &[OsProcess], receipts: &[ProcessReceip
     stale_process_receipt_pids.dedup();
 
     stale_process_receipt_pids
-}
-
-/// Remove receipts of dead Processes that finished or never got a row; a dry
-/// run counts the receipts of dead PIDs instead.
-pub(crate) fn prune_dead_process_receipts(lf_home: &Path, dry_run: bool) -> Result<u32> {
-    let processes = OsProcess::sample(OffsetDateTime::now_utc().unix_timestamp())?;
-    let receipts = read_process_receipts_at(lf_home).context("failed to read Process receipts")?;
-    let stale = stale_process_receipt_pids(&processes, &receipts);
-    if dry_run {
-        let count = receipts
-            .iter()
-            .filter(|receipt| stale.binary_search(&receipt.pid).is_ok())
-            .count();
-        return Ok(u32::try_from(count).unwrap_or(u32::MAX));
-    }
-    Ok(prune_process_receipts_at(lf_home, &stale)?)
 }
 
 pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
@@ -536,6 +535,15 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
         output.push_str(&format!(
             "removed {} receipts · reaped {} process groups\n",
             report.removed_process_receipts, report.reaped_agent_process_groups,
+        ));
+    }
+    if let Some(store) = &report.store {
+        output.push_str(&format!(
+            "store: compacted {} usage rows · closed {} dead Processes · forgot {} finished{}\n",
+            store.usage_rows,
+            store.closed_processes,
+            store.forgotten_processes,
+            if store.vacuumed { " · vacuumed" } else { "" },
         ));
     }
     output

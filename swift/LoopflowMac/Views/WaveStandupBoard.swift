@@ -223,10 +223,10 @@ struct WaveStandupBoard: View {
                 }.accessibilityIdentifier("wave-project-history")
                 Button("Realign Projects…") { showRealignment = true }
                     .accessibilityIdentifier("wave-realign-projects")
-                if let workflow = roadmap.workflow {
+                if let workflow = roadmap.graph {
                     Button("Workflow · \(workflow)") {
                         Task {
-                            await model.loadWorkflowCatalog()
+                            await model.loadGraphCatalog()
                             model.navigation.palette = .workflow(workflow)
                         }
                     }.accessibilityIdentifier("wave-workflow")

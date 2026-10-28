@@ -539,18 +539,18 @@ struct WorkModelStreamTests {
         let work = try String(contentsOf: workURL, encoding: .utf8)
         await feed.send(try fixture.frame("task", sequence: 2, answers: scope.id,
             body: "{\"task\":\"\(found.task.task.identifier)\",\"work\":\(work),\"comments\":{\"identifier\":\"\(found.task.task.identifier)\",\"comments\":[],\"conflicts\":{},\"pending_sync\":[],\"refresh_error\":null},\"graph_processes\":[]}"))
-        try await eventually { model.taskWork[found.task.id].value?.workflow != nil }
-        let workflow = model.taskWork[found.task.id].value?.workflow
+        try await eventually { model.taskWork[found.task.id].value?.graph != nil }
+        let workflow = model.taskWork[found.task.id].value?.graph
         await feed.send(WorkFrame(sequence: 3, answers: scope.id, home: "/home", copy: nil, revisions: nil,
             unavailable: "sqlite: no such column: t.paused", content: .planning(nil), wire: nil))
         try await eventually { model.roadmap.errorMessage != nil }
-        #expect(model.taskWork[found.task.id].value?.workflow == workflow)
+        #expect(model.taskWork[found.task.id].value?.graph == workflow)
         let header = TaskWorkflowHeader(model: model, task: found.task, work: model.taskWork[found.task.id])
         #expect(throws: (any Error).self) { try header.inspect().find(text: "No workflow yet") }
         #expect(try header.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-move").isDisabled())
         await feed.fail(RegistryQueryError("reader exited"))
         try await eventually { model.taskWork[found.task.id].errorMessage == "reader exited" }
-        #expect(model.taskWork[found.task.id].value?.workflow == workflow)
+        #expect(model.taskWork[found.task.id].value?.graph == workflow)
     }
 
     @Test("Peer status updates independently, preserves failures and rejects old scopes")
@@ -744,7 +744,7 @@ struct WorkModelStreamTests {
         let feed = WorkFeed()
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/workflow_catalog.json")
+            .appendingPathComponent("tests/fixtures/dto/graph_catalog.json")
         let original = try String(contentsOf: path, encoding: .utf8)
         actor Catalog {
             var content: String
@@ -761,7 +761,7 @@ struct WorkModelStreamTests {
         }
         let catalog = Catalog(original)
         let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
-            guard args.starts(with: ["wave", "workflow", "list"]) else {
+            guard args.starts(with: ["graph", "list"]) else {
                 throw RegistryQueryError("unexpected catalogue operation")
             }
             return try await catalog.read()
@@ -782,7 +782,7 @@ struct WorkModelStreamTests {
         await feed.send(try heartbeat(2, planning: 1, sessions: 1))
         await feed.send(try fixture.planningFrame(sequence: 3, answers: nil))
         try await eventually { model.planningSequence == 3 }
-        await model.loadWorkflowCatalog()
+        await model.loadGraphCatalog()
         try await eventually { model.workflowCatalog.value?.isEmpty == false }
         let baseline = await catalog.reads
         await catalog.update("[]")
@@ -794,9 +794,10 @@ struct WorkModelStreamTests {
         await feed.send(try heartbeat(6, planning: 2, sessions: 2))
         try await eventually { model.workflowCatalog.value?.isEmpty == true }
         #expect(await catalog.reads == baseline + 1)
+        // Both catalogues are one read: returning from an editor rereads it once.
         await model.rereadDefinitions()
         #expect(await catalog.reads == baseline + 2)
-        #expect(model.graphCatalog.isLoading, "An unopened catalogue stays unread on editor return")
+        #expect(model.graphCatalog.value?.isEmpty == true)
         await catalog.fail()
         await feed.send(try heartbeat(7, planning: 3, sessions: 2))
         try await eventually { model.workflowCatalog.errorMessage == "catalog unavailable" }
@@ -818,9 +819,9 @@ struct WorkModelStreamTests {
         }
         let source = Source()
         let model = WorkModel(query: RegistryQuery { _, _ in await source.read(deferred) })
-        let old = Task { await model.loadWorkflowCatalog() }
+        let old = Task { await model.loadGraphCatalog() }
         await deferred.waitUntilRequested()
-        await model.loadWorkflowCatalog(force: true)
+        await model.loadGraphCatalog(force: true)
         await deferred.release("invalid old response")
         await old.value
         #expect(model.workflowCatalog.value?.isEmpty == true)

@@ -65,6 +65,7 @@ fn hook_refreshes_checkout_ancestors_and_scratch_without_replaying_the_request()
         repo: repo_path,
         wave: Some("parent/child".into()),
         skill_file: Some(repo.path().join("active.md")),
+        submitted_docs: None,
         references: Vec::new(),
         home: home.path().join("machine"),
     };
@@ -159,6 +160,7 @@ fn hook_after_repository_move_reads_retained_skill_and_current_scratch() {
         repo: old.clone(),
         wave: None,
         skill_file: Some(old.join("active.md")),
+        submitted_docs: None,
         references: Vec::new(),
         home: home.path().join("machine"),
     };

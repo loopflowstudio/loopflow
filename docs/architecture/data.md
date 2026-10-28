@@ -39,8 +39,8 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Native starts, outcomes, retries and usage | LfSession history, correlated to native turn and driving Process |
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
 | A Graph's name, launched graph and each step's node | GraphProcess: `graph_processes` and `graph_process_steps`, appended by the Graph process |
-| A Task's Workflow: its graph, position and moves | `task_workflows`, one row per Task updated in place, and append-only `task_workflow_moves`; written by `lf task run` and `lf task workflow move` |
-| A Task's state: not ready, ready, active, done | Read from its `task_workflows` position; never stored. `tasks.abandoned_at` is the one mark beside it |
+| A Task's graph and the step it stands at | `task_graphs`, one row per Task updated in place; written only by `lf task run` and its child Graph process |
+| A Task's state: unstarted, idle, active, moving, shipping, deferred, done | Read from its checkout, `task_graphs` step, running Graph and Auto-Ship approval; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
 | Credentials and provider-native conversation files | The selected provider account's native Machine |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |

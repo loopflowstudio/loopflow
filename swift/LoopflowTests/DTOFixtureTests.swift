@@ -112,35 +112,22 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode([TaskCheckoutExplanation].self, from: JSONEncoder().encode(reports)) == reports)
     }
 
-    @Test func taskMoveExplanationsPreservePositionsAndCompletionUncertainty() throws {
-        let data = try loadFixtureData("task_move_explanations.json")
-        let reports = try JSONDecoder().decode([TaskMoveExplanation].self, from: data)
-        #expect(reports[0].action?.from == .edge(index: 1, lfProcessId: "process-retained", running: true))
-        #expect(reports[0].action?.to == "start")
-        #expect(reports[0].action?.reason == "Restart Workflow")
-        #expect(reports[1].action?.workflow == nil)
-        #expect(reports[1].action?.from == nil)
-        #expect(reports[1].action?.to == "end")
-        #expect(!reports[1].unavailable.isEmpty)
-        #expect(reports[2].action == nil)
-        #expect(try JSONDecoder().decode([TaskMoveExplanation].self, from: JSONEncoder().encode(reports)) == reports)
-        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        var action = try #require(wire[0]["action"] as? [String: Any])
-        action.removeValue(forKey: "to")
-        wire[0]["action"] = action
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode([TaskMoveExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
-        }
-    }
-
     @Test func taskRunExplanationsPreserveActionsAndMissingEvidence() throws {
         let data = try loadFixtureData("task_run_explanations.json")
         let reports = try JSONDecoder().decode([TaskRunExplanation].self, from: data)
-        #expect(reports[0].action == .edge(workflow: "feature", takeUp: true, from: "start", to: "review-design", name: "kickoff", runs: true))
-        #expect(reports[1].action == .edge(workflow: "feature", takeUp: false, from: "review-design", to: "end", name: "end", runs: false))
-        #expect(reports[2].action == .edge(workflow: "proof", takeUp: false, from: "start", to: "end", name: "proof", runs: true))
+        #expect(reports[0].action == .run(graph: "feature", takeUp: true, from: "start", stopsAt: "explore"))
+        #expect(reports[1].action == .wait(graph: "feature", takeUp: false, step: "demo"))
+        #expect(reports[2].action == .end(graph: "proof", takeUp: false))
         #expect(reports[3].action == nil)
         #expect(try JSONDecoder().decode([TaskRunExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        // A run to the end says so with an explicit null.
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        var action = try #require(wire[0]["action"] as? [String: Any])
+        action.removeValue(forKey: "stops_at")
+        wire[0]["action"] = action
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode([TaskRunExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+        }
     }
 
     @Test func contextExplanationPreservesAvailabilityAndProvenance() throws {
@@ -311,13 +298,12 @@ struct DTOFixtureTests {
         let before = try merged.taskPart()
         let during = try completed.taskPart()
         let after = try arrived.taskPart()
-        #expect(before.work.workflow == during.work.workflow)
-        guard case .edge(_, _, true) = during.work.workflow?.position else {
-            Issue.record("Completed Task lost its live edge")
+        #expect(before.work.graph == during.work.graph)
+        guard case .run(_, _, true) = during.work.graph?.position else {
+            Issue.record("Completed Task lost its live run")
             return
         }
-        #expect(after.work.workflow?.position == .node("end"))
-        #expect(after.work.workflow?.history.last?.kind == .arrived)
+        #expect(after.work.graph?.position == .at(step: "end"))
         #expect(before.graphProcesses.count == 1 && after.graphProcesses.count == 1)
         #expect(before.graphProcesses[0].entry.id == after.graphProcesses[0].entry.id)
         #expect(after.graphProcesses[0].steps.allSatisfy { $0.outcome == "succeeded" })
@@ -363,10 +349,10 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Task overview reads Workflow without diagnostic history")
+    @Test("Task overview reads its graph without diagnostic history")
     func taskOverviewFixture() throws {
         let overview = try JSONDecoder().decode(TaskOverview.self, from: loadFixtureData("task_overview.json"))
-        #expect(overview.workflow != nil)
+        #expect(overview.graph != nil)
         #expect(overview.sessions.count == 2)
         #expect(overview.graphProcesses.count == 1)
     }
@@ -381,23 +367,21 @@ struct DTOFixtureTests {
         #expect(work.graphProcesses[0].name == "pursue")
         #expect(work.graphProcesses[0].state == .current)
         #expect(!work.processes.isEmpty)
-        let workflow = try #require(work.workflow)
-        #expect(workflow.nodes.map(\.name) == ["review-design", "demo"])
-        #expect(workflow.nodes.map(\.description) == ["you review the plan", "you try the change"])
-        #expect(workflow.edges.last?.name == "deliver")
-        // An edge that runs nothing is named by the end it enters.
-        let research = try JSONDecoder().decode([WorkflowCatalogEntry].self, from: loadFixtureData("workflow_catalog.json"))
-            .first { $0.name == "research" }?.workflow
-        #expect(research?.edges.last?.name == "end")
-        #expect(workflow.position == .edge(index: 2, lfProcessId: work.graphProcesses[0].id, running: true))
-        #expect(workflow.outgoing.isEmpty)
-        #expect(workflow.history.map(\.kind) == [.set, .tookUp, .chose, .arrived, .chose])
-        #expect(workflow.history.map(\.actor) == [.person, .person, .person, .edge, .conversation])
-        // A move no registered process made names no Process.
-        #expect(workflow.history[0].lfProcessId == nil)
-        #expect(workflow.history.last?.sessionId == work.sessions[0].id)
-        #expect(workflow.history.last?.note == "take the smaller approach")
+        let graph = try #require(work.graph)
+        #expect(graph.name == "feature")
+        #expect(graph.interactiveSteps.map(\.name) == ["review-design", "demo"])
+        #expect(graph.interactiveSteps.map(\.description) == ["you review the plan", "you try the change"])
+        #expect(graph.position == .run(step: "review-design", lfProcessId: work.graphProcesses[0].id, running: true))
+        #expect(graph.waitingStep == nil)
         #expect(try JSONDecoder().decode(TaskWork.self, from: JSONEncoder().encode(work)) == work)
+        // Every position field is required.
+        var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var wireGraph = try #require(wire["graph"] as? [String: Any])
+        wireGraph["position"] = ["kind": "run", "step": "review-design", "lf_process_id": "p"]
+        wire["graph"] = wireGraph
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskWork.self, from: JSONSerialization.data(withJSONObject: wire))
+        }
     }
 
     @Test("A Graph process keeps its launched graph and every step, and requires each field")

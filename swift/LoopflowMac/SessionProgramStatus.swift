@@ -1,7 +1,7 @@
 import Foundation
 import Loopflow
 
-/// Presentation of shared Session evidence; never Task completion or Workflow state.
+/// Presentation of shared Session evidence; never Task completion or graph position.
 enum SessionProgramStatus {
     case reported(SessionRecord, ProgramStatusReport)
     case available(SessionRecord)

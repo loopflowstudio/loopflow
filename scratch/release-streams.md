@@ -118,13 +118,29 @@ working and tested before the next starts.
    days old with no open `regressed_in` Task covering it). The release run moves
    them forward only, and publishes each package's reader catalog beside
    `SHA256SUMS`.
+   **Where the pointers live (concept review, 2026-10-28).** Every way in today
+   reads GitHub's "Latest" marker: `install.sh` (`releases/latest`), the website
+   and `lf machine`'s `INSTALL_COMMAND` (`releases/latest/download/install.sh`),
+   and `install/published.rs`. `release_publish --finalize` sets it on every
+   release (`gh release edit --draft=false --latest`), so today "latest" is
+   `preview`. New installs default to `stable` (decided), so GitHub's Latest
+   marker *becomes* the `stable` pointer: finalize publishes with
+   `--latest=false` (explicitly; GitHub otherwise picks one itself), and the
+   daily release run moves Latest forward to the stable candidate. `preview` is
+   the newest published, non-draft release tag. Each pointer is only a tag; the
+   package carries its own catalog, so no stream manifest file is needed.
+   GitHub doesn't keep pointers moving forward, so the run refuses to move one
+   back. Every existing URL keeps meaning "what a new install gets".
 3. **`regressed_in` Task field** and the stable rule reading it.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default
    stable; switching slower runs `can_open` first. `install.sh --channel`.
 5. **One lf, linked.** `~/.local/bin/lf` links into Loopflow.app or a versions
-   directory; `lf install` on a Mac with the app updates the app (directly when
-   it isn't running, by asking it when it is).
+   directory; `lf install` on a Mac with the app updates the app. How it does
+   that is still open (see Open): the Decided section has Sparkle as the only
+   updater on a Mac with the app, while Jack's later lean ("1 c?") has `lf
+   install` swap the bundle itself when the app isn't running. Settle before
+   slice 5; it doesn't affect slices 2–4.
 6. **Self-update.** Daily scheduled `lf install` on the recorded stream (Linux,
    headless); the in-place promotion entry point for an app updated in place.
 7. **Sparkle, one appcast per stream**, EdDSA key in Doppler, Developer ID

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-669 concept review — release streams</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1d1f;--bg:#fdfdfc;--mute:#666;--rule:#ddd;--new:#1a7f37;--old:#9a3412;--code:#f2f1ee}
+@media(prefers-color-scheme:dark){:root{--fg:#e8e6e3;--bg:#161616;--mute:#9a9a9a;--rule:#333;--new:#4ade80;--old:#fb923c;--code:#222}}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.6 -apple-system,system-ui,sans-serif}
+main{max-width:44rem;margin:0 auto;padding:3rem 1.25rem 5rem}
+h1{font-size:1.6rem;line-height:1.25;margin:0 0 .4rem}h2{font-size:1.15rem;margin:2.6rem 0 .6rem}
+.meta{color:var(--mute);font-size:.9rem}
+code{background:var(--code);padding:.05em .3em;border-radius:3px;font-size:.88em}
+pre{background:var(--code);padding:.9rem 1rem;border-radius:6px;overflow-x:auto;font-size:.85rem;line-height:1.5}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem}@media(max-width:620px){.cols{grid-template-columns:1fr}}
+.old{border-left:3px solid var(--old);padding-left:.8rem}.new{border-left:3px solid var(--new);padding-left:.8rem}
+.old b,.new b{display:block;margin-bottom:.2rem}.old b{color:var(--old)}.new b{color:var(--new)}
+ol li{margin:.5rem 0}
+</style></head><body><main>
+<h1>Stable is the link everyone already uses</h1>
+<p class="meta">LOO-669 · concept-review step (headless) · 2026-10-28 · built from <code>scratch/release-streams.md</code>, <code>rust/loopflow/src/ops/release.rs</code>, <code>release/install.sh</code>, <code>lf/commands/machine.rs</code>, <code>lf/commands/install/published.rs</code></p>
+
+<p>Slice 1 (minors from main) matches the accepted design: no pairing, prepare hooks run, cycle notes from the preceding <code>.0</code>, no leftovers. Nothing to change there.</p>
+<p>The mismatch is in slice 2. Every way into Loopflow today resolves GitHub's <em>Latest</em> marker, and each release sets it. So the URL on the website delivers <code>preview</code>, while Jack decided new installs get <code>stable</code>.</p>
+
+<h2>One install, end to end</h2>
+<div class="cols">
+<div class="old"><b>Today</b>
+<pre>curl …/releases/latest/download/install.sh | sh
+  → GitHub Latest = newest release
+release_publish --finalize
+  → gh release edit --draft=false --latest</pre>
+A new user gets a release that is hours old.</div>
+<div class="new"><b>Proposed (recorded as next direction)</b>
+<pre>curl …/releases/latest/download/install.sh | sh
+  → GitHub Latest = stable pointer
+release_publish --finalize
+  → gh release edit --draft=false --latest=false
+daily release run
+  → gh release edit &lt;stable tag&gt; --latest
+    (forward only)</pre>
+Same URL, now soaked 7 days. <code>preview</code> = newest published tag.</div>
+</div>
+
+<h2>Actions → concepts → APIs</h2>
+<pre>install fresh         stable   GitHub Latest marker (existing URLs)
+lf install --preview  preview  newest non-draft release tag
+lf install --dev      dev      Packages (main) artifact (#1755)
+release a version     release  lf release run patch|minor  → preview only
+soak passes           stable   daily run moves Latest forward
+regression filed      Task     regressed_in holds stable back (slice 3)</pre>
+<p>Each pointer is only a tag; the package carries its reader catalog. No stream manifest file.</p>
+
+<h2>Still open, not blocking slices 2–4</h2>
+<p>Slice 5's text had settled how <code>lf install</code> updates the app on a Mac. The Decided section says Sparkle is the only updater; Jack's later lean ("1 c?") has <code>lf install</code> swap the bundle when the app isn't running. The build order now points at that open item instead of choosing.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>GitHub Latest as the stable pointer: (a) yes (b) keep Latest = preview and publish a separate stable pointer</li>
+<li>Updating the app from <code>lf install</code>: (a) always ask the app / Sparkle (b) swap the bundle when the app isn't running, ask it when it is</li>
+</ol>
+</main></body></html>

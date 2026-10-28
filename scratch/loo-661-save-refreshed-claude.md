@@ -40,6 +40,25 @@ Browser reconnection unblocks live diagnosis only: `invalid_grant` returns befor
 OAuth rotation because refresh precedes saving without a shared transaction.
 Neither dependency relaxes the preservation requirement or proves a native writer.
 
+### Planning decision, 2026-10-28
+
+Retain this draft and its complete acceptance scope. Source inspection still finds
+the `security -i` transport and refresh-before-save order; no replacement has been
+implemented. The next useful evidence is a supported writer with exact native
+replacement and failure-preservation proof, not another diagnostic-only change.
+This is a technical mechanism gap, not missing permission for ordinary repair.
+If resolving it requires changing storage authority, provider refresh ownership or
+trust policy, that changed outcome needs Jack Heart's decision; none is selected.
+
+Apple's [current TN3137](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+(September 24 revision, checked October 28) still distinguishes file-based ACLs
+from data-protection access groups and requires the file-based implementation for
+existing file-based items. Its latest addition concerns backup entropy files,
+not an atomic compatible replacement API. Thus it supplies no new mechanism for
+the rejected SecItem or alternate-store routes. This review proves neither public
+API exhaustion nor the historical failure's cause. No mutation probe or live
+refresh was repeated.
+
 ## Surviving implementation
 
 - `provider_auth/mod.rs::{read_claude_login,write_claude_login}` select Keychain for
@@ -166,7 +185,7 @@ establish installed binary equivalence or exhaust public interfaces.
 
 ## Remaining implementation and acceptance
 
-1. Prove a distinct supported mechanism addressing findings 35–37 on disposable
+1. **This slice — mechanism proof (blocked).** Prove a distinct supported mechanism addressing findings 35–37 on disposable
    synthetic items before replacing the production transport and exclusive fixture.
    Preserve JSON validation, readback, managed login locking, replacement checks,
    omitted refresh tokens, unknown fields and the 15-second HTTP timeout. No extra
@@ -231,4 +250,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 realign); fetched main remains `635d99fee`, source and plan agree, memory/scratch fit; no code changes or test rerun; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); source and current Apple guidance rechecked, memory/scratch fit; prose only, no test rerun or native probe; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.

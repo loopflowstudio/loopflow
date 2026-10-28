@@ -16,6 +16,9 @@ The compress receipt at
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-6l3nxoyh/receipt.json`
 records checkpoint `d030ff821` with `moved: false` and source absent; it proves no telemetry move.
 
-This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-0v453nev/tmp`
+The preceding realign reservation and receipt remain in
+`94037bca4e66b681d4fa1d0063dd4c31dcc89e3c:scratch/questions.md`.
+
+This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-1qsz1lmd/tmp`
 for fresh telemetry after checkpointing. Its sibling `receipt.json` records the
 checkpoint and verified move, or source absence. A reservation alone proves no archive.

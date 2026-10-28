@@ -39,7 +39,13 @@ struct Machine {
 }
 
 fn lf(home: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new(loopflow_test_support::lf_binary());
+    let mut command = on_machine(home, Command::new(loopflow_test_support::lf_binary()));
+    command.args(args);
+    command
+}
+
+/// `command` as a process on the Machine at `home` runs, inheriting no `LF_*`.
+fn on_machine(home: &Path, mut command: Command) -> Command {
     for (key, _) in std::env::vars_os() {
         let key = key.to_string_lossy().into_owned();
         if key.starts_with("LF_") || key.starts_with("LOOPFLOW_") || key.starts_with("LINEAR_") {
@@ -47,7 +53,6 @@ fn lf(home: &Path, args: &[&str]) -> Command {
         }
     }
     command
-        .args(args)
         .current_dir(home)
         .env("LF_HOME", home)
         .env("LF_BIN", loopflow_test_support::lf_binary())
@@ -454,6 +459,52 @@ fn a_confirmation_is_answered_even_when_nothing_changed() {
             break;
         }
     }
+}
+
+#[test]
+fn a_watch_ends_with_its_parent_while_stdin_stays_open() {
+    let home = Machine::new();
+    // The parent hands its own stdin to the watch, then waits. This test keeps
+    // that pipe's write end open, so only the parent's exit can end the watch.
+    let mut parent = on_machine(home.path(), Command::new("/bin/sh"))
+        .args([
+            "-c",
+            r#"exec 3<&0; "$0" desktop plan --all --json --watch <&3 >/dev/null & echo $!; exec sleep 600"#,
+        ])
+        .arg(loopflow_test_support::lf_binary())
+        .current_dir(home.repo())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(parent.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let watch: libc::pid_t = line.trim().parse().unwrap();
+    let alive = |pid: libc::pid_t| {
+        let state = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        let state = String::from_utf8_lossy(&state.stdout);
+        !state.trim().is_empty() && !state.trim_start().starts_with('Z')
+    };
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(alive(watch), "the watch never started");
+
+    parent.kill().unwrap();
+    parent.wait().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while alive(watch) {
+        if Instant::now() > deadline {
+            // SAFETY: the orphaned watch this test started.
+            unsafe { libc::kill(watch, libc::SIGKILL) };
+            panic!("the watch outlived its parent");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    drop(parent.stdin.take());
 }
 
 #[cfg(target_os = "macos")]

@@ -131,6 +131,9 @@ where
         // only a checkout that changed on disk is asked again.
         crate::git::retain_reads();
     }
+    // Read before anything can be scheduled: a parent that exits after this
+    // is noticed even if it exits before the observer starts.
+    let parent = parent_process();
     let mut checkouts = checkouts::Checkouts::default();
     let mut followed_at = None;
     let mut stale = false;
@@ -147,7 +150,7 @@ where
     std::thread::spawn(move || read_requests(&input));
     let changes = shared.clone();
     let wal = database.clone();
-    std::thread::spawn(move || observe(&changes, &wal));
+    std::thread::spawn(move || observe(&changes, &wal, parent));
 
     let runtime = tokio::runtime::Runtime::new()?;
     let mut stdout = std::io::stdout().lock();
@@ -326,9 +329,10 @@ fn strip_reading_time(value: &mut serde_json::Value) {
 fn identity<T: Serialize>(unavailable: &Option<String>, body: &Option<T>) -> Result<[u8; 32]> {
     let mut value = serde_json::to_value(body)?;
     strip_reading_time(&mut value);
+    // Streamed: a large reading is never held a second time as bytes.
     let mut hash = Sha256::new();
-    hash.update(serde_json::to_vec(unavailable)?);
-    hash.update(serde_json::to_vec(&value)?);
+    serde_json::to_writer(&mut hash, unavailable)?;
+    serde_json::to_writer(&mut hash, &value)?;
     Ok(hash.finalize().into())
 }
 
@@ -372,15 +376,12 @@ fn read_requests<A: DeserializeOwned>(shared: &Shared<A>) {
 /// Wake the watch when the store may have changed, and close it when its
 /// parent exits: a descendant that inherited the pipe can hold stdin open
 /// long after the parent is gone.
-fn observe<A>(shared: &Shared<A>, database: &Path) {
-    #[cfg(unix)]
-    let parent = std::os::unix::process::parent_id();
+fn observe<A>(shared: &Shared<A>, database: &Path, parent: Option<u32>) {
     let mut store = StoreChanges::watch(database);
     loop {
         store.wait(CHECK);
         let mut mailbox = lock(shared);
-        #[cfg(unix)]
-        if std::os::unix::process::parent_id() != parent {
+        if parent.is_some() && parent_process() != parent {
             mailbox.closed = true;
         }
         if mailbox.closed {
@@ -390,6 +391,14 @@ fn observe<A>(shared: &Shared<A>, database: &Path) {
         mailbox.look = true;
         shared.1.notify_all();
     }
+}
+
+/// The process that started this one; an orphan is adopted by another.
+fn parent_process() -> Option<u32> {
+    #[cfg(unix)]
+    return Some(std::os::unix::process::parent_id());
+    #[cfg(not(unix))]
+    None
 }
 
 /// Follow the checkouts of the Tasks registered now and the repositories

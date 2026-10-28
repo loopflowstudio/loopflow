@@ -76,9 +76,10 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
         task: options.task.clone(),
     };
     if options.watch {
+        // History is committed facts only; the clock just ages the window.
         return super::watch::run(
             window,
-            super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
+            super::watch::Watched::every(super::watch::PLANNING_CLOCK),
             |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
         );
     }

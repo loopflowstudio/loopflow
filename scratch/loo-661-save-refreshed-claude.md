@@ -1,6 +1,8 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status: **Diagnostics only; replacement writer unproved.**
+Status: **Draft implementation mechanism; diagnostics only.**
+Kickoff reviewed 2026-10-27: replacement writer remains unproved; a new disposable
+counterexample establishes destructive failure in the existing transport (finding 30).
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
@@ -34,6 +36,23 @@ and acceptance sequence below. No product decision or authorization is pending.
 Reopen a rejected route only with a mechanism addressing its counterexample;
 the exclusions below do not exhaust public interfaces. Diagnostics alone cannot
 deliver LOO-661.
+
+## Demo and implementation decision
+
+After a naturally required refresh, `lf account claude --json` shows the same
+accepted identity and capacity, and native Claude continues using that login
+without reauthentication. Before that installed demo, the native acceptance
+fixture demonstrates exact 2/8 KiB replacement and readable old bytes after an
+injected save failure, using the production writer and existing reader together.
+
+The target remains one native writer replacing the interactive command transport,
+shared by refresh and activation. Choosing a supported atomic data/access mechanism
+is still a technical prerequisite, not an accepted design decision. On 2026-10-27,
+the agent retained Jack Heart's preservation requirements and rejected treating
+diagnostics, a size refusal, or successful API status as the repair. No tested
+candidate meets the contract; kickoff cannot declare the implementation ready.
+The failure to avoid is a reported save error that has already destroyed the
+usable login. Finding 30 now demonstrates that failure on disposable items.
 
 ## Surviving implementation
 
@@ -141,6 +160,25 @@ source/header review, except read-only installed dispatch inspection in 18.
   and abandons the provider item. Neither route resolves the partition failure.
   These were source/header/documentation reviews only; full citations remain in
   `e3f012685c:scratch/loo-661-save-refreshed-claude.md`, findings 28–29.
+- **Destructive command-boundary failure (30, 2026-10-27):**
+  `uv run python scratch/claude_command_boundary_probe.py` exercises the current
+  writer's exact command form against six disposable synthetic items. Each starts
+  with a verified 64-byte JSON value. Both 1,242-byte replacements round-trip.
+  At 2,048 and 8,192 bytes, both five- and six-character account names produce
+  writer exit 1 and reader exit 0, but the reader returns neither old nor intended
+  bytes. Read-output lengths are 3,990 and 1,994 respectively; these are CLI output
+  lengths, not an assertion about raw Keychain encoding. All six deletions succeed.
+  Each child has a 15-second timeout and is reaped; output contains only sizes,
+  booleans and statuses. No real credential, route or Session was accessed.
+  This independently reproduces twice, including the saved runner. It does not
+  invoke the compiled Rust writer or diagnose the installed account failure.
+  The earlier old-value-preserved result is specific to its fixture, not a safety
+  property of `security -i`. The published
+  [interactive loop](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/SecurityTool/macOS/security.c#L1094-L1126)
+  executes each buffer read and replaces its final status on each command. That
+  is consistent with a partial replacement followed by an error; exact installed
+  parsing/encoding was not instrumented. A nonzero writer status cannot establish
+  preservation, even when the reader remains accessible.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
@@ -151,7 +189,7 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Remaining implementation and acceptance
 
-1. Prove a supported writer's encoding, access and failure preservation, then
+1. **This slice:** prove a supported writer's encoding, access and failure preservation, then
    replace the transport and its exclusive fixture in one cut.
    Preserve JSON validation, readback, managed login locking,
    intervening-replacement checks, omitted refresh tokens, unknown fields and the
@@ -166,6 +204,8 @@ Neither limitation relaxes Jack Heart's requirements.
    selection, account and access preservation. Invalid JSON, injected pre-commit
    failure and denied/locked storage must leave old data readable; cover partition
    and partial-commit failures. Compare booleans/lengths, never values in output.
+   Include differing service/account prefix lengths from finding 30: rejected
+   oversized input must not silently replace old data with a partial value.
    Do not apply an unproved candidate to real credentials.
 3. Compile and explicitly invoke the production native writer in tests while keeping
    ordinary unit tests on files. Require nonzero executed native cases; a test
@@ -221,4 +261,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — realign (2026-10-27): `git diff --check` and `lf context` pass; prose-only reconciliation, no Rust rerun. Gate owns affected suites; native-writer and installed-refresh acceptance remain unproved.
+Check — kickoff (2026-10-27): `uv run python scratch/claude_command_boundary_probe.py` completed six cases and six cleanups, exposing four destructive failures; `git diff --check` and `lf context` pass. No Rust changes or Rust rerun; native-writer and installed-refresh acceptance remain unproved.

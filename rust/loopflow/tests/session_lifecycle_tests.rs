@@ -1865,7 +1865,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "-b", "task", "run", "INF-123", "switch-proof"], "cwd": x,
+            "argv": [env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "switch-proof"], "cwd": x,
         }))
         .unwrap(),
     )
@@ -1881,10 +1881,28 @@ fn declared_agent_can_start_another_tasks_graph() {
     )
     .unwrap();
     assert_eq!(result["code"], 0, "{result}");
-    // The run blocked until Y's Graph finished.
-    let graphs = support::recorded_graphs(fixture.home.path());
+    // A bare run returns after registration; wait for Y to stop at demo.
+    // -b would execute demo headlessly and start Y's provider.
+    let deadline = Instant::now() + PATIENCE;
+    let graphs = loop {
+        let graphs = support::recorded_graphs(fixture.home.path());
+        if graphs.first().is_some_and(|graph| graph.0.is_some()) {
+            break graphs;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Y's Graph never stopped: {graphs:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
     assert_eq!(graphs.len(), 1);
     assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
+    let status = fixture.json(&["task", "status", "INF-123", "--json"]);
+    assert_eq!(
+        status["execution"]["work"]["graph"]["position"],
+        serde_json::json!({"kind": "at", "step": "demo"})
+    );
+    assert_eq!(fixture.launches().len(), 1);
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)

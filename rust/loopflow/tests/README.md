@@ -465,10 +465,12 @@ uv run python scripts/test_task_installation.py --test task_adopts_linear_checko
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
-Agent-selection changes also require the container-only
+Agent-selection and Task launch-mode changes also require the container-only
 `declared_agent_can_start_another_tasks_graph` proof: saved Task defaults remain
 local, while explicit `-a` overrides child Tasks too. Ordinary Rust suites skip
 this installation-boundary proof.
+Fixtures that stop at an interactive step use bare `task run` and wait for the
+recorded Graph outcome; `-b` executes that step headlessly and needs a provider.
 Every ordinary installation run first upgrades populated released planning and
 Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
 historical PRs, pending completion delivery, a running Process and its Workflow,

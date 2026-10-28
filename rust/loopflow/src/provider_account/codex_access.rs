@@ -15,7 +15,9 @@ use crate::provider_auth::{
     codex::Connection, codex_identity_from_credential, codex_identity_from_home, Provider,
 };
 use crate::store::ProviderAccount;
-use crate::subscription::{codex_connection, codex_usage, SubscriptionError, SubscriptionUsage};
+use crate::subscription::{
+    codex_connection, codex_usage, CodexUsageError, SubscriptionError, SubscriptionUsage,
+};
 
 struct Credential {
     home: PathBuf,
@@ -184,7 +186,11 @@ async fn observe(
     if !credential.unchanged() {
         return Err(ObserveError::Changed);
     }
-    if matches!(usage, Err(SubscriptionError::NeedsLogin(_))) && !*refreshed {
+    if matches!(
+        usage,
+        Err(CodexUsageError::Access(SubscriptionError::NeedsLogin(_)))
+    ) && !*refreshed
+    {
         *refreshed = true;
         usage = codex_usage(&mut connection, home, true).await;
         // A refresh may have changed the bytes. Re-observe those bytes on a
@@ -193,6 +199,14 @@ async fn observe(
             return Err(ObserveError::Changed);
         }
     }
+    let usage = match usage {
+        // A different identity is not a rejected token: neither refresh nor
+        // another credential copy can repair the account the server reported.
+        Err(CodexUsageError::Identity(reason)) => {
+            return Err(SubscriptionError::NeedsLogin(reason).into());
+        }
+        result => result.map_err(SubscriptionError::from),
+    };
     if let Ok(usage) = &usage {
         validate_identity(account, &usage.identity, &[]).map_err(SubscriptionError::NeedsLogin)?;
     }

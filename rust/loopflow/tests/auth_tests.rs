@@ -874,14 +874,17 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
 #[test]
 fn account_read_failure_preserves_credentials_unless_revoked() {
     let home = tempfile::tempdir().unwrap();
-    let codex = r#"#!/bin/sh
-read -r initialize
-echo '{"id":1,"result":{}}'
-read -r initialized
-read -r account
-printf '{"id":2,"error":{"code":%s,"message":"fixture failure"}}\n' "$LF_TEST_ACCOUNT_ERROR"
-read -r limits
-echo '{"id":3,"result":{"rateLimits":{}}}'
+    let codex = r#"#!/usr/bin/env python3
+import json, os, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if 'id' not in request:
+        continue
+    response = {'id': request['id'], 'result': {}}
+    if request['method'] == 'account/read':
+        response = {'id': request['id'], 'error': {
+            'code': int(os.environ['LF_TEST_ACCOUNT_ERROR']), 'message': 'fixture failure'}}
+    print(json.dumps(response), flush=True)
 "#;
     let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1383,6 +1386,21 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         .session_history(&session, 0, 0)
         .unwrap()
         .starts_with(&history));
+    let listing = run(&["history", "list", "--json"]);
+    let listing: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
+    assert!(!listing["entries"].as_array().unwrap().is_empty());
+    let usage = run(&["usage", "--json"]);
+    let usage: serde_json::Value = serde_json::from_slice(&usage.stdout).unwrap();
+    let captures: Vec<_> = usage
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["session_id"] == session)
+        .map(|row| row["captured"].as_i64().unwrap())
+        .collect();
+    assert!(captures.contains(&prior.captured.unwrap()));
+    assert!(captures.contains(&resumed.captured.unwrap()));
+    run(&["doctor", "--json"]);
     let routed: String = db
         .query_row(
             "SELECT account_id FROM provider_session_accounts WHERE provider_session_id=?1",

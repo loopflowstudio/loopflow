@@ -430,16 +430,33 @@ async fn codex_request(
         })
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CodexUsageError {
+    #[error(transparent)]
+    Access(#[from] SubscriptionError),
+    #[error("{0}")]
+    Identity(String),
+}
+
+impl From<CodexUsageError> for SubscriptionError {
+    fn from(error: CodexUsageError) -> Self {
+        match error {
+            CodexUsageError::Access(error) => error,
+            CodexUsageError::Identity(reason) => Self::NeedsLogin(reason),
+        }
+    }
+}
+
 pub(crate) async fn codex_usage(
     connection: &mut crate::provider_auth::codex::Connection,
     home: &Path,
     refresh: bool,
-) -> Result<SubscriptionUsage, SubscriptionError> {
+) -> Result<SubscriptionUsage, CodexUsageError> {
     let account_response =
         codex_request(connection, "account/read", json!({"refreshToken": refresh})).await?;
-    let response = codex_request(connection, "account/rateLimits/read", json!({})).await?;
     let identity = crate::provider_auth::codex_identity_from_account(home, &account_response)
-        .map_err(SubscriptionError::NeedsLogin)?;
+        .map_err(CodexUsageError::Identity)?;
+    let response = codex_request(connection, "account/rateLimits/read", json!({})).await?;
     let snapshot = response.get("rateLimits");
     let windows = codex_windows(snapshot)?;
     let plan = account_response

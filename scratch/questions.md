@@ -16,10 +16,11 @@ LOO-664 / #1754 is integrated; its disposable reproduction proves only the bridg
 Infrastructure owns CLI/helper installation and installed acceptance.
 
 Latest archive (2026-10-28 realign):
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-s3p31b6k/tmp`.
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-bu6x1sjm/tmp`.
 Earlier complete receipts and archive references:
-`8d0b15b9d43ed60c4f15b01f585623e0bcf1d862:scratch/questions.md`.
+`e8e4cb4e87:scratch/questions.md`.
 Kickoff still observes installed 0.14.19; integrated source v0.15.0 proves no
 installed or credential recovery.
 
-The 2026-10-28 kickoff found `.lf/tmp` absent after checkpointing; no new telemetry archive was needed or created.
+Realign checkpoint `35e5dee35b` preceded the atomic archive; all prior archives
+remain intact. This receipt establishes telemetry preservation only.

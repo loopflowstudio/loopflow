@@ -255,7 +255,7 @@ attempt, including headless Task steps before a provider session ID is available
 Later attempts retain earlier account evidence; a null account means ambient
 execution. Once the provider reports its native identity, continuation must retain
 that identity and selected account/native Machine. Requested account and actual
-selection are different evidence; [cutover status](architecture-reference.md#cutover-status)
+selection are different evidence; [cutover status](architecture/reference-cutover.md#cutover-status)
 records the remaining history/account conversion.
 
 Prefer an account while keeping the normal route as fallback:

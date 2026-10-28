@@ -17,6 +17,8 @@ Figma commands require FIGMA_TOKEN env var (Settings > Personal access tokens)
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -85,6 +87,54 @@ def test(args: argparse.Namespace) -> None:
     )
 
 
+def _cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("\n", " ")
+
+
+def _render_command(command: dict, lines: list[str]) -> None:
+    path = command["command"]
+    lines += [f"## {path}", "", command.get("description") or "Command namespace.", ""]
+    arguments = [
+        item for item in command["arguments"] if path == "lf" or item.get("global") is not True
+    ]
+    if arguments:
+        lines += ["| Argument | What it does |", "|---|---|"]
+        for item in arguments:
+            long, short = item.get("long"), item.get("short")
+            if long:
+                label = f"--{long}" + (f" / -{short}" if short else "")
+            elif short:
+                label = f"-{short}"
+            else:
+                label = f"<{item['name']}>"
+            detail = item.get("description") or item["name"].replace("_", " ")
+            if item.get("global") is True:
+                detail += " Applies everywhere."
+            if item["defaults"]:
+                detail += f" Default: {', '.join(item['defaults'])}."
+            lines.append(f"| `{_cell(label)}` | {_cell(detail)} |")
+        lines.append("")
+    for child in command["commands"]:
+        _render_command(child, lines)
+
+
+def _generate_lf_reference(docs_dest: Path) -> None:
+    # The command tree is generated from the installed lf, never committed:
+    # every CLI change would otherwise conflict in one file.
+    lf = os.environ.get("LF_BIN") or shutil.which("lf")
+    reference = docs_dest / "lf-reference.md"
+    if lf is None or not reference.exists():
+        print("  ! docs/lf-reference.md keeps only its preamble: lf not found")
+        return
+    catalog = subprocess.run(
+        [lf, "help", "--all", "--json"], capture_output=True, text=True, check=True
+    ).stdout
+    lines = [reference.read_text().rstrip("\n"), ""]
+    _render_command(json.loads(catalog)["definition"], lines)
+    reference.write_text("\n".join(lines))
+    print(f"  ✓ docs/lf-reference.md (commands from {lf})")
+
+
 INSTALL_REWRITES = [
     # Shorten GitHub release URL to our hosted redirect
     (
@@ -126,6 +176,8 @@ def sync_docs(args: argparse.Namespace) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text)
         synced.append(f"docs/{relative}")
+
+    _generate_lf_reference(docs_dest)
 
     # Copy images/gifs to static/
     for pattern in ["*.png", "*.gif"]:

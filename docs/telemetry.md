@@ -38,7 +38,7 @@ each budget, where it was set and current usage;
 ## What happened
 
 ```bash
-lf history --task LOO-12                  # the Task's story: created, run, PR'd, steered
+lf history --task LOO-12                  # what its Sessions did: input, turns, outcomes
 lf history list --task LOO-12             # every command that ran for it, newest first
 lf history list --search "land" --all     # one command, across every repository
 lf history show <id> --final              # what the agent concluded
@@ -48,7 +48,9 @@ lf history search "cleanupPeriodDays" --since 30d   # text across recent convers
 lf history retention                      # what providers still keep, and what goes next
 ```
 
-`lf history` orders durable Work facts: creation, execution, PRs and steers.
+`lf history` orders what Sessions did — input captured, provider turns, recorded
+outcomes — each tagged with its Task or Wave. Changes no Session made (PRs,
+Steers, Workflow moves, sync) are on the Task: `lf task status`.
 `history list` is the command record underneath it, one row per lf process,
 with its parent and outcome. Narrow it with `--parent`, `--caller SESSION` or
 `--outcome`.
@@ -111,7 +113,7 @@ Each check reports ok, warn or fail with its detail. `--json` returns the same a
 | `lf usage [--task\|--wave\|--project] [--days N]` | Recorded provider usage per Session |
 | `lf usage --context` / `--weekly` | Input by source / context cost and turn time by week |
 | `lf usage --parent SESSION` | Usage of the inputs one Session issued |
-| `lf history [--task\|--wave\|--project]` | Work facts, newest first |
+| `lf history [--task\|--wave\|--project]` | What Sessions did, newest first |
 | `lf history list` | Recorded commands; filter by Task, Wave, parent, caller, text, outcome |
 | `lf history show ID` | One process or Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
 | `lf history search TEXT` / `lf history retention` | Find text in recent conversations / what providers still keep |

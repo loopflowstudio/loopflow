@@ -130,7 +130,6 @@ struct WavesView: View {
         }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
-            model.detailWaveId = selectedWave.flatMap { $0.isRegistered ? $0.id : nil }
             if let wave = selectedWave, wave.isRegistered {
                 model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
             }
@@ -374,7 +373,7 @@ struct WavesView: View {
             WaveDetailPane(
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
-                streamed: model.waveDetail,
+                streamed: wave.isRegistered ? model.waveDetail(id: wave.id) : nil,
                 isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
                 transportError: model.projectCommandErrors[wave.id],
                 onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
@@ -496,7 +495,7 @@ struct WavesView: View {
             } else {
                 waves = try await RegistryQueryLocal.shared.allWaves()
             }
-            let plans = await buildWavePlanCache(registryWaves: waves)
+            let plans = buildWavePlanCache(registryWaves: waves)
             plansByWaveKey = plans
             for state in repoStates.values {
                 state.applyConnectedWaves(waves, plans: plans)
@@ -542,7 +541,9 @@ struct WavesView: View {
         }
     }
 
-    private func buildWavePlanCache(registryWaves: [Wave]) async -> [String: WavePlan] {
+    /// Each Wave's Projects arrive with the roadmap in every planning frame;
+    /// only the authored objective is read here, from its GOAL.md.
+    private func buildWavePlanCache(registryWaves: [Wave]) -> [String: WavePlan] {
         let authored = authoredWavesByRepo
         var targets: [String: (repoPath: String, waveName: String)] = [:]
         for wave in registryWaves {
@@ -555,28 +556,24 @@ struct WavesView: View {
                 targets[key] = (repoPath, waveName)
             }
         }
-
-        return await withTaskGroup(of: (String, WavePlan?).self) { group in
-            for (key, target) in targets {
-                group.addTask {
-                    let objective = WavePlanParser.objective(
-                        repoRoot: URL(fileURLWithPath: target.repoPath),
-                        waveName: target.waveName
-                    ) ?? ""
-                    let plan = try? await RegistryQueryLocal.shared.plan(
-                        wave: target.waveName,
-                        objective: objective,
-                        cwd: target.repoPath
-                    )
-                    return (key, plan ?? (objective.isEmpty ? nil : WavePlan(objective: objective)))
-                }
-            }
-            var plans: [String: WavePlan] = [:]
-            for await (key, plan) in group {
-                plans[key] = plan
-            }
-            return plans
+        var projects: [String: WorkEvidence<ProjectPlanningSnapshot>] = [:]
+        for roadmap in model.roadmap.value?.waves ?? [] {
+            projects[Self.wavePlanKey(repoPath: roadmap.wave.repo, waveName: roadmap.wave.name)] = roadmap.projects
         }
+
+        var plans: [String: WavePlan] = [:]
+        for (key, target) in targets {
+            let objective = WavePlanParser.objective(
+                repoRoot: URL(fileURLWithPath: target.repoPath),
+                waveName: target.waveName
+            ) ?? ""
+            if let projects = projects[key] {
+                plans[key] = WavePlan(objective: objective, projects: projects)
+            } else if !objective.isEmpty {
+                plans[key] = WavePlan(objective: objective)
+            }
+        }
+        return plans
     }
 
     private func restoreStickyRepoSelectionIfNeeded() {

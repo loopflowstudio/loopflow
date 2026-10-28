@@ -1,4 +1,6 @@
+import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -29,7 +31,7 @@ def _age_tree(root: Path, age_days: float) -> None:
 
 def _run(tmp_path: Path, stubs: dict[str, str] | None = None, exit_code: int = 0) -> str:
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     for tool, body in {"lf": "exit 0", "uv": "exit 0", "xcrun": "exit 0", **(stubs or {})}.items():
         stub = bin_dir / tool
         stub.write_text(f"#!/bin/sh\n{body}\n")
@@ -206,3 +208,173 @@ def test_process_in_checkout_keeps_its_idle_build_output(tmp_path: Path) -> None
     finally:
         process.terminate()
         process.wait(timeout=10)
+
+
+def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo), *args], env=env, capture_output=True, text=True, check=True
+    )
+    return result.stdout.strip()
+
+
+def test_real_cleanup_preserves_unpublished_work_and_removes_finished_checkouts(
+    tmp_path: Path,
+) -> None:
+    root = SCRIPT.parent.parent
+    build_env = {key: value for key, value in os.environ.items() if not key.startswith("LF_")}
+    subprocess.run(
+        ["cargo", "build", "-p", "loopflow", "--bin", "lf"],
+        cwd=root,
+        env=build_env,
+        stdin=subprocess.DEVNULL,
+        check=True,
+    )
+    metadata = json.loads(
+        subprocess.check_output(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=root, env=build_env
+        )
+    )
+    binary = Path(metadata["target_directory"]) / "debug/lf"
+
+    # HOME does not redirect getpwuid_r. Interpose only that external account
+    # lookup in the fixture CLI so production registry/installation reads also
+    # resolve to this disposable Home; the production executable is unchanged.
+    source = tmp_path / "account.c"
+    source.write_text("""
+#include <pwd.h>
+#include <stdlib.h>
+static int fixture_getpwuid_r(uid_t uid, struct passwd *pwd, char *buf,
+                             size_t size, struct passwd **result) {
+    int status = getpwuid_r(uid, pwd, buf, size, result);
+    if (status == 0 && *result) pwd->pw_dir = getenv("LOOPFLOW_TEST_ACCOUNT_HOME");
+    return status;
+}
+__attribute__((used)) static struct { const void *replacement; const void *original; }
+interpose __attribute__((section("__DATA,__interpose"))) = {
+    (const void *)fixture_getpwuid_r, (const void *)getpwuid_r
+};
+""")
+    library = tmp_path / "account.dylib"
+    subprocess.run(["cc", "-dynamiclib", str(source), "-o", str(library)], check=True)
+    home = tmp_path / "home"
+    (tmp_path / "account").mkdir()
+    repo = home / "src/kata"
+    repo.mkdir(parents=True)
+    bare = tmp_path / "origin.git"
+    env = {
+        "HOME": str(home),
+        "LF_HOME": str(home / ".lf"),
+        "LF_BIN": str(binary),
+        "LOOPFLOW_TEST_ACCOUNT_HOME": str(tmp_path / "account"),
+        "DYLD_INSERT_LIBRARIES": str(library),
+        "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin:/usr/sbin:/sbin",
+        "GIT_ALLOW_PROTOCOL": "file",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    _git(repo, "init", "-qb", "main", env=env)
+    _git(repo, "config", "user.name", "Cleanup Fixture", env=env)
+    _git(repo, "config", "user.email", "fixture@example.com", env=env)
+    (repo / ".gitignore").write_text("target/\n")
+    _git(repo, "add", ".", env=env)
+    _git(repo, "commit", "-qm", "base", env=env)
+    _git(repo, "init", "--bare", str(bare), env=env)
+    _git(bare, "symbolic-ref", "HEAD", "refs/heads/main", env=env)
+    _git(repo, "remote", "add", "origin", "https://github.com/fixture/kata.git", env=env)
+    _git(repo, "config", f"url.{bare}.insteadOf", "https://github.com/fixture/kata.git", env=env)
+    _git(repo, "push", "-u", "origin", "main", env=env)
+    pulls = {}
+    kept = {}
+    finished = []
+    for branch in ["unpushed", "old-unpushed", "merged", "closed", "moved", "dirty"]:
+        path = repo.with_name(f"kata.{branch}")
+        _git(repo, "worktree", "add", "-b", branch, str(path), "main", env=env)
+        (path / "work.txt").write_text(branch)
+        _git(path, "add", ".", env=env)
+        date_env = (
+            {
+                **env,
+                "GIT_AUTHOR_DATE": "2020-01-01T00:00:00Z",
+                "GIT_COMMITTER_DATE": "2020-01-01T00:00:00Z",
+            }
+            if branch == "old-unpushed"
+            else env
+        )
+        _git(path, "commit", "-qm", branch, env=date_env)
+        head = _git(path, "rev-parse", "HEAD", env=env)
+        if branch in {"merged", "closed", "moved", "dirty"}:
+            pulls[branch] = [
+                {
+                    "number": len(pulls) + 1,
+                    "headRefOid": head,
+                    "state": "CLOSED" if branch == "closed" else "MERGED",
+                }
+            ]
+        if branch == "merged":
+            _git(repo, "merge", "--no-edit", branch, env=env)
+            _git(repo, "push", "origin", "main", env=env)
+        if branch == "moved":
+            (path / "work.txt").write_text("unpublished follow-up")
+            _git(path, "commit", "-am", "follow-up", env=env)
+        if branch == "dirty":
+            (path / "notes.txt").write_text("unfinished notes")
+        if branch in {"merged", "closed"}:
+            finished.append((branch, path))
+        else:
+            kept[branch] = (
+                path,
+                _git(path, "rev-parse", "HEAD", env=env),
+                (path / "work.txt").read_bytes(),
+            )
+    gh = rf"""#!{sys.executable}
+import json, re, sys
+pulls = {pulls!r}
+if sys.argv[1:3] == ["api", "rate_limit"]:
+    budget = {{"limit": 5000, "remaining": 4900, "reset": 2000000000}}
+    print(json.dumps({{"resources": {{"graphql": budget}}}}))
+else:
+    query = next(arg[6:] for arg in sys.argv if arg.startswith("query="))
+    repo = {{}}
+    pattern = r'b(\d+): pullRequests\(first: 100, headRefName: "([^"]+)"'
+    for index, branch in re.findall(pattern, query):
+        repo["b" + index] = {{"nodes": pulls.get(branch, [])}}
+        repo["r" + index] = None
+    print(json.dumps({{"data": {{"repository": repo}}}}))
+"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text(gh)
+    (bin_dir / "gh").chmod(0o755)
+    dry = subprocess.run(
+        [str(binary), "wt", "prune", "--dry-run"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "merged" in dry.stdout and "closed" in dry.stdout
+    assert all(path.exists() for _, path in finished)
+
+    # Set dyld variables at exec: macOS strips them while starting system shells.
+    lf = "exec env " + " ".join(
+        shlex.quote(f"{key}={env[key]}")
+        for key in [
+            "LF_BIN",
+            "DYLD_INSERT_LIBRARIES",
+            "LOOPFLOW_TEST_ACCOUNT_HOME",
+            "GIT_ALLOW_PROTOCOL",
+        ]
+    )
+    lf += f' {shlex.quote(str(binary))} "$@"'
+    out = _run(tmp_path, {"lf": lf})
+    assert "lf wt prune failed" not in out, out
+    for branch, path in finished:
+        assert not path.exists(), out
+        assert not _git(repo, "branch", "--list", branch, env=env), out
+    for branch, (path, head, content) in kept.items():
+        assert (path / "work.txt").read_bytes() == content, out
+        assert _git(path, "rev-parse", "HEAD", env=env) == head, out
+        assert _git(repo, "rev-parse", branch, env=env) == head, out
+    assert (kept["dirty"][0] / "notes.txt").read_text() == "unfinished notes"
+    again = _run(tmp_path, {"lf": lf})
+    assert "No prunable worktrees" in again, again

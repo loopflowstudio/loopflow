@@ -171,7 +171,9 @@ pub struct TaskSnapshot {
     pub provider: String,
     pub pr: Option<TaskPr>,
     pub latest_event: Option<crate::work::task::TaskEvent>,
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
     pub updated_at: time::OffsetDateTime,
     /// Freshness of the PR state against GitHub as of this read. `Degraded`
     /// means a bounded remote read failed and the PR fields are cached, not
@@ -1567,22 +1569,14 @@ fn task_configuration_refusal(task: &Task, skill: Option<&crate::graph::Skill>) 
     .map(|error| error.to_string())
 }
 
-pub(crate) async fn task_process_refusal(
-    store: &SharedStore,
+/// Why the Task cannot start a process: its configuration, else a
+/// non-resumable failure as its latest event.
+pub(crate) fn task_process_refusal_after(
     task: &Task,
-) -> crate::store::StoreResult<Option<String>> {
-    if let Some(refusal) = task_configuration_refusal(task, None) {
-        return Ok(Some(refusal));
-    }
-    persisted_task_process_refusal(store, task).await
-}
-
-async fn persisted_task_process_refusal(
-    store: &SharedStore,
-    task: &Task,
-) -> crate::store::StoreResult<Option<String>> {
-    let event = store.latest_task_event(&task.id).await?;
-    Ok(task_event_process_refusal(event.as_ref()).map(str::to_string))
+    latest: Option<&crate::work::task::TaskEvent>,
+) -> Option<String> {
+    task_configuration_refusal(task, None)
+        .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 
 pub(crate) fn task_event_process_refusal(
@@ -1616,7 +1610,18 @@ pub(crate) async fn task_worktree_blocker(
         .latest_task_event(&task.id)
         .await
         .map_err(|error| task_error(format!("failed to read Task worktree state: {error}")))?;
-    if let Some(event) = event {
+    task_worktree_blocker_after(task, event.as_ref())
+}
+
+/// `task_worktree_blocker` for a Task whose latest event is already read.
+pub(crate) fn task_worktree_blocker_after(
+    task: &Task,
+    latest: Option<&crate::work::task::TaskEvent>,
+) -> OpsResult<Option<TaskWorktreeBlocker>> {
+    if task.worktree.is_none() {
+        return Ok(None);
+    }
+    if let Some(event) = latest {
         if let TaskEventKind::WorktreeInitializing { branch, path, .. }
         | TaskEventKind::CheckoutInitializing { branch, path, .. } = &event.kind
         {
@@ -1693,6 +1698,11 @@ pub struct TaskStatus {
     pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
     pub ownership: Option<crate::durable::TaskOwnership>,
+    /// Its Sessions, Graphs and Workflow; `null` for an unregistered Task.
+    pub overview: Option<crate::task_work::TaskOverview>,
+    /// `lf graph show --processes` for each of `overview`'s Graphs, in order.
+    pub graph_processes: Vec<crate::durable::GraphProcessDetail>,
+    pub comments: Option<crate::work::task::comment::TaskComments>,
 }
 
 pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
@@ -1731,56 +1741,100 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             } else {
                 None
             };
-        let mut result = TaskStatus {
-            sync: None,
-            task: None,
-            project: None,
-            observed_at: None,
-            planning_error: inspection
-                .as_ref()
-                .and_then(|read| read.refresh_error.clone()),
-            planning_stale: false,
-            planning_state: crate::store::PlanningState::Unavailable,
-            execution: None,
-            ownership: None,
+        let planning_error = inspection
+            .as_ref()
+            .and_then(|read| read.refresh_error.clone());
+        let mut result = match (task, inspection) {
+            (Some(task), _) => registered_task_status(&store, task).await?,
+            (None, inspection) => {
+                let mut result = TaskStatus {
+                    sync: None,
+                    task: None,
+                    project: None,
+                    observed_at: None,
+                    planning_error: None,
+                    planning_stale: false,
+                    planning_state: crate::store::PlanningState::Unavailable,
+                    execution: None,
+                    ownership: None,
+                    overview: None,
+                    graph_processes: Vec::new(),
+                    comments: None,
+                };
+                if let Some(read) = inspection {
+                    // Foreign observations remain acquisition evidence, not owned Work.
+                    result.planning_state = read.observation.state;
+                    result.observed_at = read.observation.observed_at;
+                }
+                result
+            }
         };
-        if let Some(task) = task {
-            let acquisition = store
-                .sqlite
-                .task_acquisition(&task.id)
-                .map_err(task_error)?;
-            result.project = match &task.project_id {
-                Some(id) => store.get_project(id).await.map_err(task_error)?,
-                None => None,
-            };
-            result.sync = Some(
-                store
-                    .sqlite
-                    .task_planning_sync(&task.id)
-                    .map_err(task_error)?,
-            );
-            result.execution = Some(read_task_snapshot(&store, task.clone()).await?);
-            result.ownership = Some(store.sqlite.task_ownership(&task.id).map_err(task_error)?);
-            result.planning_state = acquisition.state;
-            result.observed_at = acquisition.observed_at;
-            result.task = Some(task);
-        } else if let Some(read) = inspection {
-            // Foreign observations remain acquisition evidence, not owned Work.
-            result.planning_state = read.observation.state;
-            result.observed_at = read.observation.observed_at;
+        if planning_error.is_some() {
+            result.planning_error = planning_error;
+            if result.planning_state == crate::store::PlanningState::Available {
+                result.planning_state = crate::store::PlanningState::Unavailable;
+            }
         }
-        if result.planning_error.is_some()
-            && result.planning_state == crate::store::PlanningState::Available
-        {
-            result.planning_state = crate::store::PlanningState::Unavailable;
-        }
-        result.planning_stale = result.planning_state != crate::store::PlanningState::Available
-            || result.observed_at.is_some_and(|at| {
-                time::OffsetDateTime::now_utc().unix_timestamp() - at
-                    >= super::linear::LINEAR_SOFT_STALE_SECS
-            });
+        result.planning_stale = planning_stale(&result);
         Ok(result)
     })
+}
+
+/// `lf task status <id> --watch`: what the store records for `selector` now,
+/// without the planning exchange the one-shot read starts first.
+pub async fn read_task_status(
+    store: &SharedStore,
+    repo: &Path,
+    selector: &str,
+) -> OpsResult<TaskStatus> {
+    let task = store
+        .sqlite
+        .resolve_task_id(selector, Some(&repo.to_string_lossy()))
+        .and_then(|id| id.map(|id| store.sqlite.task(&id)).transpose())
+        .map_err(task_error)?
+        .flatten()
+        .ok_or_else(|| task_error(format!("Task {selector} is not registered")))?;
+    registered_task_status(store, task).await
+}
+
+async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
+    let acquisition = store
+        .sqlite
+        .task_acquisition(&task.id)
+        .map_err(task_error)?;
+    let (overview, graph_processes) = store.sqlite.task_overview(&task.id).map_err(task_error)?;
+    let mut result = TaskStatus {
+        sync: Some(
+            store
+                .sqlite
+                .task_planning_sync(&task.id)
+                .map_err(task_error)?,
+        ),
+        project: match &task.project_id {
+            Some(id) => store.get_project(id).await.map_err(task_error)?,
+            None => None,
+        },
+        observed_at: acquisition.observed_at,
+        planning_error: None,
+        planning_stale: false,
+        planning_state: acquisition.state,
+        execution: Some(read_task_snapshot(store, task.clone()).await?),
+        ownership: Some(store.sqlite.task_ownership(&task.id).map_err(task_error)?),
+        overview: Some(overview),
+        graph_processes,
+        comments: Some(store.sqlite.task_comments(&task.id).map_err(task_error)?),
+        task: Some(task),
+    };
+    result.planning_stale = planning_stale(&result);
+    Ok(result)
+}
+
+fn planning_stale(status: &TaskStatus) -> bool {
+    status.planning_state != crate::store::PlanningState::Available
+        || status.observed_at.is_some_and(|at| {
+            time::OffsetDateTime::now_utc().unix_timestamp() - at
+                >= super::linear::LINEAR_SOFT_STALE_SECS
+        })
 }
 
 /// Sessions copied here from rented Machines this Task ran on.
@@ -1936,12 +1990,15 @@ pub(crate) fn completion_pending(store: &SharedStore, task: &Task) -> OpsResult<
         .sqlite
         .task_completion_pending(&task.id)
         .map_err(task_error)?
-        .map(|(_, reason)| {
-            format!(
-                "Completion pending: {reason}. Retry: lf task complete {}",
-                task.identifier
-            )
-        }))
+        .map(|(_, reason)| completion_pending_text(task, &reason)))
+}
+
+/// How a pending completion request reads, with its retry.
+pub(crate) fn completion_pending_text(task: &Task, reason: &str) -> String {
+    format!(
+        "Completion pending: {reason}. Retry: lf task complete {}",
+        task.identifier
+    )
 }
 
 async fn settle_completion(store: &SharedStore, task: &mut Task, request: i64) -> OpsResult<()> {
@@ -2384,10 +2441,18 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         });
     if let Some(graph) = graph {
         let name = graph.name.clone();
-        let (execution, _) =
-            crate::ops::task_execution::execution_of_latest_graph(store, Some(graph))
-                .await
-                .map_err(task_error)?;
+        let facts = store
+            .sqlite
+            .graph_execution_facts([&graph])
+            .map_err(task_error)?;
+        let (execution, _) = crate::ops::task_execution::execution_of_latest_graph(
+            &store.sqlite,
+            task,
+            Some(&graph),
+            &facts,
+        )
+        .await
+        .map_err(task_error)?;
         let step = execution.step.unwrap_or_default();
         let position = match execution.state {
             TaskExecutionState::Running | TaskExecutionState::Stalled => Some(format!("at {step}")),

@@ -137,7 +137,7 @@ fn seed_credential_history(home: &Path) -> Project {
 fn status_json(home: &Path, args: &[&str], ambient_wave_id: Option<&str>) -> serde_json::Value {
     let mut command = Command::new(loopflow_test_support::lf_binary());
     command
-        .args(["wave", "status"])
+        .args(["desktop", "wave"])
         .args(args)
         .arg("--json")
         .env("LF_HOME", home)
@@ -188,7 +188,7 @@ fn roadmap_wave(roadmap: &serde_json::Value, wave: &serde_json::Value) -> serde_
 fn roadmap_json(home: &Path, wave: &str) -> serde_json::Value {
     let mut command = Command::new(loopflow_test_support::lf_binary());
     command
-        .args(["wave", "show", wave, "--json"])
+        .args(["desktop", "plan", wave, "--json"])
         .env("LF_HOME", home)
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_WAVE_ID")
@@ -995,7 +995,7 @@ fn exact_task_roadmap_retains_history_without_starting_work() {
     for identifier in ["W2-127", "PRD-52", "not-a-task"] {
         let mut command = Command::new(loopflow_test_support::lf_binary());
         command
-            .args(["wave", "show", "--task", identifier, "--all", "--json"])
+            .args(["desktop", "plan", "--task", identifier, "--all", "--json"])
             .env("LF_HOME", home.path())
             .env("LF_WAVE_ID", "must-not-narrow-exact-lookup")
             .env_remove("LF_CAPTURE_KEY")
@@ -1077,7 +1077,7 @@ fn exact_task_roadmap_scopes_duplicate_identifiers_to_registered_repositories() 
 
     for all in [true, false] {
         let mut command = Command::new(loopflow_test_support::lf_binary());
-        command.args(["wave", "show", "--task", "PRD-52", "--json"]);
+        command.args(["desktop", "plan", "--task", "PRD-52", "--json"]);
         if all {
             command.arg("--all");
         }

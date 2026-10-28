@@ -1,25 +1,23 @@
-//! `lf history` — one ordered record of durable Work facts.
+//! `lf history` — what Sessions did, each record tagged with the Work it was
+//! attributed to. Work changes no Session made live on the Task itself.
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::durable::{Author, SteerComment, WorkRef};
+use crate::durable::WorkRef;
 use crate::lf::commands::util::parse_since;
-use crate::lf::commands::waves::PrMergeRequestSnapshot;
 use crate::lf::commands::work_catalog::{WorkCatalog, WorkOwner};
 use crate::lf::commands::WorkFilter;
 use crate::session_record::SessionHistory;
+use crate::store::rows::unix_to_datetime;
 use crate::store::sqlite::SqliteStore;
-use crate::work::task::{GithubPr, TaskPr, TaskPrId};
 
 const MAX_LIMIT: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkActivitySnapshot {
-    pub generated_at: i64,
-    pub since: i64,
-    pub limit: usize,
+    /// More Session records exist in the window than `--limit` returned.
     pub truncated: bool,
     pub items: Vec<WorkActivityEntry>,
 }
@@ -27,7 +25,8 @@ pub struct WorkActivitySnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkActivityEntry {
     pub id: String,
-    pub recorded_at: i64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub recorded_at: OffsetDateTime,
     pub summary: String,
     pub work: WorkRef,
     /// Current display label: Wave name, Project slug, or Task identifier.
@@ -38,7 +37,6 @@ pub struct WorkActivityEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkActivityFact {
-    WorkCreated,
     InputCaptured {
         session_id: crate::id::LfSessionId,
         captured: i64,
@@ -55,63 +53,38 @@ pub enum WorkActivityFact {
         lf_process_id: Option<crate::id::LfProcessId>,
         status: Option<String>,
     },
-    PrStarted {
-        id: TaskPrId,
-    },
-    PrPublishRequested {
-        id: TaskPrId,
-        github: Option<GithubPr>,
-    },
-    PrMergeRequested {
-        id: TaskPrId,
-        request: PrMergeRequestSnapshot,
-        github: Option<GithubPr>,
-    },
-    PrMerged {
-        id: TaskPrId,
-        github: Option<GithubPr>,
-        merge_commit: String,
-    },
-    PrAbandoned {
-        id: TaskPrId,
-        github: Option<GithubPr>,
-    },
-    SteerIssued {
-        id: i64,
-        author: Author,
-    },
+}
+
+/// What `lf history` reads; the flags of the same name, which a `--watch`
+/// request can replace.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryWindow {
+    since: String,
+    limit: usize,
+    wave: Option<String>,
+    project: Option<String>,
+    task: Option<String>,
 }
 
 pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
-    let limit = options.limit;
-    let generated_at = OffsetDateTime::now_utc();
-    let since = parse_since(&options.since, generated_at)?.unix_timestamp();
-    if limit == 0 || limit > MAX_LIMIT {
-        return Err(anyhow!(
-            "--limit must be between 1 and {MAX_LIMIT}; got {}",
-            limit
-        ));
+    let window = HistoryWindow {
+        since: options.since.clone(),
+        limit: options.limit,
+        wave: options.wave.clone(),
+        project: options.project.clone(),
+        task: options.task.clone(),
+    };
+    if options.watch {
+        return super::watch::run(
+            window,
+            super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
+            |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
+        );
     }
-
-    let filter = WorkFilter {
-        wave: options.wave.as_deref(),
-        project: options.project.as_deref(),
-        task: options.task.as_deref(),
-    };
     let path = crate::store::database_path_from_env()?;
-    let snapshot = if path.exists() {
-        let store = SqliteStore::new(&path)?;
-        build_snapshot(&store, generated_at.unix_timestamp(), since, limit, filter)?
-    } else {
-        WorkActivitySnapshot {
-            generated_at: generated_at.unix_timestamp(),
-            since,
-            limit,
-            truncated: false,
-            items: Vec::new(),
-        }
-    };
-
+    let store = path.exists().then(|| SqliteStore::new(&path)).transpose()?;
+    let snapshot = read(store.as_ref(), &window)?;
     if options.json {
         println!("{}", serde_json::to_string(&snapshot)?);
     } else {
@@ -120,31 +93,38 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
     Ok(())
 }
 
+fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
+    let limit = window.limit;
+    let since = parse_since(&window.since, OffsetDateTime::now_utc())?.unix_timestamp();
+    if limit == 0 || limit > MAX_LIMIT {
+        return Err(anyhow!(
+            "--limit must be between 1 and {MAX_LIMIT}; got {}",
+            limit
+        ));
+    }
+    let filter = WorkFilter {
+        wave: window.wave.as_deref(),
+        project: window.project.as_deref(),
+        task: window.task.as_deref(),
+    };
+    match store {
+        Some(store) => build_snapshot(store, since, limit, filter),
+        None => Ok(WorkActivitySnapshot {
+            truncated: false,
+            items: Vec::new(),
+        }),
+    }
+}
+
 pub(crate) fn build_snapshot(
     store: &SqliteStore,
-    generated_at: i64,
     since: i64,
     limit: usize,
     filter: WorkFilter<'_>,
 ) -> Result<WorkActivitySnapshot> {
-    let tasks = store
-        .list_tasks(None)
-        .map_err(|error| anyhow!("failed to read Tasks: {error}"))?;
     let catalog = WorkCatalog::new(store.work_identities()?)?;
 
-    let mut entries = catalog.creation_entries(since);
-    for task in &tasks {
-        let work = catalog
-            .owners
-            .get(&WorkRef::Task(task.id.clone()))
-            .ok_or_else(|| anyhow!("Task {} is missing from the Work catalog", task.id))?;
-        for pr in store
-            .task_prs(&task.id)
-            .map_err(|error| anyhow!("failed to read PRs for {}: {error}", task.identifier))?
-        {
-            entries.extend(pr_entries(&pr, work, since));
-        }
-    }
+    let mut entries = Vec::new();
 
     let history =
         store.conversation_history(filter.wave, filter.project, filter.task, None, since, true)?;
@@ -198,46 +178,7 @@ pub(crate) fn build_snapshot(
         }
     }
 
-    let steers = store
-        .steers_since(since)
-        .map_err(|error| anyhow!("failed to read Steers: {error}"))?;
-    for comment in steers {
-        if let Some(work) = catalog.owners.get(&comment.work) {
-            entries.push(steer_entry(&comment, work));
-        }
-    }
-
-    Ok(finalize_snapshot(
-        entries,
-        generated_at,
-        since,
-        limit,
-        &catalog,
-        filter,
-    ))
-}
-
-impl WorkCatalog {
-    fn creation_entries(&self, since: i64) -> Vec<WorkActivityEntry> {
-        self.owners
-            .values()
-            .filter_map(|owner| {
-                let recorded_at = owner.created_at.filter(|value| *value >= since)?;
-                let kind = match &owner.work {
-                    WorkRef::Wave(_) => "Wave",
-                    WorkRef::Project(_) => "Project",
-                    WorkRef::Task(_) => "Task",
-                };
-                Some(activity_entry(
-                    format!("{}:{}:created", owner.work.kind(), owner.work.id()),
-                    recorded_at,
-                    format!("{kind} {} created", owner.subject),
-                    owner,
-                    WorkActivityFact::WorkCreated,
-                ))
-            })
-            .collect()
-    }
+    Ok(finalize_snapshot(entries, limit, &catalog, filter))
 }
 
 fn activity_entry(
@@ -249,7 +190,7 @@ fn activity_entry(
 ) -> WorkActivityEntry {
     WorkActivityEntry {
         id,
-        recorded_at,
+        recorded_at: unix_to_datetime(recorded_at),
         summary,
         work: owner.work.clone(),
         subject: owner.subject.clone(),
@@ -293,112 +234,8 @@ fn input_entries(input: &SessionHistory, work: &WorkOwner, since: i64) -> Vec<Wo
     entries
 }
 
-fn pr_entries(pr: &TaskPr, work: &WorkOwner, since: i64) -> Vec<WorkActivityEntry> {
-    let github = pr.github();
-    let reference = github
-        .map(|github| format!("PR #{}", github.number))
-        .unwrap_or_else(|| format!("PR {}", pr.slug));
-    let mut entries = Vec::new();
-    if pr.created_at.unix_timestamp() >= since {
-        entries.push(activity_entry(
-            format!("pr:{}:started", pr.id),
-            pr.created_at.unix_timestamp(),
-            format!("PR work started on {}", pr.branch),
-            work,
-            WorkActivityFact::PrStarted { id: pr.id.clone() },
-        ));
-    }
-    if let Some(publication) = pr
-        .publication
-        .as_ref()
-        .filter(|publication| publication.requested_at.unix_timestamp() >= since)
-    {
-        entries.push(activity_entry(
-            format!("pr:{}:publish_requested", pr.id),
-            publication.requested_at.unix_timestamp(),
-            format!("Publication requested for {reference}"),
-            work,
-            WorkActivityFact::PrPublishRequested {
-                id: pr.id.clone(),
-                github: publication.github.clone(),
-            },
-        ));
-    }
-    if let Some(request) = pr
-        .publication
-        .as_ref()
-        .and_then(|publication| publication.merge.as_ref())
-        .filter(|request| request.requested_at.unix_timestamp() >= since)
-    {
-        entries.push(activity_entry(
-            format!("pr:{}:merge_requested", pr.id),
-            request.requested_at.unix_timestamp(),
-            format!("Merge requested for {reference}"),
-            work,
-            WorkActivityFact::PrMergeRequested {
-                id: pr.id.clone(),
-                request: PrMergeRequestSnapshot::from(request),
-                github: github.cloned(),
-            },
-        ));
-    }
-    if let Some(merge_commit) = pr
-        .merge_commit
-        .as_ref()
-        .filter(|_| pr.updated_at.unix_timestamp() >= since)
-    {
-        entries.push(activity_entry(
-            format!("pr:{}:merged", pr.id),
-            pr.updated_at.unix_timestamp(),
-            format!("{reference} merged"),
-            work,
-            WorkActivityFact::PrMerged {
-                id: pr.id.clone(),
-                github: github.cloned(),
-                merge_commit: merge_commit.clone(),
-            },
-        ));
-    }
-    if let Some(abandoned_at) = pr
-        .abandoned_at
-        .filter(|abandoned_at| abandoned_at.unix_timestamp() >= since)
-    {
-        entries.push(activity_entry(
-            format!("pr:{}:abandoned", pr.id),
-            abandoned_at.unix_timestamp(),
-            format!("{reference} abandoned"),
-            work,
-            WorkActivityFact::PrAbandoned {
-                id: pr.id.clone(),
-                github: github.cloned(),
-            },
-        ));
-    }
-    entries
-}
-
-fn steer_entry(comment: &SteerComment, work: &WorkOwner) -> WorkActivityEntry {
-    activity_entry(
-        format!(
-            "steer:{}:{}:{}",
-            comment.work.kind(),
-            comment.work.id(),
-            comment.steer.id
-        ),
-        comment.issued_at.unix_timestamp(),
-        format!("Steered: {}", comment.steer.text),
-        work,
-        WorkActivityFact::SteerIssued {
-            id: comment.steer.sequence,
-            author: comment.steer.author.clone(),
-        },
-    )
-}
-
 fn finalize_snapshot(
     mut entries: Vec<WorkActivityEntry>,
-    generated_at: i64,
-    since: i64,
     limit: usize,
     catalog: &WorkCatalog,
     filter: WorkFilter<'_>,
@@ -418,9 +255,6 @@ fn finalize_snapshot(
     let truncated = entries.len() > limit;
     entries.truncate(limit);
     WorkActivitySnapshot {
-        generated_at,
-        since,
-        limit,
         truncated,
         items: entries,
     }
@@ -428,23 +262,20 @@ fn finalize_snapshot(
 
 fn print_snapshot(snapshot: &WorkActivitySnapshot) {
     if snapshot.items.is_empty() {
-        println!("No durable Work activity recorded in this window.");
+        println!("No Session activity recorded in this window.");
         return;
     }
     println!("TIME              WORK             ACTIVITY");
     for item in &snapshot.items {
-        let time = OffsetDateTime::from_unix_timestamp(item.recorded_at)
-            .map(|value| {
-                format!(
-                    "{:04}-{:02}-{:02} {:02}:{:02}",
-                    value.year(),
-                    u8::from(value.month()),
-                    value.day(),
-                    value.hour(),
-                    value.minute()
-                )
-            })
-            .unwrap_or_else(|_| item.recorded_at.to_string());
+        let value = item.recorded_at;
+        let time = format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}",
+            value.year(),
+            u8::from(value.month()),
+            value.day(),
+            value.hour(),
+            value.minute()
+        );
         println!(
             "{time:<17} {work:<16} {summary}",
             work = item.subject,
@@ -459,30 +290,26 @@ fn print_snapshot(snapshot: &WorkActivitySnapshot) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::work::task::{
-        GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication, TaskId, TaskPrId,
-    };
+    use crate::work::task::TaskId;
 
     #[test]
     fn work_activity_fixture_round_trips() {
         let fixture = include_str!("../../../../../tests/fixtures/dto/work_activity_snapshot.json");
         let snapshot = serde_json::from_str::<WorkActivitySnapshot>(fixture).unwrap();
 
-        assert_eq!(snapshot.limit, 50);
-        assert_eq!(snapshot.items.len(), 5);
+        assert_eq!(snapshot.items.len(), 3);
         assert!(matches!(
             snapshot.items[0].fact,
             WorkActivityFact::InputCompletionRecorded { ref status, .. } if status == "ok"
         ));
         assert!(matches!(
             snapshot.items[1].fact,
-            WorkActivityFact::PrMerged { ref github, .. }
-                if github.as_ref().map(|pr| pr.number) == Some(1144)
+            WorkActivityFact::ProviderHistoryRecorded { ref status, .. }
+                if status.as_deref() == Some("completed")
         ));
         assert!(matches!(
             snapshot.items[2].fact,
-            WorkActivityFact::PrMergeRequested { ref request, .. }
-                if request.requested_at == "2026-07-21T18:35:51Z"
+            WorkActivityFact::InputCaptured { captured: 4, .. }
         ));
         assert_eq!(
             serde_json::from_str::<WorkActivitySnapshot>(
@@ -502,33 +329,7 @@ mod tests {
                 format!("project:{project}"),
                 format!("task:{identifier}"),
             ],
-            created_at: None,
         }
-    }
-
-    #[test]
-    fn steer_activity_ids_include_their_work_identity() {
-        let first = task_owner("W2-1", "control", "live");
-        let second = task_owner("W2-2", "control", "live");
-        let comment = |work: WorkRef| SteerComment {
-            work,
-            steer: crate::steer::Steer {
-                id: crate::id::SteerId::new(),
-                sequence: 1,
-                source: "fixture".into(),
-                revision: "1".into(),
-                author: Author::User,
-                text: "direction".to_string(),
-            },
-            issued_at: OffsetDateTime::UNIX_EPOCH,
-        };
-
-        let first_entry = steer_entry(&comment(first.work.clone()), &first);
-        let second_entry = steer_entry(&comment(second.work.clone()), &second);
-
-        assert_ne!(first_entry.id, second_entry.id);
-        assert!(first_entry.id.contains(first.work.id()));
-        assert!(second_entry.id.contains(second.work.id()));
     }
 
     fn catalog(owners: &[WorkOwner]) -> WorkCatalog {
@@ -546,7 +347,10 @@ mod tests {
             recorded_at,
             id.to_string(),
             owner,
-            WorkActivityFact::WorkCreated,
+            WorkActivityFact::InputCaptured {
+                session_id: "session".into(),
+                captured: 1,
+            },
         )
     }
 
@@ -562,8 +366,6 @@ mod tests {
         ];
         let snapshot = finalize_snapshot(
             entries,
-            40,
-            0,
             1,
             &catalog,
             WorkFilter {
@@ -583,8 +385,6 @@ mod tests {
         let catalog = catalog(std::slice::from_ref(&owner));
         let snapshot = finalize_snapshot(
             vec![entry("a", 10, &owner), entry("b", 10, &owner)],
-            20,
-            0,
             50,
             &catalog,
             WorkFilter::default(),
@@ -605,8 +405,6 @@ mod tests {
         let catalog = catalog(std::slice::from_ref(&owner));
         let snapshot = finalize_snapshot(
             vec![entry("target", 10, &owner)],
-            20,
-            0,
             50,
             &catalog,
             WorkFilter {
@@ -642,84 +440,13 @@ mod tests {
     #[test]
     fn wire_reuses_work_reference_and_one_fact_tag() {
         let owner = task_owner("W2-1", "control", "live");
-        let value = serde_json::to_value(entry("created", 10, &owner)).unwrap();
+        let value = serde_json::to_value(entry("captured", 10, &owner)).unwrap();
 
         assert_eq!(value["work"]["kind"], "task");
         assert_eq!(value["work"]["id"], owner.work.id());
         assert_eq!(value["subject"], "W2-1");
-        assert_eq!(value["fact"]["kind"], "work_created");
+        assert_eq!(value["fact"]["kind"], "input_captured");
         assert!(value.get("evidence").is_none());
         assert!(value.get("kind").is_none());
-    }
-
-    #[test]
-    fn serial_pr_stages_preserve_their_distinct_evidence() {
-        let pr = TaskPr {
-            id: TaskPrId::new(),
-            task_id: TaskId::new(),
-            sequence: 2,
-            slug: "activity-query".to_string(),
-            branch: "jack/activity-query".to_string(),
-            base_commit: "base".to_string(),
-            parent_pr_id: None,
-            publication: Some(PrPublication {
-                requested_at: OffsetDateTime::from_unix_timestamp(20).unwrap(),
-                presentation: Some(PrPresentation {
-                    title: "Activity query".to_string(),
-                    body: "Reviewer context".to_string(),
-                    head_sha: "head".to_string(),
-                }),
-                github: Some(GithubPr {
-                    number: 140,
-                    url: "https://github.com/loopflowstudio/loopflow/pull/140".to_string(),
-                    head_sha: Some("head".to_string()),
-                }),
-                merge: Some(PrMergeRequest {
-                    mode: PrMergeMode::Auto,
-                    requested_at: OffsetDateTime::from_unix_timestamp(30).unwrap(),
-                    head_sha: "head".to_string(),
-                }),
-            }),
-            merge_commit: Some("merge".to_string()),
-            abandoned_at: None,
-            ci_observation: None,
-            github_observation: None,
-            linear_attachment_id: None,
-            linear_comment_id: None,
-            linear_link_error: None,
-            created_at: OffsetDateTime::from_unix_timestamp(10).unwrap(),
-            updated_at: OffsetDateTime::from_unix_timestamp(40).unwrap(),
-        };
-
-        let entries = pr_entries(&pr, &task_owner("W2-1", "control", "live"), 0);
-
-        assert!(matches!(
-            entries[0].fact,
-            WorkActivityFact::PrStarted { .. }
-        ));
-        assert!(matches!(
-            entries[1].fact,
-            WorkActivityFact::PrPublishRequested { .. }
-        ));
-        assert!(matches!(
-            entries[2].fact,
-            WorkActivityFact::PrMergeRequested { .. }
-        ));
-        let merge_request = serde_json::to_value(&entries[2]).unwrap();
-        assert_eq!(
-            merge_request["fact"]["request"]["requested_at"],
-            "1970-01-01T00:00:30Z"
-        );
-        assert!(matches!(
-            &entries[3].fact,
-            WorkActivityFact::PrMerged {
-                github: Some(github),
-                merge_commit,
-                ..
-            } if github.url.ends_with("/140") && merge_commit == "merge"
-        ));
-        assert!(entries
-            .iter()
-            .all(|entry| entry.id.contains(pr.id.as_str())));
     }
 }

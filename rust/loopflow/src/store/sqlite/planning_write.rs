@@ -1051,8 +1051,12 @@ mod tests {
         assert_eq!(exported.changes["rejected"], incoming.changes["rejected"]);
         let status = store.peer_planning_status("/repo", None).unwrap().remove(0);
         assert_eq!(status.conflicts.len(), 1);
-        assert_eq!(status.changes, exported.changes);
-        assert!(status.candidates.contains("rejected"));
+        let journal = store
+            .peer_planning_journal("/repo", None)
+            .unwrap()
+            .remove(0);
+        assert_eq!(journal.changes, exported.changes);
+        assert!(journal.candidates.contains("rejected"));
         let mut conn = store.conn.lock().unwrap();
         let values = super::read(&conn, "waves", wave.as_ref().unwrap().as_str()).unwrap();
         assert!(values.contains(&Edit::WaveName("Renamed".into())));

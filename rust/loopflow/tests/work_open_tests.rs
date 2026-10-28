@@ -937,7 +937,7 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
             home.path(),
             repo.path(),
             None,
-            &["session", "list", "--json", "--all"],
+            &["desktop", "sessions", "--json", "--all"],
         ));
         let session = sessions
             .as_array()

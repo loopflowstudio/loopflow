@@ -67,6 +67,7 @@ const MEMBERSHIP_TARGETS: &[&[&str]] = &[&["task", "move"], &["ops", "machine", 
 /// Typed historical filters may resolve an explicit name to its stored ID.
 const FILTER_ONLY: &[&[&str]] = &[
     &["task", "list"],
+    &["desktop", "done"],
     &["history"],
     &["ops", "ci"],
     &["history", "list"],
@@ -94,6 +95,20 @@ const COMMANDS: &[Cmd] = &[
         id: "wave show",
         path: &["wave", "show"],
         base_args: &["wave", "show", "--json"],
+        wave_form: WaveForm::Positional,
+        global_default: true,
+    },
+    Cmd {
+        id: "desktop wave",
+        path: &["desktop", "wave"],
+        base_args: &["desktop", "wave", "--json"],
+        wave_form: WaveForm::Positional,
+        global_default: false,
+    },
+    Cmd {
+        id: "desktop plan",
+        path: &["desktop", "plan"],
+        base_args: &["desktop", "plan", "--json"],
         wave_form: WaveForm::Positional,
         global_default: true,
     },

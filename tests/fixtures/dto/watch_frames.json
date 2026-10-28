@@ -1,0 +1,290 @@
+[
+  {
+    "read": "lf desktop plan --all --json --watch",
+    "part": "planning",
+    "frame": {
+      "answers": null,
+      "unavailable": null,
+      "body": {
+        "generated_at": "2026-10-05T00:00:00Z",
+        "waves": [],
+        "tasks": {
+          "state": "ok",
+          "items": [],
+          "truncated": false
+        }
+      }
+    }
+  },
+  {
+    "read": "lf desktop plans --json --watch",
+    "part": "selections",
+    "frame": {
+      "answers": null,
+      "unavailable": null,
+      "body": [
+        {
+          "dashboard_id": "picked",
+          "repository": "repo_11111111111111111111111111111111",
+          "saved_revision": 3,
+          "selection": {
+            "id": "root",
+            "expression": {
+              "kind": "compose",
+              "items": [
+                {
+                  "id": "first",
+                  "expression": {
+                    "kind": "filter",
+                    "filter": {
+                      "field": "state",
+                      "value": "backlog"
+                    }
+                  }
+                },
+                {
+                  "id": "second",
+                  "expression": {
+                    "kind": "work",
+                    "work": {
+                      "repository": "repo_11111111111111111111111111111111",
+                      "kind": "task",
+                      "id": "task_33333333333333333333333333333333"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "resolution": {
+            "members": [
+              {
+                "source": [
+                  "root",
+                  "first"
+                ],
+                "work": {
+                  "repository": "repo_11111111111111111111111111111111",
+                  "kind": "task",
+                  "id": "task_33333333333333333333333333333333"
+                }
+              },
+              {
+                "source": [
+                  "root",
+                  "second"
+                ],
+                "work": {
+                  "repository": "repo_11111111111111111111111111111111",
+                  "kind": "task",
+                  "id": "task_33333333333333333333333333333333"
+                }
+              }
+            ],
+            "unavailable": [],
+            "attention": []
+          },
+          "arrangement": {
+            "order": [
+              {
+                "source": [
+                  "root",
+                  "first"
+                ],
+                "work": {
+                  "repository": "repo_11111111111111111111111111111111",
+                  "kind": "task",
+                  "id": "task_33333333333333333333333333333333"
+                }
+              },
+              {
+                "source": [
+                  "root",
+                  "second"
+                ],
+                "work": {
+                  "repository": "repo_11111111111111111111111111111111",
+                  "kind": "task",
+                  "id": "task_33333333333333333333333333333333"
+                }
+              }
+            ],
+            "hidden": [],
+            "mode": "touched"
+          },
+          "projection": {
+            "visible": [
+              {
+                "source": [
+                  "root",
+                  "first"
+                ],
+                "work": {
+                  "repository": "repo_11111111111111111111111111111111",
+                  "kind": "task",
+                  "id": "task_33333333333333333333333333333333"
+                }
+              }
+            ],
+            "suppressed": [
+              {
+                "member": {
+                  "source": [
+                    "root",
+                    "second"
+                  ],
+                  "work": {
+                    "repository": "repo_11111111111111111111111111111111",
+                    "kind": "task",
+                    "id": "task_33333333333333333333333333333333"
+                  }
+                },
+                "winner": {
+                  "source": [
+                    "root",
+                    "first"
+                  ],
+                  "work": {
+                    "repository": "repo_11111111111111111111111111111111",
+                    "kind": "task",
+                    "id": "task_33333333333333333333333333333333"
+                  }
+                }
+              }
+            ]
+          },
+          "slots": {
+            "root": {
+              "kind": "split",
+              "axis": "vertical",
+              "weights": [
+                2.0,
+                1.0
+              ],
+              "children": [
+                {
+                  "kind": "slot",
+                  "slot": 1
+                },
+                {
+                  "kind": "slot",
+                  "slot": 0
+                }
+              ]
+            }
+          },
+          "contents": [
+            {
+              "work": {
+                "repository": "repo_11111111111111111111111111111111",
+                "kind": "task",
+                "id": "task_33333333333333333333333333333333"
+              },
+              "title": "Backlog",
+              "states": [
+                "backlog"
+              ],
+              "primary_session": null,
+              "location": null,
+              "argv": null,
+              "unavailable": [
+                "No primary Session is recorded",
+                "Recorded execution location is unavailable"
+              ],
+              "face": null,
+              "pane_revision": null
+            }
+          ],
+          "name": null,
+          "pinned": false
+        }
+      ]
+    }
+  },
+  {
+    "read": "lf desktop sessions --json --watch",
+    "part": "sessions",
+    "frame": {
+      "answers": 7,
+      "unavailable": null,
+      "body": []
+    }
+  },
+  {
+    "read": "lf desktop task LOO-1 --json --watch",
+    "part": "task",
+    "frame": {
+      "answers": 7,
+      "unavailable": "Task LOO-1 is not registered",
+      "body": null
+    }
+  },
+  {
+    "read": "lf history --since 7d --limit 50 --task LOO-1 --json --watch",
+    "part": "work_activity",
+    "frame": {
+      "answers": 7,
+      "unavailable": null,
+      "body": {
+        "truncated": false,
+        "items": []
+      }
+    }
+  },
+  {
+    "read": "lf monitor ps --json --watch",
+    "part": "activity",
+    "frame": {
+      "answers": 7,
+      "unavailable": null,
+      "body": {
+        "nodes": []
+      }
+    }
+  },
+  {
+    "read": "lf desktop task LOO-1 --json --watch",
+    "part": "task",
+    "frame": {
+      "answers": 8,
+      "unavailable": null,
+      "body": {
+        "sync": null,
+        "task": null,
+        "project": null,
+        "observed_at": null,
+        "planning_error": null,
+        "planning_stale": false,
+        "planning_state": "available",
+        "execution": null,
+        "ownership": null,
+        "overview": {
+          "sessions": [],
+          "graph": null,
+          "graph_processes": []
+        },
+        "graph_processes": [],
+        "comments": {
+          "identifier": "LOO-1",
+          "comments": [],
+          "pending_sync": [],
+          "refresh_error": null,
+          "conflicts": {}
+        },
+        "row": null
+      }
+    }
+  },
+  {
+    "read": "lf planning status --json --watch",
+    "part": "peer_planning",
+    "frame": {
+      "answers": 7,
+      "unavailable": null,
+      "body": {
+        "transport": "git",
+        "destinations": []
+      }
+    }
+  }
+]

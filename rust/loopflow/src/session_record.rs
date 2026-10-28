@@ -1,6 +1,5 @@
 //! Captured Session inputs and append-only provider evidence.
 
-pub mod active;
 pub(crate) mod activity;
 mod runtime;
 

@@ -2,7 +2,9 @@
 //! Graph process writes it, and only by appending. Reading selects nothing and grants
 //! neither attachment nor process authority.
 
+use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -43,35 +45,43 @@ pub(super) fn graphs_in(
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut steps = conn.prepare(&format!(
-        "{columns},gs.node,gs.iterations FROM graph_process_steps gs JOIN processes e ON e.id=gs.lf_process_id
-         WHERE gs.graph_lf_process_id=?1 ORDER BY gs.seq"
-    ))?;
+    // Every Graph's steps in one statement, so a reading of many Graphs costs two.
+    let ids = super::children::ids_json(
+        graph_processes
+            .iter()
+            .map(|(process, _, _)| process.id.as_str()),
+    );
+    let mut steps = HashMap::<String, Vec<GraphProcessStep>>::new();
+    for row in conn
+        .prepare(&format!(
+            "{columns},gs.graph_lf_process_id,gs.node,gs.iterations FROM graph_process_steps gs
+             JOIN processes e ON e.id=gs.lf_process_id
+             WHERE gs.graph_lf_process_id IN (SELECT value FROM json_each(?1)) ORDER BY gs.seq"
+        ))?
+        .query_map([&ids], |row| {
+            Ok((
+                read_process(row)?,
+                row.get::<_, String>("graph_lf_process_id")?,
+                row.get::<_, u32>("node")?,
+                row.get::<_, String>("iterations")?,
+            ))
+        })?
+    {
+        let (process, graph, key, iterations) = row?;
+        steps.entry(graph).or_default().push(GraphProcessStep {
+            process,
+            key,
+            iterations: serde_json::from_str(&iterations)?,
+        });
+    }
     graph_processes
         .into_iter()
         .map(|(graph_process, name, compiled)| {
-            let steps = steps
-                .query_map([&graph_process.id], |row| {
-                    Ok((
-                        read_process(row)?,
-                        row.get::<_, u32>("node")?,
-                        row.get::<_, String>("iterations")?,
-                    ))
-                })?
-                .map(|row| {
-                    let (process, key, iterations) = row?;
-                    Ok(GraphProcessStep {
-                        process,
-                        key,
-                        iterations: serde_json::from_str(&iterations)?,
-                    })
-                })
-                .collect::<StoreResult<Vec<_>>>()?;
             Ok(GraphProcess {
                 compiled: serde_json::from_str::<CompiledGraph>(&compiled)?,
+                steps: steps.remove(graph_process.id.as_str()).unwrap_or_default(),
                 process: graph_process,
                 name,
-                steps,
             })
         })
         .collect()
@@ -83,40 +93,45 @@ pub(super) fn entry_in(
     graph: &GraphProcess,
 ) -> StoreResult<GraphProcessInventoryEntry> {
     let process = &graph.process;
-    let state =
-        GraphProcessSummaryState::of_process(process.outcome.as_deref(), process.completed_at);
-    let task = super::task_work::task_of_process(conn, &process.id)?;
-    let wave: Option<String> = match &task {
-        Some(task) => conn
-            .query_row(
-                "SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1",
-                [task],
-                |row| row.get(0),
-            )
-            .optional()?,
+    let task = super::task_work::task_of_process(conn, &process.id)?
+        .map(|id| TaskId::parse(&id))
+        .transpose()
+        .map_err(invalid)?;
+    let wave = match &task {
+        Some(task) => super::durable::task_wave_in(conn, task)?,
         None => conn
             .query_row(
                 "SELECT c.wave_id FROM session_events c JOIN processes e ON e.id=c.lf_process_id
                  WHERE c.kind='captured' AND e.parent_lf_process_id=?1 AND c.wave_id IS NOT NULL
                  ORDER BY c.seq DESC LIMIT 1",
                 [&process.id],
-                |row| row.get(0),
+                |row| row.get::<_, String>(0),
             )
-            .optional()?,
+            .optional()?
+            .map(|id| WaveId::parse(&id))
+            .transpose()
+            .map_err(invalid)?,
     };
+    entry_of(graph, task, wave)
+}
+
+/// The Graph's inventory entry once its Task and Wave are known.
+pub(crate) fn entry_of(
+    graph: &GraphProcess,
+    task_id: Option<TaskId>,
+    wave_id: Option<WaveId>,
+) -> StoreResult<GraphProcessInventoryEntry> {
+    let process = &graph.process;
     Ok(GraphProcessInventoryEntry {
         summary: GraphProcessSummary {
             id: process.id.to_string(),
             name: graph.name.clone(),
-            state,
-            task_id: task
-                .map(|id| TaskId::parse(&id))
-                .transpose()
-                .map_err(invalid)?,
-            wave_id: wave
-                .map(|id| WaveId::parse(&id))
-                .transpose()
-                .map_err(invalid)?,
+            state: GraphProcessSummaryState::of_process(
+                process.outcome.as_deref(),
+                process.completed_at,
+            ),
+            task_id,
+            wave_id,
             updated_at: process
                 .completed_at
                 .or(graph.latest().map(|step| step.process.started_at))
@@ -125,6 +140,43 @@ pub(super) fn entry_in(
         repo: process.repo.clone(),
         ended_at: process.completed_at,
     })
+}
+
+/// What a reading of Graphs' execution asks of the store once: the input each
+/// Process captured last, and the receipt files of unfinished Processes.
+#[derive(Debug, Default)]
+pub(crate) struct GraphExecutionFacts {
+    pub inputs: HashMap<LfProcessId, (String, String, i64)>,
+    pub receipts: HashMap<LfProcessId, PathBuf>,
+}
+
+/// The conversation, captured input and its event each of `processes` opened
+/// last. A process that delegated to its transport owner captures through the
+/// command that transport serves, so the delegation chain counts as itself.
+fn process_inputs(
+    conn: &Connection,
+    processes: &[&LfProcessId],
+) -> StoreResult<HashMap<LfProcessId, (String, String, i64)>> {
+    let ids = super::children::ids_json(processes.iter().map(|id| id.as_str()));
+    // Agent Processes record a bare executable name, not an argv array.
+    let rows = conn
+        .prepare(
+            "WITH RECURSIVE delegated(root,id,serves) AS (
+                 SELECT id,id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='session' AND json_extract(command,'$[2]')='serve' END
+                 FROM processes WHERE id IN (SELECT value FROM json_each(?1))
+                 UNION
+                 SELECT d.root,p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END
+                 FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
+                 WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END))
+             SELECT d.root,c.session_id,c.receipt_key,MAX(c.seq) FROM delegated d
+             JOIN session_events c ON c.lf_process_id=d.id
+             WHERE c.kind='captured' GROUP BY d.root",
+        )?
+        .query_map([&ids], |row| {
+            Ok((row.get(0)?, (row.get(1)?, row.get(2)?, row.get(3)?)))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
 }
 
 impl SqliteStore {
@@ -266,39 +318,58 @@ impl SqliteStore {
             .optional()?)
     }
 
-    pub(crate) fn graph_entry(
-        &self,
-        graph: &GraphProcess,
-    ) -> StoreResult<GraphProcessInventoryEntry> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        entry_in(&conn, graph)
-    }
-
     /// The conversation, captured input and its event a process opened last.
-    /// A process that delegated to its transport owner captures through the
-    /// command that transport serves, so the delegation chain counts as itself.
     pub(crate) fn process_input(
         &self,
         process: &LfProcessId,
     ) -> StoreResult<Option<(String, String, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                // Agent Processes record a bare executable name, not an argv array.
-                "WITH RECURSIVE delegated(id,serves) AS (
-                     SELECT id,CASE WHEN json_valid(command) THEN json_extract(command,'$[1]')='session' AND json_extract(command,'$[2]')='serve' END
-                     FROM processes WHERE id=?1
-                     UNION
-                     SELECT p.id,CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END
-                     FROM processes p JOIN delegated d ON p.parent_lf_process_id=d.id
-                     WHERE d.serves OR (CASE WHEN json_valid(p.command) THEN json_extract(p.command,'$[1]')='session' AND json_extract(p.command,'$[2]')='serve' END))
-                 SELECT session_id,receipt_key,seq FROM session_events
-                 WHERE kind='captured' AND lf_process_id IN (SELECT id FROM delegated)
-                 ORDER BY seq DESC LIMIT 1",
-                params![process],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?)
+        Ok(process_inputs(&conn, &[process])?.remove(process))
+    }
+
+    /// Execution facts of `graphs`: their latest steps' captured inputs and
+    /// the receipts of their unfinished Graph and step Processes.
+    pub(crate) fn graph_execution_facts<'a>(
+        &self,
+        graphs: impl IntoIterator<Item = &'a GraphProcess>,
+    ) -> StoreResult<GraphExecutionFacts> {
+        let graphs: Vec<_> = graphs.into_iter().collect();
+        let steps: Vec<_> = graphs
+            .iter()
+            .filter_map(|graph| graph.latest().map(|step| &step.process.id))
+            .collect();
+        let unfinished = super::children::ids_json(
+            graphs
+                .iter()
+                .flat_map(|graph| {
+                    std::iter::once(&graph.process).chain(graph.latest().map(|step| &step.process))
+                })
+                .filter(|process| process.completed_at.is_none())
+                .map(|process| process.id.as_str()),
+        );
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let inputs = process_inputs(&conn, &steps)?;
+        let home = conn
+            .path()
+            .filter(|path| !path.is_empty())
+            .and_then(|path| std::path::Path::new(path).parent())
+            .map(std::path::Path::to_path_buf);
+        let mut receipts = HashMap::new();
+        if let Some(home) = home {
+            for row in conn
+                .prepare(
+                    "SELECT id,receipt_locator FROM processes
+                     WHERE id IN (SELECT value FROM json_each(?1)) AND receipt_locator IS NOT NULL",
+                )?
+                .query_map([&unfinished], |row| {
+                    Ok((row.get::<_, LfProcessId>(0)?, row.get::<_, String>(1)?))
+                })?
+            {
+                let (id, locator) = row?;
+                receipts.insert(id, crate::journal::process_receipt_path(&home, &locator));
+            }
+        }
+        Ok(GraphExecutionFacts { inputs, receipts })
     }
 }
 

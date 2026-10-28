@@ -309,8 +309,8 @@ fn require_session_action(state: SessionState, action: SessionActionKind) -> Res
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionPage {
-    pub entries: Vec<SessionRecord>,
+pub struct SessionPage<T = SessionRecord> {
+    pub entries: Vec<T>,
     pub next: Option<String>,
 }
 
@@ -507,6 +507,15 @@ fn graph_occurrence(
         }
         _ => SessionGraphOccurrence::Past,
     }
+}
+
+/// One Session as `list` reads it; `None` once it is gone.
+pub(crate) fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    Ok(store
+        .sqlite
+        .session_summary(id, now)?
+        .map(|session| summary_surface(&session)))
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.

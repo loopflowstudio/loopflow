@@ -1,7 +1,6 @@
 // Link ordinary integration proofs once; nextest still isolates each test process.
 mod support;
 
-mod active_runs_watch;
 mod agent_startup_tests;
 mod auth_tests;
 mod build_cleanup;
@@ -33,6 +32,7 @@ mod release_lock_tests;
 mod repo_commands;
 mod scratch_tests;
 mod session_cli_tests;
+mod session_list_watch;
 mod session_steers;
 mod store_contention;
 mod sync_tests;

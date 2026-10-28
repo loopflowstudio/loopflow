@@ -9,7 +9,7 @@ use std::process::Command;
 use support::{register_task_without_pr, EnvGuard};
 
 #[test]
-fn work_watch_reconnects_repository_planning() {
+fn planning_status_watch_reconnects_repository_planning() {
     planning_reconnect_fixture("watch");
 }
 

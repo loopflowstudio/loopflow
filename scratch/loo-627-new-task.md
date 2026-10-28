@@ -92,7 +92,7 @@ from a scope instead of a Task: `scope_graph_default(repo, wave: Option<&str>)`
 (main's config layers through `graph_setting`). Both callers use it:
 - `task_graph_default(store, task)` → `select_task_run` (unchanged behavior)
 - `lf wave graph show [WAVE] [--no-wave] --json`, which gains
-  `default: { name, source: "personal" | "wave" | "repo" | "default" }`, and whose
+  `default: { name, source }` (`SetupSource`: `personal · global · wave · repo · default`; the sheet labels `personal` and `global` as yours), and whose
   `wave_id`/`wave` are null for `--no-wave` (the repository scope).
 
 Desktop shows this read. It never rebuilds the Wave → repository → `code` fallback
@@ -243,63 +243,31 @@ two-line create/run example is replaced, not kept beside the new line.
 
 ## Implementation status (2026-10-28)
 
-Both slices are built. `create --run` runs the real `lf task run` as a child
-process (so placement, transport release and `-b` waiting are the existing path),
-then admits the primary with `ensure_task(request)`, then serves `lf resume --task`
-when stdin/stdout are a terminal. `task_conversations` already reads only
-`interactive=1` Sessions, so Graph step Sessions are never adopted. The sheet is a
-`WorkNavigation.Palette.newTask` case, so the action monitor stands down while it is
-open. Checks: `cargo test -p loopflow --lib task_create_run` (the fixture lives in
-`tests/linear/`, compiled into the lib), DTO fixtures, CLI reference, Swift
-`NewTaskTests` + `newTaskSelectsTheTask` + action registry fixture: pass.
+Both slices are built, synced onto main after #1751 (`lf set`; `lf wave graph set` is gone).
 
-Compress (2026-10-28): `task_create` calls `primary::ensure_task` directly (no wrapper).
-Compress 2 (2026-10-28): `GraphDefault.source` is `SetupSource` (same wire); `check_graph` and
-`select_task_run` share `ops::task::load_graph` for the missing-graph error. Check: clippy clean;
-`cargo test --lib -- task_create_run wave_planning_reads_current a_task_takes_up_its_waves_graph` and
-integration `wave_graph_reports task_create_receipt graph_catalog_and_wave_selection`: pass.
-Sync onto main (2026-10-28, #1751 `lf set`): `lf wave graph set` and `set_wave_graph` are gone;
-`wave graph show [--no-wave]` resolves `default` through main's config layers, so sources are
-`personal · wave · repo · default`, and the sheet labels them.
-Realign (2026-10-28): `wave_graph` had copied `task_graph_default`'s layer read; both
-now call `scope_graph_default`. Check: `cargo test -p loopflow --lib -- task_create_run wave_resolution_matrix`
-pass; clippy clean.
+- `create --run` runs the real `lf task run` as a child process, then admits the primary
+  with `primary::ensure_task(request)`, then serves `lf resume --task` when stdin/stdout
+  are a terminal. Graph step Sessions are never adopted (`task_conversations` reads only
+  `interactive=1`).
+- `scope_graph_default` is the one resolver for `select_task_run` and `wave graph show`;
+  `WaveGraph` reports only `default` (the redundant `graph` field is gone). `check_graph`
+  and `select_task_run` share `ops::task::load_graph` for the missing-graph error.
+- Concept review (2026-10-28) found Desktop could not tell "nothing filed" from "filed,
+  run failed", so Create again filed a duplicate. Fixed: `--run --json` prints the
+  receipt (`graph`/`session_id` null) before exiting non-zero; `queryLf` carries a failed
+  command's stdout, `RegistryQuery.createTask` throws `TaskCreateRunFailed` with the
+  receipt, and `WorkModel.createTask` closes the sheet, selects the Task and puts the
+  error on its Start control. The sheet keeps the request only when nothing was filed.
+- The sheet is a `WorkNavigation.Palette.newTask` case, so the action monitor stands
+  down while it is open. Create is guarded only by its disabled state.
 
-Concept review (2026-10-28): the model holds — one command, one sheet, Rust owns the
-default and the admission. One mismatch with the accepted recovery contract ("Run fails
-after create … Desktop selects the Task anyway"): `WorkModel.createTask` keeps the sheet
-open on any failure, and `--run --json` prints nothing on stdout once the run fails, so
-Desktop cannot tell "nothing filed" from "filed, run failed", and pressing Create again
-files a duplicate Task. Next implement direction:
-- `lf task create --run --json` prints the receipt whenever the Task was filed, with
-  `graph` and `session_id` null when the run failed, and still exits non-zero. `graph`
-  becomes `Option<String>` / `String?`; update the DTO fixture and both tests.
-- `WorkModel.createTask` reads that receipt from a failed run, closes the sheet, selects
-  the Task (its Start/Run again control recovers) and shows the run's error there. The
-  sheet keeps the request only when nothing was filed.
-- Retire the "Create again files a second Task" assumption in `scratch/questions.md`.
-
-Implemented (2026-10-28): `--run --json` prints the receipt (`graph`/`session_id` null)
-before exiting non-zero; Desktop's `queryLf` carries a failed command's stdout in
-`RegistryQueryError`, `RegistryQuery.createTask` throws `TaskCreateRunFailed` with the
-receipt, and `WorkModel.createTask` closes the sheet, selects the Task and puts the error
-on its Start control. The success path now opens the conversation by Task id, and the
-New Task WorkModel fakes answer `desktop plan` (main's refresh read). Checks:
-`task_create_run`, `dto_fixtures::task_create_receipt`, clippy, Swift
-`NewTaskTests|WorkDestinationTests/newTask` (5): pass; rerun at 203846275 (receipt/close
-consolidation): `task_create_run`, Swift (5), fmt + clippy: pass.
-
-Compress 2 (2026-10-28): `WaveGraph.graph` is gone. It repeated `default.name`
-whenever `default.source` was not `default`, nothing read it, and its fixture had
-drifted. Tests now read `default`. The sheet labels `global` as yours. `start` now
-prints the receipt from one place. Checks: `task_create_run`,
-`wave_planning_reads_current…`, `wave_resolution_matrix`, integration
-`graph_catalog_and_wave_selection` + `dto_fixtures`, clippy, and `swift test` with the
-`NewTaskTests|WorkDestinationTests` filter (59): all pass.
+Check (a63a9f365 tree): `task_create_run`, `wave_resolution_matrix`, integration
+`graph_catalog_and_wave_selection` + `dto_fixtures`, clippy, Swift
+`NewTaskTests|WorkDestinationTests` (59): pass.
 
 Remaining: demo with a real provider (`code` stops at its interactive steps; `auto`
 reaches a merged PR), including whether the first reply leaves building to the
-running Graph.
+running Graph. Owner: demo/review.
 
 ## Slices (one PR)
 

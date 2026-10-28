@@ -1,17 +1,12 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
 Status (2026-10-28): **Writer unresolved; diagnostics only; not implementation-ready.**
+The checked-in `security -i` writer still has the destructive size failure below.
 No candidate meets transport, native reader-access and failed-save preservation
-requirements. The checked-in `security -i` writer still has the destructive size
-failure below. Public interfaces are not exhausted; revisit rejected routes only
-with a mechanism addressing their counterexamples. In particular,
-[`kSecAttrAccess`](https://developer.apple.com/documentation/security/ksecattraccess)
-support does not establish atomic preservation (findings 31/33). Creating a
-separate item with copied access also fails before promotion (finding 34).
-The implementation sequence is conditional on that missing mechanism; Jack Heart's
-accepted outcome and boundaries remain unchanged. Supported reconnection for
-jack@loopflow.studio is a separate live-acceptance dependency, proving neither
-the writer nor the historical save-failure cause.
+requirements. Public interfaces are not exhausted; revisit rejected routes only
+with a mechanism addressing their counterexamples. Implementation depends on that
+proof; live acceptance separately requires supported reconnection for
+jack@loopflow.studio. Neither dependency relaxes Jack Heart's accepted outcome.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -46,12 +41,6 @@ advancing work without plumbing failures; no quantitative Wave target is selecte
 
 The target is one native writer shared by refresh and activation. Diagnostics,
 a size refusal, successful API status or post-write repair do not prove preservation.
-
-**Demo:** after a naturally required refresh on the repaired installation,
-`lf account claude --json` accepts the same account with verified capacity, and
-native Claude continues using that login without reauthentication. The current
-rejected grant must first be recovered through the supported sign-in flow;
-that recovery alone will not demonstrate the repair.
 
 ## Surviving implementation
 
@@ -149,6 +138,19 @@ finding numbers so the archived evidence stays addressable.
   readers recovered exact old bytes. This proves those recoveries only, not
   unchanged ACL identity or general rollback safety. No commit/access-restoration
   probe ran; committing first abandons verification and leaves access unresolved.
+- **Copied-access creation (34, 2026-10-28):**
+  `SecKeychainItemCreateFromContent` accepts copied access, suggesting a staged
+  candidate could avoid the uncommitted group lookup above. With interaction
+  disabled, disposable 2,048/8,192-byte probes returned zero for original lookup
+  and access-copy, then `-25293` for both creations. Independent `security` reads
+  returned exact old bytes; candidates were absent (exit 44). Original cleanup
+  succeeded; absent-candidate cleanup returned 44. Children had 15-second
+  deadlines and were reaped; output contained only statuses, sizes and equality
+  booleans. No real credential, route, Session or global trust setting changed.
+  Creation failed before promotion or transaction testing; this does not rule out
+  every explicit-access creation. Full API citation, source/runner/result Git blob
+  IDs and reproduction commands:
+  `78530325c1:scratch/loo-661-save-refreshed-claude.md`, finding 34.
 - **Live observations (6, 32):** launches reported one write/readback failure
   without status and two expired OAuth errors. Later 0.14.18/0.14.19 polls accepted
   jack@loopflow.studio and jackstah@gmail.com with verified capacity and no recovery;
@@ -171,37 +173,6 @@ would select LOO-325. Local preservation must prove readable old bytes and uncha
 access, but cannot prove server validity after OAuth rotation: `fresh_claude_token`
 receives the refresh response before saving, with no provider/Keychain transaction.
 Neither limitation relaxes Jack Heart's requirements.
-
-### Copied-access creation counterexample (34, 2026-10-28)
-
-Apple documents `SecKeychainItemCreateFromContent` accepting an access object
-copied from another item via `SecKeychainItemCopyAccess`
-([API contract](https://developer.apple.com/documentation/security/seckeychainitemcreatefromcontent(_:_:_:_:_:_:_:))).
-This suggests staging a readable candidate before changing the original, avoiding
-the uncommitted new-group lookup in findings 22–26. It does not promise an atomic
-promotion or preservation of partition access.
-
-A new disposable probe created a synthetic original with `security -i`, copied
-its access object without reading its password through the API, then attempted
-native creation under a second unique service with exactly 2,048/8,192 bytes.
-With interaction disabled, lookup and access-copy returned zero; both creations
-returned `-25293`. Independent `security` reads returned exact original bytes;
-the new items were absent (exit 44). Both original deletions succeeded; cleanup
-of absent candidates also returned 44. Every child had a 15-second timeout and
-was reaped. Output held only statuses, sizes and equality booleans. No real
-credential, routing, Session or global trust setting changed.
-
-This rejects copied-access staging as an established escape from the replacement
-counterexamples. No promotion or transaction experiment followed; creation itself
-failed. It does not establish that every explicit-access creation is impossible.
-The supported writer remains unresolved; no product choice has been relaxed.
-Reproducible evidence is preserved in Git blobs: C source
-`1059c9ed006003509adf938405870afc3b0cc4a9`, Python runner
-`b80bb3edc52b65f7fd2d1585a249d40b744bad9d`, JSON results
-`23c5b26bbcbea7af1c2334eb89b4571dd6202938`. Restore them as `probe.c`, `run.py`
-and `results.json` in one disposable directory; compile with
-`clang -Wno-deprecated-declarations probe.c -framework Security -framework CoreFoundation -o probe`,
-then run `uv run python run.py`.
 
 ## Remaining implementation and acceptance
 
@@ -278,4 +249,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — kickoff (2026-10-28): copied-access creation probe executed both native sizes and returned `-25293`, preserving both originals; `git diff --check` and `lf context` pass. No production change or broad test rerun; writer proof, affected gate checks and Infrastructure's installed acceptance after supported reconnection remain pending.
+Check — compress (2026-10-28): `git diff --check` and `lf context` pass; prose only, no build/test rerun. Writer proof, affected gate checks and Infrastructure's installed acceptance after supported reconnection remain pending.

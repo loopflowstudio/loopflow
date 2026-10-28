@@ -1,4 +1,5 @@
 pub mod clipboard;
+pub(crate) mod file_exchange;
 #[cfg(target_os = "macos")]
 pub(crate) mod fs_events;
 

@@ -305,6 +305,15 @@ It first saves the current login back to its
 stored account, so a token the provider refreshed while active is kept; a login
 Loopflow has never seen is kept as a new explicit-only account.
 
+When Codex's native and stored copies name the same login but disagree, live
+status checks the native copy first. Only a definite authentication rejection
+allows checking the stored copy. Launches repair rejected credentials in the
+original home after verifying the other copy; conversations and resume IDs stay
+there. Displaced files remain in private `.lf-auth-recovery-*` directories beside
+`auth.json`, including late writes from an already-running client. Timeouts and
+service failures report verification unavailable and leave both copies intact.
+Cached status performs no provider requests. Recovery never restarts a daemon.
+
 For Codex, `use` also restarts its shared background app-server if it still holds
 another login, even when the file was already correct. Running turns get up to
 five minutes to finish; a turn still running at restart is interrupted. The login

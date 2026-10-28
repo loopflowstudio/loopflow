@@ -1312,7 +1312,8 @@ impl SqliteStore {
         Ok(session)
     }
 
-    /// Reserve the next input and its attachment together; a losing claimant changes neither.
+    /// Reserve input and attachment together, including for an explicitly retried
+    /// retired Session. Retain its retirement; a losing claimant changes neither.
     pub(crate) fn claim_session_input(
         &self,
         mut next: LfSession,
@@ -1328,7 +1329,7 @@ impl SqliteStore {
                 next.wave_id = previous.wave_id.clone();
             }
             if previous.captured != next.captured
-                || previous.completed_at.is_some()
+                || previous.completed_at != next.completed_at
                 || previous.cwd != next.cwd
                 || previous.task_id != next.task_id
                 || previous.wave_id != next.wave_id

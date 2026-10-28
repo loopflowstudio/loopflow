@@ -780,7 +780,7 @@ Jack Heart authorized landing and a patch release; shipment remains unproved.
 LOO-340 owns account state/routing and LOO-338 naming. Compare email and per-user
 subject, not workspace identity; usage proves no login. Unavailable identity is not
 rejection. Native refresh, sole browser ownership and installed acceptance remain
-unproved; no installed repair is authorized. Exact decisions, isolation requirements
+unproved by that work. Exact decisions, isolation requirements
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../../docs/subscriptions.md).
 
@@ -810,6 +810,24 @@ and expired OAuth; later accepted polls prove no refresh or live cause. Unit tes
 select files even on macOS; acceptance must exercise the production writer and
 reader, then an installed refresh. LOO-325 concurrency remains unselected.
 Evidence: `ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/loo-661-save-refreshed-claude.md`.
+
+LOO-665 (2026-10-28): Jack Heart authorized the same-login Codex hotfix through
+merge; Infrastructure owns installation/acceptance. Mini's stored limits succeed
+while native returns 401 despite account/read; rotation order remains unknown.
+Jack's 04:13 UTC steer reports isolated same-Session marker recall after upgrading
+Codex to 0.165.0, but shared status still unavailable. This proves neither shared
+recovery nor a fresh 401 diagnosis. Identity alone proves no usable access.
+
+Recovery needs definite target rejection and alternate acceptance; transient
+failure stays unknown. Keep conversation placement independent of credential
+selection. Compare-before-rename cannot preserve an uncooperative writer: retain
+the displaced inode, including later descriptor writes, and refuse stale evidence.
+Save-back must honor the same evidence or it can recreate the failure. General
+refresh coordination and Claude changes remain separate. Explicit continuation
+of a completed Session retains retirement and prior captures; fresh atomic input/
+attachment admission still rejects stale completion snapshots and live owners.
+Release's entry-point lesson applies: public status/launch/resume fixtures prove
+stand-in continuity, not real-provider inference or installed recovery.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-10)
 

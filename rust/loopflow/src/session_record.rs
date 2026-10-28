@@ -1518,11 +1518,6 @@ impl CaptureHandle {
             StoreError::InvalidAuthority("Session input requires an admitted Process".into())
         })?;
         let mut next = store.session(session)?.ok_or(StoreError::NotFound)?;
-        if next.completed_at.is_some() {
-            return Err(StoreError::InvalidAuthority(format!(
-                "session {session:?} is already complete"
-            )));
-        }
         let expected = store.session_attachment(session)?;
         next.artifact_key = Some(new_artifact_key());
         next.input_published = false;
@@ -3485,10 +3480,17 @@ mod tests {
             )?;
             provider.kill()?;
             provider.wait()?;
-            store.release_session_attachment(&session.id, &attachment)?;
+            original.finish("completed")?;
             Ok(())
         })
         .unwrap();
+        assert!(store
+            .session(&session.id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
+        let history = store.session_history(&session.id, 0, 0).unwrap();
         let attachment = store.session_attachment(&session.id).unwrap().unwrap();
         let manifest = fs::read(original.artifact_dir().join("manifest.json")).unwrap();
         let request = AgentProcessRequest::from_prepared(&AgentConfig {
@@ -3528,6 +3530,10 @@ mod tests {
             );
             assert!(saved.context.is_some());
             let current = store.session(&session.id)?.unwrap();
+            assert!(current.completed_at.is_some());
+            assert!(store
+                .session_history(&session.id, 0, 0)?
+                .starts_with(&history));
             assert_ne!(current.captured, session.captured);
             assert_eq!(current.cwd, session.cwd);
             assert_eq!(current.title, session.title);

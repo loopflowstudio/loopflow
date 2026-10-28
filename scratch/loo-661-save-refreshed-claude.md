@@ -37,6 +37,11 @@ is selected merely to make the remaining implementation sequence executable.
 No product decision or additional authorization is pending, and the exclusions
 below do not exhaust every public interface.
 
+2026-10-27 kickoff decision: retain the accepted outcome and blocked mechanism
+status. Finding 27 below rejects passing a copied access object through the
+existing-item modifier as another route around partition replacement. No safe
+production cutover is selected, and the diagnostic-only branch is not the repair.
+
 ## Demo and decision boundary
 
 After a naturally required refresh, `lf account claude --json` still accepts
@@ -168,6 +173,19 @@ review except read-only installed dispatch inspection in 18.
   `d6c97155d988c0d1453f82bc4c108f24f11e8d70`; reconstruct its temporary directory
   locator beside the compiled probe. All transaction subprocesses were bounded
   to 10/15 seconds; outputs contained only status, lengths and comparisons.
+- **Explicit access is not an update escape hatch (27):** at the same pinned
+  Apple revision, `ItemImpl::addWithCopyInfo` passes `mAccess` into
+  `updateSSGroup`; `ItemImpl::update` calls it without that argument. The latter
+  copies the old group's access and removes partition/integrity ACLs.
+  `SecKeychainItemCreateFromContent` supplies initial access to a new item;
+  `SecKeychainItemSetAccess` immediately changes the current group's access,
+  rather than staging access for the next data update. Thus an explicit-access
+  branch inside the private helper is not a public replacement mechanism.
+  Creation still does not replace a valid duplicate (finding 16), and setting
+  access before modification does not avoid the modifier's removal. This is
+  source evidence, not a new native mutation result or proof of installed binary
+  equivalence. Sources: [Item.cpp](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Item.cpp),
+  [SecKeychainItem.cpp](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItem.cpp).
 - **Live failure remains undiagnosed (6):** a recorded launch reported native
   write/readback failure without status; two others reported expired OAuth.
   Supported installed 0.14.18 polls accepted jack@loopflow.studio and
@@ -262,4 +280,4 @@ intended step edits with `lf commit <paths>` before sync, preserving unrelated
 staged/unstaged work and normal validation. Do not force-add telemetry or implement
 a competing repair; retain the dependency if checkpointing fails.
 
-Check — 2026-10-27 compress: `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only consolidation; prior diagnostic tests (4), fmt and clippy results remain applicable. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.
+Check — 2026-10-27 kickoff: `git diff --check` passed; `lf context` reports memory/scratch within both limits. Source-only investigation and plan edit; prior diagnostic tests (4), fmt and clippy results remain applicable. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.

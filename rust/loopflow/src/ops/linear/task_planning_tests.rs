@@ -5561,6 +5561,7 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
             home: fixture.directory.path().to_owned(),
             wave: None,
             skill_file: None,
+            submitted_docs: None,
             references: Vec::new(),
         };
         let claude = crate::harness::context::claude_args(&delivery).unwrap();

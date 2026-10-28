@@ -591,6 +591,7 @@ mod tests {
                 home: home.path().to_owned(),
                 wave: None,
                 skill_file: Some(skill),
+                submitted_docs: None,
                 references: Vec::new(),
             };
             context

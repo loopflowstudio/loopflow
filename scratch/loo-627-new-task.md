@@ -285,6 +285,14 @@ New Task WorkModel fakes answer `desktop plan` (main's refresh read). Checks:
 `NewTaskTests|WorkDestinationTests/newTask` (5): pass; rerun at 203846275 (receipt/close
 consolidation): `task_create_run`, Swift (5), fmt + clippy: pass.
 
+Compress 2 (2026-10-28): `WaveGraph.graph` is gone. It repeated `default.name`
+whenever `default.source` was not `default`, nothing read it, and its fixture had
+drifted. Tests now read `default`. The sheet labels `global` as yours. `start` now
+prints the receipt from one place. Checks: `task_create_run`,
+`wave_planning_reads_current…`, `wave_resolution_matrix`, integration
+`graph_catalog_and_wave_selection` + `dto_fixtures`, clippy, and `swift test` with the
+`NewTaskTests|WorkDestinationTests` filter (59): all pass.
+
 Remaining: demo with a real provider (`code` stops at its interactive steps; `auto`
 reaches a merged PR), including whether the first reply leaves building to the
 running Graph.

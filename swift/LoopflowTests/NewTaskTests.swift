@@ -47,7 +47,7 @@ struct NewTaskTests {
     @Test("The sheet shows the reported default and where it stops; Create waits for a request")
     func sheetDefaultsToTheReportedWorkflow() async throws {
         let catalog = try fixture("graph_catalog.json")
-        let defaultGraph = #"{"wave_id": null, "wave": null, "graph": null, "default": {"name": "feature", "source": "repo"}}"#
+        let defaultGraph = #"{"wave_id": null, "wave": null, "default": {"name": "feature", "source": "repo"}}"#
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["graph", "list"]) { return catalog }
             if args.starts(with: ["wave", "graph", "show"]) { return defaultGraph }

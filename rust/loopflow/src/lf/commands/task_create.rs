@@ -64,19 +64,19 @@ pub fn start(
         run.stdout(Stdio::from(std::io::stderr().as_fd().try_clone_to_owned()?));
     }
     let status = run.status().context("start `lf task run`")?;
-    let (graph, session_id) = match status.success() {
-        true => admit(cli, repo, task, request)?,
-        false => (None, None),
-    };
-    if json {
+    let receipt = |graph, session_id| -> Result<()> {
         let receipt = TaskCreateReceipt {
             task: task.clone(),
             graph,
-            session_id: session_id.clone(),
+            session_id,
         };
         println!("{}", serde_json::to_string_pretty(&receipt)?);
-    }
+        Ok(())
+    };
     if !status.success() {
+        if json {
+            receipt(None, None)?;
+        }
         eprintln!("{issue} was created; start it again with `lf task run {issue}`");
         return Err(crate::process::CommandExit(
             status
@@ -86,8 +86,12 @@ pub fn start(
         )
         .into());
     }
-    // The receipt is the whole answer; a headless run has no conversation to open.
-    if json || session_id.is_none() {
+    let (graph, session_id) = admit(cli, repo, task, request)?;
+    if json {
+        return receipt(Some(graph), session_id);
+    }
+    // A headless run has no conversation to open.
+    if session_id.is_none() {
         return Ok(());
     }
     if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
@@ -112,7 +116,7 @@ fn admit(
     repo: &Path,
     task: &Task,
     request: Option<&str>,
-) -> Result<(Option<String>, Option<crate::id::LfSessionId>)> {
+) -> Result<(String, Option<crate::id::LfSessionId>)> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = std::sync::Arc::new(open_store(&storage_config_from_env()?).await?);
         let graph = store
@@ -135,6 +139,6 @@ fn admit(
                 .id,
             ),
         };
-        Ok((Some(graph), session_id))
+        Ok((graph, session_id))
     })
 }

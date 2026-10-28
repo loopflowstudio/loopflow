@@ -144,6 +144,8 @@ Desktop Retention card renders it.
 
 `task_create_receipt.json` pins `lf task create REQUEST --run --json`: the created
 Task, the graph it took up and its admitted primary conversation, null after a
-headless `-b` run; both are null when the run failed after the Task was filed. `wave_graph.json` pins `lf wave graph show --json` for a Wave
-and for the repository (`--no-wave`); `default` is Rust's resolution, which
-Desktop's New Task sheet shows instead of rebuilding it. Rust and Swift decode both.
+headless `-b` run; both are null when the run failed after the Task was filed.
+`wave_graph.json` pins `lf wave graph show --json` for a Wave and for the
+repository (`--no-wave`); `default` is Rust's resolution and the setting that
+chose it, which Desktop's New Task sheet shows instead of rebuilding it. Rust and
+Swift decode both.

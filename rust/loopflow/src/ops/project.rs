@@ -5,7 +5,6 @@ use crate::store::planning_sync::PlanningSyncStatus;
 use crate::store::{PlanningLocks, Store};
 use crate::work::project::Project;
 use crate::work::project::ProjectStatus;
-use crate::work::wave::setup::SetupSource;
 use crate::work::wave::Wave;
 
 fn project_error(message: impl ToString) -> OpsError {
@@ -283,22 +282,20 @@ pub async fn edit(
     read_saved(&store, &project.id)
 }
 
-/// The graph a scope's new Tasks take up: the configured `graph:`, if any,
-/// and the default resolved through your `lf set graph`, the Wave's and the
-/// repository's `graph:`, then `code`.
+/// The graph a scope's new Tasks take up, resolved through your `lf set graph`,
+/// the Wave's and the repository's `graph:`, then `code`.
 /// The repository scope has no Wave.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WaveGraph {
     pub wave_id: Option<crate::id::WaveId>,
     pub wave: Option<String>,
-    pub graph: Option<String>,
     pub default: GraphDefault,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GraphDefault {
     pub name: String,
-    /// `personal`, `wave`, `repo` or `default`
+    /// `personal`, `wave`, `repo`, `global` or `default`
     pub source: String,
 }
 
@@ -317,7 +314,6 @@ pub async fn wave_graph(
     let (name, source) =
         crate::ops::task::scope_graph_default(repo, wave.as_ref().map(|wave| wave.slug()))?;
     Ok(WaveGraph {
-        graph: (source != SetupSource::Default).then(|| name.clone()),
         wave_id: wave.as_ref().map(|wave| wave.id().clone()),
         wave: wave.as_ref().map(|wave| wave.slug().into()),
         default: GraphDefault {

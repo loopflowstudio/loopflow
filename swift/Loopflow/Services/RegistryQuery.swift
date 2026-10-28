@@ -652,22 +652,21 @@ public struct TaskCreateRunFailed: LocalizedError, Sendable {
     public var errorDescription: String? { message }
 }
 
-/// `lf wave graph show --json`: a Wave's own selection and the default its new
-/// Tasks take up, resolved in Rust through your, the Wave's and the repository's `graph:`, then `code`.
+/// `lf wave graph show --json`: the graph a scope's new Tasks take up, resolved
+/// in Rust through your, the Wave's and the repository's `graph:`, then `code`.
 /// The repository scope has no Wave.
 public struct WaveGraph: Decodable, Sendable, Hashable {
     public struct Default: Decodable, Sendable, Hashable {
         public let name: String
-        /// `personal`, `wave`, `repo` or `default`
+        /// `personal`, `wave`, `repo`, `global` or `default`
         public let source: String
     }
     public let waveId: String?
     public let wave: String?
-    public let graph: String?
     public let `default`: Default
 
     enum CodingKeys: String, CodingKey {
-        case wave, graph, `default`
+        case wave, `default`
         case waveId = "wave_id"
     }
 }

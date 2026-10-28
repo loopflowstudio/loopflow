@@ -128,7 +128,7 @@ struct NewTaskSheet: View {
     static func defaultLabel(_ reported: WaveGraph.Default?) -> String {
         guard let reported else { return "Default" }
         return switch reported.source {
-        case "personal": "\(reported.name) · your default"
+        case "personal", "global": "\(reported.name) · your default"
         case "wave": "\(reported.name) · Wave default"
         case "repo": "\(reported.name) · repository default"
         default: "\(reported.name) · default"

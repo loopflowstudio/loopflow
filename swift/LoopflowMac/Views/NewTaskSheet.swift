@@ -114,7 +114,6 @@ struct NewTaskSheet: View {
     }
 
     private func create() {
-        guard !trimmed.isEmpty, !creating else { return }
         creating = true
         error = nil
         let (request, wave, graph) = (trimmed, wave, graph)

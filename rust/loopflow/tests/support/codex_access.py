@@ -18,8 +18,8 @@ def main() -> None:
         print("fixture")
         return
     home = Path(os.environ["CODEX_HOME"])
-    thread = "0199a213-81c0-7800-8aa1-bbab2a035a53"
-    history = home / "turns.json"
+    thread = os.environ.get("CODEX_FIXTURE_THREAD", "0199a213-81c0-7800-8aa1-bbab2a035a53")
+    history = home / f"turns-{thread}.json"
     turns = json.loads(history.read_text()) if history.exists() else []
     auth = json.loads((home / "auth.json").read_text())
     token = auth["tokens"]["access_token"]
@@ -35,7 +35,14 @@ def main() -> None:
             continue
         method = request["method"]
         with (home / "probe-events").open("a") as events:
-            events.write(json.dumps({"method": method, "pid": os.getpid()}) + "\n")
+            event = {
+                "method": method,
+                "pid": os.getpid(),
+                "thread": thread,
+                "home": str(home),
+                "email": email,
+            }
+            events.write(json.dumps(event) + "\n")
         result = {}
         if method == "account/read":
             refreshed = home / "refresh-to"
@@ -73,8 +80,10 @@ def main() -> None:
                 assert turns
             result = {"thread": {"id": thread, "turns": turns}}
         elif method == "thread/turns/list":
+            assert request["params"]["threadId"] == thread
             result = {"data": turns, "nextCursor": None}
         elif method == "turn/start":
+            assert request["params"]["threadId"] == thread
             assert token in ("fixture", "rotated")
             turn = {"id": f"turn-{len(turns)}", "status": "completed", "items": []}
             turns.append(turn)

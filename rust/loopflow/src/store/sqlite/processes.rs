@@ -1491,12 +1491,63 @@ mod discovery_tests {
             .unwrap()
             .is_none());
 
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET completed_at=10 WHERE id=?1",
+                [&session.id],
+            )
+            .unwrap();
+        // A completion concurrent with preparation invalidates that snapshot.
+        assert!(store
+            .claim_session_input(next.clone(), Some(&attachment), &second, || {
+                panic!("reserved process needs no close")
+            })
+            .is_err());
+        assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
+        assert_eq!(
+            store.session_attachment(&session.id).unwrap(),
+            Some(attachment.clone())
+        );
+        next.completed_at = Some(10);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
+                params![
+                    first,
+                    std::process::id(),
+                    crate::journal::process_started_at(std::process::id())
+                        .unwrap()
+                        .unwrap()
+                ],
+            )
+            .unwrap();
+        // Completion does not permit taking input from a still-attached owner.
+        assert!(store
+            .claim_session_input(next.clone(), Some(&attachment), &second, || {
+                panic!("live owner must be refused before closing its provider")
+            })
+            .is_err());
+        assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), before);
+        assert_eq!(
+            store.session(&session.id).unwrap().unwrap().completed_at,
+            Some(10)
+        );
+        let mut owner = store.process(&first).unwrap().unwrap();
+        owner.completed_at = Some(11);
+        store.record_process(&owner).unwrap();
         let (admitted, claimed) = store
             .claim_session_input(next.clone(), Some(&attachment), &second, || {
                 panic!("reserved process needs no close")
             })
             .unwrap();
         assert_eq!(admitted.artifact_key, next.artifact_key);
+        assert_eq!(admitted.completed_at, Some(10));
         assert_ne!(admitted.captured, session.captured);
         assert_eq!(claimed.lf_process_id, Some(second.clone()));
         let history = store.session_history(&session.id, 0, 0).unwrap();

@@ -764,13 +764,28 @@ Jack Heart authorized landing and a patch release; shipment remains unproved.
 LOO-340 owns account state/routing and LOO-338 naming. Compare email and per-user
 subject, not workspace identity; usage proves no login. Unavailable identity is not
 rejection. Native refresh, sole browser ownership and installed acceptance remain
-unproved; no installed repair is authorized. Exact decisions, isolation requirements
+unproved by that work. Exact decisions, isolation requirements
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../../docs/subscriptions.md).
 
 Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
 with five-minute turn grace. Configured acceptance remains open.
+
+LOO-665 (2026-10-28): Jack Heart authorized the same-login Codex hotfix through
+merge; Infrastructure retains coordinated installation and cross-Machine acceptance.
+Mini's labelled receipts show stored live limits succeeding while native limits
+return HTTP 401 despite successful account/read. Neither identity equality nor
+account/read proves usable access; token-rotation order remains unknown.
+
+Recovery needs definite target rejection and alternate acceptance; transient
+failure stays unknown. Keep conversation placement independent of credential
+selection. Compare-before-rename cannot preserve an uncooperative writer: retain
+the displaced inode, including later descriptor writes, and refuse stale evidence.
+Save-back must honor the same evidence or it can recreate the failure. General
+refresh coordination and Claude changes remain separate. Release's entry-point
+lesson applies: resolver tests do not prove public launch/resume, installation,
+or completed inference.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-10)
 

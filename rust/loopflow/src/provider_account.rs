@@ -329,12 +329,12 @@ impl ProviderAccountRoute {
 
     /// Home used for identity checks. Codex access is resolved separately;
     /// Claude's matching native credential carries its current refresh.
-    fn credential_home(&self, profile: &Path) -> PathBuf {
+    fn credential_home(&self) -> PathBuf {
         match (self.provider, &self.home) {
             (Provider::Claude, RouteHome::Shared { .. }) => {
-                activation::claude_credential_home(profile)
+                activation::claude_credential_home(self.account_home())
             }
-            _ => profile.to_path_buf(),
+            _ => self.account_home().to_path_buf(),
         }
     }
 
@@ -388,7 +388,7 @@ impl ProviderAccountRoute {
                 .map_err(|error| unavailable(error.to_string()))?;
             return self.check_identity().await;
         }
-        let home = self.credential_home(self.account_home());
+        let home = self.credential_home();
         crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
             .await
             .map_err(|error| ProviderAccountError::CredentialUnavailable {
@@ -408,13 +408,8 @@ impl ProviderAccountRoute {
     }
 
     async fn check_identity(&self) -> Result<(), ProviderAccountError> {
-        let (store, profile) = match &self.login {
-            AccountLogin::Stored { store, profile }
-            | AccountLogin::Replayed {
-                catalog: store,
-                profile,
-            } => (store, profile),
-        };
+        let (AccountLogin::Stored { store, .. } | AccountLogin::Replayed { catalog: store, .. }) =
+            &self.login;
         let accounts = store
             .list_provider_accounts(Some(self.provider.as_str()))
             .await?;
@@ -423,7 +418,7 @@ impl ProviderAccountRoute {
             .find(|account| account.account_id == self.account_id)
             .ok_or_else(|| ProviderAccountError::Runtime("selected account disappeared".into()))?;
         let mut selected = account.clone();
-        selected.home = Some(self.credential_home(profile));
+        selected.home = Some(self.credential_home());
         identity::check_current_identity(&selected, &accounts)
             .await
             .map_err(|error| ProviderAccountError::Runtime(error.to_string()))

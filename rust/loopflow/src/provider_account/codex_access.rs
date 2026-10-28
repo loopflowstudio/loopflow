@@ -143,20 +143,16 @@ async fn resolve_bounded(
     let mut refreshed = [false; 2];
     // A provider refresh or concurrent replacement invalidates old evidence.
     // One retry shares the original deadline and refresh budget.
-    for attempt in 0..2 {
-        let result = resolve_once(account, preferred, alternate, &mut refreshed).await;
-        match result {
-            Err(ObserveError::Changed) if attempt == 0 => continue,
-            Err(ObserveError::Changed) => {
-                return Err(unavailable(
-                    "Codex credential changed during verification; retry",
-                ))
-            }
-            Err(ObserveError::Provider(error)) => return Err(error),
-            Ok(access) => return Ok(access),
+    let result = match resolve_once(account, preferred, alternate, &mut refreshed).await {
+        Err(ObserveError::Changed) => {
+            resolve_once(account, preferred, alternate, &mut refreshed).await
         }
-    }
-    unreachable!("two bounded attempts return a result")
+        result => result,
+    };
+    result.map_err(|error| match error {
+        ObserveError::Changed => unavailable("Codex credential changed during verification; retry"),
+        ObserveError::Provider(error) => error,
+    })
 }
 
 enum ObserveError {

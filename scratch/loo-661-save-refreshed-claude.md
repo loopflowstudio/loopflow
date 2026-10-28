@@ -1,6 +1,6 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Writer unresolved; no supported mechanism established.**
+Status (2026-10-28): **Draft implementation plan blocked on the writer mechanism.**
 The production `security -i` writer remains defective and no native acceptance
 fixture exists. Finding 35 rejects the tested copied-access and trusted-application
 constructions; finding 36 identifies why database authentication and retaining an
@@ -16,6 +16,18 @@ Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
 prior plan and dependency reconciliation:
 `61c6f82a7fd9e9c61d3a9e81dfcfa261708536dc:scratch/loo-661-save-refreshed-claude.md`.
+
+Kickoff reconciliation (2026-10-28): retain the existing design and acceptance
+contract. Current source still uses the defective transport; the branch's
+diagnostic changes supply neither replacement nor preservation. Rechecking
+[Apple's pinned command implementation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/SecurityTool/macOS/security.c#L73-L76)
+confirms its fixed 4,096-byte interactive buffer; it supplies no new transport
+candidate. Findings 35–36 remain the decisive native-access counterexamples.
+No new qualifying mechanism, mutation probe or live-account evidence resulted.
+The remaining sequence below is conditional, not an executable repair plan:
+implementation needs a demonstrated supported mechanism preserving bytes and
+native access, or an explicit scope decision from Jack Heart. Browser reconnection
+is a separate live-demo dependency and cannot resolve this storage dependency.
 
 Integrated dependencies (none proves Claude repair or installation):
 
@@ -326,4 +338,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — realign (2026-10-28): `git diff --check` and `lf context` pass; source and archived finding 36 agree with the plan. Prose only; no build or mutation probe rerun. Native acceptance, gate and Infrastructure's installed acceptance remain pending.
+Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; current writer, archived findings 35–36 and pinned Apple command source reviewed. Prose only; no build or mutation probe rerun. Writer mechanism, native acceptance, gate and installed acceptance remain unresolved.

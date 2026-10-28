@@ -8,6 +8,13 @@ of preservation requirements is pending; exclusions below do not exhaust public
 interfaces. Reopen a rejected route only with a mechanism addressing its
 counterexample.
 
+Kickoff decision, 2026-10-27: retain the accepted outcome and existing plan;
+no replacement mechanism is ready for implementation. Direct inspection of the
+combined `SecItemUpdate` path confirms separate data/access mutations (31).
+Fresh supported observation now reports `refresh grant rejected` for
+jack@loopflow.studio (32), establishing a reconnect dependency for live acceptance.
+It does not establish the cause of the original save failure.
+
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
@@ -47,6 +54,12 @@ The target is one native writer shared by refresh and activation. Diagnostics,
 a size refusal, successful API status or post-write repair cannot establish the
 required preservation. The acceptance sequence below separates disposable native
 storage proof from the installed refresh demo; neither can replace the other.
+
+**Demo:** after a naturally required refresh on the repaired installation,
+`lf account claude --json` accepts the same account with verified capacity, and
+native Claude continues using that login without reauthentication. The current
+rejected grant must first be recovered through the supported sign-in flow;
+that recovery alone will not demonstrate the repair.
 
 ## Surviving implementation
 
@@ -139,7 +152,7 @@ source/header review, except read-only installed dispatch inspection in 18.
   without status and two expired OAuth errors. Later supported 0.14.18/0.14.19
   polls accepted jack@loopflow.studio and jackstah@gmail.com with verified capacity
   and no diagnostic/recovery instruction; the uninspected local row remained
-  unavailable. Latest supported `lf account claude --json` observation:
+  unavailable. Earlier supported `lf account claude --json` observation:
   `1793163454` (2026-10-27), exit 0, both managed accounts accepted with three
   verified windows each and no diagnostic or recovery instruction. Polls expose neither
   refresh occurrence nor storage stage, payload size or causality. They explain
@@ -172,6 +185,34 @@ source/header review, except read-only installed dispatch inspection in 18.
   is consistent with a partial replacement followed by an error; exact installed
   parsing/encoding was not instrumented. A nonzero writer status cannot establish
   preservation, even when the reader remains accessible.
+- **Combined public update is sequential (31, 2026-10-27):** Apple's
+  [`kSecAttrAccess` contract](https://developer.apple.com/documentation/security/ksecattraccess)
+  permits data and access in one `SecItemUpdate` call. Directly tracing that API,
+  rather than inferring from the CLI, finds
+  [`_UpdateKeychainItem`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecItem.cpp#L2511-L2541)
+  calling `SecKeychainItemModifyContent` before `SecKeychainItemSetAccess`.
+  Access failure returns through cleanup without restoring data.
+  [`SecItemUpdate_osx`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecItem.cpp#L5405-L5458)
+  loops over matches without an enclosing transaction. Together with the
+  modifier's internal commit, this confirms the published combined call lacks
+  the required atomic data/access boundary. Findings 22–26 still constrain an
+  external transaction. This is source evidence, not a new native probe or proof
+  of installed binary equivalence; it closes the citation gap in findings 21/28,
+  without claiming all public interfaces exhausted.
+- **Current live refresh rejection (32, 2026-10-27):** supported
+  `lf account claude --json` at `1793169073` returned exit 0 but rejected
+  jack@loopflow.studio, with recovery present and no verified windows. A targeted
+  diagnostic observation at `1793169147` confirmed `refresh grant rejected`.
+  Both accepted jackstah@gmail.com with three verified windows and no recovery;
+  the local row remained unavailable. Output retained only identity, verification,
+  diagnostic from a fixed allowlist, recovery presence and counts. No real token
+  was read directly, printed, altered to force expiry or used in argv.
+  In `fresh_claude_token`, this reason maps to HTTP 400 `invalid_grant` before
+  the credential writer. This identifies the current refresh failure category,
+  not the cause of the historical save failure or token invalidation. Supported
+  reconnection (`lf account connect claude jack@loopflow.studio`) is a live
+  acceptance dependency; no sign-in or account-route change was attempted.
+  Further polling without recovery supplies no new acceptance evidence.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
@@ -257,4 +298,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — realign (2026-10-27): `git diff --check` and `lf context` pass; prose-only reconciliation, existing diagnostic/probe evidence reused without reruns. Gate owns affected checks; native-writer design and installed-refresh acceptance remain unresolved.
+Check — kickoff (2026-10-27): `lf account claude --json` exits 0 but reports `refresh grant rejected` for jack@loopflow.studio; `git diff --check` and `lf context` pass. Prose/source investigation only; native proof and affected gate checks remain pending.

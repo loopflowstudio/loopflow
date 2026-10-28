@@ -1224,15 +1224,8 @@ fn applied_floor(conn: &rusqlite::Connection, version: &str) -> StoreResult<Stri
 /// The newest pending migration that older builds cannot read past, or `None`
 /// when every build that opens the store now still can after it advances.
 pub(crate) fn raised_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
-    raised_floor_over(conn, MIGRATIONS)
-}
-
-fn raised_floor_over(
-    conn: &rusqlite::Connection,
-    set: &[Migration],
-) -> StoreResult<Option<String>> {
     let applied = applied_versions(conn)?;
-    Ok(pending_migrations(&applied, set)?
+    Ok(pending_migrations(&applied, MIGRATIONS)?
         .iter()
         .rev()
         .find(|migration| migration.breaks_readers())

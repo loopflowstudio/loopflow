@@ -667,7 +667,7 @@ impl SqliteStore {
         Ok(store)
     }
 
-    /// The oldest lf release that can open this store; `None` when it is empty.
+    /// The migration a reader must know to open this store; `None` when it is empty.
     pub(crate) fn reader_floor(&self) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         crate::store::migrations::store_reader_floor(&conn)

@@ -4,7 +4,7 @@ Status: **Implementation blocked on a verified native writer; diagnostics only.*
 Jack Heart authorized bounded repair and autonomous delivery of
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-reviewed checkout: `e4aedd2b70` (2026-10-27, includes LOO-657 and v0.14.19).
+reviewed checkout: `c33592e382` (2026-10-27, includes LOO-657 and v0.14.19).
 No remote freshness is claimed. Installed 0.14.19 accepted both managed accounts
 in a later poll, without proving refresh or explaining the original save failure.
 
@@ -42,6 +42,12 @@ Both are required: successful account polls do not prove a save occurred.
 Retain one native writer behind `write_claude_login`, shared by refresh and
 activation, with current readers and credential authority preserved. Its transport
 remains unselected; a transaction wrapper alone does not establish compatibility.
+
+2026-10-27 kickoff decision: retain the accepted outcome and existing plan.
+**This slice remains mechanism proof**, not production cutover: one disposable
+replacement must satisfy exact large-value readback, existing-reader access and
+failure preservation together before replacing the writer. Diagnostics alone
+cannot satisfy that slice. No supported replacement has yet passed it.
 
 ## Surviving implementation
 
@@ -191,6 +197,20 @@ No real credential was directly read or printed. Retain these counterexamples:
   pre-update plan: `4ba8a12723381e61dec42111cd97561020e9552c`. This is synthetic rollback evidence,
   not a compatible writer or live diagnosis.
 
+- **Transaction review (24, 2026-10-27):** re-reading the pinned
+  [replacement path](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Item.cpp#L809-L904)
+  confirms that an outer transaction does not change new-group creation or
+  partition-ACL removal. The
+  [secure-storage reader](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_cdsa_client/lib/securestorage.cpp#L253-L277)
+  separately looks up the group's symmetric key and can report record-not-found
+  there. Consequently, findings 22–23 do not establish that the password record
+  itself disappeared: metadata succeeded while secret reads failed. Group-key
+  lookup is a concrete diagnostic lead, not an established cause on the installed
+  framework. The next mechanism investigation must distinguish that lookup from
+  password-record visibility and prove access preservation independently; merely
+  reacquiring the item or adding another transaction wrapper is insufficient.
+  This review made no Keychain mutation and established no new passing writer.
+
 Findings 8–20 are source/header review except the read-only installed dispatch
 inspection in 18. These exclusions establish neither production acceptance nor
 exhaustion of every public interface. Argv credentials, broad trust changes,
@@ -276,4 +296,4 @@ intended step edits with `lf commit <paths>` before sync, preserving unrelated
 staged/unstaged work and normal validation. Do not force-add telemetry or implement
 a competing repair; retain the dependency if checkpointing fails.
 
-Check — 2026-10-27 compression: `git diff --check`, `git diff --cached --check` and `lf context` passed; prose-only reduction, no tests rerun (11 subscription tests previously passed). Native replacement remains unproved; gate owns affected suites/clippy and Infrastructure owns installed refresh acceptance.
+Check — 2026-10-27 kickoff: `git diff --check`, `git diff --cached --check` and `lf context` passed; source/plan review only, no tests rerun (11 subscription tests previously passed). Native replacement remains unproved; gate owns affected suites/clippy and Infrastructure owns installed refresh acceptance.

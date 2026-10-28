@@ -18,6 +18,7 @@ struct WorkNavigator: View {
     @State private var pressedScope: WorkNavigation.SidebarScope?
     /// Pointing at the Waves section reveals New Wave; only that row reads it.
     @State private var wavesHover = HoverFlag()
+    @State private var taskDrag = TaskOrderDrag.State()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var listTitle: String {
@@ -40,7 +41,8 @@ struct WorkNavigator: View {
     }
 
     private var rowOrder: [WorkReference] {
-        model.sidebarTaskIDs.map { .task(id: $0) } + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
+        (model.sidebarTaskIDs + model.sidebarAutonomousTaskIDs).map { .task(id: $0) }
+            + model.visibleRoadmaps.map { .wave(id: $0.wave.id) }
     }
 
     private func moveFocus(_ direction: MoveCommandDirection) {
@@ -87,8 +89,9 @@ struct WorkNavigator: View {
                             .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
                     }
+                    autonomousSection
                     if let selection = model.selection, selection.kind == .task,
-                       !taskIDs.contains(where: { model.isSelected(.task(id: $0)) }) {
+                       !(taskIDs + model.sidebarAutonomousTaskIDs).contains(where: { model.isSelected(.task(id: $0)) }) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
@@ -163,7 +166,7 @@ struct WorkNavigator: View {
 
     private func waveRow(_ wave: WaveRoadmap) -> some View {
         waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
-                count: wave.tasks.items.count, unavailableReason: wave.tasks.unavailableReason)
+                count: wave.tasks.items.count { !$0.task.isTerminal }, unavailableReason: wave.tasks.unavailableReason)
     }
 
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
@@ -188,7 +191,7 @@ struct WorkNavigator: View {
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
                 } else {
-                    Text("\(count)").font(Typography.code(10)).help("\(count) Tasks")
+                    Text("\(count)").font(Typography.code(10)).help("\(count) open Tasks")
                 }
             }.font(Typography.body(13)).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -198,15 +201,35 @@ struct WorkNavigator: View {
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
-            .accessibilityLabel("\(name), \(count) Tasks")
+            .accessibilityLabel("\(name), \(count) open Tasks")
             .accessibilityIdentifier("work-wave-\(reference?.id ?? "repository")")
             .matchedGeometryEffect(id: scope, in: scopeTitle)
     }
 
-    private func taskRow(_ id: String, slotHint: String?) -> some View {
+    /// Shipping Tasks run to merge without anyone; they sit below, quieter, under a heading.
+    @ViewBuilder private var autonomousSection: some View {
+        let ids = model.sidebarAutonomousTaskIDs
+        if !ids.isEmpty {
+            HStack {
+                Text("Autonomous")
+                Spacer()
+                Text("\(ids.count)").font(Typography.code(10))
+            }
+            .font(Typography.strong(12)).foregroundStyle(palette.textSecondary)
+            .padding(.horizontal, 10).padding(.top, 14).padding(.bottom, 2)
+            .help("Shipping: running to merge with nothing left for a person to do")
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("work-autonomous-heading")
+            ForEach(ids, id: \.self) { id in
+                taskRow(id, slotHint: nil, quiet: true)
+            }
+        }
+    }
+
+    private func taskRow(_ id: String, slotHint: String?, quiet: Bool = false) -> some View {
         let found = model.task(id: id)
         let selected = model.isSelected(.task(id: id))
-        let otherWave = model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
+        let muted = quiet || model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
         let sessions = model.taskSessions(id)
         let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
         let title = found?.task.task.name ?? "Task unavailable · \(id)"
@@ -228,7 +251,7 @@ struct WorkNavigator: View {
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(selected ? palette.workSelectedText : otherWave ? palette.textSecondary : palette.text)
+        .foregroundStyle(selected ? palette.workSelectedText : muted ? palette.textSecondary : palette.text)
         .background {
             Button { model.select(.task(id: id)) } label: {
                 SidebarSelectionShape(state: selected ? .shown : .none)
@@ -245,7 +268,8 @@ struct WorkNavigator: View {
         }
         .renderFlash()
         }
-        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarScope == .repository ? model.workingTaskWorkID(row: id) : nil))
+        .modifier(TaskOrderDragging(model: model, workID: model.navigation.sidebarScope == .repository ? model.workingTaskWorkID(row: id) : nil,
+                                    drag: taskDrag))
         .contextMenu {
             actions(for: id)
         }
@@ -697,21 +721,68 @@ private struct RowHover<Content: View>: View {
 }
 
 /// Working Tasks rows reorder the repository's one Task order by drag; Wave lists don't.
+/// A drag is a move, not a copy: no + badge, and a line marks where the row lands.
 private struct TaskOrderDragging: ViewModifier {
     let model: WorkModel
     let workID: String?
+    let drag: TaskOrderDrag.State
+    @Environment(\.palette) private var palette
 
     func body(content: Content) -> some View {
         if let workID {
             content
-                .draggable(TaskOrderDrag.token(workID))
-                .dropDestination(for: String.self) { values, _ in
-                    guard let task = values.first.flatMap(TaskOrderDrag.taskID), task != workID else { return false }
-                    Task { await model.reorderWorkingTask(task, to: workID) }
-                    return true
+                .onDrag {
+                    drag.source = workID
+                    return NSItemProvider(object: TaskOrderDrag.token(workID) as NSString)
+                }
+                .onDrop(of: [.plainText], delegate: TaskOrderDrop(model: model, target: workID, drag: drag))
+                .overlay(alignment: drag.landing(on: workID) ?? .top) {
+                    if drag.landing(on: workID) != nil {
+                        Rectangle().fill(palette.accent).frame(height: 2)
+                            .allowsHitTesting(false).accessibilityIdentifier("task-order-insertion")
+                    }
                 }
         } else {
             content
         }
+    }
+}
+
+extension TaskOrderDrag {
+    /// The sidebar row being dragged and the row it would take the place of.
+    @MainActor @Observable final class State {
+        var source: String?
+        var target: String?
+        /// The dragged row lands after the target when it comes from above.
+        var below = false
+
+        func landing(on row: String) -> Alignment? {
+            target == row ? (below ? .bottom : .top) : nil
+        }
+    }
+}
+
+private struct TaskOrderDrop: DropDelegate {
+    let model: WorkModel
+    let target: String
+    let drag: TaskOrderDrag.State
+
+    func dropEntered(info: DropInfo) {
+        drag.target = drag.source == target ? nil : target
+        let ids = model.workingTaskMembers.map(\.work.id)
+        drag.below = (ids.firstIndex(of: drag.source ?? "") ?? 0) < (ids.firstIndex(of: target) ?? 0)
+    }
+
+    func dropExited(info: DropInfo) {
+        if drag.target == target { drag.target = nil }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+
+    func performDrop(info: DropInfo) -> Bool {
+        defer { drag.source = nil; drag.target = nil }
+        guard let source = drag.source, source != target else { return false }
+        Task { await model.reorderWorkingTask(source, to: target) }
+        return true
     }
 }

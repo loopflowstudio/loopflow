@@ -210,6 +210,53 @@ struct WorkNavigationTests {
         #expect(model.navigation.sidebarWaveID == nil)
     }
 
+    @Test("A Wave row counts its open Tasks, not every Task it ever had")
+    func waveRowCountsOpenTasks() throws {
+        let model = try dashboardModel()
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
+        let row = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
+        #expect(try row.find(text: "3").string() == "3")
+        #expect(throws: (any Error).self) { try row.find(text: "4") }
+    }
+
+    @Test("Shipping Tasks sit under an Autonomous heading below the Working Tasks, in light and dark",
+          arguments: [ColorScheme.light, .dark])
+    func autonomousSectionListsShippingTasks(scheme: ColorScheme) throws {
+        let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        // Rust's Working Tasks leave shipping issue-now out; the board's Autonomous rule finds it.
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
+            members: [fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "issue-review"), title: "issue-review")])],
+            reason: "")
+        #expect(model.sidebarTaskIDs == ["issue-review"])
+        #expect(model.sidebarAutonomousTaskIDs == ["issue-now"])
+        let navigator = WorkNavigator(model: model, onOpenSession: { _ in }).environment(\.colorScheme, scheme)
+        let heading = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-autonomous-heading")
+        _ = try heading.find(text: "Autonomous")
+        model.navigation.sidebarFilter = .available
+        #expect(model.sidebarAutonomousTaskIDs.isEmpty)
+    }
+
+    @Test("A dropped Task row takes its place before the order is written")
+    func droppedRowMovesBeforeTheWrite() async throws {
+        let model = WorkModel(query: RegistryQuery { args, _ in
+            if args.contains("move") { try await Task.sleep(for: .seconds(30)) }
+            throw RegistryQueryError("unused")
+        }, repoPath: "/src/loopflow")
+        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        func task(_ id: String) -> WorkViewPlan.Content {
+            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
+        }
+        model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
+                                                   members: [task("issue-review"), task("issue-now")])], reason: "")
+        #expect(model.workingTaskIDs == ["issue-review", "issue-now"])
+        let write = Task { await model.reorderWorkingTask("issue-now", to: "issue-review") }
+        for _ in 0..<20 where model.workingTaskIDs != ["issue-now", "issue-review"] { await Task.yield() }
+        #expect(model.workingTaskIDs == ["issue-now", "issue-review"])
+        write.cancel()
+        await write.value
+    }
+
     @Test("The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member")
     func dashboardSidebarHeader() throws {
         let model = try dashboardModel()

@@ -1855,6 +1855,22 @@ final class WorkModel {
         }
     }
 
+    /// Below the Working Tasks: the scope's Autonomous Tasks, as the Wave board buckets
+    /// them (shipping, no one's turn). Dashboards and Available/Busy filters have none.
+    var sidebarAutonomousTaskIDs: [String] {
+        guard navigation.sidebarFilter == .working else { return [] }
+        let board: WorkNavigation.Board
+        switch navigation.sidebarScope {
+        case .repository: board = .repository
+        case .wave(let id): board = .wave(id)
+        case .dashboard: return []
+        }
+        let tasks = standupTasks(board)?.items ?? []
+        let working = Set(sidebarTaskIDs)
+        return WaveStandup(tasks: tasks, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
+            .autonomous.map(\.task.id).filter { !working.contains($0) }
+    }
+
     func taskSessions(_ id: String) -> [SessionRecord] {
         let runtimeID = task(id: id)?.task.runtime?.workId ?? id
         return (sessions.value ?? []).filter {
@@ -2792,13 +2808,30 @@ extension WorkModel {
 
     /// The sidebar and the Working Tasks grid write the same order; both read the
     /// repository plan, so each shows the other's move.
+    /// The row moves on drop; the written order replaces it, and a failed write re-reads it.
     func reorderWorkingTask(_ task: String, to target: String) async {
         guard task != target, let repoPath else { return }
         dashboardError = nil
+        moveRepositoryMember(task, to: target)
         do {
             _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
             try await refreshPlan(nil, repoPath: repoPath)
-        } catch { dashboardError = error.localizedDescription }
+        } catch {
+            dashboardError = error.localizedDescription
+            try? await refreshPlan(nil, repoPath: repoPath)
+        }
+    }
+
+    /// `task` takes `target`'s place in the repository plan, as `lf desktop move` writes it.
+    private func moveRepositoryMember(_ task: String, to target: String) {
+        guard var plans = selectionPlans.value,
+              let index = plans.firstIndex(where: { $0.dashboardID == nil && $0.selection.expression == .repository }) else { return }
+        var members = plans[index].resolution.members
+        guard let from = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == task }),
+              let to = members.firstIndex(where: { $0.work.kind == .task && $0.work.id == target }) else { return }
+        members.insert(members.remove(at: from), at: to)
+        plans[index].resolution.members = members
+        applySelectionPlans(plans, reason: "")
     }
 
     /// The Working Tasks member a sidebar row shows; rows may use the planning ID.

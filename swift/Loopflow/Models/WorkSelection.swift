@@ -84,7 +84,7 @@ public struct WorkMemberRef: Codable, Hashable, Sendable {
 
 public struct WorkSelectionResolution: Codable, Equatable, Sendable {
     public let attention: [WorkWorkspaceKey]
-    public let members: [WorkMemberRef]
+    public var members: [WorkMemberRef]
     public let unavailable: [String]
 }
 
@@ -180,7 +180,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let repository: String
     public let selection: WorkSelection
     public let savedRevision: Int64?
-    public let resolution: WorkSelectionResolution
+    public var resolution: WorkSelectionResolution
     public let arrangement: WorkArrangement
     public let projection: WorkArrangementProjection
     /// The page geometry visible members fill, in projection order.

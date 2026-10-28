@@ -1515,6 +1515,9 @@ extension SessionsWorkspace {
                 self.persistenceTask?.cancel()
                 self.persistenceTask = Task { [weak self] in
                     do { try await Task.sleep(for: .milliseconds(300)) } catch { return }
+                    // A newer edit can cancel this task after its timer fires but before it
+                    // resumes; the save it would start belongs to its successor.
+                    guard !Task.isCancelled else { return }
                     await self?.savePaneIntent()
                 }
             }

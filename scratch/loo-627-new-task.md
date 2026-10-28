@@ -261,6 +261,20 @@ Realign (2026-10-28): `wave_graph` had copied `task_graph_default`'s layer read;
 now call `scope_graph_default`. Check: `cargo test -p loopflow --lib -- task_create_run wave_resolution_matrix`
 pass; clippy clean.
 
+Concept review (2026-10-28): the model holds — one command, one sheet, Rust owns the
+default and the admission. One mismatch with the accepted recovery contract ("Run fails
+after create … Desktop selects the Task anyway"): `WorkModel.createTask` keeps the sheet
+open on any failure, and `--run --json` prints nothing on stdout once the run fails, so
+Desktop cannot tell "nothing filed" from "filed, run failed", and pressing Create again
+files a duplicate Task. Next implement direction:
+- `lf task create --run --json` prints the receipt whenever the Task was filed, with
+  `graph` and `session_id` null when the run failed, and still exits non-zero. `graph`
+  becomes `Option<String>` / `String?`; update the DTO fixture and both tests.
+- `WorkModel.createTask` reads that receipt from a failed run, closes the sheet, selects
+  the Task (its Start/Run again control recovers) and shows the run's error there. The
+  sheet keeps the request only when nothing was filed.
+- Retire the "Create again files a second Task" assumption in `scratch/questions.md`.
+
 Remaining: demo with a real provider (`code` stops at its interactive steps; `auto`
 reaches a merged PR), including whether the first reply leaves building to the
 running Graph.

@@ -27,10 +27,10 @@ for each; the design (`scratch/loo-627-new-task.md`) depends on them.
 
 ## Implementation assumptions (2026-10-28)
 
-- **A run that fails after create, in Desktop.** The sheet stays open with the error
-  and the request; the filed Task appears in the sidebar with its Start control.
-  Pressing Create again files a second Task. Simpler than a retry path; revisit if
-  the demo shows it happens.
+- **A run that fails after create, in Desktop.** Superseded at concept review
+  (2026-10-28): the accepted design selects the filed Task so its Start control
+  recovers; the sheet keeps the request only when nothing was filed. See the design's
+  concept-review note.
 - **Stops line for a graph with no interactive step** reads "runs to its end without
   stopping", not "runs to a merged PR": a custom graph need not open a PR.
 - **LOOPFLOW.md's agent handoff** keeps `create --title` then `task run`; agents keep

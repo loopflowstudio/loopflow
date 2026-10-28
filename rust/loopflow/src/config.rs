@@ -744,6 +744,17 @@ pub fn load_wave_config(
     Ok(Some(config))
 }
 
+/// The planning transport from the global and repository config files.
+/// `lf set` holds no planning values, so this opens no store: planning checks
+/// resolve it once per Wave and Task inside a bounded hook.
+pub fn load_planning_transport(repo_root: &Path) -> Result<PlanningConfig, LoadError> {
+    let global = load_yaml_file(&global_config_path())?;
+    let repo = load_yaml_file(&repo_root.join(".lf").join("config.yaml"))?;
+    let config: Config = serde_yaml_ng::from_value(merge_config_values(global, repo))
+        .map_err(|e| LoadError::InvalidGraph(format!("Config validation error: {e}")))?;
+    Ok(config.planning_transport())
+}
+
 /// One present config file's values.
 #[derive(Debug, Clone)]
 pub struct ConfigLayerValues {

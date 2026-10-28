@@ -20,12 +20,7 @@ use super::{OpsError, OpsResult};
 /// The repository's planning selection. Unreadable configuration selects none:
 /// routing is configuration, never availability.
 fn transport(repo: &Path) -> Option<PlanningConfig> {
-    Some(
-        crate::config::load_config(Some(repo))
-            .ok()?
-            .unwrap_or_default()
-            .planning_transport(),
-    )
+    crate::config::load_planning_transport(repo).ok()
 }
 
 /// The configured remote provider's product name; Git planning has none.

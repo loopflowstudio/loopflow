@@ -159,12 +159,10 @@ pub(super) fn read_initiative(repo: &Path, wave: &str) -> Option<String> {
 }
 
 pub(crate) fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
-    let config = crate::config::load_config(Some(repo))
-        .map_err(|error| {
-            OpsError::Message(format!("failed to read planning configuration: {error}"))
-        })?
-        .unwrap_or_default();
-    Ok(match config.planning_transport() {
+    let transport = crate::config::load_planning_transport(repo).map_err(|error| {
+        OpsError::Message(format!("failed to read planning configuration: {error}"))
+    })?;
+    Ok(match transport {
         crate::config::PlanningConfig::Linear { team } => {
             team.filter(|team| !team.trim().is_empty())
         }

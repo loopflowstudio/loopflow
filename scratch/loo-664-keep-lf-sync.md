@@ -83,7 +83,7 @@ This slice: gate, publication and landing. Gate includes existing resolver/Graph
 tests and commit-boundary suites:
 
 ```bash
-uv run python scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(commit_tests::) | test(agent_startup_tests::) | test(release_tests::) | test(release_lock_tests::)' < /dev/null
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(commit_tests::) | test(agent_startup_tests::) | binary(release_tests) | test(release_lock_tests::)' < /dev/null
 ```
 
 Gate must pass, including formatting and Clippy; CI owns cross-platform coverage.
@@ -150,3 +150,15 @@ defeats rebuilding the checkpoint from HEAD plus ordinary additions; a whitespac
 filename defeats trimmed-output emptiness detection. These constrain the repair,
 not new product choices. Next proof remains the affected gate and Infrastructure's
 separate installed readback; this review changes no code and reruns no Rust checks.
+
+## Publication verification — 2026-10-27
+
+Check: `scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(commit_tests::) | test(agent_startup_tests::) | test(release_tests::) | test(release_lock_tests::)'` passed architecture, formatting, Clippy, 77 Rust tests and 72 website tests; the standalone release binary required the corrected selector above.
+Check: network-isolated `scripts/materialize_rust_tests.py --prepare-cli -- cargo nextest run -p loopflow --test release_tests --no-tests fail --no-fail-fast --build-jobs 4 --test-threads 4` passed all 76 tests with rustup stable and inherited LF variables removed.
+
+No source repair was needed. The publication boundary has local proof; hosted CI,
+landing, coordinated release/install and installed LOO-661 readback remain separate.
+The Task-local bridge retains pre-publication telemetry (including gate logs) at
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-664-pr-publish-acgse2al/before-sync` and reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-664-pr-publish-acgse2al/after-publication`
+for fresh telemetry before returning to automatic Graph sync. Both are atomic moves;
+prior archives remain untouched.

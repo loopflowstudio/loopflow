@@ -790,7 +790,7 @@ final class WorkModel {
     /// The board and strip hide in navigation; the conversation hides as its session
     /// pane does, so `lf desktop hide -p session` and the hover button agree.
     func isHidden(_ part: WaveViewPart, in view: WorkNavigation.Board) -> Bool {
-        guard part == .session else { return navigation.hiddenViewParts[view, default: []].contains(part) }
+        guard part == .session else { return navigation.hiddenViewParts[view, default: WaveViewPart.hiddenByDefault].contains(part) }
         guard let store = viewWorkspace(view)?.multiplexer, let pane = store.sessionPane else { return false }
         return store.collapsedPaneIds.contains(pane.id)
     }
@@ -799,9 +799,9 @@ final class WorkModel {
         // A hidden part is no longer zoomed; a collapsed session pane unzooms itself.
         guard part == .session else {
             if hidden {
-                navigation.hiddenViewParts[view, default: []].insert(part)
+                navigation.hiddenViewParts[view, default: WaveViewPart.hiddenByDefault].insert(part)
                 if navigation.zoomedViewParts[view] == part { navigation.zoomedViewParts[view] = nil }
-            } else { navigation.hiddenViewParts[view]?.remove(part) }
+            } else { navigation.hiddenViewParts[view, default: WaveViewPart.hiddenByDefault].remove(part) }
             return
         }
         guard let workspace = viewWorkspace(view), let pane = workspace.multiplexer.sessionPane else { return }

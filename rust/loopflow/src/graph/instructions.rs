@@ -14,7 +14,7 @@ pub fn render_graph_instructions(
 ) -> Result<String, LoadError> {
     let mut output = format!("# Graph: {name}\n\n");
     output.push_str("Carry out these steps using the current request. Wait for each command to finish and inspect its result; stop on failure. Give headless skill runs the relevant request, findings and next action as their message.\n\n\
-For conversational steps, load and follow the named skill here, retaining its native controls and resource base. If it requires user invocation, ask here. After interruption, inspect results before repeating a successful command. This Graph needs no Task. For an associated Task, completing this checklist does not move its Workflow.\n\n");
+For conversational steps, load and follow the named skill here, retaining its native controls and resource base. If it requires user invocation, ask here. After interruption, inspect results before repeating a successful command. This Graph needs no Task. For an associated Task, completing this checklist does not move its graph.\n\n");
     render_steps(
         steps,
         "",

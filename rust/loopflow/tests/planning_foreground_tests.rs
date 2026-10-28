@@ -155,8 +155,7 @@ fn execution(conn: &Connection, task: &str) -> Vec<Vec<Vec<rusqlite::types::Valu
     [
         "agent_sessions",
         "processes",
-        "task_workflows",
-        "task_workflow_moves",
+        "task_graphs",
         "task_prs",
         "task_ownership",
     ]
@@ -225,7 +224,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         params![source_key,fixture.task.id.as_str(),fixture.task.wave_id.as_ref().unwrap().as_str()]).unwrap();
     let graph = json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}}]});
     conn.execute(
-        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'review',1)",
         params![fixture.task.id.as_str(), graph.to_string()],
     )
     .unwrap();
@@ -258,11 +257,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let third = create(&target, right.path(), "task-pr-tests");
     assert_ne!(first, third);
     assert_ne!(second, third);
-    run(
-        &source,
-        left.path(),
-        &["task", "workflow", "move", &first, "end"],
-    );
+    run(&source, left.path(), &["task", "complete", &first]);
     assert!(runtime
         .block_on(worker.get_task(&first.parse().unwrap()))
         .unwrap()
@@ -347,7 +342,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     run(
         &target,
         right.path(),
-        &["task", "workflow", "move", fixture.task.id.as_str(), "end"],
+        &["task", "complete", fixture.task.id.as_str()],
     );
     wait_for(|| {
         status(&runtime, &worker, target_key, &binding)
@@ -745,7 +740,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
         VALUES('retained-session','Retained','human',1,1,1,?1,?2,?3)", params![target_key, retained, retained_task.wave_id.as_ref().map(|wave| wave.as_str())]).unwrap();
     let graph = json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}}]});
     conn.execute(
-        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'review',1)",
         params![retained, graph.to_string()],
     )
     .unwrap();

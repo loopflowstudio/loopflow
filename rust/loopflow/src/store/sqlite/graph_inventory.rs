@@ -237,14 +237,17 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Where the Process table ends now; a child started later lies beyond it.
-    pub(crate) fn process_mark(&self) -> StoreResult<i64> {
+    /// Where `parent`'s children end now; a child started later lies beyond it.
+    /// A running parent's children are never forgotten, and SQLite gives a new
+    /// row a rowid above every remaining one, so forgetting other finished rows
+    /// cannot put a later child behind this mark.
+    pub(crate) fn process_mark(&self, parent: &LfProcessId) -> StoreResult<i64> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(
-            conn.query_row("SELECT COALESCE(MAX(rowid),0) FROM processes", [], |row| {
-                row.get(0)
-            })?,
-        )
+        Ok(conn.query_row(
+            "SELECT COALESCE(MAX(rowid),0) FROM processes WHERE parent_lf_process_id=?1",
+            [parent],
+            |row| row.get(0),
+        )?)
     }
 
     /// The first Process `parent` started after `mark`.
@@ -374,6 +377,54 @@ mod tests {
     use crate::durable::GraphProcessFilter;
     use crate::session::GraphProcessSummaryState;
     use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn a_step_lands_after_its_graphs_mark_when_an_unrelated_rowid_is_reused() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let process = |parent: Option<&crate::id::LfProcessId>, pid: u32| {
+            let process = crate::process::LfProcess {
+                id: crate::id::LfProcessId::new(),
+                pid: Some(pid),
+                kind: crate::process::ProcessKind::Lf,
+                agent_session_id: None,
+                os_started_at: None,
+                trace_id: crate::id::TraceId::new(),
+                parent_lf_process_id: parent.cloned(),
+                via_agent: Some(false),
+                caller_session_id: None,
+                caller_agent_process_id: None,
+                command: None,
+                repo: None,
+                cwd: None,
+                started_at: 1,
+                completed_at: None,
+                outcome: None,
+                exit_code: None,
+                signal: None,
+                error: None,
+            };
+            store.record_process(&process).unwrap();
+            process
+        };
+        let graph = process(None, 10);
+        // A concurrent `lf task status` holds the highest rowid when the Graph
+        // marks, then exits and is forgotten before the step registers.
+        let status = process(None, 11);
+        let mark = store.process_mark(&graph.id).unwrap();
+        store
+            .record_process(&crate::process::LfProcess {
+                completed_at: Some(2),
+                outcome: Some("succeeded".into()),
+                ..status
+            })
+            .unwrap();
+        let step = process(Some(&graph.id), 12);
+        assert_eq!(
+            store.child_process_after(&graph.id, mark).unwrap(),
+            Some(step.id)
+        );
+    }
 
     #[test]
     fn step_input_is_read_through_transport_delegation() {
@@ -580,11 +631,11 @@ mod tests {
         assert_eq!(entry.summary.id, "00000000-0000-4000-8000-00000000f100");
         assert_eq!(store.revisions().unwrap().graphs, revisions_before);
 
-        // A captured Workflow not at `end` is dropped by the ship draft; none
+        // A captured graph not at `end` is dropped by the ship draft; none
         // that remains names its Graphs as `flow`.
         let conn = store.conn.lock().unwrap();
         let stored: Option<String> = rusqlite::OptionalExtension::optional(conn.query_row(
-            "SELECT graph FROM task_workflows WHERE task_id=?1",
+            "SELECT graph FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| row.get(0),
         ))

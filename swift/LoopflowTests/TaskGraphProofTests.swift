@@ -57,10 +57,10 @@ struct TaskGraphTests {
     @Test("Separate catalogs retain invalid entries and compiled composition")
     func graphFixtures() throws {
         let catalog = try JSONDecoder().decode([GraphCatalogEntry].self, from: fixture("graph_catalog.json"))
-        let workflows = try JSONDecoder().decode([WorkflowCatalogEntry].self, from: fixture("workflow_catalog.json"))
+        let workflows = catalog.map(WorkflowCatalogEntry.init)
         #expect(catalog.map(\.id) == ["feature", "broken"])
-        #expect(workflows[0].workflow?.edges.map(\.name) == ["pursue", "pursue", "deliver"])
-        #expect(workflows[1].source == ".lf/graphs/proof.yaml" && workflows[1].unavailable != nil)
+        #expect(workflows[0].workflow?.steps.isEmpty == false)
+        #expect(workflows[1].source == ".lf/graphs/broken.yaml" && workflows[1].unavailable != nil && workflows[1].workflow == nil)
         #expect(catalog[0].compiled?.steps.count == 8 && catalog[1].unavailable != nil)
         let compiled = try #require(catalog[0].compiled)
         let composition = try #require(catalog[0].composition)
@@ -188,10 +188,9 @@ struct TaskGraphTests {
         let waves = try #require(roadmap["waves"] as? [[String: Any]]).map { try #require($0["wave"]) }
         // The Task waits at `demo` after three Graph processes: one finished, one stopped, one running.
         var work = try object("task_work.json")
-        var workflow = try #require(work["workflow"] as? [String: Any])
-        workflow["position"] = ["kind": "node", "node": "demo"]
-        workflow["outgoing"] = [3, 4]
-        work["workflow"] = workflow
+        var graph = try #require(work["graph"] as? [String: Any])
+        graph["position"] = ["kind": "at", "step": "demo"]
+        work["graph"] = graph
         let run = try object("graph_detail.json")
         let running = try #require((work["graph_processes"] as? [[String: Any]])?.first)
         let runId = try #require(running["id"] as? String)
@@ -456,7 +455,7 @@ struct TaskGraphProofTests {
         #expect((try? find("compiled-node-4")) == nil, "composition starts folded")
         try find("composition-group-group-0").disclosureGroup().expand()
         try await settle(window)
-        #expect(try find("compiled-node-4").accessibilityLabel().string() == "demo, stage, pending")
+        #expect(try find("compiled-node-4").accessibilityLabel().string() == "demo, interactive step, pending")
 
         let oldRevision = try #require(model.graphCatalog.value?.first?.composition?.revision)
         try await source.reviseTemplate()

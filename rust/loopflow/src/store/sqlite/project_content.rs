@@ -47,24 +47,24 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn selected_wave_workflow(&self, wave: &WaveId) -> StoreResult<Option<String>> {
+    pub fn selected_wave_graph(&self, wave: &WaveId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row("SELECT workflow FROM waves WHERE id=?1", [wave], |row| {
+        conn.query_row("SELECT graph FROM waves WHERE id=?1", [wave], |row| {
             row.get(0)
         })
         .map_err(Into::into)
     }
 
-    /// Select the Workflow name future Tasks take up; definitions live in the repository.
-    pub fn select_wave_workflow(&self, wave: &WaveId, name: &str) -> StoreResult<()> {
-        crate::workflow::validate_workflow_name(name).map_err(StoreError::InvalidData)?;
+    /// Select the graph future Tasks take up; definitions live in the repository.
+    pub fn select_wave_graph(&self, wave: &WaveId, name: &str) -> StoreResult<()> {
+        crate::task_graph::validate_graph_name(name).map_err(StoreError::InvalidData)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         super::planning_write::local(
             &tx,
             &crate::work::edit::WorkEdit::for_target(
                 wave.as_str(),
-                &[Edit::WaveWorkflow(Some(name.into()))],
+                &[Edit::WaveGraph(Some(name.into()))],
             ),
         )?;
         tx.commit()?;
@@ -339,10 +339,10 @@ mod tests {
                     rusqlite::params![project.as_str(), wave.id(), mapping, name],
                 )
                 .unwrap();
-            store.select_wave_workflow(wave.id(), "review").unwrap();
+            store.select_wave_graph(wave.id(), "review").unwrap();
             let before = store.revisions().unwrap();
             let changes = store.pending_project_changes(&project).unwrap();
-            store.select_wave_workflow(wave.id(), "review").unwrap();
+            store.select_wave_graph(wave.id(), "review").unwrap();
             store.update_project_content(&project, &[], &[]).unwrap();
             store
                 .edit_project(&project, Some(name), Some(""), None)
@@ -354,9 +354,9 @@ mod tests {
         drop(store);
         let store = SqliteStore::open_ephemeral(&database).unwrap();
         for wave in waves {
-            assert!(store.select_wave_workflow(&wave, "invalid:review").is_err());
+            assert!(store.select_wave_graph(&wave, "invalid:review").is_err());
             assert_eq!(
-                store.selected_wave_workflow(&wave).unwrap().as_deref(),
+                store.selected_wave_graph(&wave).unwrap().as_deref(),
                 Some("review")
             );
         }

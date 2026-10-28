@@ -35,8 +35,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM task_workflows WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM task_workflow_moves WHERE lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)
@@ -177,6 +176,23 @@ fn process_query(
     (sql, values)
 }
 
+/// An ended agent reserved under a parent that had no row: `attach_in` takes
+/// its trace from the parent, so a self-rooted trace proves absence at
+/// reservation rather than later pruning.
+const UNRECORDED_ANCESTRY: &str = "a.kind='agent' AND a.completed_at IS NOT NULL
+    AND a.trace_id=a.id AND a.parent_lf_process_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM processes p WHERE p.id=a.parent_lf_process_id)
+    AND (a.attached_lf_process_id IS NULL
+        OR NOT EXISTS (SELECT 1 FROM processes p WHERE p.id=a.attached_lf_process_id))";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UnrecordedAncestry {
+    pub(crate) agent_process_id: LfProcessId,
+    pub(crate) parent_lf_process_id: LfProcessId,
+    pub(crate) attached_lf_process_id: Option<LfProcessId>,
+    pub(crate) session_id: Option<String>,
+}
+
 fn attachment_in(
     conn: &rusqlite::Connection,
     session: &str,
@@ -281,10 +297,15 @@ pub(super) fn attach_in(
                 params![previous.agent_process_id, AttachmentToken::new()],
             )?;
         }
+        // A best-effort start receipt can lose to a held write lock; the
+        // attaching lf's row lands here instead, never a self-rooted agent.
+        if let Some(start) = crate::journal::current_start_record(process) {
+            super::record_process_in(tx, &start)?;
+        }
         tx.execute(
             "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
                 started_at,agent_session_id,agent_provider,agent_interactive,spawn_state)
-             SELECT ?2,'agent',COALESCE((SELECT trace_id FROM processes WHERE id=?3),?2),
+             SELECT ?2,'agent',(SELECT trace_id FROM processes WHERE id=?3),
                 ?3,s.provider,s.repo,s.cwd,?4,s.id,s.provider,s.interactive,'reserved' FROM agent_sessions s WHERE s.id=?1",
             params![session,attached.agent_process_id,process,
                 time::OffsetDateTime::now_utc().unix_timestamp()],
@@ -585,6 +606,22 @@ impl SqliteStore {
             .flatten())
     }
 
+    /// A recorded lf Process for fixtures that attach as someone other than
+    /// the test's own journal Process.
+    #[cfg(test)]
+    pub(crate) fn test_lf_process(&self) -> LfProcessId {
+        let id = LfProcessId::new();
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [&id],
+            )
+            .expect("record fixture lf Process");
+        id
+    }
+
     #[cfg(test)]
     pub(crate) fn agent_process_identity(&self, session: &str) -> StoreResult<Option<(u32, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -867,6 +904,77 @@ impl SqliteStore {
         Ok(rows)
     }
 
+    /// Ended AgentProcesses whose parent was absent when they were reserved:
+    /// the agent's trace is rooted at itself, and no recorded LfProcess owns it.
+    pub(crate) fn unrecorded_agent_ancestry(&self) -> StoreResult<Vec<UnrecordedAncestry>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT a.id,a.parent_lf_process_id,a.attached_lf_process_id,a.agent_session_id
+             FROM processes a WHERE {UNRECORDED_ANCESTRY} ORDER BY a.id"
+        ))?;
+        let rows = query
+            .query_map([], |row| {
+                Ok(UnrecordedAncestry {
+                    agent_process_id: row.get(0)?,
+                    parent_lf_process_id: row.get(1)?,
+                    attached_lf_process_id: row.get(2)?,
+                    session_id: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Release ancestry that was never recorded, keeping the id it named in a
+    /// Session fact. Returns false when the row no longer has the signature.
+    pub(crate) fn release_unrecorded_ancestry(
+        &self,
+        agent: &UnrecordedAncestry,
+        repairer: Option<&LfProcessId>,
+    ) -> StoreResult<bool> {
+        let _dispatch = agent
+            .session_id
+            .as_deref()
+            .map(|session| self.lock_session_attachment(session))
+            .transpose()?;
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some(start) = repairer.and_then(crate::journal::current_start_record) {
+            super::record_process_in(&tx, &start)?;
+        }
+        let released = tx.execute(
+            &format!(
+                "UPDATE processes AS a SET parent_lf_process_id=NULL,attached_lf_process_id=NULL,
+                    attachment_token=NULL WHERE a.id=?1 AND {UNRECORDED_ANCESTRY}"
+            ),
+            [&agent.agent_process_id],
+        )?;
+        if released == 0 {
+            return Ok(false);
+        }
+        if let Some(session) = &agent.session_id {
+            tx.execute(
+                "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,agent_process_id,
+                    observed_at,payload,captured_event)
+                 SELECT id,'observed',?2,?3,?4,?5,json_object('type','agent_process_ancestry_repaired',
+                    'agent_process_id',?4,'unrecorded_parent_lf_process_id',?6,
+                    'released_attached_lf_process_id',?7,'evidence','trace_rooted_at_agent'),current_capture
+                 FROM agent_sessions WHERE id=?1",
+                params![
+                    session,
+                    format!("agent-process:{}:ancestry-repair", agent.agent_process_id),
+                    repairer,
+                    agent.agent_process_id,
+                    time::OffsetDateTime::now_utc().unix_timestamp(),
+                    agent.parent_lf_process_id,
+                    agent.attached_lf_process_id,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
     /// Recheck the exact record and attachment while excluding native takeover.
     /// Only positive OS death evidence (including successful termination) settles it.
     pub(crate) fn settle_agent_process(
@@ -1141,6 +1249,7 @@ impl SqliteStore {
         session: &str,
         expected: &SessionAttachment,
         outcome: &str,
+        departure: Option<&crate::process::Departure>,
         close_provider: impl FnOnce() -> StoreResult<bool>,
     ) -> StoreResult<()> {
         let canonical = crate::id::canonical_session(session);
@@ -1156,9 +1265,13 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "type": "attachment_exit", "outcome": outcome, "attachment_token": expected.token
         });
+        if let Some(departure) = departure {
+            payload["departure"] = serde_json::to_value(departure)
+                .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        }
         let exit_seq: i64 = tx.query_row(
             "INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload,captured_event)
              SELECT id,'observed',?2,?3,?4,?5,current_capture FROM agent_sessions WHERE id=?1
@@ -1198,6 +1311,40 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(())
+    }
+
+    /// Where the conversation went when `attachment` ended, if a mover said.
+    /// The exit receipt is keyed by the ended token, so a later attachment
+    /// never answers for an earlier one.
+    pub(crate) fn attachment_departure(
+        &self,
+        session: &str,
+        attachment: &SessionAttachment,
+    ) -> StoreResult<Option<crate::process::Departure>> {
+        let canonical = crate::id::canonical_session(session);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let payload = conn
+            .query_row(
+                "SELECT payload FROM session_events WHERE session_id=?1 AND kind='observed'
+                 AND receipt_key=?2",
+                params![
+                    canonical.as_str(),
+                    format!("attachment:{}:exit", attachment.token)
+                ],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let Some(payload) = payload else {
+            return Ok(None);
+        };
+        let mut payload: serde_json::Value = serde_json::from_str(&payload)
+            .map_err(|error| StoreError::InvalidData(error.to_string()))?;
+        match payload.get_mut("departure").map(serde_json::Value::take) {
+            Some(departure) => serde_json::from_value(departure)
+                .map(Some)
+                .map_err(|error| StoreError::InvalidData(error.to_string())),
+            None => Ok(None),
+        }
     }
 
     /// Stale providers retain their historical caller, never the new attachment.
@@ -1261,7 +1408,7 @@ mod discovery_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment("session", None, &LfProcessId::new(), true)
+            .claim_session_attachment("session", None, &store.test_lf_process(), true)
             .unwrap();
         let conn = store.conn.lock().unwrap();
         conn.execute(
@@ -1281,7 +1428,7 @@ mod discovery_tests {
         let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
         let attachment = store
-            .claim_session_attachment("session", None, &LfProcessId::new(), true)
+            .claim_session_attachment("session", None, &store.test_lf_process(), true)
             .unwrap();
         let path = home.path().join("answering.sock");
         let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
@@ -1796,7 +1943,7 @@ mod attachment_tests {
             Ok(())
         };
         assert!(store
-            .finish_session_attachment("conversation", &attachment, "completed", || {
+            .finish_session_attachment("conversation", &attachment, "completed", None, || {
                 close()?;
                 Err(StoreError::InvalidData("provider close failed".into()))
             })
@@ -1817,7 +1964,7 @@ mod attachment_tests {
             .is_none());
 
         store
-            .finish_session_attachment("conversation", &attachment, "completed", || {
+            .finish_session_attachment("conversation", &attachment, "completed", None, || {
                 close()?;
                 Ok(true)
             })
@@ -2045,9 +2192,13 @@ mod attachment_tests {
                 Err(StoreError::InvalidAuthority(_))
             ));
             assert!(matches!(
-                store.finish_session_attachment("conversation", stale, "interrupted", || panic!(
-                    "stale stop"
-                )),
+                store.finish_session_attachment(
+                    "conversation",
+                    stale,
+                    "interrupted",
+                    None,
+                    || panic!("stale stop")
+                ),
                 Err(StoreError::InvalidAuthority(_))
             ));
             assert!(matches!(

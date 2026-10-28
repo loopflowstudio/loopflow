@@ -97,7 +97,6 @@ struct WorkNavigator: View {
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
-                    if scope == .repository { DashboardSidebar(model: model, scopeTitle: scopeTitle) }
                 }.padding(8)
             }
             WaveSectionDivider(navigation: model.navigation)
@@ -330,38 +329,57 @@ struct WorkBreadcrumbs: View {
                 .frame(width: 24, height: 28).contentShape(Rectangle())
                 .disabled(model.navigation.forwardStack.isEmpty).help("Forward")
             Button(model.repoPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Work") {
+                // The parent crumb of a zoomed part zooms out.
+                if model.navigation.waveView == .repository { model.setZoomed(nil, in: .repository) }
                 model.select(nil)
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()
-            WorkJumpSeparator(model: model, scope: .repository, label: "Waves and Dashboards")
-            if showWave, model.navigation.trailBoard == nil, let wave = model.breadcrumb?.wave {
-                Button(wave.roadmap.wave.displayName) {
-                    model.select(.wave(id: wave.roadmap.wave.id))
-                    model.navigation.content = .terminals
-                }.lineLimit(1).fixedSize()
-                WorkJumpSeparator(model: model, scope: .wave(wave.roadmap.wave.id), label: "Tasks in \(wave.roadmap.wave.displayName)")
+            WorkJumpSeparator(model: model, scope: .repository, label: "Waves")
+            // A Wave view in the trail, or the Wave of Work outside any board, heads
+            // the crumbs after the repository; the repository page adds none.
+            let board = model.navigation.trailBoard
+            if case .wave(let id) = board {
+                waveCrumb(id, name: model.wave(id: id)?.wave.displayName ?? id)
+            } else if showWave, board == nil || board == .repository, let wave = model.breadcrumb?.wave {
+                waveCrumb(wave.roadmap.wave.id, name: wave.roadmap.wave.displayName)
             }
-            switch model.navigation.trailBoard {
+            switch board {
+            // A Dashboard opened through `lf desktop` names itself; Back returns to it.
             case .saved(let id):
-                Button(model.dashboard(id)?.name ?? id) { model.selectDashboard(id) }
-                    .lineLimit(1).fixedSize().disabled(model.navigation.dashboardID == id)
+                Text(model.dashboard(id)?.name ?? id).lineLimit(1).fixedSize()
+                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
             case .workingTasks:
-                Button(WorkNavigation.workingTasksTitle) { model.selectWorkingTasksDashboard() }
-                    .lineLimit(1).fixedSize().disabled(model.navigation.destination == .workingTasks)
-            case .wave(let id):
-                Button(model.breadcrumb?.wave?.roadmap.wave.displayName ?? id) {
-                    model.select(.wave(id: id))
-                    model.navigation.content = .terminals
-                }.lineLimit(1).fixedSize()
-            case nil: EmptyView()
+                Text(WorkNavigation.workingTasksTitle).lineLimit(1).fixedSize()
+                if model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
+            case .wave, .repository, nil: EmptyView()
             }
-            if model.navigation.trailBoard != nil, model.breadcrumb?.task != nil { Text("/").foregroundStyle(.secondary) }
+            if let view = model.navigation.waveView, let zoomed = model.zoomedPart(in: view) {
+                ZoomCrumb(title: zoomed.title) { model.setZoomed(nil, in: view) }
+            }
             if let task = model.breadcrumb?.task {
                 TaskHeading(task: task.task)
+                if let workspace = model.shownWorkspace, workspace.key.kind == .task, workspace.key.id == task.task.id {
+                    ShowHiddenMenu(workspace: workspace).font(Typography.caption())
+                    let store = workspace.multiplexer
+                    if let zoomed = store.zoomedPaneId, let pane = store.layout.pane(for: zoomed) {
+                        ZoomCrumb(title: pane.kind.rawValue.capitalized) { store.setZoom(zoomed, enabled: false) }
+                    }
+                }
             }
             if let target = model.machineTarget {
                 WorkMachineControl(model: model, target: target).padding(.leading, 6)
             }
+        }
+    }
+
+    private func waveCrumb(_ id: String, name: String) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            Button(name) {
+                if model.navigation.waveView == .wave(id) { model.setZoomed(nil, in: .wave(id)) }
+                model.select(.wave(id: id))
+                model.navigation.content = .terminals
+            }.lineLimit(1).fixedSize()
+            WorkJumpSeparator(model: model, scope: .wave(id), label: "Tasks in \(name)")
         }
     }
 }

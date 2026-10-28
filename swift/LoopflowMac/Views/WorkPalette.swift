@@ -11,7 +11,7 @@ struct WorkPaletteRow: Identifiable, Equatable {
 
 extension WorkModel {
     var paletteIsStale: Bool {
-        roadmap.errorMessage != nil || sessions.errorMessage != nil || graphCatalog.errorMessage != nil || workflowCatalog.errorMessage != nil
+        roadmap.errorMessage != nil || sessions.errorMessage != nil || graphCatalog.errorMessage != nil
             || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil || !$0.unavailableTasks.isEmpty }
     }
 
@@ -45,18 +45,9 @@ extension WorkModel {
                 rows.append(recent)
             }
         }
-        for dashboard in dashboards {
-            guard let id = dashboard.dashboardID else { continue }
-            rows.append(.init(id: .dashboard(id), title: dashboard.name ?? id,
-                detail: "Dashboard · " + id, key: id))
-        }
         for graph in graphCatalog.value ?? [] {
             rows.append(.init(id: .graph(graph.name), title: graph.name,
-                              detail: "Graph definition", key: graph.name))
-        }
-        for workflow in workflowCatalog.value ?? [] {
-            rows.append(.init(id: .workflow(workflow.name), title: workflow.name,
-                              detail: "Workflow", key: workflow.name))
+                              detail: "Graph", key: graph.name))
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
             rows.append(.init(id: .graphLog(selection.id), title: "Graph processes of \(found.task.task.identifier)",
@@ -122,16 +113,13 @@ extension WorkModel {
         switch scope {
         case .repository:
             let waves = visibleRoadmaps.map { WorkPaletteRow(id: .wave($0.wave.id), title: $0.wave.displayName, detail: "Wave", key: $0.wave.name) }
-            let dashboards = dashboards.compactMap { plan in
-                plan.dashboardID.map { WorkPaletteRow(id: .dashboard($0), title: plan.name ?? $0, detail: "Dashboard", key: $0) }
-            }
-            guard !query.isEmpty else { return waves + dashboards }
+            guard !query.isEmpty else { return waves }
             let tasks = visibleTasks.map { task in
                 let home = visibleRoadmaps.first { $0.wave.id == task.task.waveId }?.wave.displayName ?? "No Wave"
                 return WorkPaletteRow(id: .task(task.id), title: task.task.name,
                     detail: "Task · \(home) · \(task.task.identifier)", key: task.task.identifier)
             }
-            rows = waves + dashboards + tasks
+            rows = waves + tasks
         case .wave(let id):
             rows = (wave(id: id)?.tasks.items ?? []).sorted { $0.task.rank < $1.task.rank }.map { task in
                 WorkPaletteRow(id: .task(task.id), title: task.task.name,
@@ -151,7 +139,6 @@ extension WorkModel {
             select(nil)
             navigation.content = .terminals
         case .openRepository(let path): openRepository?(path, nil)
-        case .dashboard(let id): selectDashboard(id)
         case .wave(let id): openPaletteWave(id)
         case .task(let id):
             Perf.$inputTrace.withValue(UUID().uuidString) {
@@ -180,7 +167,6 @@ struct WorkPalette: View {
         switch row.id {
         case .task(let id): working.contains(id) ? "Working Tasks" : "Other Tasks"
         case .wave: "Waves"
-        case .dashboard: "Dashboards"
         case .repository, .openRepository: "Repositories"
         default: "Definitions and Session actions"
         }
@@ -245,7 +231,6 @@ struct WorkPalette: View {
         .onExitCommand { model.navigation.palette = nil }
         .task {
             await model.loadGraphCatalog()
-            await model.loadWorkflowCatalog()
             if !model.paletteIsStale && !model.roadmap.isLoading && !model.sessions.isLoading {
                 let available = Set(model.paletteRows.map(\.id))
                 model.navigation.recentDestinations.removeAll { !available.contains($0.id) }
@@ -431,9 +416,9 @@ struct WorkflowCatalogInspector: View {
             if let error = sourceError ?? model.workflowCatalog.errorMessage {
                 Text(error).foregroundStyle(palette.warning)
             }
-            Button("Refresh") { Task { await model.loadWorkflowCatalog(force: true) } }
+            Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
             if let workflow = entry?.workflow {
-                WorkflowDiagram(nodes: workflow.nodes, edges: workflow.edges)
+                WorkflowDiagram(nodes: workflow.steps, edges: workflow.runs)
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

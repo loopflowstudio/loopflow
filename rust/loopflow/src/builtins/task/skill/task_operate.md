@@ -40,26 +40,24 @@ conflicts, verify and push, then reread status.
    working copy. A path in another checkout does not deliver context. Do not
    launch competing implementation when existing code has no supported handoff.
 
-2. **Choose the Graph.** A Task on a workflow reports it as
-   `execution.work.workflow` in status: stages where a person takes part,
-   joined by routes that each run one Graph. A route alone does not prove a live
-   Graph process: check every associated Graph and unfinished Process against `lf ps --json`.
-   Leave observed live work alone; unknown liveness never authorizes a second Graph process.
-   Before selecting another route, recover verified merged delivery as described
-   below. At a stage its last route reached, the Task waits on a person in
-   its conversation; say which stage and which routes leave it. At a stage
-   because the last route stopped or failed, that route is the remaining work.
-   Only a route leaving the current stage moves the Task:
-   `lf task run <issue>` takes the only one or names them,
-   `lf task run <issue> <graph>` picks one, `lf task run <issue> end` takes a
-   route that runs nothing. `lf --task <issue> graph <graph>` runs a Graph without
-   moving the Task. Without a workflow, choose as follows.
+2. **Choose the Graph.** A Task runs one graph, reported as `work.graph` in
+   status: its interactive steps, where a person takes part, and the step the
+   Task stands at. A run alone does not prove a live Graph process: check every
+   associated Graph and unfinished Process against `lf ps --json`. Leave observed
+   live work alone; unknown liveness never authorizes a second Graph process.
+   Before running further, recover verified merged delivery as described below.
+   At an interactive step, the Task waits on a person in its conversation; say
+   which step. When they are done, `lf task run <issue>` continues after it. A
+   stopped run is the remaining work: `lf task run <issue>` starts it again.
+   `lf task run <issue> --from <step>` goes back or skips ahead;
+   `lf task run <issue> <graph>` takes up another graph. `lf --task <issue>
+   graph <graph>` runs a Graph without moving the Task.
    Leave a Graph with a live process running. A stopped
    Graph is history: read what it finished and which effects it recorded before
-   choosing what to launch. Read the Wave default when assigned, otherwise the
-   repository `workflow:`, then inspect the actual
+   choosing what to launch. A Task with no graph takes up its Wave's default,
+   the repository's `graph:`, else `code`; inspect the actual
    installed catalog with `lf list` and `lf help <graph>`. Honor an explicit Graph
-   choice; otherwise use the Wave's workflow or repository default unless the design and execution
+   choice; otherwise use that default unless the design and execution
    evidence call for another entry point. For example, an accepted design with
    implementation remaining can use `pursue`; unresolved design starts with
    `task-design` and its review in the Task conversation. Graphs run autonomous
@@ -71,10 +69,11 @@ conflicts, verify and push, then reread status.
    complete the Task. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
-3. **Advance the work.** `lf task run <issue> [graph]` starts a
-   fresh Graph in the Task's worktree and returns once it is running; it never
-   continues an earlier one. `lf task status <issue>` follows it; `-b` waits for
-   the end. Check installed
+3. **Advance the work.** `lf task run <issue>` runs the Task's graph in its
+   worktree until the next interactive step and returns once it is running.
+   `lf task status <issue>` follows it. `-b` runs every step headless, straight
+   past interactive steps, and waits for the end: use it only when no one needs
+   to take part. Check installed
    help first. Leave a live Graph process running. After a stopped or failed Graph,
    launch only the work that remains; never relaunch merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session
@@ -103,9 +102,9 @@ conflicts, verify and push, then reread status.
    run `lf task complete <issue>` and reread status. Do not replay gate, re-arm the
    PR or reopen a completed Task merely to create more work. A PR-less Task can reach end with retained files
    and commits; no placeholder PR or landing ceremony is required. Completion
-   changes status without moving the Workflow and is safe to repeat after arrival.
+   changes status without moving the Task's graph and is safe to repeat after arrival.
    When status shows completion pending at end, retry `lf task complete <issue>`
-   alone. Never run the successful route again. A newer reopening supersedes the
+   alone. Never run the successful steps again. A newer reopening supersedes the
    old request; standing at end alone does not authorize another completion.
 
 6. **Report the outcome and what is available.** For completed work, state the

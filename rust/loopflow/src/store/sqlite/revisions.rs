@@ -92,6 +92,8 @@ mod tests {
         "project_binding_imports",
         "auth_browser_bindings",
         "blob_tokens",
+        // Desktop reads GitHub people once per repository through `lf ops people`.
+        "github_people",
         // Acquisition attempts and watermarks do not change displayed Work.
         "linear_team_checks",
         "machines",
@@ -245,14 +247,13 @@ mod tests {
     /// The tables the Task conversation work adds, each with the one domain
     /// its three triggers move.
     #[test]
-    fn workflow_graph_process_and_activity_tables_move_their_domains() {
+    fn task_graph_graph_process_and_activity_tables_move_their_domains() {
         let (_dir, store) = store();
         let conn = store.conn.lock().unwrap();
         for (table, domain) in [
             ("graph_processes", "graphs"),
             ("graph_process_steps", "graphs"),
-            ("task_workflows", "planning"),
-            ("task_workflow_moves", "planning"),
+            ("task_graphs", "planning"),
             ("session_activity", "sessions"),
         ] {
             let moved: i64 = conn

@@ -1744,3 +1744,73 @@ fn sync_runs_the_strategy_it_records_for_a_dirty_branch() {
         &["merge-base", "--is-ancestor", "origin/main", "HEAD"],
     );
 }
+
+#[test]
+fn uncommitted_edits_that_conflict_with_main_reach_the_resolver_not_a_stash() {
+    // LOO-659: a Graph's `sync` stashed an implement step's edits, merged main,
+    // then failed restoring them, leaving hours of work only in the stash.
+    let resolver = r#"#!/usr/bin/python3
+import json, subprocess, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+message = json.loads(sys.stdin.readline())
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'fixture-thread'}), flush=True)
+open('conflict.txt', 'w').write('feature and main\n')
+subprocess.run(['git', 'add', 'conflict.txt'], check=True)
+subprocess.run(['git', '-c', 'core.editor=true', 'commit', '--no-edit'], check=True, stdout=sys.stderr)
+print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'resolved'}]}}), flush=True)
+print(json.dumps({'type': 'result', 'uuid': 'fixture-result', 'session_id': 'fixture-thread', 'subtype': 'success', 'is_error': False, 'result': 'resolved'}), flush=True)
+for line in sys.stdin:
+    pass
+"#;
+    let _env = EnvGuard::new(&[("claude", resolver)]);
+    let repo = TestRepo::new();
+    repo.create_file("conflict.txt", "original\n");
+    repo.create_file(".lf/config.yaml", "agent: claude\n");
+    repo.create_file(".gitignore", ".lf/prompts/\n.lf/tmp/\n");
+    repo.stage_all();
+    repo.commit("original");
+    repo.push();
+    repo.create_branch("feature");
+    repo.checkout("main");
+    repo.create_file("conflict.txt", "main line\n");
+    repo.stage_all();
+    repo.commit("main work");
+    repo.push();
+    repo.checkout("feature");
+    repo.create_file("conflict.txt", "feature line\n");
+    repo.create_file("src/new.rs", "fn new() {}\n");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .args(["sync", "origin/main"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+
+    assert!(git(repo.path(), &["stash", "list"]).is_empty());
+    assert_eq!(git(repo.path(), &["status", "--porcelain"]), "");
+    git(
+        repo.path(),
+        &["merge-base", "--is-ancestor", "origin/main", "HEAD"],
+    );
+    let checkpoint = git(repo.path(), &["rev-parse", "HEAD^1"]);
+    assert_eq!(
+        git(
+            repo.path(),
+            &["show", &format!("{checkpoint}:conflict.txt")]
+        ),
+        "feature line"
+    );
+    for (path, content) in [
+        ("conflict.txt", "feature and main\n"),
+        ("src/new.rs", "fn new() {}\n"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(repo.path().join(path)).unwrap(),
+            content
+        );
+    }
+}

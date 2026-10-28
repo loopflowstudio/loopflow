@@ -196,7 +196,7 @@ mod tests {
         assert!(get_builtin_graph("task").is_none());
         let first = get_builtin_graph("task-design").expect("Task first graph");
         assert!(first.contains("- kickoff"));
-        // Stages belong to the Task graphs; the Graphs they compose run on their own.
+        // Interactive steps belong to the Task graphs; the Graphs they compose run on their own.
         for graph in ["task-design", "pursue", "incident"] {
             assert!(!get_builtin_graph(graph)
                 .unwrap_or_else(|| panic!("{graph} is builtin"))

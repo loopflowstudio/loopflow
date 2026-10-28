@@ -150,23 +150,21 @@ still carries both lf and agent rows during the AgentProcess cutover.
 
 ## Definition and execution projections
 
-A Workflow's definition is a graph: `WorkflowDefinition` is projected from a
-`GraphDefinition`, its `interactive:` steps as stages and the slices between them
-as routes. `WorkflowCatalogEntry` carries that projection, while
 `GraphCatalogEntry` carries the compiled graph and `GraphComposition`
 disclosure tree. Invalid sources remain visible with their error.
 
-`lf wave workflow list/source` reads graphs; `show/set`
-reads or changes the Wave's default, independently of Project history. `set --file` stores an edited graph in the Wave.
-Task `workflow show/restart` handles its captured instance. Restart is the existing
-move to `start`, preserving graph, moves and execution history.
+`lf wave graph show/set` reads or changes the Wave's default graph,
+independently of Project history.
 
-Task status and roadmap separate `workflow_name`, `latest_graph_process`,
-`execution` and `run_control`. The latest `GraphProcessDetail` is ordinary
-execution evidence, including completed graphs, not a second Task lifecycle.
-Task work and watch carry `graph_processes`. Session membership references the
-exact `graph_lf_process_id`; Workflow moves retain their Task-run `lf_process_id`.
-Persisted graphs and historical capture formats remain unchanged.
+Task status and roadmap separate `graph_name` with its `graph_source`
+(`task`, `wave`, `repository` or `builtin`), `latest_graph_process`,
+`execution` and `run_control`. Task work and overview carry `graph`, a
+`TaskGraph` of name, interactive steps and position. The latest
+`GraphProcessDetail` is ordinary execution evidence, including completed graphs,
+not a second Task lifecycle. Task work and watch carry `graph_processes`. Session
+membership references the exact `graph_lf_process_id`; a Task graph's run names
+its Task-run `lf_process_id`. Persisted graphs and historical capture formats
+remain unchanged.
 
 ## Core models and APIs
 
@@ -479,7 +477,7 @@ not imported. Runtime readers use only the final schema and current encodings.
 
 Linear statuses are the owner: one In Progress Project per Wave, sharing a chapter
 name across the repository. Planned Projects express future plans; Completed
-Projects retain history. A Task without a captured Workflow selects an explicit request, its Wave default, repository `workflow:`, then the builtin `code`.
+Projects retain history. A Task without a graph takes up an explicitly named one, its Wave default, repository `graph:`, then builtin `code`.
 There is no Chapter row, packet or local switch. Rotation uses an explicit target
 and stable Project identities, converges after partial mutations, preserves active
 Task identity/worktree/PR/execution, and refuses unrelated competing plans.

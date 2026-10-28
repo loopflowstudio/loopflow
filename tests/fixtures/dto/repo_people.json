@@ -1,0 +1,5 @@
+[
+  {"email":"maya@example.com","name":"Maya","github":{"login":"maya","name":"Maya Lin","avatar_url":"https://avatars.githubusercontent.com/u/1?v=4"}},
+  {"email":"sam@example.com","name":null,"github":{"login":"sam","name":null,"avatar_url":"https://avatars.githubusercontent.com/u/2?v=4"}},
+  {"email":"unknown@example.com","name":"Unknown","github":null}
+]

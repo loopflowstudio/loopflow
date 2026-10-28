@@ -692,7 +692,7 @@ fn initial_session_publication_requires_history_and_a_live_agent() {
         .unwrap()
         .unwrap();
     let attachment = store
-        .claim_session_attachment(&session.id, None, &crate::id::LfProcessId::new(), true)
+        .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
         .unwrap();
     let publication = store.record_agent_process_identity(
         &session.id,

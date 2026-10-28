@@ -19,7 +19,7 @@ struct WorkCLISubscriptionTests {
         let seedID = try #require(seed["id"] as? String)
         let status = try await fixture.json(["task", "status", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
-        _ = try await fixture.run(["wave", "workflow", "set", "proof", waveName])
+        _ = try await fixture.run(["wave", "graph", "set", "proof", waveName])
         let query = fixture.lf.query
         let model = WorkModel(query: query, repoPath: fixture.repo.path)
         let keeping = Task { await model.keepWorkCurrent() }
@@ -43,9 +43,14 @@ struct WorkCLISubscriptionTests {
         let created = try await fixture.json(["task", "create", "--wave", waveName, "--title", "Arrives through CLI", "--json"])
         let id = try #require(created["id"] as? String)
         try await eventually { model.task(id: id) != nil }
-        // A Wave lists its unstarted Tasks so each can offer Start.
-        try await eventually { selectedPlanMembers(model).first { $0.work.id == id }?.states == [.unstarted, .backlog] }
-        _ = try await fixture.run(["-b", "task", "run", id])
+        // An unstarted Task waits in the board's Backlog, where it offers Start; the strip lists Working Tasks.
+        try await eventually {
+            WaveStandup(tasks: model.visibleTasks, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
+                .backlog.contains { $0.id == id }
+        }
+        #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
+        // `-b` would run `demo` headless; plain `task run` stops before it, needing no provider.
+        _ = try await fixture.run(["task", "run", id])
         // Membership and checkout details arrive in separate observation frames.
         try await eventually {
             selectedPlanMembers(model).filter { $0.work.id == id }.count == 1

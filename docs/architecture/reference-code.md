@@ -43,7 +43,7 @@ kernel locks                 live local exclusion authority
 | Planning | `waves`, `projects`, `project_changes`, `project_events`, `tasks`, `task_creation_intents`, `task_changes`, `task_comments`, `task_comment_deliveries`, `task_state_deliveries`, `task_issue_identities`, `task_deletions`, `task_events` | Stored plans and definitions, optional provider links, stable Work identity, creation receipts, comments and deletion recovery |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, native completions, turn receipts and the current observations availability is judged from |
 | Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started |
-| Workflows | `task_workflows`, `task_workflow_moves` | The graph a Task took up with its position, and every move, append-only |
+| Task graphs | `task_graphs` | The graph a Task took up, the step it stands at and the run carrying it |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and provider observations |
 | Work adjuncts | `tool_responses`, `task_ownership` | Tool answers and the append-only Task ownership log |
@@ -54,8 +54,8 @@ kernel locks                 live local exclusion authority
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Rental | `ondemands`, `pools`, `rentals`, `machine_records` | Rental templates and limits, lendable owned machines, admitted rentals with caps and deadlines, records copied back from a machine before it is given back |
 | Machine and provider authority | `machines`, `access_profiles`, `auth_browser_bindings`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_routes`, `provider_session_accounts`, `provider_tokens` | Machine routes, credentials, selection, limits, shared-home account switches, delivery receipts |
-| Local observation/cache | `blob_tokens` | Deterministic Git-blob token counts |
-| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `graphs`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: usage moves only `usage`, and every other Session history row moves `sessions`. GraphProcess rows move `graphs`, a Workflow's position and moves `planning`, and a Session's stream reading `sessions` when availability or reported detail could change; quiet arriving is the reader's clock, not a write. `lf monitor work --watch` reads it to decide which parts to project again |
+| Local observation/cache | `blob_tokens`, `github_people` | Deterministic Git-blob token counts and the GitHub user behind each Task owner's email |
+| Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `graphs`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: usage moves only `usage`, and every other Session history row moves `sessions`. GraphProcess rows move `graphs`, a Task's graph and step `planning`, and a Session's stream reading `sessions` when availability or reported detail could change; quiet arriving is the reader's clock, not a write. `lf monitor work --watch` reads it to decide which parts to project again |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |
 
 Released migration files remain immutable. Three direct draft groups establish
@@ -86,7 +86,7 @@ payload remains idempotent. Metric names and UUID punctuation retain their bytes
 
 Task and Project rows own saved planning; Linear mappings link optional provider
 observations and pending effects. Local settlement proves no provider delivery;
-inbound planning grants no Workflow movement or Process control. GitHub owns PR
+inbound planning grants no graph movement or Process control. GitHub owns PR
 heads, checks and merge. Git owns commits and worktrees. Model providers own their
 session and usage semantics; local observations do not replace those authorities.
 

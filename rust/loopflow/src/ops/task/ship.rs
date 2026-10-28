@@ -1,8 +1,8 @@
 //! `lf ship`: someone approves a Task once, and its remaining graph runs to
-//! `end` with no one at hand. The approval is stored; the Task reads shipping
-//! while this Machine's ship process carries it there, and idle when that
-//! process exited. At each stage a headless stand-in runs the stage's skill and
-//! decides the route. Defer holds it, Stop withdraws the approval, and a ship
+//! `end` with no one at hand, as `lf -b task run` runs it: interactive steps
+//! headless, standing in for the person. The approval is stored; the Task reads
+//! shipping while this Machine's ship process carries it there, and idle when
+//! that process exited. Defer holds it, Stop withdraws the approval, and a ship
 //! process that died is started again.
 
 use serde::{Deserialize, Serialize};
@@ -12,11 +12,10 @@ use crate::id::LfProcessId;
 use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
 use crate::ops::pr::PrReadFreshness;
-use crate::ops::workflow::{Workflow, WorkflowPosition};
 use crate::pr_landing::{PrLanding, PrLandingState};
 use crate::store::sqlite::TaskShipping;
+use crate::task_graph::{TaskGraph, TaskGraphPosition, END};
 use crate::work::task::{PrPhase, Task};
-use crate::workflow::{END, START};
 
 use super::{block_on_task, task_error, task_store, SharedStore, TaskRunSelection};
 
@@ -42,17 +41,11 @@ pub enum ShipStart {
 /// The next thing the ship process runs.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ShipStep {
-    /// The Task stands at a stage where a person takes part: run its skill
-    /// headless, standing in for them. The stand-in's decision chooses
-    /// `advance`, or `repeat` when the stage has a loop behind it.
-    StandIn {
-        stage: String,
-        skill: String,
-        advance: String,
-        repeat: Option<String>,
+    /// Run the rest of the graph headless: from the interactive step the Task
+    /// waits at, standing in for the person, or on from where it stands.
+    Run {
+        from: Option<String>,
     },
-    /// Take this edge, or run it again when it stopped.
-    Edge(String),
     Deferred,
     /// Someone stopped shipping; the approval is withdrawn.
     Stopped,
@@ -130,7 +123,7 @@ fn carrier_failure(
 /// The Task's shipping, when it is shipping. `alive` is the ship process's
 /// liveness and `failure` when it failed and why.
 pub(crate) fn shipping_snapshot(
-    workflow: Option<&Workflow>,
+    graph: Option<&TaskGraph>,
     shipping: &TaskShipping,
     status: TaskState,
     alive: ProcessIdentityEvidence,
@@ -191,17 +184,12 @@ pub(crate) fn shipping_snapshot(
             _ => shipping(ShippingState::Landing, format!("CI running on #{number}")),
         };
     }
-    let reason = match workflow {
+    let reason = match graph {
         None => "taking up its graph".to_string(),
-        Some(workflow) => match &workflow.position {
-            WorkflowPosition::Edge { edge, .. } => {
-                let edge = &workflow.definition.edges[*edge as usize];
-                format!("{} → {}", edge.name, edge.to)
-            }
-            WorkflowPosition::Node { node } if workflow.definition.node(node).is_some() => {
-                format!("{node} (stand-in)")
-            }
-            WorkflowPosition::Node { node } => format!("from {node}"),
+        Some(graph) => match (&graph.position, graph.waiting_step()) {
+            (TaskGraphPosition::Run { step, .. }, _) => format!("running from {step}"),
+            (_, Some(step)) => format!("{} (stand-in)", step.name),
+            (TaskGraphPosition::At { step }, None) => format!("from {step}"),
         },
     };
     shipping(ShippingState::Building, reason)
@@ -211,7 +199,7 @@ pub(crate) fn shipping_snapshot(
 pub(crate) fn read_shipping(
     sqlite: &crate::store::sqlite::SqliteStore,
     task: &crate::work::task::TaskId,
-    workflow: Option<&Workflow>,
+    graph: Option<&TaskGraph>,
     status: TaskState,
 ) -> crate::store::StoreResult<Option<ShippingSnapshot>> {
     let Some(shipping) = sqlite.task_shipping(task)? else {
@@ -221,7 +209,7 @@ pub(crate) fn read_shipping(
     let failure = carrier_failure(sqlite, &shipping)?;
     let landing = sqlite.pending_task_landing(task)?;
     Ok(shipping_snapshot(
-        workflow,
+        graph,
         &shipping,
         status,
         alive,
@@ -270,30 +258,22 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
                 });
             }
         }
-        let current = store.sqlite.workflow(&task.id).map_err(task_error)?;
-        let workflow = match (current, graph) {
-            (Some(workflow), None) => workflow,
-            (current, graph) => {
-                let TaskRunSelection { take_up, .. } =
-                    super::select_task_run(&store, &task, task.worktree()?, graph)?;
-                match take_up {
-                    Some(graph) => {
-                        store
-                            .sqlite
-                            .take_up_workflow(&task.id, &graph, &process, None)
-                            .map_err(task_error)?;
-                        store
-                            .sqlite
-                            .workflow(&task.id)
-                            .map_err(task_error)?
-                            .expect("the graph was just taken up")
-                    }
-                    // The graph named is the one the Task is already on.
-                    None => current.expect("a Task that takes nothing up keeps its graph"),
-                }
+        let current = store.sqlite.task_graph(&task.id).map_err(task_error)?;
+        if current.is_none() || graph.is_some() {
+            let TaskRunSelection {
+                graph: selected,
+                take_up,
+                ..
+            } = super::select_task_run(&store, &task, task.worktree()?, graph, Some("start"))?;
+            if take_up {
+                store
+                    .sqlite
+                    .take_up_task_graph(&task.id, &selected)
+                    .map_err(task_error)?;
             }
-        };
-        if matches!(&workflow.position, WorkflowPosition::Node { node } if node == END) {
+        } else if current.as_ref().is_some_and(
+            |graph| matches!(&graph.position, TaskGraphPosition::At { step } if step == END),
+        ) {
             return Ok(ShipStart::AtEnd { issue });
         }
         let by = participant_or("someone");
@@ -390,39 +370,26 @@ pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult
 pub enum ShipMerge {
     /// No merge to act on.
     Open,
-    /// Its PR merged; the Task now stands at the stage that checks merged work.
+    /// Its PR merged; the Task now stands at the interactive step that checks merged work.
     Verifying(String),
     /// Its PR merged and the Task is done.
     Done,
 }
 
-/// The stage that checks merged work: the one whose route into `end` runs nothing.
-fn post_merge_stage(workflow: &Workflow) -> Option<&str> {
-    workflow
-        .definition
-        .edges
-        .iter()
-        .zip(&workflow.routes)
-        .find(|(edge, route)| edge.to == END && route.start.is_none())
-        .map(|(edge, _)| edge.from.as_str())
-        .filter(|stage| workflow.definition.node(stage).is_some())
-}
-
-/// Whether the Task has stood at `stage` on its current graph. A merge sends
-/// it to the post-merge stage only once, so a fix forward is not pulled back.
-fn reached(workflow: &Workflow, stage: &str) -> bool {
-    workflow
-        .history
-        .iter()
-        .any(|step| step.workflow == workflow.definition.name && step.to == stage)
+/// The interactive step that checks merged work: the last step of the graph.
+fn post_merge_step(graph: &crate::task_graph::CapturedGraph) -> Option<&str> {
+    graph
+        .interactive_steps()
+        .into_iter()
+        .find(|(place, _)| graph.after(place).is_none())
+        .and_then(|(_, skill)| skill.interactive_step())
 }
 
 /// Act on a shipping Task's merged PR, whoever merged it, so no further
-/// build step runs on delivered work: send it to the stage that checks merged
-/// work, or complete it when its graph has none.
+/// build step runs on delivered work: send it to the step that checks merged
+/// work, or complete it when its graph has none. A PR the Task already
+/// completed with is history: reopened, the Task ships its new work.
 pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
-    let process = crate::journal::current_lf_process_id()
-        .ok_or_else(|| task_error("lf ship requires a registered Process"))?;
     block_on_task(async {
         let store = task_store().await?;
         let mut task = task_by_issue(&store, issue).await?;
@@ -434,22 +401,30 @@ pub fn ship_settle_merge(issue: &str) -> OpsResult<ShipMerge> {
         if pr.phase() != PrPhase::Merged {
             return Ok(ShipMerge::Open);
         }
-        let workflow = store.sqlite.workflow(&task.id).map_err(task_error)?;
-        if let Some(workflow) = &workflow {
-            if let Some(stage) = post_merge_stage(workflow) {
-                if reached(workflow, stage) {
+        let published_at = pr
+            .publication
+            .as_ref()
+            .map_or(0, |publication| publication.requested_at.unix_timestamp());
+        if store
+            .sqlite
+            .task_completed_since(&task.id, published_at)
+            .map_err(task_error)?
+        {
+            return Ok(ShipMerge::Open);
+        }
+        let row = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;
+        // A Task already at `end` has checked the merge; it only completes.
+        if let Some(row) = row.as_ref().filter(|row| row.step != END) {
+            if let Some(step) = post_merge_step(&row.graph) {
+                // Standing at it, or a run left from it: it already checks the merge.
+                if row.step == step {
                     return Ok(ShipMerge::Open);
                 }
                 store
                     .sqlite
-                    .set_workflow_node(
-                        &task.id,
-                        stage,
-                        &process,
-                        Some("its PR merged while shipping"),
-                    )
+                    .set_task_graph_step(&task.id, step)
                     .map_err(task_error)?;
-                return Ok(ShipMerge::Verifying(stage.to_owned()));
+                return Ok(ShipMerge::Verifying(step.to_owned()));
             }
         }
         if let Some(request) = store
@@ -487,96 +462,26 @@ pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
         {
             return Ok(ShipStep::Stopped);
         }
-        let workflow = store
+        let graph = store
             .sqlite
-            .workflow(&task.id)
+            .task_graph(&task.id)
             .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} has no Workflow to ship")))?;
-        next_step(&workflow, &task.identifier)
+            .ok_or_else(|| task_error(format!("Task {issue} has no graph to ship")))?;
+        next_step(&graph, &task.identifier)
     })
 }
 
-fn next_step(workflow: &Workflow, issue: &str) -> OpsResult<ShipStep> {
-    let definition = &workflow.definition;
-    match &workflow.position {
-        WorkflowPosition::Node { node } if node == END => Ok(ShipStep::Finished),
-        WorkflowPosition::Edge {
-            edge,
-            running: true,
-            ..
-        } => Err(task_error(format!(
-            "Task {issue} is on {}, carried by another run; read `lf task status {issue}`",
-            definition.edges[*edge as usize].name
+fn next_step(graph: &TaskGraph, issue: &str) -> OpsResult<ShipStep> {
+    match &graph.position {
+        TaskGraphPosition::At { step } if step == END => Ok(ShipStep::Finished),
+        TaskGraphPosition::Run { running: true, .. } => Err(task_error(format!(
+            "Task {issue} is running, carried by another `lf task run`; read `lf task status {issue}`"
         ))),
-        WorkflowPosition::Edge { edge, .. } => Ok(ShipStep::Edge(
-            definition.edges[*edge as usize].name.clone(),
-        )),
-        WorkflowPosition::Node { node } => {
-            let (advance, repeat) = routes_from(workflow, node).ok_or_else(|| {
-                task_error(format!(
-                    "Task {issue} is at {node} of graph {}, and no route leaves it for another stage",
-                    definition.name
-                ))
-            })?;
-            Ok(match definition.node(node) {
-                Some(stage) if node != START => ShipStep::StandIn {
-                    stage: node.clone(),
-                    skill: stage.skill.clone(),
-                    advance,
-                    repeat,
-                },
-                _ => ShipStep::Edge(advance),
-            })
-        }
+        TaskGraphPosition::Run { .. } => Ok(ShipStep::Run { from: None }),
+        TaskGraphPosition::At { .. } => Ok(ShipStep::Run {
+            from: graph.waiting_step().map(|step| step.name.clone()),
+        }),
     }
-}
-
-/// The edges a stand-in chooses between at `node`: the one that advances
-/// (toward `end` when one goes there, else the one to a later stage) and the
-/// one that repeats, back to this stage or an earlier one.
-fn routes_from(workflow: &Workflow, node: &str) -> Option<(String, Option<String>)> {
-    let definition = &workflow.definition;
-    // `start` comes before every stage and `end` after.
-    let order = |stage: &str| match stage {
-        START => 0,
-        _ => definition
-            .nodes
-            .iter()
-            .position(|node| node.name == stage)
-            .map_or(usize::MAX, |index| index + 1),
-    };
-    let (repeat, onward): (Vec<_>, Vec<_>) = definition
-        .outgoing(node)
-        .map(|(_, edge)| edge)
-        .partition(|edge| order(&edge.to) <= order(node));
-    let advance = onward
-        .iter()
-        .find(|edge| edge.to == END)
-        .or(onward.first())?;
-    Some((
-        advance.name.clone(),
-        repeat.first().map(|edge| edge.name.clone()),
-    ))
-}
-
-/// How long a stand-in waits before repeating its stage after `consecutive`
-/// blocked decisions in a row: the landing's repair backoff, 1 minute up to 30.
-pub fn blocked_backoff(consecutive: u32) -> std::time::Duration {
-    let seconds = crate::ops::pr_landing::repair_backoff(consecutive.saturating_add(1));
-    std::time::Duration::from_secs(u64::try_from(seconds).expect("backoff is positive"))
-}
-
-/// The instruction a headless stand-in receives at a stage. With a loop behind
-/// the stage it answers advance or iterate; blocked repeats with the blocker.
-pub fn stand_in_message(stage: &str, repeats: bool) -> String {
-    let person = participant_or("the person who shipped this Task");
-    let mut message = format!(
-        "No one is available. You are standing in for {person} at {stage}. Decide as they would, record why in your final message, and continue."
-    );
-    if repeats {
-        message.push_str(" Advance when the work before this stage holds; iterate only for a concrete, repairable gap, naming it; there is no one to hand a blocker to.");
-    }
-    message
 }
 
 /// A ship step completed, so a later failure restarts after the shortest wait.
@@ -639,15 +544,20 @@ mod tests {
     use crate::durable::TaskState;
     use crate::id::LfProcessId;
     use crate::journal::ProcessIdentityEvidence;
-    use crate::ops::workflow::{Workflow, WorkflowPosition};
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::sqlite::TaskShipping;
-    use crate::workflow::CapturedGraph;
+    use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
 
-    #[test]
-    fn a_repeatedly_blocked_stand_in_waits_longer_up_to_half_an_hour() {
-        let minutes = |n| super::blocked_backoff(n).as_secs() / 60;
-        assert_eq!([1, 2, 3, 6, 20].map(minutes), [1, 2, 4, 30, 30]);
+    fn feature_at(position: TaskGraphPosition) -> TaskGraph {
+        let repo = tempfile::tempdir().unwrap();
+        let graph = CapturedGraph::load("feature", repo.path())
+            .unwrap()
+            .unwrap();
+        TaskGraph {
+            name: graph.name.clone(),
+            interactive_steps: graph.interactive_summary(),
+            position,
+        }
     }
 
     #[test]
@@ -691,101 +601,51 @@ mod tests {
     }
 
     #[test]
-    fn a_stand_in_runs_each_stage_and_chooses_between_its_routes() {
+    fn ship_stands_in_at_the_waiting_step_and_restarts_a_stopped_run() {
+        let at = |step: &str| {
+            next_step(
+                &feature_at(TaskGraphPosition::At { step: step.into() }),
+                "INF-1",
+            )
+            .unwrap()
+        };
+        assert_eq!(at("start"), ShipStep::Run { from: None });
+        assert_eq!(
+            at("demo"),
+            ShipStep::Run {
+                from: Some("demo".into())
+            }
+        );
+        assert_eq!(at("end"), ShipStep::Finished);
+        let stopped = feature_at(TaskGraphPosition::Run {
+            step: "demo".into(),
+            lf_process_id: "gone".into(),
+            running: false,
+        });
+        assert_eq!(
+            next_step(&stopped, "INF-1").unwrap(),
+            ShipStep::Run { from: None }
+        );
         let repo = tempfile::tempdir().unwrap();
         let graph = CapturedGraph::load("feature", repo.path())
             .unwrap()
             .unwrap();
-        let (definition, routes) = graph.project().unwrap();
-        let at = |node: &str| {
-            let workflow = Workflow::new(
-                definition.clone(),
-                routes.clone(),
-                WorkflowPosition::Node { node: node.into() },
-                Vec::new(),
-            );
-            next_step(&workflow, "INF-1").unwrap()
-        };
-        assert_eq!(at("start"), ShipStep::Edge("kickoff".into()));
-        assert_eq!(
-            at("explore"),
-            ShipStep::StandIn {
-                stage: "explore".into(),
-                skill: "explore".into(),
-                advance: "pursue".into(),
-                repeat: Some("kickoff".into()),
-            }
-        );
-        // From demo the onward edge is the one into `end`, not the round back.
-        assert_eq!(
-            at("demo"),
-            ShipStep::StandIn {
-                stage: "demo".into(),
-                skill: "demo".into(),
-                advance: "deliver".into(),
-                repeat: Some("pursue".into()),
-            }
-        );
-        // After merge, verify finishes into `end` or fixes forward through implement.
-        assert_eq!(
-            at("verify"),
-            ShipStep::StandIn {
-                stage: "verify".into(),
-                skill: "verify".into(),
-                advance: "end".into(),
-                repeat: Some("pursue".into()),
-            }
-        );
-        let workflow = Workflow::new(
-            definition.clone(),
-            routes.clone(),
-            WorkflowPosition::Node {
-                node: "demo".into(),
-            },
-            Vec::new(),
-        );
-        assert_eq!(super::post_merge_stage(&workflow), Some("verify"));
-        assert!(!super::reached(&workflow, "verify"));
-        assert_eq!(at("end"), ShipStep::Finished);
-        // A stopped edge runs again.
-        let stopped = Workflow::new(
-            definition.clone(),
-            routes.clone(),
-            WorkflowPosition::Edge {
-                edge: 4,
-                lf_process_id: "gone".into(),
-                running: false,
-            },
-            Vec::new(),
-        );
-        assert_eq!(
-            next_step(&stopped, "INF-1").unwrap(),
-            ShipStep::Edge("deliver".into())
-        );
+        assert_eq!(super::post_merge_step(&graph), Some("verify"));
     }
 
     #[test]
     fn shipping_reads_what_happens_now_and_never_waits_on_a_person() {
         let repo = tempfile::tempdir().unwrap();
-        let graph = CapturedGraph::load("feature", repo.path())
-            .unwrap()
-            .unwrap();
-        let (definition, routes) = graph.project().unwrap();
-        let workflow = Workflow::new(
-            definition,
-            routes,
-            WorkflowPosition::Node {
-                node: "demo".into(),
-            },
-            Vec::new(),
-        );
+        let graph = feature_at(TaskGraphPosition::At {
+            step: "demo".into(),
+        });
         let handoff = TaskShipping {
             shipped_at: 5,
             process: Some(LfProcessId::new()),
             restarts: 0,
         };
         let read = |status, alive, landing: Option<&PrLanding>| {
-            shipping_snapshot(Some(&workflow), &handoff, status, alive, None, landing).unwrap()
+            shipping_snapshot(Some(&graph), &handoff, status, alive, None, landing).unwrap()
         };
         let building = read(TaskState::Shipping, ProcessIdentityEvidence::Live, None);
         assert_eq!(building.shipped_at, 5);
@@ -836,7 +696,7 @@ mod tests {
 
         // Done is not shipping.
         assert!(shipping_snapshot(
-            Some(&workflow),
+            Some(&graph),
             &handoff,
             TaskState::Done,
             ProcessIdentityEvidence::Live,

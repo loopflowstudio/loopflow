@@ -660,22 +660,22 @@ async fn planning_response(
 }
 
 #[tokio::test]
-async fn wave_workflow_selects_a_committed_definition_offline() {
+async fn wave_graph_selects_a_committed_definition_offline() {
     let fixture = Fixture::new().await;
     let (repo, wave) = planning_repo(&fixture).await;
     LINEAR_TEST_CONTEXT
         .scope(fixture.context("http://127.0.0.1:1"), async {
-            let missing = crate::ops::project::set_workflow(&repo, Some(wave.slug()), "review")
+            let missing = crate::ops::project::set_wave_graph(&repo, Some(wave.slug()), "review")
                 .await
                 .unwrap_err()
                 .to_string();
             assert!(missing.contains(".lf/graphs/review.yaml"), "{missing}");
             std::fs::create_dir_all(repo.join(".lf/graphs")).unwrap();
             std::fs::write(repo.join(".lf/graphs/review.yaml"), "- cmd: help\n").unwrap();
-            let selected = crate::ops::project::set_workflow(&repo, Some(wave.slug()), "review")
+            let selected = crate::ops::project::set_wave_graph(&repo, Some(wave.slug()), "review")
                 .await
                 .unwrap();
-            assert_eq!(selected.workflow.as_deref(), Some("review"));
+            assert_eq!(selected.graph.as_deref(), Some("review"));
             assert_eq!(selected.wave_id, *wave.id());
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
         })
@@ -1001,7 +1001,7 @@ assert_eq!(retained.title, expected.title);
 assert_eq!(retained.description, expected.description);
 assert_eq!(retained.pm_snapshot_synced_at, expected.pm_snapshot_synced_at);
                 assert!(retained.worktree.is_none());
-                assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+                assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
                 assert_eq!(runtime.block_on(fixture.store.task_events_after(&task.id, 0)).unwrap(), history);
                 if connected {
                     assert!(matches!(retained.pm_writeback, LinearWritebackState::Pending {
@@ -1241,7 +1241,7 @@ fn task_completion_retains_request_but_rolls_back_status_if_delivery_cannot_comm
             .task_completion_pending(&task.id)
             .unwrap()
             .is_some());
-        assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+        assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
         assert!(fixture
             .store
             .sqlite
@@ -1286,7 +1286,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
             .pending_task_state(&task.id)
             .unwrap()
             .unwrap();
-        let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
+        let workflow = fixture.store.sqlite.task_graph(&task.id).unwrap();
         // A changed unrelated field does not conflict with the pending state save.
         remote.item.name = "Linear title".into();
         remote.item.revision = Some("2026-10-08T01:00:00Z".into());
@@ -1378,7 +1378,7 @@ fn task_completion_ingestion_preserves_baseline_and_atomically_adopts_linear() {
                 .as_deref(),
             Some("canceled")
         );
-        assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+        assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow);
         assert_eq!(
             runtime
                 .block_on(
@@ -1446,20 +1446,18 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
         fixture
             .store
             .sqlite
-            .take_up_workflow(
+            .take_up_task_graph(
                 &task.id,
-                &crate::workflow::CapturedGraph {
+                &crate::task_graph::CapturedGraph {
                     name: "reopen".into(),
                     steps: Vec::new(),
                 },
-                &process.id,
-                None,
             )
             .unwrap();
         fixture
             .store
             .sqlite
-            .set_workflow_node(&task.id, "start", &process.id, Some("New scope"))
+            .set_task_graph_step(&task.id, "start")
             .unwrap();
         assert_eq!(
             fixture
@@ -1721,30 +1719,24 @@ fn assert_completion_adopts_reopening(during_delivery: bool) {
         );
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
         let execution = || {
-            [
-                "processes",
-                "agent_sessions",
-                "task_prs",
-                "task_workflows",
-                "task_workflow_moves",
-            ]
-            .iter()
-            .map(|table| {
-                let mut query = conn
-                    .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
-                    .unwrap();
-                let columns = query.column_count();
-                query
-                    .query_map([], |row| {
-                        (0..columns)
-                            .map(|i| row.get::<_, rusqlite::types::Value>(i))
-                            .collect::<rusqlite::Result<Vec<_>>>()
-                    })
-                    .unwrap()
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .unwrap()
-            })
-            .collect::<Vec<_>>()
+            ["processes", "agent_sessions", "task_prs", "task_graphs"]
+                .iter()
+                .map(|table| {
+                    let mut query = conn
+                        .prepare(&format!("SELECT * FROM {table} ORDER BY rowid"))
+                        .unwrap();
+                    let columns = query.column_count();
+                    query
+                        .query_map([], |row| {
+                            (0..columns)
+                                .map(|i| row.get::<_, rusqlite::types::Value>(i))
+                                .collect::<rusqlite::Result<Vec<_>>>()
+                        })
+                        .unwrap()
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                        .unwrap()
+                })
+                .collect::<Vec<_>>()
         };
         let before = execution();
         runtime.block_on(async {
@@ -1832,7 +1824,7 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
             .pending_task_state(&task.id)
             .unwrap()
             .unwrap();
-        let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
+        let workflow = fixture.store.sqlite.task_graph(&task.id).unwrap();
         runtime.block_on(async {
             state.lock().await.reopen_during_completion = true;
             crate::ops::linear_observe::sync_task_state(&fixture.store, task)
@@ -1857,7 +1849,7 @@ fn task_completion_unseen_reopening_can_be_overwritten_by_unconditional_delivery
                 .unwrap();
             assert_eq!(state.lock().await.completion_writes, 1);
         });
-        assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+        assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow);
         // Matching readback settles only the observed state. It cannot record a
         // conflict it never saw or certify that no intermediate edit was lost.
         let conn = rusqlite::Connection::open(&fixture.database).unwrap();
@@ -1915,7 +1907,7 @@ fn task_completion_lost_reply_adopts_linear_reopening() {
             .is_none());
         let adopted = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
         assert_eq!(adopted.state.as_deref(), Some("unstarted"));
-        assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+        assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
         assert!(fixture
             .store
             .sqlite
@@ -3490,7 +3482,7 @@ fn planning_fields_unsent_save_replaces_a_concurrent_linear_edit_without_moving_
                         .unwrap(),
                     WorkStatus::Ready
                 );
-                assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+                assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
             });
         });
     }
@@ -3695,7 +3687,7 @@ fn planning_fields_deliver_project_activation_and_task_membership_without_execut
             assert_eq!(retained.id, task.id);
             assert_eq!(retained.project_id, Some(destination.id));
             assert!(retained.worktree.is_none());
-            assert!(fixture.store.sqlite.workflow(&task.id).unwrap().is_none());
+            assert!(fixture.store.sqlite.task_graph(&task.id).unwrap().is_none());
         });
     });
 }
@@ -5088,7 +5080,7 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                     .pending_project_changes(task.project_id.as_ref().unwrap())
                     .unwrap();
                 let saved_task = fixture.store.sqlite.task(&task.id).unwrap();
-                let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
+                let workflow = fixture.store.sqlite.task_graph(&task.id).unwrap();
                 match rejection {
                     "stale" => provider["updatedAt"] = json!("2026-10-10T11:59:00Z"),
                     "foreign" => {
@@ -5151,7 +5143,7 @@ fn project_field_delivery_requires_revision_accepted_into_work() {
                 );
                 assert_eq!(state.lock().await.field_writes, 0, "{rejection}");
                 assert_eq!(fixture.store.sqlite.task(&task.id).unwrap(), saved_task);
-                assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+                assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow);
                 let attempted: bool = rusqlite::Connection::open(&fixture.database)
                     .unwrap()
                     .query_row(
@@ -5340,8 +5332,8 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute("UPDATE tasks SET worktree='/retained/task',branch='retained/branch' WHERE id=?1", [task.id.as_str()]).unwrap();
             conn.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-            conn.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'start',0,'11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","steps":[]}).to_string()]).unwrap();
-            let workflow_before = fixture.store.sqlite.workflow(&task.id).unwrap();
+            conn.execute("INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,?2,'start','{\"index\":0}','11111111-1111-4111-8111-111111111111',3)", rusqlite::params![task.id.as_str(),json!({"name":"code","steps":[]}).to_string()]).unwrap();
+            let workflow_before = fixture.store.sqlite.task_graph(&task.id).unwrap();
             let work = crate::durable::WorkRef::Project(task.project_id.clone().unwrap());
             let mut provider = planning_project("project-1", "project-1");
             provider["content"] = json!("Before.\n\nworkflow: feature\n\n## KRs\n- [x] Preserve work\n\n## Notes\nAfter.\n");
@@ -5375,7 +5367,7 @@ fn project_prose_save_delivers_and_settles_without_changing_managed_fields() {
                 pm_snapshot_synced_at: task_after.pm_snapshot_synced_at,
                 ..task_before
             });
-            assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow_before);
+            assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow_before);
             let outcome: Option<String> = conn.query_row("SELECT outcome FROM processes WHERE id='11111111-1111-4111-8111-111111111111'", [], |r| r.get(0)).unwrap();
             assert_eq!(outcome, None);
         });
@@ -5400,7 +5392,7 @@ fn task_field_delivery_requires_revision_accepted_into_work() {
                 let work = save_field_name(fixture, task, false, "Pending local title");
                 let saved = fixture.store.sqlite.task(&task.id).unwrap().unwrap();
                 let receipt = field_receipts(fixture, task, false)[0].clone();
-                let workflow = fixture.store.sqlite.workflow(&task.id).unwrap();
+                let workflow = fixture.store.sqlite.task_graph(&task.id).unwrap();
                 {
                     let mut provider = state.lock().await;
                     if foreign {
@@ -5422,7 +5414,7 @@ fn task_field_delivery_requires_revision_accepted_into_work() {
                 );
                 assert_eq!(state.lock().await.field_writes, 0);
                 assert_eq!(fixture.store.sqlite.task(&task.id).unwrap().unwrap(), saved);
-                assert_eq!(fixture.store.sqlite.workflow(&task.id).unwrap(), workflow);
+                assert_eq!(fixture.store.sqlite.task_graph(&task.id).unwrap(), workflow);
                 let pending = field_receipts(fixture, task, false);
                 assert_eq!(pending.len(), 1);
                 assert_eq!(pending[0].id, receipt.id);
@@ -5480,7 +5472,7 @@ fn linear_on_demand_adopts_new_open_issues_without_allocating_execution() {
             assert!(fixture
                 .store
                 .sqlite
-                .workflow(&adopted.id)
+                .task_graph(&adopted.id)
                 .unwrap()
                 .is_none());
             assert!(fixture
@@ -5569,6 +5561,7 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
             home: fixture.directory.path().to_owned(),
             wave: None,
             skill_file: None,
+            submitted_docs: None,
             references: Vec::new(),
         };
         let claude = crate::harness::context::claude_args(&delivery).unwrap();

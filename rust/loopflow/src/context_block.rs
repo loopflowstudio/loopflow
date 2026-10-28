@@ -44,6 +44,8 @@ pub struct ContextDelivery {
     pub wave: Option<String>,
     pub skill_file: Option<PathBuf>,
     pub references: Vec<PathBuf>,
+    /// Sources already supplied in task text; absent in historical deliveries.
+    pub submitted_docs: Option<Vec<PathBuf>>,
     pub home: PathBuf,
 }
 
@@ -51,19 +53,8 @@ impl ContextDelivery {
     pub fn prepare(components: &crate::prompt::PromptComponents) -> Result<Self, CoreError> {
         let repo = fs::canonicalize(&components.repo_root)?;
         let mut references = Vec::new();
-        for doc in components.docs.iter().chain(&components.summaries) {
-            if matches!(
-                doc.source,
-                DocumentSource::RepoMemory | DocumentSource::Scratch | DocumentSource::Wave
-            ) {
-                continue;
-            }
-            // Explicit documents remain paths. Generated summaries have no source file.
-            references.push(if doc.source == DocumentSource::Summary {
-                write_prompt_log(&repo, &doc.content, "summary", None)?
-            } else {
-                repo.join(&doc.path)
-            });
+        for doc in &components.summaries {
+            references.push(write_prompt_log(&repo, &doc.content, "summary", None)?);
         }
         if components.diff.is_some() || !components.diff_files.is_empty() {
             let paths = components
@@ -117,6 +108,17 @@ impl ContextDelivery {
             wave: components.wave.clone(),
             skill_file,
             references,
+            submitted_docs: Some(
+                components
+                    .docs
+                    .iter()
+                    .filter(|doc| doc.source == DocumentSource::Docs)
+                    .map(|doc| {
+                        let path = repo.join(&doc.path);
+                        path.canonicalize().unwrap_or(path)
+                    })
+                    .collect(),
+            ),
             home: crate::store::lf_home_dir(),
         })
     }
@@ -145,6 +147,9 @@ impl ContextDelivery {
         for path in &mut self.references {
             update(path);
         }
+        for path in self.submitted_docs.iter_mut().flatten() {
+            update(path);
+        }
         self.repository = Some((id.clone(), destination));
         Ok(())
     }
@@ -156,6 +161,14 @@ impl ContextDelivery {
             wave: self.wave.clone(),
             ..Default::default()
         })?;
+        documents.retain(|doc| {
+            let path = self.repo.join(&doc.path);
+            let path = path.canonicalize().unwrap_or(path);
+            !self
+                .submitted_docs
+                .as_ref()
+                .is_some_and(|submitted| submitted.contains(&path))
+        });
         let branch = crate::git::current_branch(&self.repo).ok().flatten();
         order_documents(&mut documents, wave, branch.as_deref());
         render_block(
@@ -449,6 +462,7 @@ mod tests {
             repo: repo.canonicalize().unwrap(),
             wave: None,
             skill_file: None,
+            submitted_docs: None,
             references: Vec::new(),
             home: repo.join("machine"),
         }

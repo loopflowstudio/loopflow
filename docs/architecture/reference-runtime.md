@@ -72,8 +72,8 @@ The retained operational process evidence is not a new lifecycle object.
 ## Tracked Work and Task Graphs
 
 ```text
-lf task run ISSUE [GRAPH] -> place the worktree, take up the Wave's workflow or repository default
-                         -> lf --task ISSUE graph GRAPH as a child: one lf process,
+lf task run ISSUE [GRAPH] -> place the worktree, take up GRAPH, the Wave's, the repository's or `code`
+                         -> lf --task ISSUE graph run as a child: one lf process,
                             started again while a Graph process fails (three at most)
                          -> step processes, one child process each
                          -> current, completed or stopped
@@ -250,9 +250,9 @@ Task row ----> managed worktree ----> commits
    observes merge, and explicit arm or land resumes it.
 6. Verified merge alone leaves an open Task available for optional new Task creation.
    No follow-up disposition is required. `ship` runs gate and `land --wait-and-fix`;
-   its Workflow endpoint requests completion. A stopped Graph leaves the operator
+   reaching `end` requests completion. A stopped Graph leaves the operator
    to inspect live work and retry completion alone when the outcome is satisfied.
-7. `task complete` changes status without moving the Workflow. Arrival at end
+7. `task complete` changes status without moving the Task's graph. Reaching end
    atomically requests completion; a failure retains arrival and retries only
    completion. Accepted Linear completion/reopening leaves execution intact and
    supersedes old completion intent. Ordinary reads execute no trigger. A PR-less Task

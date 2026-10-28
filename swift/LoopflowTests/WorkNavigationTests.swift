@@ -61,7 +61,8 @@ struct WorkNavigationTests {
         #expect(model.workingTaskIDs.isEmpty)
         model.applySelectionPlans([
             fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [task("issue-now")]),
-            fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: wave), members: [task("issue-now"), task("issue-review")]),
+            // Rust lists a Wave's Working Tasks only, as at the repository.
+            fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: wave), members: [task("issue-now")]),
         ], reason: "")
         #expect(model.workingTaskIDs == ["issue-now"])
         #expect(model.sidebarTaskIDs == ["issue-now"])
@@ -183,21 +184,28 @@ struct WorkNavigationTests {
         model.select(nil)
         #expect(model.navigation.sidebarScope == .repository)
         #expect(model.sidebarTaskIDs == model.workingTaskIDs)
-        model.selectSidebarTask(slot: 0)
-        #expect(model.navigation.destination == .work(.task(id: "issue-review")))
+        // The repository page is a Wave view, so its Tasks enter through it too.
+        model.selectSidebarTask(slot: 1)
+        #expect(model.navigation.destination == .entered(from: .repository, work: .task(id: "issue-now")))
+        #expect(model.navigation.wavePages[.repository] == 1)
+        #expect(model.desktopDestination(repository: "repo")
+            == .entered(from: .repository, work: .init(repository: "repo", kind: .task, id: "issue-now")))
     }
 
-    @Test("Inside a Wave, the sidebar and ⌘N count its started Tasks; the board keeps unstarted ones")
+    @Test("Inside a Wave view, the sidebar and ⌘N count its started Tasks and enter through the Wave on the Task's page")
     func waveScopeSlotsCountTheWave() throws {
         let model = try dashboardModel()
         model.select(.wave(id: "wave-1"))
         #expect(model.sidebarTaskIDs == ["issue-now"])
-        #expect(model.waveTiles("wave-1").map(\.work.id) == ["issue-later", "issue-now"])
+        #expect(model.boardTiles(.wave("wave-1")).map(\.work.id) == ["issue-now"])
         model.selectSidebarTask(slot: 0)
-        #expect(model.navigation.destination == .work(.task(id: "issue-now")))
+        #expect(model.navigation.destination == .entered(from: .wave("wave-1"), work: .task(id: "issue-now")))
+        #expect(model.navigation.wavePages[.wave("wave-1")] == 0)
         #expect(model.navigation.sidebarScope == .wave("wave-1"))
         model.selectSidebarTask(slot: 1)
         #expect(model.selection == .task(id: "issue-now"))
+        model.goBack()
+        #expect(model.navigation.destination == .work(.wave(id: "wave-1")))
         model.selectDashboard("review")
         #expect(model.navigation.sidebarWaveID == nil)
     }
@@ -209,7 +217,6 @@ struct WorkNavigationTests {
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         _ = try navigator.inspect().find(text: "REVIEW")
         _ = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-repository")
-        #expect(throws: (any Error).self) { try navigator.inspect().find(viewWithAccessibilityIdentifier: "dashboard-review") }
         let first = try navigator.inspect().find(TaskRowMetadata.self) { try $0.actualView().slotHint == "⌘1" }
         #expect(try first.actualView().task.id == "issue-now")
     }
@@ -598,7 +605,7 @@ struct WorkNavigationTests {
     }
 
 
-    @Test("Task briefs and the full Wave inventory share the current snapshot")
+    @Test("Task briefs and the Wave standup board share the current snapshot")
     func inspectorShowsPlanning() async throws {
         let model = try model()
         await model.refresh()
@@ -609,11 +616,16 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(text: task.task.task.description) }
         #expect(throws: Never.self) { try view.inspect().find(button: "New session") }
         model.select(.wave(id: task.wave!.wave.id))
-        for member in task.wave!.tasks.items where member.id != "issue-later" {
-            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-\(member.id)")
+        let board = WorkNavigation.Board.wave(task.wave!.wave.id)
+        let standup = model.standup(task.wave!.tasks.items, doneDays: WaveStandupDefaults.doneDays)
+        for section in WaveBoardSection.allCases {
+            model.navigation.boardSections[board] = section
+            for row in standup.rows(section) {
+                _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(row.id)")
+            }
         }
-        // Completed work leaves the current plan; Project history keeps it.
-        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-task-issue-later") }
+        // Completed work without a date is outside Done's window; Project history keeps it.
+        #expect(throws: (any Error).self) { try view.inspect().find(viewWithAccessibilityIdentifier: "wave-row-issue-later") }
         #expect(throws: (any Error).self) { try view.inspect().find(TaskHistoryControls.self) }
     }
 
@@ -801,14 +813,14 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         let found = try #require(model.task(id: "issue-review"))
-        let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"processes":[],"workflow":null}"#.utf8))
+        let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"processes":[],"graph":null}"#.utf8))
         let loading = TaskWorkflowHeader(model: model, task: found.task, work: .loading)
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
         #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }
         let missing = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: nil, reason: "Offline"))
         #expect(try missing.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
         let absent = TaskWorkflowHeader(model: model, task: found.task, work: .available(empty))
-        let selection = found.task.workflowName.map { "\($0) · \(found.task.workflowSource ?? "")" } ?? "No workflow selected"
+        let selection = found.task.graphName.map { "\($0) · \(found.task.graphSource ?? "")" } ?? "No workflow selected"
         #expect(try absent.inspect().find(text: selection).string() == selection)
         let stale = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: empty, reason: "Offline"))
         #expect(try stale.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
@@ -1019,7 +1031,7 @@ struct WorkNavigationTests {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
         return WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
     }
-    /// Working Tasks [review, now]; wave-1 [later, now]; Dashboard "Review" [now, later, review] and wave-1.
+    /// Working Tasks [review, now]; wave-1 [now]; Dashboard "Review" [now, later, review] and wave-1.
     private func dashboardModel() throws -> WorkModel {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
@@ -1041,7 +1053,7 @@ struct WorkNavigationTests {
             fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                             members: [content(.task, "issue-review"), content(.task, "issue-now")]),
             fixtureViewPlan(owner: .init(repository: "repo", kind: .wave, id: "wave-1"),
-                            members: [content(.task, "issue-later"), content(.task, "issue-now")]),
+                            members: [content(.task, "issue-now")]),
             dashboard,
         ], reason: "")
         return model

@@ -900,3 +900,226 @@ fn operator_context_preview_uses_resolved_skills_without_preparing_checkouts() {
     assert!(!repo.path().join(".lf/tmp").exists());
     assert!(!repo.path().join(".git/worktrees").exists());
 }
+
+#[test]
+fn explicit_documents_match_preview_capture_and_codex_input() {
+    for (selection, native) in [("relative", false), ("absolute", true), ("external", false)] {
+        for large in [false, true] {
+            let repo = TestRepo::new();
+            let home = tempfile::tempdir().unwrap();
+            support::install_native_codex(&home.path().join("bin"));
+            let body = format!(
+                "FIRST-662\n{}MIDDLE-662\n{}FINAL-662\n",
+                "reference snow 雪 $passive\n".repeat(if large { 5_000 } else { 1 }),
+                "document data ".repeat(if large { 20_000 } else { 1 })
+            );
+            let path = if selection == "external" {
+                home.path().join("ignored.txt")
+            } else {
+                repo.path().join("document.txt")
+            };
+            fs::write(&path, &body).unwrap();
+            repo.create_file(".gitignore", "ignored.txt\n");
+            repo.create_file("config.txt", "CONFIG-DOCUMENT-662");
+            repo.create_file("frontmatter.txt", "FRONTMATTER-DOCUMENT-662");
+            repo.create_file(
+                ".lf/config.yaml",
+                "diff: false\ndiff_files: false\npaste: false\ndocs: [config.txt]\n",
+            );
+            if native {
+                repo.create_file(
+                    ".agents/skills/probe/SKILL.md",
+                    "---\nname: probe\ndescription: Probe docs\n---\nRead the supplied reference.",
+                );
+            } else {
+                repo.create_file(
+                    ".lf/skills/probe.md",
+                    "---\ndocs: [frontmatter.txt]\n---\nRead the supplied reference.",
+                );
+            }
+            let selected = if selection == "relative" {
+                "document.txt".to_string()
+            } else {
+                path.display().to_string()
+            };
+            let args = [
+                if selection == "external" { "-i" } else { "-b" },
+                "-a",
+                "codex",
+                "--docs",
+                &selected,
+                "skill",
+                "probe",
+                "Report final marker.",
+            ];
+            let preview = native_codex_command(repo.path(), home.path(), &args)
+                .args(["--context", "--json"])
+                .output()
+                .unwrap();
+            assert!(
+                preview.status.success(),
+                "{}",
+                String::from_utf8_lossy(&preview.stderr)
+            );
+            let preview: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+            let expected = preview["task_prompt"].as_str().unwrap();
+            assert!(expected.contains(&body.replace('$', "&#36;")));
+            assert_eq!(expected.matches("FIRST-662").count(), 1);
+            assert!(expected.contains("CONFIG-DOCUMENT-662"));
+            assert_eq!(expected.contains("FRONTMATTER-DOCUMENT-662"), !native);
+            assert!(preview["references"].as_array().unwrap().is_empty());
+            assert!(!repo.path().join(".lf/prompts").exists());
+            assert!(!home.path().join("native-argv.jsonl").exists());
+            assert!(!home.path().join("runs").exists());
+            assert!(!home.path().join("loopflow.db").exists());
+            let output = native_codex_command(repo.path(), home.path(), &args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let turns: serde_json::Value =
+                serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap())
+                    .unwrap();
+            let inputs = turns[0]["items"][0]["content"].as_array().unwrap();
+            assert_eq!(inputs.last().unwrap()["text"], expected);
+            assert_eq!(!preview["skill_invocation"].is_null(), native);
+            let contexts = explicit_document_captures(home.path());
+            assert_eq!(contexts.len(), 1);
+            assert_eq!(contexts[0]["context"]["task"]["text"], expected);
+            assert!(contexts[0]["context"]["task"]["assets"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|asset| {
+                    asset["kind"] == "document"
+                        && asset["source_path"].as_str().is_some_and(|source| {
+                            repo.path().join(source).canonicalize().unwrap()
+                                == path.canonicalize().unwrap()
+                                && expected.contains(&format!(
+                                    "Document: {}",
+                                    serde_json::to_string(source).unwrap()
+                                ))
+                        })
+                }));
+            fs::write(&path, "Changed after submission").unwrap();
+            assert_eq!(explicit_document_captures(home.path()), contexts);
+        }
+    }
+}
+
+fn explicit_document_captures(home: &std::path::Path) -> Vec<serde_json::Value> {
+    ignore::WalkBuilder::new(home.join("runs"))
+        .hidden(false)
+        .build()
+        .map(Result::unwrap)
+        .filter(|entry| entry.file_name() == "context.json")
+        .map(|entry| serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap())
+        .collect()
+}
+
+#[test]
+fn explicit_documents_native_reconnect_supplies_only_the_new_selection() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    support::install_native_codex(&home.path().join("bin"));
+    repo.create_file(
+        ".lf/config.yaml",
+        "diff: false\ndiff_files: false\npaste: false\n",
+    );
+    repo.create_file("first.txt", "FIRST-DOCUMENT-662");
+    repo.create_file("next.txt", "NEXT-DOCUMENT-662");
+    repo.stage_all();
+    repo.commit("Document fixtures");
+    // Keep the repository conversation's managed checkout inside this fixture.
+    let checkout = home.path().join("checkout");
+    assert!(Command::new("git")
+        .args(["clone", "--quiet"])
+        .arg(repo.path())
+        .arg(&checkout)
+        .status()
+        .unwrap()
+        .success());
+    for (key, value) in [
+        ("user.name", "Fixture Participant"),
+        ("user.email", "fixture@example.invalid"),
+    ] {
+        assert!(Command::new("git")
+            .current_dir(&checkout)
+            .args(["config", key, value])
+            .status()
+            .unwrap()
+            .success());
+    }
+    let command = |args: &[&str]| native_codex_command(&checkout, home.path(), args);
+    let prepared = command(&["connect", "--fresh", "--prepare", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let prepared: serde_json::Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = prepared["id"].as_str().unwrap();
+    let first_path = repo.path().join("first.txt");
+    let next_path = repo.path().join("next.txt");
+    let first = command(&[
+        "-b",
+        "-a",
+        "codex",
+        "--docs",
+        first_path.to_str().unwrap(),
+        "connect",
+        session,
+        "--message",
+        "FIRST-REQUEST-662",
+    ])
+    .output()
+    .unwrap();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let next = command(&[
+        "-b",
+        "--docs",
+        next_path.to_str().unwrap(),
+        "connect",
+        session,
+        "--message",
+        "Read the new document.",
+    ])
+    .output()
+    .unwrap();
+    assert!(
+        next.status.success(),
+        "{}",
+        String::from_utf8_lossy(&next.stderr)
+    );
+    let turns: serde_json::Value =
+        serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap()).unwrap();
+    assert_eq!(turns.as_array().unwrap().len(), 2);
+    let old = turns[0]["items"][0]["content"][0]["text"].as_str().unwrap();
+    let new = turns[1]["items"][0]["content"][0]["text"].as_str().unwrap();
+    assert!(old.contains("FIRST-DOCUMENT-662"));
+    assert!(new.contains("NEXT-DOCUMENT-662"));
+    assert!(!new.contains("FIRST-DOCUMENT-662"));
+    assert!(!new.contains("FIRST-REQUEST-662"));
+    let contexts = explicit_document_captures(home.path());
+    assert!(contexts
+        .iter()
+        .any(|context| context["context"]["task"]["text"] == new));
+    let live: i64 = db
+        .query_row(
+            "SELECT count(*) FROM processes WHERE kind='agent' AND completed_at IS NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(live, 0);
+}

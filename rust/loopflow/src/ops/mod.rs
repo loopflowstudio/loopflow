@@ -13,6 +13,7 @@ pub(crate) mod land;
 pub mod linear;
 pub mod linear_observe;
 pub(crate) mod metrics;
+pub mod people;
 pub(crate) mod planning_client;
 pub(crate) mod planning_delivery;
 pub(crate) mod planning_export;
@@ -42,7 +43,6 @@ pub mod task_run;
 pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
-pub mod workflow;
 pub mod wt;
 pub mod wt_timing;
 

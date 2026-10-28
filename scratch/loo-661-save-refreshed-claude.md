@@ -4,9 +4,8 @@ Status: **Implementation blocked on a verified native writer; diagnostics only.*
 Jack Heart authorized bounded repair and autonomous delivery of
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-reviewed checkout: `3bc20b3aff` (2026-10-27, includes LOO-657 and v0.14.19).
-No remote freshness is claimed. Installed 0.14.19 accepted both managed accounts
-in a later poll, without proving refresh or explaining the original save failure.
+reviewed checkout: `e0fbae22bb` (includes LOO-657 and v0.14.19).
+No remote freshness is claimed.
 
 ## Required outcome
 
@@ -24,35 +23,10 @@ and installed acceptance. This Task serves its reliable-auth objective and KR ab
 advancing work without plumbing failures; no quantitative Wave target is selected.
 
 No tested writer meets the preservation contract. The current `security -i`
-writer still has its input ceiling; diagnostics do not repair it. Findings 22–23
-prove old-reader recovery after specific rollbacks, but replacement reads failed.
-The next implementation needs a supported mechanism that demonstrates exact large
-replacement, existing-reader access and old-data recovery on failure together.
-This slice is mechanism proof before production cutover. The native-modifier /
-outer-transaction candidate is rejected for the proposed verify-before-commit
-sequence: finding 26 identifies snapshot reads in the published implementation,
-consistent with finding 25's missing new group key. A fresh lookup cannot verify
-replacement before commit on that path. No production mechanism
-is selected merely to make the remaining implementation sequence executable.
-No product decision or additional authorization is pending, and the exclusions
-below do not exhaust every public interface.
-
-2026-10-27 kickoff decision: retain the accepted outcome and blocked mechanism
-status. Finding 27 below rejects passing a copied access object through the
-existing-item modifier as another route around partition replacement. No safe
-production cutover is selected, and the diagnostic-only branch is not the repair.
-
-## Demo and decision boundary
-
-After a naturally required refresh, `lf account claude --json` still accepts
-Jack Heart's same account and reports capacity; native Claude continues using that
-login without sign-in. A disposable production-path fixture independently proves
-exact 2,048- and 8,192-byte replacement and readable old data on a failed save.
-Both are required: successful account polls do not prove a save occurred.
-
-Retain one native writer behind `write_claude_login`, shared by refresh and
-activation, with current readers and credential authority preserved. Its transport
-remains unselected; a transaction wrapper alone does not establish compatibility.
+writer still has its input ceiling; diagnostics do not repair it. Prove a supported
+mechanism before production cutover. Findings 22–27 below reject the proposed
+outer-transaction verification and explicit-access alternatives without exhausting
+public interfaces. No product decision or additional authorization is pending.
 
 ## Surviving implementation
 
@@ -63,12 +37,9 @@ remains unselected; a transaction wrapper alone does not establish compatibility
   of config-directory path>`; the ambient default home falls back to unsuffixed
   `Claude Code-credentials` when no scoped item exists. Existing account metadata
   wins; `USER` supplies new items. Readers use `security find-generic-password`.
-- `subscription.rs::fresh_claude_token` retains the original `SecretString`,
-  preserves unrelated JSON and serializes the refreshed value once. Endpoint
-  selection precedes request construction. The final replacement check and save
-  sit beside the returned credential; a single-use wrapper added no policy.
-  Keep `ensure_claude_credential_unchanged` and the `claude_persistence_error`
-  redaction boundary.
+- `subscription.rs::fresh_claude_token` retains the original `SecretString` and
+  serializes the refreshed value once. Keep `ensure_claude_credential_unchanged`
+  and the `claude_persistence_error` redaction boundary.
 - Closed storage stages and numeric statuses survive error conversion; arbitrary
   errors stay redacted. Save failures are `Unavailable`, not `NeedsLogin`.
   Readback failure and mismatch differ; neither proves rollback or safe retry.
@@ -91,6 +62,8 @@ Full evidence before this consolidation is preserved at
 (blob `47bcef7ebe8d8f75a0e7f9526169c891914d0110`), including earlier archives,
 source URLs, process IDs and probe blobs. The conclusions below group the findings
 by mechanism so the next investigation need not replay them.
+The pre-compression plan is at
+`e0fbae22bb4b4e3bee33a62a51dcf12f30a7b2a6:scratch/loo-661-save-refreshed-claude.md`.
 The earlier uncommitted memory/assumptions are preserved as Git blobs
 `a7a634b98304be1599c7039139496e8eb8dec209` /
 `5ddde1b3c97907dcfb356bd1fde5ab3e64022705` before reconciliation/checkpointing.
@@ -207,13 +180,9 @@ Heart's preservation requirement or selects the excluded concurrency redesign.
 
 ## Remaining implementation and acceptance
 
-1. Revise the mechanism design before dependent implementation. Finding 26
-   rejects the proposed native-modifier / outer-transaction / reader-verification
-   sequence: query snapshots hide the new group key until commit. A distinct
-   supported mechanism must establish encoding, access and failure preservation;
-   another fresh-query probe or transaction wrapper does not resolve this.
-   Transport replacement, consumer cutover and deletion
-   are one cut. Preserve JSON validation, readback, managed login locking,
+1. Prove a supported mechanism that establishes encoding, access and failure
+   preservation, then replace the transport and its exclusive fixture in one cut.
+   Preserve JSON validation, readback, managed login locking,
    intervening-replacement checks, omitted refresh tokens, unknown fields and the
    15-second HTTP timeout. No extra OAuth request or automatic retry. Bound new
    subprocesses to 15 seconds, close stdin and reap on every exit. Report uncertain
@@ -246,14 +215,13 @@ Heart's preservation requirement or selects the excluded concurrency redesign.
 
 ## Delete — do not maintain
 
-- Removed `subscription.rs::persist_claude_refresh`; its sole caller performs the
-  same check/save directly. Shared race checks and redaction remain.
 - Replace the `security -i` spawn, hex script and command-string escaping restrictions
   inside `write_claude_keychain_credential` once a compatible writer is proven.
   Replace its exclusive stand-in in
   `claude_persistence_keychain_diagnostics_distinguish_write_readback_and_mismatch`
   with the surviving writer's diagnostic fixture, retaining stage/secrecy checks.
-  No second writer, small-value fallback, size dispatch, dual writes or bypass.
+  Keep one writer behind `write_claude_login`, shared by refresh and activation;
+  no small-value fallback, size dispatch, dual writes or bypass.
 - Retain shared readers, service/account parsers and tests, managed file writes,
   explicit profile-capture cleanup and race/rotation tests; they have other consumers.
 
@@ -280,4 +248,4 @@ intended step edits with `lf commit <paths>` before sync, preserving unrelated
 staged/unstaged work and normal validation. Do not force-add telemetry or implement
 a competing repair; retain the dependency if checkpointing fails.
 
-Check — 2026-10-27 kickoff: `git diff --check` passed; `lf context` reports memory/scratch within both limits. Source-only investigation and plan edit; prior diagnostic tests (4), fmt and clippy results remain applicable. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.
+Check — compress: `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reduction; prior diagnostic tests (4), fmt and clippy results remain applicable. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.

@@ -4,9 +4,11 @@ Status: **Accepted outcome; writer design unresolved; diagnostics only.**
 Jack Heart authorized bounded repair and autonomous delivery of
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-Reviewed checkout: `03736520510eba450d9fecd47db088f6b3c38098`
-(includes LOO-657 and v0.14.19); kickoff reconciliation: 2026-10-27.
-No remote freshness is claimed.
+Reviewed checkout: `44c8155bb509f43d9c6b0f358753afcfde2f6b9b`;
+realign reconciliation: 2026-10-27. The merge of `0d72f072a4` changes Task/Graph
+plumbing but leaves the auth, refresh, activation and account-status code unchanged
+from the prior reviewed `0373652051`. LOO-657 and v0.14.19 remain integrated.
+No remote freshness or installed upgrade is claimed.
 
 ## Required outcome
 
@@ -61,8 +63,9 @@ only; an unexpired account poll demonstrates neither refresh nor repair.
 The writer still validates JSON, resolves service/account, sends hex through
 `security -i` stdin and verifies readback. Four diagnostic tests cover hostile
 output, mismatch, numeric IO errors and unstructured errors; they prove redaction,
-not native preservation. No replacement writer, native acceptance fixture,
-database migration, DTO change or Swift change exists.
+not native preservation. No replacement writer or native acceptance fixture exists.
+This repair adds no database migration, DTO change or Swift change; the merged
+Task/Graph work has its own migration and does not supply credential acceptance.
 
 ## Evidence and excluded alternatives
 
@@ -207,17 +210,10 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Delivery also depends on LOO-664: installed 0.14.19's literal `.lf/tmp` exclusion
-fails even in a clean checkout. Explicit-path checkpoints preserve edits but do
-not restore sync. Jack Heart's Task revision of 2026-10-28 03:39 UTC authorizes a
-temporary Task-local bridge: after validation and checkpointing, atomically archive
-the complete `.lf/tmp` directory to a unique LOO-661 directory under the designated
-`installed-sync-hotfix-20261027/task-telemetry` archive. Preserve earlier archives
-and any newly produced telemetry separately; leave `.lf/tmp` absent immediately
-before automatic sync. The exact destination is recorded in `scratch/questions.md`.
-The supplied disposable reproduction establishes this workaround for installed19;
-it does not establish installed repair. Infrastructure owns the prepared signed
-CLI/helper installation and verification. No ignore-rule change, forced telemetry
-staging, suppressed Git error or competing publisher belongs in this Task.
+Delivery retains the LOO-664 sync dependency. Jack Heart's Task revision of
+2026-10-28 03:39 UTC authorizes a temporary telemetry archive bridge, recorded in
+`scratch/questions.md`; checkpointing alone does not restore sync. The supplied
+disposable reproduction proves the bridge, not installed repair. Infrastructure
+owns the prepared signed CLI/helper installation and verification.
 
-Check — compress (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reduction; no build/test rerun. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.
+Check — realign (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reconciliation; no build/test rerun. Gate owns affected suites on the merged tree; native replacement and installed refresh acceptance remain unproved.

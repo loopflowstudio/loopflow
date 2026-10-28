@@ -781,19 +781,19 @@ changed partitions and broke the `security` reader; access restoration failed.
 Published source commits data before restoring access. Compatible writing remains
 unproved; exclusions do not prove exhaustion.
 
-FileDL transactions recovered exact old bytes after specific 2/8 KiB rollbacks,
-but replacement reads failed. Public record-by-ID reads found new encoded bytes;
-group-key queries did not. Published source reads modified records by ID but
-queries the pre-write snapshot, consistent with that failure. The proposed
-pre-commit verification fails; other mechanisms remain open. General rollback
-safety and unchanged ACL identity remain unproved.
+FileDL rollbacks recovered old bytes at 2/8 KiB; replacement reads failed.
+Record-by-ID reads found new encoded bytes, but group-key queries did not.
+Published source's pre-write query snapshot is consistent with failed pre-commit
+verification. Rollback safety and unchanged ACL identity remain unproved.
+Rollback cannot establish server validity after OAuth rotation: refresh
+precedes saving, with no shared provider/Keychain transaction.
 
 Closed stages/statuses keep secrets out of diagnostics. Save failures stay
 `Unavailable`; failed readback/mismatch proves neither rollback nor safe retry.
 Launches reported save failure and expired OAuth; later polls accepted both accounts
 without proving refresh. Synthetic storage proof cannot replace installed refresh
-acceptance. LOO-325 concurrency remains unselected. Detailed evidence:
-`31c2ed7565:scratch/loo-661-save-refreshed-claude.md`.
+acceptance. LOO-325 concurrency remains unselected. Evidence:
+`0288f9d611:scratch/loo-661-save-refreshed-claude.md`.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-10)
 

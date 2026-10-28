@@ -4,13 +4,14 @@ The [design](loo-661-save-refreshed-claude.md) owns the unresolved compatible-wr
 mechanism, rejected alternatives and live diagnosis. No product decision is
 pending and no relaxation of preservation, trust or storage authority is assumed.
 
-2026-10-27: The latest Task definition authorizes the telemetry archive bridge
-after checkpointing; checkpointing alone does not restore installed19 sync.
-This compress step's allocated destination is
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-compress-8FQuIfqc/tmp`.
-The final archive operation follows validation and the explicit-path checkpoint;
-its command result records whether the move succeeded. Earlier archives remain
-untouched. This recovery changes neither the unresolved writer proof nor
-Infrastructure's ownership of installation and live acceptance.
-The prior kickoff destination remains recorded at
-`0288f9d611755301b85bd36316a7b310ed8d9d3a:scratch/questions.md`.
+2026-10-27: Jack Heart's current Task definition authorizes archiving the complete
+Task-local `.lf/tmp` after validation and an explicit-path checkpoint, leaving it
+absent for automatic sync. Checkpointing alone does not restore installed19 sync.
+This realign step's allocated destination is
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-realign-hxkX9Mtm/tmp`.
+The final operation records the atomic move's result. Earlier archives and any
+new telemetry remain separate; no logs are deleted or overwritten. No ignore-rule
+change, forced telemetry staging or suppressed Git error is authorized.
+This bridge changes neither writer proof nor Infrastructure's installation and
+live-acceptance ownership. Earlier archive paths remain at
+`22d5d8e0e5:scratch/questions.md` and `0288f9d611:scratch/questions.md`.

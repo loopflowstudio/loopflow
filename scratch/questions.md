@@ -4,6 +4,13 @@ The [design](loo-661-save-refreshed-claude.md) owns the unresolved writer mechan
 rejected alternatives and live diagnosis. No product decision or relaxation of
 preservation, trust or storage authority is assumed.
 
+Finding 36 (2026-10-28): database authentication does not forward its credentials
+into creation's partition edits; the group-retaining encoder has no identified
+public replacement entry point. Proceeding requires a concrete supported mechanism
+or Jack Heart's scope decision. A database password alone is not a demonstrated
+solution and must not be collected speculatively. No new secret, private interface,
+trust change or selection of LOO-325 is assumed; no mutation probe repeated.
+
 Supported reconnection for jack@loopflow.studio requires browser sign-in (design
 finding 32); this headless run does not initiate or bypass it.
 

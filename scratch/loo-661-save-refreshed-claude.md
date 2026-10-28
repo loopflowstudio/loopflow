@@ -1,6 +1,6 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (realigned 2026-10-28): **Writer unresolved; diagnostics only.**
+Status (implement investigation 2026-10-28): **Writer unresolved; authorization dependency.**
 Accepted scope is unchanged; the replacement mechanism remains a draft.
 The checked-in `security -i` writer still has the destructive size failure below.
 No candidate meets transport, native reader-access and failed-save preservation
@@ -10,10 +10,12 @@ proof; live acceptance separately requires supported reconnection for
 jack@loopflow.studio. Neither dependency relaxes Jack Heart's accepted outcome.
 Finding 35 isolates the copied partition entry as the creation obstacle and rejects
 explicit trusted-application construction as a reader-compatible replacement.
-The requested differential investigation is complete; no replacement mechanism
-has been selected. Its original-byte and semantic-ACL checks passed, but every
-candidate failed native reading. These results establish neither production
-acceptance nor safe promotion.
+Finding 36 traces the requested database-authentication and existing-group paths.
+Neither supplies a supported replacement under the accepted constraints. Further
+implementation requires a concrete public mechanism or a scope decision; no new
+mutation probe is justified. Prior original-byte and semantic-ACL checks passed,
+but every candidate failed native reading. These results establish neither
+production acceptance nor safe promotion.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -244,13 +246,77 @@ access, but cannot prove server validity after OAuth rotation: `fresh_claude_tok
 receives the refresh response before saving, with no provider/Keychain transaction.
 Neither limitation relaxes Jack Heart's requirements.
 
+### 36. Database authentication and existing-group retention (2026-10-28)
+
+Read-only follow-up to finding 35, using the same pinned Apple Security source
+commit and installed SDK declarations. No mutation probe, credential read,
+unlock, authentication request or trust change ran. The following are source
+conclusions, not traces of installed securityd.
+
+**Database authentication does not supply creation's missing authority.**
+`KeychainDatabase::checkCredentials` examines the credentials passed to that ACL
+operation. It accepts a `KEYCHAIN_LOCK` sample containing a valid database
+passphrase or a key validated against the database. It explicitly ignores prompt
+samples and returns false without a matching sample. Being unlocked, possessing
+an item reference or having a trusted-application ACL does not satisfy this check.
+The validation still checks the supplied passphrase when the database is unlocked.
+[Database credential validation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/securityd/src/kcdatabase.cpp#L1275-L1317).
+
+Public `CSSM_DL_Authenticate` reaches `KeychainDatabase::authenticate`, which stores
+database credentials in `mCred`; `checkCredentials` does not consult that stored
+value. `SecKeychainUnlock` unlocks the database rather than changing the credentials
+passed to subsequent ACL edits. Creation's `Access::Maker` generates its own random
+setup-password sample; `Access::setAccess(target, maker)` passes that sample to
+each edit. `SecKeychainItemCreateFromContent` accepts access policy but no database
+credential argument. Thus authenticating first does not make the copied partition
+construction from finding 35 authorized. A database password alone would not
+establish a supported creation path or atomic preservation.
+[Authentication](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/securityd/src/kcdatabase.cpp#L617-L638),
+[creation credentials](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Access.cpp#L175-L212),
+[maker](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Access.cpp#L358-L398).
+
+**The group-retaining encoder is internal, not the public data modifier.**
+`SSDbUniqueRecordImpl::modify` can encode new data with the existing `SSGroup`.
+However, `ItemImpl::updateSSGroup` reaches that operation only with null new data;
+non-null replacement data selects a new group. The similarly named
+`SSDLSession::DataModify` uses `SSUniqueRecord`, whose implementation inherits the
+raw `DbUniqueRecordImpl` modifier, not the secure-storage encoder. Passing plaintext
+through public `CSSM_DL_DataModify` therefore does not reach the group-retaining
+operation. Retaining an item or unique-record reference does not change this
+dispatch. Calling the internal C++ operation or reproducing its group-label/IV/
+ciphertext envelope would cross the existing private-interface boundary.
+[Internal encoder](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_cdsa_client/lib/securestorage.cpp#L581-L620),
+[item dispatch](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Item.cpp#L886-L1045),
+[public modifier dispatch](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_apple_cspdl/lib/SSDLSession.cpp#L286-L300),
+[record type](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_apple_cspdl/lib/SSDatabase.h#L174-L194).
+
+**Concrete dependency:** no public credential-forwarding creation or encrypted
+group-retaining replacement was identified in these paths. Database-authorized
+partition editing requires a database passphrase/master-key credential unavailable
+under the no-new-secrets constraint, plus a supported way to supply it to the
+relevant operation. The group-retaining route requires a supported API reaching
+that encoder; none was found. Proceeding through private interfaces, trust changes
+or provider-owned refresh would require a scope decision that Jack Heart has not
+made for this Task; LOO-325 remains unselected. No secret should be collected on
+the assumption that it alone resolves this dependency. Public interfaces in
+general are not declared exhausted.
+
+The production writer remains defective. No new candidate qualified for exact
+2,048/8,192-byte native-reader and failed-save-preservation tests; no production
+writer or acceptance fixture was changed. Browser reconnection remains independent,
+the historical save failure is undiagnosed, and Infrastructure retains installation
+and installed-verification ownership.
+
 ## Remaining implementation and acceptance
 
 1. **Unresolved mechanism:** a distinct supported construction must explain how it
    supplies native partition access and preserves failed saves. Finding 35 resolves
    the copied-access differential and rejects the tested explicit trusted-application
-   route; neither needs an unchanged repeat. Public interfaces remain unexhausted,
-   but no next candidate is yet supported by evidence. Proof requires disposable
+   route; neither needs an unchanged repeat. Finding 36 identifies the missing
+   per-operation database authority and public group-retaining encoder; simply
+   authenticating/unlocking first or retaining a reference does not supply them.
+   A concrete public mechanism or an explicit scope decision is now required.
+   Public interfaces remain unexhausted. Proof requires disposable
    synthetic items, exact independent native-reader round trips, and preservation
    of original bytes and access. Only then can the production transport and its
    exclusive fixture be replaced in one cut.
@@ -329,4 +395,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — realign (2026-10-28): `git diff --check` and `lf context` pass; reviewed source and eight archived results at `66ae255389` agree with finding 35. No behavior changed or probe reran; writer proof, native acceptance fixture, gate and Infrastructure's installed acceptance remain pending.
+Check — implement investigation (2026-10-28): `git diff --check` and `lf context` pass; pinned-source call paths and SDK declarations reviewed, no behavior changed or mutation probe rerun. Authorization mechanism, native acceptance fixture, gate and Infrastructure's installed acceptance remain pending.

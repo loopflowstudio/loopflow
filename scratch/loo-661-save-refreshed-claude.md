@@ -12,6 +12,11 @@ fix does not complete this repair or permit delivery.
 exclude two examined public CSSM bridges, not all public APIs. Native synthetic
 proof and installed live acceptance remain separate.
 
+Reconciled October 28 against `2b2079af4`: the production writer and eight-case
+fixture still match these findings. Finding 43 changes the candidate assessment,
+not acceptance. Release's child memory retains the same distinction between
+entry-point proof and installed behavior; it supplies no Claude recovery evidence.
+
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Infrastructure owns release, CLI/Desktop/helper installation and installed acceptance.
@@ -179,7 +184,9 @@ An unlocked Keychain, a copied access object, or a returned key handle alone doe
 not supply that combination.
 
 Further implementation needs that supported mechanism, then the native fixture's
-large-value and injected-failure proof. Jack Heart and Infrastructure must decide
+large-value and injected-failure proof.
+
+**Unselected proposal (October 28):** Jack Heart and Infrastructure must decide
 whether to obtain Apple guidance for this public-interface path, or commission a
 separately reviewed provider-owned refresh design under LOO-325 if none can be
 established. Neither action is selected here. Provider-owned refresh remains an
@@ -253,4 +260,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check (October 28 compress; prose only) — `git diff --check` and `lf context`: PASS; no Rust changes or test reruns. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.
+Check (October 28 realign; prose only) — `git diff --check` and `lf context`: PASS; no Rust changes or test reruns. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.

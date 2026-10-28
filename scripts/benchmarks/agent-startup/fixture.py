@@ -1,4 +1,4 @@
-"""Back up a dense SQLite store read-only; apply source drafts only to the copy."""
+"""Back up a dense SQLite store read-only into a private benchmark Home."""
 
 import argparse
 import json
@@ -6,7 +6,6 @@ import os
 import sqlite3
 import uuid
 from pathlib import Path
-
 
 
 def require_fixture(home: Path) -> None:

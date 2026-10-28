@@ -1,6 +1,9 @@
 use crate::support;
 
-use std::process::Command;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
 
 use base64::prelude::*;
 use loopflow::store::{
@@ -198,7 +201,11 @@ case "$CODEX_HOME" in
       echo '{"jsonrpc":"2.0","id":3,"result":{"rateLimits":{"planType":"team","primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":1900000000}}}}'
     fi;;
   */revoked)
-    echo '{"jsonrpc":"2.0","id":3,"error":{"code":401,"message":"token_invalidated"}}';;
+    echo '{"jsonrpc":"2.0","id":3,"error":{"code":401,"message":"token_invalidated"}}'
+    read -r refresh
+    echo '{"id":4,"result":{"account":{"email":"revoked@example.com"}}}'
+    read -r limits
+    echo '{"id":5,"error":{"code":401,"message":"token_invalidated"}}';;
   *) exit 9;;
 esac
 "#;
@@ -867,14 +874,17 @@ echo '{"id":3,"result":{"rateLimits":{}}}'
 #[test]
 fn account_read_failure_preserves_credentials_unless_revoked() {
     let home = tempfile::tempdir().unwrap();
-    let codex = r#"#!/bin/sh
-read -r initialize
-echo '{"id":1,"result":{}}'
-read -r initialized
-read -r account
-printf '{"id":2,"error":{"code":%s,"message":"fixture failure"}}\n' "$LF_TEST_ACCOUNT_ERROR"
-read -r limits
-echo '{"id":3,"result":{"rateLimits":{}}}'
+    let codex = r#"#!/usr/bin/env python3
+import json, os, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if 'id' not in request:
+        continue
+    response = {'id': request['id'], 'result': {}}
+    if request['method'] == 'account/read':
+        response = {'id': request['id'], 'error': {
+            'code': int(os.environ['LF_TEST_ACCOUNT_ERROR']), 'message': 'fixture failure'}}
+    print(json.dumps(response), flush=True)
 "#;
     let _env = EnvGuard::with_lf_home(&[("codex", codex)], home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -1096,5 +1106,352 @@ done
     assert_eq!(
         std::fs::read_to_string(native.join("spent")).unwrap(),
         "fixture-attempt"
+    );
+}
+
+struct CodexClient {
+    child: Child,
+    messages: Receiver<serde_json::Value>,
+    reader: Option<std::thread::JoinHandle<()>>,
+}
+
+impl CodexClient {
+    fn start(home: &std::path::Path, thread: &str) -> Self {
+        let mut child = Command::new("codex")
+            .arg("app-server")
+            .env("CODEX_HOME", home)
+            .env("CODEX_FIXTURE_THREAD", thread)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (send, messages) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let message = serde_json::from_str(&line.unwrap()).unwrap();
+                if send.send(message).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            child,
+            messages,
+            reader: Some(reader),
+        }
+    }
+
+    fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        let input = self.child.stdin.as_mut().unwrap();
+        writeln!(
+            input,
+            "{}",
+            serde_json::json!({"id":1,"method":method,"params":params})
+        )
+        .unwrap();
+        input.flush().unwrap();
+        let response = self.messages.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(response["id"], 1);
+        assert!(response.get("error").is_none(), "{response}");
+        response["result"].clone()
+    }
+
+    fn turn(&mut self, thread: &str) -> serde_json::Value {
+        let result = self.request(
+            "turn/start",
+            serde_json::json!({"threadId":thread,"input":[]}),
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let message = self
+                .messages
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap();
+            if message["method"] == "turn/completed" {
+                assert_eq!(message["params"]["threadId"], thread);
+                assert_eq!(message["params"]["turn"], result["turn"]);
+                return result["turn"].clone();
+            }
+        }
+    }
+
+    fn close(&mut self) {
+        drop(self.child.stdin.take());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                assert!(status.success(), "{status}");
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fixture did not exit on stdin closure"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.reader.take().unwrap().join().unwrap();
+    }
+}
+
+impl Drop for CodexClient {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
+    }
+}
+
+#[test]
+fn codex_same_login_recovery_status_launch_resume_and_reset() {
+    let home = tempfile::tempdir().unwrap();
+    let script = support::codex_socket_script(&format!(
+        "#!/bin/sh\nexec python3 '{}' \"$@\"\n",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_access.py")
+    ));
+    let _env = EnvGuard::with_lf_home(&[("codex", &script)], home.path());
+    let repo = loopflow_test_support::TestRepo::new();
+    repo.create_file(
+        ".lf/config.yaml",
+        "agent: codex\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
+    let profile = home.path().join("accounts/codex/active");
+    let native = home.path().join("native");
+    for path in [&profile, &native] {
+        write_identity(path, "active@example.com", "active");
+    }
+    let set_token = |path: &std::path::Path, token: &str| {
+        let mut auth: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path.join("auth.json")).unwrap()).unwrap();
+        auth["tokens"]["access_token"] = token.into();
+        auth["expires_at"] = 4102444800_i64.into();
+        let bytes = serde_json::to_vec(&auth).unwrap();
+        std::fs::write(path.join("auth.json"), &bytes).unwrap();
+        bytes
+    };
+    let good = set_token(&profile, "fixture");
+    set_token(&native, "fixture");
+    let active_thread = "0199a213-81c0-7800-8aa1-bbab2a035a54";
+    let mut client = CodexClient::start(&native, active_thread);
+    let active_pid = client.child.id();
+    client.request("initialize", serde_json::json!({}));
+    let started = client.request("thread/start", serde_json::json!({}));
+    assert_eq!(started["thread"]["id"], active_thread);
+    let first_turn = client.turn(active_thread);
+    let bad = set_token(&native, "rejected");
+    std::fs::write(native.join("history.jsonl"), "unrelated native history\n").unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    let selected = account("active", profile.clone());
+    runtime
+        .block_on(store.upsert_provider_account(&selected))
+        .unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(args)
+            .current_dir(repo.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("CODEX_HOME", &native)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    let status = run(&["account", "codex", "--json"]);
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(report["accounts"][0]["verification"], "accepted");
+    assert_eq!(std::fs::read(native.join("auth.json")).unwrap(), bad);
+    let events = std::fs::read(profile.join("probe-events")).unwrap();
+    run(&["account", "codex", "--cached", "--json"]);
+    assert_eq!(std::fs::read(profile.join("probe-events")).unwrap(), events);
+    run(&[
+        "account",
+        "redeem-reset",
+        "codex",
+        "active@",
+        "--idempotency-key",
+        "one-spend",
+        "--json",
+    ]);
+    assert_eq!(
+        std::fs::read_to_string(profile.join("spent")).unwrap(),
+        "one-spend\n"
+    );
+    assert!(!native.join("spent").exists());
+    let excluded = home.path().join("accounts/codex/excluded");
+    write_identity(&excluded, "excluded@example.com", "excluded");
+    let excluded_auth = set_token(&excluded, "fixture");
+    runtime
+        .block_on(store.upsert_provider_account(&account("excluded", excluded.clone())))
+        .unwrap();
+    run(&["account", "route", "set", "codex", "excluded@", "--default"]);
+    run(&["account", "route", "set", "codex", "active@"]);
+    let routes = || {
+        let output = run(&["account", "route", "--json"]);
+        let scoped: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let output = run(&["account", "route", "--default", "--json"]);
+        let default: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        (scoped, default)
+    };
+    let prior_routes = routes();
+    let codex_route = |report: &serde_json::Value| {
+        report
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|route| route["provider"] == "codex")
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        codex_route(&prior_routes.0)["candidates"][0]["account_id"],
+        "active"
+    );
+    assert_eq!(
+        codex_route(&prior_routes.1)["candidates"][0]["account_id"],
+        "excluded"
+    );
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let stored_routes = || {
+        db.prepare(
+            "SELECT json_array(scope,scope_id,provider,position,account_id,created_at,updated_at)
+                    FROM provider_routes ORDER BY scope,scope_id,provider,position",
+        )
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    };
+    let prior_stored_routes = stored_routes();
+    run(&["-b", ":", "Reply with RECOVERED."]);
+    assert_eq!(std::fs::read(native.join("auth.json")).unwrap(), good);
+    let (session, thread): (String, String) = db
+        .query_row(
+            "SELECT id,provider_thread FROM agent_sessions WHERE provider_thread IS NOT NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_ne!(thread, active_thread);
+    assert!(client.child.try_wait().unwrap().is_none());
+    let second_turn = client.turn(active_thread);
+    assert_eq!(client.child.id(), active_pid);
+    let retained = client.request(
+        "thread/turns/list",
+        serde_json::json!({"threadId":active_thread}),
+    );
+    assert_eq!(
+        retained["data"],
+        serde_json::json!([first_turn, second_turn])
+    );
+    client.close();
+    let sessions =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let prior = sessions.session(&session).unwrap().unwrap();
+    assert!(prior.completed_at.is_some());
+    let history = sessions.session_history(&session, 0, 0).unwrap();
+    run(&[
+        "-b",
+        "session",
+        "connect",
+        &session,
+        "--message",
+        "Reply with RECOVERED again.",
+    ]);
+    let continued: (String, String) = db
+        .query_row(
+            "SELECT id,provider_thread FROM agent_sessions WHERE id=?1",
+            [&session],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(continued, (session.clone(), thread.clone()));
+    let resumed = sessions.session(&session).unwrap().unwrap();
+    assert_ne!(resumed.captured, prior.captured);
+    assert_eq!(resumed.completed_at, prior.completed_at);
+    assert!(sessions
+        .session_history(&session, 0, 0)
+        .unwrap()
+        .starts_with(&history));
+    let listing = run(&["history", "list", "--json"]);
+    let listing: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
+    assert!(!listing["entries"].as_array().unwrap().is_empty());
+    let usage = run(&["usage", "--json"]);
+    let usage: serde_json::Value = serde_json::from_slice(&usage.stdout).unwrap();
+    let captures: Vec<_> = usage
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["session_id"] == session)
+        .map(|row| row["captured"].as_i64().unwrap())
+        .collect();
+    assert!(captures.contains(&prior.captured.unwrap()));
+    assert!(captures.contains(&resumed.captured.unwrap()));
+    run(&["doctor", "--json"]);
+    let routed: String = db
+        .query_row(
+            "SELECT account_id FROM provider_session_accounts WHERE provider_session_id=?1",
+            [&thread],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(routed, "active");
+    let turns: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(native.join(format!("turns-{thread}.json"))).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(turns.as_array().unwrap().len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(native.join("history.jsonl")).unwrap(),
+        "unrelated native history\n"
+    );
+    assert_eq!(std::fs::read(profile.join("auth.json")).unwrap(), good);
+    assert_eq!(routes(), prior_routes);
+    assert_eq!(stored_routes(), prior_stored_routes);
+    assert_eq!(
+        std::fs::read(excluded.join("auth.json")).unwrap(),
+        excluded_auth
+    );
+    assert!(!excluded.join("probe-events").exists());
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(native.join("probe-events"))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let launches: Vec<_> = events
+        .iter()
+        .filter(|event| event["method"] == "turn/start")
+        .collect();
+    assert_eq!(launches.len(), 4);
+    for event in &launches {
+        assert_eq!(event["home"], native.to_str().unwrap());
+        assert_eq!(event["email"], "active@example.com");
+    }
+    assert_eq!(
+        launches
+            .iter()
+            .filter(|event| event["thread"] == thread)
+            .count(),
+        2
+    );
+    assert_eq!(
+        launches
+            .iter()
+            .filter(|event| event["thread"] == active_thread && event["pid"] == active_pid)
+            .count(),
+        2
     );
 }

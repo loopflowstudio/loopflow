@@ -15,9 +15,8 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
-use crate::provider_account::activation::credential_home;
+use crate::provider_account::activation::claude_credential_home;
 use crate::provider_account::identity::{credential_digest, AccountIdentity};
-use crate::provider_auth::Provider;
 use crate::store::{AccountLimitWindow, ProviderAccount};
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -55,16 +54,12 @@ pub async fn poll_account(
         SubscriptionError::Unavailable("account has no managed credential home".to_string())
     })?;
     match account.provider.as_str() {
-        "claude" => poll_claude(&credential_home(Provider::Claude, home)).await,
-        "codex" => {
-            crate::provider_account::identity::check_account_identity(account, &[])
-                .map_err(SubscriptionError::NeedsLogin)?;
-            let home = credential_home(Provider::Codex, home);
-            let usage = poll_codex(&home).await?;
-            crate::provider_account::identity::check_account_identity(account, &[])
-                .map_err(SubscriptionError::NeedsLogin)?;
-            Ok(usage)
-        }
+        "claude" => poll_claude(&claude_credential_home(home)).await,
+        "codex" => Ok(
+            crate::provider_account::codex_access::resolve(account, None)
+                .await?
+                .usage,
+        ),
         other => Err(SubscriptionError::Unavailable(format!(
             "no subscription poll for provider '{other}'"
         ))),
@@ -392,7 +387,7 @@ pub struct RateLimitResetCredit {
     pub description: Option<String>,
 }
 
-async fn codex_connection(
+pub(crate) async fn codex_connection(
     home: &Path,
 ) -> Result<crate::provider_auth::codex::Connection, SubscriptionError> {
     crate::provider_auth::codex::Connection::start(
@@ -417,6 +412,7 @@ async fn codex_request(
     if let Some(error) = response.get("error") {
         let message = error.get("message").and_then(Value::as_str).unwrap_or("");
         if message.contains("token_invalidated")
+            || message.contains("401 Unauthorized")
             || error.get("code").and_then(Value::as_i64) == Some(401)
         {
             return Err(SubscriptionError::NeedsLogin("credential revoked".into()));
@@ -434,16 +430,35 @@ async fn codex_request(
         })
 }
 
-async fn codex_usage(
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CodexUsageError {
+    #[error(transparent)]
+    Access(#[from] SubscriptionError),
+    #[error("{0}")]
+    Identity(String),
+}
+
+impl From<CodexUsageError> for SubscriptionError {
+    fn from(error: CodexUsageError) -> Self {
+        match error {
+            CodexUsageError::Access(error) => error,
+            CodexUsageError::Identity(reason) => Self::NeedsLogin(reason),
+        }
+    }
+}
+
+pub(crate) async fn codex_usage(
     connection: &mut crate::provider_auth::codex::Connection,
     home: &Path,
-) -> Result<SubscriptionUsage, SubscriptionError> {
+    refresh: bool,
+) -> Result<SubscriptionUsage, CodexUsageError> {
     let account_response =
-        codex_request(connection, "account/read", json!({"refreshToken": true})).await?;
-    let response = codex_request(connection, "account/rateLimits/read", json!({})).await?;
+        codex_request(connection, "account/read", json!({"refreshToken": refresh})).await?;
     let identity = crate::provider_auth::codex_identity_from_account(home, &account_response)
-        .map_err(SubscriptionError::NeedsLogin)?;
+        .map_err(CodexUsageError::Identity)?;
+    let response = codex_request(connection, "account/rateLimits/read", json!({})).await?;
     let snapshot = response.get("rateLimits");
+    let windows = codex_windows(snapshot)?;
     let plan = account_response
         .pointer("/account/planType")
         .or_else(|| snapshot.and_then(|value| value.get("planType")))
@@ -458,16 +473,11 @@ async fn codex_usage(
             SubscriptionError::Unavailable("codex returned invalid reset credits".into())
         })?;
     Ok(SubscriptionUsage {
-        windows: codex_windows(snapshot),
+        windows,
         plan,
         reset_credits,
         identity,
     })
-}
-
-async fn poll_codex(home: &Path) -> Result<SubscriptionUsage, SubscriptionError> {
-    let mut connection = codex_connection(home).await?;
-    codex_usage(&mut connection, home).await
 }
 
 #[derive(Debug)]
@@ -484,19 +494,13 @@ pub(crate) async fn redeem_codex_reset(
     key: &str,
     credit_id: Option<&str>,
 ) -> Result<ResetRedemption, SubscriptionError> {
-    let home = account
-        .home
-        .as_deref()
-        .ok_or_else(|| SubscriptionError::Unavailable("account has no credential home".into()))?;
-    crate::provider_account::identity::check_account_identity(account, accounts)
+    let access = crate::provider_account::codex_access::resolve(account, None).await?;
+    crate::provider_account::identity::validate_identity(account, &access.usage.identity, accounts)
         .map_err(SubscriptionError::NeedsLogin)?;
-    let home = &credential_home(Provider::Codex, home);
-    let mut connection = codex_connection(home).await?;
-    let before = codex_usage(&mut connection, home).await?;
-    crate::provider_account::identity::validate_identity(account, &before.identity, accounts)
-        .map_err(SubscriptionError::NeedsLogin)?;
-    crate::provider_account::identity::check_account_identity(account, accounts)
-        .map_err(SubscriptionError::NeedsLogin)?;
+    access.ensure_unchanged()?;
+    let home = access.home().to_path_buf();
+    let mut connection = access.connection;
+    let before = access.usage;
     let result = codex_request(
         &mut connection,
         "account/rateLimitResetCredit/consume",
@@ -519,7 +523,7 @@ pub(crate) async fn redeem_codex_reset(
         })?
         .to_string();
     let after = async {
-        let usage = codex_usage(&mut connection, home).await?;
+        let usage = codex_usage(&mut connection, &home, false).await?;
         crate::provider_account::identity::validate_identity(account, &usage.identity, accounts)
             .map_err(SubscriptionError::NeedsLogin)?;
         Ok(usage)
@@ -539,18 +543,25 @@ fn percentage(value: &Value) -> Option<u8> {
         .map(|value| value.round().clamp(0.0, 100.0) as u8)
 }
 
-fn codex_windows(rate_limits: Option<&Value>) -> Vec<AccountLimitWindow> {
-    let Some(snapshot) = rate_limits else {
-        return Vec::new();
+fn codex_windows(
+    rate_limits: Option<&Value>,
+) -> Result<Vec<AccountLimitWindow>, SubscriptionError> {
+    let Some(snapshot) = rate_limits.filter(|value| !value.is_null()) else {
+        return Ok(Vec::new());
     };
+    let invalid = || SubscriptionError::Unavailable("codex returned invalid rate limits".into());
+    let snapshot = snapshot.as_object().ok_or_else(invalid)?;
     let plan = snapshot.get("planType").and_then(Value::as_str);
     ["primary", "secondary"]
         .iter()
         .filter_map(|key| snapshot.get(*key))
         .filter(|value| !value.is_null())
-        .filter_map(|value| {
-            let used_percent = percentage(value.get("usedPercent")?)?;
-            Some(AccountLimitWindow {
+        .map(|value| {
+            let used_percent = value
+                .get("usedPercent")
+                .and_then(percentage)
+                .ok_or_else(invalid)?;
+            Ok(AccountLimitWindow {
                 window: crate::harness::codex_window_name(
                     value.get("windowDurationMins").and_then(Value::as_u64),
                 )
@@ -565,7 +576,7 @@ fn codex_windows(rate_limits: Option<&Value>) -> Vec<AccountLimitWindow> {
 
 #[cfg(test)]
 mod tests {
-    use super::{claude_windows, codex_windows};
+    use super::{claude_windows, codex_windows, SubscriptionError};
     use serde_json::json;
 
     #[test]
@@ -599,7 +610,8 @@ mod tests {
             "primary": {"usedPercent": 78, "windowDurationMins": 10080, "resetsAt": 1784780166},
             "secondary": null,
             "planType": "pro"
-        })));
+        })))
+        .unwrap();
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].window, "weekly");
         assert_eq!(windows[0].used_percent, 78);
@@ -612,8 +624,28 @@ mod tests {
         let windows = codex_windows(Some(&json!({
             "primary": {"usedPercent": 40, "windowDurationMins": 300},
             "planType": "pro"
-        })));
+        })))
+        .unwrap();
         assert_eq!(windows[0].window, "session");
+    }
+
+    #[test]
+    fn codex_missing_limits_are_unknown_but_malformed_limits_are_unavailable() {
+        assert!(codex_windows(None).unwrap().is_empty());
+        for snapshot in [json!(null), json!({}), json!({"primary": null})] {
+            assert!(codex_windows(Some(&snapshot)).unwrap().is_empty());
+        }
+        for snapshot in [
+            json!([]),
+            json!({"primary": {}}),
+            json!({"primary": {"usedPercent": "12"}}),
+            json!({"primary": {"usedPercent": 12}, "secondary": false}),
+        ] {
+            assert!(matches!(
+                codex_windows(Some(&snapshot)),
+                Err(SubscriptionError::Unavailable(_))
+            ));
+        }
     }
 }
 

@@ -77,4 +77,16 @@ locks older builds out.
 
 ## Remaining work
 
-(updated as implementation proceeds)
+- Release run: `ReleaseSourceInspection.preparation_required`, the repair loop in
+  `release_run_inner` and `preparation_missing`, and the publisher's
+  `migrations/drafts` inspection are dead now that nothing is prepared. Delete
+  them with `release_tests` (CI-only) coverage.
+- Expand → wait → contract enforcement (design open).
+- First real `lf self install --main` needs a green `Packages (main)` run after merge.
+
+Check results (2026-10-27): focused `store::migrations::`, `store::migration_build::`,
+`store::sqlite::frontier_tests::`, `lf::commands::install::`, rollover, build_info,
+CLI parse, reference regeneration pass; `cargo clippy --all-targets` clean; Python
+migration/gate/release/install/architecture tests pass. Three canonical-ids tests
+and one contention test failed only under the full parallel module run and pass
+alone. Swift edits are uncompiled here (gate/CI own the Swift build).

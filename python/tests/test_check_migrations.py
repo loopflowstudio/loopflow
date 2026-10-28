@@ -52,16 +52,12 @@ def test_merged_history_left_alone_passes(repo: Path):
     assert "no unmerged migration" in result.stdout
 
 
-def test_one_new_slug_passes_and_two_fail(repo: Path):
+def test_new_slugs_pass_and_are_named(repo: Path):
     (repo / MIGRATIONS / "add_note.sql").write_text("ALTER TABLE waves ADD note TEXT;\n")
-    result = check(repo)
-    assert result.returncode == 0, result.stderr
-    assert "unmerged migration: add_note.sql" in result.stdout
-
     (repo / MIGRATIONS / "add_colour.sql").write_text("ALTER TABLE waves ADD colour TEXT;\n")
     result = check(repo)
-    assert result.returncode == 1
-    assert "keeps one" in result.stderr
+    assert result.returncode == 0, result.stderr
+    assert "unmerged: add_colour.sql, add_note.sql" in result.stdout
 
 
 @pytest.mark.parametrize("name", ["task_graphs.sql", "0.10.1.001_release.sql"])

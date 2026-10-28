@@ -8,8 +8,8 @@ forward migration.
 - Released batches (`<major>.<minor>[.<patch>].<NNN>_<name>.sql`) are frozen
   history: none is added, edited, renamed or deleted.
 - Every later migration is `<slug>.sql`. `build.rs` orders slugs by the
-  first-parent commit on origin/main that added them; a branch keeps one
-  unmerged slug and edits it in place until it merges.
+  first-parent commit on origin/main that added them; a Task keeps one and
+  edits it in place until it merges (`scripts/new_migration.py`).
 - Runtime SQL names its columns, so an older lf can write a store a newer one
   extended.
 
@@ -134,13 +134,9 @@ def main() -> None:
         if slug and slug.group(1) in released:
             _fail(f"{name} reuses the released migration name {slug.group(1)!r}")
     unmerged = _check_against_main(local)
-    if len(unmerged) > 1:
-        _fail(
-            f"this branch adds {len(unmerged)} migrations ({', '.join(unmerged)}); "
-            "a Task keeps one and edits it in place"
-        )
     _check_runtime_sql()
-    print(f"unmerged migration: {unmerged[0]}" if unmerged else "no unmerged migration")
+    # A merge-queue group may carry several Tasks' migrations at once.
+    print(f"unmerged: {', '.join(unmerged)}" if unmerged else "no unmerged migration")
 
 
 if __name__ == "__main__":

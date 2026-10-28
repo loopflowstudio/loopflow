@@ -102,3 +102,9 @@ open until Jack Heart closes it.
 4. "Layout not saved: … CancellationError" banner appears often. *fix* — persistence cancel path.
 5. Wave view Session tile hover controls (expand/hide) crowd the rounded corner. *fix* —
    consistent inset. Screenshot: ~/Desktop/Screenshot 2026-10-28 at 1.33.00 PM.png
+6. ⌘` should cycle repository windows. *fix* — GhosttyTerminalView.performKeyEquivalent
+   returns ⌘`/⌘⇧` to AppKit instead of sending them to the PTY.
+7. Codex sessions copy with Ctrl-C, not ⌘C (also in cmux; maybe only cmux-started
+   sessions, with hook errors on switch). *split → LOO-677*.
+
+Jack Heart, 2026-10-28: do not launch another dev app; prove later fixes headless.

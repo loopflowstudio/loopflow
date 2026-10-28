@@ -791,16 +791,17 @@ with five-minute turn grace. Configured acceptance remains open.
 ## Claude credential preservation (LOO-661, 2026-10-28)
 
 Jack Heart authorized preservation-first repair; Infrastructure owns installation.
-`security -i` fails destructively at 2/8 KiB. Copied-access creation returned
-`-25293`; omitting partition ACLs or trusting `security` alone created unreadable
-items (native-reader timeouts). Trust lists alone supply no partition authority.
-Original bytes and semantic ACLs survived; group identity is unproved.
-Protected-tag denial is a published-source explanation, not an installed trace.
-No replacement or historical cause is established; public
-interfaces remain unexhausted. `refresh grant rejected` precedes persistence;
-live acceptance needs reconnection. Diagnostics prove no preservation; local
-rollback cannot undo OAuth rotation. LOO-325 stays separate. Evidence:
-`66ae255389:scratch/loo-661-save-refreshed-claude.md`, findings 34–35.
+`security -i` fails destructively at 2/8 KiB. Copied partition access denied
+creation; omitting it or trusting `security` produced native-reader timeouts.
+Original bytes/semantic ACLs survived; group identity is unproved.
+Published-source review finds authentication does not forward creation's required
+credentials; retaining a reference does not reach the internal group encoder.
+A password alone is insufficient. Installed traces, public-interface exhaustion,
+replacement, native acceptance and historical cause remain unproved.
+`refresh grant rejected` precedes saving; live acceptance
+needs reconnection. Diagnostics prove no preservation; rollback cannot undo OAuth
+rotation. LOO-325 stays separate. Evidence:
+`1266f97dfe:scratch/loo-661-save-refreshed-claude.md`, findings 34–36.
 
 ## Codex credential recovery (LOO-665, 2026-10-28)
 

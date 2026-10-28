@@ -1,13 +1,14 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Writer unresolved; authorization dependency.**
+Status (2026-10-28): **Writer unresolved; no supported mechanism established.**
 The production `security -i` writer remains defective and no native acceptance
 fixture exists. Finding 35 rejects the tested copied-access and trusted-application
 constructions; finding 36 identifies why database authentication and retaining an
 item reference do not solve those failures. Further implementation needs a
-concrete public mechanism or Jack Heart's scope decision. Public interfaces are
-not declared exhausted; do not repeat a rejected probe without addressing its
-counterexample. Live acceptance independently needs browser reconnection for
+concrete public mechanism; no scope change is accepted. Finding 36 completes the
+requested database-authentication and group-retention investigation, without a
+candidate addressing finding 35. Public interfaces are not declared exhausted.
+Live acceptance independently needs browser reconnection for
 jack@loopflow.studio; the historical save failure remains undiagnosed.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
@@ -325,4 +326,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — compress (2026-10-28): `git diff --check` and `lf context` pass; prose only, no build or mutation probe rerun. Authorization mechanism and native acceptance remain unresolved; gate and Infrastructure's installed acceptance remain pending.
+Check — realign (2026-10-28): `git diff --check` and `lf context` pass; source and archived finding 36 agree with the plan. Prose only; no build or mutation probe rerun. Native acceptance, gate and Infrastructure's installed acceptance remain pending.

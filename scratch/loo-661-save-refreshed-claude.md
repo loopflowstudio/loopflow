@@ -252,4 +252,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — compress (2026-10-28): `git diff --check` and `lf context` pass; notes and archived probe removal only, no production change or test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.
+Check — realign (2026-10-28): `git diff --check` and `lf context` pass; code, plan and parent/Release memory agree, with no production change or test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.

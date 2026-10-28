@@ -29,3 +29,8 @@ The subsequent kickoff found `.lf/tmp` absent and installed `lf --version` still
 reporting 0.14.19. No archive was needed at that inspection; no installation or
 credential recovery is inferred. Source v0.15.0 is integrated. The writer and
 live-acceptance dependencies remain as recorded in the design.
+
+The later 2026-10-28 reconciliation found fresh telemetry and installed 0.14.19.
+Its separate post-checkpoint archive is
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-9sz04hkm/tmp`.
+No installed recovery is inferred.

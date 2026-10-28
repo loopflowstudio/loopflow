@@ -1232,14 +1232,17 @@ fn repo_people_keep_unresolved_github_identity_explicit() {
 }
 
 #[test]
-fn task_create_receipt_names_the_graph_and_admitted_conversation() {
+fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
-    let receipt: loopflow::lf::commands::task_create::TaskCreateReceipt =
+    let receipts: Vec<loopflow::lf::commands::task_create::TaskCreateReceipt> =
         serde_json::from_str(json).unwrap();
-    assert_eq!(receipt.graph, "code");
-    assert!(receipt.session_id.is_some());
+    assert_eq!(receipts[0].graph.as_deref(), Some("code"));
+    assert!(receipts[0].session_id.is_some());
+    // The run failed after the Task was filed.
+    assert_eq!(receipts[1].graph, None);
+    assert_eq!(receipts[1].session_id, None);
     assert_eq!(
-        serde_json::to_value(&receipt).unwrap(),
+        serde_json::to_value(&receipts).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }

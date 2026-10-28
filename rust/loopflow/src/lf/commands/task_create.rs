@@ -15,12 +15,14 @@ use crate::ops::human_session::primary;
 use crate::store::{open_store, storage_config_from_env};
 use crate::work::task::Task;
 
-/// What `lf task create --run --json` prints: the created Task, the graph it
-/// took up, and its admitted conversation, absent for a headless (`-b`) run.
+/// What `lf task create --run --json` prints whenever the Task was filed: the
+/// Task, the graph it took up and its admitted conversation. A headless (`-b`)
+/// run admits no conversation; a run that failed leaves both absent and the
+/// command still exits non-zero, so callers never file the request twice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskCreateReceipt {
     pub task: Task,
-    pub graph: String,
+    pub graph: Option<String>,
     pub session_id: Option<crate::id::LfSessionId>,
 }
 
@@ -64,6 +66,14 @@ pub fn start(
     let status = run.status().context("start `lf task run`")?;
     if !status.success() {
         eprintln!("{issue} was created; start it again with `lf task run {issue}`");
+        if json {
+            let receipt = TaskCreateReceipt {
+                task: task.clone(),
+                graph: None,
+                session_id: None,
+            };
+            println!("{}", serde_json::to_string_pretty(&receipt)?);
+        }
         return Err(crate::process::CommandExit(
             status
                 .code()
@@ -93,7 +103,7 @@ pub fn start(
     if json {
         let receipt = TaskCreateReceipt {
             task: task.clone(),
-            graph,
+            graph: Some(graph),
             session_id,
         };
         println!("{}", serde_json::to_string_pretty(&receipt)?);

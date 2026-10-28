@@ -91,7 +91,7 @@ struct WorkDestinationTests {
                 return receipt
             }
             if args.contains("connect") { return encoded }
-            if args.starts(with: ["wave", "show"]) { return planning }
+            if args.starts(with: ["desktop", "plan"]) { return planning }
             throw RegistryQueryError("New Task runs no separate start or connect sequence")
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
@@ -102,6 +102,44 @@ struct WorkDestinationTests {
         #expect(model.navigation.palette == nil)
         #expect(model.selection == .task(id: task.id))
         #expect(installedSession(model, registry)?.id == record.id)
+    }
+
+    @Test("A run that fails after New Task filed it selects the Task with the error; nothing is filed again")
+    func newTaskRunFailureSelectsTheFiledTask() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let receipt = """
+        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
+         "graph": null, "session_id": null}
+        """
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["task", "create"]) {
+                throw RegistryQueryError("graph show late failed", stdout: receipt)
+            }
+            if args.starts(with: ["desktop", "plan"]) { return planning }
+            throw RegistryQueryError("A failed run opens no conversation")
+        }
+        let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.navigation.palette = .newTask
+        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        #expect(model.navigation.palette == nil)
+        #expect(model.selection == .task(id: task.id))
+        #expect(model.navigation.taskRunDrafts[task.id]?.error == "graph show late failed")
+    }
+
+    @Test("New Task keeps the sheet when nothing was filed")
+    func newTaskFailureBeforeFilingKeepsTheSheet() async throws {
+        let query = RegistryQuery { args, _ in
+            throw RegistryQueryError("not a repository")
+        }
+        let (model, _) = destinationModel(query: query, repoPath: "/repo")
+        model.navigation.palette = .newTask
+        await #expect(throws: RegistryQueryError.self) {
+            try await model.createTask(request: "fix it", wave: nil, graph: nil)
+        }
+        #expect(model.navigation.palette == .newTask)
     }
 
     @Test func dashboardTileOpensConversationInPlace() async throws {

@@ -275,6 +275,15 @@ files a duplicate Task. Next implement direction:
   sheet keeps the request only when nothing was filed.
 - Retire the "Create again files a second Task" assumption in `scratch/questions.md`.
 
+Implemented (2026-10-28): `--run --json` prints the receipt (`graph`/`session_id` null)
+before exiting non-zero; Desktop's `queryLf` carries a failed command's stdout in
+`RegistryQueryError`, `RegistryQuery.createTask` throws `TaskCreateRunFailed` with the
+receipt, and `WorkModel.createTask` closes the sheet, selects the Task and puts the error
+on its Start control. The success path now opens the conversation by Task id, and the
+New Task WorkModel fakes answer `desktop plan` (main's refresh read). Checks:
+`task_create_run`, `dto_fixtures::task_create_receipt`, clippy, Swift
+`NewTaskTests|WorkDestinationTests/newTask` (5): pass.
+
 Remaining: demo with a real provider (`code` stops at its interactive steps; `auto`
 reaches a merged PR), including whether the first reply leaves building to the
 running Graph.

@@ -16,7 +16,8 @@ struct NewTaskTests {
 
     @Test("The sheet's fields map to one lf task create command and Rust's default read")
     func queriesPassFieldsThrough() async throws {
-        let receipt = try fixture("task_create_receipt.json")
+        let receipts = try #require(JSONSerialization.jsonObject(with: Data(fixture("task_create_receipt.json").utf8)) as? [Any])
+        let receipt = String(decoding: try JSONSerialization.data(withJSONObject: receipts[0]), as: UTF8.self)
         let graphs = try #require(JSONSerialization.jsonObject(with: Data(fixture("wave_graph.json").utf8)) as? [Any])
         let repository = String(decoding: try JSONSerialization.data(withJSONObject: graphs[1]), as: UTF8.self)
         let calls = OSAllocatedUnfairLock<[[String]]>(initialState: [])
@@ -36,6 +37,9 @@ struct NewTaskTests {
             ["task", "create", "--wave", "product", "--graph", "auto", "--run", "--json", "--", "-v is ignored"],
             ["wave", "graph", "show", "--no-wave", "--json"],
         ])
+        // A run that failed after filing reports the Task with no graph or conversation.
+        let failed = try RegistryQuery.decode([TaskCreateReceipt].self, from: fixture("task_create_receipt.json"))[1]
+        #expect(failed.graph == nil && failed.sessionId == nil)
         // Every Wave and the repository decode, including a null Wave.
         _ = try RegistryQuery.decode([WaveGraph].self, from: fixture("wave_graph.json"))
     }

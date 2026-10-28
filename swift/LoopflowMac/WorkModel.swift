@@ -2140,19 +2140,27 @@ final class WorkModel {
     /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
     /// repository), starts its workflow and admits its conversation with the
     /// request as the first turn; this window then shows that conversation.
-    /// A failure keeps the sheet and the request; a Task filed before its run
-    /// failed is listed with its Start control.
+    /// When nothing was filed, the sheet keeps the request and the error. A Task
+    /// filed before its run failed is selected with the error at its Start control.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
         let receipt: TaskCreateReceipt
         do {
             receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath)
+        } catch let failed as TaskCreateRunFailed {
+            navigation.palette = nil
+            try? await confirmWorkUpdate()
+            let id = failed.receipt.task.id
+            if let found = task(id: id) { openTaskDestination(wave: found.wave, task: found.task) }
+            else { select(.task(id: id)) }
+            navigation.taskRunDrafts[id] = TaskRunDraft(error: failed.message)
+            return
         } catch {
             try? await confirmWorkUpdate()
             throw error
         }
         navigation.palette = nil
         try? await confirmWorkUpdate()
-        await openTaskConversation(receipt.task.identifier)
+        await openTaskConversation(receipt.task.id)
     }
 
     /// Ship the Task, then confirm its subscription update; it moves to Shipping

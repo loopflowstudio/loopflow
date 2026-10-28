@@ -1557,6 +1557,19 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(receipt["session_id"].is_null(), "{receipt}");
     assert_eq!(receipt["graph"], "proof");
+
+    // A run that fails still reports the filed Task, so nothing files it twice.
+    let before = tasks();
+    let output = task.run(&[
+        "-b", "task", "create", "fails", "--run", "--graph", "gate", "--json",
+    ]);
+    assert!(!output.status.success());
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    assert_eq!(receipt["task"]["title"], "fails");
+    assert!(receipt["graph"].is_null(), "{receipt}");
+    assert!(receipt["session_id"].is_null(), "{receipt}");
+    assert_eq!(tasks(), before + 1);
 }
 
 #[test]

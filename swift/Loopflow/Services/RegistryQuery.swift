@@ -10,14 +10,21 @@
 import Foundation
 
 /// One `lf` query failed — the subprocess errored, or its JSON didn't decode.
+/// `stdout` is what a failed command printed before it exited, such as the
+/// receipt of a Task filed before its run failed.
 public struct RegistryQueryError: LocalizedError, Sendable {
     public let message: String
-    public init(_ message: String) { self.message = message }
+    public let stdout: String
+    public init(_ message: String, stdout: String = "") {
+        self.message = message
+        self.stdout = stdout
+    }
     public var errorDescription: String? { message }
 }
 
 /// Runs an `lf` argv (already including the subcommand, e.g. `["wave", "list","--json"]`)
-/// and returns captured stdout. Throws on a non-zero exit or spawn failure.
+/// and returns captured stdout. Throws on a non-zero exit or spawn failure; a
+/// non-zero exit throws `RegistryQueryError` carrying its stdout.
 /// `cwd` seeds ambient resolution for verbs that want it (`lf wave status` with no
 /// wave); machine-wide reads such as `lf wave list` ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
@@ -344,11 +351,17 @@ public struct RegistryQuery: Sendable {
     /// New Task: Rust files the request in `wave` (nil files it in the
     /// repository), starts it as `lf task run` does and admits its conversation
     /// with the request as the first turn. Returns once the Graph registers.
+    /// A run that fails after the Task was filed throws `TaskCreateRunFailed`.
     public func createTask(request: String, wave: String?, graph: String?, cwd: String?) async throws -> TaskCreateReceipt {
         var args = ["task", "create"] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
         if let graph { args += ["--graph", graph] }
         args += ["--run", "--json", "--", request]
-        return try Self.decode(TaskCreateReceipt.self, from: await run(args, cwd))
+        let stdout: String
+        do { stdout = try await run(args, cwd) } catch let error as RegistryQueryError {
+            guard let receipt = try? Self.decode(TaskCreateReceipt.self, from: error.stdout) else { throw error }
+            throw TaskCreateRunFailed(receipt: receipt, message: error.message)
+        }
+        return try Self.decode(TaskCreateReceipt.self, from: stdout)
     }
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
@@ -614,7 +627,8 @@ public struct RegistryQuery: Sendable {
 // MARK: - Wire snapshots (mirror the Rust `--json` types)
 
 /// `lf task create REQUEST --run --json`: the created Task, the graph it took
-/// up and its admitted conversation, nil after a headless run.
+/// up and its admitted conversation, nil after a headless run. Both are nil
+/// when the run failed after the Task was filed.
 public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
     public struct CreatedTask: Decodable, Sendable, Hashable {
         public let id: String
@@ -622,13 +636,20 @@ public struct TaskCreateReceipt: Decodable, Sendable, Hashable {
         public let title: String
     }
     public let task: CreatedTask
-    public let graph: String
+    public let graph: String?
     public let sessionId: String?
 
     enum CodingKeys: String, CodingKey {
         case task, graph
         case sessionId = "session_id"
     }
+}
+
+/// New Task filed `receipt.task`, then its run failed with `message`.
+public struct TaskCreateRunFailed: LocalizedError, Sendable {
+    public let receipt: TaskCreateReceipt
+    public let message: String
+    public var errorDescription: String? { message }
 }
 
 /// `lf wave graph show --json`: a Wave's own selection and the default its new

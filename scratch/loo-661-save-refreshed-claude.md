@@ -1,6 +1,7 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Implementation incomplete; supported native writer unresolved.**
+Status (2026-10-28): **Draft mechanism; implementation incomplete.**
+The outcome and preservation constraints are accepted; no replacement writer is selected.
 The defective `security -i` writer remains, with no native acceptance fixture.
 The historical save failure is undiagnosed; live acceptance separately needs browser
 reconnection for jack@loopflow.studio. No public-API exhaustion or scope change is assumed.
@@ -13,10 +14,11 @@ choices and integrated LOO-657 takeover notices. No quantitative Wave target is 
 Source integration of LOO-664, LOO-665 and v0.15.0 establishes neither installation nor
 Claude recovery. The temporary sync bridge and archive receipts live in
 [questions.md](questions.md).
-October 28 reconciliation fetched `origin/main` at `635d99fee076363167deb29c8f647527edf0428a`;
-it adds no changes beyond the recorded base. The surviving writer and diagnostic
-tests still match this plan. Infrastructure's relevant memory and Release child's
-memory add no native-writer mechanism or installed acceptance evidence.
+October 28 kickoff reinspection at `7f067d39fb38014cffc0a56a084f3d44a517ab72`
+confirms the surviving writer, refresh path and diagnostic stand-in still match
+this plan. The supplied Task definition and Infrastructure memory add no supported
+writer mechanism or installed acceptance. The existing design is retained;
+repeating rejected probes or publishing diagnostics cannot satisfy the accepted repair.
 
 ## Required outcome and next decision
 
@@ -234,4 +236,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 realign); prose only, no build/test rerun; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); source/plan reconciliation only, no build/test rerun; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.

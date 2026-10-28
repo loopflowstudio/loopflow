@@ -13,13 +13,15 @@ Infrastructure owns CLI/helper installation and installed acceptance.
 
 Prior archive paths and receipts remain in
 `083c86ec350c5a51aab763faa39ef2ecd769b8f6:scratch/questions.md` and its references.
-The compression receipt at
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-bxuuwerb/receipt.json`
-records checkpoint `9e976b789ce6052051c6c623ba6b3cdb88dc3377`, source absent and no move.
-That reservation is not an archive. Fresh `.lf/tmp/metrics/ops.jsonl` exists at this
-October 28 reconciliation; earlier archives remain untouched.
+The preceding realign receipt at
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-v6cd6ra1/receipt.json`
+records checkpoint `7f067d39fb38014cffc0a56a084f3d44a517ab72`, a completed move
+and verified byte preservation. Earlier archives remain untouched.
 
-This pass reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-v6cd6ra1/tmp`
-for any fresh telemetry created by checkpointing. Its sibling `receipt.json`
-records the checkpoint and verified move, or source absence if no move is needed.
-A reservation alone proves no archive; later telemetry remains separate.
+This kickoff reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-vu9c27jf/tmp`
+for fresh telemetry after checkpointing. Its sibling `receipt.json` records the
+checkpoint and verified move, or source absence. A reservation alone proves no archive.
+
+October 28 kickoff retains the accepted constraints and existing design. There is
+no new supported writer candidate to probe. Browser reconnection remains a separate
+live-diagnosis dependency; no permission to relax access or failure preservation is assumed.

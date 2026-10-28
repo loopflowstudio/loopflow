@@ -1521,13 +1521,11 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     assert_eq!(receipt["task"]["title"], "fix the flaky retry test");
     assert_eq!(receipt["task"]["description"], request);
     assert_eq!(receipt["graph"], "feature");
-    let status = task.run(&["task", "status", issue, "--json"]);
+    let status = task.run(&["desktop", "task", issue, "--json"]);
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert_eq!(status["execution"]["work"]["graph"]["name"], "feature");
-    assert_eq!(
-        status["execution"]["work"]["graph"]["position"],
-        at("review")
-    );
+    let graph = &status["execution"]["work"]["graph"];
+    assert_eq!(graph["name"], "feature");
+    assert_eq!(graph["position"], at("review"));
     // The admitted primary conversation opens with the request, word for word.
     let session = receipt["session_id"].as_str().unwrap();
     let first_turn: String = db

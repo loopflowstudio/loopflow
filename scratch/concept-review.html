@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>LOO-665 · Codex recovery concept review</title>
+  <style>
+    :root { color-scheme: light dark; --ink: #202c32; --paper: #faf9f5; --muted: #53646c; --line: #c8d0d1; --accent: #146756; }
+    @media (prefers-color-scheme: dark) { :root { --ink: #e4e9e9; --paper: #192124; --muted: #aebdc2; --line: #4c5b60; --accent: #8cdbc2; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 system-ui, sans-serif; }
+    main { max-width: 770px; margin: auto; padding: 48px 24px 64px; }
+    header { color: var(--muted); font-size: .82rem; }
+    h1 { font-size: clamp(1.7rem, 5vw, 2.3rem); line-height: 1.15; margin: 24px 0 16px; }
+    h2 { font-size: 1.15rem; margin: 32px 0 12px; }
+    p { margin: 12px 0; }
+    code { font-size: .86em; overflow-wrap: anywhere; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; border-left: 3px solid var(--accent); padding: 12px 16px; }
+    .decision { color: var(--accent); font-weight: 650; }
+    .sources { margin-top: 8px; overflow-wrap: anywhere; }
+    dl { margin: 16px 0; }
+    dt { font-weight: 650; margin-top: 18px; }
+    dd { margin: 4px 0 0; }
+    ol { padding-left: 1.4rem; }
+    li { margin: 12px 0; }
+    footer { border-top: 1px solid var(--line); margin-top: 32px; padding-top: 16px; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    LOO-665 · concept-review · 2026-10-28 UTC
+    <div class="sources">Built from <code>scratch/loo-665.md</code>, <code>docs/subscriptions.md</code>,
+      <code>provider_account/{codex_access,activation}.rs</code>, <code>provider_account.rs</code>,
+      <code>subscription.rs</code>, <code>session_record.rs</code>,
+      <code>store/sqlite/{sessions,processes}.rs</code>, <code>platform/file_exchange.rs</code>
+      and <code>tests/auth_tests.rs</code> under <code>rust/loopflow/</code> (production files under <code>src/</code>).</div>
+  </header>
+
+  <h1>Recover access in the same conversation.</h1>
+  <p class="decision">No additional product decision is needed. The accepted design stands.</p>
+  <p>Jack Heart authorized using a working copy of the selected Codex account while preserving
+    both credentials, active clients and Session history. The consequential mismatch was treating
+    “same login” as “working access.”</p>
+
+  <h2>Same actions, repaired meaning</h2>
+  <pre><code>lf account codex --json
+lf -b : "Reply with RECOVERED."
+lf -b session connect &lt;session-id&gt; --message 'Reply with RECOVERED.'</code></pre>
+  <p><strong>Before · observed installed failure.</strong> Matching native identity wins even when
+    native limits return 401 and stored limits succeed. Same-login activation skips repair.</p>
+  <p><strong>After · implemented, installed shared proof pending.</strong> Status reports live
+    access from the accepted copy. Launch repairs the rejected copy in the conversation’s
+    original home. Continuation keeps the Session and native thread.</p>
+
+  <dl>
+    <dt>Check access → selected account → <code>resolve</code></dt>
+    <dd>Observe the preferred copy. Definite rejection permits managed refresh and then the
+      alternate copy. Status does not install credentials; missing limits do not imply capacity.</dd>
+    <dt>Run → conversation home → <code>launch_as → repair</code></dt>
+    <dd>Keep shared, custom or isolated placement. Exchange verified credentials while retaining
+      the displaced file, including later writes through an existing descriptor.</dd>
+    <dt>Continue → existing Session → <code>claim_session_input</code></dt>
+    <dd>Admit a new capture and attachment atomically. Keep native identity, retirement,
+      earlier outcomes and attribution. A live owner still prevents takeover.</dd>
+  </dl>
+
+  <h2>Failure and recovery stay ordinary</h2>
+  <p>A working native copy wins over a stale profile. Both rejected means reconnect the selected
+    account. Timeout or service failure means verification unavailable, with no repair.
+    Concurrent changes retain both versions and stop the launch; retry obtains fresh evidence.</p>
+  <p>Credentials remain provider files. SQLite owns account choice and Session history.
+    <code>CodexAccess</code> is temporary evidence. Preservation directories are retained files,
+    with no new account selector, recovery queue or health record.</p>
+
+  <footer>
+    <h2>Review questions · settled by the accepted brief</h2>
+    <ol>
+      <li><strong>Must Jack choose a credential copy or move the conversation?</strong>
+        No. Recover the selected account in its existing conversation home.</li>
+      <li><strong>Can uncertainty justify replacing a credential?</strong>
+        No. Require definite rejection and alternate acceptance; retain concurrent updates.</li>
+      <li><strong>Does the current evidence establish installed shared recovery?</strong>
+        No. Gate still owns public history/usage/doctor checks. Infrastructure owns installed
+        shared status, configured inference and same-thread continuation on Mini. Reported
+        isolated continuation is separate evidence.</li>
+    </ol>
+    <p>No open product choice; no implementation change requested by this review.
+      Headless artifact; visual rendering unavailable.</p>
+  </footer>
+</main>
+</body>
+</html>

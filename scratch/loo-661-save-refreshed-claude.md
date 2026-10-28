@@ -1,6 +1,7 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
 Status (2026-10-28): **Writer unresolved; diagnostics only; not implementation-ready.**
+Accepted scope is unchanged; the replacement mechanism remains a draft.
 The checked-in `security -i` writer still has the destructive size failure below.
 No candidate meets transport, native reader-access and failed-save preservation
 requirements. Public interfaces are not exhausted; revisit rejected routes only
@@ -46,7 +47,9 @@ a size refusal, successful API status or post-write repair do not prove preserva
 
 - `provider_auth/mod.rs::read_claude_login` and `write_claude_login` select native
   Keychain storage for native macOS homes and private `.credentials.json` files
-  for managed homes. Ordinary unit tests use files even on macOS.
+  for managed homes. Native reads fall back to the file only when the Keychain
+  item is absent; Keychain read errors propagate. Ordinary unit tests use files
+  even on macOS.
 - The scoped service is `Claude Code-credentials-<first eight SHA256 hex digits
   of config-directory path>`; the ambient default home falls back to unsuffixed
   `Claude Code-credentials` when no scoped item exists. Existing account metadata
@@ -176,7 +179,7 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Remaining implementation and acceptance
 
-1. **This slice:** prove a supported writer's encoding, access and failure preservation, then
+1. **Unresolved prerequisite:** prove a supported writer's encoding, access and failure preservation, then
    replace the transport and its exclusive fixture in one cut.
    Preserve JSON validation, readback, managed login locking,
    intervening-replacement checks, omitted refresh tokens, unknown fields and the
@@ -249,4 +252,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — compress (2026-10-28): `git diff --check` and `lf context` pass; prose only, no build/test rerun. Writer proof, affected gate checks and Infrastructure's installed acceptance after supported reconnection remain pending.
+Check — realign (2026-10-28): `git diff --check` and `lf context` pass; code/evidence inspection only, no build/test rerun. Writer proof, affected gate checks and Infrastructure's installed acceptance after supported reconnection remain pending.

@@ -680,6 +680,24 @@ def test_build_and_test_commands_share_the_four_worker_budget():
     assert xcodebuild.argv[xcodebuild.argv.index("-jobs") + 1] == jobs
 
 
+def test_rust_filter_runs_only_matching_tests_then_clippy():
+    plans = gate.build_plan(
+        changed=["rust/loopflow/src/lib.rs"],
+        run_all=False,
+        forced=set(),
+        rust_tests="test(prompt::)",
+    )
+    rust = next(plan for plan in plans if plan.suite.name == "rust")
+    labels = [command.label for command in rust.commands]
+    tests = next(command.argv for command in rust.commands if command.label == "rust")
+
+    assert labels[-1] == "clippy"
+    assert labels.index("rust") < labels.index("clippy")
+    assert "--all" not in tests
+    assert any("test(prompt::)" in argument for argument in tests)
+    assert "rust-clones" not in labels
+
+
 @pytest.mark.parametrize("nextest", [True, False])
 @pytest.mark.parametrize("macos_version", ["15.7", "26.0"])
 def test_macos_clones_run_under_their_own_sandbox(monkeypatch, nextest, macos_version):

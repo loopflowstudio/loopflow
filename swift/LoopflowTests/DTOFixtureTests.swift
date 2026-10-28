@@ -208,6 +208,16 @@ struct DTOFixtureTests {
         }
     }
 
+    @Test func repoPeopleCarryEmailsAndOptionalGitHubUsers() throws {
+        let people = try JSONDecoder().decode([RepoPerson].self, from: loadFixtureData("repo_people.json"))
+        #expect(people.map(\.email) == ["maya@example.com", "sam@example.com", "unknown@example.com"])
+        #expect(people[0].github?.name == "Maya Lin")
+        #expect(people[1].github?.name == nil && people[1].name == nil)
+        #expect(people[2].github == nil)
+        let encoded = try JSONEncoder().encode(people)
+        #expect(try JSONDecoder().decode([RepoPerson].self, from: encoded) == people)
+    }
+
     @Test func desktopInspectionRetainsUnavailableWorkAndExactPanes() throws {
         let data = try loadFixtureData("desktop_inspection.json")
         let report = try JSONDecoder().decode(DesktopInspection.self, from: data)
@@ -234,6 +244,14 @@ struct DTOFixtureTests {
         #expect(report.windows[1].task?.actions?.recommended == .resume)
         #expect(report.windows[1].task?.runControl?.unavailable == "Task checkout is on another Machine")
         #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
+        #expect(window.viewParts.isEmpty)
+        #expect(report.windows[1].viewParts.map(\.name) == ["board", "session", "tiles"])
+        #expect(report.windows[1].viewParts[0].doneDays == 7)
+        #expect(report.windows[1].viewParts[0].section == "backlog")
+        #expect(report.windows[1].viewParts[2].ratio == 0.382)
+        #expect(report.windows[1].viewParts.map(\.zoomed) == [false, false, true])
+        #expect(report.windows[1].viewParts[2].page == 2 && report.windows[1].viewParts[2].pages == 3)
+        #expect(report.windows[1].viewParts.map(\.hidden) == [false, true, false])
         #expect(window.workspaces.first?.layout.children.first?.subject == "session-one")
         #expect(window.workspaces.first?.layout.children.first?.surface == "native-surface-incarnation")
         #expect(window.workspaces.first?.layout.children.last?.surface == nil)

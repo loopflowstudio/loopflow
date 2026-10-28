@@ -1136,6 +1136,27 @@ fn desktop_state_retains_outer_and_inner_layouts() {
     assert_eq!(window.open_work, [window.workspaces[0].work.clone()]);
     assert_eq!(window.workspaces[0].layout.ratio, Some(0.6));
     assert_eq!(window.workspaces[0].hidden_panes, ["files-pane"]);
+    assert!(window.view_parts.is_empty());
+    let parts = &reading.windows[1].view_parts;
+    assert_eq!(
+        parts
+            .iter()
+            .map(|part| part.name.as_str())
+            .collect::<Vec<_>>(),
+        ["board", "session", "tiles"]
+    );
+    assert_eq!(parts[0].done_days, Some(7));
+    assert_eq!(parts[0].section.as_deref(), Some("backlog"));
+    assert_eq!(parts[2].ratio, 0.382);
+    assert_eq!(
+        parts.iter().map(|part| part.zoomed).collect::<Vec<_>>(),
+        [false, false, true]
+    );
+    assert_eq!((parts[2].page, parts[2].pages), (Some(2), Some(3)));
+    assert_eq!(
+        parts.iter().map(|part| part.hidden).collect::<Vec<_>>(),
+        [false, true, false]
+    );
     let encoded = serde_json::to_string(&reading).unwrap();
     assert_eq!(
         serde_json::from_str::<DesktopInspection>(&encoded).unwrap(),
@@ -1164,4 +1185,18 @@ fn retention_summary_keeps_states_expiries_and_policies_exactly() {
         .unwrap()
         .remove("unknown");
     assert!(serde_json::from_value::<RetentionSummary>(missing).is_err());
+}
+
+#[test]
+fn repo_people_keep_unresolved_github_identity_explicit() {
+    use loopflow::ops::people::RepoPerson;
+    let json = include_str!("../../../tests/fixtures/dto/repo_people.json");
+    let value: serde_json::Value = serde_json::from_str(json).unwrap();
+    let people: Vec<RepoPerson> = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(people[1].github.as_ref().unwrap().name, None);
+    assert_eq!(people[2].github, None);
+    assert_eq!(serde_json::to_value(&people).unwrap(), value);
+    let mut missing = value[2].clone();
+    missing.as_object_mut().unwrap().remove("email");
+    assert!(serde_json::from_value::<RepoPerson>(missing).is_err());
 }

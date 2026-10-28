@@ -102,7 +102,7 @@ You want to do something; here's how through `lf`.
 | use every Claude and Codex login you pay for, routed to the one with room | `lf account` |
 | run on Claude Code, Codex, OpenCode or Pi, per run or per Skill | `lf -a codex : "…"` |
 | run on your own machine over SSH | `lf --machine mini -b task run <ID>` |
-| rent a Daytona or Modal sandbox for one Task and give it back after | `lf task run <ID> --rent <template>` |
+| rent a machine from Daytona, Modal, RunPod or AWS for one Task and give it back after | `lf task run <ID> --rent <template>` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
 | see what agents cost, by Task, Wave or week | `lf history usage --weekly` |
 | open work in Desktop, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
@@ -146,8 +146,8 @@ Markdown at its `.md` URL.
 
 ## Developing Loopflow
 
-`AGENTS.md` is the style guide, `TESTING.md` covers the suites, and
-`RELEASE_NOTES.md` carries the release history.
+`AGENTS.md` is the style guide, `scripts/README.md` covers the test runner,
+and `RELEASE_NOTES.md` carries the release history.
 
 ```bash
 uv run python scripts/install.py local       # build under local-bin/

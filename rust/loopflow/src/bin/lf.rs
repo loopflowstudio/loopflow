@@ -757,6 +757,7 @@ fn dispatch_ops(cmd: &OpsCommand, cli: &Cli, args: &[String]) -> anyhow::Result<
             repo,
             json,
         } => loopflow::lf::commands::ci::run(since, wave.as_deref(), repo.as_deref(), *json),
+        OpsCommand::People { json } => loopflow::lf::commands::people::run(*json),
         OpsCommand::Tokens { json, days } => loopflow::lf::commands::tokens::run(*json, *days),
         OpsCommand::Machine {
             cmd: cmd @ loopflow::lf::MachineCommand::Use { .. },

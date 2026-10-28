@@ -38,24 +38,6 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
-    @Test("Owned inventory rows name their owner and Machine")
-    func ownedRowsNameTheirOwner() async throws {
-        let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.prefix(2) == ["wave", "show"] { return roadmap }
-            if args.first == "session" { return #"{"entries":[],"next":null}"# }
-            if args.first == "planning" { return #"{"destinations":[]}"# }
-            throw RegistryQueryError("Unexpected command: \(args)")
-        }, repoPath: "/src/loopflow")
-        await model.refresh()
-        let wave = try #require(model.roadmap.value?.waves.first { roadmap in
-            if case .available(let tasks, _) = roadmap.tasks { return tasks.contains { $0.runtime?.owner != nil } }
-            return false
-        })
-        let view = WaveTaskInventory(model: model, waveID: wave.wave.id)
-        #expect(try view.inspect().find(text: "Jack Heart on mini").string() == "Jack Heart on mini")
-    }
-
     @Test("The repository roadmap reads Git planning through the ordinary query")
     func roadmapPeerPlanning() async throws {
         let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
@@ -649,7 +631,7 @@ struct DesktopHeadlessTests {
         // The clicked row darkens before the selection moves it.
         for _ in 0..<50 where model.selection != .wave(id: wave.id) { try await Task.sleep(for: .milliseconds(20)) }
         #expect(model.selection == .wave(id: wave.id))
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-detail-wave")
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-standup-board")
         let title = try view.inspect().find(viewWithAccessibilityIdentifier: "wave-title").text().string()
         #expect(title == "Product")
         let task = try #require(roadmap.waves.first?.tasks.items.first)

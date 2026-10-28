@@ -2,67 +2,9 @@ import Loopflow
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct DashboardSidebar: View {
-    @Bindable var model: WorkModel
-    let scopeTitle: Namespace.ID
-    @State private var creating = false
-    /// The whole section reveals New Dashboard; only the button reads it.
-    @State private var hover = HoverFlag()
-    @Environment(\.palette) private var palette
-    var body: some View {
-        // Matches the sidebar stack's spacing, so grouping changes no layout.
-        // Hover follows hit testing: the shape makes the section's empty space
-        // and the hidden button count, not just its labels.
-        VStack(alignment: .leading, spacing: 5) { section }.contentShape(Rectangle()).hoverSource(hover)
-    }
-
-    /// A zoomed member fills the center, so its Dashboard is containing.
-    private func selection(of board: WorkNavigation.Board, shown: Bool) -> SidebarSelection {
-        shown ? .shown : model.navigation.trailBoard == board ? .containing : .none
-    }
-
-    @ViewBuilder private var section: some View {
-        HStack {
-            Text("DASHBOARDS").font(Typography.code(10)).foregroundStyle(palette.textSecondary)
-            Spacer()
-            HoverRevealed(flag: hover) {
-                // Plain, like the rows: a bordered button tracks the pointer
-                // itself, so reaching it ended the section's hover and hid it.
-                Button { creating = true } label: { Image(systemName: "plus").contentShape(Rectangle()) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("New Dashboard")
-            }
-        }.padding(10)
-            .sheet(isPresented: $creating) { DashboardEditor(model: model, plan: nil) }
-        Button { model.selectWorkingTasksDashboard() } label: {
-            let state = selection(of: .workingTasks, shown: model.navigation.destination == .workingTasks)
-            Label(WorkNavigation.workingTasksTitle, systemImage: "square.grid.3x2")
-                .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
-                .background(SidebarSelectionShape(state: state))
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-        }.buttonStyle(.plain).accessibilityIdentifier("dashboard-working-tasks")
-        ForEach(model.dashboards.filter(\.pinned), id: \.dashboardID) { plan in
-            if let id = plan.dashboardID {
-                let state = selection(of: .saved(id), shown: model.navigation.dashboardID == id)
-                Button { model.selectDashboard(id) } label: {
-                    Label {
-                        Text(plan.name ?? id)
-                            .matchedGeometryEffect(id: WorkNavigation.SidebarScope.dashboard(id), in: scopeTitle)
-                    } icon: { Image(systemName: "rectangle.split.2x2") }
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                        .foregroundStyle(state == .shown ? palette.workSelectedText : palette.text)
-                        .background(SidebarSelectionShape(state: state))
-                        .contentShape(RoundedRectangle(cornerRadius: 6))
-                }.buttonStyle(.plain).accessibilityIdentifier("dashboard-" + id)
-            }
-        }
-    }
-}
-
 struct DashboardEditor: View {
     let model: WorkModel
-    let plan: WorkViewPlan?
+    let plan: WorkViewPlan
     @Environment(\.dismiss) private var dismiss
     @State private var id = UUID().uuidString
     @State private var name = ""
@@ -71,7 +13,7 @@ struct DashboardEditor: View {
     @State private var revision: Int64?
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(plan == nil ? "New Dashboard" : "Edit Dashboard").font(.headline)
+            Text(plan.dashboardID == nil ? "Save Dashboard" : "Edit Dashboard").font(.headline)
             TextField("Name", text: $name)
             TextField("Query", text: $expression, axis: .vertical).font(.system(.body, design: .monospaced))
             Text("For example: (wave:product state:open), state:available or state:shipping")
@@ -90,13 +32,11 @@ struct DashboardEditor: View {
             }
         }.padding(24).frame(width: 540)
         .onAppear {
-            if let plan {
-                id = plan.dashboardID ?? id
-                name = plan.name ?? id
-                expression = plan.selection.queryText
-                pinned = plan.pinned
-                revision = plan.savedRevision
-            }
+            id = plan.dashboardID ?? id
+            name = plan.name ?? id
+            expression = plan.selection.queryText
+            pinned = plan.pinned
+            revision = plan.savedRevision
         }
     }
 }
@@ -192,7 +132,9 @@ struct DashboardView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }.padding(10).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(palette.surfaceMuted)
-            .sheet(isPresented: $editing) { DashboardEditor(model: model, plan: model.selectedViewPlan) }
+            .sheet(isPresented: $editing) {
+                if let plan = model.selectedViewPlan { DashboardEditor(model: model, plan: plan) }
+            }
             .onChange(of: model.navigation.dashboardID) { _, _ in editingSlots = false }
     }
 
@@ -204,20 +146,32 @@ struct DashboardView: View {
     }
 }
 
-/// A Wave view's Tasks as tiles, filling the Wave plan's slots in the shared order.
-/// `lf desktop move -p N` reorders them; LOO-594 refines this view.
+/// A Wave view's footer: its Tasks as tiles filling the Wave plan's strip in the shared
+/// order; the repository page's are its Working Tasks. `lf desktop move -p N` reorders
+/// them. The page lives in navigation, so it follows an entered tile and survives back.
 struct WaveTiles: View {
     let model: WorkModel
     let workspaces: SessionsWorkspaceRegistry
     let sessions: SessionsStore
-    let waveID: String
+    /// `.wave(id)` or `.repository`.
+    let view: WorkNavigation.Board
 
     var body: some View {
-        if let plan = model.wavePlan(waveID) {
-            DashboardSlotGrid(members: model.waveTiles(waveID), focused: nil, layout: plan.slots) { member in
-                DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
-                              workingTasks: false, focused: false, takesFocus: false)
-            }.padding(8).accessibilityIdentifier("wave-tiles")
+        if let plan = model.boardPlan(view) {
+            let members = model.boardTiles(view)
+            if members.isEmpty {
+                Text("No planned or started Tasks").font(Typography.body(15))
+                    .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityIdentifier("wave-tiles-empty")
+            } else {
+                DashboardSlotGrid(members: members, focused: nil, layout: plan.slots,
+                                  heldPage: Binding(get: { model.navigation.wavePages[view] ?? 0 },
+                                                    set: { model.navigation.wavePages[view] = $0 }),
+                                  pagerKeys: false) { member in
+                    DashboardTile(model: model, workspaces: workspaces, sessions: sessions, member: member, plan: plan,
+                                  workingTasks: false, focused: false, takesFocus: false)
+                }.padding(8).accessibilityIdentifier("wave-tiles")
+            }
         }
     }
 }
@@ -362,8 +316,8 @@ extension WorkModel {
         let board: WorkNavigation.Board? = switch navigation.destination {
         case .dashboard(let id): .saved(id)
         case .workingTasks: .workingTasks
-        case .work(let wave?) where wave.kind == .wave: .wave(wave.id)
-        case .work, .view, .entered: nil
+        case .work: navigation.waveView
+        case .view, .entered: nil
         }
         guard let board, let work = key.reference else { return select(key.reference) }
         navigation.zoomOrigin = origin

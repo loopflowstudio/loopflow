@@ -310,23 +310,24 @@ The full contract and current cutover status live in
 Use `uv` for Python package management. Never use pip directly.
 
 ```bash
-# Python
-uv sync                       # Install dependencies
-uv run pytest python/tests/   # Run Python tests
-uv run lf agent --help        # Run commands
-
-# Or activate the venv
-source .venv/bin/activate
-pytest python/tests/
-
-# Rust
-cargo build                   # Build all crates
-cargo test                    # Run all Rust tests
-cargo fmt                     # Format code
-cargo clippy --all-targets -- -D warnings # Lint (warnings = errors)
+uv run python scripts/test.py --list                     # suites this branch reaches
+cargo test -p loopflow --lib skills::catalog::           # one focused Rust module
+uv run pytest python/tests/test_gate_bounded.py          # one focused Python file
+uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::)'  # gate: affected suites once per tree
+cargo fmt                                                # format
+cargo clippy --all-targets -- -D warnings                # lint after tests (warnings = errors)
+uv sync                                                  # install Python dependencies
 ```
 
-See TESTING.md for the full test suite (Python, Swift, Rust, Loopflow UI). CI runs all.
+Run one cargo command at a time: concurrent builds wait on one target lock.
+CI runs the full matrix; locally, run it only to reproduce a CI failure.
+When accepted work needs a developer tool the Machine lacks, install it
+(Homebrew on macOS) and configure it at Machine level, then continue; a
+missing tool is never a reason to defer. Keep Machine-only tools out of
+repository config CI also reads: sccache runs through `~/.cargo/config.toml`.
+`scripts/testing.md` holds the shared command list, and module READMEs
+(`rust/loopflow/tests/`, `scripts/`, `swift/`, `website/`, `.github/`) own
+their boundary checks.
 
 # Code Organization
 

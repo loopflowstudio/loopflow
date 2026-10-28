@@ -219,6 +219,10 @@ impl std::fmt::Debug for CodexHarness {
 }
 
 impl CodexHarness {
+    pub(crate) fn account_route(&self) -> Option<ProviderAccountRoute> {
+        self.account_route.clone()
+    }
+
     pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
         Self {
             events,

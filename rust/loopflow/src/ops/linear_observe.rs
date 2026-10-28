@@ -12,6 +12,8 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use super::{OpsError, OpsResult};
+use crate::linear::StateHistory;
+use crate::store::sqlite::task_state_delivery::TaskStateDelivery;
 use crate::store::{SharedStore, Store};
 use crate::work::task::Task;
 
@@ -318,12 +320,12 @@ pub(super) async fn sync_repository_deliveries(store: &Store, repository: &str) 
         .sqlite
         .pending_planning_tasks(repository)
         .map_err(message)?;
+    // State before comments, as `task sync` orders them: our own comment must
+    // not land as an intervening revision while the state write is in flight.
     futures_util::future::join_all(pending.iter().map(|task| async {
-        let (comments, state) = tokio::join!(
-            sync_task_comments(store, task),
-            sync_task_state(store, task)
-        );
-        for result in [comments, state] {
+        let state = sync_task_state(store, task).await;
+        let comments = sync_task_comments(store, task).await;
+        for result in [state, comments] {
             if let Err(error) = result {
                 tracing::debug!(%error, "planning delivery pending");
             }
@@ -394,12 +396,19 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
                 "{provider} state is unknown; saved decision retained"
             )));
         }
-        if !crate::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &observed)
-            .map_err(message)?
+        let history = state_history(&client, issue.as_str(), &delivery, &observed).await;
+        if !crate::linear::acceptance::observe_task_state(
+            &store.sqlite,
+            &delivery,
+            &observed,
+            history,
+        )
+        .map_err(message)?
         {
             return Ok(());
         }
-        if delivery.attempted && !retry {
+        let attempted = delivery.attempted && history != StateHistory::Unchanged;
+        if attempted && !retry {
             return Err(OpsError::Message(
                 "Prior state delivery remains uncertain; saved decision retained".into(),
             ));
@@ -411,6 +420,13 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
             )
             .await
             .map_err(message)?;
+        // Reserve at the send boundary: a slow pre-write check must not leave
+        // an unsent request attempted. Its throttle skips the request's own check.
+        if matches!(client, super::planning_client::PlanningClient::Linear(_)) {
+            if let Err(error) = check_before_write(&repository).await {
+                tracing::debug!(%error, "pre-write Linear check pending");
+            }
+        }
         if !store
             .sqlite
             .attempt_task_state(&delivery, retry)
@@ -424,16 +440,30 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
         let confirmed = match client.set_item_state(issue.as_str(), &state_id).await {
             Ok(confirmed) => confirmed,
             Err(error) => {
-                if !delivery.attempted
-                    && matches!(error, crate::linear::LinearError::RateLimited { .. })
-                {
+                if !attempted && matches!(error, crate::linear::LinearError::RateLimited { .. }) {
                     store.sqlite.reject_task_state(&delivery).map_err(message)?;
                 }
                 return Err(message(&error));
             }
         };
-        if crate::linear::acceptance::observe_task_state(&store.sqlite, &delivery, &confirmed)
+        // The reserved row carries the attempt and any base evidence moved forward.
+        let history = match store
+            .sqlite
+            .pending_task_state(&delivery.task_id)
             .map_err(message)?
+        {
+            Some(reserved) if reserved.id == delivery.id => {
+                state_history(&client, issue.as_str(), &reserved, &confirmed).await
+            }
+            _ => StateHistory::Unknown,
+        };
+        if crate::linear::acceptance::observe_task_state(
+            &store.sqlite,
+            &delivery,
+            &confirmed,
+            history,
+        )
+        .map_err(message)?
         {
             return Err(message(format!(
                 "{provider} state write remains uncertain; saved decision retained"
@@ -453,6 +483,36 @@ pub(crate) async fn deliver_task_state(store: &Store, task: &Task, retry: bool) 
         .sqlite
         .task_state_error(&delivery, &error)
         .map_err(message)
+}
+
+/// Evidence for a write that may have reached the provider while the state
+/// still reads as its base. Any other observation needs none.
+async fn state_history(
+    client: &super::planning_client::PlanningClient,
+    issue: &str,
+    delivery: &TaskStateDelivery,
+    observed: &crate::linear::LinearIssue,
+) -> StateHistory {
+    let (Some(base_revision), Some(base_state)) = (&delivery.base_revision, &delivery.base_state)
+    else {
+        return StateHistory::Unknown;
+    };
+    if !delivery.attempted || observed.state.as_ref() != Some(base_state) {
+        return StateHistory::Unknown;
+    }
+    if observed.revision.as_ref() == Some(base_revision) {
+        return StateHistory::Unchanged;
+    }
+    match client
+        .state_history_since(issue, base_revision, base_state)
+        .await
+    {
+        Ok(history) => history,
+        Err(error) => {
+            tracing::debug!(%error, "Task state history unavailable");
+            StateHistory::Unknown
+        }
+    }
 }
 
 pub(crate) async fn sync_task_comments(store: &Store, task: &Task) -> OpsResult<()> {

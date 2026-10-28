@@ -89,6 +89,22 @@ include!(concat!(env!("OUT_DIR"), "/builtin_skill_categories.rs"));
 mod tests {
     use super::*;
 
+    /// Builtins run in repositories without this one's files; `docs:` belongs
+    /// to repository skills.
+    #[test]
+    fn builtin_skills_include_no_repository_docs() {
+        for name in builtin_skill_names() {
+            let source = get_builtin_skill(name).expect("listed builtin");
+            let frontmatter = crate::graph::split_frontmatter(source)
+                .map(|(frontmatter, _)| frontmatter)
+                .unwrap_or_default();
+            assert!(
+                !frontmatter.lines().any(|line| line.starts_with("docs:")),
+                "builtin {name} declares docs"
+            );
+        }
+    }
+
     #[test]
     fn retired_ingest_skill_is_not_registered() {
         assert!(get_builtin_skill("ingest").is_none());

@@ -70,7 +70,8 @@ Bring the plan and the implementation into agreement with what the work has taug
    repairs with the smallest relevant check. Keep blockers, contrary evidence,
    and deferred checks visible where they affect the next action. If a check cannot
    run headless, leave it to gate/CI or replace it with a headless check; do not
-   block the Graph on it. Human judgment belongs to demo/review.
+   block the Graph on it. Ask the person for a judgment you need when one is in
+   the conversation; headless, leave it for demo/review.
 
 Keep named, dated decisions, draft/accepted status and remaining work in the
 plan. Record one check-result line. Omit session instructions and ambient Machine

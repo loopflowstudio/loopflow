@@ -81,14 +81,19 @@ plan in the conversation; do not require a document template or a prior skill.
      Do not stage the landing with flags, v2s, or setups nothing uses yet.
 
 3. **Sanity check**
-   - Build the changed code and run the focused test for the behavior changed.
-     Skip builds for prose-only edits. Reuse a still-applicable passing result;
-     do not repeat a command without a change or failure that warrants it.
+   - Build the changed code and run the focused test for the behavior changed:
+     the narrowest filter that names it, never a whole package or workspace
+     suite. Skip builds for prose-only edits. Reuse a still-applicable passing
+     result; do not repeat a command without a change or failure that warrants it.
+   - One build at a time: never run two compilers, test runners or linters
+     against the same build directory concurrently, in the background or in
+     parallel tool calls.
    - Gate owns affected suites and the design's automated acceptance checks,
      once. Do not run them early because they appear in Done when.
    - If a check cannot run headless here, use a headless equivalent or leave it
-     to gate/CI. Human judgment belongs to demo/review. Neither is a reason to
-     stop implementation or block the Graph. An actual build or test failure
+     to gate/CI rather than stopping implementation. Ask the person for a
+     judgment you need when one is in the conversation; headless, leave it for
+     demo/review instead of blocking the Graph. An actual build or test failure
      still needs a fix.
    - Update remaining work in place. Keep one command/result line with any
      deferred owner; no pass ledger or repeated caveats.

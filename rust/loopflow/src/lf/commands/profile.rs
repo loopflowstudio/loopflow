@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::profile::{ProviderRoute, RouteScope};
-use crate::provider_account::{account_login, match_account, AccountMatch};
+use crate::provider_account::{account_login, match_account, nearest_provider_route, AccountMatch};
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
@@ -55,28 +55,13 @@ async fn show_routes(
 ) -> Result<()> {
     let mut reports = Vec::new();
     for provider in [Provider::Claude, Provider::Codex] {
-        let scope = match store {
-            Some(store) => {
-                let route = match repo_id {
-                    Some(repo) => {
-                        store
-                            .provider_route(&RouteScope::Repo(repo.clone()), provider)
-                            .await?
-                    }
-                    None => None,
-                };
-                if let Some(route) = route {
-                    route.scope.id().to_string()
-                } else if store
-                    .provider_route(&RouteScope::Default, provider)
-                    .await?
-                    .is_some()
-                {
-                    "default".into()
-                } else {
-                    "automatic".into()
-                }
-            }
+        let route = match store {
+            Some(store) => nearest_provider_route(store, repo_id, None, provider).await?,
+            None => None,
+        };
+        let scope = match route {
+            Some(route) if route.scope == RouteScope::Default => "default".into(),
+            Some(route) => route.scope.id().to_owned(),
             None => "automatic".into(),
         };
         let (accounts, diagnostic) =

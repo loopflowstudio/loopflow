@@ -799,7 +799,7 @@
     },
     "tasks_machine": {
       "value": "home_00000000000000000000000000000001",
-      "source": "wave"
+      "source": "personal"
     },
     "session_machine": {
       "value": "home_00000000000000000000000000000002",
@@ -810,7 +810,7 @@
         "accounts": [
           "work"
         ],
-        "source": "wave"
+        "source": "personal"
       },
       "codex": {
         "accounts": [],

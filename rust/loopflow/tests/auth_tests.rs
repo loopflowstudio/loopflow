@@ -293,7 +293,11 @@ esac
             .env(key, value)
             .output()
             .unwrap();
-        assert!(output.status.success());
+        assert!(
+            output.status.success(),
+            "{key}={value}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(text.contains("session: usage unknown"));
         assert!(!text.contains("100% used"));

@@ -105,7 +105,6 @@ mod tests {
         "provider_account_limits",
         "provider_account_switches",
         "provider_accounts",
-        "provider_routes",
         "provider_session_accounts",
         "provider_tokens",
         "rentals",

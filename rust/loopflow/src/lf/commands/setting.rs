@@ -21,24 +21,20 @@ use std::sync::Arc;
 enum Key {
     /// `workflow`, `agent` or `skill_agents.<skill>`: your value over the
     /// committed config.
-    Shared(String),
+    Shared,
     /// `machine`, `machine.tasks` or `machine.session`.
-    Machine(Vec<MachineSetting>),
+    Machine(&'static [MachineSetting]),
     /// `account.<provider>`: the logins that pay, in order.
     Account(Provider),
 }
 
 fn parse_key(raw: &str) -> anyhow::Result<Key> {
     Ok(match raw.split_once('.') {
-        None if raw == "workflow" || raw == "agent" => Key::Shared(raw.to_owned()),
-        None if raw == "machine" => {
-            Key::Machine(vec![MachineSetting::Tasks, MachineSetting::Session])
-        }
-        Some(("machine", "tasks")) => Key::Machine(vec![MachineSetting::Tasks]),
-        Some(("machine", "session")) => Key::Machine(vec![MachineSetting::Session]),
-        Some(("skill_agents", skill)) if !skill.is_empty() && !skill.contains('.') => {
-            Key::Shared(raw.to_owned())
-        }
+        None if raw == "workflow" || raw == "agent" => Key::Shared,
+        None if raw == "machine" => Key::Machine(&[MachineSetting::Tasks, MachineSetting::Session]),
+        Some(("machine", "tasks")) => Key::Machine(&[MachineSetting::Tasks]),
+        Some(("machine", "session")) => Key::Machine(&[MachineSetting::Session]),
+        Some(("skill_agents", skill)) if !skill.is_empty() && !skill.contains('.') => Key::Shared,
         Some(("account", provider)) => Key::Account(
             crate::lf::commands::profile::parse_managed_provider(provider)?,
         ),
@@ -77,13 +73,23 @@ pub fn run(
     global: bool,
     here: bool,
 ) -> anyhow::Result<()> {
+    tokio::runtime::Runtime::new()?.block_on(run_async(repo, wave, key, value, global, here))
+}
+
+async fn run_async(
+    repo: &Path,
+    wave: Option<&str>,
+    key: &str,
+    value: Option<&str>,
+    global: bool,
+    here: bool,
+) -> anyhow::Result<()> {
     let raw_key = key;
     let key = parse_key(raw_key)?;
-    let runtime = tokio::runtime::Runtime::new()?;
     let config = storage_config_from_env().context("resolve the shared Loopflow store")?;
     let store = Arc::new(
-        runtime
-            .block_on(open_store(&config))
+        open_store(&config)
+            .await
             .context("open the shared Loopflow store")?,
     );
     let scope = match (wave, global) {
@@ -91,12 +97,13 @@ pub fn run(
         (None, true) => Scope::Global,
         (None, false) => Scope::Repository,
         (Some(wave), false) => {
-            let wave = runtime.block_on(crate::work::wave::context::resolve_managed_wave(
+            let wave = crate::work::wave::context::resolve_managed_wave(
                 Some(&store),
                 Some(repo),
                 Some(wave),
                 None,
-            ))?;
+            )
+            .await?;
             Scope::Wave {
                 id: wave.id().clone(),
                 slug: wave.slug().to_owned(),
@@ -104,45 +111,31 @@ pub fn run(
         }
     };
     match key {
-        Key::Shared(key) => shared(&store.sqlite, repo, &scope, &key, value),
-        Key::Account(provider) => runtime.block_on(account(&store, repo, &scope, provider, value)),
+        Key::Shared => shared(&store.sqlite, repo, &scope, raw_key, value),
+        Key::Account(provider) => account(&store, repo, &scope, provider, value).await,
         Key::Machine(settings) => {
             let default_scope = default_scope(&store.sqlite, repo, &scope)?
                 .ok_or_else(|| anyhow!("a Machine is set for a Wave or repository, not --global; with none set, work runs on the Machine running it"))?;
             let command = match value {
                 // A capacity lives on this Machine; your others keep theirs.
                 Some(capacity) if is_capacity(&store.sqlite, capacity)? => {
-                    return capacity_set(
-                        &store.sqlite,
-                        &scope,
-                        &default_scope,
-                        &settings,
-                        capacity,
-                    );
+                    return capacity_set(&store.sqlite, &scope, &default_scope, settings, capacity);
                 }
                 Some(machine) => {
                     let target =
                         crate::ops::task_ownership::resolve_machine(&store.sqlite, machine)?;
-                    machine_set(
-                        &runtime,
-                        &store,
-                        repo,
-                        &scope,
-                        &default_scope,
-                        &settings,
-                        &target,
-                    )?;
+                    machine_set(&store, repo, &scope, &default_scope, settings, &target).await?;
                     vec!["set".to_owned(), raw_key.to_owned(), target.to_string()]
                 }
                 None => {
-                    machine_unset(&store.sqlite, &scope, &default_scope, &settings)?;
+                    machine_unset(&store.sqlite, &scope, &default_scope, settings)?;
                     vec!["unset".to_owned(), raw_key.to_owned()]
                 }
             };
             if here {
                 return Ok(());
             }
-            runtime.block_on(copy_to_my_machines(&store.sqlite, repo, &scope, command))
+            copy_to_my_machines(&store.sqlite, repo, &scope, command).await
         }
     }
 }
@@ -245,8 +238,7 @@ fn capacity_set(
     Ok(())
 }
 
-fn machine_set(
-    runtime: &tokio::runtime::Runtime,
+async fn machine_set(
     store: &SharedStore,
     repo: &Path,
     scope: &Scope,
@@ -267,7 +259,7 @@ fn machine_set(
                 PrimaryScope::Repository(CanonicalRepo::discover(repo)?),
             ),
         };
-        runtime.block_on(move_primary_session(store, repo, wave, &primary, target))?;
+        move_primary_session(store, repo, wave, &primary, target).await?;
     }
     let parts = match settings {
         [MachineSetting::Session] => "its Session runs",
@@ -399,13 +391,10 @@ mod tests {
 
     #[test]
     fn keys_name_shared_setup_machines_and_accounts() {
-        assert_eq!(
-            parse_key("skill_agents.implement").unwrap(),
-            Key::Shared("skill_agents.implement".into())
-        );
+        assert_eq!(parse_key("skill_agents.implement").unwrap(), Key::Shared);
         assert_eq!(
             parse_key("machine.session").unwrap(),
-            Key::Machine(vec![MachineSetting::Session])
+            Key::Machine(&[MachineSetting::Session])
         );
         assert_eq!(
             parse_key("account.claude").unwrap(),

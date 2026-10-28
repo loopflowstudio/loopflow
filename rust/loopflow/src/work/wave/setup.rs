@@ -3,7 +3,7 @@
 //! config (`~/.lf/config.yaml` → `.lf/config.yaml` → `.lf/wave/<name>/config.yaml`)
 //! under your own `lf set` values; Machine and account routes are only yours,
 //! stored on this Machine.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -92,23 +92,22 @@ pub async fn read_wave_setup(
     checkout: &Path,
 ) -> anyhow::Result<WaveSetup> {
     let layers = config_layers(Some(checkout), Some(wave.slug()))?;
-    let agent = setting(layer_setting(&layers, &["agent"])).unwrap_or_else(|| SetupValue {
-        value: Some(crate::config::default_agent().to_owned()),
-        source: SetupSource::Default,
-    });
-    let skills = layers
-        .iter()
-        .filter_map(|layer| layer.value.get("skill_agents")?.as_mapping())
-        .flat_map(|skills| skills.keys().filter_map(|key| key.as_str()))
-        .map(str::to_owned)
-        .collect::<BTreeSet<_>>();
-    let skill_agents = skills
-        .into_iter()
-        .filter_map(|skill| {
-            let value = setting(layer_setting(&layers, &["skill_agents", &skill]))?;
-            Some((skill, value))
-        })
-        .collect();
+    let agent = layer_setting(&layers, &["agent"])
+        .map(|(layer, value)| setting(layer, value))
+        .unwrap_or_else(|| SetupValue {
+            value: Some(crate::config::default_agent().to_owned()),
+            source: SetupSource::Default,
+        });
+    let mut skill_agents = BTreeMap::new();
+    for layer in &layers {
+        if let Some(skills) = layer.value.get("skill_agents").and_then(|v| v.as_mapping()) {
+            for (skill, value) in skills {
+                if let Some(skill) = skill.as_str().filter(|_| !value.is_null()) {
+                    skill_agents.insert(skill.to_owned(), setting(layer.layer, value));
+                }
+            }
+        }
+    }
     let repo = RepoId::discover(checkout).ok();
     let mut accounts = BTreeMap::new();
     for provider in [Provider::Claude, Provider::Codex] {
@@ -142,12 +141,11 @@ pub async fn read_wave_setup(
     })
 }
 
-fn setting(found: Option<(ConfigLayer, &serde_yaml_ng::Value)>) -> Option<SetupValue> {
-    let (layer, value) = found?;
-    Some(SetupValue {
+fn setting(layer: ConfigLayer, value: &serde_yaml_ng::Value) -> SetupValue {
+    SetupValue {
         value: value.as_str().map(str::to_owned),
         source: layer.into(),
-    })
+    }
 }
 
 fn machine(

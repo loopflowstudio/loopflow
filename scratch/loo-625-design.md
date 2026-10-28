@@ -1,7 +1,8 @@
 # LOO-625: Set up each area of work once
 
 Accepted by Jack Heart, 2026-10-26, in the LOO-625 Task conversation. Brief: the Task
-description. Decisions: `scratch/loo-625-direction.md`.
+description. Jack Heart’s final command shape is recorded under **One verb** below;
+it supersedes the earlier `lf wave set` spellings.
 
 ## Demo
 
@@ -15,7 +16,7 @@ skill_agents:
 lf set machine daytona --wave infrastructure    # personal, local store
 lf set account.claude work --wave infrastructure
 
-lf wave status infrastructure --json   # each value with its source: task | wave | repo | global | default
+lf wave status infrastructure --json   # each value with its source: task | personal | wave | repo | global | default
 lf task run LOO-xxx                    # runs code on Opus, on daytona, billed to work — no flags
 ```
 
@@ -46,18 +47,19 @@ The repository is the Wave of Tasks without one: no Wave file means repo values.
   Task filed in the same change. This repository's own `.lf/wave/*/GOAL.md`
   frontmatter stays until that release is installed; add the `config.yaml` files beside it.
 
-**Personal (local store rows).** Machine and account routes, per Wave.
+**Personal (local store rows).** Overrides of shared setup, Machine defaults and account routes.
 
 - Machine: the existing Wave machine row. Accounts: `RouteScope::Wave` beside `Repo |
   Default`; resolution Wave > Repo > Default. Both are written by `lf set` (One verb).
-- `workflow`, `agent`, `skill_agents` are edited in `config.yaml` by hand; no command
-  writes committed config (Jack Heart, 2026-10-27).
+- `lf set` may override `workflow`, `agent` and `skill_agents.<skill>` for one person.
+  Shared values are edited in `config.yaml` by hand; `lf set` never writes that file
+  (Jack Heart, final steer 2026-10-27).
 
 ## Effective setup
 
 `lf wave status <wave>` (and `--json`) reports workflow, agent, per-skill agents,
 machine and account routes, each with value and source
-(`task | wave | repo | global | default`). DTO rule: no defaults; add fixture under
+(`task | personal | wave | repo | global | default`). DTO rule: no defaults; add fixture under
 `tests/fixtures/dto/` and each language's fixture test if Swift mirrors it.
 
 ## Acceptance
@@ -71,6 +73,8 @@ machine and account routes, each with value and source
 
 ## Delete — do not maintain
 
+The following removals are implemented; do not restore their authorities.
+
 - `waves.workflow` column, `SqliteStore::{selected_wave_workflow, select_wave_workflow}`,
   their tests; `WorkValue::WaveWorkflow` becomes `HistoricalWaveWorkflow` (wire name
   `wave_workflow` kept so stored planning edits still decode; writes ignore it, like
@@ -81,6 +85,9 @@ machine and account routes, each with value and source
   file; GOAL.md frontmatter read only as fallback when `config.yaml` is absent.
 - `ContextBudgets::resolve` re-reading Wave frontmatter: Wave budgets arrive through the
   layered `Config` with their source path.
+- The account report's duplicate route chain and `provider_routes`' obsolete
+  `NEVER_DISPLAYED` classification. Preserve watched Wave setup through planning
+  revision triggers in the same migration draft.
 
 ## Implementation decisions (2026-10-26)
 
@@ -92,57 +99,45 @@ machine and account routes, each with value and source
   `merge_method`, `land`, `pr`; unknown keys also rejected (key set from `Config`).
 - Account route Wave scope id is the WaveId.
 
-## Status (2026-10-27)
+## Current implementation and review
 
-Implemented: Wave `config.yaml` layer (`config::load_wave_config`, `config_layers`),
-`skill_agents`, launch/Task agent resolution per Wave, `waves.workflow` dropped (draft `wave_setup`), `RouteScope::Wave`,
-`WaveDetailSnapshot.setup` (`work/wave/setup.rs`),
-GOAL.md fallback marked LOO-640, this repository's `.lf/wave/*/config.yaml`, docs.
+- `config::config_layers` loads shared and personal values; `workflow_setting` owns
+  default Workflow resolution for Tasks and Wave status. `SetupSource` owns the source
+  vocabulary for Task JSON, Wave status and missing-Workflow errors.
+- `nearest_provider_route` owns account precedence for launches and reports.
+  `WaveDetailSnapshot.setup` reports effective values; Swift does not consume it yet.
+- `lf set` / `lf unset` own personal writes. The replaced `wave workflow set`,
+  `machine use` and `account route set` forms, their dispatch and exclusive tests are
+  deleted. Main #1720 owns Task handoff through `lf task move --machine`.
+- Cross-repository migration was dropped by Jack Heart (steer 2a6771a3); the two
+  external selections were written by hand. Do not write other repositories.
+- LOO-640 owns the remaining GOAL.md fallback after a compatible release is installed.
+  No other obsolete setup path remains selected for deletion.
 
-End to end: `a_task_run_takes_its_waves_agent_and_account_without_flags`
-(`tests/linear/task_graph_launch_tests.rs`) runs `lf -b task run` with a Claude stand-in;
-the step launches on the Wave's `claude:opus` with the Wave-routed `work` account.
+Compress removes the account report's duplicate route chain, redundant Wave-key
+filtering before deserialization, and per-skill rescans of all config layers. The
+settings command enters its async runtime once; config reads retain no extra store
+connection. Personal precedence and the Session/Tasks Machine split stay intact.
 
-Launches and `lf wave status` share one route chain
-(`provider_account::nearest_provider_route`); `LF_WAVE_ID` is read by
-`wave::context::ambient_wave_id`. `config::workflow_setting` is the one
-Wave → repo → builtin `code` Workflow resolution (Task default and Wave setup).
+Review assumptions and acceptance limits remain in `scratch/questions.md`. One real
+Task run with a Claude stand-in proves the Wave agent and account route; previews and
+status prove the second Wave and repository fallback. Launch tests use isolated
+account homes to avoid the native Keychain.
 
-`lf set` / `lf unset` (One verb, below; Jack Heart steers 2249b6d5, 1a78ed7e, 4d4360a5,
-b4f19861): `lf/commands/setting.rs`, `scope_settings` table in draft `wave_setup`,
-`ConfigLayer::Personal` in `config::config_layers`, source `personal` in `lf wave status`.
-`lf wave workflow set`, `lf machine use` (its Task handoff moved to
-`lf task move --machine` on main, #1720) and `lf account route set` are deleted; Desktop,
-tests, docs and skills moved.
-
-## Settled history (2026-10-27)
-
-- Cross-repository Wave workflow migration dropped (Jack Heart steer 2a6771a3); manabot
-  and etude-studio selections were written by hand.
-- Keychain escape: launch tests use `LF_ACCOUNT_ISOLATION=isolated`.
-- Concept review 2 (`lf set`, against Jack Heart steer b4f19861): shape holds. Root
-  `--wave` scopes it, no `--wave` is the repository, `--global` every repository, store
-  only. `global` has two writers for `agent`/`skill_agents` (`~/.lf/config.yaml` and
-  `lf set --global`, the store value above the file), both reported `global`; kept as
-  `questions.md` records, not a product block. Its one doc defect, `release/CRON_HOST.md`
-  teaching `lf machine use`, now reads `lf set machine mini --wave infrastructure`
-  (2e16d1c224); only immutable release notes still name the deleted forms.
-- Concept review 3 (after the CRON_HOST.md fix): nothing to change. Only immutable release
-  notes name the deleted forms; `lf set --here` is the hidden fan-out flag inherited from
-  `lf machine use`.
-- Concept review: one source vocabulary. `task_workflow_default` returns `SetupSource`;
-  Task JSON, `lf wave status` and the missing-Workflow error say
-  `task | personal | wave | repo | global | default`. Swift keeps `String?`.
+Prior evidence: full nextest had 3028/3032 passing; all four failures passed later
+focused checks, including the two Machine tests serially. No complete post-fix
+full-suite pass is recorded; gate/CI owns it. Exact commands, logs, counts and the
+17,210-row startup budget are preserved at
+`e40add38068dbfd2022bcf8f1a589dde020eedb3:scratch/loo-625-design.md`.
+The duplicate direction note and obsolete concept-review proposal are preserved at
+that commit under `scratch/loo-625-direction.md` and `scratch/concept-review.html`;
+the global-file/store overlap remains an implementation assumption in `scratch/questions.md`.
 
 ## Remaining
 
-- Nothing outstanding before review.
+- None selected. Gate (2026-10-27, LF_* unset): `scripts/test.py --reuse-passing` with a filter over the changed modules and setup/Machine/account/DTO/CLI suites passed (Rust 550/550, architecture, website, Swift 638); a forced `cargo clippy --all-targets -D warnings` re-lint passed. Log: /tmp/loo625-gate/gate.log. CI owns the full Rust matrix.
 
-Publish check (LF_* unset, 2026-10-27, logs /tmp/loo625-rust): clippy `--all-targets`, migrations, architecture and Swift pass; full nextest 3028/3032 before 54dba90784, with all four failures passing in later focused checks. `focused4.log` stopped after 373 passes and two Machine timeouts, not 384/384; `focused5.log` passes 13/13, covering the unfinished tail. At bc00d732e0, materialized nextest filtered to those two Machine tests (`--test-threads 1`) passes 2/2 (`machine-resume.log`). No complete post-fix full-suite pass is recorded; gate/CI owns that coverage. Startup row budget: 17,210 rows.
-
-Check (LF_* unset, 2026-10-27, after restoring the `lf set` work from the stash `lf checkout update` left and merging main's Fly removal): `--test integration wave_setup_tests` and CLI-shape tests (`reference_matches_the_compiled_cli`, `wave_resolution_matrix`, `machine_commands`, `cli_discovery`, `documented_commands`) pass; `--lib -- setting config:: scope_defaults` pass with `harness::claude` capture passing serially (concurrency flake); fmt and clippy `--all-targets` clean. Gate owns the full suites.
-
-Compress (2026-10-27): `cargo test --lib lf::tests your_workflow_for_a_wave`, fmt, clippy `--all-targets`: pass.
+Check (2026-10-27, network-isolated with inherited `LF_*` unset): `cargo test -p loopflow --lib config::` 43 passed; focused `cargo nextest run -p loopflow --lib --test integration` 10/10 passed (setup, account status, Machine defaults, DTO and revision coverage); `scripts/check_migrations.py`, `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed. Logs: `/tmp/loo625-compress-*.log`, including the earlier partial boundary run (46 passed, account-status assertion failed while the draft was changing; its stable-source rerun passed). Gate/CI owns materialized/full-suite coverage.
 
 ## One verb: `lf set` (Jack Heart, 2026-10-27, accepted)
 
@@ -178,8 +173,8 @@ lf wave status infrastructure                          # every value and its sou
   the implementer's call, but personal overrides must be distinguishable from the
   committed Wave value).
 - Delete the forms it replaces: `lf wave workflow set` (folds into `lf set workflow`,
-  now personal), the Wave/repository default form of `lf machine use` (Task
-  handoff stays), and `lf account route set --wave` (added on this branch). Fold
+  now personal), `lf machine use` (Task
+  handoff uses `lf task move --machine`), and `lf account route set --wave` (added on this branch). Fold
   repository scope of account routes into `lf set` with no `--wave`; `--global` replaces
   `lf account route set --default`, so `lf account route set` is gone (`lf account route`
   stays as the read).

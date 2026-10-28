@@ -70,11 +70,7 @@ pub(crate) fn try_read_wave_config(
     let Some((path, mapping)) = read_wave_file(repo, name)? else {
         return Ok(None);
     };
-    let own = WAVE_ONLY_KEYS
-        .iter()
-        .filter_map(|key| Some(((*key).into(), mapping.get(*key)?.clone())))
-        .collect::<Mapping>();
-    serde_yaml_ng::from_value(Value::Mapping(own))
+    serde_yaml_ng::from_value(Value::Mapping(mapping))
         .map(Some)
         .map_err(|source| WaveConfigError::Parse { path, source })
 }
@@ -152,9 +148,6 @@ fn read_wave_file(repo: &Path, name: &str) -> Result<Option<(PathBuf, Mapping)>,
 }
 
 fn parse_mapping(path: &Path, content: &str) -> Result<Mapping, WaveConfigError> {
-    if content.trim().is_empty() {
-        return Ok(Mapping::new());
-    }
     serde_yaml_ng::from_str::<Option<Mapping>>(content)
         .map(Option::unwrap_or_default)
         .map_err(|source| WaveConfigError::Parse {
@@ -337,6 +330,13 @@ mod tests {
         repo.write_config("agent: claude\n");
         assert_eq!(repo.layer()["agent"].as_str(), Some("claude"));
         assert!(read_wave_config(repo.path(), "scan").unwrap().id.is_none());
+
+        // An empty file still replaces the old frontmatter.
+        for empty in ["", " \n", "# No overrides\n", "null\n"] {
+            repo.write_config(empty);
+            assert!(repo.layer().as_mapping().unwrap().is_empty());
+            assert!(read_wave_config(repo.path(), "scan").unwrap().id.is_none());
+        }
     }
 
     #[test]

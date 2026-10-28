@@ -2764,6 +2764,8 @@ mod linear_oauth_tests {
 #[cfg(test)]
 mod account_observation_tests {
     use super::SqliteStore;
+    use crate::profile::{ProviderRoute, RouteScope};
+    use crate::provider_auth::Provider;
     use crate::store::{
         AccountLimitWindow, CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
     };
@@ -2789,6 +2791,35 @@ mod account_observation_tests {
             created_at: 1,
             updated_at: 1,
         }
+    }
+
+    #[test]
+    fn route_edits_invalidate_wave_setup() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        let before = store.revisions().unwrap().planning;
+        store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Claude,
+                accounts: vec![account.account_id],
+                created_at: 1,
+                updated_at: 1,
+            })
+            .unwrap();
+        let after_set = store.revisions().unwrap().planning;
+        assert!(after_set > before);
+        assert!(store
+            .clear_provider_route(&RouteScope::Default, Provider::Claude)
+            .unwrap());
+        let after_unset = store.revisions().unwrap().planning;
+        assert!(after_unset > after_set);
+        assert!(!store
+            .clear_provider_route(&RouteScope::Default, Provider::Claude)
+            .unwrap());
+        assert_eq!(store.revisions().unwrap().planning, after_unset);
     }
 
     #[test]

@@ -821,7 +821,11 @@ fn personal_settings(
         if !path.try_exists()? {
             return Ok(None);
         }
-        let store = settings_reader(&path)?;
+        // Reuse the receipt ledger when present, without retaining a new connection.
+        let store = match crate::journal::retained_ledger(&path) {
+            Some(store) => store,
+            None => crate::store::sqlite::SqliteStore::open_read_only(&path)?,
+        };
         if !store.has_scope_settings()? {
             return Ok(None);
         }
@@ -835,15 +839,6 @@ fn personal_settings(
         tracing::warn!(%error, "your lf set values are unavailable");
         None
     })
-}
-
-/// The receipt ledger's connection when this Process has one: each new
-/// connection reads the whole schema, and every config load asks for your values.
-fn settings_reader(path: &Path) -> anyhow::Result<crate::store::sqlite::SqliteStore> {
-    match crate::journal::retained_ledger(path) {
-        Some(store) => Ok(store),
-        None => Ok(crate::store::sqlite::SqliteStore::open_read_only(path)?),
-    }
 }
 
 fn settings_value(values: &BTreeMap<String, String>) -> serde_yaml_ng::Value {

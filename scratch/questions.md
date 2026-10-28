@@ -19,8 +19,9 @@
 - `lf wave workflow show` now reports the effective selection (personal, Wave, repo); the
   roadmap `workflow` field still reads only the committed Wave file.
 - `lf unset machine.session` does not move the Session; it runs where it is until set again.
-- Every config load now opens the local store read-only to look for `lf set` values (git
-  repository discovery only when any exist). Gate should watch command latency.
+- Config loads look for `lf set` values in the local store, reusing the Process receipt
+  connection when available (git repository discovery only when overrides exist). No
+  extra connection is retained between loads. Gate should watch command latency.
 - After merging main (#1720 moved Task handoff to `lf task move --machine`), `lf machine use`
   had no form left, so it is deleted; Desktop's Task handoff calls `lf task move --machine`.
 - `lf set agent|skill_agents.<skill> --global` and `~/.lf/config.yaml` both write the global

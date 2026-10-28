@@ -26,6 +26,14 @@ FROM provider_routes;
 DROP TABLE provider_routes;
 ALTER TABLE provider_routes_next RENAME TO provider_routes;
 
+-- Wave setup is part of watched Work projections.
+CREATE TRIGGER store_revision_provider_routes_insert AFTER INSERT ON provider_routes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_provider_routes_update AFTER UPDATE ON provider_routes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_provider_routes_delete AFTER DELETE ON provider_routes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
 -- Your own overrides of shared setup (`workflow`, `agent`, `skill_agents.<skill>`)
 -- for a Wave, a repository or every repository, set by `lf set`.
 CREATE TABLE scope_settings (

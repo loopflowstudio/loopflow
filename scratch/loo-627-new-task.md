@@ -260,6 +260,11 @@ Both slices are built, synced onto main after #1751 (`lf set`; `lf wave graph se
   error on its Start control. The sheet keeps the request only when nothing was filed.
 - The sheet is a `WorkNavigation.Palette.newTask` case, so the action monitor stands
   down while it is open. Create is guarded only by its disabled state.
+- Second concept review (2026-10-28, a63a9f365 tree): nothing to change, no open
+  product choice. Each concept maps to one owner: request → Task notes + primary
+  `LfSession.request`; workflow → `task_graphs` at take-up; default →
+  `scope_graph_default`. The sheet's terminal line omits `--no-wave` because
+  `create` files without a Wave by default.
 
 Check (a63a9f365 tree): `task_create_run`, `wave_resolution_matrix`, integration
 `graph_catalog_and_wave_selection` + `dto_fixtures`, clippy, Swift

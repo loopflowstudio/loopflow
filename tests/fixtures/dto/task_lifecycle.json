@@ -101,8 +101,8 @@
                   },
                   "wave_id": "aa97077e-8723-4834-95ab-01c61d9678ae"
                 },
-                "workflow_name": null,
-                "workflow_source": null
+                "graph_name": null,
+                "graph_source": null
               },
               {
                 "actions": {
@@ -132,36 +132,6 @@
                 },
                 "latest_graph_process": {
                   "compiled": {
-                    "interactions": {
-                      "stages": [],
-                      "transitions": [
-                        {
-                          "from": "@start",
-                          "nodes": [
-                            "0",
-                            "1"
-                          ],
-                          "routes": [
-                            {
-                              "condition": null,
-                              "from": "@start",
-                              "to": "0"
-                            },
-                            {
-                              "condition": null,
-                              "from": "0",
-                              "to": "1"
-                            },
-                            {
-                              "condition": null,
-                              "from": "1",
-                              "to": "@end"
-                            }
-                          ],
-                          "to": "@end"
-                        }
-                      ]
-                    },
                     "name": "delivery",
                     "steps": [
                       {
@@ -369,8 +339,8 @@
                   },
                   "wave_id": "aa97077e-8723-4834-95ab-01c61d9678ae"
                 },
-                "workflow_name": "delivery",
-                "workflow_source": "task"
+                "graph_name": "delivery",
+                "graph_source": "task"
               }
             ],
             "state": "ok",
@@ -424,7 +394,7 @@
                 "status": "ready",
                 "superseded_by_wave_id": null
               },
-              "workflow": null
+              "graph": null
             }
           ]
         },
@@ -795,36 +765,6 @@
       },
       "latest_graph_process": {
         "compiled": {
-          "interactions": {
-            "stages": [],
-            "transitions": [
-              {
-                "from": "@start",
-                "nodes": [
-                  "0",
-                  "1"
-                ],
-                "routes": [
-                  {
-                    "condition": null,
-                    "from": "@start",
-                    "to": "0"
-                  },
-                  {
-                    "condition": null,
-                    "from": "0",
-                    "to": "1"
-                  },
-                  {
-                    "condition": null,
-                    "from": "1",
-                    "to": "@end"
-                  }
-                ],
-                "to": "@end"
-              }
-            ]
-          },
           "name": "delivery",
           "steps": [
             {
@@ -1032,8 +972,8 @@
         },
         "wave_id": "aa97077e-8723-4834-95ab-01c61d9678ae"
       },
-      "workflow_name": "delivery",
-      "workflow_source": "task"
+      "graph_name": "delivery",
+      "graph_source": "task"
     },
     "status": {
       "execution": {
@@ -1432,58 +1372,12 @@
             }
           ],
           "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "edge",
-                "at": 1793059415,
-                "edge": 0,
-                "from": "start",
-                "kind": "arrived",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
+          "graph": {
             "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
+            "interactive_steps": [],
             "position": {
-              "kind": "node",
-              "node": "end"
+              "kind": "at",
+              "step": "end"
             }
           }
         },
@@ -1689,36 +1583,6 @@
         "graph_processes": [
           {
             "compiled": {
-              "interactions": {
-                "stages": [],
-                "transitions": [
-                  {
-                    "from": "@start",
-                    "nodes": [
-                      "0",
-                      "1"
-                    ],
-                    "routes": [
-                      {
-                        "condition": null,
-                        "from": "@start",
-                        "to": "0"
-                      },
-                      {
-                        "condition": null,
-                        "from": "0",
-                        "to": "1"
-                      },
-                      {
-                        "condition": null,
-                        "from": "1",
-                        "to": "@end"
-                      }
-                    ],
-                    "to": "@end"
-                  }
-                ]
-              },
               "name": "delivery",
               "steps": [
                 {
@@ -1810,58 +1674,12 @@
             }
           ],
           "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "edge",
-                "at": 1793059415,
-                "edge": 0,
-                "from": "start",
-                "kind": "arrived",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
+          "graph": {
             "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
+            "interactive_steps": [],
             "position": {
-              "kind": "node",
-              "node": "end"
+              "kind": "at",
+              "step": "end"
             }
           }
         }
@@ -1982,8 +1800,8 @@
                   },
                   "wave_id": "aa97077e-8723-4834-95ab-01c61d9678ae"
                 },
-                "workflow_name": null,
-                "workflow_source": null
+                "graph_name": null,
+                "graph_source": null
               },
               {
                 "actions": {
@@ -2013,36 +1831,6 @@
                 },
                 "latest_graph_process": {
                   "compiled": {
-                    "interactions": {
-                      "stages": [],
-                      "transitions": [
-                        {
-                          "from": "@start",
-                          "nodes": [
-                            "0",
-                            "1"
-                          ],
-                          "routes": [
-                            {
-                              "condition": null,
-                              "from": "@start",
-                              "to": "0"
-                            },
-                            {
-                              "condition": null,
-                              "from": "0",
-                              "to": "1"
-                            },
-                            {
-                              "condition": null,
-                              "from": "1",
-                              "to": "@end"
-                            }
-                          ],
-                          "to": "@end"
-                        }
-                      ]
-                    },
                     "name": "delivery",
                     "steps": [
                       {
@@ -2235,8 +2023,8 @@
                   },
                   "wave_id": "aa97077e-8723-4834-95ab-01c61d9678ae"
                 },
-                "workflow_name": "delivery",
-                "workflow_source": "task"
+                "graph_name": "delivery",
+                "graph_source": "task"
               }
             ],
             "state": "ok",
@@ -2290,7 +2078,7 @@
                 "status": "ready",
                 "superseded_by_wave_id": null
               },
-              "workflow": null
+              "graph": null
             }
           ]
         },
@@ -2661,36 +2449,6 @@
       },
       "latest_graph_process": {
         "compiled": {
-          "interactions": {
-            "stages": [],
-            "transitions": [
-              {
-                "from": "@start",
-                "nodes": [
-                  "0",
-                  "1"
-                ],
-                "routes": [
-                  {
-                    "condition": null,
-                    "from": "@start",
-                    "to": "0"
-                  },
-                  {
-                    "condition": null,
-                    "from": "0",
-                    "to": "1"
-                  },
-                  {
-                    "condition": null,
-                    "from": "1",
-                    "to": "@end"
-                  }
-                ],
-                "to": "@end"
-              }
-            ]
-          },
           "name": "delivery",
           "steps": [
             {
@@ -2883,8 +2641,8 @@
         },
         "wave_id": "aa97077e-8723-4834-95ab-01c61d9678ae"
       },
-      "workflow_name": "delivery",
-      "workflow_source": "task"
+      "graph_name": "delivery",
+      "graph_source": "task"
     },
     "status": {
       "execution": {
@@ -3220,46 +2978,12 @@
             }
           ],
           "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
+          "graph": {
             "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
+            "interactive_steps": [],
             "position": {
-              "edge": 0,
-              "kind": "edge",
+              "kind": "run",
+              "step": "start",
               "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
               "running": true
             }
@@ -3467,36 +3191,6 @@
         "graph_processes": [
           {
             "compiled": {
-              "interactions": {
-                "stages": [],
-                "transitions": [
-                  {
-                    "from": "@start",
-                    "nodes": [
-                      "0",
-                      "1"
-                    ],
-                    "routes": [
-                      {
-                        "condition": null,
-                        "from": "@start",
-                        "to": "0"
-                      },
-                      {
-                        "condition": null,
-                        "from": "0",
-                        "to": "1"
-                      },
-                      {
-                        "condition": null,
-                        "from": "1",
-                        "to": "@end"
-                      }
-                    ],
-                    "to": "@end"
-                  }
-                ]
-              },
               "name": "delivery",
               "steps": [
                 {
@@ -3573,46 +3267,12 @@
             }
           ],
           "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
+          "graph": {
             "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
+            "interactive_steps": [],
             "position": {
-              "edge": 0,
-              "kind": "edge",
+              "kind": "run",
+              "step": "start",
               "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
               "running": true
             }
@@ -3669,36 +3329,6 @@
                 },
                 "latest_graph_process": {
                   "compiled": {
-                    "interactions": {
-                      "stages": [],
-                      "transitions": [
-                        {
-                          "from": "@start",
-                          "nodes": [
-                            "0",
-                            "1"
-                          ],
-                          "routes": [
-                            {
-                              "condition": null,
-                              "from": "@start",
-                              "to": "0"
-                            },
-                            {
-                              "condition": null,
-                              "from": "0",
-                              "to": "1"
-                            },
-                            {
-                              "condition": null,
-                              "from": "1",
-                              "to": "@end"
-                            }
-                          ],
-                          "to": "@end"
-                        }
-                      ]
-                    },
                     "name": "delivery",
                     "steps": [
                       {
@@ -3871,8 +3501,8 @@
                   },
                   "wave_id": "aa97077e-8723-4834-95ab-01c61d9678ae"
                 },
-                "workflow_name": "delivery",
-                "workflow_source": "task"
+                "graph_name": "delivery",
+                "graph_source": "task"
               }
             ],
             "state": "ok",
@@ -3926,7 +3556,7 @@
                 "status": "ready",
                 "superseded_by_wave_id": null
               },
-              "workflow": null
+              "graph": null
             }
           ]
         },
@@ -4242,36 +3872,6 @@
       },
       "latest_graph_process": {
         "compiled": {
-          "interactions": {
-            "stages": [],
-            "transitions": [
-              {
-                "from": "@start",
-                "nodes": [
-                  "0",
-                  "1"
-                ],
-                "routes": [
-                  {
-                    "condition": null,
-                    "from": "@start",
-                    "to": "0"
-                  },
-                  {
-                    "condition": null,
-                    "from": "0",
-                    "to": "1"
-                  },
-                  {
-                    "condition": null,
-                    "from": "1",
-                    "to": "@end"
-                  }
-                ],
-                "to": "@end"
-              }
-            ]
-          },
           "name": "delivery",
           "steps": [
             {
@@ -4444,8 +4044,8 @@
         },
         "wave_id": "aa97077e-8723-4834-95ab-01c61d9678ae"
       },
-      "workflow_name": "delivery",
-      "workflow_source": "task"
+      "graph_name": "delivery",
+      "graph_source": "task"
     },
     "status": {
       "execution": {
@@ -4741,46 +4341,12 @@
             }
           ],
           "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
+          "graph": {
             "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
+            "interactive_steps": [],
             "position": {
-              "edge": 0,
-              "kind": "edge",
+              "kind": "run",
+              "step": "start",
               "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
               "running": true
             }
@@ -4952,36 +4518,6 @@
         "graph_processes": [
           {
             "compiled": {
-              "interactions": {
-                "stages": [],
-                "transitions": [
-                  {
-                    "from": "@start",
-                    "nodes": [
-                      "0",
-                      "1"
-                    ],
-                    "routes": [
-                      {
-                        "condition": null,
-                        "from": "@start",
-                        "to": "0"
-                      },
-                      {
-                        "condition": null,
-                        "from": "0",
-                        "to": "1"
-                      },
-                      {
-                        "condition": null,
-                        "from": "1",
-                        "to": "@end"
-                      }
-                    ],
-                    "to": "@end"
-                  }
-                ]
-              },
               "name": "delivery",
               "steps": [
                 {
@@ -5058,46 +4594,12 @@
             }
           ],
           "sessions": [],
-          "workflow": {
-            "edges": [
-              {
-                "from": "start",
-                "name": "session",
-                "to": "end"
-              }
-            ],
-            "history": [
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": null,
-                "from": "start",
-                "kind": "took_up",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "start",
-                "workflow": "delivery"
-              },
-              {
-                "actor": "person",
-                "at": 1793059409,
-                "edge": 0,
-                "from": "start",
-                "kind": "chose",
-                "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
-                "note": null,
-                "session_id": null,
-                "to": "end",
-                "workflow": "delivery"
-              }
-            ],
+          "graph": {
             "name": "delivery",
-            "nodes": [],
-            "outgoing": [],
+            "interactive_steps": [],
             "position": {
-              "edge": 0,
-              "kind": "edge",
+              "kind": "run",
+              "step": "start",
               "lf_process_id": "e1431b95-d4d5-4d95-abbd-5bcc6b8a4d1d",
               "running": true
             }

@@ -103,7 +103,8 @@ work_values! {
     (TaskTeam, "task_team", Option<String>),
     (CommentTask, "comment_task", String),
     (HistoricalProjectWorkflow, "workflow", String),
-    (WaveWorkflow, "wave_workflow", Option<String>),
+    // Released peers and stored edits name it `wave_workflow`.
+    (WaveGraph, "wave_workflow", Option<String>),
     (Krs, "krs", Vec<crate::work::project::ProjectKR>),
     (MetricTargets, "metric_targets", Vec<crate::work::wave::metrics::MetricTarget>),
     (Disposition, "disposition", Disposition),

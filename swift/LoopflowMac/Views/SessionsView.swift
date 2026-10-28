@@ -1310,7 +1310,6 @@ struct SessionsContentView: View {
             model.jump(to: destination, source: "palette")
             return
         case .graph(let name): navigation.palette = .graph(name)
-        case .workflow(let name): navigation.palette = .workflow(name)
         case .rename(let id):
             guard let record = store.sessions.first(where: { $0.id == id })?.record else { return }
             openSession(record)

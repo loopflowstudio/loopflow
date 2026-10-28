@@ -457,8 +457,9 @@ frontmatter never changes scheduling.
 | **CLI** | `-i` (interactive), `-b` (batch/headless) |
 | **Default** | interactive for a direct TTY; headless otherwise |
 
-`lf graph` runs autonomous steps and stops at its first `interactive:` stage;
-a Task carries the graph on from there. See [Orchestration](orchestration.md).
+A Graph's steps run headless except its `interactive:` steps, which launch the way
+a direct skill does; `-i` and `-b` choose for every step. `lf task run` stops
+before each interactive step instead. See [Orchestration](orchestration.md#where-a-person-takes-part).
 
 ### Chrome
 

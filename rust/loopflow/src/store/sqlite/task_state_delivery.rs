@@ -50,9 +50,8 @@ pub(super) fn queue_in(conn: &Connection, task: &TaskId, target: &str) -> StoreR
         ),
     )?;
     conn.execute(
-        "INSERT INTO task_state_deliveries(id,task_id,move_seq,target,base_revision,base_state)
-         SELECT ?2,t.id,(SELECT max(seq) FROM task_workflow_moves WHERE task_id=t.id),?3,
-             i.revision,i.state
+        "INSERT INTO task_state_deliveries(id,task_id,target,base_revision,base_state)
+         SELECT ?2,t.id,?3,i.revision,i.state
          FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
          LEFT JOIN pm_items i ON i.id=t.external_issue_id AND i.repo=w.repo AND i.provider='linear'
          WHERE t.id=?1",

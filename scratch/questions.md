@@ -4,7 +4,7 @@
   in-process rotation thread: the script reports bytes freed per step and per
   repository, and nothing else read the footprint. Reversible.
 - Store bookkeeping (dead Process rows and receipts, usage compaction, vacuum)
-  needs SQLite and lf's schema, so it stays in the binary as `lf self prune`,
+  needs SQLite and lf's schema, so it stays in the binary as `lf monitor prune`,
   which the script runs first. It no longer runs hourly inside capturing
   processes; it runs whenever the cron job does.
 - Home retention is 7 days for every rotatable category (what hourly
@@ -15,8 +15,8 @@
   script hourly and the skill daily; kept Jack's single-entry shape. With deletion
   deterministic the agent is only a reporter, so two cron lines would cost one
   agent run a day instead of 24. Recorded for Jack; not blocking.
-- Unattended safety: the script does all deletion, including idle ignored
-  build output in linked worktrees (3 days) and main checkouts (1 day); the
+- Unattended safety: the script does all deletion, including ignored
+  build output untouched for four hours in idle linked and main checkouts; the
   skill only reports. Uncertain cases are kept and reported.
 - Snapshot staging directories (`~/.lf/copies/.tmp*`) left by a killed draft
   build now go when the next snapshot starts or, unheld, after a week; the
@@ -66,3 +66,25 @@
 
 - Concepts settled: the script deletes, the skill reports, cron runs the skill through `disk-cleanup.sh skill`, and `lf monitor prune` is the one lf entry point. No `lf disk`, `disk::` or launchd reference remains outside the uninstall line and shipped release notes.
 - Open but not blocking (Jack's chosen shape): an hourly agent run that only reports; script hourly plus skill daily would be cheaper.
+
+## Gate 2026-10-27
+
+- Comparison: `origin/main...HEAD` after the recorded main merge; 21 Task paths.
+  The four-hour build policy is retained from commit `1c7442ea33`, whose message
+  records Jack's sweep and decision; it supersedes the earlier day-based notes.
+- Review repairs: keep backups with open or recent sidecars; keep held caches
+  and Trash and inspect their full age; retain on failed modification or Git
+  inspection; refresh the process view between steps and before each checkout;
+  retain all output of a checkout held by a process. Log mechanical steps and
+  failures, preserve launchd if cron installation fails, and never steal a
+  four-hour-old lock from a possibly live cleanup.
+- Verification plan: changed-aware runner with reuse, architecture, cleanup
+  Python tests, website docs tests, and Rust filters for build cleanup, store
+  copy/retention, monitor, CLI discovery/reference and documented commands.
+  Rust formatting and workspace Clippy follow tests. The full Rust matrix
+  remains CI-owned; laptop cleanup and cron installation remain post-landing
+  acceptance, as recorded above.
+- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(build_cleanup) | test(store::copy::) | test(store::sqlite::retention::) | test(lf::commands::top::) | test(monitor_prune) | test(cli_discovery::) | test(cli_reference::) | test(documented_commands::)'` — PASS: architecture, 8 cleanup tests, 63 Rust tests, formatting, workspace Clippy `-D warnings`, 72 website tests; 300s, no timeouts. Full Rust matrix remains CI-owned.
+- `uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/test_disk_cleanup.py` — PASS: 9 tests in 42.30s after final script simplification and the checkout-cwd regression; unchanged Rust and website inputs retain the preceding results.
+- `bash -n scripts/disk-cleanup.sh`, `shellcheck scripts/disk-cleanup.sh`, Ruff check/format for `python/tests/test_disk_cleanup.py`, and `git diff --check` — PASS.
+- No gate blocker remains. Configured laptop cleanup, per-repository reclaimed-byte evidence and cron installation are still required at the existing post-landing verification boundary; no real cleanup or schedule mutation was performed by gate.

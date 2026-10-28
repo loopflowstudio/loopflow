@@ -12,7 +12,7 @@
 # simulators, idle ~/Library/Caches entries and old Trash.
 #
 # Never removes the database or its sidecars, account homes, the newest backup
-# per database, anything modified within the last day, or anything a process
+# per database, Home material modified within the last day, or anything a process
 # holds open; when lsof fails, nothing that check protects is removed. Each
 # removal is appended to ~/.lf/logs/disk.log. This script does all the deleting;
 # the skill only reads its output and reports.
@@ -61,7 +61,7 @@ install_entry() {
   {
     without_entry
     printf '17 * * * * /bin/bash %q skill %s\n' "$main/scripts/disk-cleanup.sh" "$marker"
-  } | crontab -
+  } | crontab - || return 1
   crontab -l | grep -F "$marker"
   # The launchd agent this replaces.
   launchctl bootout "gui/$(id -u)/com.loopflow.disk-cleanup" 2>/dev/null || true
@@ -83,9 +83,9 @@ run_skill() {
 }
 
 case "${1:-run}" in
-  install) install_entry; exit 0 ;;
+  install) install_entry; exit $? ;;
   uninstall)
-    without_entry | crontab -
+    without_entry | crontab - || exit 1
     printf 'Removed the disk-cleanup crontab entry\n'
     exit 0 ;;
   skill) run_skill ;;
@@ -105,12 +105,8 @@ exec > >(tee -a "$log") 2>&1
 
 lock="${TMPDIR:-/tmp}/loopflow-disk-cleanup.lock"
 if ! mkdir "$lock" 2>/dev/null; then
-  if [ -n "$(find "$lock" -maxdepth 0 -mmin +240 2>/dev/null)" ]; then
-    rm -rf "$lock" && mkdir "$lock"
-  else
-    printf '%s skipped: another cleanup holds %s\n' "$(date '+%F %T')" "$lock"
-    exit 0
-  fi
+  printf '%s skipped: another cleanup holds %s (if abandoned, remove it after checking for a live run)\n' "$(date '+%F %T')" "$lock"
+  exit 0
 fi
 work="$(mktemp -d)"
 trap 'rm -rf "$lock" "$work"' EXIT
@@ -119,48 +115,54 @@ free_kib() { df -k "$HOME" | awk 'NR==2 {print $4}'; }
 human() { awk -v k="$1" 'BEGIN { split("K M G T", u); i=1; while (k>=1024 && i<4) { k/=1024; i++ } printf "%.1f%s", k, u[i] }'; }
 note() { printf '%s %s\n' "$(date '+%F %T')" "$*"; }
 step() {
-  local name="$1" before after
+  local name="$1" before after status
   shift
+  inspect_open_files || exit 1
   before="$(free_kib)"
   note "== $name"
-  "$@" 2>&1 | sed 's/^/   /'
+  "$@" 2>&1 | tee -a "$disk_log" | sed 's/^/   /'
+  status=$?
+  [ "$status" -eq 0 ] || note "FAILED: $name (exit $status)"
   after="$(free_kib)"
   note "   $name freed $(human $((after > before ? after - before : 0)))"
 }
 
-# Remove one path and append the removal to disk.log: remove <category> <path> <reason>
+# step appends this receipt to disk.log: remove <category> <path> <reason>
 remove() {
   local kib
   kib="$(du -sk "$2" 2>/dev/null | awk '{print $1}')"
   rm -rf "$2" || return
-  printf '%s removed %s %s %s (%s)\n' "$(date -u '+%FT%TZ')" "$1" "$(human "${kib:-0}")" "$2" "$3" >>"$disk_log"
-  printf 'removed %s %s %s (%s)\n' "$1" "$(human "${kib:-0}")" "$2" "$3"
+  printf '%s removed %s %s %s (%s)\n' "$(date -u '+%FT%TZ')" "$1" "$(human "${kib:-0}")" "$2" "$3"
 }
 
 # Every open path (cwd, mapped files, open files) and all their ancestors, read
-# once: a path is held when it, or anything under it, is open.
+# before each step: a path is held when it, or anything under it, is open.
 held="$work/held"
-if lsof -nP -Fn 2>/dev/null >"$work/lsof" && grep -q '^n/' "$work/lsof"; then
+inspect_open_files() {
+  if ! lsof -nP -Fn 2>/dev/null >"$work/lsof" || ! grep -q '^n/' "$work/lsof"; then
+    echo "open-file inspection failed; stopping cleanup" >&2
+    return 1
+  fi
   sed -n 's/^n\(\/.*\)/\1/p' "$work/lsof" | awk '{
     p = $0; print p
     while (sub(/\/[^\/]*$/, "", p) && p != "") print p
   }' | sort -u >"$held"
-else
-  held=""
-fi
+}
 
-# Print the paths on stdin that no process holds; none when lsof failed.
+# Print the paths on stdin that no process holds.
 idle() {
-  if [ -z "$held" ]; then
-    cat >/dev/null
-    echo "open-file inspection failed; removed nothing" >&2
-    return
-  fi
   awk 'NR == FNR { h[$0] = 1; next } !($0 in h)' "$held" -
 }
 
 # Whether nothing under the path was modified within the minutes given.
-untouched() { [ -z "$(find "$1" -mmin -"$2" -print -quit 2>/dev/null)" ]; }
+untouched() {
+  local recent
+  if ! recent="$(find "$1" -mmin -"$2" -print -quit 2>/dev/null)"; then
+    echo "kept $1 (modification inspection failed)" >&2
+    return 1
+  fi
+  [ -z "$recent" ]
+}
 
 # --------------------------------------------------------------------------
 # Home
@@ -183,14 +185,25 @@ home_units() {
 }
 
 home() {
-  local category path count=0
+  local category path sidecar keep count=0
   home_units >"$work/home"
   cut -f2 "$work/home" | idle >"$work/home-idle"
   while IFS=$'\t' read -r category path; do
+    [ "$path" != "$disk_log" ] || continue
     grep -qxF -- "$path" "$work/home-idle" || continue
     untouched "$path" $((home_keep_days * 1440)) || continue
+    keep=false
+    for sidecar in "$path-wal" "$path-shm"; do
+      [ -e "$sidecar" ] || continue
+      if grep -qxF -- "$sidecar" "$held" || ! untouched "$sidecar" $((home_keep_days * 1440)); then
+        keep=true
+      fi
+    done
+    [ "$keep" = false ] || continue
     remove "$category" "$path" "older than $home_keep_days days" || continue
-    for sidecar in "$path-wal" "$path-shm"; do [ -e "$sidecar" ] && rm -f "$sidecar"; done
+    for sidecar in "$path-wal" "$path-shm"; do
+      [ ! -e "$sidecar" ] || remove "$category" "$sidecar" "older than $home_keep_days days"
+    done
     count=$((count + 1))
   done <"$work/home"
   echo "removed $count Home units untouched for $home_keep_days days"
@@ -202,21 +215,20 @@ home() {
 # Ignored, untracked output in one checkout that no process holds and nothing
 # wrote to for build_idle_minutes: idle_builds <checkout>
 idle_builds() {
-  local checkout="$1" path rel
-  if [ -z "$held" ]; then
-    echo "open-file inspection failed; kept build output in $checkout"
+  local checkout="$1" path rel tracked
+  inspect_open_files || return 1
+  if grep -qxF -- "$checkout" "$held"; then
+    echo "kept $checkout (held open)"
     return
   fi
   find "$checkout" -maxdepth 3 -type d \( -name target -o -name node_modules -o -name .venv \
     -o -name .build -o -name DerivedData \) -prune 2>/dev/null | sort >"$work/builds"
-  idle <"$work/builds" >"$work/builds-idle"
   while IFS= read -r path; do
     rel="${path#"$checkout"/}"
     git -C "$checkout" check-ignore -q -- "$rel" || continue
-    [ -z "$(git -C "$checkout" ls-files -- "$rel" | head -1)" ] || continue
-    if ! grep -qxF -- "$path" "$work/builds-idle"; then
-      echo "kept $path (held open)"
-    elif ! untouched "$path" "$build_idle_minutes"; then
+    tracked="$(git -C "$checkout" ls-files -- "$rel")" || continue
+    [ -z "$tracked" ] || continue
+    if ! untouched "$path" "$build_idle_minutes"; then
       echo "kept $path (written in the last 4 hours)"
     else
       remove build "$path" "idle 4 hours in $(basename "$checkout")"
@@ -280,7 +292,8 @@ library_caches() {
   for entry in "$HOME/Library/Caches"/*; do
     [ -e "$entry" ] || continue
     untouched "$entry" $((cache_idle_days * 1440)) || continue
-    rm -rf "$entry" && count=$((count + 1))
+    grep -qxF -- "$entry" "$held" && { echo "kept $entry (held open)"; continue; }
+    remove cache "$entry" "untouched for $cache_idle_days days" && count=$((count + 1))
   done
   echo "removed $count cache entries untouched for $cache_idle_days days"
 }
@@ -290,9 +303,12 @@ trash() {
     echo "$HOME/.Trash unreadable: grant Full Disk Access to /bin/bash to clean it"
     return
   fi
-  local count
-  count="$(find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -mtime +"$trash_idle_days" | wc -l | tr -d ' ')"
-  find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -mtime +"$trash_idle_days" -exec rm -rf {} + 2>/dev/null
+  local entry count=0
+  while IFS= read -r entry; do
+    untouched "$entry" $((trash_idle_days * 1440)) || continue
+    grep -qxF -- "$entry" "$held" && { echo "kept $entry (held open)"; continue; }
+    remove trash "$entry" "untouched for $trash_idle_days days" && count=$((count + 1))
+  done < <(find "$HOME/.Trash" -mindepth 1 -maxdepth 1 -print)
   echo "removed $count items trashed over $trash_idle_days days ago"
 }
 
@@ -304,7 +320,6 @@ docker_image() {
 
 start="$(free_kib)"
 note "disk cleanup on $(hostname -s): $(human "$start") free"
-[ -n "$held" ] || note "open-file inspection failed: Home and idle build output stay"
 step "lf monitor prune" lf monitor prune
 step "Home" home
 for repo in "$src"/*/; do

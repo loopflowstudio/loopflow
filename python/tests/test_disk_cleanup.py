@@ -27,12 +27,12 @@ def _age_tree(root: Path, age_days: float) -> None:
         _age(Path(directory), age_days)
 
 
-def _run(tmp_path: Path) -> str:
+def _run(tmp_path: Path, stubs: dict[str, str] | None = None, exit_code: int = 0) -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for tool in ("lf", "uv", "xcrun"):
+    for tool, body in {"lf": "exit 0", "uv": "exit 0", "xcrun": "exit 0", **(stubs or {})}.items():
         stub = bin_dir / tool
-        stub.write_text("#!/bin/sh\nexit 0\n")
+        stub.write_text(f"#!/bin/sh\n{body}\n")
         stub.chmod(0o755)
     env = {
         "HOME": str(tmp_path / "home"),
@@ -44,7 +44,7 @@ def _run(tmp_path: Path) -> str:
     result = subprocess.run(
         ["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=600
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == exit_code, result.stdout + result.stderr
     return result.stdout
 
 
@@ -129,3 +129,80 @@ def test_linked_worktree_loses_output_idle_for_four_hours(tmp_path: Path) -> Non
     assert not (idle / "target").exists(), out
     assert (recent / "target").exists(), out
     assert "written in the last 4 hours" in out
+
+
+@pytest.mark.parametrize("held", [False, True])
+def test_backup_with_recent_or_open_sidecar_is_kept(tmp_path: Path, held: bool) -> None:
+    lf = tmp_path / "home/.lf"
+    old = lf / "loopflow.db.backup-old"
+    sidecar = Path(f"{old}-wal")
+    _write(old, 30)
+    _write(sidecar, 30 if held else 0)
+    _write(lf / "loopflow.db.backup-new", 10)
+
+    # A read-only handle leaves the sidecar's old timestamp intact.
+    with sidecar.open("rb") if held else open(os.devnull, "rb"):
+        out = _run(tmp_path)
+
+    assert old.exists(), out
+    assert sidecar.exists(), out
+
+
+def test_cache_and_trash_keep_open_or_recent_contents_and_log_removals(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    for root in (home / "Library/Caches", home / ".Trash"):
+        for name, age in (("old", 40), ("held", 40), ("recent", 0)):
+            _write(root / name / "data", age)
+            _age_tree(root / name, 40)
+
+    with (home / "Library/Caches/held/data").open("rb"), (home / ".Trash/held/data").open("rb"):
+        out = _run(tmp_path)
+
+    for root in (home / "Library/Caches", home / ".Trash"):
+        assert not (root / "old").exists(), out
+        assert (root / "held/data").exists(), out
+        assert (root / "recent/data").exists(), out
+    log = (home / ".lf/logs/disk.log").read_text()
+    assert "removed cache" in log
+    assert "removed trash" in log
+
+
+def test_failed_open_file_inspection_stops_all_cleanup(tmp_path: Path) -> None:
+    cache = tmp_path / "home/Library/Caches/old/data"
+    _write(cache, 40)
+    _age_tree(cache.parent, 40)
+
+    out = _run(tmp_path, {"lsof": "exit 1"}, exit_code=1)
+
+    assert cache.exists(), out
+    assert "open-file inspection failed; stopping cleanup" in out
+
+
+def test_failed_modification_inspection_keeps_material(tmp_path: Path) -> None:
+    cache = tmp_path / "home/Library/Caches/old/data"
+    _write(cache, 40)
+    _age_tree(cache.parent, 40)
+
+    out = _run(
+        tmp_path, {"find": 'case "$1" in */Caches/old) exit 1;; esac\nexec /usr/bin/find "$@"'}
+    )
+
+    assert cache.exists(), out
+    assert "modification inspection failed" in out
+
+
+def test_process_in_checkout_keeps_its_idle_build_output(tmp_path: Path) -> None:
+    repo = tmp_path / "home/src/kata"
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / ".gitignore").write_text("target/\n")
+    _write(repo / "target/debug/kata", 3)
+    _age_tree(repo / "target", 3)
+    process = subprocess.Popen(["/bin/sleep", "600"], cwd=repo)
+    try:
+        out = _run(tmp_path)
+        assert (repo / "target/debug/kata").exists(), out
+        assert f"kept {repo} (held open)" in out
+    finally:
+        process.terminate()
+        process.wait(timeout=10)

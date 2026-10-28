@@ -100,7 +100,7 @@ def main() -> None:
     invoke(candidate, "self", "install", "promote", "--cli-target", entry)
     for cwd in [repo, checkout]:
         assert json.loads(invoke(entry, "config", "repository", "--json", cwd=cwd)) == identity
-        after = json.loads(invoke(entry, "task", "status", task["id"], "--json", cwd=cwd))
+        after = json.loads(invoke(entry, "desktop", "task", task["id"], "--json", cwd=cwd))
         assert after["task"]["id"] == task["id"]
         assert after["execution"]["worktree"] == str(checkout)
         invoke(entry, "session", "list", "--json", cwd=cwd)
@@ -123,7 +123,7 @@ def main() -> None:
     moved = home / "renamed"
     repo.rename(moved)
     assert json.loads(invoke(entry, "config", "repository", "--json", cwd=moved)) == identity
-    after_move = json.loads(invoke(entry, "task", "status", task["id"], "--json", cwd=moved))
+    after_move = json.loads(invoke(entry, "desktop", "task", task["id"], "--json", cwd=moved))
     assert after_move["execution"]["worktree"] == str(checkout)
     assert unpublished.read_text() == "retained edit\n"
     # Promotion retry and ordinary reads retain the same identity and checkout.

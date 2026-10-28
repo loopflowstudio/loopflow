@@ -621,7 +621,7 @@ def _prepare_native_fixture(output: Path, cli: Path) -> Path:
         raise RuntimeError("The one-task world did not hold exactly one Task-bound Session")
     task = json.loads(
         _fixture_cli(
-            cli, ["task", "status", records[0]["task_ids"][0], "--json"], repo, environment
+            cli, ["desktop", "task", records[0]["task_ids"][0], "--json"], repo, environment
         )
     )["task"]
     (transcript,) = Path(homes["CLAUDE_CONFIG_DIR"]).glob("projects/*/*.jsonl")

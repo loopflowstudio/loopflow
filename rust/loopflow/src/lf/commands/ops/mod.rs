@@ -397,7 +397,12 @@ pub(crate) fn run_sync_in(
 /// Stage every edit except local telemetry under `.lf/tmp/`, which is not
 /// work even in a repository that doesn't ignore it. True when any is staged.
 fn stage_uncommitted_work(repo: &Path) -> Result<bool> {
-    crate::git::git_stdout(repo, &["add", "-A", "--", ":/", ":(exclude,top).lf/tmp"])?;
+    // A literal `.lf/tmp` prefix makes Git reject the pathspec when ignored.
+    // Match the dot through a glob so ignored and unignored telemetry both work.
+    crate::git::git_stdout(
+        repo,
+        &["add", "-A", "--", ":/", ":(exclude,top,glob)[.]lf/tmp/**"],
+    )?;
     Ok(
         !crate::git::git_stdout(repo, &["diff", "--cached", "--name-only"])?
             .trim()

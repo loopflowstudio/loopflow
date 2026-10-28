@@ -162,6 +162,11 @@ lf wt create spike                  # a worktree beside the repository, in its l
 lf wt prune --branches --dry-run    # branches of merged PRs and finished Tasks
 ```
 
+Before merging into a feature branch, automatic sync checkpoints staged and
+unstaged edits together. It leaves generated telemetry under `.lf/tmp/` local,
+even without an ignore rule, and respects other ignored files. Files explicitly
+staged beforehand remain part of the checkpoint.
+
 Sync follows a stack parent through its squash merge. Stack one Task on
 another's open PR, even a draft:
 

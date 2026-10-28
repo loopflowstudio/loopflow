@@ -99,9 +99,10 @@ Jack: "we can stack on the migrations branch if necessary." This branch sits on
 #1755's head; `lf sync` follows it through its squash merge. Each slice lands
 working and tested before the next starts.
 
-1. **Minors from main — built 2026-10-28 (uncommitted).** `release.rs` drops
-   `MinorRelease`, the closing patch, `prepared_tree`, the `NeedsIntegration`
-   refusal, the prepare skip and the fix-forward ban; `collect_version_changes`
+1. **Minors from main — built 2026-10-28 (committed in `4b6ee82ba`).** `release.rs` drops
+   `MinorRelease`, the closing patch, `prepared_tree`, the minor-pair refusal
+   inside `NeedsIntegration` (the variant stays: an ordinary release PR behind
+   main still rebuilds on it), the prepare skip and the fix-forward ban; `collect_version_changes`
    bases a minor's notes (and its no-changes check) on the previous `.0`.
    Compress folded `is_minor_version`/`minor_notes_base` into `notes_base` and
    inlined `release_run_inner` (one caller left).

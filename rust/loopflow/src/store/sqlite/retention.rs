@@ -468,7 +468,10 @@ mod tests {
         finished(6, Some(3));
 
         let report = prune(&path, now).unwrap();
-        assert_eq!((report.closed_processes, report.forgotten_processes), (3, 3));
+        assert_eq!(
+            (report.closed_processes, report.forgotten_processes),
+            (3, 3)
+        );
         let rows: Vec<(String, Option<i64>, Option<String>)> = conn
             .prepare("SELECT id,completed_at,outcome FROM processes ORDER BY id")
             .unwrap()

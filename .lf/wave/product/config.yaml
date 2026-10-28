@@ -5,4 +5,4 @@ chat:
   provider: discord
   guild_id: '1333122108699709535'
   channel_id: '1528936130748223519'
-workflow: feature
+graph: feature

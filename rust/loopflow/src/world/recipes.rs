@@ -207,7 +207,7 @@ fn portfolio(world: &World) -> Result<()> {
         0.5,
     )?;
     world.task_run(&running, "feature", 0.03, 5, Outcome::Succeeded)?;
-    world.move_to(&running, "demo", "Built in the Session")?;
+    world.wait_at(&running, "demo")?;
     world.uncommitted(
         &running,
         &[(

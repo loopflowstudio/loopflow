@@ -58,9 +58,9 @@ pub enum GraphOutcome {
     Waiting,
     Interrupted,
     Blocked(String),
-    /// The runner reached this stage, where a person takes part; the slice
-    /// before it is complete.
-    Staged(String),
+    /// The runner stopped before this interactive step, where a person takes
+    /// part; everything before it is complete.
+    StoppedAt(String),
 }
 
 #[async_trait]
@@ -83,11 +83,22 @@ pub trait SkillExecutor: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct GraphRunner<E> {
     executor: E,
+    stop_at_interactive: bool,
 }
 
 impl<E> GraphRunner<E> {
     pub fn new(executor: E) -> Self {
-        Self { executor }
+        Self {
+            executor,
+            stop_at_interactive: false,
+        }
+    }
+
+    /// Stop before each interactive step instead of running it: a Task run
+    /// leaves that step to a person in the Task conversation.
+    pub fn stopping_at_interactive(mut self) -> Self {
+        self.stop_at_interactive = true;
+        self
     }
 }
 
@@ -122,7 +133,7 @@ impl<E: SkillExecutor> GraphRunner<E> {
     ) -> Result<Option<GraphOutcome>> {
         let (body, leaf) = cursor.current_body(items);
         let Some(item) = body.get(leaf.index) else {
-            // Older saved human settlements can leave a completed child
+            // Older saved interactive settlements can leave a completed child
             // waiting to return to its parent.
             return settle_step(items, cursor);
         };
@@ -130,8 +141,11 @@ impl<E: SkillExecutor> GraphRunner<E> {
             return settle_step(items, cursor);
         }
         if let ConcreteStep::Skill(skill) = item {
-            if let Some(stage) = skill.stage() {
-                return Ok(Some(GraphOutcome::Staged(stage.to_string())));
+            if let Some(step) = skill
+                .interactive_step()
+                .filter(|_| self.stop_at_interactive)
+            {
+                return Ok(Some(GraphOutcome::StoppedAt(step.to_string())));
             }
         }
         let ctx = ExecutionContext {
@@ -598,6 +612,37 @@ mod tests {
         assert_eq!(cursor.iteration, 2);
         assert_eq!(cursor.index, items.len());
         assert_eq!(executor.saved_cursor(), cursor);
+    }
+
+    #[tokio::test]
+    async fn interactive_steps_run_in_place_unless_a_task_run_stops_there() {
+        let repo = fixture_repo().unwrap();
+        let mut design = skill("design");
+        design.interactive = true;
+        let items = vec![
+            step("plan", None),
+            ConcreteStep::Skill(design),
+            step("build", None),
+        ];
+        // `lf graph`: the interactive step runs like any other.
+        let executor = RecordingExecutor::new(repo.path().to_owned());
+        let outcome = GraphRunner::new(executor.clone())
+            .run(&items, 0)
+            .await
+            .unwrap();
+        assert_eq!(outcome, GraphOutcome::Completed);
+        assert_eq!(executor.calls(), ["plan", "design", "build"]);
+        // `lf task run`: stop before it, with everything earlier done.
+        let executor = RecordingExecutor::new(repo.path().to_owned());
+        let mut cursor = ExecutionCursor::default();
+        let outcome = GraphRunner::new(executor.clone())
+            .stopping_at_interactive()
+            .run_with_cursor(&items, &mut cursor)
+            .await
+            .unwrap();
+        assert_eq!(outcome, GraphOutcome::StoppedAt("design".to_owned()));
+        assert_eq!(executor.calls(), ["plan"]);
+        assert_eq!(cursor.index, 1);
     }
 
     #[tokio::test]

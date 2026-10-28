@@ -26,6 +26,9 @@ setting, so reconnect executes only on Linux. The Rust harness still compiles on
 macOS; its tests are explicitly ignored there, not reported as behavioral passes.
 Include its Python command calls when renaming Task controls; Rust CLI parsing
 tests alone cannot catch stale commands in the Linux-only fixture.
+Changes to Task completion or Graph storage must run both reconnect proofs on
+Linux, including a disposable container when developing on macOS. Completion
+uses `task complete --reason`; retained execution is read from `task_graphs`.
 Include this fixture when changing Work storage or receipt field names: its SQL
 must read canonical Task fields, not retired provider JSON. To prove pending saves
 across a closed connection, make the peer unavailable during the save; short CLI

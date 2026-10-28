@@ -124,7 +124,7 @@ fn capture(binary: &Path, repo: &Path, home: &Path) -> Value {
             }
             WorkContent::Task(Some(part)) => {
                 let work = serde_json::to_value(&part.work).unwrap();
-                assert_eq!(work["workflow"], status["execution"]["work"]["workflow"]);
+                assert_eq!(work["graph"], status["execution"]["work"]["graph"]);
                 task = Some(frame);
             }
             _ => {}
@@ -140,20 +140,14 @@ fn contract(population: &Value) -> Value {
     for phase in ["merged", "completed", "arrived"] {
         let capture = &population[phase];
         let execution = &capture["status"]["execution"];
-        let workflow = &execution["work"]["workflow"];
-        let history: Vec<_> = workflow["history"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|entry| json!([entry["kind"], entry["from"], entry["to"], entry["edge"]]))
-            .collect();
+        let graph = &execution["work"]["graph"];
         let graphs: Vec<_> = capture["task_frame"]["body"]["graph_processes"].as_array().unwrap().iter()
             .map(|graph| json!({"state":graph["entry"]["state"], "steps":graph["steps"].as_array().unwrap().iter()
                 .map(|step| step["outcome"].clone()).collect::<Vec<_>>()})).collect();
         phases.insert(phase.into(), json!({
             "status": execution["status"], "pr": capture["row"]["pr"]["phase"],
-            "position": [workflow["position"]["kind"],workflow["position"]["node"],workflow["position"]["running"]],
-            "history": history, "graphs": graphs,
+            "position": [graph["position"]["kind"],graph["position"]["step"],graph["position"]["running"]],
+            "graphs": graphs,
         }));
     }
     Value::Object(phases)
@@ -195,7 +189,7 @@ fi
     let mut paths = vec![bin];
     paths.extend(std::env::split_paths(&path));
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
-    // The delivery edge holds in an ordinary owned execution until released.
+    // The delivery run holds in an ordinary owned execution until released.
     let hold = home.path().join("hold.py");
     fs::write(
         &hold,
@@ -248,7 +242,7 @@ while not (home / 'release').exists():
         // Authoritative simulated GitHub observation precedes any filing.
         runtime.block_on(crate::ops::task::reconcile_delivered_task(&store, &mut source)).unwrap();
         let merged = capture(&binary, repo.path(), home.path());
-        assert_eq!(merged["status"]["execution"]["work"]["workflow"]["position"]["running"], true);
+        assert_eq!(merged["status"]["execution"]["work"]["graph"]["position"]["running"], true);
         assert_ne!(merged["status"]["execution"]["status"], "done");
         // Exercise buffered filing while the selected planning transport is offline.
         provider.lock().unwrap().unavailable = true;
@@ -260,13 +254,13 @@ while not (home / 'release').exists():
         crate::ops::task::task_complete(repo.path(), "FIX-1", None).unwrap();
         let completed = capture(&binary, repo.path(), home.path());
         assert_eq!(completed["status"]["execution"]["status"], "done");
-        assert_eq!(completed["status"]["execution"]["work"]["workflow"], merged["status"]["execution"]["work"]["workflow"]);
+        assert_eq!(completed["status"]["execution"]["work"]["graph"], merged["status"]["execution"]["work"]["graph"]);
         assert!(graph.child.try_wait().unwrap().is_none());
         assert!(repo.path().exists());
         fs::write(home.path().join("release"), "").unwrap();
         assert!(graph.child.wait().unwrap().success(), "{}", fs::read_to_string(&log_path).unwrap());
         let arrived = capture(&binary, repo.path(), home.path());
-        assert_eq!(arrived["status"]["execution"]["work"]["workflow"]["position"], json!({"kind":"node", "node":"end"}));
+        assert_eq!(arrived["status"]["execution"]["work"]["graph"]["position"], json!({"kind":"at", "step":"end"}));
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let completions: i64 = db.query_row("SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='completed'", [], |row| row.get(0)).unwrap();
         assert_eq!(completions, 1);

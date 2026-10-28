@@ -1,4 +1,4 @@
--- A Wave's default Workflow is committed in `.lf/wave/<name>/config.yaml`;
+-- A Wave's default graph is committed in `.lf/wave/<name>/config.yaml`;
 -- the local selection it replaces is dropped.
 ALTER TABLE waves DROP COLUMN workflow;
 
@@ -34,7 +34,7 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 CREATE TRIGGER store_revision_provider_routes_delete AFTER DELETE ON provider_routes
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
--- Your own overrides of shared setup (`workflow`, `agent`, `skill_agents.<skill>`)
+-- Your own overrides of shared setup (`graph`, `agent`, `skill_agents.<skill>`)
 -- for a Wave, a repository or every repository, set by `lf set`.
 CREATE TABLE scope_settings (
     scope_kind TEXT NOT NULL CHECK (scope_kind IN ('wave', 'repository', 'global')),

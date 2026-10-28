@@ -20,7 +20,16 @@ thread_local! {
     static AFTER_SELECTION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
 
-pub(crate) const ROOTS: [&str; 4] = ["target", ".build", "swift/.build", "website/node_modules"];
+pub(crate) const ROOTS: [&str; 6] = [
+    "target",
+    ".build",
+    "swift/.build",
+    "node_modules",
+    "website/node_modules",
+    ".venv",
+];
+/// lsof across a busy Machine and a walk of a large `target/` each take tens of seconds.
+const INSPECTION_DEADLINE: Duration = Duration::from_secs(180);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct BuildCleanupEntry {
@@ -46,8 +55,8 @@ pub(crate) struct BuildCleanupPolicy {
 }
 
 fn output(command: &mut Command) -> Result<Vec<u8>> {
-    let output = bounded_output(command, Duration::from_secs(5))
-        .context("inspection failed or exceeded its five-second deadline")?;
+    let output = bounded_output(command, INSPECTION_DEADLINE)
+        .context("inspection failed or exceeded its deadline")?;
     if !output.status.success() {
         bail!("inspection failed");
     }
@@ -216,7 +225,7 @@ fn inspect_candidate(
         path,
         path,
         cutoff,
-        Instant::now() + Duration::from_secs(5),
+        Instant::now() + INSPECTION_DEADLINE,
         &mut HashSet::new(),
     )
 }

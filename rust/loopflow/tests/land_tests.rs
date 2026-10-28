@@ -461,8 +461,15 @@ fn land_cleans_added_scratch_and_retains_existing_edits() {
 }
 
 #[test]
-fn final_preparation_keeps_published_history_when_the_base_changes() {
-    for (manual_merge, advance_base) in [(false, false), (true, false), (false, true)] {
+fn final_preparation_keeps_published_history_and_merges_main_only_on_conflict() {
+    // (manual merge, main advanced, GitHub reports the PR conflicting)
+    for (manual_merge, advance_base, conflicting) in [
+        (false, false, false),
+        (true, false, false),
+        (false, true, false),
+        (false, true, true),
+        (true, true, true),
+    ] {
         let home = tempfile::TempDir::new().unwrap();
         let repo = TestRepo::new();
         repo.create_file("scratch/.gitkeep", "");
@@ -484,8 +491,14 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
             repo.checkout("feature");
         }
         let gh_log = home.path().join("gh.log");
-        let script = gh_existing_pr_script(gh_log.to_str().unwrap())
+        let mut script = gh_existing_pr_script(gh_log.to_str().unwrap())
             .replace("git rev-parse HEAD", "git rev-parse @{upstream}");
+        if conflicting {
+            script = script.replace(
+                r#""mergeStateStatus":"CLEAN""#,
+                r#""mergeStateStatus":"DIRTY""#,
+            );
+        }
         let _env = EnvGuard::with_lf_home(&[("gh", script.as_str())], home.path());
         let options = LandOptions {
             strict: true,
@@ -502,7 +515,7 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
         } else {
             land(repo.path(), &options, &NullProgress).unwrap();
         }
-        if advance_base {
+        if conflicting {
             assert_ne!(repo.head_sha(), published_head);
             assert!(loopflow::git::is_ancestor(repo.path(), &published_head, "HEAD").unwrap());
             assert_eq!(
@@ -510,7 +523,9 @@ fn final_preparation_keeps_published_history_when_the_base_changes() {
                 "new upstream work"
             );
         } else {
+            // A repair or re-arm on a mergeable PR keeps the base its checks ran on.
             assert_eq!(repo.head_sha(), published_head);
+            assert!(!repo.path().join("upstream.txt").exists());
         }
         assert_eq!(
             fs::read_to_string(repo.path().join("feature.txt")).unwrap(),
@@ -1881,7 +1896,7 @@ fn waited_task_landing_repairs_beside_the_open_task_session() {
 }
 
 #[test]
-fn waited_task_landing_completes_at_workflow_end_without_another_command() {
+fn waited_task_landing_completes_at_graph_end_without_another_command() {
     waited_task_landing("end", false);
 }
 
@@ -1920,7 +1935,7 @@ fn waited_task_landing(destination: &str, failed_startup: bool) {
     }
     repo.create_branch("waited-repair");
     let worktree = repo.path().canonicalize().unwrap();
-    // The graph lands, then reaches a stage or its end.
+    // The graph lands, then reaches an interactive step or its end.
     let mut graph = "- cmd: graph show deliver\n- cmd: pr land --wait-and-fix --strict --title waited-repair --body Repair-without-Desktop\n".to_string();
     if destination != "end" {
         graph.push_str("- interactive: {name: demo, id: review}\n");
@@ -2045,20 +2060,46 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     }
     let out = home.path().join("run.stdout");
     let err = home.path().join("run.stderr");
+    // `-b` runs interactive steps headless too, so a run that must stop at
+    // review is bare: it may return once its Graph registers and carry on in
+    // that Graph's log.
+    let mut args = vec!["task", "run", "INF-123", "delivery-proof"];
+    if destination == "end" {
+        args.insert(0, "-b");
+    }
     let mut waiter = Waiter(
         command()
-            .args(["-b", "task", "run", "INF-123", "delivery-proof"])
+            .args(&args)
             .stdout(fs::File::create(&out).unwrap())
             .stderr(fs::File::create(&err).unwrap())
             .spawn()
             .unwrap(),
         home.path().join("loopflow.db"),
     );
+    let printed = |label: &str| {
+        let out = fs::read_to_string(&out).unwrap();
+        out.split(label)
+            .nth(1)
+            .and_then(|rest| rest.split_whitespace().next())
+            .map(str::to_owned)
+    };
     let read = || {
-        (
-            fs::read_to_string(&out).unwrap(),
-            fs::read_to_string(&err).unwrap(),
+        let mut error = fs::read_to_string(&err).unwrap();
+        if let Some(log) = printed("log:    ") {
+            error.push_str(&fs::read_to_string(log).unwrap_or_default());
+        }
+        (fs::read_to_string(&out).unwrap(), error)
+    };
+    // The run's carrier: this process, or the bare run's Graph process's parent.
+    let carrier_exit = || -> Option<i64> {
+        let graph = printed("running as Graph process ")?;
+        db.query_row(
+            "SELECT c.exit_code FROM processes g JOIN processes c ON c.id=g.parent_lf_process_id
+             WHERE g.id=?1 AND c.completed_at IS NOT NULL",
+            [graph],
+            |row| row.get(0),
         )
+        .ok()
     };
     let wait_for = |reported: &str| {
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -2095,9 +2136,14 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         return;
     }
     let deadline = Instant::now() + Duration::from_secs(120);
-    let status = loop {
+    let succeeded = loop {
+        if let Some(code) = carrier_exit() {
+            break code == 0;
+        }
         if let Some(status) = waiter.0.try_wait().unwrap() {
-            break status;
+            if printed("running as Graph process ").is_none() {
+                break status.success();
+            }
         }
         let (output, error) = read();
         assert!(
@@ -2107,7 +2153,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         std::thread::sleep(Duration::from_millis(25));
     };
     let (output, error) = read();
-    assert!(status.success(), "{output}\n{error}");
+    assert!(succeeded, "{output}\n{error}");
     assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
     let session_open: bool = db
         .query_row(
@@ -2141,18 +2187,18 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         (repaired_head.trim().into(), repaired_head.trim().into())
     );
     assert!(
-        output.contains("Pull request merged; Task completion can proceed"),
-        "{output}"
+        format!("{output}{error}").contains("Pull request merged; Task completion can proceed"),
+        "{output}{error}"
     );
-    let node: String = db
+    let step: String = db
         .query_row(
-            "SELECT node FROM task_workflows WHERE task_id=?1",
+            "SELECT step FROM task_graphs WHERE task_id=?1",
             [fixture.task.id.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(node, destination);
-    // Short of `end` the Task waits at a stage with nothing running.
+    assert_eq!(step, destination);
+    // Short of `end` the Task waits at an interactive step with nothing running.
     let expected_state = if destination == "end" {
         "done"
     } else {
@@ -2179,7 +2225,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
         status["execution"]["status"], expected_state,
-        "only an edge reaching end authorizes Task completion"
+        "only a run reaching end authorizes Task completion"
     );
     assert_eq!(support::recorded_graphs(home.path()).len(), 1);
 }

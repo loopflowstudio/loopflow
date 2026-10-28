@@ -4,7 +4,7 @@ You've launched a Skill and a Graph. This page makes them yours: which agent
 runs each step, which machine runs the Graph, how a Task moves from idea to
 landed PR, and how a Wave keeps going.
 
-Loopflow ships reasonable workflows for software engineering, and they are
+Loopflow ships reasonable Graphs for software engineering, and they are
 templates. Copy one with `lf graph customize pursue`, change it, or write down
 the way you work and share it.
 
@@ -58,14 +58,15 @@ A repository Skill's `docs:` adds files to its context, resolved like `--docs`.
 
 ```bash
 lf -b graph ship-api                     # headless, step to step; returns when it ends
-lf -i graph ship-api                     # each step opens in the agent; exit it to advance
+lf -i graph ship-api                     # every step opens in the agent; exit it to advance
 lf --machine mini -b graph ship-api      # the whole Graph on another machine you added
 lf graph ship-api --context --json       # what the first step would receive; launches nothing
 ```
 
-Without `-i`, every step runs headless, even from a terminal. A failed step
-stops the Graph. A stopped Graph is history: inspect it with
-`lf graph show ID --processes`, then start fresh work. Nothing resumes it.
+Without `-i` or `-b`, steps run headless except `interactive:` ones, which open
+here ([below](#where-a-person-takes-part)). A failed step stops the Graph. A
+stopped Graph is history: inspect it with `lf graph show ID --processes`, then
+start fresh work. Nothing resumes it.
 
 Mechanical steps ride along as commands:
 
@@ -116,11 +117,11 @@ work. Name your own decider with `step:`:
         description: "No actionable defect in the supplied change"
 ```
 
-## Workflows
+## Where a person takes part
 
-A Task's Workflow is a graph whose `interactive:` steps are stages: places
-where you take part in the Task's conversation. Everything between stages runs
-on its own.
+A step written `interactive: <skill>` is where a person takes part; every other
+step runs headless. A Task's workflow is the Graph it took up and the step it
+stands at.
 
 ```yaml
 # feature (builtin)
@@ -136,48 +137,52 @@ on its own.
 ```
 
 ```bash
-lf task run LOO-12              # start: runs kickoff up to explore
-lf task run LOO-12 pursue       # at explore: build it, up to demo
-lf ship LOO-12                  # every remaining step to merge, standing in at each stage
-lf task workflow move LOO-12 explore --reason "rethink the API"   # go back, running nothing
+lf graph feature                    # explore and demo open here with you; the rest runs on its own
+lf -b graph feature                 # every step headless; an agent stands in at explore and demo
+lf task run LOO-12 feature          # runs up to explore and stops; the Task waits in its conversation
+lf task run LOO-12                  # after you're done there: on to demo
+lf task run LOO-12 --from kickoff   # go back a round
+lf -b task run LOO-12               # the rest, straight through to a merged PR
+lf ship LOO-12                      # the same, returning once the Task is shipping
 ```
 
-Routes between stages are named by what they run first (the composed graph,
-else the skill): `pursue` and `deliver` above, and `end` for a route that runs
-nothing. A run moves the Task onto the route; success puts it at the next stage.
-A failed or stopped Graph leaves it on the route: run it again, take another,
-or `move` it. `lf task status LOO-12` shows the stage, the routes you can take
-now and every move with who made it. There is no approve command; give feedback
-in the Task's conversation, which knows its stage and the command for each route.
-
-`lf ship` returns once the Task is shipping; a headless agent stands in at each
-remaining stage, decides advance or repeat, and records why in the Task's
-history. `lf ship --stop` withdraws it. Any route into `end` ships the same way.
+`-i` makes every step of a launch interactive and `-b` every step headless. At an
+interactive step with a loop behind it, you, or the agent standing in, decide
+advance or iterate; blocked there, the Task waits at that step. A run that
+otherwise stops or fails leaves the Task where that run began; the next
+`lf task run` starts it again. `--from` takes a step's id, its Skill, or the
+Graph it was composed from; starting from an interactive step only puts the Task
+there. After the last step the Task reaches `end`, which requests completion.
+`lf ship` or any run into `end` hands the Task to Auto-Ship, which may land its
+PR. Other Graphs in the Task's worktree never move it. There is no approve command: give feedback in the
+Task's conversation, which knows its step and how to go on. `lf ship --stop`
+withdraws Auto-Ship.
 
 | Task state | When |
 |---|---|
 | `unstarted` | no checkout yet |
-| `idle` | a checkout, no Graph running, not at a stage |
-| `active` | at a stage, in its Task Session |
-| `moving` | a Graph runs, with a stage ahead that stops for you |
-| `shipping` | a Graph runs and no stage ahead stops it |
+| `idle` | a checkout, nothing running, not at an interactive step |
+| `active` | at an interactive step, in its Task Session |
+| `moving` | a run carries it, with an interactive step ahead |
+| `shipping` | a run carries it and nothing ahead stops it |
 | `deferred` · `done` · `abandoned` | held, completed, dropped |
 
 Builtins are `feature` (explore, demo, deliver, verify), `code` (demo, deliver,
-verify), `auto` (pursue then deliver, no stops: request to merged PR without
-you) and `research` (findings, no PR). To change one, copy it, commit it, and
-select it for a Wave with `workflow: feature` in `.lf/wave/product/config.yaml`:
+verify), `auto` (pursue then deliver, no interactive step: request to merged PR
+without you) and `research` (findings, no PR). To change one, copy it, commit it,
+and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:
 
 ```bash
-lf graph customize feature                   # copies the builtin to .lf/graphs/feature.yaml
-lf --wave product set workflow feature       # or only for you, without committing
+lf graph customize feature                # copies the builtin to .lf/graphs/feature.yaml
+lf --wave product set graph feature       # or only for you, without committing
 ```
 
 Commit those files; teammates run your definition once they have your commit.
-A Task captures its Workflow on its first `lf task run`: the one you name, then
-your `lf set workflow` for its Wave and then its repository, then its Wave's
-`workflow:`, then the repository's in `.lf/config.yaml`, then builtin `code`. Later edits apply to new Tasks; `lf task workflow restart LOO-12`
-moves an existing one back to `start` without reloading it.
+
+A Task takes up its Graph on its first `lf task run`: the one you name, then
+your `lf set graph` for its Wave and then its repository, then its Wave's
+`graph:`, then the repository's in `.lf/config.yaml`, then builtin `code`. It keeps
+that Graph as it was; later edits apply to Tasks that take it up afterwards.
 
 ## Run Tasks on other machines
 

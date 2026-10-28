@@ -65,7 +65,7 @@ pub(crate) mod wave_definitions;
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
 pub use scope_defaults::ScopeSettings;
-pub(crate) use task_work::{EndMove, TaskShipping};
+pub(crate) use task_work::TaskShipping;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable

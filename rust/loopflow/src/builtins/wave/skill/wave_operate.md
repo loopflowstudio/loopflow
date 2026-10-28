@@ -89,12 +89,12 @@ already holds a disposition above.
   report an unchanged failure instead of repeating it.
 - **A Graph ends where authored.** A finished Graph or published PR does not
   complete the Task. Name what remains and the PR or Task conversation awaiting
-  a decision. A Task on a workflow (`execution.work.workflow`) at a stage its
-  last route reached is available to the person there; rerun a route that stopped or
-  failed with `lf task run <issue> <graph>`, and take no other route for them;
-  do not choose a new direction or arm an unapproved merge.
+  a decision. A Task waiting at an interactive step (`work.graph` in status) is
+  available to the person there; start a run that stopped or failed again with
+  `lf task run <issue>`, and do not continue past their step for them, choose a
+  new direction or arm an unapproved merge.
 - **Retry completion alone.** A durable completion request at end retries with
-  `lf task complete <issue>`, never `task run` or gate. Completion, Workflow
+  `lf task complete <issue>`, never `task run` or gate. Completion, graph
   position and Process liveness are independent. A newer reopening supersedes
   old intent; end alone cannot re-complete it.
 - **Finish merged delivery.** Merge alone does not complete a Task. Inspect
@@ -149,9 +149,9 @@ is an approval prerequisite. A Task's Graphs carry its autonomous work; do not
 perform a Graph's steps here. Preserve Graph history, conversation reviews,
 worktrees, ownership and execution history.
 
-- Continue a Task you own with `lf task run <issue-id>`; it takes the Task's
-  Workflow route or default Graph. Each run is a fresh Graph and returns once it
-  is running; `lf task status <issue-id>` follows it. Leave a live one running
+- Continue a Task you own with `lf task run <issue-id>`; it runs the Task's
+  graph until the next interactive step. Each run is a fresh Graph process and
+  returns once it is running; `lf task status <issue-id>` follows it. Leave a live one running
   instead of duplicating it.
 - Use supported Task/Work operations, not raw stores, unclaimed process
   signals or a competing worker on this Machine. A missing Machine stays an

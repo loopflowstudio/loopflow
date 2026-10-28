@@ -630,8 +630,8 @@ fn print_task_snapshot(
             branch,
             pm_writeback,
         );
-        if let Some(workflow) = &snapshot.work.workflow {
-            println!("  {}", workflow.summary());
+        if let Some(graph) = &snapshot.work.graph {
+            println!("  {}", graph.summary());
         }
         if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");
@@ -816,47 +816,21 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             print_planning_sync(&saved.1);
             Ok(())
         }
-        WaveCommand::Workflow { cmd } => {
-            use loopflow::lf::WaveWorkflowCommand;
+        WaveCommand::Graph { cmd } => {
+            use loopflow::lf::WaveGraphCommand;
             tokio::runtime::Runtime::new()?.block_on(async {
                 match cmd {
-                    WaveWorkflowCommand::List { json } => {
-                        let entries = loopflow::workflow::workflow_catalog(repo)?;
-                        if *json {
-                            println!("{}", serde_json::to_string(&entries)?);
-                        } else {
-                            for entry in entries {
-                                println!(
-                                    "{}{}",
-                                    entry.name,
-                                    entry
-                                        .unavailable
-                                        .map(|e| format!(" (unavailable: {e})"))
-                                        .unwrap_or_default()
-                                );
-                            }
-                        }
-                    }
-                    WaveWorkflowCommand::Source { name } => {
-                        print!(
-                            "{}",
-                            loopflow::workflow::read_workflow_source(name, repo)?.ok_or_else(
-                                || anyhow::anyhow!(loopflow::workflow::missing_workflow(name))
-                            )?
-                        );
-                    }
-                    WaveWorkflowCommand::Show { wave, json } => {
-                        let selected = project::workflow(repo, wave.as_deref()).await?;
+                    WaveGraphCommand::Show { wave, json } => {
+                        let selected = project::wave_graph(repo, wave.as_deref()).await?;
                         if *json {
                             println!("{}", serde_json::to_string_pretty(&selected)?);
                         } else {
                             println!(
                                 "{} · {}",
                                 selected.wave,
-                                selected
-                                    .workflow
-                                    .as_deref()
-                                    .unwrap_or("No workflow selected")
+                                selected.graph.as_deref().unwrap_or(
+                                    "no graph selected; Tasks take up the repository's `graph:`, or code"
+                                )
                             );
                         }
                     }
@@ -989,31 +963,6 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             unreachable!("location reads precede repository commands")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
-        TaskCommand::Workflow { cmd } => match cmd {
-            loopflow::lf::TaskWorkflowCommand::Move {
-                issue,
-                stage,
-                reason,
-            } => {
-                println!(
-                    "{}",
-                    loopflow::ops::task::workflow_set(issue, stage, reason.as_deref())?
-                );
-                Ok(())
-            }
-            loopflow::lf::TaskWorkflowCommand::Show { issue, json: _ } => {
-                let workflow = loopflow::ops::task::workflow_show(issue)?;
-                println!("{}", serde_json::to_string_pretty(&workflow)?);
-                Ok(())
-            }
-            loopflow::lf::TaskWorkflowCommand::Restart { issue } => {
-                println!(
-                    "{}",
-                    loopflow::ops::task::workflow_set(issue, "start", Some("Restart Workflow"),)?
-                );
-                Ok(())
-            }
-        },
         TaskCommand::Sync {
             issue,
             retry_creation,
@@ -1040,7 +989,7 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
         }
         TaskCommand::Reopen { issue, reason } => {
             loopflow::ops::task::task_reopen(issue, reason.as_deref())?;
-            println!("{issue}: reopened; Workflow unchanged");
+            println!("{issue}: reopened; its Graph unchanged");
             Ok(())
         }
         TaskCommand::Complete { issue, reason } => {
@@ -1629,10 +1578,8 @@ fn run() -> anyhow::Result<()> {
         &cli.command,
         Some(Commands::Wave {
             cmd: WaveCommand::Show { .. }
-                | WaveCommand::Workflow {
-                    cmd: loopflow::lf::WaveWorkflowCommand::List { .. }
-                        | loopflow::lf::WaveWorkflowCommand::Show { .. }
-                        | loopflow::lf::WaveWorkflowCommand::Source { .. }
+                | WaveCommand::Graph {
+                    cmd: loopflow::lf::WaveGraphCommand::Show { .. }
                 }
         })
     );
@@ -1929,6 +1876,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         cmd:
             TaskCommand::Run {
                 graph,
+                from,
                 name,
                 stack_on,
                 directive,
@@ -1945,10 +1893,12 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 agent: cli.agent.clone(),
                 name: name.clone(),
                 graph: graph.clone(),
+                from: from.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
             },
+            cli.batch || cli.interactive,
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -2087,40 +2037,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     };
     if let Some((wave, request)) = planning {
         let report = loopflow::lf::commands::context::explain_task_planning(task, wave, &request)?;
-        if json {
-            println!("{}", serde_json::to_string_pretty(&report)?);
-        } else {
-            println!("{}", report.render());
-        }
-        return Ok(());
-    }
-    let movement = match &cli.command {
-        Some(Commands::Task {
-            cmd:
-                TaskCommand::Workflow {
-                    cmd:
-                        loopflow::lf::TaskWorkflowCommand::Move {
-                            issue,
-                            stage,
-                            reason,
-                        },
-                },
-        }) => Some((issue.as_str(), stage.as_str(), reason.as_deref())),
-        Some(Commands::Task {
-            cmd:
-                TaskCommand::Workflow {
-                    cmd: loopflow::lf::TaskWorkflowCommand::Restart { issue },
-                },
-        }) => Some((issue.as_str(), "start", Some("Restart Workflow"))),
-        _ => None,
-    };
-    if let Some((task, node, reason)) = movement {
-        let report = loopflow::lf::commands::context::explain_task_move(
-            task,
-            cli.wave.as_deref(),
-            node,
-            reason,
-        )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
@@ -2413,6 +2329,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             TaskCommand::Run {
                 issue,
                 graph,
+                from,
                 name,
                 stack_on,
                 directive,
@@ -2428,7 +2345,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             .context("No Task selected")?;
         let directory = loopflow::repo::working_directory()?;
         let repo = selected_task_repository(&cli, &directory, Some(issue))?;
-        let (task, graph) = loopflow::ops::task::task_place(
+        let (task, start) = loopflow::ops::task::task_place(
             &repo,
             issue,
             loopflow::ops::task::TaskProcessOptions {
@@ -2437,24 +2354,34 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 agent: cli.agent.clone(),
                 name: name.clone(),
                 graph: graph.clone(),
+                from: from.clone(),
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
             },
+            if cli.interactive {
+                loopflow::ops::task::TaskRunMode::InPlace
+            } else if cli.batch {
+                loopflow::ops::task::TaskRunMode::Headless
+            } else {
+                loopflow::ops::task::TaskRunMode::Stop
+            },
         )?;
-        let Some(edge) = graph else {
-            // An edge that runs nothing: setting out on it is the whole move.
-            println!(
-                "Task {} moved along a route that runs nothing",
-                task.identifier
-            );
-            return Ok(());
+        let step = match start {
+            loopflow::ops::task::TaskRunStart::Run(step) => step,
+            loopflow::ops::task::TaskRunStart::Waiting(step) => {
+                println!("Task {} waits at {step}", task.identifier);
+                return Ok(());
+            }
+            loopflow::ops::task::TaskRunStart::Ended => {
+                println!("Task {} reached the end of its graph", task.identifier);
+                return Ok(());
+            }
         };
-        // This process carries the edge and writes where it left the Task: at
-        // the edge's target once an attempt at its slice succeeded, otherwise
-        // still on the edge.
-        loopflow::lf::commands::graph::run_task_edge_for(&cli, &task, &edge, true)?;
-        return Ok(loopflow::ops::task::workflow_arrive(&task)?);
+        // This process carries the run; its Graph process writes where the
+        // Task stopped. A run that never arrives leaves the Task to start it again.
+        loopflow::lf::commands::graph::run_task_graph_for(&cli, &task, &step, true)?;
+        return Ok(loopflow::ops::task::task_run_finished(&task)?);
     }
     if let Some(Commands::Ship {
         graph,
@@ -2686,7 +2613,7 @@ fn execute_command(
             cmd: cmd @ WaveCommand::Rename { .. },
         }) => in_directory_runtime(args, |repo| run_wave_command(repo, cmd)),
         Some(Commands::Wave {
-            cmd: cmd @ WaveCommand::Workflow { .. },
+            cmd: cmd @ WaveCommand::Graph { .. },
         }) => {
             let cwd = std::env::current_dir()?;
             let repo = loopflow::repo::discover_repo_root(&cwd)?.unwrap_or(cwd);
@@ -2743,9 +2670,6 @@ fn execute_command(
             Some(cmd) => loopflow::lf::commands::monitor::run(cmd),
             None => loopflow::lf::commands::monitor::overview(*json, *all),
         },
-        Some(Commands::Disk { json, cmd }) => {
-            loopflow::lf::commands::disk::run(*json, cmd.as_ref())
-        }
         Some(Commands::History { feed, cmd }) => match cmd {
             Some(cmd) => loopflow::lf::commands::history::run(cmd),
             None => loopflow::lf::commands::activity::run(feed),
@@ -2761,10 +2685,10 @@ fn execute_command(
             unreachable!("install dispatches before home routing")
         }
         Some(Commands::Graph { cmd }) => match cmd {
-            GraphCommand::Route => {
+            GraphCommand::Run => {
                 let repo_root = loopflow::repo::working_directory()?;
                 with_runtime(&repo_root, args, || {
-                    loopflow::lf::commands::graph::run_task_edge(cli, &repo_root, binding)
+                    loopflow::lf::commands::graph::run_task_graph(cli, &repo_root, binding)
                 })
             }
             GraphCommand::List { json, inventory } if inventory.processes => {

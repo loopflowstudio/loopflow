@@ -701,7 +701,7 @@ mod tests {
                 b.task_state(&task).unwrap() == crate::durable::TaskState::Deferred,
                 deferred
             );
-            assert!(b.workflow(&task).unwrap().is_none());
+            assert!(b.task_graph(&task).unwrap().is_none());
             assert!(b.task(&task).unwrap().unwrap().worktree.is_none());
         }
     }
@@ -821,7 +821,11 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",rusqlite::params![task.as_str(),r#"{"name":"review","nodes":[{"name":"review","skill":"review","description":null}],"edges":[]}"#]).unwrap();
+            conn.execute(
+                "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'review',1)",
+                rusqlite::params![task.as_str(), r#"{"name":"review","steps":[]}"#],
+            )
+            .unwrap();
         }
         let local_wave = b.task(&task).unwrap().unwrap().wave_id;
         {
@@ -841,7 +845,7 @@ mod tests {
                 "agent_sessions",
                 "session_events",
                 "session_activity",
-                "task_workflows",
+                "task_graphs",
                 "task_state_deliveries",
             ]
             .into_iter()
@@ -910,7 +914,7 @@ mod tests {
         let conn = b.conn.lock().unwrap();
         assert_eq!(
             conn.query_row(
-                "SELECT node FROM task_workflows WHERE task_id=?1",
+                "SELECT step FROM task_graphs WHERE task_id=?1",
                 [task.as_str()],
                 |r| r.get::<_, String>(0)
             )

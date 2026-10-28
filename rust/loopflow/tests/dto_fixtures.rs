@@ -93,7 +93,7 @@ fn wave_detail_preserves_graph_and_machine() {
         loopflow::store::sqlite::ProjectReadinessState::Ready
     );
     assert!(snapshot.project_readiness.activation.is_none());
-    assert_eq!(snapshot.setup.workflow.value.as_deref(), Some("code"));
+    assert_eq!(snapshot.setup.graph.value.as_deref(), Some("code"));
     assert_eq!(
         snapshot.setup.skill_agents["implement"].source,
         loopflow::work::wave::setup::SetupSource::Wave
@@ -182,7 +182,7 @@ fn status_and_roadmap_require_the_shared_metric_portfolio() {
     );
     assert!(
         serde_json::to_value(&roadmap.waves[0].projects).unwrap()["items"][0]
-            .get("workflow")
+            .get("graph")
             .is_none()
     );
     assert_eq!(
@@ -475,25 +475,17 @@ fn task_work_preserves_all_owners() {
     assert_eq!(work.sessions.len(), 2);
     assert_eq!(work.graph_processes.len(), 1);
     assert!(!work.processes.is_empty());
-    let workflow = work.workflow.as_ref().expect("fixture Task has a workflow");
+    let graph = work.graph.as_ref().expect("fixture Task has a graph");
     assert_eq!(
-        workflow.position,
-        loopflow::ops::workflow::WorkflowPosition::Edge {
-            edge: 2,
-            lf_process_id: work.graph_processes[0].summary.id.clone(),
+        graph.position,
+        loopflow::task_graph::TaskGraphPosition::Run {
+            step: "review-design".into(),
+            lf_process_id: work.graph_processes[0].summary.id.to_string(),
             running: true,
         }
     );
-    // A conversation's move names it; an edge's arrival names no one.
-    let asked = workflow.history.last().expect("fixture has history");
-    assert_eq!(
-        asked.actor,
-        loopflow::ops::workflow::WorkflowActor::Conversation
-    );
-    assert_eq!(
-        asked.session_id.as_deref(),
-        Some(work.sessions[0].id.as_str())
-    );
+    assert_eq!(graph.step(), "review-design");
+    assert!(graph.waiting_step().is_none());
     assert_eq!(
         serde_json::to_value(work).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()
@@ -581,19 +573,6 @@ fn work_frames_keep_each_part_and_require_every_envelope_field() {
 }
 
 #[test]
-fn separate_workflow_catalog_preserves_invalid_sources() {
-    let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/workflow_catalog.json"
-    ))
-    .unwrap();
-    let entries: Vec<loopflow::workflow::WorkflowCatalogEntry> =
-        serde_json::from_value(value.clone()).unwrap();
-    assert!(entries[0].workflow.is_some());
-    assert!(entries[1].workflow.is_none() && entries[1].unavailable.is_some());
-    assert_eq!(serde_json::to_value(entries).unwrap(), value);
-}
-
-#[test]
 fn task_delivery_preserves_execution_and_due_unstarted_tasks() {
     use loopflow::lf::commands::waves::RoadmapTask;
     let json = include_str!("../../../tests/fixtures/dto/task_delivery_rows.json");
@@ -626,7 +605,7 @@ fn task_delivery_preserves_execution_and_due_unstarted_tasks() {
 }
 
 #[test]
-fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
+fn composed_lifecycle_preserves_completion_before_graph_arrival() {
     use loopflow::lf::commands::waves::RoadmapTask;
     use loopflow::lf::commands::work_watch::{WorkContent, WorkFrame};
     use loopflow::ops::task::TaskStatus;
@@ -649,7 +628,7 @@ fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
             panic!("planning frame missing")
         };
         let execution = status.execution.unwrap();
-        assert_eq!(task.work.workflow, execution.work.workflow);
+        assert_eq!(task.work.graph, execution.work.graph);
         assert_eq!(row.runtime.as_ref().unwrap().status, execution.status);
         let loopflow::lf::commands::waves::Evidence::Ok { items, .. } =
             plan.roadmap.wave_tasks(&plan.roadmap.waves[0])
@@ -666,16 +645,16 @@ fn composed_lifecycle_preserves_completion_before_workflow_arrival() {
         }
     }
     assert_eq!(
-        captures["merged"]["status"]["execution"]["work"]["workflow"],
-        captures["completed"]["status"]["execution"]["work"]["workflow"]
+        captures["merged"]["status"]["execution"]["work"]["graph"],
+        captures["completed"]["status"]["execution"]["work"]["graph"]
     );
     assert_eq!(
-        captures["completed"]["status"]["execution"]["work"]["workflow"]["position"]["running"],
+        captures["completed"]["status"]["execution"]["work"]["graph"]["position"]["running"],
         true
     );
     assert_eq!(
-        captures["arrived"]["status"]["execution"]["work"]["workflow"]["position"],
-        serde_json::json!({"kind":"node","node":"end"})
+        captures["arrived"]["status"]["execution"]["work"]["graph"]["position"],
+        serde_json::json!({"kind":"at","step":"end"})
     );
 }
 
@@ -819,19 +798,15 @@ fn task_run_explanations_preserve_actions_and_missing_evidence() {
     let reports: Vec<TaskRunExplanation> = serde_json::from_str(json).unwrap();
     assert!(matches!(
         &reports[0].action,
-        Some(TaskRunAction::Edge { take_up: true, .. })
+        Some(TaskRunAction::Run { take_up: true, stops_at: Some(step), .. }) if step == "explore"
     ));
     assert!(matches!(
         &reports[1].action,
-        Some(TaskRunAction::Edge { runs: false, .. })
+        Some(TaskRunAction::Wait { take_up: false, step, .. }) if step == "demo"
     ));
     assert!(matches!(
         &reports[2].action,
-        Some(TaskRunAction::Edge {
-            take_up: false,
-            runs: true,
-            ..
-        })
+        Some(TaskRunAction::End { take_up: false, .. })
     ));
     assert!(reports[3].action.is_none());
     assert_eq!(
@@ -1011,34 +986,6 @@ fn repository_identity_preserves_explicit_local_locators() {
 }
 
 #[test]
-fn task_move_explanations_preserve_positions_and_completion_uncertainty() {
-    use loopflow::ops::task::TaskMoveExplanation;
-    use loopflow::ops::workflow::WorkflowPosition;
-    let json = include_str!("../../../tests/fixtures/dto/task_move_explanations.json");
-    let reports: Vec<TaskMoveExplanation> = serde_json::from_str(json).unwrap();
-    let restart = reports[0].action.as_ref().unwrap();
-    assert!(matches!(
-        restart.from,
-        Some(WorkflowPosition::Edge { running: true, .. })
-    ));
-    assert_eq!(restart.to, "start");
-    assert_eq!(restart.reason.as_deref(), Some("Restart Workflow"));
-    let completion = reports[1].action.as_ref().unwrap();
-    assert!(completion.workflow.is_none());
-    assert!(completion.from.is_none());
-    assert_eq!(completion.to, "end");
-    assert!(!reports[1].unavailable.is_empty());
-    assert!(reports[2].action.is_none());
-    assert_eq!(
-        serde_json::to_value(reports).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-    let mut missing: serde_json::Value = serde_json::from_str(json).unwrap();
-    missing[0]["action"].as_object_mut().unwrap().remove("to");
-    assert!(serde_json::from_value::<Vec<TaskMoveExplanation>>(missing).is_err());
-}
-
-#[test]
 fn task_planning_explanations_preserve_intent_and_effects() {
     use loopflow::ops::task::{TaskPlanningAction, TaskPlanningExplanation};
     let json = include_str!("../../../tests/fixtures/dto/task_planning_explanations.json");
@@ -1169,7 +1116,7 @@ fn paused_task_state_is_unfinished() {
 fn task_overview_excludes_diagnostic_process_history() {
     let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
     let overview: loopflow::task_work::TaskOverview = serde_json::from_str(input).unwrap();
-    assert!(overview.workflow.is_some());
+    assert!(overview.graph.is_some());
     assert_eq!(
         serde_json::to_value(overview).unwrap(),
         serde_json::from_str::<serde_json::Value>(input).unwrap()

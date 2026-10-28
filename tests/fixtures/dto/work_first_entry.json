@@ -156,7 +156,7 @@
           "status": "ready",
           "superseded_by_wave_id": null
         },
-        "workflow": "feature"
+        "graph": "feature"
       }
     ],
     "tasks": {
@@ -262,8 +262,8 @@
             "project_id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
             "wave_id": "d1b09180-31e8-4cee-b058-413a3fd52616"
           },
-          "workflow_name": "feature",
-          "workflow_source": "task"
+          "graph_name": "feature",
+          "graph_source": "task"
         }
       ],
       "truncated": false

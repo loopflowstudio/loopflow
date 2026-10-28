@@ -242,7 +242,7 @@ fn read_store() -> OpsResult<Store> {
         .ok_or_else(|| project_error("Planning unavailable: local registry is absent"))
 }
 
-async fn workflow_wave(store: &Store, repo: &Path, wave: Option<&str>) -> OpsResult<Wave> {
+async fn graph_wave(store: &Store, repo: &Path, wave: Option<&str>) -> OpsResult<Wave> {
     crate::work::wave::context::resolve_managed_wave(
         Some(store),
         Some(repo),
@@ -283,20 +283,20 @@ pub async fn edit(
 }
 
 #[derive(Debug, serde::Serialize)]
-pub struct WaveWorkflow {
+pub struct WaveGraph {
     pub wave_id: crate::id::WaveId,
     pub wave: String,
-    pub workflow: Option<String>,
+    pub graph: Option<String>,
 }
 
-pub async fn workflow(repo: &Path, selector: Option<&str>) -> OpsResult<WaveWorkflow> {
+pub async fn wave_graph(repo: &Path, selector: Option<&str>) -> OpsResult<WaveGraph> {
     let store = read_store()?;
-    let wave = workflow_wave(&store, repo, selector).await?;
+    let wave = graph_wave(&store, repo, selector).await?;
     let layers =
         crate::config::config_layers(Some(repo), Some(wave.slug())).map_err(project_error)?;
-    let (name, layer) = crate::config::workflow_setting(&layers).map_err(project_error)?;
-    Ok(WaveWorkflow {
-        workflow: layer.map(|_| name),
+    let (name, layer) = crate::config::graph_setting(&layers).map_err(project_error)?;
+    Ok(WaveGraph {
+        graph: layer.map(|_| name),
         wave_id: wave.id().clone(),
         wave: wave.slug().into(),
     })

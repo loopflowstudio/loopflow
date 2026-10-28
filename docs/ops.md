@@ -30,7 +30,7 @@ To go from review-ready to merged in one step, ship the Task:
 lf ship LOO-12               # remaining steps, then deliver: gate, land --wait-and-fix
 ```
 
-A PR merged while shipping sends the Task to its last stage before `end`
+A PR merged while shipping sends the Task to its graph's last interactive step
 (`verify` in `code`): check it on `main`, then finish or fix forward as a new PR.
 
 Running `lf land` again after new commits prepares the Task's next PR; the earlier

@@ -93,7 +93,7 @@
       "project_id": null,
       "wave_id": null
     },
-    "workflow_name": "code",
-    "workflow_source": "default"
+    "graph_name": "code",
+    "graph_source": "default"
   }
 }

@@ -342,9 +342,9 @@ pub fn bind_task_planning(repo: &TestRepo) {
     repo.commit("Bind fixture planning before creating Task checkouts");
 }
 
-/// Select a Wave's default Workflow in its committed `config.yaml` in `repo`.
-#[allow(dead_code)] // Shared helper compiled into integration tests without Workflows.
-pub fn select_wave_workflow(
+/// Select a Wave's default graph in its committed `config.yaml` in `repo`.
+#[allow(dead_code)] // Shared helper compiled into integration tests without Wave graphs.
+pub fn select_wave_graph(
     repo: &Path,
     store: &loopflow::store::sqlite::SqliteStore,
     wave: &WaveId,
@@ -356,7 +356,7 @@ pub fn select_wave_workflow(
         .ok()
         .and_then(|content| serde_yaml_ng::from_str(&content).ok())
         .unwrap_or_default();
-    config.insert("workflow".into(), name.into());
+    config.insert("graph".into(), name.into());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
 }

@@ -50,7 +50,7 @@ pub(crate) fn workspace_name(identifier: &str, title: &str) -> String {
 }
 
 /// Where a Task stands, for terminal titles: `Available` when its
-/// conversation is, then the Workflow node where a person takes part, such as
+/// conversation is, then the interactive step where its Graph waits, such as
 /// `Available · Design`. Both come from their shared readers; nothing new is judged.
 fn standing(
     store: &SqliteStore,
@@ -64,10 +64,11 @@ fn standing(
             .is_some_and(|summary| summary.available),
         None => false,
     };
-    let workflow = store.workflow(task)?;
-    let node = workflow
+    let graph = store.task_graph(task)?;
+    let node = graph
         .as_ref()
-        .and_then(|workflow| workflow.person_node());
+        .and_then(|graph| graph.waiting_step())
+        .map(|step| step.name.as_str());
     let mut parts = Vec::new();
     if available {
         parts.push("Available".to_string());

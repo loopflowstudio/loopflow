@@ -5,11 +5,11 @@ public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let graphProcesses: [GraphProcessInventoryEntry]
     public let processes: [LfProcess]
-    /// The Task's Workflow; `nil` when it runs only ad hoc Graphs.
-    public let workflow: Workflow?
+    /// The graph the Task took up; `nil` until its first `lf task run`.
+    public let graph: TaskGraph?
 
     enum CodingKeys: String, CodingKey {
-        case sessions, processes, workflow
+        case sessions, processes, graph
         case graphProcesses = "graph_processes"
     }
 }
@@ -18,110 +18,92 @@ public struct TaskWork: Codable, Sendable, Equatable {
 public struct TaskOverview: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let graphProcesses: [GraphProcessInventoryEntry]
-    public let workflow: Workflow?
+    public let graph: TaskGraph?
 
     enum CodingKeys: String, CodingKey {
-        case sessions, workflow
+        case sessions, graph
         case graphProcesses = "graph_processes"
     }
 }
 
-/// A Task's Workflow: the graph it took up, where the Task stands on it, and
-/// how it got there. Nodes are stages where a person takes part; edges are the
-/// routes between them. `start` and `end` are implicit.
-public struct Workflow: Codable, Sendable, Equatable {
-    public struct Node: Codable, Sendable, Hashable {
+/// The graph a Task took up and where the Task stands on it. An interactive
+/// step is where a person takes part in the Task conversation; `start` and
+/// `end` are implicit.
+public struct TaskGraph: Codable, Sendable, Equatable {
+    public struct InteractiveStep: Codable, Sendable, Hashable {
         public let name: String
         public let skill: String
         /// One line saying what the person does here; `nil` when the skill says nothing.
         public let description: String?
     }
 
-    public struct Edge: Codable, Sendable, Hashable {
-        public let from: String
-        public let to: String
-        /// What `lf task run ISSUE <name>` takes to choose it: the graph or
-        /// skill it runs first, or `end` when it runs nothing.
-        public let name: String
-    }
-
-    /// One change to the Task's position.
-    public struct Move: Codable, Sendable, Equatable {
-        public enum Kind: String, Codable, Sendable {
-            case tookUp = "took_up"
-            case chose, arrived, set
-        }
-
-        public enum Actor: String, Codable, Sendable { case person, conversation, edge }
-
-        public let workflow: String
-        public let kind: Kind
-        public let from: String
-        public let to: String
-        public let edge: Int?
-        /// The `lf` process that made the move; `nil` when none was registered.
-        public let lfProcessId: String?
-        public let actor: Actor
-        public let sessionId: String?
-        public let note: String?
-        public let at: Int64
-
-        enum CodingKeys: String, CodingKey {
-            case workflow, kind, from, to, edge, actor, note, at
-            case lfProcessId = "lf_process_id"
-            case sessionId = "session_id"
-        }
-    }
-
-    /// At a node the Task waits on a person. On an edge its Graph
-    /// process carries it; one that no longer runs has stopped and holds the Task.
+    /// `at` waits at `start`, `end` or an interactive step. `run` is a
+    /// `lf task run` carrying the Task on from `step`; one no longer running
+    /// stopped, and the next `lf task run` starts it again.
     public enum Position: Codable, Sendable, Equatable {
-        case node(String)
-        case edge(index: Int, lfProcessId: String, running: Bool)
+        case at(step: String)
+        case run(step: String, lfProcessId: String, running: Bool)
 
         enum CodingKeys: String, CodingKey {
-            case kind, node, edge, running
+            case kind, step, running
             case lfProcessId = "lf_process_id"
         }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             switch try container.decode(String.self, forKey: .kind) {
-            case "node":
-                self = .node(try container.decode(String.self, forKey: .node))
-            case "edge":
-                self = .edge(
-                    index: try container.decode(Int.self, forKey: .edge),
+            case "at":
+                self = .at(step: try container.decode(String.self, forKey: .step))
+            case "run":
+                self = .run(
+                    step: try container.decode(String.self, forKey: .step),
                     lfProcessId: try container.decode(String.self, forKey: .lfProcessId),
                     running: try container.decode(Bool.self, forKey: .running))
             case let kind:
                 throw DecodingError.dataCorruptedError(
-                    forKey: .kind, in: container, debugDescription: "unknown workflow position \(kind)")
+                    forKey: .kind, in: container, debugDescription: "unknown graph position \(kind)")
             }
         }
 
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             switch self {
-            case .node(let node):
-                try container.encode("node", forKey: .kind)
-                try container.encode(node, forKey: .node)
-            case .edge(let index, let lfProcessId, let running):
-                try container.encode("edge", forKey: .kind)
-                try container.encode(index, forKey: .edge)
+            case .at(let step):
+                try container.encode("at", forKey: .kind)
+                try container.encode(step, forKey: .step)
+            case .run(let step, let lfProcessId, let running):
+                try container.encode("run", forKey: .kind)
+                try container.encode(step, forKey: .step)
                 try container.encode(lfProcessId, forKey: .lfProcessId)
                 try container.encode(running, forKey: .running)
             }
         }
+
+        /// Where the Task waits, or the step its run left.
+        public var step: String {
+            switch self {
+            case .at(let step), .run(let step, _, _): step
+            }
+        }
     }
 
+    public static let start = "start"
+    public static let end = "end"
+
     public let name: String
-    public let nodes: [Node]
-    public let edges: [Edge]
+    public let interactiveSteps: [InteractiveStep]
     public let position: Position
-    /// Edges `lf task run` can choose now, by their place among `edges`.
-    public let outgoing: [Int]
-    public let history: [Move]
+
+    enum CodingKeys: String, CodingKey {
+        case name, position
+        case interactiveSteps = "interactive_steps"
+    }
+
+    /// The interactive step a person takes part at now.
+    public var waitingStep: InteractiveStep? {
+        guard case .at(let step) = position else { return nil }
+        return interactiveSteps.first { $0.name == step }
+    }
 }
 
 public struct TaskSession: Codable, Sendable, Equatable, Identifiable {

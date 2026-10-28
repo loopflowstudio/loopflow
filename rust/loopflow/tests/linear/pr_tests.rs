@@ -1324,13 +1324,13 @@ fn repeated_status_of_merged_task_never_completes_work() {
         .expect("read first Task events");
     let conn =
         rusqlite::Connection::open(home.path().join("loopflow.db")).expect("open test registry");
-    let moves = || -> i64 {
+    let moves = || -> Option<String> {
         conn.query_row(
-            "SELECT COUNT(*) FROM task_workflow_moves WHERE task_id=?1",
+            "SELECT json_object('step',step,'run',lf_process_id,'at',updated_at) FROM task_graphs WHERE task_id=?1",
             [task.task.id.as_str()],
             |row| row.get(0),
         )
-        .expect("read Workflow moves")
+        .ok()
     };
     let first_moves = moves();
     let second = task_status(repo.path(), Some("INF-123"))
@@ -1345,7 +1345,7 @@ fn repeated_status_of_merged_task_never_completes_work() {
     assert!(!second.status.is_terminal());
     assert_eq!(
         second_moves, first_moves,
-        "status must not move the Workflow"
+        "status must not move the Task on its graph"
     );
     assert_eq!(
         second_events, first_events,

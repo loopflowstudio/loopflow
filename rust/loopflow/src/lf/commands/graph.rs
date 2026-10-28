@@ -62,25 +62,47 @@ pub fn run(
         cli,
         repo,
         binding,
+        false,
+        None,
     )
 }
 
-/// `lf --task ISSUE graph route`: run the slice of the Task's captured graph
-/// that its current edge names, from the route's first step to the next
-/// stage. The Task run that chose the edge is this process's parent; it
-/// writes the arrival when this process succeeds.
-pub fn run_task_edge(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
+/// `lf --task ISSUE graph run`: carry the Task's Graph from the cursor its
+/// `lf task run`, this process's parent, set out from. The Graph writes where
+/// it left the Task: before the interactive step it stopped at, or at `end`.
+pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> Result<()> {
     let Some(WorkRef::Task(task)) = binding.map(|binding| &binding.work) else {
-        anyhow::bail!("`lf graph route` runs a Task's route; name the Task with --task");
+        anyhow::bail!("`lf graph run` carries a Task's Graph; `lf task run` starts it");
     };
     let store = block_on(open_graph_store())?;
     store.sqlite.require_task_launch(task)?;
-    let (graph, start, edge, _) = store
-        .sqlite
-        .workflow_edge_slice(task)?
-        .context("the Task is not on a route that runs steps; `lf task run` chooses one")?;
-    print_pipeline_header(&format!("{} · {edge}", graph.name), &graph.steps);
-    execute(&graph.name, &graph.steps, start, None, cli, repo, binding)
+    let row = store.sqlite.task_graph_row(task)?;
+    let Some((graph, (start, carrier))) = row.and_then(|row| row.run.map(|run| (row.graph, run)))
+    else {
+        anyhow::bail!("the Task is not on a run; `lf task run` starts one");
+    };
+    let parent = journal::current_lf_process_id()
+        .and_then(|id| store.sqlite.process(&id).ok().flatten())
+        .and_then(|process| process.parent_lf_process_id);
+    anyhow::ensure!(
+        parent.as_ref() == Some(&carrier.id),
+        "the Task's run is carried by another `lf task run`; read `lf task status`"
+    );
+    print_pipeline_header(&graph.name, &graph.steps);
+    // `-b` and `-i` run straight through: every step headless, or every step
+    // with the person in this terminal.
+    let stop_at_interactive = !cli.batch && !cli.interactive;
+    execute(
+        &graph.name,
+        &graph.steps,
+        start,
+        None,
+        cli,
+        repo,
+        binding,
+        stop_at_interactive,
+        Some(&carrier.id),
+    )
 }
 
 pub fn show(name: &str, repo: &Path) -> Result<()> {
@@ -111,19 +133,19 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Graph before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
-/// Carry one Task run: start the Task's current edge as a child Graph process,
-/// and start it again while a Graph process fails. Each attempt records its own
+/// Carry one Task run: start the Task's Graph as a child Graph process, and
+/// start it again while a Graph process fails. Each attempt records its own
 /// GraphProcess beneath this process. A Graph held for a person or a watcher, an
 /// interrupted one, and a launch refused before any Graph started are returned
 /// as they ended. Once someone interrupts the Task, nothing is started again.
-/// `edge` names the edge for messages.
+/// `run` names the graph and where the run set out, for messages.
 ///
 /// With `release`, a bare run inside its execution owner lets its launcher go
 /// once the first attempt has registered, and carries on with its output in
 /// that attempt's log.
-pub fn run_task_edge_for(cli: &Cli, task: &Task, edge: &str, release: bool) -> Result<()> {
+pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> Result<()> {
     let checkout = task.worktree()?;
-    let args = task_run_args(cli, task.id.as_str(), &["graph", "route"]);
+    let args = task_run_args(cli, task.id.as_str(), &["graph", "run"]);
     let store = block_on(open_graph_store())?;
     let store = &store.sqlite;
     let process =
@@ -149,7 +171,7 @@ pub fn run_task_edge_for(cli: &Cli, task: &Task, edge: &str, release: bool) -> R
                     log.settle(&registered)?;
                     if !released {
                         println!(
-                            "{} · {edge} running as Graph process {registered}\n  follow: lf task status {}\n  log:    {}",
+                            "{} · {run} running as Graph process {registered}\n  follow: lf task status {}\n  log:    {}",
                             task.identifier,
                             task.identifier,
                             log.path.display()
@@ -166,7 +188,7 @@ pub fn run_task_edge_for(cli: &Cli, task: &Task, edge: &str, release: bool) -> R
             return Ok(());
         }
         if store.latest_interrupt_id(&work)? > cursor {
-            eprintln!("Task run interrupted; not starting {edge} again.");
+            eprintln!("Task run interrupted; not starting it again.");
             return Err(crate::process::CommandExit(130).into());
         }
         // Only a Graph process that failed is started again.
@@ -174,62 +196,22 @@ pub fn run_task_edge_for(cli: &Cli, task: &Task, edge: &str, release: bool) -> R
         if failed {
             if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
-                    "Route {edge} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
+                    "The run of {run} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
                 );
                 return Err(crate::process::CommandExit(1).into());
             }
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
-                eprintln!("Route {edge} failed {attempt} times; this Task run stops here.");
+                eprintln!("The run of {run} failed {attempt} times; this Task run stops here.");
             }
             return Err(exit_of(status).into());
         }
         eprintln!(
-            "Route {edge} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
+            "The run of {run} failed (attempt {attempt} of {TASK_RUN_ATTEMPTS}); starting it again."
         );
         attempt += 1;
     }
-}
-
-/// Run `skill` for the Task as a headless child, `message` as its first turn,
-/// and read the structured answer `output` asks for. `None` when the skill
-/// runs with no contract or answers outside it; the caller decides without.
-pub(crate) fn run_task_skill(
-    cli: &Cli,
-    issue: &str,
-    checkout: &Path,
-    skill: &str,
-    message: &str,
-    output: Option<&GraphOutput>,
-) -> Result<Option<SkillOutcome>> {
-    let mut step_cli = cli.process_options();
-    step_cli.output_schema = output.map(GraphOutput::schema);
-    step_cli.wave = cli.wave.clone();
-    let mut args = task_run_args(&step_cli, issue, &["skill", "--", skill]);
-    args.push(message.to_owned());
-    let store = block_on(open_graph_store())?;
-    let store = &store.sqlite;
-    let process =
-        journal::current_lf_process_id().context("a Task run requires a registered Process")?;
-    let mark = store.process_mark(&process)?;
-    let status = spawn_task_child(&args, checkout, None, None, |_| Ok(()))?;
-    if !status.success() {
-        return Err(exit_of(status).into());
-    }
-    let Some(output) = output else {
-        return Ok(None);
-    };
-    let Some(step) = store.child_process_after(&process, mark)? else {
-        return Ok(None);
-    };
-    let Some((_, input, _)) = store.process_input(&step)? else {
-        return Ok(None);
-    };
-    Ok(store
-        .input_final_answer(&input)?
-        .and_then(|text| answer_value(&text).ok())
-        .and_then(|value| output.decode(&value).ok()))
 }
 
 fn exit_of(status: std::process::ExitStatus) -> crate::process::CommandExit {
@@ -387,6 +369,7 @@ pub(crate) fn task_run_args(cli: &Cli, issue: &str, tail: &[&str]) -> Vec<String
 }
 
 /// Drive the Graph in this process from `start`, bracketed by graph journal events.
+#[allow(clippy::too_many_arguments)]
 fn execute(
     graph_name: &str,
     items: &[ConcreteStep],
@@ -395,6 +378,8 @@ fn execute(
     cli: &Cli,
     repo: &Path,
     binding: Option<&WorkBinding>,
+    stop_at_interactive: bool,
+    task_run: Option<&LfProcessId>,
 ) -> Result<()> {
     let accounts = crate::provider_account::selection::AccountSelection::from_flags_or_env(
         &cli.account,
@@ -438,7 +423,29 @@ fn execute(
             )
             .context("could not record the Graph; no steps launched")?;
         drop(admission);
-        let outcome = drive(&running, start, accounts).await?;
+        let outcome = drive(&running, start, accounts, stop_at_interactive).await?;
+        // A Task run's Graph writes where it left the Task. Blocked at an
+        // interactive step, the Task waits there: what blocks it is for a
+        // person, and nothing before it runs again.
+        if let (Some(carrier), Some(task)) = (task_run, &running.task) {
+            let blocked_at = match (&outcome, running.current()) {
+                (GraphOutcome::Blocked(_), Some(ConcreteStep::Skill(skill))) => {
+                    skill.interactive_step().map(str::to_owned)
+                }
+                _ => None,
+            };
+            let step = match &outcome {
+                GraphOutcome::Completed => Some(crate::task_graph::END),
+                GraphOutcome::StoppedAt(step) => Some(step.as_str()),
+                _ => blocked_at.as_deref(),
+            };
+            if let Some(step) = step {
+                running
+                    .store
+                    .sqlite
+                    .arrive_task_graph(task, carrier, step)?;
+            }
+        }
         // A step that completed its Task could not clean up under its own live
         // Graph; the finished Graph can.
         if let (GraphOutcome::Completed, Some(task)) = (&outcome, &running.task) {
@@ -485,8 +492,10 @@ async fn open_graph_store() -> Result<SharedStore> {
 fn report_outcome(outcome: GraphOutcome) -> Result<()> {
     match outcome {
         GraphOutcome::Completed => Ok(()),
-        GraphOutcome::Staged(stage) => {
-            eprintln!("Reached {stage}, where a person takes part; a Task carries the graph on from there.");
+        GraphOutcome::StoppedAt(step) => {
+            eprintln!(
+                "Stopped at {step}, an interactive step; the Task conversation takes it from here."
+            );
             Ok(())
         }
         GraphOutcome::Interrupted => Err(crate::process::CommandExit(130).into()),
@@ -506,6 +515,7 @@ async fn drive(
     running: &RunningGraph<'_>,
     start: ExecutionCursor,
     accounts: crate::provider_account::selection::AccountSelection,
+    stop_at_interactive: bool,
 ) -> Result<GraphOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
         graph: Some(running.graph.to_owned()),
@@ -521,13 +531,17 @@ async fn drive(
         let _graph_env = EnvVarGuard::set("LOOPFLOW_GRAPH_NAME", running.graph);
         let _accounts = accounts.activate()?;
         let mut cursor = start;
-        GraphRunner::new(running)
-            .run_with_cursor(running.steps, &mut cursor)
-            .await
+        let runner = GraphRunner::new(running);
+        let runner = if stop_at_interactive {
+            runner.stopping_at_interactive()
+        } else {
+            runner
+        };
+        runner.run_with_cursor(running.steps, &mut cursor).await
     }
     .await;
     let (event, error) = match &result {
-        Ok(GraphOutcome::Completed | GraphOutcome::Staged(_)) => (LfEventType::Completed, None),
+        Ok(GraphOutcome::Completed | GraphOutcome::StoppedAt(_)) => (LfEventType::Completed, None),
         Ok(_) => (LfEventType::Escalated, None),
         Err(error) => (LfEventType::Errored, Some(error.to_string())),
     };
@@ -571,11 +585,11 @@ fn render_pipeline_lines(items: &[ConcreteStep]) -> Vec<String> {
     let mut lines = Vec::new();
     for item in items {
         match item {
-            ConcreteStep::Skill(skill) => match skill.stage() {
-                Some(stage) if stage != skill.skill.name => {
-                    lines.push(format!("{} [stage {stage}]", skill.skill.name))
+            ConcreteStep::Skill(skill) => match skill.interactive_step() {
+                Some(step) if step != skill.skill.name => {
+                    lines.push(format!("{} [interactive {step}]", skill.skill.name))
                 }
-                Some(_) => lines.push(format!("{} [stage]", skill.skill.name)),
+                Some(_) => lines.push(format!("{} [interactive]", skill.skill.name)),
                 None => lines.push(skill.skill.name.clone()),
             },
             ConcreteStep::Command(command) => lines.push(command.item.to_string()),
@@ -851,6 +865,22 @@ impl RunningGraph<'_> {
     }
 }
 
+/// What a headless agent reads at an interactive step. With a loop behind the
+/// step it answers advance or iterate; blocked repeats with the blocker.
+fn stand_in_message(step: &str, repeats: bool) -> String {
+    let person = crate::config::participant_name()
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "the person who started this run".into());
+    let mut message = format!(
+        "\n\nNo one is available. You are standing in for {person} at {step}. Decide as they would, record why in your final message, and continue."
+    );
+    if repeats {
+        message.push_str(" Advance when the work before this step holds; iterate only for a concrete, repairable gap, naming it; there is no one to hand a blocker to.");
+    }
+    message
+}
+
 /// The JSON value a final answer carries: the answer itself, or the object
 /// inside the prose or code fence a provider wrapped it in.
 fn answer_value(text: &str) -> Result<serde_json::Value, String> {
@@ -895,6 +925,11 @@ impl SkillExecutor for &RunningGraph<'_> {
                 "\n\nPrevious step feedback or iteration direction:\n{direction}"
             ));
         }
+        // `-b` runs an interactive step headless: the agent stands in for the person.
+        if skill.interactive && !self.launcher.interactive && self.launcher.batch {
+            let step = skill.interactive_step().unwrap_or(name);
+            message.push_str(&stand_in_message(step, skill.returns.is_some()));
+        }
         if let Some(instructions) = current
             .as_ref()
             .and_then(GraphOutput::for_step_instructions)
@@ -909,6 +944,11 @@ impl SkillExecutor for &RunningGraph<'_> {
         step_cli.only_account.clear();
         step_cli.isolate = false;
         step_cli.shared = false;
+        // `-i` and `-b` choose for every step. Otherwise a step runs headless,
+        // and an interactive step launches the way `lf skill` would: with the
+        // person at a terminal, else headless.
+        step_cli.interactive = self.launcher.interactive;
+        step_cli.batch = !self.launcher.interactive && (self.launcher.batch || !skill.interactive);
         // The child receives this occurrence's captured source, not a later
         // catalog selection. Keep the file alive through every child/readback.
         let mut input = tempfile::NamedTempFile::new()?;
@@ -1228,7 +1268,7 @@ mod tests {
     }
 
     #[test]
-    fn builtin_task_graphs_compile_and_the_stageless_ones_run_whole() {
+    fn builtin_task_graphs_compile_and_name_their_interactive_steps() {
         let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for name in ["task-design", "pursue", "queue", "deliver", "auto"] {
             let graph = crate::graph::load_graph(name, &repo).unwrap();
@@ -1237,19 +1277,22 @@ mod tests {
                 items
                     .iter()
                     .all(|item| !matches!(item, ConcreteStep::Skill(skill) if skill.interactive)),
-                "{name} has a stage"
+                "{name} has an interactive step"
             );
         }
         for name in ["feature", "code", "research"] {
-            let definition = crate::workflow::load_workflow(name, &repo)
+            let graph = crate::task_graph::CapturedGraph::load(name, &repo)
                 .unwrap()
                 .unwrap_or_else(|| panic!("{name} is a builtin graph"));
-            assert!(!definition.nodes.is_empty(), "{name} has stages");
+            assert!(
+                !graph.interactive_steps().is_empty(),
+                "{name} has interactive steps"
+            );
         }
     }
 
     #[test]
-    fn pipeline_lines_mark_stages_hidden_in_xor_paths() {
+    fn pipeline_lines_mark_interactive_steps_hidden_in_xor_paths() {
         let repo = tempdir().unwrap();
         let graphs = repo.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
@@ -1262,25 +1305,25 @@ mod tests {
         let items = crate::graph::compile_graph(&graph, repo.path()).unwrap();
         assert!(render_pipeline_lines(&items)
             .iter()
-            .any(|line| line.contains("explore [stage review_choice]")));
+            .any(|line| line.contains("explore [interactive review_choice]")));
     }
 
     #[test]
-    fn graph_steps_run_headless_unless_asked_for_a_terminal() {
+    fn task_run_children_carry_only_the_launch_override() {
         use clap::Parser;
         let mode = |argv: &[&str]| {
             let cli = crate::lf::Cli::try_parse_from(argv).unwrap();
-            let args = task_run_args(&cli, "INF-1", &["graph", "route"]);
-            assert!(args.ends_with(&["--task", "INF-1", "graph", "route"].map(String::from)));
+            let args = task_run_args(&cli, "INF-1", &["graph", "run"]);
+            assert!(args.ends_with(&["--task", "INF-1", "graph", "run"].map(String::from)));
             (
                 args.contains(&"--batch".to_owned()),
                 args.contains(&"--interactive".to_owned()),
             )
         };
-        assert_eq!(mode(&["lf", "task", "run", "INF-1"]), (true, false));
+        // A bare run stops at interactive steps; `-b` runs straight through
+        // headless, `-i` with the person at every step.
+        assert_eq!(mode(&["lf", "task", "run", "INF-1"]), (false, false));
         assert_eq!(mode(&["lf", "-b", "task", "run", "INF-1"]), (true, false));
         assert_eq!(mode(&["lf", "-i", "task", "run", "INF-1"]), (false, true));
-        let ship = crate::lf::Cli::try_parse_from(["lf", "ship"]).unwrap();
-        assert!(ship.step_args().contains(&"--batch".to_owned()));
     }
 }

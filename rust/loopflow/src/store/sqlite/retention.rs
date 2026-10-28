@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::{params, Connection, TransactionBehavior};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::journal::{OsProcess, ProcessIdentityEvidence};
 use crate::session_record::{late_usage_key, merge_native_usage, native_usage_key};
@@ -22,11 +22,11 @@ const PROCESS_BATCH: i64 = 10_000;
 /// Every live writer waits this long; each prune transaction stays well under.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 
-#[derive(Debug, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetentionReport {
     pub usage_rows: u64,
     pub closed_processes: u64,
-    pub processes: u64,
+    pub forgotten_processes: u64,
     pub vacuumed: bool,
 }
 
@@ -42,16 +42,18 @@ pub(crate) fn prune(database: &Path, now: i64) -> StoreResult<RetentionReport> {
     // Nothing references the rows deleted here (see each predicate), and
     // per-row foreign-key probes would scan session_events for each delete.
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-    let mut report = RetentionReport::default();
     // The capture pass this cursor followed ended when migration converted
     // every capture to facts.
     let _ = std::fs::remove_file(Cursor::beside(database, "retention").0);
-    report.usage_rows = compact_usage(&conn, &Cursor::beside(database, "usage"))?;
+    let usage_rows = compact_usage(&conn, &Cursor::beside(database, "usage"))?;
     let home = database.parent().unwrap_or(Path::new("."));
-    report.closed_processes = close_dead_processes(&conn, home, now)?;
-    report.processes = forget_processes(&conn)?;
-    report.vacuumed = reclaim(&conn)?;
-    Ok(report)
+    let closed_processes = close_dead_processes(&conn, home, now)?;
+    Ok(RetentionReport {
+        usage_rows,
+        closed_processes,
+        forgotten_processes: forget_processes(&conn)?,
+        vacuumed: reclaim(&conn)?,
+    })
 }
 
 /// The last row a pass visited, in a file beside the database, so a later pass
@@ -401,7 +403,7 @@ mod tests {
         process(4, Some(3), true, false);
         process(5, None, true, true);
 
-        assert_eq!(prune(&path, now).unwrap().processes, 3);
+        assert_eq!(prune(&path, now).unwrap().forgotten_processes, 3);
         assert!(!cursor.exists());
 
         let left: Vec<String> = conn
@@ -466,7 +468,10 @@ mod tests {
         finished(6, Some(3));
 
         let report = prune(&path, now).unwrap();
-        assert_eq!((report.closed_processes, report.processes), (3, 3));
+        assert_eq!(
+            (report.closed_processes, report.forgotten_processes),
+            (3, 3)
+        );
         let rows: Vec<(String, Option<i64>, Option<String>)> = conn
             .prepare("SELECT id,completed_at,outcome FROM processes ORDER BY id")
             .unwrap()

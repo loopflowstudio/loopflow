@@ -19,7 +19,7 @@ struct WorkCLISubscriptionTests {
         let seedID = try #require(seed["id"] as? String)
         let status = try await fixture.json(["task", "status", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
-        _ = try await fixture.run(["--wave", waveName, "set", "workflow", "proof"])
+        _ = try await fixture.run(["--wave", waveName, "set", "graph", "proof"])
         let query = fixture.lf.query
         let model = WorkModel(query: query, repoPath: fixture.repo.path)
         let keeping = Task { await model.keepWorkCurrent() }
@@ -49,7 +49,8 @@ struct WorkCLISubscriptionTests {
                 .backlog.contains { $0.id == id }
         }
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
-        _ = try await fixture.run(["-b", "task", "run", id])
+        // `-b` would run `demo` headless; plain `task run` stops before it, needing no provider.
+        _ = try await fixture.run(["task", "run", id])
         // Membership and checkout details arrive in separate observation frames.
         try await eventually {
             selectedPlanMembers(model).filter { $0.work.id == id }.count == 1

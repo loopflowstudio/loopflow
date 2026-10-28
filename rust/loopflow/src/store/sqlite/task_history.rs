@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(thread.comments.len(), 1);
         assert!(thread.comments[0].body.contains(&intent.notes));
         assert_eq!(store.task_events_after(&source, 0).unwrap(), events);
-        assert!(store.workflow(&child).unwrap().is_none());
+        assert!(store.task_graph(&child).unwrap().is_none());
     }
 
     #[test]

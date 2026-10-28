@@ -327,11 +327,6 @@ public struct RegistryQuery: Sendable {
         return try Self.decode([GraphCatalogEntry].self, from: stdout)
     }
 
-    public func workflowCatalog(cwd: String?) async throws -> [WorkflowCatalogEntry] {
-        let stdout = try await run(["wave", "workflow", "list", "--json"], cwd)
-        return try Self.decode([WorkflowCatalogEntry].self, from: stdout)
-    }
-
     /// The repository's Task owners with their GitHub users; lf caches each email's lookup.
     public func repoPeople(cwd: String?) async throws -> [RepoPerson] {
         let stdout = try await run(["ops", "people", "--json"], cwd)
@@ -342,16 +337,18 @@ public struct RegistryQuery: Sendable {
         try await run(["graph", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Start a fresh Graph for the Task, placing it when needed; returns once it
-    /// runs. Without `graph`, Rust takes the Task's route or its Wave's Workflow.
-    public func runTask(issue: String, graph: String?, cwd: String?) async throws {
+    /// Run the Task's graph until its next interactive step; returns once it
+    /// runs. `graph` takes up another graph; `from` starts at that step instead,
+    /// and an interactive `from` only puts the Task there.
+    public func runTask(issue: String, graph: String?, from: String? = nil, cwd: String?) async throws {
         var args = ["task", "run", issue]
         if let graph { args.append(graph) }
+        if let from { args += ["--from", from] }
         _ = try await run(args, cwd)
     }
 
-    /// Ship the Task: run its remaining Workflow to the end headless, standing
-    /// in at each stage. Returns once it is shipping; it runs on until the Task lands.
+    /// Ship the Task: run the rest of its graph to the end headless, standing
+    /// in at each interactive step. Returns once it is shipping; it runs on until the Task lands.
     public func shipTask(issue: String, cwd: String?) async throws {
         _ = try await run(["--task", issue, "ship"], cwd)
     }
@@ -366,11 +363,6 @@ public struct RegistryQuery: Sendable {
     /// each in its own owner with no viewer; panes attach when they show it.
     public func resumeInterrupted() async throws {
         _ = try await run(["resume", "--all"], nil)
-    }
-
-    /// Put the Task at a node of its Workflow without running anything.
-    public func moveTask(issue: String, node: String, cwd: String?) async throws {
-        _ = try await run(["task", "workflow", "move", issue, node], cwd)
     }
 
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
@@ -737,7 +729,8 @@ public struct RoadmapSnapshot: Decodable, Sendable, Hashable {
 }
 
 public struct WaveRoadmap: Sendable, Hashable {
-    public let workflow: String?
+    /// The graph the Wave's Tasks take up by default.
+    public let graph: String?
     public let projectReadiness: ProjectReadiness
     public let wave: WaveSnapshot
     public let metricPortfolio: MetricPortfolio
@@ -749,14 +742,14 @@ public struct WaveRoadmap: Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case projectReadiness = "project_readiness"
-        case wave, projects, workflow
+        case wave, projects, graph
         case metricPortfolio = "metric_portfolio"
         case unavailableTasks = "unavailable_tasks"
     }
 
     init(from decoder: Decoder, roadmapTasks: WorkEvidence<RoadmapTask>) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        workflow = try container.decode(String?.self, forKey: .workflow)
+        graph = try container.decode(String?.self, forKey: .graph)
         projectReadiness = try container.decode(ProjectReadiness.self, forKey: .projectReadiness)
         let wave = try container.decode(WaveSnapshot.self, forKey: .wave)
         self.wave = wave

@@ -238,7 +238,7 @@
           },
           "unresolved_execution": true
         },
-        "workflow_name": "feature",
+        "graph_name": "feature",
         "latest_graph_process": {
           "entry": {
             "id": "3f2c7a10-1b6e-4d8e-9a55-0c7f0b1e2d34",
@@ -377,140 +377,7 @@
                 ],
                 "paths": []
               }
-            ],
-            "interactions": {
-              "stages": [
-                "4"
-              ],
-              "transitions": [
-                {
-                  "from": "@start",
-                  "to": "4",
-                  "nodes": [
-                    "0",
-                    "1",
-                    "2",
-                    "3"
-                  ],
-                  "routes": [
-                    {
-                      "from": "@start",
-                      "to": "0",
-                      "condition": null
-                    },
-                    {
-                      "from": "0",
-                      "to": "1",
-                      "condition": null
-                    },
-                    {
-                      "from": "1",
-                      "to": "2",
-                      "condition": null
-                    },
-                    {
-                      "from": "2",
-                      "to": "3",
-                      "condition": null
-                    },
-                    {
-                      "from": "3",
-                      "to": "4",
-                      "condition": "advance"
-                    },
-                    {
-                      "from": "3",
-                      "to": "1",
-                      "condition": "repeat"
-                    }
-                  ]
-                },
-                {
-                  "from": "4",
-                  "to": "4",
-                  "nodes": [
-                    "1",
-                    "2",
-                    "3",
-                    "5"
-                  ],
-                  "routes": [
-                    {
-                      "from": "4",
-                      "to": "5",
-                      "condition": null
-                    },
-                    {
-                      "from": "5",
-                      "to": "1",
-                      "condition": "repeat"
-                    },
-                    {
-                      "from": "1",
-                      "to": "2",
-                      "condition": null
-                    },
-                    {
-                      "from": "2",
-                      "to": "3",
-                      "condition": null
-                    },
-                    {
-                      "from": "3",
-                      "to": "4",
-                      "condition": "advance"
-                    },
-                    {
-                      "from": "3",
-                      "to": "1",
-                      "condition": "repeat"
-                    }
-                  ]
-                },
-                {
-                  "from": "4",
-                  "to": "@end",
-                  "nodes": [
-                    "5",
-                    "6",
-                    "7",
-                    "8"
-                  ],
-                  "routes": [
-                    {
-                      "from": "4",
-                      "to": "5",
-                      "condition": null
-                    },
-                    {
-                      "from": "5",
-                      "to": "6",
-                      "condition": "advance"
-                    },
-                    {
-                      "from": "6",
-                      "to": "7",
-                      "condition": "fix"
-                    },
-                    {
-                      "from": "6",
-                      "to": "8",
-                      "condition": "skip"
-                    },
-                    {
-                      "from": "8",
-                      "to": "@end",
-                      "condition": null
-                    },
-                    {
-                      "from": "7",
-                      "to": "8",
-                      "condition": null
-                    }
-                  ]
-                }
-              ]
-            }
+            ]
           },
           "current": 4,
           "completed": [
@@ -579,7 +446,7 @@
           "merge_commit": null,
           "abandoned_at": null
         },
-        "workflow_source": "task"
+        "graph_source": "task"
       },
       {
         "task": {
@@ -688,7 +555,7 @@
           },
           "unresolved_execution": false
         },
-        "workflow_name": "feature",
+        "graph_name": "feature",
         "latest_graph_process": null,
         "execution": {
           "state": "idle",
@@ -704,7 +571,7 @@
         },
         "shipping": null,
         "pr": null,
-        "workflow_source": "task"
+        "graph_source": "task"
       }
     ],
     "truncated": false
@@ -783,7 +650,7 @@
     "activation": null
   },
   "setup": {
-    "workflow": {
+    "graph": {
       "value": "code",
       "source": "wave"
     },

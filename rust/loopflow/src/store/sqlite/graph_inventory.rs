@@ -631,11 +631,11 @@ mod tests {
         assert_eq!(entry.summary.id, "00000000-0000-4000-8000-00000000f100");
         assert_eq!(store.revisions().unwrap().graphs, revisions_before);
 
-        // A captured Workflow not at `end` is dropped by the ship draft; none
+        // A captured graph not at `end` is dropped by the ship draft; none
         // that remains names its Graphs as `flow`.
         let conn = store.conn.lock().unwrap();
         let stored: Option<String> = rusqlite::OptionalExtension::optional(conn.query_row(
-            "SELECT graph FROM task_workflows WHERE task_id=?1",
+            "SELECT graph FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| row.get(0),
         ))

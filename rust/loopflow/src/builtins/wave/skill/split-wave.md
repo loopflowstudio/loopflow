@@ -63,7 +63,7 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
      future and historical content. Preserve existing Project identities.
    - If a current Project exists, `lf update-plan --wave <child> --plan <plan.json>`
      replaces its complete content: `{"metric_targets":[],"krs":[]}`.
-     Supply all KRs and targets; keep the Wave workflow default.
+     Supply all KRs and targets; keep the Wave's default graph.
    - If no current Project exists, arrange its plan through the accepted
      repository chapter process or a Linear change.
      Future plan authoring needs an available Linear writer; `update-plan`

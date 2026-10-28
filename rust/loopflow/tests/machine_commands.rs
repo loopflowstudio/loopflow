@@ -2173,20 +2173,14 @@ fn at_explore(db: &Path, task: &loopflow::durable::TaskId) {
     let graph = serde_json::json!({"name": "feature", "steps": [{"Skill": {"skill": {"name": "explore"}, "id": null, "interactive": true, "returns": null, "sources": []}}]});
     let db = rusqlite::Connection::open(db).unwrap();
     db.execute(
-        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'explore',1)",
+        "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'explore',1)",
         rusqlite::params![task.as_str(), graph.to_string()],
-    )
-    .unwrap();
-    db.execute(
-        "INSERT INTO task_workflow_moves(task_id,workflow,kind,from_node,to_node,at)
-         VALUES(?1,'feature','took_up','start','explore',1)",
-        [task.as_str()],
     )
     .unwrap();
 }
 
 #[test]
-fn task_move_carries_ownership_workflow_and_session() {
+fn task_move_carries_ownership_graph_and_session() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
     let mini = plan.remote.local_machine().unwrap().id;
@@ -2209,7 +2203,7 @@ fn task_move_carries_ownership_workflow_and_session() {
         git(plan._repos[0].bare_path(), &["show", "move-task:notes.txt"]),
         "uncommitted"
     );
-    // Mini owns the Task, checked out on its branch, at the same stage with its history.
+    // Mini owns the Task, checked out on its branch, at the same step.
     let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
     assert_eq!(owner.machine.id, Some(mini.clone()));
     let arrived = plan.remote.task(&task).unwrap().unwrap();
@@ -2221,22 +2215,14 @@ fn task_move_carries_ownership_workflow_and_session() {
     );
     let remote_db =
         rusqlite::Connection::open(fixture.root.path().join("remote/store/loopflow.db")).unwrap();
-    let node: String = remote_db
+    let step: String = remote_db
         .query_row(
-            "SELECT node FROM task_workflows WHERE task_id=?1",
+            "SELECT step FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(node, "explore");
-    let history: Vec<(String, Option<String>)> = remote_db
-        .prepare("SELECT kind,lf_process_id FROM task_workflow_moves WHERE task_id=?1 ORDER BY seq")
-        .unwrap()
-        .query_map([task.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
-    assert_eq!(history, [("took_up".to_string(), None)]);
+    assert_eq!(step, "explore");
     // Its conversation came along as the Task's Session, in the Task's checkout.
     let moved = plan.remote.session(&session).unwrap().unwrap();
     assert!(moved.completed_at.is_none());
@@ -2288,19 +2274,19 @@ fn resume_task_on_another_machine_moves_the_task_there() {
     assert_eq!(resumed["id"], session.as_str());
     assert_eq!(resumed["workspace"]["machine_id"], mini.as_str());
 
-    // The same state `lf task move` reaches: ownership, Workflow and Session on mini.
+    // The same state `lf task move` reaches: ownership, graph and Session on mini.
     let owner = plan.remote.task_ownership(&task).unwrap().owner.unwrap();
     assert_eq!(owner.machine.id, Some(mini.clone()));
-    let node: String =
+    let step: String =
         rusqlite::Connection::open(fixture.root.path().join("remote/store/loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT node FROM task_workflows WHERE task_id=?1",
+                "SELECT step FROM task_graphs WHERE task_id=?1",
                 [task.as_str()],
                 |row| row.get(0),
             )
             .unwrap();
-    assert_eq!(node, "explore");
+    assert_eq!(step, "explore");
     let moved = plan.remote.session(&session).unwrap().unwrap();
     assert_eq!(moved.task_id.as_ref(), Some(&task));
     assert_eq!(
@@ -2475,17 +2461,17 @@ fn task_move_stops_a_live_graph() {
         ),
         "halfway"
     );
-    // Mini holds the Task on the same route, which reads as stopped there.
-    let (edge, carrier): (Option<i64>, Option<String>) =
+    // Mini holds the Task on the same run, which reads as stopped there.
+    let (run_start, carrier): (Option<String>, Option<String>) =
         rusqlite::Connection::open(fixture.root.path().join("remote/store/loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT edge,lf_process_id FROM task_workflows WHERE task_id=?1",
+                "SELECT run_start,lf_process_id FROM task_graphs WHERE task_id=?1",
                 [task.as_str()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-    assert_eq!(edge, Some(0));
+    assert!(run_start.is_some());
     assert!(carrier.is_some());
 }
 

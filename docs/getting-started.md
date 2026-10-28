@@ -71,15 +71,16 @@ A Task gets its own worktree, branch and pull request. Start one and walk away:
 
 ```bash
 lf task create --title "add a divide-by-zero error"   # prints the Task ID
-lf -b task run <ID> code                              # its own worktree; returns with a published PR
+lf task run <ID> code                                 # its own worktree; publishes a PR, then waits for you
 lf comment <ID> "raise ValueError, not ZeroDivisionError"   # reaches the run before its next step
 ```
 
-`code` is the built-in Workflow: build until it holds and publish the PR, stop
-for you to try the change, then deliver it and stop again for you to check it on
-`main`. Name it once; the Task keeps it. Set
-`workflow: code` in `.lf/config.yaml` and `lf task run <ID>` picks it up for
-every new Task. `auto` skips both stops: with `workflow: auto` in
+`code` is the built-in Graph: build until it holds and publish the PR, stop for
+you to try the change, then deliver it and stop again for you to check it on
+`main`. Name it once; the Task keeps it, and each `lf task run <ID>` continues
+from where it stopped. Set `graph: code` in `.lf/config.yaml` and every new Task
+takes it up. `lf -b task run <ID>` runs straight through both stops with an agent
+standing in; `auto` has no stops: with `graph: auto` in
 `.lf/wave/<wave>/config.yaml`, that Wave's Tasks run from request to merged PR
 without you.
 
@@ -110,7 +111,7 @@ lf ship <ID>                     # the remaining steps, then merge; repairs fail
 lf ship <ID> --stop              # withdraw it; disarms the auto-merge it armed
 ```
 
-`lf ship` stands in for you at each remaining stage and runs `deliver`: `gate`,
+`lf ship` stands in for you at each remaining interactive step and runs `deliver`: `gate`,
 then `lf land --wait-and-fix`. It returns once the Task is shipping (`-b` waits);
 `lf task status` follows it. The Task completes when the PR merges, and its
 worktree is cleaned up later by `lf wt prune`.

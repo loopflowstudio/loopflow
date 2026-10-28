@@ -92,8 +92,11 @@ fn create(source: &Path, dir: &Path) -> StoreResult<()> {
         return Ok(());
     }
     // Holding the lock, every staging directory is a killed snapshot's.
-    for abandoned in abandoned_snapshots(parent) {
-        let _ = std::fs::remove_dir_all(abandoned);
+    for entry in std::fs::read_dir(parent).map_err(io)?.flatten() {
+        let staging = entry.file_name().to_string_lossy().starts_with(STAGING);
+        if staging && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
     }
     let staging = tempfile::Builder::new()
         .prefix(STAGING)
@@ -108,41 +111,6 @@ fn create(source: &Path, dir: &Path) -> StoreResult<()> {
     std::fs::rename(staging.path(), dir).map_err(io)?;
     let _ = staging.keep();
     Ok(())
-}
-
-/// Hold the copies lock when no snapshot is in progress, or `None` while one
-/// is or no copy exists. A snapshot holds it from staging to rename, so while
-/// it is held here every staging directory under `copies` belongs to a process
-/// that died.
-pub(crate) fn idle_lock(copies: &Path) -> StoreResult<Option<std::fs::File>> {
-    use fs2::FileExt;
-    if !copies.is_dir() {
-        return Ok(None);
-    }
-    let file = open_lock(&copies.join(".lock"))?;
-    Ok(file.try_lock_exclusive().is_ok().then_some(file))
-}
-
-/// Whether `path` names a snapshot's staging directory.
-pub(crate) fn is_staging(path: &Path) -> bool {
-    path.file_name()
-        .is_some_and(|name| name.to_string_lossy().starts_with(STAGING))
-}
-
-/// Staging directories under `copies`. Only abandoned while [`idle_lock`] is held.
-pub(crate) fn abandoned_snapshots(copies: &Path) -> Vec<PathBuf> {
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(copies)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|entry| is_staging(&entry.path()))
-                .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-                .map(|entry| entry.path())
-                .collect()
-        })
-        .unwrap_or_default();
-    paths.sort();
-    paths
 }
 
 /// The shared store's processes are not the copy's: forget their OS identity

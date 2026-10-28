@@ -25,21 +25,10 @@
     "task_id": "task_00000000000040008000000000000001",
     "identifier": "LOO-12",
     "ownership_marker": "Jack handed this off to home_00000000000040008000000000000002\n\n<!-- loopflow-ownership:{} -->",
-    "workflow": {
+    "graph": {
       "graph": { "name": "code", "steps": [] },
-      "node": "explore",
-      "edge": 1,
-      "moves": [
-        {
-          "workflow": "code",
-          "kind": "took_up",
-          "from": "start",
-          "to": "explore",
-          "edge": null,
-          "note": null,
-          "at": 1792600000
-        }
-      ]
+      "step": "explore",
+      "run_start": { "index": 1 }
     }
   }
 }

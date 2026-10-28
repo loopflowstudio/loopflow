@@ -47,8 +47,7 @@ Four controls answer different questions:
 1. **Execution boundary:** which files, processes, and networks the OS permits.
 2. **Action policy:** which vendor tools run automatically or ask first.
 3. **Identity:** which accounts and external systems the process tree can use.
-4. **Workflow review:** when kickoff, realign, and gate sessions need your
-   decision.
+4. **Interactive steps:** where a graph stops for your decision.
 
 Only the first is general containment. Review and shipping decisions make work
 legible; they do not contain hostile code.

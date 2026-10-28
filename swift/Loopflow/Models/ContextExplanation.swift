@@ -54,40 +54,55 @@ public struct ContextExplanation: Codable, Equatable, Sendable {
     }
 }
 
+/// What `lf task run` would do: run `graph` from `from` until the interactive
+/// step `stopsAt` (or to the end), put the Task at the interactive step `step`
+/// running nothing, or reach `end` when nothing remains.
 public enum TaskRunAction: Codable, Equatable, Sendable {
-    /// The edge a run would take; `runs` is false for an edge into `end` that runs nothing.
-    case edge(workflow: String, takeUp: Bool, from: String, to: String, name: String, runs: Bool)
+    case run(graph: String, takeUp: Bool, from: String, stopsAt: String?)
+    case wait(graph: String, takeUp: Bool, step: String)
+    case end(graph: String, takeUp: Bool)
 
     private enum CodingKeys: String, CodingKey {
-        case kind, workflow, from, to, name, runs
+        case kind, graph, from, step
         case takeUp = "take_up"
+        case stopsAt = "stops_at"
     }
-    private enum Kind: String, Codable { case edge }
+    private enum Kind: String, Codable { case run, wait, end }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        let graph = try values.decode(String.self, forKey: .graph)
+        let takeUp = try values.decode(Bool.self, forKey: .takeUp)
         switch try values.decode(Kind.self, forKey: .kind) {
-        case .edge:
-            self = .edge(workflow: try values.decode(String.self, forKey: .workflow),
-                         takeUp: try values.decode(Bool.self, forKey: .takeUp),
-                         from: try values.decode(String.self, forKey: .from),
-                         to: try values.decode(String.self, forKey: .to),
-                         name: try values.decode(String.self, forKey: .name),
-                         runs: try values.decode(Bool.self, forKey: .runs))
+        case .run:
+            self = .run(graph: graph, takeUp: takeUp,
+                        from: try values.decode(String.self, forKey: .from),
+                        stopsAt: try values.decode(String?.self, forKey: .stopsAt))
+        case .wait:
+            self = .wait(graph: graph, takeUp: takeUp, step: try values.decode(String.self, forKey: .step))
+        case .end:
+            self = .end(graph: graph, takeUp: takeUp)
         }
     }
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .edge(let workflow, let takeUp, let from, let to, let name, let runs):
-            try values.encode(Kind.edge, forKey: .kind)
-            try values.encode(workflow, forKey: .workflow)
+        case .run(let graph, let takeUp, let from, let stopsAt):
+            try values.encode(Kind.run, forKey: .kind)
+            try values.encode(graph, forKey: .graph)
             try values.encode(takeUp, forKey: .takeUp)
             try values.encode(from, forKey: .from)
-            try values.encode(to, forKey: .to)
-            try values.encode(name, forKey: .name)
-            try values.encode(runs, forKey: .runs)
+            try values.encode(stopsAt, forKey: .stopsAt)
+        case .wait(let graph, let takeUp, let step):
+            try values.encode(Kind.wait, forKey: .kind)
+            try values.encode(graph, forKey: .graph)
+            try values.encode(takeUp, forKey: .takeUp)
+            try values.encode(step, forKey: .step)
+        case .end(let graph, let takeUp):
+            try values.encode(Kind.end, forKey: .kind)
+            try values.encode(graph, forKey: .graph)
+            try values.encode(takeUp, forKey: .takeUp)
         }
     }
 }
@@ -174,20 +189,6 @@ public struct SessionConnectExplanation: Codable, Equatable, Sendable {
     public let action: SessionConnectAction?
     public let state: SessionState?
     public let actions: [SessionAction]
-    public let impediments: [String]
-    public let unavailable: [String]
-}
-
-public struct TaskMoveAction: Codable, Equatable, Sendable {
-    public let workflow: String?
-    public let from: Workflow.Position?
-    public let to: String
-    public let reason: String?
-}
-
-public struct TaskMoveExplanation: Codable, Equatable, Sendable {
-    public let resolution: ContextExplanation
-    public let action: TaskMoveAction?
     public let impediments: [String]
     public let unavailable: [String]
 }

@@ -45,7 +45,7 @@ const LAUNCHES: [&[&str]; 3] = [
 ];
 
 #[test]
-fn explicit_launch_policy_survives_task_workflow_nested_graphs_and_provider_children() {
+fn explicit_launch_policy_survives_task_runs_nested_graphs_and_provider_children() {
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
     repo.create_branch("agent-proof");
@@ -133,7 +133,7 @@ for line in sys.stdin:
     repo.commit("Define agent selection fixtures");
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    support::select_wave_workflow(
+    support::select_wave_graph(
         repo.path(),
         &store,
         registered.task.wave_id.as_ref().unwrap(),
@@ -375,10 +375,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         let config = repo.path().join(".lf/config.yaml");
         fs::write(
             &config,
-            format!(
-                "{}\nworkflow: proof\n",
-                fs::read_to_string(&config).unwrap()
-            ),
+            format!("{}\ngraph: proof\n", fs::read_to_string(&config).unwrap()),
         )
         .unwrap();
         repo.create_branch("launch-proof");
@@ -494,12 +491,12 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             serde_json::json!(["ops", "sync", "--plan"])
         );
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
-        // At its end the Task has no route to run; completion retries without
-        // replaying the one it took.
+        // At its end the Task has nothing left to run; completion retries
+        // without replaying the run that reached it.
         let output = run(&["-b", "task", "run", "INF-123"]);
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("graph proof has reached its end"), "{error}");
+        assert!(error.contains("is at the end of graph proof"), "{error}");
         let output = run(&["task", "complete", "INF-123"]);
         let error = String::from_utf8_lossy(&output.stderr);
         assert!(error.contains("pull request has not merged"), "{error}");
@@ -523,9 +520,9 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
             .unwrap()
             .iter()
             .all(|graph| graph["state"] == "completed"));
-        let workflow = &status["execution"]["work"]["workflow"];
+        let graph = &status["execution"]["work"]["graph"];
         assert_eq!(
-            (&workflow["name"], &workflow["position"]),
+            (&graph["name"], &graph["position"]),
             (&"proof".into(), &at("end"))
         );
         assert!(status["execution"]["completion_pending"].is_string());
@@ -563,7 +560,7 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
 
 #[test]
 fn failed_placement_is_observed_without_starting_a_task() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let parent =
         loopflow_test_support::RunningParent::insert(&task.home.path().join("loopflow.db"));
@@ -639,7 +636,7 @@ fn hold_script(home: &Path, announce: bool) -> PathBuf {
 #[test]
 fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
     for launch in ["task", "direct", "checkout", "alias", "wt"] {
-        let task = WorkflowTask::new();
+        let task = GraphTask::new();
         // A real sibling checkout, managed through the public placement command.
         task.ok(&["wt", "create", "caller"]);
         // Worktree discovery is read-only and does not select an ambient Home.
@@ -798,7 +795,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
 
 #[test]
 fn task_run_returns_while_its_graph_keeps_running() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     let hold = hold_script(task.home.path(), false);
     task.repo.create_file(
         ".lf/graphs/held.yaml",
@@ -811,7 +808,7 @@ fn task_run_returns_while_its_graph_keeps_running() {
         ".lf/graphs/held-flow.yaml",
         "- graph: held\n- interactive: {name: demo, id: review}\n",
     );
-    task.select_workflow("held-flow");
+    task.select_wave_graph("held-flow");
     let home = task.home.path();
     let (out, returned, release) = (
         home.join("launcher.out"),
@@ -895,8 +892,8 @@ fn task_run_returns_while_its_graph_keeps_running() {
     assert!(steps >= 2, "the second step never ran: {steps}");
     // The owner writes the arrival after its Graph exits.
     let deadline = Instant::now() + Duration::from_secs(30);
-    while task.workflow()["position"] != at("review") {
-        assert!(Instant::now() < deadline, "{}", task.workflow());
+    while task.graph()["position"] != at("review") {
+        assert!(Instant::now() < deadline, "{}", task.graph());
         std::thread::sleep(Duration::from_millis(50));
     }
     let status = task.run(&["task", "status", "INF-123"]);
@@ -918,7 +915,7 @@ fn task_run_returns_while_its_graph_keeps_running() {
 
 #[test]
 fn a_refused_bare_task_run_returns_its_refusal() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     let output = command(
         task.repo.path(),
         task.home.path(),
@@ -1068,21 +1065,44 @@ fn a_task_run_takes_its_waves_agent_and_account_without_flags() {
     );
 }
 
-/// A registered Task whose repository defines the Graphs and workflows below.
-struct WorkflowTask {
+/// A registered Task whose repository defines the Graphs below.
+struct GraphTask {
     repo: TestRepo,
     home: tempfile::TempDir,
     registered: support::RegisteredTask,
     _env: support::EnvGuard,
 }
 
-impl WorkflowTask {
+/// How one `lf task run` ended once its run stopped: a bare run returns as its
+/// Graph process registers and keeps going in that Graph's log.
+struct Ran {
+    code: Option<i32>,
+    /// Everything it printed, its log included.
+    text: String,
+}
+
+impl Ran {
+    fn success(&self) -> bool {
+        self.code == Some(0)
+    }
+}
+
+impl GraphTask {
+    /// The fixture, its Wave selecting `feature`.
     fn new() -> Self {
-        Self::with_tools(&[])
+        let task = Self::without_wave_graph(&[]);
+        task.select_wave_graph("feature");
+        task
     }
 
     /// The fixture with these executables on PATH as well.
     fn with_tools(tools: &[(&str, &str)]) -> Self {
+        let task = Self::without_wave_graph(tools);
+        task.select_wave_graph("feature");
+        task
+    }
+
+    fn without_wave_graph(tools: &[(&str, &str)]) -> Self {
         let repo = TestRepo::new();
         support::bind_task_planning(&repo);
         let home = tempfile::tempdir().unwrap();
@@ -1095,30 +1115,24 @@ impl WorkflowTask {
         for (path, content) in [
             (".lf/graphs/proof.yaml", "- cmd: task sync --plan\n"),
             (".lf/graphs/land-proof.yaml", "- cmd: task sync --plan\n"),
-            (".lf/graphs/broken.yaml", "- cmd: graph show no-such-graph\n"),
             // Fails until the repository defines a Graph named `late`.
             (".lf/graphs/gate.yaml", "- cmd: graph show late\n"),
-            // Another round succeeds; accepting fails until `late` exists.
+            // Accepting fails until `late` exists.
             (
                 ".lf/graphs/gated.yaml",
-                "- graph: proof\n- loop: proof\n  interactive: {name: demo, id: review}\n- graph: gate\n- interactive: {name: demo, id: accepted}\n",
+                "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: gate\n- interactive: {name: demo, id: accepted}\n",
             ),
             // The Wave's default, `feature`, as this repository defines it.
             (
                 ".lf/graphs/feature.yaml",
                 "- graph: proof\n- interactive: {name: demo, id: review}\n",
             ),
-            // No PR: the last route runs nothing.
+            // No PR: nothing runs after the findings.
             (
                 ".lf/graphs/findings.yaml",
                 "- graph: proof\n- interactive: {name: research, id: findings}\n",
             ),
-            // An ordinary repeatable route returns to its review stage.
-            (
-                ".lf/graphs/rounds.yaml",
-                "- graph: proof\n- graph: land-proof\n- loop: land-proof\n  interactive: {name: demo, id: review}\n- graph: broken\n",
-            ),
-            // Merged work is checked at a last stage before `end`.
+            // Merged work is checked at a last interactive step before `end`.
             (
                 ".lf/graphs/verified.yaml",
                 "- graph: proof\n- interactive: {name: demo, id: review}\n- graph: land-proof\n- interactive: {name: verify, id: check}\n",
@@ -1130,7 +1144,7 @@ impl WorkflowTask {
         }
         // The Task's branch starts from these definitions and holds nothing.
         repo.stage_all();
-        repo.commit("Define the fixture Graphs and graphs");
+        repo.commit("Define the fixture Graphs");
         repo.create_branch("launch-proof");
         let registered = support::register_task_without_pr(
             home.path(),
@@ -1145,15 +1159,14 @@ impl WorkflowTask {
             _env: env,
         };
         fixture.ok(&["task", "checkout", "INF-123"]);
-        fixture.select_workflow("feature");
         fixture
     }
 
-    fn select_workflow(&self, name: &str) {
+    fn select_wave_graph(&self, name: &str) {
         let store =
             loopflow::store::sqlite::SqliteStore::new(&self.home.path().join("loopflow.db"))
                 .unwrap();
-        support::select_wave_workflow(
+        support::select_wave_graph(
             self.repo.path(),
             &store,
             self.registered.task.wave_id.as_ref().unwrap(),
@@ -1203,7 +1216,7 @@ impl WorkflowTask {
         status["execution"].clone()
     }
 
-    /// Planning status, independent of Workflow position.
+    /// Planning status, independent of where the Task stands on its Graph.
     fn state(&self) -> String {
         self.status()["status"].as_str().unwrap().to_string()
     }
@@ -1248,39 +1261,91 @@ impl WorkflowTask {
         );
     }
 
+    /// Run `lf task run …` and wait for the run it started to stop.
+    fn task_run(&self, args: &[&str]) -> Ran {
+        self.ran(self.run(args))
+    }
+
+    /// `lf task run …` that must succeed, waited.
+    fn task_run_ok(&self, args: &[&str]) {
+        let ran = self.task_run(args);
+        assert!(ran.success(), "{args:?}: {}", ran.text);
+    }
+
+    /// Wait for the run a returned `lf task run` printed, if it printed one:
+    /// until its carrier, the Graph process's parent, has exited.
+    fn ran(&self, output: std::process::Output) -> Ran {
+        let mut text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let printed = |label: &str| {
+            text.split(label)
+                .nth(1)
+                .and_then(|rest| rest.split_whitespace().next())
+                .map(str::to_owned)
+        };
+        let (Some(graph), Some(log)) = (printed("running as Graph process "), printed("log:    "))
+        else {
+            return Ran {
+                code: output.status.code(),
+                text,
+            };
+        };
+        let db = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
+        let carrier: String = db
+            .query_row(
+                "SELECT parent_lf_process_id FROM processes WHERE id=?1",
+                [&graph],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let code = loop {
+            let (done, code): (bool, Option<i32>) = db
+                .query_row(
+                    "SELECT completed_at IS NOT NULL, exit_code FROM processes WHERE id=?1",
+                    [&carrier],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            if done {
+                break code;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the run never stopped: {text}\n{}",
+                fs::read_to_string(&log).unwrap_or_default()
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        text.push_str(&fs::read_to_string(&log).unwrap_or_default());
+        Ran { code, text }
+    }
+
     fn finish_after_provider_observation(&self, args: &[&str]) {
         self.ok(args);
         assert_eq!(self.state(), "done");
         assert!(self.status()["completion_pending"].is_null());
-        let workflow = self.workflow();
+        let graph = self.graph();
         self.complete_in_linear();
         self.ok(&["task", "complete", "INF-123"]);
-        assert_eq!(self.workflow(), workflow);
+        assert_eq!(self.graph(), graph);
         assert_eq!(self.state(), "done");
     }
 
-    fn workflow(&self) -> serde_json::Value {
-        self.status()["work"]["workflow"].clone()
+    fn graph(&self) -> serde_json::Value {
+        self.status()["work"]["graph"].clone()
+    }
+
+    fn text_status(&self) -> String {
+        String::from_utf8_lossy(&self.run(&["task", "status", "INF-123"]).stdout).to_string()
     }
 }
 
-fn at(node: &str) -> serde_json::Value {
-    serde_json::json!({"kind": "node", "node": node})
-}
-
-/// Each move's kind and the edge it names, oldest first.
-fn moves(workflow: &serde_json::Value) -> Vec<(String, Option<u64>)> {
-    workflow["history"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|entry| {
-            (
-                entry["kind"].as_str().unwrap().into(),
-                entry["edge"].as_u64(),
-            )
-        })
-        .collect()
+fn at(step: &str) -> serde_json::Value {
+    serde_json::json!({"kind": "at", "step": step})
 }
 
 fn refusal(output: std::process::Output) -> String {
@@ -1288,9 +1353,24 @@ fn refusal(output: std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).to_string()
 }
 
+/// An `lf` that runs the real one, except that `graph show late` runs `script`.
+fn lf_shim(dir: &Path, script: &str) -> PathBuf {
+    let lf = dir.join("lf");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *'graph show late'*)\n{script}\nesac\nexec '{}' \"$@\"\n",
+            loopflow_test_support::lf_binary()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    lf
+}
+
 #[test]
-fn checkout_leaves_workflow_selection_to_the_first_run() {
-    let fixture = WorkflowTask::new();
+fn checkout_leaves_graph_selection_to_the_first_run() {
+    let fixture = GraphTask::new();
     fixture.repo.push_new_branch("main");
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let store = &fixture.registered.store;
@@ -1312,7 +1392,7 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
         );
     observation.item.id = "unplaced-issue".into();
     observation.item.identifier = "INF-124".into();
-    observation.item.name = "Workflow chosen at first run".into();
+    observation.item.name = "Graph chosen at first run".into();
     observation.item.branch_name = None;
     runtime
         .block_on(store.seed_issue(&scope, "linear", observation, None, None))
@@ -1327,7 +1407,7 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
             "- graph: proof\n- interactive: {name: demo, id: review}\n",
         )
         .unwrap();
-        support::select_wave_workflow(
+        support::select_wave_graph(
             fixture.repo.path(),
             &sqlite,
             task.wave_id.as_ref().unwrap(),
@@ -1335,76 +1415,119 @@ fn checkout_leaves_workflow_selection_to_the_first_run() {
         );
     };
     select("before-checkout");
-    fixture.ok(&["task", "checkout", "INF-124", "--name", "first-workflow"]);
-    assert!(sqlite.task_work(&task.id).unwrap().workflow.is_none());
+    fixture.ok(&["task", "checkout", "INF-124", "--name", "first-graph"]);
+    assert!(sqlite.task_work(&task.id).unwrap().graph.is_none());
     select("at-first-run");
-    fixture.ok(&["-b", "task", "run", "INF-124"]);
-    let captured = sqlite.task_work(&task.id).unwrap().workflow.unwrap();
-    assert_eq!(captured.definition.name, "at-first-run");
+    fixture.task_run_ok(&["task", "run", "INF-124"]);
+    let captured = sqlite.task_work(&task.id).unwrap().graph.unwrap();
+    assert_eq!(captured.name, "at-first-run");
     assert_eq!(
         serde_json::to_value(&captured.position).unwrap(),
         at("review")
     );
     select("after-first-run");
-    fixture.ok(&["-b", "task", "run", "INF-124"]);
-    let retained = sqlite.task_work(&task.id).unwrap().workflow.unwrap();
-    assert_eq!(retained.definition, captured.definition);
+    fixture.task_run_ok(&["task", "run", "INF-124"]);
+    let retained = sqlite.task_work(&task.id).unwrap().graph.unwrap();
+    assert_eq!(retained.name, captured.name);
     assert_eq!(serde_json::to_value(&retained.position).unwrap(), at("end"));
 }
 
 #[test]
-fn a_task_takes_up_its_waves_workflow_and_keeps_one_it_named() {
-    // Nothing named, no Workflow yet: the Wave default.
-    let task = WorkflowTask::new();
-    let preview = task.run(&["task", "run", "--explain", "--json"]);
-    assert!(
-        preview.status.success(),
-        "{}",
-        String::from_utf8_lossy(&preview.stderr)
+fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
+    let explain = |task: &GraphTask, args: &[&str]| -> serde_json::Value {
+        let preview = task.run(args);
+        assert!(
+            preview.status.success(),
+            "{}",
+            String::from_utf8_lossy(&preview.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&preview.stdout).unwrap()["action"].clone()
+    };
+    // Nothing named, no graph yet: the Wave default, stopping at its review.
+    let task = GraphTask::new();
+    let action = explain(&task, &["task", "run", "--explain", "--json"]);
+    assert_eq!(
+        (&action["kind"], &action["graph"], &action["take_up"]),
+        (&"run".into(), &"feature".into(), &true.into())
     );
-    let preview: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
-    assert_eq!(preview["action"]["to"], "review");
-    task.ok(&["-b", "task", "run"]);
-    let workflow = task.workflow();
-    assert_eq!(workflow["name"], "feature");
-    assert_eq!(workflow["position"], at("review"));
+    assert_eq!(action["stops_at"], "review");
+    // `-b` runs straight past it to the end.
+    let action = explain(&task, &["-b", "task", "run", "--explain", "--json"]);
+    assert!(action["stops_at"].is_null(), "{action}");
+    task.task_run_ok(&["task", "run"]);
+    let graph = task.graph();
+    assert_eq!(graph["name"], "feature");
+    assert_eq!(graph["position"], at("review"));
+    assert_eq!(graph["interactive_steps"][0]["skill"], "demo");
+    drop(task);
+
+    // No Wave default: the repository's `graph:`, else the builtin `code`.
+    let task = GraphTask::without_wave_graph(&[]);
+    let action = explain(&task, &["task", "run", "--explain", "--json"]);
+    assert_eq!(
+        (&action["graph"], &action["take_up"]),
+        (&"code".into(), &true.into())
+    );
+    let config = task.repo.path().join(".lf/config.yaml");
+    fs::write(
+        &config,
+        format!("{}graph: findings\n", fs::read_to_string(&config).unwrap()),
+    )
+    .unwrap();
+    let action = explain(&task, &["task", "run", "--explain", "--json"]);
+    assert_eq!(action["graph"], "findings");
     drop(task);
 
     // A Task that named its own keeps it when later runs name nothing.
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
-    task.finish_after_provider_observation(&["-b", "task", "run", "INF-123"]);
-    let workflow = task.workflow();
-    assert_eq!(workflow["name"], "findings");
-    assert_eq!(workflow["position"], at("end"));
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "findings"]);
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    let graph = task.graph();
+    assert_eq!(graph["name"], "findings");
+    assert_eq!(graph["position"], at("end"));
 }
 
 #[test]
-fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
-    let workflow = task.workflow();
-    assert_eq!(workflow["name"], "findings");
-    assert_eq!(workflow["nodes"][0]["skill"], "research");
-    assert_eq!(workflow["position"], at("findings"));
-    assert_eq!(workflow["outgoing"], serde_json::json!([1]));
-    // The edge's Graph is an ordinary Graph process; it chose the edge and,
-    // having succeeded, wrote the arrival.
-    let graphs = support::recorded_graphs(task.home.path());
-    assert_eq!(graphs.len(), 1);
-    let chose = |edge| ("chose".to_string(), Some(edge));
-    assert_eq!(
-        moves(&workflow),
-        [
-            ("took_up".into(), None),
-            chose(0),
-            ("arrived".into(), Some(0))
-        ]
+fn a_run_explanation_includes_interactive_steps_inside_its_first_xor() {
+    let task = GraphTask::new();
+    fs::write(
+        task.repo.path().join(".lf/graphs/conditional.yaml"),
+        "- xor:\n    paths:\n      review:\n        description: Review it\n        steps:\n          - interactive: demo\n      skip:\n        description: Nothing to review\n",
+    )
+    .unwrap();
+    let output = task.run(&[
+        "task",
+        "run",
+        "INF-123",
+        "conditional",
+        "--explain",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let history = workflow["history"].as_array().unwrap();
-    assert_eq!(history[1]["lf_process_id"], history[2]["lf_process_id"]);
-    assert_eq!(history[1]["actor"], "person");
-    assert_eq!(history[2]["actor"], "edge");
+    let preview: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(preview["action"]["stops_at"], "demo");
+    assert!(support::recorded_graphs(task.home.path()).is_empty());
+}
+
+#[test]
+fn nothing_after_the_last_interactive_step_reaches_end_without_a_pr() {
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "findings"]);
+    let graph = task.graph();
+    assert_eq!(graph["name"], "findings");
+    assert_eq!(graph["interactive_steps"][0]["skill"], "research");
+    assert_eq!(graph["position"], at("findings"));
+    assert_eq!(task.state(), "active");
+    assert!(
+        task.text_status().contains("Graph findings: at findings"),
+        "{}",
+        task.text_status()
+    );
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     task.repo
         .create_file("findings.md", "Accepted recommendation\n");
     task.repo.stage_all();
@@ -1412,187 +1535,71 @@ fn a_workflow_with_no_landing_edge_reaches_its_end_without_a_pr() {
     task.repo
         .create_file("draft.md", "Retained working notes\n");
     task.finish_after_provider_observation(&["task", "run", "INF-123"]);
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("end"));
+    assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(
         fs::read_to_string(task.repo.path().join("draft.md")).unwrap(),
         "Retained working notes\n"
     );
     assert!(task.repo.path().join("findings.md").exists());
-    assert_eq!(moves(&workflow).last(), Some(&chose(1)));
+    // Nothing remained to run.
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
     // Reaching the end completes research without creating a PR.
     assert_eq!(task.state(), "done");
     assert!(task.status()["pr"].is_null());
-    let error = refusal(task.run(&["-b", "task", "run", "INF-123"]));
+    let error = refusal(task.run(&["task", "run", "INF-123"]));
     assert!(error.contains("is done"), "{error}");
-    let status = task.run(&["task", "status", "INF-123"]);
-    assert!(String::from_utf8_lossy(&status.stdout).contains("Workflow findings: at end"));
+    assert!(task.text_status().contains("Graph findings: at end"));
 }
 
 #[test]
-fn a_landing_edge_that_returns_to_its_node_can_be_taken_again() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
-    for _ in 0..2 {
-        task.ok(&["-b", "task", "run", "INF-123", "land-proof"]);
-        assert_eq!(task.workflow()["position"], at("review"));
-    }
-    let chosen = |workflow: &serde_json::Value| -> Vec<u64> {
-        moves(workflow)
-            .into_iter()
-            .filter(|(kind, _)| kind == "chose")
-            .filter_map(|(_, edge)| edge)
-            .collect()
-    };
-    assert_eq!(chosen(&task.workflow()), [0, 1, 1]);
-    // Two edges leave review, so the entry asks which, and names them.
-    let error = refusal(task.run(&["-b", "task", "run", "INF-123"]));
-    assert!(error.contains("land-proof (to review)"), "{error}");
-    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "accepted"]));
-    assert!(error.contains("neither a route leaving review"), "{error}");
-    assert_eq!(chosen(&task.workflow()), [0, 1, 1]);
-}
-
-#[test]
-fn a_landing_that_settles_later_is_recorded_by_moving_the_task() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
-    // The landing edge's Graph stops before its end: the Task stays on it.
-    assert!(!task
-        .run(&["-b", "task", "run", "INF-123", "broken"])
-        .status
-        .success());
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"]["kind"], "edge");
-    assert_eq!(workflow["position"]["edge"], 2);
-    assert_eq!(workflow["position"]["running"], false);
-    assert_eq!(moves(&workflow).last().unwrap().0, "chose");
-    // The work finished elsewhere; a person says so.
-    task.finish_after_provider_observation(&[
-        "task",
-        "workflow",
-        "move",
-        "INF-123",
-        "end",
-        "--reason",
-        "merged by hand",
-    ]);
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("end"));
-    let set = workflow["history"].as_array().unwrap().last().unwrap();
-    assert_eq!(set["kind"], "set");
-    assert_eq!(
-        (&set["from"], &set["to"]),
-        (&"review".into(), &"end".into())
-    );
-    assert_eq!(set["edge"], 2);
-    assert_eq!(set["note"], "merged by hand");
-    assert_eq!(set["actor"], "person");
-    assert_eq!(set["session_id"], serde_json::Value::Null);
-    // One Graph process reached the node; the failing edge was attempted three times.
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 4);
-    // The Task is done; nothing runs until it is put back on its workflow.
-    assert_eq!(task.state(), "done");
-    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "findings"]));
-    assert!(error.contains("lf task reopen INF-123"), "{error}");
-}
-
-#[test]
-fn a_stopped_edge_is_chosen_again_and_the_task_can_go_back() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
-    assert!(!task
-        .run(&["-b", "task", "run", "INF-123", "gate"])
-        .status
-        .success());
-    let stopped = task.workflow();
-    assert_eq!(stopped["position"]["edge"], 2);
-    assert_eq!(stopped["position"]["running"], false);
-    assert_eq!(stopped["outgoing"], serde_json::json!([1, 2]));
-    let status = task.run(&["task", "status", "INF-123"]);
-    let status = String::from_utf8_lossy(&status.stdout).to_string();
-    assert!(
-        status.contains("Workflow gated: stopped on gate (review → accepted)"),
-        "{status}"
-    );
-    // Once its cause is fixed the same edge is chosen again and arrives.
-    let late = task.repo.path().join(".lf/graphs/late.yaml");
-    fs::write(late, "- cmd: task sync --plan\n").unwrap();
-    task.ok(&["-b", "task", "run", "INF-123", "gate"]);
-    assert_eq!(task.workflow()["position"], at("accepted"));
-    // The demo was not good enough after all: go back and take the loop.
-    task.ok(&[
-        "task",
-        "workflow",
-        "move",
-        "INF-123",
-        "review",
-        "--reason",
-        "one more round",
-    ]);
-    assert_eq!(task.workflow()["position"], at("review"));
-    task.ok(&["-b", "task", "run", "INF-123", "proof"]);
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("review"));
-    let kinds: Vec<_> = moves(&workflow).into_iter().map(|(kind, _)| kind).collect();
-    assert_eq!(
-        kinds,
-        ["took_up", "chose", "arrived", "chose", "chose", "arrived", "set", "chose", "arrived"]
-    );
-    let error = refusal(task.run(&["task", "workflow", "move", "INF-123", "nowhere"]));
-    assert!(
-        error.contains("Stages: start, review, accepted, end"),
-        "{error}"
-    );
-    // Taking up another workflow starts over and keeps the history.
-    let before = workflow["history"].as_array().unwrap().len();
-    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
-    let workflow = task.workflow();
-    assert_eq!(workflow["name"], "findings");
-    assert_eq!(workflow["position"], at("findings"));
-    assert_eq!(workflow["history"].as_array().unwrap().len(), before + 3);
-    assert_eq!(workflow["history"][0]["workflow"], "gated");
-}
-
-#[test]
-fn task_edges_launch_graphs_named_after_collection_commands() {
-    let task = WorkflowTask::new();
+fn a_run_continues_after_the_step_it_stopped_at_and_from_goes_back_or_skips() {
+    let task = GraphTask::new();
     fs::write(
-        task.repo.path().join(".lf/graphs/list.yaml"),
+        task.repo.path().join(".lf/graphs/late.yaml"),
         "- cmd: task sync --plan\n",
     )
     .unwrap();
-    fs::write(
-        task.repo.path().join(".lf/graphs/reserved.yaml"),
-        "- graph: list\n- interactive: {name: demo, id: review}\n",
-    )
-    .unwrap();
-    task.select_workflow("reserved");
-    task.ok(&["-b", "task", "run", "INF-123", "reserved"]);
-    assert_eq!(
-        task.workflow()["position"],
-        serde_json::json!({"kind":"node","node":"review"})
+    task.task_run_ok(&["task", "run", "INF-123", "gated"]);
+    assert_eq!(task.graph()["position"], at("review"));
+    // The next run continues after review and stops before accepted.
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    assert_eq!(task.graph()["position"], at("accepted"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    // The demo was not good enough after all: go back to review. Nothing runs.
+    let waits = task.task_run(&["task", "run", "INF-123", "--from", "review"]);
+    assert!(waits.success(), "{}", waits.text);
+    assert!(waits.text.contains("waits at review"), "{}", waits.text);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    // From a step that runs, the run starts there: proof again, to review.
+    task.task_run_ok(&["task", "run", "INF-123", "--from", "proof"]);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 3);
+    // Skip ahead to accepted.
+    task.task_run_ok(&["task", "run", "INF-123", "--from", "accepted"]);
+    assert_eq!(task.graph()["position"], at("accepted"));
+    let error = refusal(task.run(&["task", "run", "INF-123", "--from", "nowhere"]));
+    assert!(
+        error.contains("graph gated has no step \"nowhere\""),
+        "{error}"
     );
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    assert!(error.contains("review"), "{error}");
+    // Taking up another graph starts it over.
+    task.task_run_ok(&["task", "run", "INF-123", "findings"]);
+    let graph = task.graph();
+    assert_eq!(graph["name"], "findings");
+    assert_eq!(graph["position"], at("findings"));
 }
 
 #[test]
-fn a_plain_graph_process_in_the_worktree_does_not_move_the_task() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
-    let before = task.workflow();
+fn lf_graph_in_the_worktree_does_not_move_the_task() {
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "gated"]);
+    let before = task.graph();
     task.ok(&["-b", "graph", "land-proof"]);
     task.ok(&["-b", "--task", "INF-123", "graph", "land-proof"]);
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 3);
-    assert_eq!(task.workflow(), before);
-    // Run as a plain Graph, a graph stops at its first stage and moves no Task.
-    let staged = task.run(&["-b", "graph", "rounds"]);
-    assert!(staged.status.success());
-    let stderr = String::from_utf8_lossy(&staged.stderr).to_string();
-    assert!(stderr.contains("Reached review"), "{stderr}");
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 4);
-    assert_eq!(task.workflow(), before);
+    assert_eq!(task.graph(), before);
 }
 
 /// The Graph processes started beneath `task_run`, by outcome, oldest first.
@@ -1613,69 +1620,66 @@ fn attempts(home: &Path, task_run: &str) -> Vec<String> {
 }
 
 #[test]
-fn one_task_run_starts_its_graph_again_until_an_attempt_succeeds_or_attempts_run_out() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
-    let carrier = |workflow: &serde_json::Value| {
-        let chose = workflow["history"].as_array().unwrap().last().unwrap();
-        chose["lf_process_id"].as_str().unwrap().to_string()
-    };
-    // Every attempt fails: the Task run gives up and the edge holds the Task.
-    let output = task.run(&["-b", "task", "run", "INF-123", "gate"]);
-    let error = refusal(output);
-    assert!(error.contains("Route gate failed 3 times"), "{error}");
-    let stopped = task.workflow();
-    assert_eq!(stopped["position"]["edge"], 2);
+fn a_stopped_run_is_started_again_from_where_it_began() {
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "gated"]);
+    // Every attempt fails: the Task run gives up and the run holds the Task.
+    let ran = task.task_run(&["task", "run", "INF-123"]);
+    assert!(!ran.success());
+    assert!(ran.text.contains("failed 3 times"), "{}", ran.text);
+    let stopped = task.graph();
+    assert_eq!(stopped["position"]["kind"], "run");
+    assert_eq!(stopped["position"]["step"], "review");
     assert_eq!(stopped["position"]["running"], false);
+    let carrier = stopped["position"]["lf_process_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert_eq!(
-        stopped["position"]["lf_process_id"],
-        carrier(&stopped).as_str()
-    );
-    assert_eq!(
-        attempts(task.home.path(), &carrier(&stopped)),
+        attempts(task.home.path(), &carrier),
         ["failed", "failed", "failed"]
+    );
+    let status = task.text_status();
+    assert!(
+        status.contains("Graph gated: stopped from review"),
+        "{status}"
     );
 
     // The cause clears as the third attempt starts: an `lf` that defines
     // `late` the third time the gate asks for it.
     let bin = tempfile::tempdir().unwrap();
-    let lf = bin.path().join("lf");
-    fs::write(
-        &lf,
-        format!(
-            "#!/bin/sh\ncase \"$*\" in *'graph show late'*)\n  echo asked >> '{count}'\n  [ \"$(wc -l < '{count}')\" -ge 3 ] && printf -- '- cmd: task sync --plan\\n' > '{late}';;\nesac\nexec '{real}' \"$@\"\n",
+    let lf = lf_shim(
+        bin.path(),
+        &format!(
+            "  echo asked >> '{count}'\n  [ \"$(wc -l < '{count}')\" -ge 3 ] && printf -- '- cmd: task sync --plan\\n' > '{late}';;",
             count = bin.path().join("asked").display(),
             late = task.repo.path().join(".lf/graphs/late.yaml").display(),
-            real = loopflow_test_support::lf_binary(),
         ),
-    )
-    .unwrap();
-    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    let output = command(
-        task.repo.path(),
-        task.home.path(),
-        &["-b", "task", "run", "INF-123", "gate"],
-    )
-    .env("LF_BIN", &lf)
-    .output()
-    .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
     );
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("accepted"));
-    // One Task run: chosen once, arrived once, three Graph processes beneath it.
-    let kinds: Vec<_> = moves(&workflow).into_iter().map(|(kind, _)| kind).collect();
-    assert_eq!(
-        kinds,
-        ["took_up", "chose", "arrived", "chose", "chose", "arrived"]
+    let ran = task.ran(
+        command(
+            task.repo.path(),
+            task.home.path(),
+            &["task", "run", "INF-123"],
+        )
+        .env("LF_BIN", &lf)
+        .output()
+        .unwrap(),
     );
-    let arrived = workflow["history"].as_array().unwrap().last().unwrap();
-    let task_run = arrived["lf_process_id"].as_str().unwrap();
+    assert!(ran.success(), "{}", ran.text);
+    // The bare run started the stopped run again from the gate, not after review.
+    assert_eq!(task.graph()["position"], at("accepted"));
+    // The carrier of the latest Graph process is the run that just ended.
+    let task_run = rusqlite::Connection::open(task.home.path().join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT p.parent_lf_process_id FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id ORDER BY p.rowid DESC LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap();
     assert_eq!(
-        attempts(task.home.path(), task_run),
+        attempts(task.home.path(), &task_run),
         ["failed", "failed", "succeeded"]
     );
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 7);
@@ -1683,38 +1687,26 @@ fn one_task_run_starts_its_graph_again_until_an_attempt_succeeds_or_attempts_run
 
 #[test]
 fn a_held_command_stops_the_task_run_without_repeating_the_graph() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "gated"]);
     let bin = tempfile::tempdir().unwrap();
-    let lf = bin.path().join("lf");
-    fs::write(
-        &lf,
-        format!(
-            "#!/bin/sh\ncase \"$*\" in *'graph show late'*) exit 3;; esac\nexec '{}' \"$@\"\n",
-            loopflow_test_support::lf_binary()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&lf, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    let output = command(
-        task.repo.path(),
-        task.home.path(),
-        &["-b", "task", "run", "INF-123", "gate"],
-    )
-    .env("LF_BIN", &lf)
-    .output()
-    .unwrap();
-    assert_eq!(
-        output.status.code(),
-        Some(3),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+    let lf = lf_shim(bin.path(), "  exit 3;;");
+    let ran = task.ran(
+        command(
+            task.repo.path(),
+            task.home.path(),
+            &["task", "run", "INF-123"],
+        )
+        .env("LF_BIN", &lf)
+        .output()
+        .unwrap(),
     );
+    assert_eq!(ran.code, Some(3), "{}", ran.text);
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"]["kind"], "edge");
-    assert_eq!(workflow["position"]["running"], false);
-    assert!(!String::from_utf8_lossy(&output.stderr).contains("starting it again"));
+    let graph = task.graph();
+    assert_eq!(graph["position"]["kind"], "run");
+    assert_eq!(graph["position"]["running"], false);
+    assert!(!ran.text.contains("); starting it again"), "{}", ran.text);
 }
 
 fn interrupt_rows(home: &Path) -> i64 {
@@ -1730,7 +1722,7 @@ fn interrupt_rows(home: &Path) -> i64 {
 
 #[test]
 fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     for (path, content) in [
         (
             ".lf/graphs/interrupting.yaml",
@@ -1743,30 +1735,28 @@ fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
     ] {
         fs::write(task.repo.path().join(path), content).unwrap();
     }
-    task.select_workflow("interrupted");
-    let output = task.run(&["-b", "task", "run", "INF-123", "interrupted"]);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert_eq!(output.status.code(), Some(130), "{stdout}\n{stderr}");
+    task.select_wave_graph("interrupted");
+    let ran = task.task_run(&["task", "run", "INF-123", "interrupted"]);
+    assert_eq!(ran.code, Some(130), "{}", ran.text);
     assert!(
-        stdout.contains("INF-123: stopped Graph interrupted"),
-        "{stdout}"
+        ran.text.contains("INF-123: stopped Graph interrupted"),
+        "{}",
+        ran.text
     );
-    assert!(!stderr.contains("starting it again"), "{stderr}");
+    assert!(!ran.text.contains("); starting it again"), "{}", ran.text);
     let graphs = support::recorded_graphs(task.home.path());
     assert_eq!(graphs.len(), 1);
     assert_eq!(graphs[0].1.len(), 1, "the second step never started");
-    let workflow = task.workflow();
-    let chose = workflow["history"].as_array().unwrap().last().unwrap();
-    assert_eq!(
-        attempts(task.home.path(), chose["lf_process_id"].as_str().unwrap()).len(),
-        1
-    );
+    let carrier = task.graph()["position"]["lf_process_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(attempts(task.home.path(), &carrier).len(), 1);
 }
 
 #[test]
 fn interrupting_an_idle_task_records_nothing_and_says_so() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     let before = interrupt_rows(task.home.path());
     let output = task.run(&["task", "interrupt", "INF-123", "--json"]);
     assert!(
@@ -1781,7 +1771,7 @@ fn interrupting_an_idle_task_records_nothing_and_says_so() {
 
 #[test]
 fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_stop() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     let mut waiter = command(
         task.repo.path(),
         task.home.path(),
@@ -1832,8 +1822,8 @@ fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_s
 fn a_graph_that_fails_with_retained_edits_is_not_started_again() {
     // LOO-578: starting a Graph over on top of a checkout-update stash strands
     // the edits it holds more deeply with every attempt.
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "gated"]);
     let checkout = task.repo.path();
     fs::write(checkout.join("work.txt"), "unrestored\n").unwrap();
     let message = format!("lf checkout update: caller edits in {}", checkout.display());
@@ -1853,49 +1843,35 @@ fn a_graph_that_fails_with_retained_edits_is_not_started_again() {
     )
     .unwrap();
 
-    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "gate"]));
-    assert!(error.contains(stash.trim()), "{error}");
-    assert!(!error.contains("starting it again"), "{error}");
-    let stopped = task.workflow();
-    let chose = stopped["history"].as_array().unwrap().last().unwrap();
-    assert_eq!(
-        attempts(task.home.path(), chose["lf_process_id"].as_str().unwrap()),
-        ["failed"]
-    );
+    let ran = task.task_run(&["task", "run", "INF-123"]);
+    assert!(!ran.success());
+    assert!(ran.text.contains(stash.trim()), "{}", ran.text);
+    assert!(!ran.text.contains("); starting it again"), "{}", ran.text);
+    let carrier = task.graph()["position"]["lf_process_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(attempts(task.home.path(), &carrier), ["failed"]);
 }
 
 #[test]
-fn completion_is_independent_of_workflow_readiness() {
-    let task = WorkflowTask::new();
+fn completion_is_independent_of_graph_position() {
+    let task = GraphTask::new();
     assert_eq!(task.state(), "idle");
-    // A node, then a stopped edge: both between start and end.
-    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
-    assert_eq!(task.workflow()["position"], at("review"));
+    // At an interactive step, then a stopped run: both between start and end.
+    task.task_run_ok(&["task", "run", "INF-123", "gated"]);
+    assert_eq!(task.graph()["position"], at("review"));
     assert_eq!(task.state(), "active");
-    assert!(!task
-        .run(&["-b", "task", "run", "INF-123", "gate"])
-        .status
-        .success());
-    assert_eq!(task.workflow()["position"]["kind"], "edge");
+    assert!(!task.task_run(&["task", "run", "INF-123"]).success());
+    assert_eq!(task.graph()["position"]["kind"], "run");
     assert_eq!(task.state(), "idle");
-    task.ok(&["task", "workflow", "move", "INF-123", "start"]);
-    assert_eq!(task.state(), "idle");
-    // Moving away from end does not reopen a completed Task.
-    task.finish_after_provider_observation(&[
-        "task",
-        "workflow",
-        "move",
-        "INF-123",
-        "end",
-        "--reason",
-        "Delivered",
-    ]);
+    // Completing it leaves it where it stood.
+    let stopped = task.graph();
+    task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
     assert_eq!(task.state(), "done");
-    let text =
-        String::from_utf8_lossy(&task.run(&["task", "status", "INF-123"]).stdout).to_string();
+    assert_eq!(task.graph(), stopped);
+    let text = task.text_status();
     assert!(text.contains("\nINF-123  done\n"), "{text}");
-    task.ok(&["task", "workflow", "move", "INF-123", "review"]);
-    assert_eq!(task.state(), "done");
     // The retired completion flags do not return with the alias.
     assert!(!task
         .run(&["task", "complete", "INF-123", "--summary", "x"])
@@ -1904,46 +1880,38 @@ fn completion_is_independent_of_workflow_readiness() {
 }
 
 #[test]
-fn a_task_with_no_workflow_reaches_end_on_one_with_nothing_between() {
-    let task = WorkflowTask::new();
-    task.finish_after_provider_observation(&["task", "workflow", "move", "INF-123", "end"]);
-    assert_eq!(task.state(), "done");
-    let workflow = task.workflow();
-    assert_eq!(workflow["name"], "unplanned");
-    assert_eq!(workflow["position"], at("end"));
-    assert_eq!(moves(&workflow), [("set".into(), None)]);
-}
-
-#[test]
 fn end_is_retained_while_the_tasks_pr_blocks_completion() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "findings"]);
     task.publish(false);
-    // Arrival is retained while each completion retry still refuses unsettled delivery.
-    for reach in [
-        &["task", "run", "INF-123"][..],
-        &["task", "workflow", "move", "INF-123", "end"],
-        &["task", "complete", "INF-123"],
-    ] {
-        let error = refusal(task.run(reach));
-        assert!(error.to_lowercase().contains("pull request"), "{error}");
-        assert_eq!(task.workflow()["position"], at("end"));
-        // Nothing runs while completion waits on the PR, so the Task reads idle.
-        assert_eq!(task.state(), "idle");
-    }
+    // Reaching end requests completion; the unmerged PR refuses it.
+    let error = refusal(task.run(&["task", "run", "INF-123"]));
+    assert!(error.to_lowercase().contains("pull request"), "{error}");
+    assert_eq!(task.graph()["position"], at("end"));
+    // Nothing runs while completion waits on the PR, so the Task reads idle.
+    assert_eq!(task.state(), "idle");
+    // A plain run into end hands the Task to Auto-Ship, which may land it.
+    let stop = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let stop = String::from_utf8_lossy(&stop.stdout);
+    assert!(stop.contains("INF-123 stopped shipping"), "{stop}");
+    let error = refusal(task.run(&["task", "complete", "INF-123"]));
+    assert!(error.to_lowercase().contains("pull request"), "{error}");
+    assert_eq!(task.graph()["position"], at("end"));
+    // At end, a run points to `--from`.
+    let error = refusal(task.run(&["task", "run", "INF-123"]));
+    assert!(error.contains("--from <step>"), "{error}");
+    assert_eq!(task.state(), "idle");
 }
 
 #[test]
-fn local_reopening_preserves_delivery_and_workflow_and_supersedes_pending_completion() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+fn local_reopening_preserves_delivery_and_graph_and_supersedes_pending_completion() {
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "findings"]);
     task.publish(false);
-    assert!(!task
-        .run(&["task", "workflow", "move", "INF-123", "end"])
-        .status
-        .success());
+    assert!(!task.run(&["task", "run", "INF-123"]).status.success());
     assert!(!task.status()["completion_pending"].is_null());
-    let workflow = task.workflow();
+    let graph = task.graph();
+    assert_eq!(graph["position"], at("end"));
     let graphs = support::recorded_graphs(task.home.path());
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let pr = runtime
@@ -1961,7 +1929,7 @@ fn local_reopening_preserves_delivery_and_workflow_and_supersedes_pending_comple
         "Continue accepted work",
     ]);
     assert!(task.status()["completion_pending"].is_null());
-    assert_eq!(task.workflow(), workflow);
+    assert_eq!(task.graph(), graph);
     assert_eq!(support::recorded_graphs(task.home.path()), graphs);
     assert_eq!(
         runtime
@@ -1973,29 +1941,25 @@ fn local_reopening_preserves_delivery_and_workflow_and_supersedes_pending_comple
             .unwrap(),
         pr
     );
-    task.ok(&["task", "workflow", "move", "INF-123", "end"]);
-    assert!(task.status()["completion_pending"].is_null());
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
     task.ok(&["task", "reopen", "INF-123"]);
     assert_eq!(task.state(), "idle");
-    assert_eq!(task.workflow(), workflow);
+    assert_eq!(task.graph(), graph);
     task.ok(&["task", "reopen", "INF-123"]);
-    assert_eq!(task.workflow(), workflow);
+    assert_eq!(task.graph(), graph);
     assert!(task.repo.path().exists());
 }
 
 #[test]
-fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "gated"]);
-    let workflow = task.workflow();
+fn linear_completion_and_reopening_preserve_the_graph() {
+    let task = GraphTask::new();
+    task.task_run_ok(&["task", "run", "INF-123", "gated"]);
+    let graph = task.graph();
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
-    assert_eq!(task.workflow(), workflow);
+    assert_eq!(task.graph(), graph);
     assert!(task.status()["completion_pending"].is_null());
-    task.ok(&["task", "workflow", "move", "INF-123", "end"]);
-    let ended = task.workflow();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let scope = task
         .repo
@@ -2015,62 +1979,30 @@ fn linear_completion_and_reopening_preserve_workflow_and_supersede_old_end() {
         .unwrap();
     rt.block_on(store.seed_issue(&scope, "linear", stale, None, None))
         .unwrap();
-    assert_eq!(task.state(), "idle");
-    assert_eq!(task.workflow(), ended);
+    assert_eq!(task.state(), "active");
+    assert_eq!(task.graph(), graph);
     assert!(task.status()["completion_pending"].is_null());
-    task.ok(&["task", "workflow", "move", "INF-123", "end"]);
-    assert_eq!(task.state(), "idle");
 }
 
 #[test]
 fn linear_completing_a_task_that_never_started_withdraws_it() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     task.complete_in_linear();
     assert!(task.status()["completion_pending"].is_null());
-    let error = refusal(task.run(&["-b", "task", "run", "INF-123", "gated"]));
+    let ran = task.task_run(&["task", "run", "INF-123", "gated"]);
+    assert!(!ran.success());
     assert!(
-        error.contains("terminal") || error.contains("is done"),
-        "{error}"
+        ran.text.contains("terminal") || ran.text.contains("is done"),
+        "{}",
+        ran.text
     );
     assert!(support::recorded_graphs(task.home.path()).is_empty());
     assert_eq!(task.state(), "done");
 }
 
 #[test]
-fn workflow_restart_keeps_the_captured_graph_and_execution_history() {
-    let task = WorkflowTask::new();
-    task.ok(&["-b", "task", "run", "INF-123", "rounds"]);
-    let before = task.workflow();
-    let processes = support::recorded_graphs(task.home.path());
-    fs::write(
-        task.repo.path().join(".lf/graphs/rounds.yaml"),
-        "invalid: source\n",
-    )
-    .unwrap();
-    task.ok(&["task", "workflow", "restart", "INF-123"]);
-    let after = task.workflow();
-    assert_eq!(
-        after["position"],
-        serde_json::json!({"kind":"node","node":"start"})
-    );
-    assert_eq!(after["nodes"], before["nodes"]);
-    assert_eq!(after["edges"], before["edges"]);
-    assert_eq!(
-        after["history"].as_array().unwrap().len(),
-        before["history"].as_array().unwrap().len() + 1
-    );
-    assert_eq!(support::recorded_graphs(task.home.path()), processes);
-    let shown = task.run(&["task", "workflow", "show", "INF-123", "--json"]);
-    assert!(shown.status.success());
-    assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
-        after
-    );
-}
-
-#[test]
 fn completion_preserves_retained_session_input_and_unknown_process_history() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let exec = uuid::Uuid::new_v4().to_string();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -2087,13 +2019,9 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     .unwrap();
     let sessions: String = db.query_row("SELECT json_object('published',input_published,'completed',completed_at,'cwd',cwd) FROM agent_sessions WHERE id='retained-input'", [], |row| row.get(0)).unwrap();
     task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
-    assert!(task.workflow().is_null());
-    for args in [
-        &["task", "complete", "INF-123"][..],
-        &["task", "workflow", "move", "INF-123", "end"][..],
-        &["task", "complete", "INF-123"][..],
-    ] {
-        task.ok(args);
+    assert!(task.graph().is_null());
+    for _ in 0..2 {
+        task.ok(&["task", "complete", "INF-123"]);
         assert_eq!(task.state(), "done");
         assert!(task.repo.path().exists());
     }
@@ -2119,15 +2047,15 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
 
 #[test]
 fn merged_delivery_completes_without_disposition_and_is_idempotent() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     task.publish(true);
-    task.ok(&["-b", "task", "run", "INF-123", "findings"]);
+    task.task_run_ok(&["task", "run", "INF-123", "findings"]);
     assert_ne!(task.state(), "done");
     assert!(task.repo.path().exists());
     task.finish_after_provider_observation(&["task", "complete", "INF-123"]);
-    let workflow = task.workflow();
+    let graph = task.graph();
     task.ok(&["task", "complete", "INF-123"]);
-    assert_eq!(task.workflow(), workflow);
+    assert_eq!(task.graph(), graph);
     let status = task.status();
     assert_eq!(status["status"], "done");
     assert_eq!(status["pr"]["publication"]["github"]["number"], 42);
@@ -2140,7 +2068,7 @@ fn merged_delivery_completes_without_disposition_and_is_idempotent() {
 
 #[test]
 fn unmerged_completion_in_graph_is_retryable_without_replaying_it() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     fs::write(
         task.repo.path().join(".lf/graphs/finish-proof.yaml"),
         "- cmd: task complete INF-123\n",
@@ -2152,34 +2080,26 @@ fn unmerged_completion_in_graph_is_retryable_without_replaying_it() {
     )
     .unwrap();
     task.publish(false);
-    task.select_workflow("delivery");
+    task.select_wave_graph("delivery");
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "delivery"]));
     assert!(task.status()["completion_pending"].is_string(), "{error}");
-    task.publish(true);
-    task.ok(&["task", "complete", "INF-123"]);
-    task.ok(&["task", "workflow", "move", "INF-123", "end"]);
-    assert_eq!(task.state(), "done");
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("end"));
-    let ends = workflow["history"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|entry| entry["to"] == "end" && entry["kind"] != "chose")
-        .count();
-    assert_eq!(ends, 1);
-    task.ok(&["task", "complete", "INF-123"]);
-    assert_eq!(task.workflow(), workflow);
     let graphs = support::recorded_graphs(task.home.path());
     assert!(!graphs.is_empty());
     assert!(graphs
         .iter()
         .all(|graph| graph.0.as_deref() == Some("failed")));
+    task.publish(true);
+    task.ok(&["task", "complete", "INF-123"]);
+    assert_eq!(task.state(), "done");
+    let graph = task.graph();
+    task.ok(&["task", "complete", "INF-123"]);
+    assert_eq!(task.graph(), graph);
+    assert_eq!(support::recorded_graphs(task.home.path()), graphs);
 }
 
 #[test]
-fn provider_completion_preserves_a_live_edge_and_the_graph_process_records_its_real_arrival() {
-    let task = WorkflowTask::new();
+fn provider_completion_preserves_a_live_run_and_its_graph_process_records_the_arrival() {
+    let task = GraphTask::new();
     let worktree = tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(task.registered.store.get_task(&task.registered.task.id))
@@ -2192,7 +2112,7 @@ fn provider_completion_preserves_a_live_edge_and_the_graph_process_records_its_r
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, content).unwrap();
     };
-    write(".lf/graphs/live-workflow.yaml", "- graph: live\n");
+    write(".lf/graphs/live-graph.yaml", "- graph: live\n");
     let hold = hold_script(task.home.path(), true);
     write(
         ".lf/graphs/live.yaml",
@@ -2201,14 +2121,14 @@ fn provider_completion_preserves_a_live_edge_and_the_graph_process_records_its_r
             hold.display()
         ),
     );
-    // The run names the checkout's Workflow file; no Wave selection is needed.
+    // The run names the checkout's graph file; no Wave selection is needed.
     let log_path = task.home.path().join("live.log");
     let log = fs::File::create(&log_path).unwrap();
     let mut held = HeldGraph {
         child: command(
             task.repo.path(),
             task.home.path(),
-            &["-b", "task", "run", "INF-123", "live-workflow"],
+            &["-b", "task", "run", "INF-123", "live-graph"],
         )
         .stdout(log.try_clone().unwrap())
         .stderr(log)
@@ -2226,7 +2146,7 @@ fn provider_completion_preserves_a_live_edge_and_the_graph_process_records_its_r
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    let before = task.workflow();
+    let before = task.graph();
     assert_eq!(before["position"]["running"], true);
     task.publish(false);
     let placement = task.status();
@@ -2238,11 +2158,11 @@ fn provider_completion_preserves_a_live_edge_and_the_graph_process_records_its_r
     assert_eq!(moved["pr"], placement["pr"]);
     assert_eq!(moved["worktree"], placement["worktree"]);
     assert_eq!(moved["branch"], placement["branch"]);
-    assert_eq!(task.workflow(), before);
+    assert_eq!(task.graph(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     task.ok(&["task", "move", "INF-123", "--no-wave"]);
     assert_eq!(task.status()["pr"], placement["pr"]);
-    assert_eq!(task.workflow(), before);
+    assert_eq!(task.graph(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     task.ok(&[
         "task",
@@ -2251,17 +2171,17 @@ fn provider_completion_preserves_a_live_edge_and_the_graph_process_records_its_r
         "--wave",
         task.registered.task.wave_id.as_ref().unwrap().as_str(),
     ]);
-    assert_eq!(task.workflow(), before);
+    assert_eq!(task.graph(), before);
     assert_eq!(task.status()["worktree"], placement["worktree"]);
     assert_eq!(task.status()["branch"], placement["branch"]);
     assert_eq!(task.status()["pr"], placement["pr"]);
     assert!(held.child.try_wait().unwrap().is_none());
     task.complete_in_linear();
     assert_eq!(task.state(), "done");
-    assert_eq!(task.workflow(), before);
+    assert_eq!(task.graph(), before);
     task.ok(&["task", "reopen", "INF-123"]);
-    assert_eq!(task.state(), "moving");
-    assert_eq!(task.workflow(), before);
+    assert_ne!(task.state(), "done");
+    assert_eq!(task.graph(), before);
     assert!(held.child.try_wait().unwrap().is_none());
     assert!(task.repo.path().exists());
     task.publish(true);
@@ -2271,40 +2191,29 @@ fn provider_completion_preserves_a_live_edge_and_the_graph_process_records_its_r
         "{}",
         fs::read_to_string(&log_path).unwrap()
     );
-    let after = task.workflow();
-    assert_eq!(after["position"], at("end"));
-    assert_eq!(
-        after["history"].as_array().unwrap().last().unwrap()["kind"],
-        "arrived"
-    );
-    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
-    assert_eq!(
-        support::recorded_graphs(task.home.path())[0].0.as_deref(),
-        Some("succeeded")
-    );
+    assert_eq!(task.graph()["position"], at("end"));
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
 }
 
 #[test]
 fn successful_final_graph_keeps_arrival_when_completion_fails_and_never_replays() {
-    let task = WorkflowTask::new();
+    let task = GraphTask::new();
     task.repo
         .create_file(".lf/graphs/final.yaml", "- graph: proof\n");
-    task.select_workflow("final");
+    task.select_wave_graph("final");
     task.publish(false);
     let error = refusal(task.run(&["-b", "task", "run", "INF-123", "final"]));
     assert!(task.status()["completion_pending"].is_string(), "{error}");
-    let arrived = task.workflow();
+    let arrived = task.graph();
     assert_eq!(arrived["position"], at("end"));
-    assert_eq!(
-        arrived["history"].as_array().unwrap().last().unwrap()["kind"],
-        "arrived"
-    );
     let graphs = support::recorded_graphs(task.home.path());
     assert_eq!(graphs.len(), 1);
     assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
     task.publish(true);
     task.ok(&["task", "complete", "INF-123"]);
-    assert_eq!(task.workflow(), arrived);
+    assert_eq!(task.graph(), arrived);
     assert_eq!(support::recorded_graphs(task.home.path()), graphs);
 }
 
@@ -2330,8 +2239,8 @@ for line in sys.stdin:
     pass
 "#;
 
-fn shipping_task() -> WorkflowTask {
-    let task = WorkflowTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
+fn shipping_task() -> GraphTask {
+    let task = GraphTask::with_tools(&[("claude", STAND_IN_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
     tokio::runtime::Runtime::new()
         .unwrap()
@@ -2344,7 +2253,7 @@ fn shipping_task() -> WorkflowTask {
     task
 }
 
-fn stand_ins(task: &WorkflowTask) -> Vec<String> {
+fn stand_ins(task: &GraphTask) -> Vec<String> {
     fs::read_to_string(task.home.path().join("stand-ins.jsonl"))
         .unwrap_or_default()
         .lines()
@@ -2353,7 +2262,7 @@ fn stand_ins(task: &WorkflowTask) -> Vec<String> {
 }
 
 /// The Task history lines that record a handoff to shipping.
-fn handoffs(task: &WorkflowTask) -> Vec<String> {
+fn handoffs(task: &GraphTask) -> Vec<String> {
     tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(
@@ -2383,7 +2292,25 @@ fn wait_for(what: &str, mut ready: impl FnMut() -> bool) {
 }
 
 #[test]
-fn task_ship_runs_every_remaining_step_standing_in_at_each_node() {
+fn a_batch_task_run_runs_straight_through_its_interactive_steps_to_the_end() {
+    let task = shipping_task();
+    let output = task.run(&["-b", "task", "run", "INF-123"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(task.graph()["position"], at("end"));
+    // One Graph process ran proof, then review headless, standing in.
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    let turns = stand_ins(&task);
+    assert_eq!(turns.len(), 1);
+    assert!(turns[0].contains("at review"), "{}", turns[0]);
+    assert_eq!(task.state(), "done");
+}
+
+#[test]
+fn task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step() {
     let task = shipping_task();
     let output = task.run(&["-b", "--task", "INF-123", "ship", "--reason", "good to go"]);
     assert!(
@@ -2392,21 +2319,11 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_node() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("INF-123 reached its end"));
-    let workflow = task.workflow();
-    assert_eq!(workflow["position"], at("end"));
-    assert_eq!(
-        moves(&workflow),
-        [
-            ("took_up".into(), None),
-            ("chose".into(), Some(0)),
-            ("arrived".into(), Some(0)),
-            ("chose".into(), Some(1)),
-        ]
-    );
+    assert_eq!(task.graph()["position"], at("end"));
     let handoff = handoffs(&task);
     assert_eq!(handoff.len(), 1);
     assert!(handoff[0].ends_with(": good to go"), "{}", handoff[0]);
-    // The review node ran headless with its skill, standing in for a person.
+    // The review step ran headless with its skill, standing in for a person.
     let turns = stand_ins(&task);
     assert_eq!(turns.len(), 1);
     assert!(turns[0].contains("You are standing in for"), "{}", turns[0]);
@@ -2418,13 +2335,32 @@ fn task_ship_runs_every_remaining_step_standing_in_at_each_node() {
 }
 
 #[test]
+fn task_ship_stands_in_at_the_step_the_task_waits_at() {
+    let task = shipping_task();
+    task.task_run_ok(&["task", "run", "INF-123"]);
+    assert_eq!(task.graph()["position"], at("review"));
+    let output = task.run(&["-b", "--task", "INF-123", "ship"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("INF-123: standing in at review"),
+        "{stderr}"
+    );
+    assert_eq!(task.graph()["position"], at("end"));
+    // Proof is not run again: the ship set out from review.
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(task.state(), "done");
+}
+
+#[test]
 fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
     let task = shipping_task();
     task.ok(&["task", "defer", "INF-123"]);
     let deferred = task.run(&["-b", "--task", "INF-123", "ship"]);
     assert!(deferred.status.success());
     assert!(String::from_utf8_lossy(&deferred.stdout).contains("INF-123 is deferred"));
-    assert!(task.workflow().is_null());
+    assert!(task.graph().is_null());
     task.ok(&["task", "resume", "INF-123"]);
 
     // The first ship holds at its stand-in; a second one finds it live.
@@ -2448,7 +2384,7 @@ fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
     );
     fs::remove_file(task.home.path().join("hold")).unwrap();
     assert!(first.wait().unwrap().success());
-    assert_eq!(task.workflow()["position"], at("end"));
+    assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(handoffs(&task).len(), 1);
 }
 
@@ -2473,8 +2409,8 @@ fn task_ship_stop_withdraws_the_approval_and_ends_its_ship() {
     assert!(stopped.contains("INF-123 stopped shipping"), "{stopped}");
     assert!(!first.wait().unwrap().success());
     fs::remove_file(task.home.path().join("hold")).unwrap();
-    // Approval withdrawn, it stands at its stage again.
-    assert_eq!(task.state(), "active");
+    // Approval withdrawn, its run stopped where it stood.
+    assert_ne!(task.state(), "shipping");
     let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let again = String::from_utf8_lossy(&again.stdout);
     assert!(again.contains("INF-123 is not shipping"), "{again}");
@@ -2500,54 +2436,38 @@ fn task_ship_completes_when_its_pr_merges_mid_ship() {
     fs::remove_file(task.home.path().join("hold")).unwrap();
     let output = first.wait_with_output().unwrap();
     assert!(output.status.success());
-    assert_eq!(task.state(), "done");
-    // Review is this graph's last stage, so it checks merged work: the merge
+    // Review is this graph's last step, so it checks merged work: the merge
     // completes nothing until the stand-in there finishes into `end`.
-    assert_eq!(
-        moves(&task.workflow()),
-        [
-            ("took_up".into(), None),
-            ("chose".into(), Some(0)),
-            ("arrived".into(), Some(0)),
-            ("chose".into(), Some(1)),
-        ]
-    );
+    assert_eq!(task.state(), "done");
+    assert_eq!(task.graph()["position"], at("end"));
+    assert_eq!(stand_ins(&task).len(), 1);
 }
 
 #[test]
-fn task_ship_takes_a_mid_ship_merge_on_to_verify_instead_of_completing() {
+fn task_ship_takes_a_merged_pr_on_to_its_check_step_instead_of_building() {
     let task = shipping_task();
-    fs::write(task.home.path().join("hold"), "").unwrap();
-    let first = command(
-        task.repo.path(),
-        task.home.path(),
-        &["-b", "ship", "INF-123", "--graph", "verified"],
-    )
-    .stdin(std::process::Stdio::null())
-    .stdout(std::process::Stdio::piped())
-    .stderr(std::process::Stdio::null())
-    .spawn()
-    .unwrap();
-    wait_for("the stand-in", || !stand_ins(&task).is_empty());
-    // Someone merges the PR by hand while the review stand-in is working.
+    task.task_run_ok(&["task", "run", "INF-123", "verified"]);
+    assert_eq!(task.graph()["position"], at("review"));
+    // Someone merged the PR by hand while the Task waited at review.
     task.publish(true);
-    fs::remove_file(task.home.path().join("hold")).unwrap();
-    let output = first.wait_with_output().unwrap();
+    let output = task.run(&["-b", "--task", "INF-123", "ship"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "{stdout}");
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(
         stdout.contains("INF-123: its PR merged; on to check"),
         "{stdout}"
     );
     assert_eq!(task.state(), "done");
-    // The landing route never ran; a stand-in checked the merged work at
+    assert_eq!(task.graph()["position"], at("end"));
+    // The landing steps never ran; a stand-in checked the merged work at
     // `check`, then finished.
     let turns = stand_ins(&task);
-    assert_eq!(turns.len(), 2);
-    assert!(turns[1].contains("at check"), "{}", turns[1]);
-    let moves = moves(&task.workflow());
-    assert_eq!(moves[3].0, "set");
-    assert_eq!(moves.len(), 5);
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert!(turns[0].contains("at check"), "{}", turns[0]);
 }
 
 #[test]
@@ -2571,7 +2491,7 @@ fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
     // Any read of this Machine's Tasks finds the dead ship and starts it again.
     task.ok(&["task", "list"]);
     wait_for("the restarted ship to reach end", || {
-        task.workflow()["position"] == at("end")
+        task.graph()["position"] == at("end")
     });
     // The restart carries the same handoff; it is not shipped a second time.
     assert_eq!(handoffs(&task).len(), 1);
@@ -2593,7 +2513,7 @@ sys.exit(3)
 
 #[test]
 fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
-    let task = WorkflowTask::with_tools(&[("claude", FAILING_CLAUDE)]);
+    let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
     connect_fixture_claude(task.home.path(), &task.registered.store);
     tokio::runtime::Runtime::new()
         .unwrap()
@@ -2605,7 +2525,9 @@ fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
         .unwrap();
     let output = task.run(&["-b", "--task", "INF-123", "ship"]);
     assert!(!output.status.success());
-    assert_eq!(stand_ins(&task).len(), 1);
+    // The ship's Task run started its failing Graph three times, then gave up.
+    let attempts = stand_ins(&task).len();
+    assert_eq!(attempts, 3);
     // Approved with its ship process exited, it is idle until the restart.
     assert_eq!(task.state(), "idle");
     // Reads right after the failure leave the restart waiting its minute.
@@ -2613,7 +2535,7 @@ fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
         task.ok(&["task", "list"]);
     }
     std::thread::sleep(Duration::from_secs(2));
-    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(stand_ins(&task).len(), attempts);
     assert_eq!(task.state(), "idle");
     // The shipping reason names the stand-in's failure and the wait.
     let shown = task.run(&["wave", "show", "--json"]);
@@ -2625,4 +2547,89 @@ fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
         .unwrap_or_else(|| panic!("no failed shipping reason in {shown}"));
     assert!(reason.starts_with("agent exited with code 1"), "{reason}");
     assert!(reason.ends_with("; retrying within a minute"), "{reason}");
+}
+
+#[test]
+fn task_ship_runs_new_work_on_a_reopened_task_despite_its_old_merged_pr() {
+    let task = shipping_task();
+    // The first delivery merged and completed the Task; then it was reopened.
+    task.publish(true);
+    task.ok(&["task", "complete", "INF-123"]);
+    assert_eq!(task.state(), "done");
+    task.ok(&["task", "reopen", "INF-123", "--reason", "new repair"]);
+    assert_ne!(task.state(), "done");
+    let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "feature"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The old merge settled nothing: the new graph ran, standing in at review.
+    assert!(!stdout.contains("its PR merged"), "{stdout}");
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    assert_eq!(stand_ins(&task).len(), 1);
+    assert_eq!(task.graph()["position"], at("end"));
+}
+
+/// A Claude stand-in that records its first turn and answers that the step is
+/// blocked on something only a person can do.
+const BLOCKED_CLAUDE: &str = r#"#!/usr/bin/python3
+import json, os, sys
+if '--version' in sys.argv:
+    print('fixture')
+    sys.exit(0)
+home = os.environ['LF_HOME']
+message = json.loads(sys.stdin.readline())
+with open(os.path.join(home, 'stand-ins.jsonl'), 'a') as turns:
+    turns.write(json.dumps(message['message']['content'][0]['text']) + '\n')
+message['session_id'] = 'stand-in'
+print(json.dumps(message), flush=True)
+print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
+summary = 'Main-source checks pass; the installed release must be checked first.'
+print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': summary, 'structured_output': {'decision': 'blocked', 'summary': None, 'reason': summary}}), flush=True)
+for line in sys.stdin:
+    pass
+"#;
+
+#[test]
+fn task_ship_blocked_at_verification_waits_there_without_building_again() {
+    let task = GraphTask::with_tools(&[("claude", BLOCKED_CLAUDE)]);
+    connect_fixture_claude(task.home.path(), &task.registered.store);
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(
+            task.registered
+                .store
+                .set_task_agent(&task.registered.task.id, "claude"),
+        )
+        .unwrap();
+    task.repo.create_file(
+        ".lf/graphs/verifying.yaml",
+        "- graph: proof\n- loop: proof\n  interactive: {name: verify, id: check}\n",
+    );
+    let first = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "verifying"]);
+    assert!(
+        !first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    // The stand-in at check reported a dependency: the Task waits at check.
+    assert_eq!(
+        task.graph()["position"],
+        at("check"),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert_eq!(stand_ins(&task).len(), 1);
+    let again = task.run(&["-b", "--task", "INF-123", "ship"]);
+    let stderr = String::from_utf8_lossy(&again.stderr);
+    assert!(!again.status.success(), "{stderr}");
+    assert!(stderr.contains("INF-123: standing in at check"), "{stderr}");
+    assert_eq!(task.graph()["position"], at("check"));
+    assert_eq!(stand_ins(&task).len(), 2);
+    // The second run set out from check: proof did not run again.
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 2);
+    assert_eq!(graphs[1].1.len(), 1, "{graphs:?}");
 }

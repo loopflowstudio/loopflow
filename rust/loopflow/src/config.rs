@@ -459,8 +459,11 @@ impl Config {
 /// Main configuration struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Default Workflow for Tasks without an explicit or Wave selection.
-    pub workflow: Option<String>,
+    /// The graph Tasks take up without their own or their Wave's selection;
+    /// `code` when unset. The released lf reads `workflow:`; LOO-637 removes
+    /// that alias once the release that reads `graph:` is installed.
+    #[serde(alias = "workflow")]
+    pub graph: Option<String>,
     #[serde(default)]
     pub planning: Option<PlanningConfig>,
     #[serde(default)]
@@ -572,7 +575,7 @@ impl Default for AutomationConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            workflow: None,
+            graph: None,
             planning: None,
             context_budgets: Default::default(),
             context_budget_sources: Default::default(),
@@ -887,25 +890,37 @@ pub fn layer_setting<'a>(
     })
 }
 
-/// The Workflow a Task in these layers takes up and the layer selecting it;
-/// no layer means the builtin `code`. A global value (`~/.lf/config.yaml`)
-/// never selects one for a repository's Tasks, and it is the farthest layer,
-/// so it is simply ignored.
-pub fn workflow_setting(
+/// The graph a Task in these layers takes up and the layer selecting it; no
+/// layer means the builtin `code`. A global value (`~/.lf/config.yaml`) never
+/// selects one for a repository's Tasks, and it is the farthest layer, so it is
+/// simply ignored. Each layer may still say `workflow:`, the released name;
+/// LOO-637 removes that alias.
+pub fn graph_setting(
     layers: &[ConfigLayerValues],
 ) -> Result<(String, Option<ConfigLayer>), LoadError> {
-    let Some((layer, value)) =
-        layer_setting(layers, &["workflow"]).filter(|(layer, _)| *layer != ConfigLayer::Global)
+    let Some((layer, value)) = layers
+        .iter()
+        .rev()
+        .filter(|layer| layer.layer != ConfigLayer::Global)
+        .find_map(|layer| {
+            ["graph", GRAPH_ALIAS]
+                .iter()
+                .find_map(|key| layer.value.get(*key).filter(|value| !value.is_null()))
+                .map(|value| (layer.layer, value))
+        })
     else {
-        return Ok(("code".to_owned(), None));
+        return Ok((crate::ops::task::DEFAULT_TASK_GRAPH.to_owned(), None));
     };
     let name = value
         .as_str()
-        .ok_or_else(|| LoadError::InvalidGraph("workflow must be a Workflow name".to_owned()))?;
-    crate::workflow::validate_workflow_name(name)
-        .map_err(|error| LoadError::InvalidGraph(format!("workflow {name}: {error}")))?;
+        .ok_or_else(|| LoadError::InvalidGraph("graph must be a graph name".to_owned()))?;
+    crate::task_graph::validate_graph_name(name)
+        .map_err(|error| LoadError::InvalidGraph(format!("graph {name}: {error}")))?;
     Ok((name.to_owned(), Some(layer)))
 }
+
+/// The released name of `graph:`; LOO-637 removes it.
+const GRAPH_ALIAS: &str = "workflow";
 
 /// Keys a Wave's `config.yaml` may set: every `Config` key a repository may
 /// share with its Waves.
@@ -937,7 +952,7 @@ fn validate_wave_keys(path: &Path, value: &serde_yaml_ng::Value) -> Result<(), L
                 path.display()
             )));
         }
-        if !allowed.contains(key) {
+        if !allowed.contains(key) && key != GRAPH_ALIAS {
             return Err(LoadError::InvalidGraph(format!(
                 "{}: unknown key `{key}`",
                 path.display()

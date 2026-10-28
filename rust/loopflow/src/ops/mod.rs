@@ -43,7 +43,6 @@ pub mod task_run;
 pub(crate) mod telemetry;
 pub mod trace;
 pub(crate) mod util;
-pub mod workflow;
 pub mod wt;
 pub mod wt_timing;
 

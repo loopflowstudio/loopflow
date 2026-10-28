@@ -56,7 +56,7 @@
   "work": {
     "sessions": [],
     "processes": [],
-    "workflow": null,
+    "graph": null,
     "graph_processes": []
   },
   "pr": null,

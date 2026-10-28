@@ -32,6 +32,10 @@ so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 
 ## Boundary checks
 
+For migration changes, run `uv run python scripts/check_migrations.py` before
+the Rust suites. Schema construction can pass even when a released migration
+was edited; this check also verifies immutable history against main and tags.
+
 `cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no
 credentials. CI's ordinary Rust network isolation covers it. It bounds provider
@@ -367,6 +371,9 @@ uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after p
 For document gathering or deduplication changes, run the complete context suite
 alongside the delivery checks; a test-name filter alone misses ancestor coverage.
 Rendering gathered documents must include the production deduplication step.
+Keep the library `context_delivery` filter in the gate plan: it covers direct
+and Wave launches in `ops::run`, outside the prompt modules. Check ambient and
+explicit selections across both the refreshed block and submitted turn.
 
 ```bash
 cargo test -p loopflow --test integration context_tests::
@@ -414,9 +421,9 @@ For Markdown changes under `docs/`, builtins or skills, and changes to README or
 AGENTS, also run `cargo test -p loopflow --test integration documented_commands::`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
 suite does not check those additions.
-`docs/lf-reference.md` renders the compiled command tree below its preamble;
-after a command or help-text change, rewrite it with
-`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration cli_reference`.
+`docs/lf-reference.md` commits only its preamble; the website's `sync-docs`
+appends the command tree from `lf help --all --json`, so a command or help-text
+change needs no reference update.
 Keep README and docs/index openings identical and regenerate docs/architecture.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.
@@ -461,10 +468,12 @@ uv run python scripts/test_task_installation.py --test task_adopts_linear_checko
 ```
 
 Pass several names after `--test` to share one disposable build across related proofs.
-Agent-selection changes also require the container-only
+Agent-selection and Task launch-mode changes also require the container-only
 `declared_agent_can_start_another_tasks_graph` proof: saved Task defaults remain
 local, while explicit `-a` overrides child Tasks too. Ordinary Rust suites skip
 this installation-boundary proof.
+Fixtures that stop at an interactive step use bare `task run` and wait for the
+recorded Graph outcome; `-b` executes that step headlessly and needs a provider.
 Every ordinary installation run first upgrades populated released planning and
 Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
 historical PRs, pending completion delivery, a running Process and its Workflow,

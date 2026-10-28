@@ -246,14 +246,13 @@ mod tests {
     /// The tables the Task conversation work adds, each with the one domain
     /// its three triggers move.
     #[test]
-    fn workflow_graph_process_and_activity_tables_move_their_domains() {
+    fn task_graph_graph_process_and_activity_tables_move_their_domains() {
         let (_dir, store) = store();
         let conn = store.conn.lock().unwrap();
         for (table, domain) in [
             ("graph_processes", "graphs"),
             ("graph_process_steps", "graphs"),
-            ("task_workflows", "planning"),
-            ("task_workflow_moves", "planning"),
+            ("task_graphs", "planning"),
             ("session_activity", "sessions"),
         ] {
             let moved: i64 = conn

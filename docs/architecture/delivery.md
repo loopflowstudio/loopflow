@@ -328,11 +328,11 @@ stay intact: private recovery converts reserved children and notes, retaining
 unknown provider creations and relations with their original IDs and inputs.
 These receipts carry no completion or process authority.
 
-`lf task complete` settles status without moving the Workflow. Movement to
+`lf task complete` settles status without moving the Task's graph. Reaching
 `end` persists a completion request in the same transaction as arrival, then
 tries completion. Failure retains both arrival and the reason; operators retry
 completion alone. Accepted provider status changes clear superseded requests
-without touching Workflow or Process history. Reads never execute the trigger. A Task with a PR needs merge
+without touching graph position or Process history. Reads never execute the trigger. A Task with a PR needs merge
 evidence; its follow-up Tasks need not be complete.
 A PR-less Task may finish with retained files and commits, without a landing
 ceremony. Completion is idempotent, including when the enclosing Graph later

@@ -23,9 +23,9 @@ Read `lf task status <issue> --json`. Leave a Graph with a live process running.
 A stopped or failed Graph is history: inspect what it finished and the effects it
 recorded; historical review boundaries remain evidence. Launch fresh work with
 `lf task run <issue>` only when the current request identifies the
-next work—for example, implementation after an accepted design. On a
-workflow that is a route leaving the Task's stage; name its Graph when the
-stage has more than one. A blocker needs
+next work—for example, implementation after an accepted design. A Task waiting
+at an interactive step continues after it; `--from <step>` starts elsewhere.
+A blocker needs
 its stated recovery first, completed work is not repeated, and a finished Graph
 alone is not a request to run it again.
 
@@ -33,7 +33,7 @@ alone is not a request to run it again.
 
 Continue in the owning checkout. Implement directly or run the selected Graph,
 such as `lf graph pursue`, using the accepted design. No Task, Wave, Linear setup,
-or Workflow enrollment is required. Preserve an explicit choice to perform
+or Task graph is required. Preserve an explicit choice to perform
 implement → compress → refresh in this conversation.
 
 When the user explicitly requests managed work, load `work` and use

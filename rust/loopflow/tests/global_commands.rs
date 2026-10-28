@@ -1125,12 +1125,12 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         "explain-proof",
         &repo.head_sha(),
     );
-    // A captured Workflow wins over the Project's feature selection.
+    // A captured graph wins over the Project's feature selection.
     let graph = serde_json::json!({"name": "captured", "steps": [{"Skill":{"skill":{"name":"demo"},"id":"review","interactive":true,"returns":null,"sources":[]}}]});
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute(
-        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'review',1)",
         rusqlite::params![registered.task.id.as_str(), graph.to_string()],
     )
     .unwrap();
@@ -1168,7 +1168,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
     }
     assert_eq!(
         explicit["action"],
-        serde_json::json!({"kind":"edge", "workflow":"captured", "take_up":false, "from":"review", "to":"end", "name":"end", "runs":false})
+        serde_json::json!({"kind":"end", "graph":"captured", "take_up":false})
     );
     assert_eq!(
         explicit["resolution"]["execution_machine"]["source"],
@@ -1192,7 +1192,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         invalid["impediments"][0]
             .as_str()
             .unwrap()
-            .contains("is neither a route leaving review"),
+            .contains("graph \"nonexistent\" is unavailable"),
         "{invalid}"
     );
     let text = success(
@@ -1201,7 +1201,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
             .unwrap(),
     );
     assert!(
-        text.contains("graph captured: review → end; run nothing"),
+        text.contains("graph captured: nothing remains; reach end"),
         "{text}"
     );
     assert!(text.contains("Nothing was executed"));
@@ -1228,7 +1228,7 @@ fn task_run_explain_explicit_and_checkout_inferred_actions_preserve_all_state() 
         fs::read(path).unwrap() == before,
         "preview changed database bytes"
     );
-    // Launch rejects the same options before checkout/Workflow preparation.
+    // Launch rejects the same options before checkout/graph preparation.
     // Its ordinary Process observation is allowed, unlike the previews above.
     for ((flag, value, _), reason) in options.into_iter().zip(impediments) {
         let output = command(
@@ -1898,35 +1898,26 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
 }
 
 #[test]
-fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling() {
+fn task_run_from_explain_reads_the_captured_graph_without_moving_the_task() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     support::bind_task_planning(&repo);
-    repo.create_branch("move-proof");
+    repo.create_branch("from-proof");
     let registered = support::register_task_with_pr(
         &home.path().join(".lf"),
         &repo.path().canonicalize().unwrap(),
-        "move-proof",
+        "from-proof",
         &repo.head_sha(),
     );
     let path = home.path().join(".lf/loopflow.db");
     let db = rusqlite::Connection::open(&path).unwrap();
-    let graph = serde_json::json!({"name": "captured", "steps": [{"Skill":{"skill":{"name":"demo"},"id":"review","interactive":true,"returns":null,"sources":[]}}]});
+    let graph = serde_json::json!({"name": "captured", "steps": [
+        {"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}},
+        {"Skill":{"skill":{"name":"demo"},"id":"review","interactive":true,"returns":null,"sources":[]}}
+    ]});
     db.execute(
-        "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'review',1)",
+        "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'end',1)",
         rusqlite::params![registered.task.id.as_str(), graph.to_string()],
-    )
-    .unwrap();
-    let process = support::record_graph(
-        &home.path().join(".lf"),
-        repo.path(),
-        "prior",
-        "step",
-        "succeeded",
-    );
-    db.execute(
-        "UPDATE task_workflows SET edge=0,lf_process_id=?1 WHERE task_id=?2",
-        rusqlite::params![process, registered.task.id.as_str()],
     )
     .unwrap();
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
@@ -1937,222 +1928,135 @@ fn task_move_explain_validates_the_captured_graph_without_moving_or_reconciling(
         ))
         .unwrap()
     };
-    let preview = read(&[
+    // An interactive step: the Task would wait there, running nothing.
+    let review = read(&[
         "task",
-        "workflow",
-        "move",
+        "run",
         "INF-123",
-        "start",
-        "--reason",
-        " Restart Workflow ",
+        "--from",
+        "review",
         "--explain",
         "--json",
     ]);
     assert_eq!(
-        preview["resolution"]["task"]["value"],
-        registered.task.id.as_str()
+        review["action"],
+        serde_json::json!({"kind":"wait","graph":"captured","take_up":false,"step":"review"})
     );
-    assert_eq!(
-        preview["resolution"]["execution_machine"]["source"],
-        "owner"
-    );
-    assert_eq!(
-        preview["action"],
-        serde_json::json!({"workflow":"captured","from":{"kind":"edge","edge":0,"lf_process_id":process,"running":false},"to":"start","reason":"Restart Workflow"})
-    );
-    assert_eq!(preview["impediments"], serde_json::json!([]));
-    assert_eq!(
-        preview["action"],
-        read(&[
-            "task",
-            "workflow",
-            "restart",
-            "INF-123",
-            "--explain",
-            "--json"
-        ])["action"]
-    );
+    assert_eq!(review["impediments"], serde_json::json!([]));
     let scoped = read(&[
         "--task",
         registered.task.id.as_str(),
         "task",
-        "workflow",
-        "move",
-        "INF-123",
-        "start",
-        "--reason",
-        "Restart Workflow",
+        "run",
+        "--from",
+        "review",
         "--explain",
         "--json",
     ]);
-    assert_eq!(scoped["action"], preview["action"]);
-    for action in [
-        vec!["task", "run", "INF-123"],
-        vec!["task", "workflow", "move", "INF-123", "start"],
-        vec!["task", "workflow", "restart", "INF-123"],
-        vec!["task", "workflow", "show", "INF-123"],
-    ] {
-        let mut args = vec!["--task", "UNKNOWN-1", "--explain"];
-        args.extend(action);
-        let output = command(home.path(), repo.path(), &args).output().unwrap();
-        assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains("conflicting Task selections"));
-    }
-    let cases = [(
-        vec!["task", "workflow", "move", "INF-123", "missing"],
-        "has no stage",
-    )];
-    let mut reasons = Vec::new();
-    for (args, expected) in &cases {
-        let mut args = args.clone();
-        args.extend(["--explain", "--json"]);
-        let report = read(&args);
-        assert!(report["action"].is_null());
-        let reason = report["impediments"][0].as_str().unwrap();
-        assert!(reason.contains(expected), "{report}");
-        reasons.push(reason.to_owned());
-    }
-    let completion = read(&[
+    assert_eq!(scoped["action"], review["action"]);
+    // A step that runs: the run would stop before review; `-b` runs past it.
+    let implement = read(&[
         "task",
-        "workflow",
-        "move",
+        "run",
         "INF-123",
-        "end",
+        "--from",
+        "implement",
         "--explain",
         "--json",
     ]);
-    assert_eq!(completion["action"]["to"], "end");
-    assert!(completion["unavailable"][0]
-        .as_str()
-        .unwrap()
-        .contains("none were performed"));
+    assert_eq!(
+        implement["action"],
+        serde_json::json!({"kind":"run","graph":"captured","take_up":false,"from":"implement","stops_at":"review"})
+    );
+    let through = read(&[
+        "-b",
+        "task",
+        "run",
+        "INF-123",
+        "--from",
+        "review",
+        "--explain",
+        "--json",
+    ]);
+    assert_eq!(through["action"]["kind"], "run");
+    assert!(through["action"]["stops_at"].is_null(), "{through}");
+    // At end a bare run has nothing to do; it points to `--from`.
+    let ended = read(&["task", "run", "INF-123", "--explain", "--json"]);
+    assert!(ended["action"].is_null());
+    assert!(
+        ended["impediments"][0]
+            .as_str()
+            .unwrap()
+            .contains("--from <step>"),
+        "{ended}"
+    );
+    let missing = read(&[
+        "task",
+        "run",
+        "INF-123",
+        "--from",
+        "missing",
+        "--explain",
+        "--json",
+    ]);
+    assert!(missing["action"].is_null());
+    let reason = missing["impediments"][0].as_str().unwrap().to_owned();
+    assert!(reason.contains("has no step \"missing\""), "{missing}");
     let text = success(
         command(
             home.path(),
             repo.path(),
-            &["task", "workflow", "move", "INF-123", "start", "--explain"],
+            &["task", "run", "INF-123", "--from", "review", "--explain"],
         )
         .output()
         .unwrap(),
     );
     assert!(
-        text.contains("put Task at start of Workflow captured; run nothing"),
+        text.contains("graph captured: wait at review; run nothing"),
         "{text}"
     );
     assert!(text.contains("Nothing was executed"));
-    let invalid_context = command(
+    let output = command(
         home.path(),
         repo.path(),
-        &["task", "workflow", "move", "INF-123", "start", "--context"],
+        &["--task", "UNKNOWN-1", "--explain", "task", "run", "INF-123"],
     )
     .output()
     .unwrap();
-    assert!(!invalid_context.status.success());
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("conflicting Task selections"));
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert!(
         fs::read(&path).unwrap() == before,
         "preview changed checkpointed store bytes"
     );
-    for ((args, _), reason) in cases.iter().zip(reasons) {
-        let output = command(home.path(), repo.path(), args).output().unwrap();
-        assert!(!output.status.success());
-        assert!(String::from_utf8_lossy(&output.stderr).contains(&reason));
-    }
+    let output = command(
+        home.path(),
+        repo.path(),
+        &["task", "run", "INF-123", "--from", "missing"],
+    )
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains(&reason));
+    // Waiting at an interactive step runs nothing and moves the Task there.
     success(
         command(
             home.path(),
             repo.path(),
-            &["task", "workflow", "restart", "INF-123"],
+            &["task", "run", "INF-123", "--from", "review"],
         )
         .output()
         .unwrap(),
     );
-    let node: String = db
+    let step: String = db
         .query_row(
-            "SELECT node FROM task_workflows WHERE task_id=?1",
+            "SELECT step FROM task_graphs WHERE task_id=?1",
             [registered.task.id.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(node, "start");
-    let note: String = db
-        .query_row(
-            "SELECT note FROM task_workflow_moves WHERE task_id=?1 ORDER BY seq DESC LIMIT 1",
-            [registered.task.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(note, "Restart Workflow");
-}
-
-#[test]
-fn task_move_explain_keeps_missing_workflow_and_registry_explicit() {
-    let home = tempfile::tempdir().unwrap();
-    let repo = TestRepo::new();
-    let read = |args: &[&str]| -> serde_json::Value {
-        serde_json::from_str(&success(
-            command(home.path(), repo.path(), args).output().unwrap(),
-        ))
-        .unwrap()
-    };
-    let absent = read(&[
-        "task",
-        "workflow",
-        "move",
-        "INF-123",
-        "end",
-        "--explain",
-        "--json",
-    ]);
-    assert!(absent["action"].is_null());
-    assert!(absent["unavailable"][0]
-        .as_str()
-        .unwrap()
-        .contains("absent"));
-    assert!(!home.path().join(".lf/loopflow.db").exists());
-    support::bind_task_planning(&repo);
-    repo.create_branch("move-proof");
-    support::register_task_with_pr(
-        &home.path().join(".lf"),
-        &repo.path().canonicalize().unwrap(),
-        "move-proof",
-        &repo.head_sha(),
-    );
-    let path = home.path().join(".lf/loopflow.db");
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
-    let before = fs::read(&path).unwrap();
-    let restart = read(&[
-        "task",
-        "workflow",
-        "restart",
-        "INF-123",
-        "--explain",
-        "--json",
-    ]);
-    assert!(restart["action"].is_null());
-    assert!(
-        restart["impediments"][0]
-            .as_str()
-            .unwrap()
-            .contains("has no graph"),
-        "{restart}"
-    );
-    let end = read(&[
-        "task",
-        "workflow",
-        "move",
-        "INF-123",
-        "end",
-        "--explain",
-        "--json",
-    ]);
-    assert!(end["action"]["workflow"].is_null());
-    assert!(end["action"]["from"].is_null());
-    assert_eq!(end["action"]["to"], "end");
-    assert!(!end["unavailable"].as_array().unwrap().is_empty());
-    db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
-    assert!(fs::read(&path).unwrap() == before);
+    assert_eq!(step, "review");
 }
 
 #[test]

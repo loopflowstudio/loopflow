@@ -28,41 +28,40 @@ struct TaskWorkflowHeader: View {
                     Text(state.capitalized).foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-lifecycle-status")
                 }
-                if let workflow = work.value?.workflow {
+                if let workflow = work.value?.graph {
                     Text(positionLabel(workflow))
                         .lineLimit(1)
                         .foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-workflow-position")
-                    ForEach(routes(workflow), id: \.self) { index in
-                        let edge = workflow.edges[index]
-                        Button(edge.name) { Task { await model.startTask(edge.name, task: task) } }
+                    if let action = runAction(workflow) {
+                        Button(action.label) { Task { await model.startTask(nil, task: task) } }
                             .buttonStyle(WorkOutlineButtonStyle(emphasized: true))
                             .disabled(unavailable != nil)
-                            .help(unavailable ?? "lf task run \(task.task.identifier) \(edge.name)")
-                            .accessibilityIdentifier("task-workflow-action-\(index)")
+                            .help(unavailable ?? action.help)
+                            .accessibilityIdentifier("task-workflow-run")
                     }
                     Spacer(minLength: 0)
-                    // Put the Task at a node without running anything.
-                    Menu("Move to") {
-                        ForEach(["start"] + workflow.nodes.map(\.name) + ["end"], id: \.self) { node in
-                            Button(node) { Task { await model.moveTask(to: node, task: task) } }
-                                .accessibilityIdentifier("task-workflow-move-\(node)")
+                    // Start the next run at a step: back, ahead, or waiting at an interactive step.
+                    Menu("Start from…") {
+                        ForEach([TaskGraph.start] + workflow.interactiveSteps.map(\.name), id: \.self) { step in
+                            Button(step) { Task { await model.startTask(nil, from: step, task: task) } }
+                                .accessibilityIdentifier("task-workflow-move-\(step)")
                         }
                     }
                     .fixedSize()
-                    .disabled(acting || readingUnavailable != nil)
-                    .help("lf task workflow move \(task.task.identifier) <node>")
+                    .disabled(unavailable != nil)
+                    .help(unavailable ?? "lf task run \(task.task.identifier) --from <step>")
                     .accessibilityIdentifier("task-workflow-move")
 
                 } else if work.value != nil, work.errorMessage == nil {
                     // The shared resolver reports the first-run default and its owner.
-                    Text(task.workflowName.map { "\($0) · \(task.workflowSource ?? "")" } ?? "No workflow selected")
+                    Text(task.graphName.map { "\($0) · \(task.graphSource ?? "")" } ?? "No workflow selected")
                         .foregroundStyle(palette.textSecondary)
                     Menu("Choose workflow") {
                         ForEach(model.workflowCatalog.value ?? [], id: \.name) { choice in
                             Button(choice.name) { Task { await model.startTask(choice.name, task: task) } }
                         }
-                    }.task { await model.loadWorkflowCatalog() }
+                    }.task { await model.loadGraphCatalog() }
                     Button("Start") { Task { await model.startTask(nil, task: task) } }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(unavailable != nil)
@@ -109,7 +108,7 @@ struct TaskWorkflowHeader: View {
         VStack(alignment: .leading, spacing: 6) {
             ScrollView(.horizontal) { controls }
                 .scrollIndicators(.visible)
-            if work.value?.workflow != nil, let error = work.errorMessage {
+            if work.value?.graph != nil, let error = work.errorMessage {
                 Text("Workflow refresh failed: \(error)")
                     .foregroundStyle(palette.failure)
                     .textSelection(.enabled)
@@ -119,13 +118,14 @@ struct TaskWorkflowHeader: View {
                 get: { expandedTasks.contains(task.id) },
                 set: { if $0 { expandedTasks.insert(task.id) } else { expandedTasks.remove(task.id) } }
             )) {
-                if let workflow = work.value?.workflow {
+                if let workflow = work.value?.graph {
+                    let shape = WorkflowDefinition(workflow)
                     WorkflowDiagram(
-                        nodes: workflow.nodes, edges: workflow.edges, position: workflow.position,
-                        choices: routes(workflow),
+                        nodes: shape.steps, edges: shape.runs, position: workflow.position,
+                        choices: choices(workflow, shape),
                         unavailable: unavailable, fits: true,
-                        hint: { "lf task run \(task.task.identifier) \($0.name) · to \($0.to)" },
-                        choose: { edge in Task { await model.startTask(edge.name, task: task) } })
+                        hint: { "lf task run \(task.task.identifier) · to \($0.to)" },
+                        choose: { _ in Task { await model.startTask(nil, task: task) } })
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Text(task.task.description)
@@ -195,23 +195,40 @@ struct TaskWorkflowHeader: View {
         }
     }
 
-    /// The routes a person can start here. Auto-Ship, in the Workflow bar, is
-    /// the one way into `end`.
-    private func routes(_ workflow: Workflow) -> [Int] {
-        workflow.outgoing.filter { workflow.edges.indices.contains($0) && workflow.edges[$0].to != "end" }
-    }
-
-    private func positionLabel(_ workflow: Workflow) -> String {
+    /// What `lf task run` does from here, named for it; `nil` while a run
+    /// carries the Task or once it is at `end`.
+    static func runAction(_ workflow: TaskGraph, issue: String) -> (label: String, help: String)? {
+        let help = "lf task run \(issue)"
         switch workflow.position {
-        case .node(let name): return "\(workflow.name) · \(name)"
-        case .edge(let index, _, let running):
-            guard workflow.edges.indices.contains(index) else { return "Workflow position unavailable" }
-            let edge = workflow.edges[index]
-            return "\(edge.from) → \(edge.to) · \(running ? "running" : "stopped")"
+        case .at(TaskGraph.start): return ("Start", help)
+        case .at(TaskGraph.end): return nil
+        case .at(let step): return ("Continue", "\(help): continue after \(step)")
+        case .run(_, _, true): return nil
+        case .run(let step, _, false): return ("Run again", "\(help): run again from \(step)")
         }
     }
 
-    /// Why no edge can be started now.
+    private func runAction(_ workflow: TaskGraph) -> (label: String, help: String)? {
+        Self.runAction(workflow, issue: task.task.identifier)
+    }
+
+    /// The run `lf task run` would start, by its place among the diagram's runs.
+    private func choices(_ workflow: TaskGraph, _ shape: WorkflowDefinition) -> [Int] {
+        guard runAction(workflow) != nil,
+              let index = shape.runs.firstIndex(where: { $0.from == workflow.position.step }) else { return [] }
+        return [index]
+    }
+
+    private func positionLabel(_ workflow: TaskGraph) -> String {
+        switch workflow.position {
+        case .at(let step): return "\(workflow.name) · \(step)"
+        case .run(let step, _, let running):
+            let to = WorkflowDefinition(workflow).runs.first { $0.from == step }?.to
+            return "\([step, to].compactMap { $0 }.joined(separator: " → ")) · \(running ? "running" : "stopped")"
+        }
+    }
+
+    /// Why no run can be started now.
     private var unavailable: String? {
         if acting { return draft?.progress ?? "Updating Task…" }
         if task.task.isTerminal { return "Reopen the Task before starting work" }
@@ -263,7 +280,7 @@ struct TaskShipControl: View {
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(acting || readingUnavailable != nil)
                         .help(deferred ? "lf task resume: let it run again"
-                                     : "lf task defer: hold it, keeping its checkout, PR and stage")
+                                     : "lf task defer: hold it, keeping its checkout, PR and interactive step")
                         .accessibilityIdentifier("task-defer")
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))
@@ -290,20 +307,20 @@ struct TaskShipControl: View {
     }
 }
 
-/// The selected Task's Workflow under the jump bar: its stages as dots, what
+/// The selected Task's Workflow under the jump bar: its interactive steps as dots, what
 /// is happening now, and Auto-Ship or Stop Auto-Ship. Clicking the dots opens a
-/// row with each stage, who takes part there and what happened. Rust owns the
+/// row with each interactive step, who takes part there and where the Task is. Rust owns the
 /// graph, the position and the shipping reason; this only arranges them.
 struct TaskWorkflowBar: View {
     let model: WorkModel
     let task: RoadmapTask
     /// The Task part of the workspace stream, as last read.
     let work: WorkReading<TaskOverview>
-    /// Per viewer: the bar opens to its stage cells.
+    /// Per viewer: the bar opens to its step cells.
     @State private var expanded = false
     @Environment(\.palette) private var palette
 
-    /// One dot: a stage where a person takes part, or `end`.
+    /// One dot: an interactive step where a person takes part, or `end`.
     struct Stage: Equatable {
         enum Place: Equatable { case passed, here, going, ahead }
         let name: String
@@ -318,7 +335,7 @@ struct TaskWorkflowBar: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: Spacing.md) {
-                if let workflow = work.value?.workflow {
+                if let workflow = work.value?.graph {
                     Text(workflow.name).fontWeight(.semibold).fixedSize()
                         .accessibilityIdentifier("task-workflow-bar-name")
                     dots(stages)
@@ -333,7 +350,7 @@ struct TaskWorkflowBar: View {
             }
             .padding(.horizontal, 14)
             .frame(height: 34)
-            if expanded, work.value?.workflow != nil {
+            if expanded, work.value?.graph != nil {
                 cells(stages)
             }
         }
@@ -362,8 +379,8 @@ struct TaskWorkflowBar: View {
         }
         .buttonStyle(.plain)
         .fixedSize()
-        .help(expanded ? "Hide stages" : "Show stages")
-        .accessibilityLabel("Stages")
+        .help(expanded ? "Hide interactive steps" : "Show interactive steps")
+        .accessibilityLabel("Interactive steps")
         .accessibilityIdentifier("task-workflow-bar-dots")
     }
 
@@ -395,50 +412,46 @@ struct TaskWorkflowBar: View {
     }
 
     private var stages: [Stage] {
-        work.value?.workflow.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
+        work.value?.graph.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
     }
 
     /// What is happening now, in one line.
     var live: String {
         if let shipping = task.shipping { return shipping.reason }
-        guard let workflow = work.value?.workflow else {
+        guard let workflow = work.value?.graph else {
             if let error = work.errorMessage { return "Workflow could not be read: \(error)" }
             if work.value == nil { return "Reading workflow…" }
-            return task.workflowName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
+            return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
         }
         switch workflow.position {
-        case .node("start"): return "Not started"
-        case .node("end"): return "At its end"
-        case .node(let node): return "At \(node) · yours"
-        case .edge(let index, let process, let running):
-            guard workflow.edges.indices.contains(index) else { return "Workflow position unavailable" }
-            let edge = workflow.edges[index]
-            guard running else { return "\(edge.name) stopped before \(edge.to)" }
+        case .at(TaskGraph.start): return "Not started"
+        case .at(TaskGraph.end): return "At its end"
+        case .at(let step): return "At \(step) · yours"
+        case .run(let from, let process, let running):
+            let to = WorkflowDefinition(workflow).runs.first { $0.from == from }?.to
+            guard running else { return to.map { "Stopped before \($0)" } ?? "Stopped from \(from)" }
             let step = model.graphProcesses[process]?.presentation.reason
-            return [edge.name + " → " + edge.to, step].compactMap { $0 }.joined(separator: " · ")
+            return [[from, to].compactMap { $0 }.joined(separator: " → "), step].compactMap { $0 }.joined(separator: " · ")
         }
     }
 
-    /// The Workflow's stages in order, then `end`, each placed against the
-    /// Task's position. While shipping, stand-ins take the stages ahead.
-    static func stages(_ workflow: Workflow, shipping: Bool) -> [Stage] {
-        let names = workflow.nodes.map(\.name) + ["end"]
+    /// The Workflow's interactive steps in order, then `end`, each placed
+    /// against the Task's position. While shipping, stand-ins take the steps ahead.
+    static func stages(_ workflow: TaskGraph, shipping: Bool) -> [Stage] {
+        let names = workflow.interactiveSteps.map(\.name) + [TaskGraph.end]
         let (at, going): (String, Bool) = switch workflow.position {
-        case .node(let node): (node, false)
-        case .edge(let index, _, let running):
-            workflow.edges.indices.contains(index) ? (workflow.edges[index].to, running) : ("start", false)
+        case .at(let step): (step, false)
+        case .run(let from, _, let running):
+            (WorkflowDefinition(workflow).runs.first { $0.from == from }?.to ?? TaskGraph.start, running)
         }
         let here = names.firstIndex(of: at) ?? -1
-        let arrived = Dictionary(workflow.history.filter { $0.kind == .arrived || $0.kind == .set }
-            .map { ($0.to, $0.at) }) { _, later in later }
         return names.enumerated().map { index, name in
             let place: Stage.Place = index < here ? .passed : index == here ? (going ? .going : .here) : .ahead
             let who: String? = name == "end" ? nil : (shipping && index >= here ? "stand-in" : "you")
             let note: String = switch place {
             case .here: "here now"
             case .going: "on the way"
-            case .passed: arrived[name].map { "arrived " + Date(timeIntervalSince1970: TimeInterval($0))
-                .formatted(.dateTime.month(.abbreviated).day()) } ?? "passed"
+            case .passed: "passed"
             case .ahead: shipping ? "agents will run it" : "ahead"
             }
             return Stage(name: name, place: place, who: who, note: note)
@@ -669,7 +682,7 @@ struct TaskDueDateView: View {
 
 /// Every Graph process in the Task's checkout, newest first, whatever started
 /// it: one line each, opening to its launched graph and steps. It is not the
-/// Workflow's history: a process that carried an edge and one started ad hoc
+/// Workflow's history: a process `lf task run` started and one started ad hoc
 /// are the same kind of row. A multiplexer pane on the page surface.
 struct GraphProcessLog: View {
     let model: WorkModel

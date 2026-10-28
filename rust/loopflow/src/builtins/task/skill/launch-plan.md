@@ -53,7 +53,7 @@ For each remaining independently shippable outcome, choose one of two actions:
   lf task create --wave <wave> --title "<desired experience>" <<'BRIEF'
   <short user-problem brief; durable design reference>
   BRIEF
-  lf task run <issue>   # its workflow's first route, or its Wave/repository default
+  lf task run <issue>   # its graph: the Wave's or repository's default, else code
   ```
   Stdin files the Task description; `--directive` on `task run` supplies
   direction, not that durable brief. Use `--stack-on <current-task>` when it
@@ -111,14 +111,14 @@ launch; use staged preparation below when artifacts must cross contexts.
 For an approved design, `--graph pursue` enters implement → compress → refresh
 → loop-or-next → concept-review → loop-or-next. Refresh runs sync → realign.
 Either decider's Iterate returns to implementation; the second's Advance
-publishes and ends the pursuit. The `code` workflow starts with that
-pursuit; `feature` drafts the design first; both land an accepted PR through
-`ship`. Design review and the demo are workflow stages in the Task
-conversation, never Graph steps. A Task on a workflow takes only a route
-leaving its current stage: bare `lf task run <issue>` takes the only one or
-names the choices, `lf task run <issue> <graph>` picks one, and naming a
-workflow takes it up from its start. `lf --task <issue> graph <graph>` runs any
-Graph without moving the Task.
+publishes and ends the pursuit. The `code` graph starts with that pursuit;
+`feature` drafts the design first; both land an accepted PR through `ship`.
+Design review and the demo are interactive steps: `lf task run <issue>` stops
+before each, the person takes part in the Task conversation, and the next
+`lf task run <issue>` continues after it. `--from <step>` goes back or skips
+ahead, `lf task run <issue> <graph>` takes up another graph, and
+`lf -b task run <issue>` runs straight through headless. `lf --task <issue>
+graph <graph>` runs any Graph without moving the Task.
 Preserve intent, constraints, and done-when
 proof in durable records so the Task remains useful after cleanup of added scratch files.
 

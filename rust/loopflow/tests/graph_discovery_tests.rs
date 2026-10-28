@@ -200,7 +200,7 @@ fn graph_inventory_flags_do_not_select_task_launch_context() {
 }
 
 #[test]
-fn flow_and_workflow_catalogs_read_the_same_graphs() {
+fn graph_catalog_and_wave_selection_read_the_same_graphs() {
     let repo = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
@@ -220,8 +220,6 @@ fn flow_and_workflow_catalogs_read_the_same_graphs() {
     std::fs::write(repo.path().join(".lf/graphs/feature.yaml"), "- cmd: help\n").unwrap();
     let graphs = run(&["graph", "list", "--json"]);
     assert!(graphs.status.success());
-    let workflows = run(&["wave", "workflow", "list", "--json"]);
-    assert!(workflows.status.success());
     let entry = |output: &std::process::Output| {
         serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout)
             .unwrap()
@@ -230,8 +228,6 @@ fn flow_and_workflow_catalogs_read_the_same_graphs() {
             .unwrap()
     };
     assert_eq!(entry(&graphs)["source"], ".lf/graphs/feature.yaml");
-    assert!(entry(&workflows)["workflow"].is_object());
-    assert_eq!(entry(&workflows)["source"], ".lf/graphs/feature.yaml");
     let shown = run(&["graph", "show", "feature", "--json"]);
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap(),
@@ -247,22 +243,24 @@ fn flow_and_workflow_catalogs_read_the_same_graphs() {
             "proof",
         )
         .unwrap();
-    // A Workflow is selected by name; its definition is the committed graph.
+    // A Wave selects a graph by name; its definition is the committed graph.
     let definition = repo.path().join(".lf/graphs/feature.yaml");
-    let selected = run(&["--wave", "proof", "set", "workflow", "feature"]);
+    let selected = run(&["--wave", "proof", "set", "graph", "feature"]);
     assert!(
         selected.status.success(),
         "{}",
         String::from_utf8_lossy(&selected.stderr)
     );
-    let workflows = run(&["wave", "workflow", "list", "--json"]);
-    assert!(entry(&workflows)["workflow"].is_object());
-    assert_eq!(entry(&workflows)["source"], ".lf/graphs/feature.yaml");
+    let shown = run(&["wave", "graph", "show", "proof", "--json"]);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap()["graph"],
+        "feature"
+    );
     std::fs::write(&definition, "invalid: true\n").unwrap();
-    assert!(!run(&["--wave", "proof", "set", "workflow", "feature"])
+    assert!(!run(&["--wave", "proof", "set", "graph", "feature"])
         .status
         .success());
-    assert!(entry(&run(&["wave", "workflow", "list", "--json"]))["unavailable"].is_string());
+    assert!(entry(&run(&["graph", "list", "--json"]))["unavailable"].is_string());
 }
 
 #[test]

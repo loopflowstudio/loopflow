@@ -107,10 +107,13 @@ pub(crate) fn read_wave_layer(
     Ok(Some((path, Value::Mapping(mapping))))
 }
 
-/// The Workflow the Wave's own `config.yaml` selects for its Tasks.
-pub(crate) fn wave_workflow(repo: &Path, name: &str) -> Result<Option<String>, WaveConfigError> {
-    Ok(read_wave_layer(repo, name)?
-        .and_then(|(_, layer)| layer.get("workflow")?.as_str().map(str::to_owned)))
+/// The graph the Wave's own `config.yaml` selects for its Tasks.
+pub(crate) fn wave_graph(repo: &Path, name: &str) -> Result<Option<String>, WaveConfigError> {
+    Ok(read_wave_layer(repo, name)?.and_then(|(_, layer)| {
+        ["graph", "workflow"]
+            .iter()
+            .find_map(|key| layer.get(*key)?.as_str().map(str::to_owned))
+    }))
 }
 
 /// The Wave's `config.yaml`, or else its GOAL.md frontmatter.
@@ -348,14 +351,14 @@ mod tests {
         ))
         .unwrap();
         update_wave_config(repo.path(), "scan", |map| {
-            map.insert("workflow".into(), "code".into());
+            map.insert("graph".into(), "code".into());
             Ok(())
         })
         .unwrap();
         let goal = std::fs::read_to_string(repo.path().join(".lf/wave/scan/GOAL.md")).unwrap();
         assert!(goal.ends_with(body));
         assert_eq!(repo.layer()["agent"].as_str(), Some("codex"));
-        assert_eq!(repo.layer()["workflow"].as_str(), Some("code"));
+        assert_eq!(repo.layer()["graph"].as_str(), Some("code"));
         assert_eq!(
             read_wave_config(repo.path(), "scan")
                 .unwrap()

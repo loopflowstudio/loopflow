@@ -288,10 +288,8 @@ impl Cli {
     #[doc(hidden)]
     pub fn step_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        // A person takes part at Workflow nodes, so a Graph's steps run headless
-        // even from a terminal unless the caller asks for `-i`.
         for (flag, enabled) in [
-            ("--batch", !self.interactive),
+            ("--batch", self.batch && !self.interactive),
             ("--interactive", self.interactive),
             ("--clipboard", self.clipboard),
             ("--yolo", self.yolo),
@@ -417,7 +415,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: WaveCommand,
     },
-    /// Ship the Task: run every remaining step to merge and completion, standing in at each stage
+    /// Ship the Task: run every remaining step to merge and completion, standing in at each interactive step
     ///
     /// Returns once the Task is shipping and runs on to its end (`-b` waits for
     /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
@@ -562,14 +560,6 @@ pub enum Commands {
         cmd: Option<crate::portfolio::PortfolioCommand>,
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
-    },
-    /// Report Loopflow's disk footprint; `clean` and `rotate` reclaim it
-    #[command(args_conflicts_with_subcommands = true)]
-    Disk {
-        #[arg(long)]
-        json: bool,
-        #[command(subcommand)]
-        cmd: Option<commands::disk::DiskCommand>,
     },
     /// Manage working notes
     Scratch {
@@ -1026,7 +1016,7 @@ impl WavePlanTarget {
 }
 
 const SETTING_KEYS: &str = "Keys:
-  workflow              the graph new Tasks take up
+  graph                 the graph new Tasks take up
   agent                 the agent work launches on, such as claude:opus
   skill_agents.<skill>  the agent one skill launches on
   machine               where new Tasks and the Session run; copied to your other
@@ -1040,43 +1030,14 @@ Yours wins over the committed .lf/config.yaml and .lf/wave/<name>/config.yaml,
 for you only; `lf wave status` shows each value and its source.";
 
 #[derive(Subcommand, Debug)]
-pub enum WaveWorkflowCommand {
-    /// Print a graph from `.lf/graphs/` or the builtins
-    Source { name: String },
-    /// List graphs, including unavailable local files
-    List {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show the Workflow the Wave's new Tasks take up; select one with `workflow:` in
-    /// `.lf/wave/<name>/config.yaml`
+pub enum WaveGraphCommand {
+    /// Show the graph the Wave's Tasks take up by default; select one with
+    /// `graph:` in `.lf/wave/<name>/config.yaml`
     Show {
         wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum TaskWorkflowCommand {
-    /// Move Workflow position without running anything; `end` requests completion
-    Move {
-        issue: String,
-        /// `start`, `end` or one of the graph's stages
-        stage: String,
-        /// Why, kept in the Task's workflow history
-        #[arg(long)]
-        reason: Option<String>,
-    },
-
-    /// Show the Task's captured graph, position and history
-    Show {
-        issue: String,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Move the captured Workflow to start without executing or reloading it
-    Restart { issue: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1099,8 +1060,9 @@ pub enum GraphCommand {
     /// Print the repository file that defines a Graph, creating
     /// it from the builtin when the repository has none
     Customize { name: String },
-    /// Run the slice of the Task's graph its current route names; `lf task run` starts it
-    Route,
+    /// Carry a Task's Graph from where its `lf task run` set out; that run starts it
+    #[command(hide = true)]
+    Run,
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -1366,10 +1328,10 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Inspect the Wave default Workflow
-    Workflow {
+    /// Show the graph the Wave's Tasks take up by default
+    Graph {
         #[command(subcommand)]
-        cmd: WaveWorkflowCommand,
+        cmd: WaveGraphCommand,
     },
     /// Edit the selected chapter's name or summary
     EditPlan {
@@ -1524,11 +1486,6 @@ pub enum TaskCommand {
         #[arg(long)]
         retry_updates: bool,
     },
-    /// Inspect or reset this Task's captured Workflow
-    Workflow {
-        #[command(subcommand)]
-        cmd: TaskWorkflowCommand,
-    },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
         issue: Option<String>,
@@ -1548,14 +1505,21 @@ pub enum TaskCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Place a Task's worktree, then start a Graph there like `lf --task ISSUE graph GRAPH`;
-    /// returns once it runs (`-b` waits for its end)
+    /// Run the Task's Graph in its worktree until the next interactive step;
+    /// returns once it runs (`-b` runs every step headless and waits for the end)
+    #[command(
+        after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
+`graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
+conversation; the next `lf task run` continues after it. `-i` runs every step with you in this \
+terminal instead."
+    )]
     Run {
         issue: Option<String>,
-        /// A route from the Task's stage, or a graph to take up; the Task's only
-        /// route or its Wave or repository default when omitted
-        #[arg(value_name = "ROUTE")]
+        /// A graph to take up in place of the Task's own
         graph: Option<String>,
+        /// Start at this step instead: to go back, skip ahead, or wait at an interactive step
+        #[arg(long, value_name = "STEP")]
+        from: Option<String>,
         #[arg(long)]
         name: Option<String>,
         /// Fork this Task's worktree from another Task's active PR
@@ -1576,14 +1540,14 @@ pub enum TaskCommand {
         #[arg(long)]
         quote: bool,
     },
-    /// Complete a Task without moving its Workflow
+    /// Complete a Task without moving its Graph
     Complete {
         issue: String,
         /// Why, kept in the Task's completion request
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Reopen local planning without moving Workflow or replacing the PR
+    /// Reopen local planning without moving its Graph or replacing the PR
     Reopen {
         issue: String,
         #[arg(long)]
@@ -1787,12 +1751,6 @@ impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
-            Self::Workflow {
-                cmd:
-                    TaskWorkflowCommand::Show { issue, .. }
-                    | TaskWorkflowCommand::Restart { issue }
-                    | TaskWorkflowCommand::Move { issue, .. },
-            } => Some(issue),
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
@@ -1823,12 +1781,6 @@ impl TaskCommand {
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
             Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
-            Self::Workflow {
-                cmd:
-                    TaskWorkflowCommand::Show { issue, .. }
-                    | TaskWorkflowCommand::Restart { issue }
-                    | TaskWorkflowCommand::Move { issue, .. },
-            } => Some(issue),
             Self::Status { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
@@ -3154,21 +3106,13 @@ mod tests {
     }
 
     #[test]
-    fn complete_and_move_are_distinct_commands() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "task",
-            "workflow",
-            "move",
-            "LOO-42",
-            "end",
-            "--reason",
-            "Delivered",
-        ])
-        .unwrap();
+    fn task_run_takes_a_step_and_completion_is_its_own_command() {
+        let cli =
+            Cli::try_parse_from(["lf", "task", "run", "LOO-42", "--from", "implement"]).unwrap();
         assert!(matches!(cli.command,
-            Some(Commands::Task { cmd: TaskCommand::Workflow { cmd: TaskWorkflowCommand::Move { issue, stage, reason } } })
-                if issue == "LOO-42" && stage == "end" && reason.as_deref() == Some("Delivered")));
+            Some(Commands::Task { cmd: TaskCommand::Run { issue, graph: None, from, .. } })
+                if issue.as_deref() == Some("LOO-42") && from.as_deref() == Some("implement")));
+        assert!(Cli::try_parse_from(["lf", "task", "workflow", "move", "LOO-42", "end"]).is_err());
         let cli =
             Cli::try_parse_from(["lf", "task", "complete", "LOO-42", "--reason", "Delivered"])
                 .unwrap();

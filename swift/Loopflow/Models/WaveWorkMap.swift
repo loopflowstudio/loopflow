@@ -48,8 +48,8 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
     public let task: TaskPlanningSnapshot
     public let reference: TaskReferenceSnapshot
     public let runtime: TaskRuntimeSnapshot?
-    public let workflowName: String?
-    public let workflowSource: String?
+    public let graphName: String?
+    public let graphSource: String?
     public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
@@ -63,8 +63,8 @@ public struct WaveTaskWork: Decodable, Sendable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, directive, condition, actions, pr, execution
-        case workflowName = "workflow_name"
-        case workflowSource = "workflow_source"
+        case graphName = "graph_name"
+        case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
         case shipControl = "ship_control"
@@ -230,8 +230,8 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let nextMove: WorkNextMove
     public let condition: TaskConditionSnapshot
     public let actions: TaskActionModel
-    public let workflowName: String?
-    public let workflowSource: String?
+    public let graphName: String?
+    public let graphSource: String?
     public let latestGraphProcess: GraphProcessDetail?
     public let execution: TaskExecutionSnapshot?
     public let runControl: TaskRunControl
@@ -242,8 +242,8 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr
-        case workflowName = "workflow_name"
-        case workflowSource = "workflow_source"
+        case graphName = "graph_name"
+        case graphSource = "graph_source"
         case latestGraphProcess = "latest_graph_process"
         case runControl = "run_control"
         case shipControl = "ship_control"

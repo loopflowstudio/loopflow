@@ -513,10 +513,18 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
             ".lf/wave/infrastructure/GOAL.md",
             ".lf/wave/infrastructure/MEMORY.md",
             ".lf/wave/infrastructure/README.md",
-            ".lf/wave/infrastructure/release/GOAL.md",
             ".lf/wave/infrastructure/release/MEMORY.md",
             ".lf/wave/infrastructure/release/notes.md",
         ]
+    );
+    assert_eq!(
+        components
+            .docs
+            .iter()
+            .find(|doc| doc.path == ".lf/wave/infrastructure/release/GOAL.md")
+            .unwrap()
+            .source,
+        DocumentSource::Docs
     );
     let prompt = components
         .docs
@@ -536,7 +544,7 @@ fn nested_wave_reads_checkout_ancestor_markdown_in_order() {
     ] {
         assert_eq!(prompt.matches(content).count(), 1, "{content}");
     }
-    assert!(prompt.find("Parent decisions").unwrap() < prompt.find("Release goal").unwrap());
+    assert!(prompt.find("Parent decisions").unwrap() < prompt.find("Release decisions").unwrap());
     assert!(prompt.find("Repository decisions").unwrap() < prompt.find("Parent goal").unwrap());
     for excluded in [
         "Sibling secrets",
@@ -561,18 +569,20 @@ fn context_delivery_repository_memory_is_included_once_without_a_wave() {
     .unwrap();
     let decisions = loopflow::prompt::drop_duplicate_docs(&mut components, temp.path());
     assert_eq!(components.docs.len(), 1);
-    assert_eq!(components.docs[0].source, DocumentSource::RepoMemory);
+    assert_eq!(components.docs[0].source, DocumentSource::Docs);
     assert!(decisions.iter().any(|decision| {
         decision.source_path.as_deref() == Some("MEMORY.md")
             && decision.decision == loopflow::trace::ContextDecisionKind::Deduplicated
     }));
     let delivery = ContextDelivery::prepare(&components).unwrap();
-    assert!(
-        delivery.references.is_empty(),
-        "repository memory is a live source, not a second reference"
-    );
-    let prompt = delivery.block(ContextMoment::Start).unwrap().text;
+    assert!(delivery.references.is_empty());
+    let prompt = loopflow::prompt::format_first_turn(&components);
     assert_eq!(prompt.matches("Repository decisions.").count(), 1);
+    assert!(!delivery
+        .block(ContextMoment::Start)
+        .unwrap()
+        .text
+        .contains("Repository decisions."));
     assert!(!prompt.contains("<lf:wave name="));
 }
 

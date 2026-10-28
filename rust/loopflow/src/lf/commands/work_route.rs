@@ -167,7 +167,7 @@ fn worktree_task(cli: &Cli) -> Result<Option<String>> {
         .map(|checkout| checkout.task_id.to_string()))
 }
 
-/// Return whether dispatch completed remotely. No Workflow or checkout is
+/// Return whether dispatch completed remotely. No Task Graph or checkout is
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     if dispatch_moved_session(cli, args)? {

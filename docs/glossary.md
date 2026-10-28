@@ -9,7 +9,8 @@ first, then the engineering words it borrows.
 |---|---|
 | **Skill** | One step: instructions for the AI, written as a text file in `.lf/skills/`. |
 | **Graph** | Steps in order, written as a file in `.lf/graphs/`. |
-| **Workflow** | A graph a Task takes up; its `interactive:` steps are stages where you take part in its conversation. Written as a file in `.lf/graphs/`. |
+| **Workflow** | A Task's workflow: the graph it took up, and the step it stands at. Any graph in `.lf/graphs/` or the builtins can be one; there are no separate workflow files. |
+| **Interactive step** | A Graph step written `interactive: <skill>`, where a person takes part: `lf graph` runs it with you, `lf task run` stops before it for the Task conversation, `-b` runs it headless. |
 | **Loopflow** | A graph that can go back and try again. Exactly: a graph with at least one backward edge. |
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |
@@ -30,7 +31,7 @@ first, then the engineering words it borrows.
 | **Scratch** | The `scratch/` folder, for working notes. `lf scratch clear` removes added files; existing files and edits remain. |
 
 Historical capture paths and immutable receipts retain their encoding; see
-[cutover status](architecture-reference.md#cutover-status). They are not a fourth
+[cutover status](architecture/reference-cutover.md#cutover-status). They are not a fourth
 execution owner in the accepted model.
 
 ## Borrowed from software engineering

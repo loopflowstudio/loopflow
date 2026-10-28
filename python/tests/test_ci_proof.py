@@ -95,20 +95,15 @@ def test_unavailable_github_keeps_full_matrix(
         ("https://github.com/owner/repo/actions/runs/42", {"PYTHON_TEST": "skipped"}, 0),
         ("https://github.com/owner/repo/actions/runs/42", {"SCRATCH_CLEAR": "failure"}, 1),
         ("https://github.com/owner/repo/actions/runs/42", {"RUST_TEST": "failure"}, 1),
-        ("https://github.com/owner/repo/actions/runs/42", {"SWIFT_TEST": "cancelled"}, 1),
-        (
-            "",
-            {
-                "SWIFT_TEST": "skipped",
-                "LOOPFLOW_UI_TEST": "skipped",
-                "MACOS_PROCESS_TEST": "skipped",
-                "MACOS_INPUTS": "false",
-            },
-            0,
-        ),
-        ("", {"SWIFT_TEST": "skipped", "MACOS_INPUTS": "true"}, 1),
-        ("", {"SWIFT_TEST": "skipped", "MACOS_INPUTS": ""}, 1),
+        ("https://github.com/owner/repo/actions/runs/42", {"MACOS": "cancelled"}, 1),
+        ("", {"MACOS": "skipped", "MACOS_INPUTS": "false"}, 0),
+        ("", {"MACOS": "skipped", "MACOS_INPUTS": "true"}, 1),
+        ("", {"MACOS": "skipped", "MACOS_INPUTS": ""}, 1),
+        ("", {"MACOS": "skipped", "MACOS_INPUTS": "false", "MACOS_INPUTS_RESULT": "failure"}, 1),
         ("", {"PYTHON_TEST": "skipped", "MACOS_INPUTS": "false"}, 1),
+        ("", {"MACOS": "skipped", "EVENT_NAME": "merge_group"}, 0),
+        ("", {"MACOS": "failure", "EVENT_NAME": "merge_group"}, 1),
+        ("", {"PYTHON_TEST": "skipped", "EVENT_NAME": "merge_group"}, 1),
     ],
 )
 def test_actual_workflow_gate_requires_proof_and_successful_warming(
@@ -116,7 +111,7 @@ def test_actual_workflow_gate_requires_proof_and_successful_warming(
 ) -> None:
     gate = _ci_jobs["tests-result"]["steps"][0]
     env = {**os.environ, **dict.fromkeys(gate["env"], "success")}
-    env.update(REUSED_PROOF=proof, **changes)
+    env.update({"REUSED_PROOF": proof, "EVENT_NAME": "pull_request", **changes})
     result = subprocess.run(["bash", "-c", gate["run"]], env=env, capture_output=True, text=True)
     assert result.returncode == expected, result.stdout
 
@@ -168,14 +163,18 @@ def test_matrix_only_runs_for_candidates_and_queue_cannot_skip_aggregate(
     classifiers = {"merge-proof", "scratch-clear", "macos-inputs"}
     matrix = set(jobs) - classifiers - {"tests-result", "cancel-superseded"}
     assert set(jobs["tests-result"]["needs"]) == matrix | classifiers
-    for name in matrix:
+    for name in matrix - {"macos"}:
         assert {"merge-proof", "scratch-clear"} <= set(jobs[name]["needs"])
+    for name in matrix:
         assert "needs.scratch-clear.outputs.candidate == 'true'" in jobs[name]["if"]
-    # Only an explicit "false" skips the macOS jobs; a failed classifier still runs them.
-    macos = {name for name in matrix if "macos-inputs" in jobs[name]["needs"]}
-    assert macos == {"swift-test", "loopflow-ui-test", "macos-process-test"}
-    for name in macos:
-        assert "needs.macos-inputs.outputs.macos != 'false'" in jobs[name]["if"]
+    # macOS runs once, before the queue. Only an explicit "false" skips a macOS
+    # job; a failed classifier still runs them.
+    macos = jobs["macos"]
+    assert macos["uses"] == "./.github/workflows/macos.yml"
+    assert "github.event_name == 'pull_request'" in macos["if"]
+    assert "needs.macos-inputs.outputs.any != 'false'" in macos["if"]
+    for name, value in macos["with"].items():
+        assert value == f"${{{{ needs.macos-inputs.outputs.{name} != 'false' }}}}"
     assert jobs["tests-result"]["if"] == (
         "${{ always() && (github.event_name != 'pull_request' || "
         "needs.scratch-clear.result != 'success' || "

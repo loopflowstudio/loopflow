@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{config_layers, layer_setting, workflow_setting, ConfigLayer};
+use crate::config::{config_layers, graph_setting, layer_setting, ConfigLayer};
 use crate::durable::{MachineSetting, OwningMachineSource};
 use crate::profile::RouteScope;
 use crate::provider_account::nearest_provider_route;
@@ -73,7 +73,7 @@ pub struct AccountSetup {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaveSetup {
-    pub workflow: SetupValue,
+    pub graph: SetupValue,
     pub agent: SetupValue,
     /// Agent by skill name, for every skill some layer names.
     pub skill_agents: BTreeMap<String, SetupValue>,
@@ -127,11 +127,11 @@ pub async fn read_wave_setup(
         };
         accounts.insert(provider.as_str().to_owned(), setup);
     }
-    let (workflow, workflow_layer) = workflow_setting(&layers)?;
+    let (graph, graph_layer) = graph_setting(&layers)?;
     Ok(WaveSetup {
-        workflow: SetupValue {
-            value: Some(workflow),
-            source: workflow_layer.map_or(SetupSource::Default, SetupSource::from),
+        graph: SetupValue {
+            value: Some(graph),
+            source: graph_layer.map_or(SetupSource::Default, SetupSource::from),
         },
         agent,
         skill_agents,

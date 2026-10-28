@@ -10,9 +10,9 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - Chapter = shared name of every Wave's In Progress Linear Project; no Chapter table
 - Project = one Wave's Linear plan: status, Tasks, KRs and targets
 - A Task's work is every Session, Graph and Process in its checkout, plus explicit binds; no Graph is selected over another
-- Workflow = the graph a Task took up, with its stored position; its `interactive:` steps are stages (a person, in its conversation) and routes between them run slices of it; `lf task run` chooses a route, `lf task workflow move` sets a stage
-- Task completion, Workflow position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the route
-- Task state = `unstarted · idle · active · moving · shipping · deferred · done · abandoned`, derived from checkout, stage, a running Graph and the Auto-Ship approval; Session state (`available · busy`) is a separate axis. Working Tasks are idle, active or moving. `lf ship` or any route into `end` approves; `lf ship --stop` withdraws
+- A Task's workflow is the graph it took up and the step it stands at; workflows are ordinary graph files, never a second definition kind. An `interactive:` step is where a person takes part: `lf graph` runs it in place, `lf task run` stops before it (the Task waits in its conversation) and the next run continues after it; `--from <step>` starts anywhere; `-i`/`-b` choose for every step of a launch
+- Task completion, graph position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the run
+- Task state = `unstarted · idle · active · moving · shipping · deferred · done · abandoned`, derived from checkout, graph position, a running Graph and the Auto-Ship approval; Session state (`available · busy`) is a separate axis. Working Tasks are idle, active or moving. `lf ship` or any run into `end` approves Auto-Ship, which may land the PR; `lf ship --stop` withdraws
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -192,7 +192,7 @@ When editing Rust tests:
 - `unwrap()` is fine in tests
 - Use `#[test]` for unit tests in the same file
 - Integration tests go in `tests/` directory
-- A test that reads state a run writes uses the waited form, `lf -b task run`; bare `task run` returns once the Graph registers. A change to when a command returns inventories its test callers too (`grep -rn '"task", "run"' rust/loopflow/tests/`).
+- Bare `task run` returns once the Graph registers; `lf -b task run` waits, but also runs interactive steps headless. A test that reads state a stopping run writes waits for that run to finish. `lf ship` and `-b` share one path. A change to when a command returns inventories its test callers too (`grep -rn '"task", "run"' rust/loopflow/tests/`).
 - Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`.
 - Mock via closures or `#[cfg(test)]`, not factory traits or extra abstractions
 - Pin fixture `LF_BIN` inside the network boundary; the runner clears inherited `LF_*`. Never let an installed provider outrank a stand-in.
@@ -238,30 +238,25 @@ The instinct on a bug is often a new check. Invert it: can the system adapt inst
 A Wave's objective, memory, cadence, budget and instruments survive planning
 boundaries. A Chapter is the shared name of each Wave's one In Progress Linear
 Project. Linear Project status owns current/planned/completed history; there is
-no Chapter table or plan packet. Project owns Tasks, KRs and targets. Wave owns the optional default Workflow; repository `workflow:` comes next, and the builtin `code` is the final default.
+no Chapter table or plan packet. Project owns Tasks, KRs and targets. Wave owns the optional default graph; repository `graph:`, then builtin `code`, are the defaults after it.
 
 A Task's work includes every Session, Graph and Process associated with
 its checkout, plus explicit binds. Rust owns this shared association for status,
 Desktop navigation, recovery and completion. Membership grants no process or
 Graph authority and never rewrites historical usage. Every Graph naming the Task
 is equally its work; a stopped Graph is history its caller inspects, never a
-position to resume. A Task with no Workflow takes up its Wave's default, then repository `workflow:`,
-then the builtin `code` on its first `lf task run`; one that named its own keeps it.
-A Workflow's definition is a graph from `.lf/graphs/`; there is no separate
-workflow definition kind. `lf wave workflow` owns graph discovery,
-customization and Wave selection. `lf task workflow show` reads the captured
-instance; `restart` moves it to `start` without reloading or executing anything.
-`lf graph` handles autonomous definitions and `--processes` inspects execution.
-Task projections expose Workflow selection, latest GraphProcessDetail, execution
-evidence and TaskRunControl separately; latest never grants primary authority.
-A Workflow is the Task's outer shape: the graph it took up, whose `interactive:`
-steps are stages where a person takes part in the Task conversation and whose
-routes between stages each run a slice of it, plus the Task's stored position on
-it. The graph is fixed when taken up. `lf task run` chooses a route, starts its
-slice as a child `lf graph`, again when a Graph process fails, and writes the
-arrival when one succeeds; a stopped Graph leaves the Task on its route;
-`lf task workflow move` sets a stage. `lf task move --wave/--no-wave` changes membership without transferring execution. Each Workflow move is appended to the Task's history. It
-executes nothing, and no command approves or completes a stage.
+position to resume. A Task with no graph takes up its Wave's default, then repository `graph:`,
+then `code`, on its first `lf task run`; one that named its own keeps it. Its graph and
+position are one `task_graphs` row that only `lf task run` (and `lf ship`, which is
+`-b task run` repeated) moves; other Graphs in the checkout never do. `lf graph` handles
+definitions and `--processes` inspects execution. Task projections expose the Task's
+graph, latest GraphProcessDetail, execution evidence and TaskRunControl separately;
+latest never grants primary authority. The graph is fixed when taken up. `lf task run`
+starts the run as a child Graph process, again when one fails, and that Graph writes
+where it left the Task: before the interactive step it stopped at, or at `end`. A run
+that stops leaves the Task on it, and the next `lf task run` starts that run again from
+where it began. `lf task move --wave/--no-wave` changes membership without transferring
+execution. No command approves or completes a step.
 Taskless execution uses the same Graph runner. A Graph is one lf process and the step
 Processes it starts; its id is the Graph process ID. The Graph process holds the cursor and
 return counts in memory and writes GraphProcess, append-only: the Graph's name and
@@ -307,8 +302,10 @@ process control nor Graph settlement. Attachment claims and provider identity
 are separate: a fresh claim token fences every attachment and release, including
 A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
 
-The full contract and current cutover status live in
-[Architecture Reference](docs/architecture-reference.md#core-models-and-apis).
+The full contract lives in
+[Core models and APIs](docs/architecture/reference-models.md#core-models-and-apis);
+the [Architecture Reference](docs/architecture-reference.md) indexes the rest,
+including cutover status.
 
 # Development Environment
 
@@ -452,9 +449,9 @@ Keep canonical owner paths in command references and help, where the tree is
 the point. Preserve established short names; do not expand `wt` to `worktree`.
 `documented_commands` checks example ambiguity against Clap; adding a competing
 command requires updating any shorthand that stops resolving uniquely.
-`docs/lf-reference.md` is generated from the compiled Clap tree: with inherited
-`LF_*` unset, run
-`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli < /dev/null`.
+`docs/lf-reference.md` commits only its authored preamble; `website/dev.py sync-docs`
+appends the command tree from `lf help --all --json` (`LF_BIN` or `lf` on PATH).
+Help text lives in Clap, so a CLI change edits no reference file.
 
 User docs follow the same principles as prompts (see PROMPTS.md):
 

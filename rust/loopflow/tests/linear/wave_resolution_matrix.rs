@@ -107,9 +107,9 @@ const COMMANDS: &[Cmd] = &[
         global_default: false,
     },
     Cmd {
-        id: "wave workflow show",
-        path: &["wave", "workflow", "show"],
-        base_args: &["wave", "workflow", "show", "--json"],
+        id: "wave graph show",
+        path: &["wave", "graph", "show"],
+        base_args: &["wave", "graph", "show", "--json"],
         wave_form: WaveForm::Positional,
         global_default: false,
     },

@@ -44,7 +44,7 @@ conversation, use `lf resume` ([Sessions](sessions.md)).
 ```bash
 lf wave show                       # each Wave's plan and Tasks, sorted by what they need
 lf task status LOO-12              # owner, state, PR, and every Session and Graph on it
-lf task workflow show LOO-12       # where it is in its Workflow, and how it got there
+lf task status LOO-12 --json       # its graph, its interactive steps, and the step it stands at
 lf task diff LOO-12 --files        # what it changed so far
 lf task wait LOO-13                # block until its run ends, with no agent polling
 ```
@@ -63,9 +63,9 @@ lf --task LOO-12 land --wait-and-fix   # merge its PR, repairing CI until it lan
 lf task complete LOO-12                 # then mark the Task done
 ```
 
-A Task whose Workflow reaches `end` requests completion itself; with a PR,
-completion waits for the merge. Landing outside the Workflow leaves the Task
-open until you complete it. Publishing, landing and CI repair are covered in [Ops](ops.md).
+A Task whose graph reaches `end` requests completion itself; with a PR,
+completion waits for the merge. Landing outside its graph leaves the Task open
+until you complete it. Publishing, landing and CI repair are covered in [Ops](ops.md).
 
 ## Share the plan
 
@@ -192,7 +192,7 @@ command in your own crontab:
 
 ```yaml
 # .lf/wave/billing/config.yaml: committed, inherited by the Wave's Tasks
-workflow: code
+graph: code
 agent: claude
 skill_agents:
   implement: claude:opus
@@ -218,7 +218,7 @@ settings.
 `lf set` never edits committed config. It stores your own value on this
 Machine for the repository, a Wave (`lf --wave <wave> set`) or every repository
 (`--global`); without `--wave` it sets the repository, even in a Wave's Task
-worktree. Your `workflow`, `agent` or `skill_agents.<skill>` wins over the
+worktree. Your `graph`, `agent` or `skill_agents.<skill>` wins over the
 committed value for you only, and `lf wave status` reports it as `personal`.
 Machines (`machine`, `machine.tasks`, `machine.session`) and account routes
 (`account.<provider>`) exist only this way; a launch uses the nearest of Wave,
@@ -234,7 +234,7 @@ lf wave update-plan --wave billing --plan plan.json
 ```
 
 ```json
-{"workflow":"feature","metric_targets":[],"krs":[{"text":"A customer's invoice matches metered usage to the cent.","holds":false}]}
+{"metric_targets":[],"krs":[{"text":"A customer's invoice matches metered usage to the cent.","holds":false}]}
 ```
 
 The goal names who benefits; KRs prove it, observably, across a window. A
@@ -279,16 +279,17 @@ it missed.
 ID prefixes of four or more hex digits (`abcd`, `lf-abcd`, `task_abcd`). An
 ambiguous prefix lists its matches.
 
-**Workflow selection.** A Task keeps the Workflow it took up. Before its first
-run: the Task's own choice, then its Wave's default, then `workflow:` in
-`.lf/config.yaml`. With none, `lf task run` asks. `lf task workflow move LOO-12
-demo` sets its position without running anything; `end` requests completion.
+**Graph selection.** A Task keeps the graph it took up. Before its first run:
+the one named on `lf task run LOO-12 GRAPH`, then its Wave's default, then
+`graph:` in `.lf/config.yaml`, then builtin `code`. `lf task run LOO-12 --from
+demo` starts at any step; starting from an interactive step only puts the Task
+there. See [Orchestration](orchestration.md#where-a-person-takes-part).
 
 **Membership.** `lf task create` makes a standalone Task unless you pass
 `--wave`. `lf task move LOO-12 --wave billing` (or `--no-wave`) changes it later
-and keeps the Session, checkout, PR and Workflow.
+and keeps the Session, checkout, PR and graph.
 
-**Completion.** `lf task complete` changes status only, independent of Workflow
+**Completion.** `lf task complete` changes status only, independent of graph
 position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 `lf task abandon` cancels it, closes its PRs and deletes its branches.
 

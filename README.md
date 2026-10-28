@@ -27,10 +27,9 @@ Each Task has:
   about the Task goes: you talk in it, reviews happen in it, results come back to
   it. One context, on whichever harness and login it runs; it outlives terminals
   and crashes.
-- **A workflow.** The stages the Task moves through (design, build, demo, land)
-  and the Graphs that run in the background between them, each in the Task's own
-  worktree and branch. You take part at the stages; the steps in between run
-  without you, or all of them do in `auto`.
+- **A workflow.** The Graph it runs (design, build, demo, land), each step in the
+  Task's own worktree and branch. `lf task run` stops at the steps where you take
+  part and the rest run without you; `lf -b task run` runs every step itself.
 - **Its own pull request, branch and tracker issue,** kept together.
 - **Its history.** Every conversation, Graph run and step, and what each cost.
 
@@ -45,9 +44,9 @@ The last install line teaches your own coding agent to do all of this, so you
 can just ask it: *"Split the auth cleanup into Tasks and run them with lf."*
 [What the skill teaches](https://github.com/loopflowstudio/loopflow/blob/main/skills/loopflow/README.md).
 
-**2. Write down how work runs.** A workflow's background steps are Graphs: a
-Graph is a YAML list of Skills, and a Skill is a Markdown file, both in your
-repository and reviewed like code. Each step can name its own agent.
+**2. Write down how work runs.** A Task's workflow is a Graph: a YAML list of
+Skills, and a Skill is a Markdown file, both in your repository and reviewed like
+code. Each step can name its own agent.
 
 ```markdown
 <!-- .lf/skills/audit.md -->
@@ -56,28 +55,34 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 
 ```yaml
 # .lf/graphs/ship-api.yaml
-- implement   # leaves commits on the branch
+- interactive: design   # you take part; leaves scratch/<task>.md
+- implement             # leaves commits on the branch
 - audit
-- gate        # leaves passing checks
+- gate                  # leaves passing checks
 ```
 
 ```bash
 lf audit                        # one Skill, here and now
-lf -b task run <ID> ship-api    # one Task through the Graph
+lf graph ship-api               # design with you here, then the rest on its own
+lf task run <ID> ship-api       # one Task through it; stops at design and waits for you
+lf -b task run <ID> ship-api    # every step headless, design included, to a merged PR
 ```
 
-Loopflow ships reasonable workflows for software engineering, and they are
+A step marked `interactive:` is where a person takes part. Each step can name its
+harness (`agent:`); `-i`, `-b`, `-a` and `--machine` choose for the whole run.
+
+Loopflow ships reasonable Graphs for software engineering, and they are
 templates. Copy one with `lf graph customize pursue`, change it, or write down
 the way you work and share it.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal,
-memory and plan, and its own setup for every Task in it: the workflow, the
-agent, the machine and the login that pays. Your repository is the Wave for
-Tasks without one.
+memory and plan, and its own setup for every Task in it: the Graph, the agent,
+the machine and the login that pays. Your repository is the Wave for Tasks
+without one.
 
 ```yaml
 # .lf/wave/infrastructure/config.yaml, committed: shaped like .lf/config.yaml
-workflow: auto        # infrastructure Tasks go from request to merged PR without you
+graph: auto           # infrastructure Tasks go from request to merged PR without you
 agent: claude:opus
 ```
 

@@ -137,7 +137,7 @@ fn success(output: &Output) -> String {
 fn two_people_share_one_repository() {
     use Person::{Lee, Maya};
     let pair = Pair::build();
-    // A takeover Workflow whose only Graph runs no agent.
+    // A takeover graph that runs no agent before its interactive step.
     let maya = pair.repo(Maya);
     std::fs::create_dir_all(maya.join(".lf/graphs")).unwrap();
     std::fs::write(
@@ -146,7 +146,7 @@ fn two_people_share_one_repository() {
     )
     .unwrap();
     pair.git(&maya, &["add", ".lf"]);
-    pair.git(&maya, &["commit", "-m", "Add the takeover Workflow"]);
+    pair.git(&maya, &["commit", "-m", "Add the takeover graph"]);
     pair.git(&maya, &["push", "origin", "main"]);
     pair.git(&pair.repo(Lee), &["pull", "--ff-only"]);
     let task = pair.create_task(Maya, "GPU fallback");
@@ -245,17 +245,28 @@ fn two_people_share_one_repository() {
 
     // 2. Lee takes the Task over on Maya's branch, so it keeps one PR.
     pair.ok(Lee, &["task", "claim", &task]);
-    pair.ok(Lee, &["-b", "task", "run", &task, "takeover"]);
-    let taken = pair.json(Lee, &["task", "status", &task, "--json"]);
+    // A bare run stops before the interactive step; it may return first.
+    pair.ok(Lee, &["task", "run", &task, "takeover"]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let taken = loop {
+        let status = pair.json(Lee, &["task", "status", &task, "--json"]);
+        if status["execution"]["work"]["graph"]["position"]
+            == serde_json::json!({"kind": "at", "step": "review"})
+        {
+            break status;
+        }
+        assert!(std::time::Instant::now() < deadline, "{status}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
     assert_eq!(taken["execution"]["branch"], branch, "{taken}");
     assert_eq!(
         taken["execution"]["pr"]["publication"]["github"]["number"], 1,
         "{taken}"
     );
 
-    // 7. Workflow definitions are committed files; a Wave's committed
+    // 7. Graph definitions are committed files; a Wave's committed
     // config.yaml selects a name.
-    let rejected = pair.run(Maya, &["set", "workflow", "review", "--file", "x"]);
+    let rejected = pair.run(Maya, &["set", "graph", "review", "--file", "x"]);
     assert_eq!(rejected.status.code(), Some(2));
     std::fs::write(
         maya.join(".lf/graphs/review.yaml"),
@@ -275,7 +286,7 @@ fn two_people_share_one_repository() {
             "user.name=Maya",
             "commit",
             "-m",
-            "Add the review Workflow",
+            "Add the review graph",
         ],
     );
     pair.git(&maya, &["push", "origin", "main"]);
@@ -284,5 +295,5 @@ fn two_people_share_one_repository() {
     pair.ok(Lee, &["wave", "status", "infra", "--sync"]);
     let fresh = pair.create_task(Lee, "Review me");
     let preview = pair.json(Lee, &["task", "run", &fresh, "--explain", "--json"]);
-    assert_eq!(preview["action"]["workflow"], "review", "{preview}");
+    assert_eq!(preview["action"]["graph"], "review", "{preview}");
 }

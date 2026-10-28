@@ -152,26 +152,25 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ## Disk filling up
 
 ```bash
-lf disk                    # ~/.lf by category, plus every worktree
-lf disk clean --dry-run    # what a cleanup would remove
-lf disk clean              # remove it; each removal is logged to ~/.lf/logs/disk.log
+scripts/disk-cleanup.sh            # reclaim now; each removal is logged to ~/.lf/logs/disk.log
+scripts/disk-cleanup.sh install    # run the disk-cleanup skill hourly from crontab
+lf monitor prune                   # only lf's records: dead Process rows and receipts, then vacuum
 ```
 
-`lf disk clean` removes worktrees `lf wt prune` would, finished Tasks' build
-output, dead process receipts, every database backup but the newest,
-captures and logs older than `--keep-days` (7), and snapshot staging
-directories a killed draft build left in `~/.lf/copies`, however recent.
-It also forgets finished
-Processes nothing needs: every lf process is listed while it runs, and at exit
-its row goes unless an agent issued it, its parent is still running, or
-something references it. The database, account homes, the newest backup,
-anything else written in the last day and anything a process holds open are
-never removed.
+The script prunes every repository under `~/src`: finished worktrees, completed
+Tasks' build output and merged branches through `lf wt prune`, and ignored
+build output (`target`, `node_modules`, `.venv`, `.build`, `DerivedData`) that no process
+holds and nothing wrote for 4 hours. In `~/.lf` it removes captures, logs, draft store
+copies and every database backup but the newest once untouched for a week. The
+database, account homes, Home material written in the last day and anything a
+process holds open are never removed; when `lsof` fails, neither is anything else
+that check protects.
 
-Starting a Session rotates `~/.lf` at most hourly: backups, draft store copies,
-captures and logs older than 30 days go, the same window Claude Code keeps its
-transcripts. There is no size budget. Provider transcripts follow each
-provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
+Under cron, the `disk-cleanup` skill runs the script and reports what it freed,
+what it kept and why, and worktrees still holding unpushed work; it deletes
+nothing itself. Edit `scripts/disk-cleanup.sh` or
+`.lf/skills/disk-cleanup.md` to change the policy. Provider transcripts follow
+each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
 
 ## Stale worktrees and branches
 
@@ -200,7 +199,9 @@ lf monitor prune --dry-run --json  # each candidate and why
 lf monitor prune --json            # recheck, then reap
 ```
 
-Pruning reports each agent process it settles or keeps, with the reason. A
+Pruning reports each agent process it settles or keeps, with the reason, then
+closes Process rows whose exit is proven, forgets finished ones nothing
+references, and compacts the store; a dry run changes none of it. A
 missing PID, a completed Task or an old Session does not prove the agent
 exited: unresolved records keep protecting their checkouts.
 

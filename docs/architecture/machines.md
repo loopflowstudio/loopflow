@@ -192,7 +192,7 @@ Peer observation routes nothing; the ownership log alone selects the Machine.
 Added peers are not a complete global inventory, and an observation reserves
 nothing. No execution-location cache exists.
 
-Task-run, move, checkout and Desktop opening explanations share one location
+Task-run, checkout and Desktop opening explanations share one location
 projection, including local/peer provenance and unavailable checkout paths for
 retained execution. Desktop opens recorded remote Tasks in the existing local
 repository window through the owner's Session/Files transport. Shells recheck the

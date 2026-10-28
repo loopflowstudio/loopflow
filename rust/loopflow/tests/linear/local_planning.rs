@@ -828,10 +828,8 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         home.path(),
         &[
             "task",
-            "workflow",
-            "move",
+            "complete",
             identity.as_str(),
-            "end",
             "--reason",
             "No implementation needed",
         ],
@@ -915,7 +913,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     );
     let definition = repo.path().join(".lf/graphs/proof.yaml");
     repo.stage_all();
-    repo.commit("Fixture workflow");
+    repo.commit("Fixture graph");
     assert!(Command::new("git")
         .current_dir(repo.path())
         .args(["remote", "remove", "origin"])
@@ -941,13 +939,9 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     lf(
         repo.path(),
         home.path(),
-        &["--wave", "inbox", "set", "workflow", "proof"],
+        &["--wave", "inbox", "set", "graph", "proof"],
     );
-    let catalog = lf(
-        repo.path(),
-        home.path(),
-        &["wave", "workflow", "list", "--json"],
-    );
+    let catalog = lf(repo.path(), home.path(), &["graph", "list", "--json"]);
     let committed = catalog
         .as_array()
         .unwrap()
@@ -955,15 +949,13 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .find(|entry| entry["name"] == "proof")
         .unwrap();
     assert_eq!(committed["source"], ".lf/graphs/proof.yaml");
-    assert!(committed["workflow"].is_object());
-    let source = lf(
-        repo.path(),
-        home.path(),
-        &["wave", "workflow", "source", "proof"],
-    );
+    assert!(committed["unavailable"].is_null());
+    let source = lf(repo.path(), home.path(), &["graph", "customize", "proof"]);
     assert_eq!(
-        source.as_str().unwrap().trim(),
-        std::fs::read_to_string(&definition).unwrap().trim()
+        Path::new(source.as_str().unwrap().trim())
+            .canonicalize()
+            .unwrap(),
+        definition.canonicalize().unwrap()
     );
     let placed = lf(
         repo.path(),
@@ -976,13 +968,25 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         .as_str()
         .unwrap()
         .starts_with(&format!("jack/{}-", &id.trim_start_matches("task_")[..6])));
-    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
-    let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
-    // The run stops at the Workflow's first stage, where a person takes part.
+    // A bare run may return as its Graph registers; it stops before the
+    // interactive step, where a person takes part.
+    lf(repo.path(), home.path(), &["task", "run", id]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let status = loop {
+        let status = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
+        if status["execution"]["work"]["graph"]["position"]["kind"] == "at" {
+            break status;
+        }
+        assert!(std::time::Instant::now() < deadline, "{status}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    assert_eq!(
+        status["execution"]["work"]["graph"]["position"]["step"],
+        "demo"
+    );
     assert_eq!(status["execution"]["status"], "active");
     assert_eq!(status["execution"]["task_id"], id);
     assert!(status["planning_error"].is_null());
-    assert!(status["execution"]["work"]["workflow"].is_object());
     let landing = command(Path::new(worktree), home.path(), &["--task", id, "land"])
         .output()
         .unwrap();
@@ -1044,8 +1048,8 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
         status["execution"]["worktree"]
     );
     assert_eq!(
-        moved["execution"]["work"]["workflow"],
-        status["execution"]["work"]["workflow"]
+        moved["execution"]["work"]["graph"],
+        status["execution"]["work"]["graph"]
     );
     let retained = lf(
         repo.path(),
@@ -1070,15 +1074,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     lf(
         repo.path(),
         home.path(),
-        &[
-            "task",
-            "workflow",
-            "move",
-            id,
-            "end",
-            "--reason",
-            "Inspection completed",
-        ],
+        &["task", "complete", id, "--reason", "Inspection completed"],
     );
     let completed = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(completed["execution"]["status"], "done");
@@ -1184,7 +1180,7 @@ fn project_creation_binding_and_activation_save_offline() {
             assert_eq!(active["status"], "started");
             assert_eq!(active["name"], "Authored name");
             assert_eq!(active["summary"], "Retain summary");
-            assert!(active.get("workflow").is_none());
+            assert!(active.get("graph").is_none());
             assert_eq!(active["krs"][0]["text"], "Preserve Tasks");
             let changes = store.pending_project_changes(&id).unwrap();
             let state = changes
@@ -2070,7 +2066,13 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             .unwrap()
             .iter()
             .all(|task| task.worktree.is_none()));
-        let (sessions,graphs): (i64,i64) = conn.query_row("SELECT (SELECT count(*) FROM agent_sessions),(SELECT count(*) FROM task_workflows)",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+        let (sessions, graphs): (i64, i64) = conn
+            .query_row(
+                "SELECT (SELECT count(*) FROM agent_sessions),(SELECT count(*) FROM task_graphs)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
         assert_eq!((sessions, graphs), (0, 0));
         assert!(!repo.path().join(".lf/wave").exists());
     }
@@ -2178,10 +2180,10 @@ fn rotation_saves_membership_and_pending_effects_offline() {
                 .unwrap();
         }
         db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-        db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',1,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
+        db.execute("INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,?2,'review','{\"index\":1}','11111111-1111-4111-8111-111111111111',7)", rusqlite::params![active.id.as_str(),serde_json::json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
         let retained_execution = || {
             [
-                ("task_workflows", "task_id", active.id.as_str()),
+                ("task_graphs", "task_id", active.id.as_str()),
                 ("processes", "id", "11111111-1111-4111-8111-111111111111"),
             ]
             .map(|(table, key, id)| {
@@ -2722,7 +2724,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
 }
 
 #[test]
-fn wave_documents_and_workflows_follow_files() {
+fn wave_documents_and_graphs_follow_files() {
     for connected in [false, true] {
         let repo = TestRepo::new();
         let home = tempfile::tempdir().unwrap();
@@ -2750,8 +2752,8 @@ fn wave_documents_and_workflows_follow_files() {
             "Additional authored context.\n",
         )
         .unwrap();
-        let workflow = "- cmd: help\n";
-        std::fs::write(repo.path().join(".lf/graphs/finish.yaml"), workflow).unwrap();
+        let graph = "- cmd: help\n";
+        std::fs::write(repo.path().join(".lf/graphs/finish.yaml"), graph).unwrap();
         let project = lf(
             repo.path(),
             home.path(),
@@ -2775,7 +2777,7 @@ fn wave_documents_and_workflows_follow_files() {
         lf(
             repo.path(),
             home.path(),
-            &["--wave", "tools/parser", "set", "workflow", "finish"],
+            &["--wave", "tools/parser", "set", "graph", "finish"],
         );
         std::fs::write(root.join("parser/MEMORY.md"), "Edited child memory λ.\n").unwrap();
         let context = lf(
@@ -2805,26 +2807,21 @@ fn wave_documents_and_workflows_follow_files() {
         let missing = command(
             repo.path(),
             home.path(),
-            &["wave", "workflow", "source", "finish"],
+            &["graph", "show", "finish", "--json"],
         )
         .output()
         .unwrap();
         assert!(!missing.status.success());
-        assert!(String::from_utf8_lossy(&missing.stderr).contains(".lf/graphs/finish.yaml"));
-        std::fs::write(repo.path().join(".lf/graphs/finish.yaml"), workflow).unwrap();
-        let source = lf(
+        std::fs::write(repo.path().join(".lf/graphs/finish.yaml"), graph).unwrap();
+        let shown = lf(
             repo.path(),
             home.path(),
-            &["wave", "workflow", "source", "finish"],
+            &["graph", "show", "finish", "--json"],
         );
-        assert_eq!(source.as_str().unwrap(), workflow);
-        std::fs::write(repo.path().join(".lf/graphs/unimported.yaml"), workflow).unwrap();
+        assert_eq!(shown["source"], ".lf/graphs/finish.yaml");
+        std::fs::write(repo.path().join(".lf/graphs/unimported.yaml"), graph).unwrap();
         std::fs::write(repo.path().join(".lf/graphs/finish.yaml"), "invalid: true").unwrap();
-        let catalog = lf(
-            repo.path(),
-            home.path(),
-            &["wave", "workflow", "list", "--json"],
-        );
+        let catalog = lf(repo.path(), home.path(), &["graph", "list", "--json"]);
         let entries = catalog.as_array().unwrap();
         let edited = entries
             .iter()
@@ -2836,7 +2833,7 @@ fn wave_documents_and_workflows_follow_files() {
             .iter()
             .find(|entry| entry["name"] == "unimported")
             .unwrap();
-        assert!(unimported["workflow"].is_object());
+        assert!(unimported["compiled"].is_object());
         assert!(unimported["unavailable"].is_null());
         lf(
             repo.path(),
@@ -3275,7 +3272,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         .find(|p| p["id"] == historical.id.as_str())
         .unwrap();
     assert_eq!(old["current"], false);
-    assert!(old.get("workflow").is_none());
+    assert!(old.get("graph").is_none());
     assert_eq!(old["krs"][0]["text"], "Historical proof remains");
     let text = lf(repo.path(), home.path(), &["wave", "show", wave.slug()]);
     let text = text.as_str().unwrap();
@@ -3285,7 +3282,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     let selected = lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "show", wave.slug(), "--json"],
+        &["wave", "graph", "show", wave.slug(), "--json"],
     );
     assert_eq!(selected["wave_id"], wave.id().as_str());
     let scoped = lf(
@@ -3295,18 +3292,12 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
             "--task",
             task_id.as_str(),
             "wave",
-            "workflow",
+            "graph",
             "show",
             "--json",
         ],
     );
     assert_eq!(scoped["wave_id"], wave.id().as_str());
-    let source = lf(
-        repo.path(),
-        home.path(),
-        &["wave", "workflow", "source", "code"],
-    );
-    assert!(source.as_str().unwrap().contains("interactive: demo"));
     connection
         .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
         .unwrap();
@@ -3325,14 +3316,14 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     lf(
         repo.path(),
         home.path(),
-        &["--wave", wave.slug(), "set", "workflow", "code"],
+        &["--wave", wave.slug(), "set", "graph", "code"],
     );
     let selected = lf(
         repo.path(),
         home.path(),
-        &["wave", "workflow", "show", wave.slug(), "--json"],
+        &["wave", "graph", "show", wave.slug(), "--json"],
     );
-    assert_eq!(selected["workflow"], "code");
+    assert_eq!(selected["graph"], "code");
     assert_eq!(store.task(&task_id).unwrap().unwrap(), task);
     assert_eq!(store.project(&historical.id).unwrap().unwrap(), historical);
     lf(
@@ -3382,21 +3373,21 @@ fn wave_planning_distinguishes_missing_registry_from_unreadable_and_removes_old_
     assert!(!home.path().join("loopflow.db").exists());
     // Definitions are files: reading them needs no registry and creates none.
     for args in [
-        vec!["wave", "workflow", "source", "code"],
-        vec!["wave", "workflow", "list", "--json"],
+        vec!["graph", "show", "code", "--json"],
+        vec!["graph", "list", "--json"],
     ] {
         lf(repo.path(), home.path(), &args);
         assert!(!home.path().join("loopflow.db").exists());
     }
-    let workflow_reads = [vec!["wave", "workflow", "show", "missing", "--json"]];
-    for args in &workflow_reads {
+    let graph_reads = [vec!["wave", "graph", "show", "missing", "--json"]];
+    for args in &graph_reads {
         let output = command(repo.path(), home.path(), args).output().unwrap();
         assert!(!output.status.success());
         assert!(String::from_utf8_lossy(&output.stderr).contains("registry is absent"));
         assert!(!home.path().join("loopflow.db").exists());
     }
     std::fs::write(home.path().join("loopflow.db"), "not a database").unwrap();
-    for args in &workflow_reads {
+    for args in &graph_reads {
         let output = command(repo.path(), home.path(), args).output().unwrap();
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
@@ -3563,14 +3554,14 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         )
         .unwrap();
     // Seed a locally retained date differing from the provider observation, and
-    // a captured Workflow. Reading must not copy either value from another owner.
+    // a captured graph. Reading must not copy either value from another owner.
     db.execute(
         "UPDATE tasks SET planning_due_date='2026-10-20' WHERE id=?1",
         [id.as_str()],
     )
     .unwrap();
     db.execute("INSERT INTO processes(id,trace_id,command,cwd,started_at) VALUES('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','lf run code','/retained/task',2)", []).unwrap();
-    db.execute("INSERT INTO task_workflows(task_id,graph,node,edge,lf_process_id,updated_at) VALUES(?1,?2,'review',1,'11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
+    db.execute("INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at) VALUES(?1,?2,'review','{\"index\":1}','11111111-1111-4111-8111-111111111111',7)", rusqlite::params![id.as_str(),json!({"name":"review","steps":[{"Skill":{"skill":{"name":"review"},"id":null,"interactive":true,"returns":null,"sources":[]}},{"Skill":{"skill":{"name":"implement"},"id":null,"interactive":false,"returns":null,"sources":[]}}]}).to_string()]).unwrap();
     let saved = store.task(&id).unwrap().unwrap();
     let read = || {
         lf(
@@ -3641,14 +3632,14 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     assert_eq!(after_removal.worktree, saved.worktree);
     assert_eq!(after_removal.branch, saved.branch);
     assert_eq!(after_removal.project_id, saved.project_id);
-    let node: String = db
+    let step: String = db
         .query_row(
-            "SELECT node FROM task_workflows WHERE task_id=?1",
+            "SELECT step FROM task_graphs WHERE task_id=?1",
             [id.as_str()],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(node, "review");
+    assert_eq!(step, "review");
     let process: (Option<i64>, Option<String>) = db.query_row("SELECT completed_at,outcome FROM processes WHERE id='11111111-1111-4111-8111-111111111111'", [], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(process, (None, None));
 }
@@ -3754,18 +3745,38 @@ fn offline_linear_checkout_uses_known_identifier_and_caps_title() {
     assert_eq!(retained["worktree"], placed["worktree"]);
 }
 
+/// The Task's graph as `lf task status --json` carries it.
+fn task_graph(repo: &Path, home: &Path, id: &str) -> Value {
+    lf(repo, home, &["task", "status", id, "--json"])["execution"]["work"]["graph"].clone()
+}
+
+/// Run `lf task run …` bare, which may return as its Graph registers, and
+/// wait until the Task stands at an interactive step or `end`.
+fn run_until_waiting(repo: &Path, home: &Path, args: &[&str], id: &str) -> Value {
+    lf(repo, home, args);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let graph = task_graph(repo, home, id);
+        if graph["position"]["kind"] == "at" {
+            return graph;
+        }
+        assert!(std::time::Instant::now() < deadline, "{graph}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 #[test]
 fn waveless_task_lifecycle() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(repo.path().join(".lf")).unwrap();
-    std::fs::write(repo.path().join(".lf/config.yaml"), "workflow: proof\n").unwrap();
+    std::fs::write(repo.path().join(".lf/config.yaml"), "graph: proof\n").unwrap();
     repo.create_file(
         ".lf/graphs/proof.yaml",
         "- cmd: graph show proof\n- interactive: {name: demo, id: review}\n",
     );
     repo.stage_all();
-    repo.commit("Configure repository workflow");
+    repo.commit("Configure the repository graph");
     repo.push();
     let created = lf(
         repo.path(),
@@ -3788,17 +3799,13 @@ fn waveless_task_lifecycle() {
     assert_eq!(counts, (1, 0, 0));
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
     assert_eq!(listed[0]["task"]["id"], id);
-    assert_eq!(listed[0]["workflow_name"], "proof");
-    assert_eq!(listed[0]["workflow_source"], "repo");
+    assert_eq!(listed[0]["graph_name"], "proof");
+    assert_eq!(listed[0]["graph_source"], "repo");
     let inventory = lf(repo.path(), home.path(), &["wave", "show", "--json"]);
     assert_eq!(inventory["tasks"]["items"][0]["task"]["id"], id);
     let placed = lf(repo.path(), home.path(), &["checkout", id, "--json"]);
-    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
-    let before = lf(
-        repo.path(),
-        home.path(),
-        &["task", "workflow", "show", id, "--json"],
-    );
+    let before = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
+    assert_eq!(before["position"]["step"], "review");
     lf(
         repo.path(),
         home.path(),
@@ -3812,25 +3819,13 @@ fn waveless_task_lifecycle() {
     let attached = lf(repo.path(), home.path(), &["task", "status", id, "--json"]);
     assert_eq!(attached["execution"]["worktree"], placed["worktree"]);
     assert_eq!(attached["execution"]["wave"], "product");
-    assert_eq!(
-        lf(
-            repo.path(),
-            home.path(),
-            &["task", "workflow", "show", id, "--json"]
-        ),
-        before
-    );
+    assert_eq!(task_graph(repo.path(), home.path(), id), before);
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     let detached = lf(repo.path(), home.path(), &["task", "list", "--json"]);
     assert_eq!(detached[0]["task"]["id"], id);
     assert!(detached[0]["task"]["wave_id"].is_null());
-    assert_eq!(detached[0]["workflow_source"], "task");
-    lf(
-        repo.path(),
-        home.path(),
-        &["task", "workflow", "move", id, "start"],
-    );
+    assert_eq!(detached[0]["graph_source"], "task");
     lf(repo.path(), home.path(), &["task", "complete", id]);
     assert_eq!(
         lf(repo.path(), home.path(), &["task", "status", id, "--json"])["execution"]["status"],
@@ -3843,16 +3838,14 @@ fn waveless_task_lifecycle() {
         &["task", "create", "--title", "Always standalone", "--json"],
     );
     let standalone_id = standalone["id"].as_str().unwrap();
-    lf(
+    run_until_waiting(
         repo.path(),
         home.path(),
-        &["-b", "task", "run", standalone_id],
+        &["task", "run", standalone_id],
+        standalone_id,
     );
-    lf(
-        repo.path(),
-        home.path(),
-        &["-b", "task", "run", standalone_id],
-    );
+    // Nothing runs after review: the next run reaches end and completes.
+    lf(repo.path(), home.path(), &["task", "run", standalone_id]);
     let completed = lf(
         repo.path(),
         home.path(),
@@ -3862,12 +3855,13 @@ fn waveless_task_lifecycle() {
     assert!(completed["execution"]["wave"].is_null());
     assert!(completed["execution"]["project_id"].is_null());
 }
+
 #[test]
-fn unconfigured_repository_runs_tasks_on_the_builtin_code_workflow() {
+fn unconfigured_repository_runs_tasks_on_the_builtin_code_graph() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     // Stand in for pursue's agent steps, keeping the `implement` that code's
-    // loops return to; the Workflow stays the builtin.
+    // loops return to; the Task's graph stays the builtin.
     repo.create_file(".lf/graphs/pursue.yaml", "- graph: implement\n");
     repo.create_file(".lf/graphs/implement.yaml", "- cmd: graph show pursue\n");
     repo.stage_all();
@@ -3880,24 +3874,19 @@ fn unconfigured_repository_runs_tasks_on_the_builtin_code_workflow() {
     );
     let id = created["id"].as_str().unwrap();
     let listed = lf(repo.path(), home.path(), &["task", "list", "--json"]);
-    assert_eq!(listed[0]["workflow_name"], "code");
-    assert_eq!(listed[0]["workflow_source"], "default");
-    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
-    let shown = lf(
-        repo.path(),
-        home.path(),
-        &["task", "workflow", "show", id, "--json"],
-    );
+    assert_eq!(listed[0]["graph_name"], "code");
+    assert_eq!(listed[0]["graph_source"], "default");
+    let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(shown["name"], "code");
-    assert_eq!(shown["position"]["node"], "demo");
+    assert_eq!(shown["position"]["step"], "demo");
 }
 
 #[test]
-fn auto_workflow_runs_a_task_to_end() {
+fn auto_graph_runs_a_task_to_end() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    repo.create_file(".lf/config.yaml", "workflow: auto\n");
-    // Stand in for the agent and delivery steps; the Workflow stays the builtin.
+    repo.create_file(".lf/config.yaml", "graph: auto\n");
+    // Stand in for the agent and delivery steps; the graph stays the builtin.
     repo.create_file(".lf/graphs/pursue.yaml", "- cmd: graph show pursue\n");
     repo.create_file(".lf/graphs/deliver.yaml", "- cmd: graph show deliver\n");
     repo.stage_all();
@@ -3909,18 +3898,13 @@ fn auto_workflow_runs_a_task_to_end() {
         &["task", "create", "--title", "Auto Task", "--json"],
     );
     let id = created["id"].as_str().unwrap();
-    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
-    let shown = lf(
-        repo.path(),
-        home.path(),
-        &["task", "workflow", "show", id, "--json"],
-    );
+    let shown = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(shown["name"], "auto");
-    assert_eq!(shown["position"]["node"], "end");
+    assert_eq!(shown["position"]["step"], "end");
 }
 
 #[test]
-fn your_workflow_for_a_wave_selects_the_builtin_auto() {
+fn your_graph_for_a_wave_selects_the_builtin_auto() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     lf(
@@ -3931,7 +3915,7 @@ fn your_workflow_for_a_wave_selects_the_builtin_auto() {
     lf(
         repo.path(),
         home.path(),
-        &["--wave", "product", "set", "workflow", "auto"],
+        &["--wave", "product", "set", "graph", "auto"],
     );
     let created = lf(
         repo.path(),
@@ -3947,24 +3931,24 @@ fn your_workflow_for_a_wave_selects_the_builtin_auto() {
         .iter()
         .find(|task| task["task"]["id"] == created["id"])
         .unwrap();
-    assert_eq!(task["workflow_name"], "auto");
-    assert_eq!(task["workflow_source"], "personal");
+    assert_eq!(task["graph_name"], "auto");
+    assert_eq!(task["graph_source"], "personal");
 }
 
 #[test]
-fn workflow_defaults_follow_task_wave_and_repository() {
+fn graph_defaults_follow_task_wave_and_repository() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    repo.create_file(".lf/config.yaml", "workflow: repository\n");
+    repo.create_file(".lf/config.yaml", "graph: repository\n");
     repo.create_file(".lf/graphs/proof.yaml", "- cmd: graph show proof\n");
-    for (name, node) in [
+    for (name, step) in [
         ("repository", "repo-review"),
         ("wave", "wave-review"),
         ("explicit", "task-review"),
     ] {
         repo.create_file(
             &format!(".lf/graphs/{name}.yaml"),
-            &format!("- graph: proof\n- interactive: {{name: demo, id: {node}}}\n"),
+            &format!("- graph: proof\n- interactive: {{name: demo, id: {step}}}\n"),
         );
     }
     repo.stage_all();
@@ -3978,7 +3962,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
     lf(
         repo.path(),
         home.path(),
-        &["--wave", "product", "set", "workflow", "wave"],
+        &["--wave", "product", "set", "graph", "wave"],
     );
     let task = lf(
         repo.path(),
@@ -3994,29 +3978,18 @@ fn workflow_defaults_follow_task_wave_and_repository() {
         ],
     );
     let id = task["id"].as_str().unwrap();
-    lf(repo.path(), home.path(), &["-b", "task", "run", id]);
-    let captured = lf(
-        repo.path(),
-        home.path(),
-        &["task", "workflow", "show", id, "--json"],
-    );
+    let captured = run_until_waiting(repo.path(), home.path(), &["task", "run", id], id);
     assert_eq!(captured["name"], "wave");
+    assert_eq!(captured["position"]["step"], "wave-review");
     lf(
         repo.path(),
         home.path(),
-        &["--wave", "product", "set", "workflow", "explicit"],
+        &["--wave", "product", "set", "graph", "explicit"],
     );
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
-    repo.create_file(".lf/config.yaml", "workflow: ''\n");
-    // The proof edge may still be running, so compare the taken-up graph, not its position.
-    let shown = lf(
-        repo.path(),
-        home.path(),
-        &["task", "workflow", "show", id, "--json"],
-    );
-    for field in ["name", "nodes", "edges"] {
-        assert_eq!(shown[field], captured[field], "{field}");
-    }
+    repo.create_file(".lf/config.yaml", "graph: ''\n");
+    // The Task keeps the graph it took up.
+    assert_eq!(task_graph(repo.path(), home.path(), id), captured);
     let standalone = lf(
         repo.path(),
         home.path(),
@@ -4035,7 +4008,7 @@ fn workflow_defaults_follow_task_wave_and_repository() {
         .unwrap();
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("invalid graph name"));
-    repo.create_file(".lf/config.yaml", "workflow: repository\n");
+    repo.create_file(".lf/config.yaml", "graph: repository\n");
     let explicit = lf(
         repo.path(),
         home.path(),
@@ -4050,19 +4023,13 @@ fn workflow_defaults_follow_task_wave_and_repository() {
         ],
     );
     let explicit_id = explicit["id"].as_str().unwrap();
-    lf(
+    let named = run_until_waiting(
         repo.path(),
         home.path(),
-        &["-b", "task", "run", explicit_id, "repository"],
+        &["task", "run", explicit_id, "repository"],
+        explicit_id,
     );
-    assert_eq!(
-        lf(
-            repo.path(),
-            home.path(),
-            &["task", "workflow", "show", explicit_id, "--json"]
-        )["name"],
-        "repository"
-    );
+    assert_eq!(named["name"], "repository");
 }
 
 #[test]

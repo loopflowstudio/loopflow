@@ -6,7 +6,7 @@
 //! ownership claim. In place of a Tasks Machine, a scope may name capacity: a
 //! pool or on-demand that `lf task run` takes a machine from.
 //!
-//! Scope settings are your overrides of shared setup (`workflow`, `agent`,
+//! Scope settings are your overrides of shared setup (`graph`, `agent`,
 //! `skill_agents.<skill>`) for a Wave, a repository or every repository.
 use std::collections::BTreeMap;
 

@@ -15,7 +15,7 @@ Project owns Tasks, KRs and targets. A Chapter is the shared
 name of those current Projects across the repository. The rotation below describes
 the explicit shared Project binding. Rotation retains exact destinations and selected
 issue IDs for recovery, while unreviewed backlog stays in its original Project.
-[Cutover status](../architecture-reference.md#cutover-status) records
+[Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
 
 ## Planning authority and identity
@@ -39,7 +39,7 @@ Sync writes only changed fields; plan-only sends nothing. A missing default-bran
 ref or GOAL.md blocks mutation instead of clearing the provider summary.
 Creation preserves authored IDs and bytes and writes missing GOAL.md/MEMORY.md
 files. Reads never provision. Registry relocation changes addresses without moving authored files.
-A Wave's Workflow is a graph: committed `.lf/graphs/` files or builtins. A Wave
+A Wave's default graph is a committed `.lf/graphs/` file or a builtin. A Wave
 records only the selected name, which travels with planning.
 Wave list, status and roadmap emit each Wave's `machine` from the reader's
 Machine-local Wave → Machine default (the Wave, then its parents), or
@@ -47,7 +47,7 @@ Machine-local Wave → Machine default (the Wave, then its parents), or
 Desktop consumes the same optional value.
 
 Task deletion atomically records local removal and a stable pending field receipt.
-It preserves Workflow, Session, Process, PR and checkout state, including completed
+It preserves Task graph, Session, Process, PR and checkout state, including completed
 outcomes. Retry retains the first receipt. Confirmed historical provider removals
 remain independent evidence. Active foreground connections deliver mapped removals.
 An exact trash observation or deletion acknowledgement settles the receipt; missing
@@ -62,8 +62,8 @@ Project prose, KRs and metric targets are separate stored fields. Local
 reads and the shared typed writer never parse or regenerate Markdown. Conversion
 reads the released Markdown once inside the migration transaction, preserves
 observation age, and seeds Git history only after conversion. Only the selected
-current Project supplies the migrated Wave workflow default; Project history
-retains no workflow authority.
+current Project supplies the migrated Wave default graph; Project history
+retains no graph authority.
 Prompt assembly and Linear delivery render at their boundaries; malformed legacy
 content refuses the migration rather than discarding criteria. Extraction and Linear
 edits recognize fenced examples as prose and replace only owned field ranges;
@@ -95,7 +95,7 @@ UUID before placement and retain it through provider creation. New Linear acquis
 derive the Task ID from the issue UUID; existing mapped Tasks keep their IDs.
 Ticket aliases remain optional mappings. Repeated imports and ticket changes retain
 identity. Unowned observations stay in provider evidence tables. Released-frontier
-migration preserves existing identities, provider observations, PRs, Workflows and
+migration preserves existing identities, provider observations, PRs, Task graphs and
 Session links. Provider content is retained as individual observation fields;
 ordinary readers and ingestion never reconstruct a stored Project or issue object.
 The membership index and provider claim remain separate when historical evidence
@@ -127,17 +127,17 @@ Placement records the checkout before filesystem creation, without creating a PR
 planning fields. Accepted state and completion are retained on the Task, so terminal
 planning prevents first placement even without provider inventory. Task and Graph entry
 use the same SQLite admission reader as placement, without a provider resolver.
-It reads one snapshot of saved planning, Workflow state and retained invalidation,
+It reads one snapshot of saved planning, Task graph state and retained invalidation,
 removal and membership evidence. Missing provider inventory alone does not prevent
 a saved Task from running; a retained invalidation still does. Remote completion
-prevents new work but does not stop an already active Workflow. Incoming removal
-retains the Task and marks its planning deleted; neither observation moves a Workflow
+prevents new work but does not stop an already running Task. Incoming removal
+retains the Task and marks its planning deleted; neither observation moves a Task
 or cleans a checkout. Competing reservations return the saved allocation; restoration
 uses that checkout and its optional PR. The queued writer retains the Wave lock through commit,
 even if its caller is canceled. Native launch and resume retain the
 ordinary Session and Process authority checks. Local deletion receipts and retained
 provider deletion evidence apply regardless of planning mode. Local completion
-records its planning decision and optional delivery receipt without moving the Workflow.
+records its planning decision and optional delivery receipt without moving the Task's graph.
 GitHub delivery still requires confirmed merge evidence. Chapter rotation commits
 all selected Waves together, carrying started Tasks and preserving backlog. Stable
 local IDs select the rows and retry receipts; provider aliases select existing
@@ -150,7 +150,7 @@ alone does not acknowledge an external effect.
 
 Refiling resolves the saved Task and destination Project, holds both Wave locks,
 and commits membership and its field receipt together. Existing work, including
-Sessions, Processes, Workflows and PRs, retains its owner. Retrying the selected
+Sessions, Processes, Graphs and PRs, retains its owner. Retrying the selected
 destination changes neither the revision nor receipt. Pending refiling allows inbound
 observations from another Wave to adopt conflicting Linear membership, retain both
 values and advance unrelated fields. It never grants execution or provider-write authority.
@@ -208,7 +208,7 @@ original input and baseline bytes through retries.
 Acquisition attaches the provider mapping to the original local row. Unknown creation
 or attachment outcomes retain their receipts; a matching title proves nothing.
 Comments retain identity and authorship. Incoming planning completion changes only
-the planning disposition: it neither advances a local Workflow nor authorizes cleanup.
+the planning disposition: it neither moves a local Task nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
 `PlanningSyncStatus` presents local Linear delivery evidence; `peer_planning` Work
@@ -283,14 +283,14 @@ predecessor Projects.
 Wave and roadmap Task summaries read saved Work directly: `id` is the local Task
 identity, `linear_id` is its optional provider binding, and `sync` is required
 read-only evidence. Missing provider inventory does not erase saved prose, due
-dates or assignments. Workflow, execution and checkout evidence remain separate.
+dates or assignments. Graph, execution and checkout evidence remain separate.
 
 `ensure` activates the configured Backlog or Planned Project in SQLite and records
 its status change for delivery. Without a binding, creation, original name,
 selection and the local transition receipt commit together. Retry reuses that
 identity and preserves later edits. Existing provider creation reservations retain
 their UUID and mappings. No provider request is needed, including during an outage.
-Terminal, archived, paused or foreign Projects retain their history. Names and content remain intact; the Wave owns its workflow default. Binding accepts the durable or mapped ID of
+Terminal, archived, paused or foreign Projects retain their history. Names and content remain intact; the Wave owns its default graph. Binding accepts the durable or mapped ID of
 an already saved Project; it does not fetch a missing Project. Legacy YAML import
 retains the original bytes and requires that exact Project's saved record.
 Project export uses the original transition receipt on the foreground connection.
@@ -352,7 +352,7 @@ for an existing exact destination; absence never turns that instruction into
 creation. Every destination requires authored KRs before any provider write.
 Existing Projects keep their names, summaries and unrelated content; supplied
 KRs and targets replace only those planning fields. Rotation preserves the Wave
-workflow default.
+default graph.
 
 The repository operation validates all selected Waves, destinations, legacy
 conversions and Task evidence before reserving every pair and applying the first
@@ -384,7 +384,7 @@ Status returns canonical `task` and `project` records, `planning_state`,
 `execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
 Project-less observation returns acquisition evidence without fabricating owned
 Work; its concrete record remains retained internally. Status may acquire planning
-but never completes a Task, allocates a checkout or moves a captured Workflow.
+but never completes a Task, allocates a checkout or moves a Task's graph.
 Wave, roadmap and Work frames expose the same acquisition state and age separately
 from saved content and outbound delivery.
 
@@ -499,49 +499,45 @@ step processes, with no separate record or process.
 
 Every Graph naming a Task, or run in its checkout, is equally that Task's
 work; none is selected or privileged. Taskless and Task execution share the
-Graph runner. Each `task run` starts a fresh Graph as a child `lf graph`, and a fresh
-one again when that Graph process fails. A Graph runs autonomous steps and stops at its first
-`interactive:` stage (`GraphOutcome::Staged`); a Task carries it on from there. Finishing
+Graph runner. `lf graph` runs an `interactive:` step in place, with the person at a
+terminal, else headless. Each `task run` starts a fresh Graph as a child Graph process
+(hidden `lf --task ISSUE graph run`), and a fresh one again when that Graph process
+fails; it stops before the next interactive step (`GraphOutcome::Staged`). Finishing
 retains history and chooses no successor; Graph completion alone does not
 complete Task Work.
 
-## Move a Task through its workflow
+## Carry a Task through its graph
 
-A [workflow](../orchestration.md#workflows) is the outer shape of a Task: nodes
-where a person takes part in the Task conversation, and edges that each run
-one Graph. On its first `lf task run`, a Task selects the explicitly named Workflow,
-its Wave default, repository `workflow:`, then the builtin `code`. A captured Workflow stays fixed. `task_workflows` holds one
-row per Task: the graph as it was then, never edited, and the Task's
-position. A later edit to the YAML applies to Tasks that take it up
-afterwards; taking one up again starts over at `start`.
+A Task takes up [one graph](../orchestration.md#where-a-person-takes-part) and stands
+at a step of it. On its first `lf task run`, a Task takes up the graph named on
+`lf task run ISSUE GRAPH`, else its Wave's default, repository `graph:`, then
+builtin `code`. `task_graphs` holds one row per Task: the graph as it was then,
+never edited, and `step`: `start`, `end`, or the interactive step it waits at.
+A later edit to the YAML applies to Tasks that take it up afterwards; taking one
+up again replaces the row and starts over at `start`.
 
-Position is stored: at a node, or on an edge with the Process carrying it.
-Whether that Process still runs is read from the Process, never stored. The store
-has one read and four writes, and every write appends to
-`task_workflow_moves`:
+While `lf task run` carries the Task, the row also holds `run_start`, the cursor
+that run began from, and `lf_process_id`, that Task run. Whether it still runs is
+read from the Process, never stored. The run's child Graph process writes where it
+left the Task: before the interactive step it stopped at, or `end`. A run that
+stops leaves the Task on it; the next `lf task run` starts it again from
+`run_start`. Without one, `lf task run` continues after the step the Task waits
+at; `--from STEP` (a step id, skill or composed graph name) starts anywhere, and
+starting from an interactive step only puts the Task there. `-b task run` runs
+straight through headless, and `lf ship` repeats it until `end`. Other Graphs in
+the checkout never move the Task. Graph processes and Task events keep the
+history; there is no move log.
 
-| Call | Effect |
-| --- | --- |
-| take up | store the graph at `start` |
-| choose | from the edge's `from` node, or from a stopped edge that left it: on the edge, carried by the choosing Process; straight to `to` for an edge that runs nothing. Refused when the Task has moved since it was read |
-| arrive | the Process that carried the edge, on success, puts the Task at `to` if it is still on that edge |
-| set | put the Task at a named node |
-
-`lf task run ISSUE [NAME]` chooses, then runs the edge's Graph in the same
-process, which arrives when the Graph succeeds. A Graph that stops leaves the
-Task on its edge. `lf task workflow move ISSUE NODE` sets. An edge is not chosen
-while another runs. A move's author is its Process's calling conversation, else
-a person; an arrival is the edge's own.
-
-Task completion, Workflow position and Process liveness are independent.
-`task complete` changes status without moving or creating a Workflow. Moving or
-arriving at end atomically records the move and a completion request, then
+Task completion, graph position and Process liveness are independent.
+`task complete` changes status without moving or creating a Task graph. Reaching
+`end` atomically records the position and a completion request, then
 attempts settlement. Failed settlement retains end and its reason; retry only
-`task complete`, never the successful edge. PR delivery requires verified merge; PR-less completion retains useful artifacts.
-Accepted Linear completion or reopening updates status without moving Workflow
+`task complete`, never the successful run. PR delivery requires verified merge; PR-less completion retains useful artifacts.
+Accepted Linear completion or reopening updates status without moving the graph
 or terminating Processes. Reopening supersedes old requests. Ordinary reads do
-not execute completion. Unfinished readiness remains not ready with no Workflow,
-ready at start, and active otherwise; abandonment is its own mark.
+not execute completion. Task state is derived: `active` at an interactive step
+with nothing running, `moving` while a run carries it with an interactive step
+ahead, `shipping` once Auto-Ship is approved and running; abandonment is its own mark.
 
 On-demand team checks acquire issue membership/state independently of
 comment and state delivery. Delivery receipts retain their original provider revision,
@@ -549,7 +545,7 @@ attempt evidence and conflicting value. The latest receipt determines the displa
 writeback state; Tasks store no separate copy. A response records only its captured
 effect, so it cannot settle a newer decision. State acquisition and delivery share
 one transactional reconciliation rule: observed conflicts adopt Linear and settle
-the losing receipt without changing the Workflow. No local/provider clock comparison orders edits.
+the losing receipt without moving the Task. No local/provider clock comparison orders edits.
 The provider read and mutation remain separate requests; they do not prevent a
 concurrent Linear edit between them. A matching mutation response settles the observed target;
 it does not prove that no intermediate edit was overwritten. An unseen complete/reopen

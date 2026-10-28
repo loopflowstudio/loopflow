@@ -86,66 +86,7 @@
         ],
         "paths": []
       }
-    ],
-    "interactions": {
-      "stages": [],
-      "transitions": [
-        {
-          "from": "@start",
-          "to": "@end",
-          "nodes": [
-            "0",
-            "1",
-            "2",
-            "3",
-            "4",
-            "5"
-          ],
-          "routes": [
-            {
-              "from": "@start",
-              "to": "0",
-              "condition": null
-            },
-            {
-              "from": "0",
-              "to": "1",
-              "condition": null
-            },
-            {
-              "from": "1",
-              "to": "2",
-              "condition": null
-            },
-            {
-              "from": "2",
-              "to": "3",
-              "condition": null
-            },
-            {
-              "from": "3",
-              "to": "4",
-              "condition": null
-            },
-            {
-              "from": "4",
-              "to": "5",
-              "condition": "advance"
-            },
-            {
-              "from": "4",
-              "to": "0",
-              "condition": "repeat"
-            },
-            {
-              "from": "5",
-              "to": "@end",
-              "condition": null
-            }
-          ]
-        }
-      ]
-    }
+    ]
   },
   "current": 0,
   "completed": [],

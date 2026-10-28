@@ -19,7 +19,7 @@ use std::sync::Arc;
 /// A key `lf set` accepts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Key {
-    /// `workflow`, `agent` or `skill_agents.<skill>`: your value over the
+    /// `graph`, `agent` or `skill_agents.<skill>`: your value over the
     /// committed config.
     Shared,
     /// `machine`, `machine.tasks` or `machine.session`.
@@ -30,7 +30,7 @@ enum Key {
 
 fn parse_key(raw: &str) -> anyhow::Result<Key> {
     Ok(match raw.split_once('.') {
-        None if raw == "workflow" || raw == "agent" => Key::Shared,
+        None if raw == "graph" || raw == "agent" => Key::Shared,
         None if raw == "machine" => Key::Machine(&[MachineSetting::Tasks, MachineSetting::Session]),
         Some(("machine", "tasks")) => Key::Machine(&[MachineSetting::Tasks]),
         Some(("machine", "session")) => Key::Machine(&[MachineSetting::Session]),
@@ -39,7 +39,7 @@ fn parse_key(raw: &str) -> anyhow::Result<Key> {
             crate::lf::commands::profile::parse_managed_provider(provider)?,
         ),
         _ => bail!(
-            "unknown key `{raw}`; keys are workflow, agent, skill_agents.<skill>, machine, \
+            "unknown key `{raw}`; keys are graph, agent, skill_agents.<skill>, machine, \
              machine.tasks, machine.session and account.<provider>"
         ),
     })
@@ -149,20 +149,20 @@ fn shared(
     key: &str,
     value: Option<&str>,
 ) -> anyhow::Result<()> {
-    if key == "workflow" && matches!(scope, Scope::Global) {
-        bail!("a Workflow is chosen per repository or Wave, never for every repository");
+    if key == "graph" && matches!(scope, Scope::Global) {
+        bail!("a graph is chosen per repository or Wave, never for every repository");
     }
     let default_scope = default_scope(store, repo, scope)?;
     let label = scope.label();
     match value {
         Some(value) => {
-            if key == "workflow" {
-                crate::workflow::validate_workflow_name(value).map_err(|e| anyhow!(e))?;
-                if crate::workflow::load_workflow(value, repo)
+            if key == "graph" {
+                crate::task_graph::validate_graph_name(value).map_err(|e| anyhow!(e))?;
+                if crate::task_graph::CapturedGraph::load(value, repo)
                     .map_err(|e| anyhow!(e))?
                     .is_none()
                 {
-                    bail!(crate::workflow::missing_workflow(value));
+                    bail!(crate::task_graph::missing_graph(value));
                 }
             } else if value.trim().is_empty() {
                 bail!("{key} needs an agent, such as claude or claude:opus");

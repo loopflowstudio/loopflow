@@ -66,7 +66,7 @@ impl SkillSource {
             && !RETIRED_INTERACTIVE_WARNING.swap(true, Ordering::Relaxed)
         {
             eprintln!(
-                "warning: skill {:?} uses retired `interactive` frontmatter; direct TTY and -b now select the launch surface",
+                "warning: skill {:?} uses retired `interactive` frontmatter; a graph marks the step `interactive: <skill>`, and -i or -b choose for a whole launch",
                 self.name
             );
         }

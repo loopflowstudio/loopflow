@@ -51,7 +51,7 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
   and Done. The repository page is the same view over every repository Task.
   Every pane and view part zooms and hides from buttons on hover, its dividers
   drag, and the header's `Show…` menu brings hidden parts back.
-- **⌘K**: search Waves, Tasks, Sessions, Graphs and Workflows.
+- **⌘K**: search Waves, Tasks, Sessions and Graphs.
 
 ```bash
 lf desktop view 'state:available'                       # a Dashboard of every available conversation

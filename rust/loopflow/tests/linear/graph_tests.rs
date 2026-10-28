@@ -1114,45 +1114,6 @@ fn graph_output_shows_steps_and_agent_messages_with_opt_in_diagnostics() {
 }
 
 #[test]
-fn operational_graph_stops_at_its_stage_without_launching_it() {
-    for source in [
-        "- interactive:
-    id: review
-    name: review-proof
-",
-        "- graph: nested-review
-",
-    ] {
-        let repo = loopflow_test_support::TestRepo::new();
-        let home = TempDir::new().unwrap();
-        write_skill(repo.path(), "review-proof", "Discuss the work.");
-        write_graph(
-            repo.path(),
-            "nested-review",
-            "- interactive:
-    id: review
-    name: review-proof
-",
-        );
-        write_graph(repo.path(), "operational", source);
-        let output = run_lf(
-            repo.path(),
-            home.path(),
-            &["--batch", "graph", "operational"],
-            None,
-        );
-        assert!(output.status.success(), "{output:?}");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("Reached review"), "{output:?}");
-        let sessions: i64 = rusqlite::Connection::open(home.path().join("loopflow.db"))
-            .unwrap()
-            .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(sessions, 0, "a stage opened a Session with no one there");
-    }
-}
-
-#[test]
 fn killed_graph_process_leaves_its_agent_step_as_history_without_another_turn() {
     let repo = loopflow_test_support::TestRepo::new();
     let home = TempDir::new().unwrap();
@@ -1260,43 +1221,6 @@ fn observing_and_preparing_a_task_are_not_execution() {
         assert!(read.status.success(), "{read:?}");
         assert_eq!(entries(), 1, "inspection writes no ownership entry");
     }
-
-    write_skill(repo.path(), "review-proof", "Review the fixture.");
-    write_graph(
-        repo.path(),
-        "review-first",
-        "- interactive:\n    id: review\n    name: review-proof\n",
-    );
-    let prepared = run_lf(
-        repo.path(),
-        home.path(),
-        &["--task", "INF-123", "graph", "review-first", "--batch"],
-        None,
-    );
-    assert!(
-        prepared.status.success(),
-        "{}",
-        String::from_utf8_lossy(&prepared.stderr)
-    );
-    assert!(
-        String::from_utf8_lossy(&prepared.stderr).contains("Reached review"),
-        "{}",
-        String::from_utf8_lossy(&prepared.stderr)
-    );
-    let sessions = run_lf(
-        repo.path(),
-        home.path(),
-        &["session", "list", "--json"],
-        None,
-    );
-    assert!(
-        sessions.status.success(),
-        "{}",
-        String::from_utf8_lossy(&sessions.stderr)
-    );
-    let sessions: Vec<serde_json::Value> = serde_json::from_slice(&sessions.stdout).unwrap();
-    assert!(sessions.is_empty());
-    assert_eq!(entries(), 1, "a stage reached writes no ownership entry");
 }
 
 #[test]
@@ -1717,8 +1641,8 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
             1
         );
     }
-    // A stage remains explicit and cannot silently run the next step just
-    // because the invocation has Task attribution.
+    // `--batch` runs an interactive step headless too, standing in for the
+    // person, then the steps after it.
     write_graph(
         repo.path(),
         "review-contribution",
@@ -1736,8 +1660,13 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Reached accept"));
-    assert!(!home.path().join("prompts").exists());
+    assert_eq!(
+        fs::read_to_string(home.path().join("prompts"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
     let listed = run_lf(
         repo.path(),
         home.path(),
@@ -1755,8 +1684,7 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
         .unwrap()
         .iter()
         .all(|session| session["kind"] != "graph"));
-    assert!(!home.path().join("prompts").exists());
-    // The launch that stopped at its stage is one more Graph process.
+    // That launch is one more Graph process; the Task's earlier Graph is untouched.
     assert_eq!(support::recorded_graphs(home.path()).len(), 7);
     assert_eq!(earlier_graph(), stopped);
     assert_eq!(repo.head_sha(), original_head);
@@ -2041,7 +1969,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     let task =
         support::register_task_with_pr(home.path(), &checkout, "task-graph-read", &repo.head_sha());
     observe_planning(&task, &checkout);
-    support::select_wave_workflow(
+    support::select_wave_graph(
         &checkout,
         &task.store.sqlite,
         task.task.wave_id.as_ref().unwrap(),
@@ -2074,7 +2002,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
 
     // Before any Graph: the recommendation, Start, and no invented history.
     let graph = roadmap_task(repo.path(), home.path());
-    assert_eq!(graph["workflow_name"], "feature");
+    assert_eq!(graph["graph_name"], "feature");
     assert!(graph["latest_graph_process"].is_null());
     assert!(graph["run_control"]["unavailable"].is_null(), "{graph}");
     assert_eq!(
@@ -2325,7 +2253,7 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
 }
 
 #[test]
-fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
+fn the_research_graph_stops_at_its_findings_then_reaches_end() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
@@ -2341,29 +2269,34 @@ fn the_research_workflow_ends_on_its_edge_that_runs_nothing() {
             repo.path(),
             home.path(),
             &["task", "status", "INF-123", "--json"],
-        )["execution"]["work"]["workflow"]["position"]["node"]
+        )["execution"]["work"]["graph"]["position"]
             .clone()
     };
-    let ran = run(&["-b", "task", "run", "INF-123", "research"]);
+    let ran = run(&["task", "run", "INF-123", "research"]);
     assert!(
         ran.status.success(),
         "{}",
         String::from_utf8_lossy(&ran.stderr)
     );
-    assert_eq!(position(), "research");
-    // Two edges leave research; the refusal names the one that runs nothing.
-    let refused = run(&["task", "run", "INF-123"]);
-    assert!(!refused.status.success());
-    let error = String::from_utf8_lossy(&refused.stderr).to_string();
-    assert!(error.contains("end (runs nothing)"), "{error}");
-    assert_eq!(position(), "research");
-    let ended = run(&["task", "run", "INF-123", "end"]);
+    // A bare run may return as its Graph registers; it stops before the
+    // interactive research step.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while position()["kind"] != "at" {
+        assert!(std::time::Instant::now() < deadline, "{}", position());
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(
+        position(),
+        serde_json::json!({"kind": "at", "step": "research"})
+    );
+    // Nothing runs after the findings: the next run reaches end.
+    let ended = run(&["task", "run", "INF-123"]);
     assert!(
         ended.status.success(),
         "{}",
         String::from_utf8_lossy(&ended.stderr)
     );
-    assert_eq!(position(), "end");
+    assert_eq!(position(), serde_json::json!({"kind": "at", "step": "end"}));
     // Running the Graph left a file uncommitted; ending kept it.
     assert!(checkout.join(".gitignore").exists());
 }

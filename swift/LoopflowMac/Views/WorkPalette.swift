@@ -11,7 +11,7 @@ struct WorkPaletteRow: Identifiable, Equatable {
 
 extension WorkModel {
     var paletteIsStale: Bool {
-        roadmap.errorMessage != nil || sessions.errorMessage != nil || graphCatalog.errorMessage != nil || workflowCatalog.errorMessage != nil
+        roadmap.errorMessage != nil || sessions.errorMessage != nil || graphCatalog.errorMessage != nil
             || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil || !$0.unavailableTasks.isEmpty }
     }
 
@@ -47,11 +47,7 @@ extension WorkModel {
         }
         for graph in graphCatalog.value ?? [] {
             rows.append(.init(id: .graph(graph.name), title: graph.name,
-                              detail: "Graph definition", key: graph.name))
-        }
-        for workflow in workflowCatalog.value ?? [] {
-            rows.append(.init(id: .workflow(workflow.name), title: workflow.name,
-                              detail: "Workflow", key: workflow.name))
+                              detail: "Graph", key: graph.name))
         }
         if let selection, selection.kind == .task, let found = task(id: selection.id) {
             rows.append(.init(id: .graphLog(selection.id), title: "Graph processes of \(found.task.task.identifier)",
@@ -235,7 +231,6 @@ struct WorkPalette: View {
         .onExitCommand { model.navigation.palette = nil }
         .task {
             await model.loadGraphCatalog()
-            await model.loadWorkflowCatalog()
             if !model.paletteIsStale && !model.roadmap.isLoading && !model.sessions.isLoading {
                 let available = Set(model.paletteRows.map(\.id))
                 model.navigation.recentDestinations.removeAll { !available.contains($0.id) }
@@ -421,9 +416,9 @@ struct WorkflowCatalogInspector: View {
             if let error = sourceError ?? model.workflowCatalog.errorMessage {
                 Text(error).foregroundStyle(palette.warning)
             }
-            Button("Refresh") { Task { await model.loadWorkflowCatalog(force: true) } }
+            Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
             if let workflow = entry?.workflow {
-                WorkflowDiagram(nodes: workflow.nodes, edges: workflow.edges)
+                WorkflowDiagram(nodes: workflow.steps, edges: workflow.runs)
             } else { Text(entry?.unavailable ?? "Refresh the Workflow catalog and try again.") }
             Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
         }.padding(24).frame(width: 780)

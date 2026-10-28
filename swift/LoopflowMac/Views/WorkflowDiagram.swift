@@ -2,10 +2,10 @@
 import Loopflow
 import SwiftUI
 
-/// Where a workflow's nodes and edges are drawn. `start` and `end` are
-/// circles and each node a box, in authored order on one row. An edge into
-/// the next column runs straight; one that returns to its own node arcs over
-/// it; any other takes its own lane below the row.
+/// Where a workflow's interactive steps and the runs between them are drawn.
+/// `start` and `end` are circles and each interactive step a box, in order on
+/// one row. A run into the next column goes straight; one that returns to its
+/// own step arcs over it; any other takes its own lane below the row.
 struct WorkflowDiagramLayout {
     enum Route: Equatable {
         case straight
@@ -23,7 +23,7 @@ struct WorkflowDiagramLayout {
 
     struct Arrow {
         let index: Int
-        let edge: Workflow.Edge
+        let edge: WorkflowDefinition.Run
         let route: Route
         let line: Path
         let head: Path
@@ -31,10 +31,10 @@ struct WorkflowDiagramLayout {
         let label: CGPoint
         let labelWidth: CGFloat
 
-        /// An edge is named by what it runs first.
+        /// A run is named by what it runs first.
         var text: String { Self.text(edge) }
 
-        static func text(_ edge: Workflow.Edge) -> String { edge.name }
+        static func text(_ edge: WorkflowDefinition.Run) -> String { edge.name }
     }
 
     static let nodeHeight: CGFloat = 44
@@ -47,7 +47,7 @@ struct WorkflowDiagramLayout {
     let arrows: [Arrow]
     let size: CGSize
 
-    init(nodes: [Workflow.Node], edges: [Workflow.Edge]) {
+    init(nodes: [TaskGraph.InteractiveStep], edges: [WorkflowDefinition.Run]) {
         let columns = ["start"] + nodes.map(\.name) + ["end"]
         let column = Dictionary(columns.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         var routes: [Int: Route] = [:]
@@ -143,21 +143,21 @@ struct WorkflowDiagramLayout {
     }
 }
 
-/// A workflow as a graph. Given a Task's position it marks the node the Task
-/// waits at or the edge it is on, running or stopped, and the edges that can
-/// be chosen now are its buttons.
+/// A workflow as a graph. Given a Task's position it marks the interactive
+/// step the Task waits at or the run it is on, running or stopped, and the run
+/// `lf task run` would start now is its button.
 struct WorkflowDiagram: View {
-    let nodes: [Workflow.Node]
-    let edges: [Workflow.Edge]
-    var position: Workflow.Position?
-    /// Edges that can be chosen now, by their place among `edges`.
+    let nodes: [TaskGraph.InteractiveStep]
+    let edges: [WorkflowDefinition.Run]
+    var position: TaskGraph.Position?
+    /// Runs that can be started now, by their place among `edges`.
     var choices: [Int] = []
-    /// Why no edge can be chosen now.
+    /// Why no run can be started now.
     var unavailable: String?
     /// Shrink to the width offered instead of scrolling: the workspace header.
     var fits = false
-    var hint: (Workflow.Edge) -> String = { _ in "" }
-    var choose: (Workflow.Edge) -> Void = { _ in }
+    var hint: (WorkflowDefinition.Run) -> String = { _ in "" }
+    var choose: (WorkflowDefinition.Run) -> Void = { _ in }
     @Environment(\.palette) private var palette
     @State private var offered: CGFloat?
     /// Below this the labels stop being readable; the header scrolls instead.
@@ -195,7 +195,9 @@ struct WorkflowDiagram: View {
 
     /// Whether the Task is on `edge` with its Graph still running; `nil` when it is not on it.
     private func running(_ edge: Int) -> Bool? {
-        if case .edge(edge, _, let running) = position { running } else { nil }
+        guard case .run(let step, _, let running) = position,
+              edges.firstIndex(where: { $0.from == step }) == edge else { return nil }
+        return running
     }
 
     private func tone(_ edge: Int) -> WorkTone? {
@@ -203,7 +205,7 @@ struct WorkflowDiagram: View {
     }
 
     private func node(_ box: WorkflowDiagramLayout.Box) -> some View {
-        let marked = position == .node(box.name)
+        let marked = position == .at(step: box.name)
         let shape = box.terminal ? AnyShape(Circle()) : AnyShape(RoundedRectangle(cornerRadius: 7))
         return VStack(spacing: 1) {
             Text(box.name)

@@ -236,7 +236,7 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
     rusqlite::Connection::open(home.path().join("loopflow.db"))
         .unwrap()
         .execute(
-            "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?1,?2,'explore',1)",
+            "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,'explore',1)",
             rusqlite::params![registered.task.id.as_str(), graph.to_string()],
         )
         .unwrap();

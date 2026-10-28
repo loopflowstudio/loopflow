@@ -506,7 +506,7 @@ fn assert_work_first_capture(capture: &Value) {
 }
 
 #[test]
-fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
+fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let fixture = Fixture::new(false);
     support::install_native_codex(&fixture.home.path().join("bin"));
     fixture
@@ -592,13 +592,29 @@ fn personal_task_launch_resume_and_skill_workflow_keep_native_identity() {
         native
     );
     support::managed_codex_account(fixture.home.path());
+    // A bare run stops before the interactive review step; it may return as
+    // its Graph registers, so wait for it to stop there.
     let run = fixture
-        .command(&["-b", "--agent", "codex", "task", "run", task_id, "proof"])
+        .command(&["--agent", "codex", "task", "run", task_id, "proof"])
         .env("LF_ACCOUNT_ISOLATION", "isolated")
         .output()
         .unwrap();
     assert!(run.status.success(), "{run:?}");
-    let final_status = fixture.json(&["task", "status", task_id, "--json"]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let final_status = loop {
+        let status = fixture.json(&["task", "status", task_id, "--json"]);
+        let finished = support::recorded_graphs(fixture.home.path())
+            .first()
+            .is_some_and(|graph| graph.0.is_some());
+        if finished
+            && status["execution"]["work"]["graph"]["position"]
+                == serde_json::json!({"kind": "at", "step": "review"})
+        {
+            break status;
+        }
+        assert!(std::time::Instant::now() < deadline, "{status}");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
     assert_eq!(final_status["execution"]["status"], "active");
     assert_eq!(fixture.count("agent_sessions"), 2);
     let graphs = support::recorded_graphs(fixture.home.path());
@@ -1831,7 +1847,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     // Y's mechanical Graph never starts a provider; X's OpenCode issues the command.
     store.set_task_agent(&caller.id, "opencode").unwrap();
     store.set_task_agent(&target.task.id, "claude").unwrap();
-    support::select_wave_workflow(
+    support::select_wave_graph(
         fixture.repo.path(),
         &store,
         target.task.wave_id.as_ref().unwrap(),
@@ -1852,7 +1868,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     std::fs::write(
         fixture.home.path().join("tool-command.json"),
         serde_json::to_vec(&serde_json::json!({
-            "argv": [env!("CARGO_BIN_EXE_lf"), "-b", "task", "run", "INF-123", "switch-proof"], "cwd": x,
+            "argv": [env!("CARGO_BIN_EXE_lf"), "task", "run", "INF-123", "switch-proof"], "cwd": x,
         }))
         .unwrap(),
     )
@@ -1868,10 +1884,28 @@ fn declared_agent_can_start_another_tasks_graph() {
     )
     .unwrap();
     assert_eq!(result["code"], 0, "{result}");
-    // The run blocked until Y's Graph finished.
-    let graphs = support::recorded_graphs(fixture.home.path());
+    // A bare run returns after registration; wait for Y to stop at demo.
+    // -b would execute demo headlessly and start Y's provider.
+    let deadline = Instant::now() + PATIENCE;
+    let graphs = loop {
+        let graphs = support::recorded_graphs(fixture.home.path());
+        if graphs.first().is_some_and(|graph| graph.0.is_some()) {
+            break graphs;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Y's Graph never stopped: {graphs:?}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
     assert_eq!(graphs.len(), 1);
     assert_eq!(graphs[0].0.as_deref(), Some("succeeded"));
+    let status = fixture.json(&["task", "status", "INF-123", "--json"]);
+    assert_eq!(
+        status["execution"]["work"]["graph"]["position"],
+        serde_json::json!({"kind": "at", "step": "demo"})
+    );
+    assert_eq!(fixture.launches().len(), 1);
     assert_eq!(
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)

@@ -59,13 +59,13 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     let home = tempfile::tempdir().unwrap();
     repo.create_file(
         ".lf/config.yaml",
-        "workflow: repo-flow\nagent: codex\ndiff: false\ndiff_files: false\npaste: false\n",
+        "graph: repo-flow\nagent: codex\ndiff: false\ndiff_files: false\npaste: false\n",
     );
     repo.create_file(".lf/skills/probe.md", "Probe.");
     repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
     repo.create_file(
         ".lf/wave/infra/config.yaml",
-        "workflow: code\nagent: claude\nskill_agents:\n  probe: claude:opus\n",
+        "graph: code\nagent: claude\nskill_agents:\n  probe: claude:opus\n",
     );
     repo.create_file(".lf/wave/research/GOAL.md", "Find out.\n");
     repo.create_file(".lf/wave/research/config.yaml", "agent: codex:o3\n");
@@ -135,8 +135,8 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
             .clone()
     };
     let infra = setup("infra");
-    assert_eq!(infra["workflow"]["value"], "code");
-    assert_eq!(infra["workflow"]["source"], "wave");
+    assert_eq!(infra["graph"]["value"], "code");
+    assert_eq!(infra["graph"]["source"], "wave");
     assert_eq!(infra["agent"]["value"], "claude");
     assert_eq!(infra["skill_agents"]["probe"]["value"], "claude:opus");
     assert_eq!(infra["tasks_machine"]["value"], here.as_str());
@@ -145,8 +145,8 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     assert_eq!(infra["accounts"]["codex"]["source"], "default");
 
     let research = setup("research");
-    assert_eq!(research["workflow"]["value"], "repo-flow");
-    assert_eq!(research["workflow"]["source"], "repo");
+    assert_eq!(research["graph"]["value"], "repo-flow");
+    assert_eq!(research["graph"]["source"], "repo");
     assert_eq!(research["agent"]["value"], "codex:o3");
     assert_eq!(research["agent"]["source"], "wave");
     assert_eq!(research["tasks_machine"]["source"], "default");
@@ -154,7 +154,7 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     assert_eq!(research["accounts"]["codex"]["source"], "personal");
 
     let plain = setup("plain");
-    assert_eq!(plain["workflow"]["source"], "repo");
+    assert_eq!(plain["graph"]["source"], "repo");
     assert_eq!(plain["agent"]["value"], "codex");
     assert_eq!(plain["agent"]["source"], "repo");
 }

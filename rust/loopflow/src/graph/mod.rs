@@ -73,13 +73,13 @@ fn validate_step_settings(id: Option<&str>) -> Result<(), LoadError> {
 }
 
 /// An executable occurrence. Template names resolve to Target during loading;
-/// stage and loop settings belong to this occurrence, not to the definition.
+/// interactive and loop settings belong to this occurrence, not to the definition.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Step {
     pub target: Target,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
-    /// A stage: a person takes part here, in the Task conversation. Written
+    /// An interactive step: a person takes part here, in the Task conversation. Written
     /// `interactive: <skill>`.
     #[serde(default, alias = "human", skip_serializing_if = "std::ops::Not::not")]
     pub interactive: bool,
@@ -109,7 +109,7 @@ pub struct Command {
 
 // Authored and saved invocations outlive CLI spellings. Both take the current
 // operation owner, keeping their arguments and topology, so a fresh Graph and a
-// captured Workflow route record the same step.
+// retained Graph record the same step.
 impl<'de> Deserialize<'de> for Command {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
@@ -220,7 +220,7 @@ pub struct GraphDefinition {
 pub struct ConcreteSkill {
     pub skill: Skill,
     pub id: Option<String>,
-    /// A stage where a person takes part; its id is `id`, else the skill name.
+    /// An interactive step, where a person takes part; its id is `id`, else the skill name.
     #[serde(alias = "human")]
     pub interactive: bool,
     /// A deciding occurrence returns this many steps back in its own body.
@@ -229,8 +229,8 @@ pub struct ConcreteSkill {
 }
 
 impl ConcreteSkill {
-    /// The stage this occurrence is, when a person takes part at it.
-    pub fn stage(&self) -> Option<&str> {
+    /// The interactive step this occurrence is, when a person takes part at it.
+    pub fn interactive_step(&self) -> Option<&str> {
         self.interactive
             .then(|| self.id.as_deref().unwrap_or(&self.skill.name))
     }
@@ -488,30 +488,33 @@ fn resolve_graph_with_catalog(
     let items = flatten_resolved(&resolved);
     let mut ids = HashSet::new();
     validate_occurrence_ids(&items, &mut ids)?;
-    validate_stages(&items, &mut HashSet::new())?;
+    validate_interactive_steps(&items, &mut HashSet::new())?;
     Ok(resolved)
 }
 
-/// Every stage has its own id, and no autonomous loop returns across one: a
-/// person decides at a stage, so nothing automatic may run back over it.
-fn validate_stages(items: &[ConcreteStep], stages: &mut HashSet<String>) -> Result<(), LoadError> {
+/// Every interactive step has its own id, and no autonomous loop returns across one: a
+/// person decides there, so nothing automatic may run back over it.
+fn validate_interactive_steps(
+    items: &[ConcreteStep],
+    steps: &mut HashSet<String>,
+) -> Result<(), LoadError> {
     for (index, item) in items.iter().enumerate() {
         match item {
             ConcreteStep::Skill(skill) => {
-                if let Some(stage) = skill.stage() {
-                    if !stages.insert(stage.to_string()) {
+                if let Some(step) = skill.interactive_step() {
+                    if !steps.insert(step.to_string()) {
                         return Err(LoadError::InvalidGraph(format!(
-                            "two stages are named {stage:?}; give one `interactive: {{name: {}, id: <stage>}}`",
+                            "two interactive steps are named {step:?}; give one `interactive: {{name: {}, id: <step>}}`",
                             skill.skill.name
                         )));
                     }
                 } else if let Some(target) = return_target(items, index) {
                     if let Some(crossed) = items[target..index].iter().find_map(|step| match step {
-                        ConcreteStep::Skill(step) => step.stage(),
+                        ConcreteStep::Skill(step) => step.interactive_step(),
                         _ => None,
                     }) {
                         return Err(LoadError::InvalidGraph(format!(
-                            "loop at {} returns across stage {crossed:?}; a person decides there",
+                            "loop at {} returns across interactive step {crossed:?}; a person decides there",
                             skill.skill.name
                         )));
                     }
@@ -519,7 +522,7 @@ fn validate_stages(items: &[ConcreteStep], stages: &mut HashSet<String>) -> Resu
             }
             ConcreteStep::Xor(branch) => {
                 for path in branch.paths.values() {
-                    validate_stages(&path.steps, stages)?;
+                    validate_interactive_steps(&path.steps, steps)?;
                 }
             }
             ConcreteStep::Command(_) => {}
@@ -756,7 +759,8 @@ fn parse_graph_mapping(
     if let Some(skill_value) = map.get(key("interactive")) {
         if map.len() != 1 {
             return Err(LoadError::InvalidGraph(
-                "an interactive item takes only the skill, or {name, id}".to_string(),
+                "step metadata belongs inside the interactive mapping: `interactive: {name, id, agent}`"
+                    .to_string(),
             ));
         }
         return parse_skill_value(skill_value, true);
@@ -803,7 +807,7 @@ fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
 
 /// `loop: <target>` runs a deciding skill last, `step`, `interactive` or
 /// `loop-or-next`, which advances, returns to the target or stops blocked. An
-/// interactive decider is a stage: the person there decides.
+/// interactive decider is an interactive step: the person there decides.
 fn parse_loop(map: &serde_yaml_ng::Mapping, target: &Value) -> Result<Step, LoadError> {
     let target = target
         .as_str()
@@ -853,9 +857,15 @@ fn parse_skill_value(value: &Value, interactive: bool) -> Result<Step, LoadError
                     "step repeat is retired; follow the work with `- loop: <target>`".to_string(),
                 ));
             }
-            if map.contains_key(key("human")) || map.contains_key(key("interactive")) {
+            if map.contains_key(key("human")) {
                 return Err(LoadError::InvalidGraph(
                     "`human:` is retired; write the item as `interactive: <skill>`".to_string(),
+                ));
+            }
+            if map.contains_key(key("interactive")) {
+                return Err(LoadError::InvalidGraph(
+                    "a step is interactive by its item; write it as `interactive: <skill>`"
+                        .to_string(),
                 ));
             }
             let mut step: SkillMapping =
@@ -1309,25 +1319,33 @@ mod tests {
     }
 
     #[test]
-    fn interactive_items_are_stages_named_by_their_skill_or_id() {
+    fn interactive_items_are_steps_named_by_their_skill_or_id() {
         let tmp = TempDir::new().unwrap();
         let graphs = tmp.path().join(".lf/graphs");
         fs::create_dir_all(&graphs).unwrap();
         fs::write(
             graphs.join("review.yaml"),
-            "- interactive: explore\n- interactive: {name: demo, id: final-demo}\n",
+            "- interactive: explore\n- interactive: {name: demo, id: final-demo, agent: codex}\n",
         )
         .unwrap();
         let graph = load_graph("review", tmp.path()).unwrap();
+        let Target::Skill(demo) = &graph.items[1].target else {
+            panic!("demo is a skill step");
+        };
+        assert_eq!(demo.agent.as_deref(), Some("codex"));
         let items = compile_graph(&graph, tmp.path()).unwrap();
-        let stages: Vec<_> = items
+        let steps: Vec<_> = items
             .iter()
             .filter_map(|item| match item {
-                ConcreteStep::Skill(skill) => skill.stage().map(str::to_owned),
+                ConcreteStep::Skill(skill) => skill.interactive_step().map(str::to_owned),
                 _ => None,
             })
             .collect();
-        assert_eq!(stages, ["explore", "final-demo"]);
+        assert_eq!(steps, ["explore", "final-demo"]);
+        let ConcreteStep::Skill(demo) = &items[1] else {
+            panic!("demo compiles to a skill step");
+        };
+        assert_eq!(demo.skill.agent.as_deref(), Some("codex"));
 
         fs::write(
             graphs.join("retired.yaml"),
@@ -2019,7 +2037,7 @@ Design the feature.
         let ConcreteStep::Skill(review) = &branch.paths["proceed"].steps[0] else {
             panic!("review")
         };
-        assert_eq!(review.stage(), Some("review"));
+        assert_eq!(review.interactive_step(), Some("review"));
         assert_eq!(review.skill.content.as_deref(), Some("Captured work"));
         assert_eq!(review.sources, ["outer", "inner"]);
         let ConcreteStep::Command(command) = &branch.paths["proceed"].steps[1] else {

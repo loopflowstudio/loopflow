@@ -971,6 +971,8 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   index restores telemetry from HEAD; existing stash recovery preserves its local
   staged/working partition, retaining a named stash on conflict. CLI fixtures
   cover ignored/unignored and pre-staged telemetry, not installed LOO-661 recovery.
+  Whitespace-only filenames are work: do not trim filename output to detect an
+  empty checkpoint.
   Jack Heart authorized the bounded hotfix and autonomous shipping; Infrastructure
   owns the single release/install and subsequent installed verification.
 - **Commit failures need both Git streams** (2026-10-11). Jack Heart requested

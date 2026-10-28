@@ -1,6 +1,7 @@
 # LOO-664: Keep sync working with ignored telemetry
 
-2026-10-27. Selective checkpoint implemented; gate and delivery remain.
+2026-10-27, reconciled after compression. Selective checkpoint implemented;
+gate and delivery remain. The approach is accepted under the Task's hotfix scope.
 The current Task definition requires no additional implementation slice.
 Jack Heart authorized the bounded hotfix and autonomous shipping in comment
 `297df81a-24b3-4431-8336-a0dfeb3660ab`. Iteration feedback rejects the previous
@@ -103,13 +104,17 @@ cannot restore sync, and source/candidate passes do not prove installed acceptan
 The 2026-10-28 03:39 UTC Task update authorizes a temporary Task-local bridge:
 after validating and checkpointing each step, atomically move `.lf/tmp` into a
 unique durable archive, leaving it absent immediately before automatic sync.
-Preserve old and newly generated telemetry separately. The compress step reserves
+The compress archive is present at
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-664-compress-HbQpjT3c/telemetry`
-for this archive. This avoids the installed literal-directory error; it is not
-the shipped repair or permission to change other checkouts or ignore rules.
+and remains separate from fresh sync metrics. This realign step reserves
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-664-realign-91MrUmnG/telemetry`
+for those fresh bytes after checkpointing. This avoids the installed literal-directory
+error; it is not the shipped repair or permission to change other checkouts or ignore rules.
 
-Compression retains the single checkpoint helper and existing recovery owner;
-their separate indexes and stash are required to preserve telemetry's partition.
-No further code reduction is warranted. Repeated delivery notes are consolidated.
+Reconciliation found no implementation mismatch or new product decision. The sync
+implementation and regressions are unchanged since `d2110131e0`; integration of
+upstream `0d72f072a4` changes neither. Infrastructure and its release child's goal
+and memory agree on operation-entry proof and separate installed acceptance.
+The existing Wave lesson now also retains the whitespace-filename counterexample.
 
-Check (2026-10-27, rustup stable 1.99.1): `uv run python scripts/test_network.py /Users/jack/.cargo/bin/cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 7 passed; rustup-first `cargo +stable fmt --all -- --check` and network-isolated `cargo +stable clippy --all-targets -- -D warnings` passed; `git diff --check` and `lf context` passed, both budgets within limits; affected suites remain with gate.
+Check (2026-10-27): `git diff --check` and `lf context` passed; prior network-isolated `cargo +stable test -p loopflow --test integration sync_preserves_work_with_` (7 passed), formatting and Clippy results remain applicable to unchanged code; affected suites remain with gate.

@@ -10,3 +10,8 @@
 - General native refresh coordination is not selected. The implementation must
   nevertheless retain a version displaced during its own repair; compare-before-
   rename alone is insufficient proof of that preservation boundary.
+
+- Implementation review found that a hardlink made before save-back would miss a
+  provider's later pathname replacement. Codex different-account activation uses
+  the same exchange at installation, preserving its switching behavior while
+  retaining the actual outgoing inode. Claude activation remains unchanged.

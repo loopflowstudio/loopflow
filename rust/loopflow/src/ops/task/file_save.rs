@@ -293,7 +293,9 @@ fn save(
             hook();
         }
     });
-    if let Err(error) = exchange(&parent, &name, &recovery) {
+    if let Err(error) =
+        crate::platform::file_exchange::exchange(&parent, &name, &recovery, c"displaced")
+    {
         return Err(task_error(format!(
             "Save failed: {error}. Draft and recovery retained at {}",
             directory.display()
@@ -338,35 +340,6 @@ fn write_new(path: &Path, bytes: &[u8]) -> OpsResult<()> {
         .open(path)?;
     file.write_all(bytes)?;
     file.sync_all()?;
-    Ok(())
-}
-
-fn exchange(parent: &File, name: &CString, recovery: &File) -> std::io::Result<()> {
-    // SAFETY: both directory descriptors and nul-terminated names are live.
-    #[cfg(target_os = "macos")]
-    let result = unsafe {
-        libc::renameatx_np(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            recovery.as_raw_fd(),
-            c"displaced".as_ptr(),
-            libc::RENAME_SWAP,
-        )
-    };
-    // SAFETY: both directory descriptors and nul-terminated names are live.
-    #[cfg(target_os = "linux")]
-    let result = unsafe {
-        libc::renameat2(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            recovery.as_raw_fd(),
-            c"displaced".as_ptr(),
-            libc::RENAME_EXCHANGE,
-        )
-    };
-    if result != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
     Ok(())
 }
 

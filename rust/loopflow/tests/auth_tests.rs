@@ -198,7 +198,11 @@ case "$CODEX_HOME" in
       echo '{"jsonrpc":"2.0","id":3,"result":{"rateLimits":{"planType":"team","primary":{"usedPercent":12,"windowDurationMins":300,"resetsAt":1900000000}}}}'
     fi;;
   */revoked)
-    echo '{"jsonrpc":"2.0","id":3,"error":{"code":401,"message":"token_invalidated"}}';;
+    echo '{"jsonrpc":"2.0","id":3,"error":{"code":401,"message":"token_invalidated"}}'
+    read -r refresh
+    echo '{"id":4,"result":{"account":{"email":"revoked@example.com"}}}'
+    read -r limits
+    echo '{"id":5,"error":{"code":401,"message":"token_invalidated"}}';;
   *) exit 9;;
 esac
 "#;
@@ -1097,4 +1101,132 @@ done
         std::fs::read_to_string(native.join("spent")).unwrap(),
         "fixture-attempt"
     );
+}
+
+#[test]
+fn codex_same_login_recovery_status_launch_resume_and_reset() {
+    let home = tempfile::tempdir().unwrap();
+    let script = support::codex_socket_script(&format!(
+        "#!/bin/sh\nexec python3 '{}' \"$@\"\n",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/codex_access.py")
+    ));
+    let _env = EnvGuard::with_lf_home(&[("codex", &script)], home.path());
+    let repo = loopflow_test_support::TestRepo::new();
+    repo.create_file(
+        ".lf/config.yaml",
+        "agent: codex\ndiff: false\ndiff_files: false\npaste: false\n",
+    );
+    let profile = home.path().join("accounts/codex/active");
+    let native = home.path().join("native");
+    for path in [&profile, &native] {
+        write_identity(path, "active@example.com", "active");
+    }
+    let set_token = |path: &std::path::Path, token: &str| {
+        let mut auth: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path.join("auth.json")).unwrap()).unwrap();
+        auth["tokens"]["access_token"] = token.into();
+        auth["expires_at"] = 4102444800_i64.into();
+        let bytes = serde_json::to_vec(&auth).unwrap();
+        std::fs::write(path.join("auth.json"), &bytes).unwrap();
+        bytes
+    };
+    let good = set_token(&profile, "fixture");
+    let bad = set_token(&native, "rejected");
+    std::fs::write(native.join("history.jsonl"), "unrelated native history\n").unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let store = runtime
+        .block_on(loopflow::store::open_ephemeral_store(
+            &StorageConfig::sqlite(home.path().join("loopflow.db")),
+        ))
+        .unwrap();
+    let account = account("active", profile.clone());
+    runtime
+        .block_on(store.upsert_provider_account(&account))
+        .unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args(args)
+            .current_dir(repo.path())
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("CODEX_HOME", &native)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    let status = run(&["account", "codex", "--json"]);
+    let report: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(report["accounts"][0]["verification"], "accepted");
+    assert_eq!(std::fs::read(native.join("auth.json")).unwrap(), bad);
+    let events = std::fs::read(profile.join("probe-events")).unwrap();
+    run(&["account", "codex", "--cached", "--json"]);
+    assert_eq!(std::fs::read(profile.join("probe-events")).unwrap(), events);
+    run(&[
+        "account",
+        "redeem-reset",
+        "codex",
+        "active@",
+        "--idempotency-key",
+        "one-spend",
+        "--json",
+    ]);
+    assert_eq!(
+        std::fs::read_to_string(profile.join("spent")).unwrap(),
+        "one-spend\n"
+    );
+    assert!(!native.join("spent").exists());
+    run(&["account", "route", "set", "codex", "active@"]);
+    run(&[
+        "-b",
+        "--account",
+        "codex=active@",
+        ":",
+        "Reply with RECOVERED.",
+    ]);
+    assert_eq!(std::fs::read(native.join("auth.json")).unwrap(), good);
+    let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    let (session, thread): (String, String) = db
+        .query_row(
+            "SELECT id,provider_thread FROM agent_sessions WHERE provider_thread IS NOT NULL",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    run(&[
+        "-b",
+        "session",
+        "connect",
+        &session,
+        "--message",
+        "Reply with RECOVERED again.",
+    ]);
+    let continued: (String, String) = db
+        .query_row(
+            "SELECT id,provider_thread FROM agent_sessions WHERE id=?1",
+            [&session],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(continued, (session, thread.clone()));
+    let routed: String = db
+        .query_row(
+            "SELECT account_id FROM provider_session_accounts WHERE provider_session_id=?1",
+            [&thread],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(routed, "active");
+    let turns: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(native.join("turns.json")).unwrap()).unwrap();
+    assert_eq!(turns.as_array().unwrap().len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(native.join("history.jsonl")).unwrap(),
+        "unrelated native history\n"
+    );
+    assert_eq!(std::fs::read(profile.join("auth.json")).unwrap(), good);
 }

@@ -17,7 +17,7 @@ use time::OffsetDateTime;
 
 use crate::provider_account::activation::credential_home;
 use crate::provider_account::identity::{credential_digest, AccountIdentity};
-use crate::provider_auth::Provider;
+use crate::provider_auth::{AuthError, Provider};
 use crate::store::{AccountLimitWindow, ProviderAccount};
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -166,18 +166,13 @@ async fn request_claude_usage(
     client: &reqwest::Client,
     token: &str,
 ) -> Result<reqwest::Response, SubscriptionError> {
+    #[cfg(test)]
+    let url =
+        std::env::var("LF_TEST_CLAUDE_USAGE_URL").unwrap_or_else(|_| CLAUDE_USAGE_URL.to_string());
+    #[cfg(not(test))]
+    let url = CLAUDE_USAGE_URL;
     client
-        .get({
-            #[cfg(test)]
-            {
-                std::env::var("LF_TEST_CLAUDE_USAGE_URL")
-                    .unwrap_or_else(|_| CLAUDE_USAGE_URL.to_string())
-            }
-            #[cfg(not(test))]
-            {
-                CLAUDE_USAGE_URL
-            }
-        })
+        .get(url)
         .bearer_auth(token)
         .header("anthropic-beta", "oauth-2025-04-20")
         .timeout(Duration::from_secs(15))
@@ -247,10 +242,8 @@ async fn fresh_claude_token(
 ) -> Result<(SecretString, SecretString, bool), SubscriptionError> {
     let raw = crate::provider_auth::read_claude_login(home)
         .map_err(|_| SubscriptionError::Unavailable("cannot read stored credentials".into()))?
-        .ok_or_else(|| SubscriptionError::NeedsLogin("no stored credentials".into()))?
-        .expose_secret()
-        .to_string();
-    let mut credentials: Value = serde_json::from_str(&raw)
+        .ok_or_else(|| SubscriptionError::NeedsLogin("no stored credentials".into()))?;
+    let mut credentials: Value = serde_json::from_str(raw.expose_secret())
         .map_err(|_| SubscriptionError::Unavailable("unreadable credential format".into()))?;
     let oauth = credentials.get("claudeAiOauth").unwrap_or(&credentials);
     let access_token = oauth
@@ -262,11 +255,7 @@ async fn fresh_claude_token(
     let now_ms = OffsetDateTime::now_utc().unix_timestamp() * 1000;
     // Missing expiry is unknown; let the server judge the token.
     if !force_refresh && expires_at_ms.is_none_or(|expiry| expiry > now_ms + 60_000) {
-        return Ok((
-            SecretString::new(access_token.to_string()),
-            SecretString::new(raw),
-            false,
-        ));
+        return Ok((SecretString::new(access_token.to_string()), raw, false));
     }
     let refresh_token = oauth
         .get("refreshToken")
@@ -275,21 +264,28 @@ async fn fresh_claude_token(
         .ok_or_else(|| {
             SubscriptionError::NeedsLogin("expired or rejected token has no refresh token".into())
         })?;
-    let response = client.post({
-            #[cfg(test)]
-            // A test never refreshes a real login it happened to find.
-            { std::env::var("LF_TEST_CLAUDE_TOKEN_URL").unwrap_or_else(|_| "http://127.0.0.1:1/token".into()) }
-            #[cfg(not(test))]
-            { CLAUDE_TOKEN_URL }
-        })
-        .json(&json!({"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": CLAUDE_OAUTH_CLIENT_ID}))
-        .timeout(Duration::from_secs(15)).send().await
+    #[cfg(test)]
+    // A test never refreshes a real login it happened to find.
+    let url = std::env::var("LF_TEST_CLAUDE_TOKEN_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:1/token".into());
+    #[cfg(not(test))]
+    let url = CLAUDE_TOKEN_URL;
+    let response = client
+        .post(url)
+        .json(&json!({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": CLAUDE_OAUTH_CLIENT_ID,
+        }))
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
         .map_err(|_| SubscriptionError::Unavailable("token refresh failed or timed out".into()))?;
     let status = response.status();
     let body: Value = response.json().await.map_err(|_| {
         SubscriptionError::Unavailable("token refresh returned invalid JSON".into())
     })?;
-    ensure_claude_credential_unchanged(home, &raw)?;
+    ensure_claude_credential_unchanged(home, raw.expose_secret())?;
     if status == reqwest::StatusCode::BAD_REQUEST
         && body.get("error").and_then(Value::as_str) == Some("invalid_grant")
     {
@@ -333,24 +329,22 @@ async fn fresh_claude_token(
     {
         oauth["expiresAt"] = json!(expiry);
     }
-    persist_claude_refresh(home, &raw, &credentials)?;
-    Ok((
-        SecretString::new(new_access),
-        SecretString::new(credentials.to_string()),
-        true,
-    ))
+    let credential = SecretString::new(credentials.to_string());
+    ensure_claude_credential_unchanged(home, raw.expose_secret())?;
+    crate::provider_auth::write_claude_login(home, &credential)
+        .map_err(claude_persistence_error)?;
+    Ok((SecretString::new(new_access), credential, true))
 }
 
-fn persist_claude_refresh(
-    home: &Path,
-    original: &str,
-    credentials: &Value,
-) -> Result<(), SubscriptionError> {
-    ensure_claude_credential_unchanged(home, original)?;
-    crate::provider_auth::write_claude_login(home, &SecretString::new(credentials.to_string()))
-        .map_err(|_| {
-            SubscriptionError::Unavailable("failed to persist refreshed credential".into())
-        })
+fn claude_persistence_error(error: AuthError) -> SubscriptionError {
+    // Other auth errors can contain paths, subprocess output or provider
+    // responses. Only the closed storage error is safe to retain here.
+    SubscriptionError::Unavailable(match error {
+        AuthError::ClaudeKeychain(error) => format!(
+            "failed to persist refreshed credential: {error}; inspect Keychain access and read the stored login before another save; the saved credential is unverified"
+        ),
+        _ => "failed to persist refreshed credential".into(),
+    })
 }
 
 fn ensure_claude_credential_unchanged(
@@ -565,8 +559,44 @@ fn codex_windows(rate_limits: Option<&Value>) -> Vec<AccountLimitWindow> {
 
 #[cfg(test)]
 mod tests {
-    use super::{claude_windows, codex_windows};
+    use super::{claude_persistence_error, claude_windows, codex_windows, SubscriptionError};
+    use crate::provider_auth::{AuthError, ClaudeKeychainError, ClaudeKeychainStage};
     use serde_json::json;
+    use std::os::unix::process::ExitStatusExt;
+
+    #[test]
+    fn claude_persistence_storage_failures_retain_safe_recovery_details() {
+        // Storage tests own stage/status coverage; this boundary retains the
+        // safe cause and adds recovery advice without rejecting the login.
+        let cause = ClaudeKeychainError::Exit {
+            stage: ClaudeKeychainStage::Readback,
+            status: std::process::ExitStatus::from_raw(128 << 8),
+        };
+        let expected = cause.to_string();
+        let error = claude_persistence_error(cause.into());
+        assert!(matches!(error, SubscriptionError::Unavailable(_)));
+        let diagnostic = error.to_string();
+        assert!(diagnostic.contains(&expected));
+        assert!(diagnostic.contains("inspect Keychain access"));
+        assert!(diagnostic.contains("saved credential is unverified"));
+    }
+
+    #[test]
+    fn claude_persistence_unstructured_errors_are_redacted() {
+        let credential = json!({
+            "accessToken": "synthetic-new-access", "refreshToken": "synthetic-refresh"
+        });
+        // Looking like a storage diagnostic does not make arbitrary text safe.
+        let error = claude_persistence_error(AuthError::Filesystem(format!(
+            "Claude Keychain write: {credential}"
+        )));
+        assert!(matches!(error, SubscriptionError::Unavailable(_)));
+        assert!(error.to_string() == "failed to persist refreshed credential");
+        let diagnostic = format!("{error:?}");
+        for secret in ["synthetic-new-access", "synthetic-refresh"] {
+            assert!(!diagnostic.contains(secret));
+        }
+    }
 
     #[test]
     fn claude_limits_map_to_named_windows() {

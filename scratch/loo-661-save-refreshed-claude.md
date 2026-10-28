@@ -28,6 +28,7 @@ writer still has its input ceiling; diagnostics do not repair it. Findings 22–
 prove old-reader recovery after specific rollbacks, but replacement reads failed.
 The next implementation needs a supported mechanism that demonstrates exact large
 replacement, existing-reader access and old-data recovery on failure together.
+This slice is mechanism proof before production cutover.
 No product decision or additional authorization is pending, and the exclusions
 below do not exhaust every public interface.
 
@@ -42,12 +43,6 @@ Both are required: successful account polls do not prove a save occurred.
 Retain one native writer behind `write_claude_login`, shared by refresh and
 activation, with current readers and credential authority preserved. Its transport
 remains unselected; a transaction wrapper alone does not establish compatibility.
-
-2026-10-27 kickoff decision: retain the accepted outcome and existing plan.
-**This slice remains mechanism proof**, not production cutover: one disposable
-replacement must satisfy exact large-value readback, existing-reader access and
-failure preservation together before replacing the writer. Diagnostics alone
-cannot satisfy that slice. No supported replacement has yet passed it.
 
 ## Surviving implementation
 
@@ -296,4 +291,4 @@ intended step edits with `lf commit <paths>` before sync, preserving unrelated
 staged/unstaged work and normal validation. Do not force-add telemetry or implement
 a competing repair; retain the dependency if checkpointing fails.
 
-Check — 2026-10-27 kickoff: `git diff --check`, `git diff --cached --check` and `lf context` passed; source/plan review only, no tests rerun (11 subscription tests previously passed). Native replacement remains unproved; gate owns affected suites/clippy and Infrastructure owns installed refresh acceptance.
+Check — 2026-10-27 compress: `cargo test -p loopflow --lib claude_persistence` passed (4 tests; linker unwind-table size warning); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, diff whitespace checks and `lf context` passed. Cargo ran with inherited `LF_*` unset and stdin closed. Gate owns affected suites; native replacement remains unproved and Infrastructure owns installed refresh acceptance.

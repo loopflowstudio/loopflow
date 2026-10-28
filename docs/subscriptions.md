@@ -184,6 +184,12 @@ unavailable and retains prior account evidence. Claude refresh coordination with
 native sessions is still under development; these comparisons do not serialize
 native refresh or credential writes.
 
+Claude refresh-save failures report unavailable. Keychain diagnostics distinguish
+write failure, failed readback and mismatched readback, retaining numeric process
+status or OS codes when available without credential contents. Inspect Keychain
+access and read the stored login before another save. Failed verification of a
+save does not establish rollback, safe retry, or a need to sign in again.
+
 Eligible accounts are ordered by plan, then room: Codex Pro leads Plus, then
 the account whose most-used window (not yet reset) is lowest leads; declared
 route order decides ties. In shared

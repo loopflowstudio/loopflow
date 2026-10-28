@@ -489,12 +489,69 @@ pub enum AuthError {
     },
     #[error("filesystem error: {0}")]
     Filesystem(String),
+    #[error(transparent)]
+    ClaudeKeychain(#[from] ClaudeKeychainError),
     #[error("{provider} rejected the authorization code: {message}")]
     CodeExchangeRejected { provider: Provider, message: String },
     #[error("{provider} OAuth request failed: {message}")]
     OAuthRequest { provider: Provider, message: String },
     #[error("credential socket request failed for {provider}: {message}")]
     CredentialSocket { provider: Provider, message: String },
+}
+
+/// Closed stages keep credential contents and command output out of diagnostics.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub enum ClaudeKeychainStage {
+    Metadata,
+    WriteStart,
+    WriteInput,
+    WriteWait,
+    Write,
+    Read,
+    Readback,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl ClaudeKeychainStage {
+    fn io_error(self, error: std::io::Error) -> ClaudeKeychainError {
+        ClaudeKeychainError::Io {
+            stage: self,
+            code: error.raw_os_error(),
+        }
+    }
+}
+
+impl std::fmt::Display for ClaudeKeychainStage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Metadata => "metadata read",
+            Self::WriteStart => "write start",
+            Self::WriteInput => "write input",
+            Self::WriteWait => "write wait",
+            Self::Write => "write",
+            Self::Read => "read",
+            Self::Readback => "readback",
+        })
+    }
+}
+
+/// Only numeric status and fixed categories may escape credential storage.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum ClaudeKeychainError {
+    #[error("Claude Keychain {stage} failed (OS code {code:?})")]
+    Io {
+        stage: ClaudeKeychainStage,
+        code: Option<i32>,
+    },
+    #[error("Claude Keychain {stage} failed (security {status})")]
+    Exit {
+        stage: ClaudeKeychainStage,
+        status: std::process::ExitStatus,
+    },
+    #[error("Claude Keychain readback mismatch (security write and read exit status: 0)")]
+    ReadbackMismatch,
 }
 
 /// Only closed categories and HTTP status codes may escape a planning refresh.
@@ -2597,7 +2654,7 @@ pub(crate) fn write_claude_login(
 /// Replace the Keychain item Claude reads for `config_dir`, as Claude writes
 /// it: `security add-generic-password -U`, fed on stdin so the login never
 /// appears in a process listing.
-#[cfg(all(target_os = "macos", not(test)))]
+#[cfg(target_os = "macos")]
 fn write_claude_keychain_credential(
     config_dir: &Path,
     credential: &SecretString,
@@ -2624,33 +2681,45 @@ fn write_claude_keychain_credential(
         .ok_or_else(|| {
             AuthError::Filesystem("no usable account name for the Claude Keychain item".to_string())
         })?;
-    let failed = |error: std::io::Error| {
-        AuthError::Filesystem(format!("write Claude Keychain credential: {error}"))
-    };
     let mut security = ProcessCommand::new("security")
         .arg("-i")
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(failed)?;
+        .map_err(|error| ClaudeKeychainStage::WriteStart.io_error(error))?;
     let script = format!(
         "add-generic-password -U -a \"{account}\" -s \"{service}\" -X {}\n",
         hex::encode(credential.expose_secret().as_bytes())
     );
-    security
+    let input = security
         .stdin
         .take()
         .expect("security stdin is piped")
-        .write_all(script.as_bytes())
-        .map_err(failed)?;
-    let status = security.wait().map_err(failed)?;
-    // `security -i` reports a failed command only through what it stored.
-    let stored = read_claude_keychain_blob_with_security(&service).ok();
-    if !status.success() || stored.as_deref() != Some(credential.expose_secret().as_bytes()) {
-        return Err(AuthError::Filesystem(
-            "write Claude Keychain credential: the item did not take the login".to_string(),
-        ));
+        .write_all(script.as_bytes());
+    if let Err(error) = input {
+        // Input may have been partially consumed. Reaping does not roll it back.
+        let _ = security.kill();
+        let _ = security.wait();
+        return Err(ClaudeKeychainStage::WriteInput.io_error(error).into());
+    }
+    let status = security.wait().map_err(|error| {
+        let _ = security.kill();
+        let _ = security.wait();
+        ClaudeKeychainStage::WriteWait.io_error(error)
+    })?;
+    if !status.success() {
+        return Err(ClaudeKeychainError::Exit {
+            stage: ClaudeKeychainStage::Write,
+            status,
+        }
+        .into());
+    }
+    // `security -i` can exit successfully after a failed command. Only readback
+    // confirms the bytes; neither read failure nor mismatch establishes rollback.
+    let stored = read_claude_keychain_blob_with_security(&service, ClaudeKeychainStage::Readback)?;
+    if stored != credential.expose_secret().as_bytes() {
+        return Err(ClaudeKeychainError::ReadbackMismatch.into());
     }
     Ok(())
 }
@@ -2809,9 +2878,7 @@ fn read_claude_keychain_credential(
     let Some(account) = read_claude_keychain_account_with_security(service)? else {
         return Ok(None);
     };
-    let blob = read_claude_keychain_blob_with_security(service).map_err(|error| {
-        AuthError::Filesystem(format!("read Claude Keychain credential: {error}"))
-    })?;
+    let blob = read_claude_keychain_blob_with_security(service, ClaudeKeychainStage::Read)?;
     let blob = String::from_utf8(blob).map_err(|_| {
         AuthError::Filesystem("Claude Keychain credential is not valid UTF-8".to_string())
     })?;
@@ -2844,17 +2911,16 @@ fn read_claude_keychain_account_with_security(service: &str) -> Result<Option<St
     let output = ProcessCommand::new("security")
         .args(["find-generic-password", "-s", service])
         .output()
-        .map_err(|error| {
-            AuthError::Filesystem(format!("read Claude Keychain metadata: {error}"))
-        })?;
+        .map_err(|error| ClaudeKeychainStage::Metadata.io_error(error))?;
     if !output.status.success() {
         if security_item_not_found(&output) {
             return Ok(None);
         }
-        return Err(AuthError::Filesystem(format!(
-            "read Claude Keychain metadata: security exited with {}",
-            output.status
-        )));
+        return Err(ClaudeKeychainError::Exit {
+            stage: ClaudeKeychainStage::Metadata,
+            status: output.status,
+        }
+        .into());
     }
     let metadata = String::from_utf8(output.stdout).map_err(|_| {
         AuthError::Filesystem("Claude Keychain metadata is not valid UTF-8".to_string())
@@ -2879,13 +2945,19 @@ fn parse_security_keychain_account(metadata: &str) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn read_claude_keychain_blob_with_security(service: &str) -> Result<Vec<u8>, String> {
+fn read_claude_keychain_blob_with_security(
+    service: &str,
+    stage: ClaudeKeychainStage,
+) -> Result<Vec<u8>, ClaudeKeychainError> {
     let output = ProcessCommand::new("security")
         .args(["find-generic-password", "-s", service, "-w"])
         .output()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| stage.io_error(error))?;
     if !output.status.success() {
-        return Err(format!("security exited with {}", output.status));
+        return Err(ClaudeKeychainError::Exit {
+            stage,
+            status: output.status,
+        });
     }
     Ok(trim_security_password_output(output.stdout))
 }
@@ -4632,6 +4704,88 @@ attributes:
             trim_security_password_output(b"single-line\r\n".to_vec()),
             b"single-line".to_vec()
         );
+    }
+
+    #[test]
+    fn claude_persistence_io_diagnostics_keep_codes_without_error_contents() {
+        for (error, expected) in [
+            (std::io::Error::from_raw_os_error(13), "OS code Some(13)"),
+            (std::io::Error::other("synthetic-secret"), "OS code None"),
+        ] {
+            let error = ClaudeKeychainStage::WriteInput.io_error(error);
+            let diagnostic = format!("{error} {error:?}");
+            assert!(diagnostic.contains("write input failed"));
+            assert!(diagnostic.contains(expected));
+            assert!(!diagnostic.contains("synthetic-secret"));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn claude_persistence_keychain_diagnostics_distinguish_write_readback_and_mismatch() {
+        let _env = crate::journal::test_env_lock();
+        let _restore = EnvGuard::snapshot(&["PATH"]);
+        let bin = tempdir().unwrap();
+        let home = tempdir().unwrap();
+        let security = bin.path().join("security");
+        std::env::set_var("PATH", bin.path());
+        let credential = SecretString::new(
+            r#"{"claudeAiOauth":{"accessToken":"synthetic-new-access","refreshToken":"synthetic-refresh"}}"#.into(),
+        );
+        let old = r#"{"accessToken":"synthetic-old-access"}"#;
+        // These are process stand-ins, not native-storage acceptance. No real
+        // Keychain item is read or written, including on the success path.
+        for (write_status, read_status, stored, expected) in [
+            (41, 0, old, Some("write failed (security exit status: 41)")),
+            (
+                0,
+                128,
+                old,
+                Some("readback failed (security exit status: 128)"),
+            ),
+            (0, 0, old, Some("readback mismatch")),
+            (0, 0, credential.expose_secret().as_str(), None),
+        ] {
+            fs::write(
+                &security,
+                format!(
+                    r#"#!/bin/sh
+if [ "$1" = "-i" ]; then
+    IFS= read -r payload
+    printf '%s' "$payload" >&2
+    exit {write_status}
+fi
+if [ "$4" = "-w" ]; then
+    printf '%s\n' '{stored}'
+    printf '%s' '{stored}' >&2
+    exit {read_status}
+fi
+printf '%s\n' '"acct"<blob>="synthetic-account"'
+"#
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&security, fs::Permissions::from_mode(0o700)).unwrap();
+            let result = write_claude_keychain_credential(home.path(), &credential);
+            if let Some(expected) = expected {
+                let error = result.unwrap_err();
+                let diagnostic = format!("{error} {error:?}");
+                assert!(diagnostic.contains(expected));
+                for secret in [
+                    credential.expose_secret().as_str(),
+                    old,
+                    "synthetic-new-access",
+                    "synthetic-refresh",
+                    "synthetic-old-access",
+                    "synthetic-account",
+                    &hex::encode(credential.expose_secret().as_bytes()),
+                ] {
+                    assert!(!diagnostic.contains(secret));
+                }
+            } else {
+                assert!(result.is_ok());
+            }
+        }
     }
 
     #[tokio::test]

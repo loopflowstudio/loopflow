@@ -542,7 +542,6 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         // The worker's entry points are gone; nothing restarts a Graph.
         for removed in [
             vec!["--task", "INF-123", "graph", "start", "proof"],
-            vec!["task", "create", "--run", "--title", "x"],
             vec!["task", "__worker", registered.task.id.as_str()],
         ] {
             assert!(

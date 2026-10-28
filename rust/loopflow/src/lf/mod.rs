@@ -3191,7 +3191,7 @@ mod tests {
             Some(Commands::External(_))
         ));
         assert!(Cli::try_parse_from(["lf", "task", "create", "--name", "placed"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "create", "--run"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "create", "--graph", "proof"]).is_err());
         assert!(
             Cli::try_parse_from(["lf", "graph", "start", "proof"]).is_ok_and(|cli| !matches!(
                 cli.command,

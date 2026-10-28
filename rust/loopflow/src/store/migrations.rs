@@ -314,10 +314,16 @@ pub(crate) fn apply_newer_release(
         conn.execute_batch(&tests::current_draft_sql("reader_floor"))?;
     }
     let head = MIGRATIONS.last().expect("the shipped set is not empty");
+    // Newer than both the shipped head and this binary: a minor release cut
+    // bumps the package version before its first migration exists.
+    let (major, minor) = (head.id.major, head.id.minor).max({
+        let (major, minor, _) = active_namespace();
+        (major, minor)
+    });
     let newer = Migration {
         id: MigrationId {
-            major: head.id.major,
-            minor: head.id.minor + 1,
+            major,
+            minor: minor + 1,
             patch: Some(0),
             ordinal: 1,
         },

@@ -22,3 +22,8 @@ Realign found fresh telemetry after kickoff. Its separate post-checkpoint archiv
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-realign-DgnB3mVm/tmp`.
 Previous archive paths and references:
 `ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/questions.md`.
+
+2026-10-28 kickoff retains both blockers without assuming recovery or a compatible
+writer. Installed `lf --version` remains 0.14.19. Reserved post-checkpoint archive
+for this step's fresh telemetry:
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-3K0muKzl/tmp`.

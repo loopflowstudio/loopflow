@@ -7,12 +7,14 @@ remains unproved. No product decision or relaxation of preservation requirements
 is pending; exclusions below do not exhaust public interfaces. A rejected route
 needs a mechanism addressing its counterexample before reconsideration.
 
-Kickoff decision, 2026-10-27: retain the accepted outcome and existing plan;
-no replacement mechanism is ready for implementation. Direct inspection of the
-combined `SecItemUpdate` path confirms separate data/access mutations (31).
-Fresh supported observation now reports `refresh grant rejected` for
-jack@loopflow.studio (32), establishing a reconnect dependency for live acceptance.
-It does not establish the cause of the original save failure.
+Kickoff decision, 2026-10-28: retain the accepted outcome and sufficient existing
+plan; no replacement mechanism is ready for implementation. Source review rules
+out preparing the old item's partition access before replacement (33), alongside
+the sequential combined update (31). These are engineering blockers, not a request
+to relax the brief. The latest recorded supported account observation remains
+`refresh grant rejected` for jack@loopflow.studio (32). Supported reconnection is a
+separate live-acceptance dependency; it would neither prove the writer nor explain
+the original save failure. No new account poll or native mutation ran this step.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -219,6 +221,14 @@ source/header review, except read-only installed dispatch inspection in 18.
   reconnection (`lf account connect claude jack@loopflow.studio`) is a live
   acceptance dependency; no sign-in or account-route change was attempted.
   Further polling without recovery supplies no new acceptance evidence.
+- **Preparing access before replacement (33, 2026-10-28):** reviewed the
+  published [`ItemImpl::update` and `updateSSGroup` implementation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Item.cpp).
+  A non-null replacement passes through `updateSSGroup` without explicit access,
+  creates a new storage group and copies the old access after removing partition
+  and integrity ACLs. Inference: changing the old partition ACL before this update
+  cannot carry it into the replacement. This rejects that ordering as a repair for
+  findings 3–5; it does not prove installed binary equivalence or exhaust public
+  interfaces. No additional disposable or real credential mutation was needed.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
@@ -304,4 +314,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — realign (2026-10-27): `git diff --check` and `lf context` pass; prose-only reconciliation reuses findings 30–32. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.
+Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; prose-only source review retains findings 30–32 and adds 33. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.

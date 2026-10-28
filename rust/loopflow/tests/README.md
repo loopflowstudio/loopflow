@@ -367,6 +367,9 @@ uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after p
 For document gathering or deduplication changes, run the complete context suite
 alongside the delivery checks; a test-name filter alone misses ancestor coverage.
 Rendering gathered documents must include the production deduplication step.
+Keep the library `context_delivery` filter in the gate plan: it covers direct
+and Wave launches in `ops::run`, outside the prompt modules. Check ambient and
+explicit selections across both the refreshed block and submitted turn.
 
 ```bash
 cargo test -p loopflow --test integration context_tests::

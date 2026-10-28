@@ -1,6 +1,11 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
 Status: **Implementation blocked on writer design; diagnostics only.**
+Kickoff review, 2026-10-28: the accepted outcome and acceptance checks remain
+binding; the implementation mechanism remains a draft. Current source still
+matches the counterexamples below. No candidate has met the combined transport,
+reader-access and failed-save preservation requirements, so this plan does not
+authorize substituting diagnostics or size refusal for the repair.
 The checked-in writer still uses the transport invalidated by finding 30.
 A replacement preserving native reader access and readable old bytes on failure
 remains unproved. No product decision or relaxation of preservation requirements
@@ -300,4 +305,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — realign (2026-10-28): `git diff --check` and `lf context` pass; prose-only reconciliation, no build/test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.
+Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; source/plan review only, no new native probe or build/test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.

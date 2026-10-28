@@ -23,12 +23,9 @@ Realign found fresh telemetry after kickoff. Its separate post-checkpoint archiv
 Previous archive paths and references:
 `ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/questions.md`.
 
-2026-10-28 kickoff retains both blockers without assuming recovery or a compatible
-writer. Installed `lf --version` remains 0.14.19. Post-checkpoint inspection found
-`.lf/tmp` absent, so no telemetry archive was needed or performed this step.
-
-2026-10-28 realign retains the writer and live-acceptance dependencies.
-Source v0.15.0 is integrated; installed `lf --version` still reports 0.14.19.
-Fresh `.lf/tmp` exists. The reserved post-checkpoint archive destination is
+2026-10-28 realign's archive is present at
 `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-3w4gjfu2/tmp`.
-The step output records whether the atomic move completed.
+The subsequent kickoff found `.lf/tmp` absent and installed `lf --version` still
+reporting 0.14.19. No archive was needed at that inspection; no installation or
+credential recovery is inferred. Source v0.15.0 is integrated. The writer and
+live-acceptance dependencies remain as recorded in the design.

@@ -13,10 +13,13 @@ Infrastructure owns CLI/helper installation and installed acceptance.
 
 Prior archive paths and receipts remain in
 `083c86ec350c5a51aab763faa39ef2ecd769b8f6:scratch/questions.md` and its references.
-The realign receipt confirms byte preservation at checkpoint `920e414455`;
-`.lf/tmp` was absent at this compression inspection. Archives remain untouched.
+The compression receipt at
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-bxuuwerb/receipt.json`
+records checkpoint `9e976b789ce6052051c6c623ba6b3cdb88dc3377`, source absent and no move.
+That reservation is not an archive. Fresh `.lf/tmp/metrics/ops.jsonl` exists at this
+October 28 reconciliation; earlier archives remain untouched.
 
-This pass reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-bxuuwerb/tmp`
+This pass reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-v6cd6ra1/tmp`
 for any fresh telemetry created by checkpointing. Its sibling `receipt.json`
 records the checkpoint and verified move, or source absence if no move is needed.
 A reservation alone proves no archive; later telemetry remains separate.

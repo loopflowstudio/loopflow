@@ -1,20 +1,12 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status: **Implementation blocked on writer design; diagnostics only.**
-Kickoff review, 2026-10-28: the accepted outcome and acceptance checks remain
-binding; the implementation mechanism remains a draft. Current source still
-matches the counterexamples below. No candidate has met the combined transport,
-reader-access and failed-save preservation requirements, so this plan does not
-authorize substituting diagnostics or size refusal for the repair.
-The checked-in writer still uses the transport invalidated by finding 30.
-A replacement preserving native reader access and readable old bytes on failure
-remains unproved. No product decision or relaxation of preservation requirements
-is pending; exclusions below do not exhaust public interfaces. A rejected route
-needs a mechanism addressing its counterexample before reconsideration.
-
-The latest recorded supported account observation is `refresh grant rejected` for
-jack@loopflow.studio (32). Supported reconnection is a separate live-acceptance
-dependency; it would neither prove the writer nor explain the original save failure.
+Status (2026-10-28): **Writer design unresolved; diagnostics only.** No candidate
+has met transport, native reader-access and failed-save preservation requirements.
+The checked-in `security -i` writer still has the destructive size failure below.
+No relaxation of the accepted outcome is pending; public interfaces are not
+exhausted. Revisit a rejected route only with a mechanism addressing its counterexample.
+Supported reconnection for jack@loopflow.studio is a separate live-acceptance
+dependency; it proves neither the writer nor the historical save-failure cause.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -89,137 +81,89 @@ below is remaining implementation, not a property of these diagnostics.
 
 ## Evidence and excluded alternatives
 
-Full findings, probe source/runner/result blobs, timestamps and source URLs:
-`0288f9d611755301b85bd36316a7b310ed8d9d3a:scratch/loo-661-save-refreshed-claude.md`.
-Earlier raw evidence: `31c2ed7565da481c0a2274ef448189fe15f70397:scratch/loo-661-save-refreshed-claude.md`
-(blob `47bcef7ebe8d8f75a0e7f9526169c891914d0110`). Previously uncommitted
-memory/assumptions were preserved as blobs `a7a634b98304be1599c7039139496e8eb8dec209`
-and `5ddde1b3c97907dcfb356bd1fde5ab3e64022705`.
+Complete findings 1–33, citations, probe receipts and earlier archive references:
+`c871ddfb0c4956fdb816c079c61d71e68767733f:scratch/loo-661-save-refreshed-claude.md`.
+The completed command-boundary probe is preserved at the same commit as
+`scratch/claude_command_boundary_probe.py`; it is removed from the working plan
+because it reproduces the rejected predecessor, not the required production path.
+Its results remain constraints on replacement, not native acceptance.
 
-These conclusions retain the rejected mechanisms so investigation need not repeat
-them. Native probes used disposable `loopflow-LOO-661-*-probe-<uuid>` services,
-synthetic bytes, bounded/reaped children, captured output and successful cleanup.
-No real credential was directly read or printed. Apple source evidence uses
-Security commit `db15acbe6a7f257a859ad9a3bb86097bfe0679d9`; it does not prove
-installed binary equivalence or exhaust public interfaces. Findings 8–20 were
-source/header review, except read-only installed dispatch inspection in 18.
+Native probes used disposable `loopflow-LOO-661-*-probe-<uuid>` services, synthetic
+bytes, bounded/reaped children, captured output and successful cleanup. No real
+credential was directly read or printed. Apple source conclusions use Security
+commit `db15acbe6a7f257a859ad9a3bb86097bfe0679d9`; they do not prove installed binary
+equivalence or exhaust public interfaces. The following groups retain the original
+finding numbers so the archived evidence stays addressable.
 
-- **Transport (1–2):** `security -i`'s 4,096-byte input buffer round-tripped
-  64/1,242-byte values; 2,048 bytes failed with old bytes retained. Hex fills the
-  buffer at 2 KiB; raw JSON cannot fit 8 KiB. Detached `security … -w` returned
-  zero but truncated larger values to 128 bytes. Source excludes PTYs, file/FD
-  indirection and repeated password options: `-w`/`-X` replace rather than append;
-  multiple commands perform separate replacements.
-- **Access (3–5, 8–9, 11, 21, 27):** `SecKeychainItemModifyAttributesAndData`
-  returned zero at 2/8 KiB but the `security` reader exited 128; `ModifyContent`
-  left reads timing out. Native writes replaced `apple-tool:` with writer
-  `cdhash:`. Non-null data creates a new group and strips partition ACLs; null
-  leaves bytes unchanged. `security-framework` 3.7.0 uses that modifier. Combined
-  updates commit data before restoring access. Apple-signed `osascript`/
-  `SecItemUpdate` and copied `SecAccessRef` restoration returned zero but reads
-  timed out. Applying edited partition access failed with `-25293` under disabled
-  UI; initial JXA `-50` errors were bridge failures. Apple-anchored
-  `com.apple.security` gets `apple-tool:`, other Apple code `apple:`.
-  Public creation supplies explicit access but rejects valid duplicates;
-  `SecKeychainItemSetAccess` changes the current group immediately, not the next
-  update. Source's explicit-access helper branch is called by creation, not
-  replacement. Neither signed interpreters nor disabled UI prove reader access.
+- **Transport (1–2, 30):** `security -i` has a 4,096-byte input buffer; hex reaches
+  it at 2 KiB, and raw JSON cannot fit 8 KiB. Early probes round-tripped 64/1,242
+  bytes and retained old bytes after a 2,048-byte failure. Later exact-command
+  probes contradicted preservation: both five- and six-character account names
+  at 2,048/8,192 bytes produced write exit 1 and read exit 0, returning neither old
+  nor intended bytes. Read-output lengths were 3,990/1,994, not raw encoding sizes.
+  All six items were deleted; the result reproduced twice with 15-second child
+  deadlines. These probes did not invoke compiled Rust. Published interactive-loop
+  source executes each buffer read and replaces final status per command, consistent
+  with partial replacement then error; installed parsing was not instrumented.
+  Detached `security … -w` returned zero but truncated larger values to 128 bytes.
+  PTYs, file/FD indirection and repeated password options do not solve this:
+  `-w`/`-X` replace, not append; separate commands replace separately.
+- **Native access (3–5, 8–9, 11, 21, 27–29, 31, 33):**
+  `SecKeychainItemModifyAttributesAndData` returned zero at 2/8 KiB but existing
+  `security` readers exited 128; `ModifyContent` left reads timing out. Native
+  writes replaced `apple-tool:` with writer `cdhash:`. Published non-null updates
+  create a new group and copy access after stripping partition/integrity ACLs;
+  null data leaves bytes unchanged. Preparing old access first therefore does not
+  preserve it. `security-framework` 3.7.0 uses that modifier. Apple-signed
+  `osascript`/`SecItemUpdate` and copied-access restoration also returned zero while
+  reads timed out. Edited partition access failed with `-25293` under disabled UI;
+  initial JXA `-50` results were bridge failures. Apple-anchored `com.apple.security`
+  gets `apple-tool:`, other Apple code `apple:`; signing alone proves no access.
+  Public creation permits explicit access but rejects valid duplicates. SetAccess
+  edits the current group, not the next replacement. Although `kSecAttrAccess`
+  permits a combined update, published `_UpdateKeychainItem` modifies data before
+  setting access; failure does not restore data, and `SecItemUpdate_osx` adds no
+  encompassing transaction. `SecKeychainItemSetAccessWithPassword` is private,
+  requires a Keychain passphrase and changes only access. TN3137's default file
+  shim retains these limits; data protection selects another storage authority.
+  No compatible atomic data/access replacement is established.
 - **Encoding and other interfaces (10, 12–20):** raw `CSSM_DL_DataModify` bypasses
-  encrypted modification; JSON would replace encoded storage. No public password
-  encoder was found; `CSSM_EncryptData` still needs private group/label/IV/ciphertext
+  encryption; JSON would overwrite encoded storage. No public password encoder
+  was found; `CSSM_EncryptData` still needs private group/label/IV/ciphertext
   composition. Private envelope reconstruction/C++ ABI remain excluded.
-  `SecKeychainSetBatchMode` is private; public FileDL transaction controls exist
-  but have the limitation below. Import handles keys/certificates; copy strips
-  access/integrity ACLs and creates a new group. macOS 26.0.1 (25A362) dispatch
-  resolves `KCSetData`/`KCUpdateItem` to staged APIs whose published paths create
-  new groups. Shared web credentials use another authority and the pinned macOS
-  source returns `errSecUnimplemented`. No mutation probe through these alternatives
-  established compatible replacement.
-- **Outer transactions (22–26):** public FileDL controls deferred commit around
-  2,048/8,192-byte modifications, which returned zero. Retained-item and fresh
-  password reads returned `-25300`; metadata succeeded. Record-by-ID reads found
-  new encoded bytes (2,084/8,228), but group-key queries returned end-of-data
-  (`-2147413715`); fresh password queries found the original 52-byte encoded record
-  and its key. Published source reads modified records by ID but queries the
-  pre-write snapshot, matching the unavailable decoding group. Another lookup
-  or transaction wrapper cannot supply the proposed pre-commit verification.
-  Rollback/autocommit restoration returned zero and fresh `security` readers
-  recovered exact old bytes. This proves those recoveries, not general rollback
-  safety or unchanged ACL identity. No commit/access-restoration probe ran;
-  committing first abandons verification and leaves partition access unresolved.
-- **Live failure (6):** launches reported one native write/readback failure
-  without status and two expired OAuth errors. Later supported 0.14.18/0.14.19
-  polls accepted jack@loopflow.studio and jackstah@gmail.com with verified capacity
-  and no diagnostic/recovery instruction; the uninspected local row remained
-  unavailable. Earlier supported `lf account claude --json` observation:
-  `1793163454` (2026-10-27), exit 0, both managed accounts accepted with three
-  verified windows each and no diagnostic or recovery instruction. Polls expose neither
-  refresh occurrence nor storage stage, payload size or causality. They explain
-  neither the earlier failure nor a browser sign-in dependency.
-- **Access/API boundaries (28–29, 2026-10-27):** `kSecAttrAccess` documents access
-  updates without guaranteeing atomic data/access preservation.
-  `SecKeychainItemSetAccessWithPassword` is private (in `SecKeychainItemPriv.h`,
-  absent from the installed public header), requires a Keychain passphrase and
-  changes access without replacing data. TN3137 describes `SecItem`'s default
-  file-Keychain shim; selecting data protection changes storage/access authority
-  and abandons the provider item. Neither route resolves the partition failure.
-  These were source/header/documentation reviews only; full citations remain in
-  `e3f012685c:scratch/loo-661-save-refreshed-claude.md`, findings 28–29.
-- **Destructive command-boundary failure (30, 2026-10-27):**
-  `uv run python scratch/claude_command_boundary_probe.py` exercises the current
-  writer's exact command form against six disposable synthetic items. Each starts
-  with a verified 64-byte JSON value. Both 1,242-byte replacements round-trip.
-  At 2,048 and 8,192 bytes, both five- and six-character account names produce
-  writer exit 1 and reader exit 0, but the reader returns neither old nor intended
-  bytes. Read-output lengths are 3,990 and 1,994 respectively; these are CLI output
-  lengths, not an assertion about raw Keychain encoding. All six deletions succeed.
-  Each child has a 15-second timeout and is reaped; output contains only sizes,
-  booleans and statuses. No real credential, route or Session was accessed.
-  This independently reproduces twice, including the saved runner. It does not
-  invoke the compiled Rust writer or diagnose the installed account failure.
-  The earlier old-value-preserved result is specific to its fixture, not a safety
-  property of `security -i`. The published
-  [interactive loop](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/SecurityTool/macOS/security.c#L1094-L1126)
-  executes each buffer read and replaces its final status on each command. That
-  is consistent with a partial replacement followed by an error; exact installed
-  parsing/encoding was not instrumented. A nonzero writer status cannot establish
-  preservation, even when the reader remains accessible.
-- **Combined public update is sequential (31, 2026-10-27):** Apple's
-  [`kSecAttrAccess` contract](https://developer.apple.com/documentation/security/ksecattraccess)
-  permits data and access in one `SecItemUpdate` call. Directly tracing that API,
-  rather than inferring from the CLI, finds
-  [`_UpdateKeychainItem`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecItem.cpp#L2511-L2541)
-  calling `SecKeychainItemModifyContent` before `SecKeychainItemSetAccess`.
-  Access failure returns through cleanup without restoring data.
-  [`SecItemUpdate_osx`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecItem.cpp#L5405-L5458)
-  loops over matches without an enclosing transaction. Together with the
-  modifier's internal commit, this confirms the published combined call lacks
-  the required atomic data/access boundary. Findings 22–26 still constrain an
-  external transaction. This is source evidence, not a new native probe or proof
-  of installed binary equivalence; it closes the citation gap in findings 21/28,
-  without claiming all public interfaces exhausted.
-- **Current live refresh rejection (32, 2026-10-27):** supported
-  `lf account claude --json` at `1793169073` returned exit 0 but rejected
-  jack@loopflow.studio, with recovery present and no verified windows. A targeted
-  diagnostic observation at `1793169147` confirmed `refresh grant rejected`.
-  Both accepted jackstah@gmail.com with three verified windows and no recovery;
-  the local row remained unavailable. Output retained only identity, verification,
-  diagnostic from a fixed allowlist, recovery presence and counts. No real token
-  was read directly, printed, altered to force expiry or used in argv.
-  In `fresh_claude_token`, this reason maps to HTTP 400 `invalid_grant` before
-  the credential writer. This identifies the current refresh failure category,
-  not the cause of the historical save failure or token invalidation. Supported
-  reconnection (`lf account connect claude jack@loopflow.studio`) is a live
-  acceptance dependency; no sign-in or account-route change was attempted.
-  Further polling without recovery supplies no new acceptance evidence.
-- **Preparing access before replacement (33, 2026-10-28):** reviewed the
-  published [`ItemImpl::update` and `updateSSGroup` implementation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/Item.cpp).
-  A non-null replacement passes through `updateSSGroup` without explicit access,
-  creates a new storage group and copies the old access after removing partition
-  and integrity ACLs. Inference: changing the old partition ACL before this update
-  cannot carry it into the replacement. This rejects that ordering as a repair for
-  findings 3–5; it does not prove installed binary equivalence or exhaust public
-  interfaces. No additional disposable or real credential mutation was needed.
+  `SecKeychainSetBatchMode` is private; public FileDL controls have the limitation
+  below. Import handles keys/certificates; copy strips access/integrity ACLs and
+  creates a group. Read-only macOS 26.0.1 (25A362) dispatch inspection resolved
+  `KCSetData`/`KCUpdateItem` to staged APIs with published new-group paths.
+  Shared web credentials use another authority; pinned source returns
+  `errSecUnimplemented`. Other findings in 8–20 were source/header review, not
+  new native mutation proof.
+- **Outer transactions (22–26):** FileDL deferred commit around 2,048/8,192-byte
+  modifications returning zero. Retained/fresh password reads returned `-25300`
+  while metadata succeeded. By-ID reads saw new encoded bytes (2,084/8,228), but
+  group-key queries returned end-of-data (`-2147413715`); fresh password queries
+  still saw the original 52-byte encoded record/key. Published source reads
+  modified records by ID but queries the pre-write snapshot, consistent with the
+  unavailable decoding group. Another lookup/wrapper does not supply pre-commit
+  verification. Rollback/autocommit restoration returned zero and fresh `security`
+  readers recovered exact old bytes. This proves those recoveries only, not
+  unchanged ACL identity or general rollback safety. No commit/access-restoration
+  probe ran; committing first abandons verification and leaves access unresolved.
+- **Live observations (6, 32):** launches reported one write/readback failure
+  without status and two expired OAuth errors. Later 0.14.18/0.14.19 polls accepted
+  jack@loopflow.studio and jackstah@gmail.com with verified capacity and no recovery;
+  the local row remained unavailable. At `1793163454` both managed accounts had
+  three verified windows. Such polls expose no refresh occurrence, storage stage,
+  payload size or causality. On 2026-10-27 at `1793169073`, supported
+  `lf account claude --json` instead rejected jack@loopflow.studio with recovery
+  and no windows; at `1793169147`, an allowlisted diagnostic confirmed
+  `refresh grant rejected`. This maps to HTTP 400 `invalid_grant` before the writer,
+  not the historical save failure's cause or the reason for token invalidation.
+  jackstah@gmail.com still had three verified windows; the local row was unavailable.
+  No token was directly inspected, forced to expire or passed in argv. Supported
+  `lf account connect claude jack@loopflow.studio` is now a live-acceptance dependency;
+  no sign-in or route change was attempted. Further polling without recovery adds
+  no acceptance evidence.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
@@ -271,6 +215,9 @@ Neither limitation relaxes Jack Heart's requirements.
 
 ## Delete — do not maintain
 
+- The completed `scratch/claude_command_boundary_probe.py` is removed; recover it
+  from the evidence reference above if a new mechanism needs its exact fixture.
+  No production test or acceptance coverage depended on this standalone experiment.
 - Replace the `security -i` spawn, hex script and command-string escaping restrictions
   inside `write_claude_keychain_credential` once a compatible writer is proven.
   Replace its exclusive stand-in in
@@ -305,4 +252,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; source/plan review only, no new native probe or build/test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.
+Check — compress (2026-10-28): `git diff --check` and `lf context` pass; notes and archived probe removal only, no production change or test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.

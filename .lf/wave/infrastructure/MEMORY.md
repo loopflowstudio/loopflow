@@ -809,7 +809,10 @@ Closed stages/statuses keep secrets out of diagnostics. Save failures stay
 Launches reported save failure and expired OAuth; later polls accepted both accounts
 without proving refresh. Synthetic storage proof cannot replace installed refresh
 acceptance. LOO-325 concurrency remains unselected. Evidence:
-`0288f9d611:scratch/loo-661-save-refreshed-claude.md`.
+`e3f012685c:scratch/loo-661-save-refreshed-claude.md`.
+Production unit tests select file storage even on macOS: a passing refresh test
+or selected macOS CI job cannot establish native Keychain acceptance. Release's
+entry-point lesson requires exercising the production writer and reader together.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-10)
 
@@ -893,45 +896,29 @@ The September 30 model/cutover decisions above supersede Run, Ask, Project-curso
 and private-store mechanisms there. Archiving detail does not establish remaining
 acceptance or authorize deleting execution history.
 
-- Capture all alternatives and human boundaries before execution; recover from
-  saved definitions after sources disappear. Invocation identity fences late
-  results independently of reusable versions/generations. Consume actual
-  successful completion evidence under the exact claim. Cursor settlement does
-  not prove external effects happened once. Serialize feedback/reopen writers,
-  persist completion before teardown and preserve published native identity.
-  A finished Flow does not complete its Task. Prove attachment and native handoff,
-  not only reducers, including another executable first on PATH.
-- Unknown custom/queued/nested history stays unresolved with bytes/order intact.
-  Inspection does not recompile or launch it. Causal ancestry, age, a missing
-  listener, finished launcher or absent display cannot grant process authority
-  or prove provider death. Preserve original dispositions and exact process
-  receipts, including hashed executable names and PID-reuse rejection.
-- One Task execution snapshot feeds status/actions/roadmap. Current execution
-  evidence wins over dirtiness or next-launch configuration errors. Missing
-  observation must not become idle capacity or a duplicate worker; the earlier
-  LOO-293 duplication came from split readers and that inference. Catalog joins
-  use stable identities and minimal schemas; current hierarchy filters do not
-  rewrite historical attribution. Fixtures isolate all ambient authority and
-  stop only their own identified provider children.
-- Preserve authored PR copy plus the managed Task block; publication alone does
-  not request settlement. Draft opening preserves readiness; promotion records
-  state only after provider success. Exact copy must survive release re-arming.
-  Same-SHA pending/passing/merged changes are progress without another commit.
-  Failed repair must surface its real blocker rather than loop indefinitely.
-- Queue cancellation is distinct from disabling auto-merge: gh 2.101.0 could
-  return success without dequeueing. Reobserve authoritative queue state before
-  replacing a head. Canceling an async waiter does not stop its blocking child;
-  keep the actual checkout lock and effect ownership until descendants finish.
-  Local landing tests did not establish hosted interruption/permissions or
-  orphan cleanup; green-unmergeable PRs and the old Etude -c discrepancy remained
-  unresolved in those records. PR #1289 proved deleted remote-branch recreation
-  only. An empty lease must still reject a branch created after absence was read.
-- Rotation preserves started identities and freezes the boundary's membership,
-  metrics and evaluation time. Failed fresh reads cannot justify retirement;
-  retries consume the frozen boundary and verify uncertain writes at the provider.
-  Deduplicate stable Work IDs; renamed PM labels do not rewrite captured history.
-  LOO-278's integration did not transfer its registered checkout/PR ownership.
-  Historical archives remain outside live architecture discovery.
+Earlier evidence:
+`15f32f8605c1994788d25bc17dd35f910f15f73f:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Current contracts supersede archived mechanisms without retroactive
+acceptance or authority.
+
+- Retain authored alternatives, boundaries and captured definitions. Invocation
+  claims fence late results; cursor settlement proves no exactly-once effect.
+  Preserve native identity, serialize feedback/reopen and persist completion
+  before teardown. Prove attachment/handoff through the public entry.
+- Unknown history retains bytes, order and dispositions. Missing observation
+  grants neither process control nor idle capacity. Shared Task reads prevent
+  duplicate workers; stable IDs preserve attribution across hierarchy changes.
+  Fixtures isolate ambient authority and stop only their own identified children.
+- Preserve authored PR copy and managed context through re-arming. Publication
+  requests no settlement; readiness changes need provider success. Same-head
+  check/merge transitions are progress. Failed repair must expose its blocker.
+- Reobserve queue cancellation: disabling auto-merge may leave an entry queued.
+  Cancelling a waiter leaves blocking children alive; retain their locks/effect
+  ownership. Empty leases still reject a branch created after absence was read.
+  Local proofs establish no hosted interruption, permission or orphan cleanup.
+- Rotation retains started identities and frozen membership, metrics and time.
+  Failed reads authorize no retirement; retries verify uncertain provider effects.
+  Integration transfers no checkout/PR ownership. Archives are historical evidence.
 
 LOO-296's restoration and unsuperseded LOO-286/287 configured continuity remain
 unproved. Exact obligations, deleted-stack counterexamples and unknown liveness
@@ -1108,27 +1095,17 @@ excerpts name complete source/size. Excerpt interpretation awaits Jack's review;
 shrinking memory is undecided. Reserve listing and compact-only active skill;
 overflow pointers remain proposed UX. Plan: `scratch/what-goes-in-system-prompt.md`.
 
-Inlining, the constant trigger and Codex base overrides are removed.
-Capture/context hooks compose at terminal spawn, replacing the temporary profile. Budget the fully rendered 10,000 UTF-8
-bytes: native Unicode spill retained endpoint markers while losing interior text,
-so marker-only checks are insufficient. `6b8f13e3f` fixes Codex skill-before-request order, proving construction only.
-Jack Heart approved #1518 after clipboard/excerpt fixes (`96ee2917`), reporting
-Codex headless and Claude headless/interactive branch launches with guide, whole
-scratch, marked 50 KB excerpt and request; the earlier failure was sandboxed.
-Interactive Codex, compaction, resume and OpenCode remain unverified,
-nonblocking. Main #1521's checkout reader replaces the duplicate. No installed
-acceptance follows; cmux/pointer judgment remains with demo/review.
-LOO-428/429 history and proof limits:
-`30a4d48c8:wave/infrastructure/MEMORY.md`, this heading.
+Jack Heart approved #1518 (`96ee2917`); #1521 superseded its reader.
+Retired assembly mechanisms, branch-launch observations and prior archives:
+`15f32f8605:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Budget complete rendered bytes: Unicode spill lost interior text despite intact
+endpoint markers. Interactive Codex, compaction, resume and OpenCode remain
+unverified/nonblocking; installed acceptance and cmux/pointer judgment remain open.
 
-Jack's October 8 terminal-default decision and retired `--tui` cutover evidence:
-`28dc141671:.lf/wave/infrastructure/MEMORY.md`, Direct invocation and large inputs.
 Preserve caller checkpoints/common invocation loading. LOO-422 owns OSC 7501
 simplification after adoption. Codex rejected-turn recovery and installed homepage
-capture remain open; CI owns the full materialized matrix.
-
-LOO-420 history:
-`4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Direct invocation and large inputs.
+capture remain open; CI owns the full materialized matrix. The archive above retains
+Jack Heart's terminal-default decision, retired `--tui` cutover and LOO-420 history.
 Jack Heart selected native installed-skill invocation with matching discovery,
 exact arguments/assets and translated ports, then delivery after verified merge.
 Busy-terminal injection, competing writers and generic recovery stay excluded.

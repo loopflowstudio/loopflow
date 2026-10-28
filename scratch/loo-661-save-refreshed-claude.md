@@ -6,8 +6,11 @@ Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
 Full plan and evidence before this reduction:
 `e3f012685c3fa12791da4deac9b71b9979576d6f:scratch/loo-661-save-refreshed-claude.md`.
-PR #1749's CI selection, LOO-657 and v0.14.19 are integrated;
-this establishes no installed upgrade.
+PR #1749's CI selection, LOO-657 and v0.14.19 are integrated.
+LOO-664 / #1754 (`fefda39493`) is now integrated through `15f32f8605`:
+source sync handles ignored and pre-staged telemetry. This supplies no installed
+upgrade or credential-writer repair; the authorized temporary sync bridge remains
+applicable until Infrastructure establishes installed recovery.
 
 ## Required outcome
 
@@ -57,6 +60,8 @@ Four diagnostic tests cover hostile output, mismatch, numeric IO errors and
 unstructured errors; they prove redaction, not native preservation. No replacement
 writer or native acceptance fixture exists. This repair adds no migration, DTO or
 Swift change; merged Task/Graph work supplies no credential acceptance.
+The current writer still waits without a deadline; the 15-second subprocess bound
+below is remaining implementation, not a property of these diagnostics.
 
 ## Evidence and excluded alternatives
 
@@ -216,4 +221,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — compress (2026-10-27): `git diff --check` and `lf context` pass; prose-only reduction, no Rust rerun. Gate owns affected suites; native-writer and installed-refresh acceptance remain unproved.
+Check — realign (2026-10-27): `git diff --check` and `lf context` pass; prose-only reconciliation, no Rust rerun. Gate owns affected suites; native-writer and installed-refresh acceptance remain unproved.

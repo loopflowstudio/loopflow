@@ -1,6 +1,7 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Implementation incomplete; native acceptance fails.**
+Status (2026-10-28): **Implementation stopped at the writer design boundary;
+native acceptance fails.**
 The reader now decodes Unicode readback exactly. All eight mocked-refresh/native
 storage cases execute and clean up: ordinary ASCII, Unicode and invalid-input
 preservation pass; four large replacements still destroy old data. The defective
@@ -11,7 +12,9 @@ Reconciled October 28 against `5eead1b8b`: implementation at `ed6c82b2b` closes
 finding 40 with finding 41's Unicode proof. Finding 42 excludes only the examined
 public CSSM construction, without mutation or proof of API exhaustion. Finding
 38's boundary was implemented in `1abbf832a` and simplified in `b909e2f71`.
-No acceptance constraint or delivery boundary changed. Release's operation-entry
+Finding 43 assesses public key enumeration as an alternative to finding 42's
+private-layout mapping; it supplies no eligible pre-commit path. No acceptance
+constraint or delivery boundary changed. Release's operation-entry
 lesson applies: native synthetic proof and installed live acceptance are separate.
 
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
@@ -43,7 +46,8 @@ Two independent gaps remain:
   A password alone is unproved. Before implementation, select a mechanism addressing
   partition authority and failed-save preservation together, then test it on disposable
   items. This plan records requirements and evidence, not an executable design.
-  Ordinary repair is authorized; no concrete product choice is ready for decision.
+  Ordinary repair is authorized; the specific missing capability and next scope
+  decision are recorded below. No replacement writer is ready for acceptance.
   Private interfaces, trust changes and provider-owned refresh remain unaccepted
   alternatives. Neither public-API exhaustion nor a scope change is established.
   Finding 39 closes finding 38's missing test boundary using test-only native
@@ -162,6 +166,33 @@ The Unicode case originally wrote exact bytes but failed readback because
 decodes independently; unit coverage retains escaping, whitespace and invalid
 output. This reader repair changes none of the writer failures or preservation gaps.
 
+**Public key enumeration (43, October 28; source review only):** assessed a
+different bridge to `CSSM_ChangeKeyAcl`: enumerate symmetric keys before and after
+content replacement inside the FileDL transaction, then authorize the newly
+created key without decoding the password record's private envelope.
+
+- [KCCursorImpl::next](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/KCCursor.cpp#L255-L281)
+  filters group keys out of higher-level searches. Those searches do not expose
+  the required `SecKeyRef` bridge.
+- [SSDLSession::DataGetFirst](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_apple_cspdl/lib/SSDLSession.cpp#L303-L367)
+  does return `CSSM_KEY` references for lower-level symmetric-key queries. Thus
+  finding 42 must not be interpreted as saying public APIs cannot return such
+  keys. Returning keys still does not associate one with the target password.
+- [DbModifier::createCursor](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_filedb/lib/AppleDatabase.cpp#L1753-L1791)
+  queries the pre-modification snapshot during a transaction; by-ID reads use
+  modified records. `AppleDatabase::dataGetFirst` uses that cursor. Therefore the
+  proposed before/after query cannot discover the new group key before commit
+  through this path. The content-update API does not return that key's ID.
+
+Committing to make the new key discoverable would move partition repair outside
+the preservation boundary. Guessing record IDs, parsing group labels from the
+password envelope, or using internal object access would restore the private
+dependency that this candidate was meant to remove. No enumeration or mutation
+was executed against any Keychain. The two locally examined implementation files
+match fresh downloads at the pinned revision; this is source evidence, not an
+installed-binary trace or public-API exhaustion. Database authentication and full
+group/ACL rollback remain unproved even if a different bridge is found.
+
 **Live diagnosis (6, 32):** the original save/readback failure had no status.
 Subsequent 0.14.18/0.14.19 capacity polls proved neither refresh nor causality.
 On October 27, supported `lf account claude --json` rejected jack@loopflow.studio
@@ -171,6 +202,33 @@ was inspected or forced to expire. Supported browser reconnection through
 `lf account connect claude jack@loopflow.studio` remains a dependency; no sign-in
 or route change was attempted. Neither historical save causality nor the reason
 for token invalidation is established. Repeating polls without recovery adds no proof.
+
+## Writer design decision needed
+
+The missing capability is **a public file-Keychain operation that replaces
+arbitrary password bytes while retaining the existing readers' partition access,
+or a public way to authorize the replacement's partition before a rollback-safe
+commit**. For the examined transaction approach this specifically requires a
+supported password-to-new-key reference and database credentials on that ACL
+operation, plus proof that failures preserve the old readable bytes and access.
+An unlocked Keychain, a copied access object, or a returned key handle alone does
+not supply that combination.
+
+The current scope remains the safe default. Further implementation needs a
+supported mechanism answering those requirements, then the existing native
+fixture's exact large-value and injected-failure proof. The concrete decision for
+Jack Heart and Infrastructure is whether to obtain Apple guidance for that
+public-interface path, or commission a separately reviewed provider-owned refresh
+design under LOO-325 if no supported path can be established. This step neither
+contacts Apple nor selects LOO-325. Provider-owned refresh is an investigation
+choice, not a proven fix, and does not waive the storage, identity, secrecy, trust,
+Session or failed-save requirements. Private-API use and trust changes remain
+outside the accepted design.
+
+Implementation cannot advance to delivery on the reader repair. Browser
+reconnection remains a separate dependency for live diagnosis; Infrastructure
+retains installation and final installed verification. No new production change
+or native mutation is justified by finding 43.
 
 ## Remaining implementation and acceptance
 
@@ -238,4 +296,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check (October 28 realign; prose only) — `git diff --check` and `lf context`: PASS; reused `ed6c82b2b` decoder test: PASS (1), native command above: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned; ld unwind-size warning), format/Clippy: PASS. Cargo checks used `scripts/test_network.py` with inherited `LF_*` cleared and stdin closed. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.
+Check (October 28 implementation; source review and prose only) — `git diff --check` and `lf context`: PASS; no Rust changes or test reruns. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.

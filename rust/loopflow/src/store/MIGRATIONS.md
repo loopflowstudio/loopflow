@@ -11,8 +11,8 @@ the `schema_migrations.version` an applied store records.
 
 ## Order comes from main
 
-`build.rs` orders the catalog: the released batches (`0.14.19.002_release.sql`
-and older, frozen history) in id order, then every slug migration in the order
+`build.rs` orders the catalog: the released batches (`<version>.<NNN>_release.sql`,
+frozen history) in id order, then every slug migration in the order
 `origin/main`'s first-parent history added it, then this checkout's unmerged
 slug last. The PR never picks a number and nothing renumbers at merge or
 release; two Tasks adding migrations at once order themselves by which merged

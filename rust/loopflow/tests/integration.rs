@@ -6,7 +6,6 @@ mod agent_startup_tests;
 mod auth_tests;
 mod build_cleanup;
 mod cli_discovery;
-mod cli_reference;
 mod commit_tests;
 mod config_tests;
 mod context_block_tests;

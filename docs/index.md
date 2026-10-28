@@ -111,7 +111,7 @@ including headless work. A running Graph is one lf process and the step processe
 it starts. A conversation can outlive its command. A Graph whose
 command stopped stays as history; fresh work is launched explicitly.
 
-Read the [contract and cutover status](architecture-reference.md#cutover-status)
+Read the [contract and cutover status](architecture/reference-cutover.md#cutover-status)
 for the accepted model and remaining implementation, or the [Glossary](glossary.md)
 for a term. The Mac app and CLI read the same owners.
 

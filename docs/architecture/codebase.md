@@ -1,7 +1,7 @@
 # Codebase map
 
 This is a current-source navigation map, including historical capture evidence.
-The [contract and cutover status](../architecture-reference.md#cutover-status)
+The [contract and cutover status](reference-cutover.md#cutover-status)
 own the accepted model and the remaining conversion.
 
 Start from a behavior, not a directory. Follow its request until it crosses a

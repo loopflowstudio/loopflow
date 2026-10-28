@@ -147,12 +147,11 @@ pub(crate) async fn observe_active_account(
     })
 }
 
-/// The home holding an account's live credential: the native one while that
-/// account is active there, since its stored profile is only current as of the
-/// last switch and refreshing both copies could invalidate one of them.
-pub(crate) fn credential_home(provider: Provider, profile: &Path) -> PathBuf {
-    let native = native_home(provider, None);
-    if same_login(provider, &native, profile) {
+/// Claude's active home keeps its most recent refresh. Codex resolves access
+/// through `codex_access` because matching identity does not prove acceptance.
+pub(crate) fn claude_credential_home(profile: &Path) -> PathBuf {
+    let native = native_home(Provider::Claude, None);
+    if same_login(Provider::Claude, &native, profile) {
         native
     } else {
         profile.to_path_buf()
@@ -160,8 +159,8 @@ pub(crate) fn credential_home(provider: Provider, profile: &Path) -> PathBuf {
 }
 
 /// Sign `native` in as `account_id`. Returns the provider credential lock
-/// when the native credential changed, to be held until the launch that asked
-/// for it has spawned; `None` when that account was already active.
+/// through divergent-copy verification or installation and the following spawn.
+/// `None` means the active credential needed no verification or replacement.
 pub(crate) async fn activate(
     store: &SharedStore,
     provider: Provider,
@@ -192,7 +191,11 @@ pub(crate) async fn activate(
             ),
         });
     };
-    let is_active = || same_login(provider, native, profile);
+    let is_active = || {
+        same_login(provider, native, profile)
+            && (provider != Provider::Codex
+                || read_login(provider, native) == read_login(provider, profile))
+    };
     if is_active() {
         return Ok(None);
     }
@@ -202,6 +205,10 @@ pub(crate) async fn activate(
     }
     if provider == Provider::Codex {
         require_file_credential_store(native)?;
+        if same_login(provider, native, profile) {
+            repair_codex_login(selected, native).await?;
+            return Ok(Some(lock));
+        }
     }
     match save_back(store, provider, native, &accounts).await? {
         // The native login was this account's all along, rotated since it was stored.
@@ -217,7 +224,12 @@ pub(crate) async fn activate(
     store
         .record_provider_account_switch(provider, account_id, cause.as_str())
         .await?;
-    write_login(provider, native, &credential)?;
+    if provider == Provider::Codex && native.join("auth.json").exists() {
+        super::codex_access::switch(selected, native)
+            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+    } else {
+        write_login(provider, native, &credential)?;
+    }
     Ok(Some(lock))
 }
 
@@ -360,7 +372,25 @@ async fn save_back(
     });
     if let Some((owner, home)) = owner.and_then(|account| Some((account, account.home.as_deref()?)))
     {
-        write_login(provider, home, &credential)?;
+        if provider == Provider::Codex && read_login(provider, home).as_ref() != Some(&credential) {
+            let _login_lock = super::acquire_managed_login_lock(home, provider, &owner.account_id)
+                .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+            // Lock order: native, then managed login (nonblocking). Status and
+            // connect hold only the managed lock and never wait for native.
+            match super::codex_access::resolve(owner, Some(native)).await {
+                Ok(access) if access.home() == native => {
+                    access
+                        .save_to(owner, home)
+                        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+                }
+                Ok(_) | Err(_) => {
+                    // Unknown access must not replace either existing copy.
+                    // The switch retains the actual outgoing inode by exchange.
+                }
+            }
+        } else if provider != Provider::Codex {
+            write_login(provider, home, &credential)?;
+        }
         let identity = identity.or_else(|| {
             Some(AccountIdentity {
                 email: owner.observed_email.clone()?,
@@ -403,6 +433,48 @@ async fn save_back(
     account.routing_state = RoutingState::ExplicitOnly;
     store.upsert_provider_account(&account).await?;
     Ok(Kept::Profile(account_id))
+}
+
+/// Isolated launch repairs its profile in place, retaining conversation history.
+pub(crate) async fn prepare_isolated_codex(
+    store: &SharedStore,
+    account_id: &ProviderAccountId,
+) -> Result<Option<fs::File>, ProviderAccountError> {
+    let account = store
+        .get_provider_account("codex", account_id)
+        .await?
+        .ok_or_else(|| ProviderAccountError::Runtime("selected account disappeared".into()))?;
+    let profile = account
+        .home
+        .as_deref()
+        .ok_or_else(|| ProviderAccountError::Runtime("account has no home".into()))?;
+    let native = native_home(Provider::Codex, None);
+    if !same_login(Provider::Codex, &native, profile)
+        || read_login(Provider::Codex, &native) == read_login(Provider::Codex, profile)
+    {
+        return Ok(None);
+    }
+    let lock = lock_native_credential(Provider::Codex)?;
+    repair_codex_login(&account, profile).await?;
+    Ok(Some(lock))
+}
+
+/// Caller holds the native lock; the managed lock is nonblocking and acquired second.
+async fn repair_codex_login(
+    account: &ProviderAccount,
+    target: &Path,
+) -> Result<(), ProviderAccountError> {
+    let profile = account
+        .home
+        .as_deref()
+        .expect("activation requires a profile");
+    let _login_lock =
+        super::acquire_managed_login_lock(profile, Provider::Codex, &account.account_id)
+            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+    super::codex_access::resolve(account, Some(target))
+        .await
+        .and_then(|access| access.repair())
+        .map_err(|error| ProviderAccountError::Runtime(error.to_string()))
 }
 
 /// Replace `path` by rename so a reader sees the old or the new credential.

@@ -29,9 +29,10 @@ prove old-reader recovery after specific rollbacks, but replacement reads failed
 The next implementation needs a supported mechanism that demonstrates exact large
 replacement, existing-reader access and old-data recovery on failure together.
 This slice is mechanism proof before production cutover. The native-modifier /
-outer-transaction candidate remains blocked: finding 25 confirms that its new
-record is readable by ID while the matching group-key query finds nothing.
-It cannot currently verify replacement before commit. No production mechanism
+outer-transaction candidate is rejected for the proposed verify-before-commit
+sequence: finding 26 identifies snapshot reads in the published implementation,
+consistent with finding 25's missing new group key. A fresh lookup cannot verify
+replacement before commit on that path. No production mechanism
 is selected merely to make the remaining implementation sequence executable.
 No product decision or additional authorization is pending, and the exclusions
 below do not exhaust every public interface.
@@ -148,6 +149,10 @@ No real credential was directly read or printed. Retain these counterexamples:
   does not expose whether refresh occurred; it neither reproduces nor explains
   the original save failure. Output was captured and reduced to identity,
   verification, diagnostic-presence booleans and observation timestamps.
+  A supported 0.14.19 poll during implementation likewise accepted both managed
+  identities at `1793156935`, with no diagnostic or recovery instruction; the
+  uninspected local row remained unavailable. Refresh occurrence and storage
+  stage remain unreported, so the live save failure is still undiagnosed.
 - **Current API contract (21, 2026-10-27):** Apple's
   [update guide](https://developer.apple.com/documentation/security/updating-and-deleting-keychain-items)
   supports replacement with `SecItemUpdate`; its
@@ -233,6 +238,19 @@ No real credential was directly read or printed. Retain these counterexamples:
   `d6c97155d988c0d1453f82bc4c108f24f11e8d70`. The runner uses a temporary probe
   directory locator; reconstruct it beside the compiled probe when reproducing.
 
+- **Transaction snapshot semantics (26, 2026-10-27):** pinned Apple
+  [AppleDatabase.cpp:1634–1670](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_filedb/lib/AppleDatabase.cpp#L1634-L1670)
+  explicitly routes `DbModifier::getRecord` to modified tables during a write,
+  but `createCursor` to the pre-write snapshot. Combined with the group-key
+  cursor in finding 24, this explains the published implementation's split:
+  the new encoded record is readable by ID while decoding cannot find its new
+  key. This is consistent with finding 25, not proof of installed binary/source
+  equivalence. Repeating a fresh query or opening another reader does not supply
+  the proposed pre-commit verification. Committing first would abandon that
+  preservation boundary and still leave the independent partition-access failure.
+  No mutation probe or production cutover ran. The transaction candidate is
+  rejected for this sequence; another supported mechanism remains necessary.
+
 Findings 8–20 are source/header review except the read-only installed dispatch
 inspection in 18. These exclusions establish neither production acceptance nor
 exhaustion of every public interface. Argv credentials, broad trust changes,
@@ -249,12 +267,11 @@ the excluded concurrency redesign.
 
 ## Remaining implementation and acceptance
 
-1. Establish a supported writer's encoding, access and commit behavior before
-   another replacement probe. Finding 25 closes the record-absence question for
-   the tested transaction; repeating a fresh lookup is not a new candidate.
-   A transaction approach must first explain how replacement and reader access
-   can be verified without exposing an incompatible committed value. Otherwise
-   it remains blocked and a distinct supported mechanism is required.
+1. Revise the mechanism design before dependent implementation. Finding 26
+   rejects the proposed native-modifier / outer-transaction / reader-verification
+   sequence: query snapshots hide the new group key until commit. A distinct
+   supported mechanism must establish encoding, access and failure preservation;
+   another fresh-query probe or transaction wrapper does not resolve this.
    Transport replacement, consumer cutover and deletion
    are one cut. Preserve JSON validation, readback, managed login locking,
    intervening-replacement checks, omitted refresh tokens, unknown fields and the
@@ -323,4 +340,4 @@ intended step edits with `lf commit <paths>` before sync, preserving unrelated
 staged/unstaged work and normal validation. Do not force-add telemetry or implement
 a competing repair; retain the dependency if checkpointing fails.
 
-Check — 2026-10-27 kickoff: `uv run python /private/tmp/loo661-group-run.py` completed; both native probes exited 1 on failed secret read, exact old-reader recovery and cleanup passed. Prior unchanged-code diagnostic tests (4), fmt and clippy passes remain applicable; no production tests rerun for this plan-only change. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.
+Check — 2026-10-27 implement: bounded, captured `lf account claude --json` exited 0; both managed identities accepted at `1793156935`, refresh unproved. Source-only mechanism revision; prior unchanged-code diagnostic tests (4), fmt and clippy passes remain applicable. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.

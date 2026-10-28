@@ -792,16 +792,16 @@ with five-minute turn grace. Configured acceptance remains open.
 
 Jack Heart authorized preservation-first repair; Infrastructure owns installation.
 Command probes found destructive `security -i` failures at 2/8 KiB, contradicting
-earlier preservation; production acceptance is absent.
-Copied partition access denied candidate creation; omitting it or trusting
-`security` caused reader timeouts. Creation probes preserved
-original bytes/semantic ACLs, without proving group identity or replacement.
-Source review found no supported creation authorization or group-retaining writer;
-public-interface exhaustion remains unproved. A password alone supplies no solution.
+earlier preservation. Copied partition access denied creation; omitting it or
+trusting `security` caused reader timeouts. Original bytes/semantic ACLs survived;
+group identity and production replacement remain unproved.
+Source review identified no creation authority, group retention or file-keychain
+LAContext bridge; no installed trace or API exhaustion is proved.
+A password alone is unproved.
 `refresh grant rejected` precedes saving; live acceptance needs browser reconnection.
 Historical save causality remains unknown. Diagnostics prove no preservation;
 rollback cannot undo OAuth rotation. LOO-325 stays separate. Evidence:
-`028c166dca:scratch/loo-661-save-refreshed-claude.md`, findings 30–36.
+`055c8a3005:scratch/loo-661-save-refreshed-claude.md`, findings 30–37.
 
 ## Codex credential recovery (LOO-665, 2026-10-28)
 

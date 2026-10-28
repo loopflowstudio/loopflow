@@ -20,21 +20,13 @@ overwrite archives, change ignore rules, force staging or suppress Git errors.
 LOO-664 / #1754 is integrated; its disposable reproduction proves only the bridge.
 Infrastructure owns CLI/helper installation and installed acceptance.
 
-Latest archive (2026-10-28 realign):
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-ib29t40r/tmp`.
-Earlier receipts and archive references:
-`9cdf9bb872178d0c5e4a09cb1eb1fa821e7ff090:scratch/questions.md`.
-Installed `lf --version` reports 0.14.19; integrated source v0.15.0 proves
-no installed or credential recovery.
+This realign pass reserves the telemetry archive destination:
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-ojie9_hk/tmp`.
+The sibling `receipt.json` records the checkpoint, byte verification and source
+absence after the atomic move. Reservation alone proves no move or installed repair.
 
-Realign checkpoint `95d012ef038770a3114f31728899694c1d110282` preceded the atomic archive;
-all 1 telemetry files match their pre-move digests, `.lf/tmp` was absent
-after the move, and prior archives remain intact. This proves telemetry preservation only.
-
-Unused kickoff archive reservation (2026-10-28):
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-a4trWWUW/tmp`.
-After checkpoint `6c23730c7906e0be600119fbf0f0591b4491dcd1`, the archive command
-stopped at its precondition: `.lf/tmp` was already absent. A separate check confirmed
-both source and destination absent; no telemetry was moved or deleted. The empty
-parent reservation remains. Earlier archives are untouched; installed recovery
-remains unproved.
+Earlier archive receipts, the unused kickoff reservation and the last installed
+0.14.19 observation remain at
+`d498137af513522569d19da82e4b26c33656687b:scratch/questions.md`.
+Those archives remain intact. Integrated source v0.15.0 proves no installed or
+credential recovery.

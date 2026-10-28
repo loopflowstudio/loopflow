@@ -224,4 +224,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28); prose compression only, no build/test rerun. Gate owns affected checks; writer mechanism, native acceptance and installed acceptance remain unresolved.
+Check — `git diff --check` and `lf context`: pass (2026-10-28); source/plan reconciliation only, no build/test rerun. Gate owns affected checks; writer mechanism, native acceptance and installed acceptance remain unresolved.

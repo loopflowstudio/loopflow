@@ -5,8 +5,8 @@
 #
 # Every repository under ~/src: finished worktrees (`lf wt prune`), completed
 # Tasks' build output (`lf wt prune --builds`), merged branches
-# (`lf wt prune --branches`) and idle build output in every checkout: the main
-# checkout after a day, linked worktrees after 3 days.
+# (`lf wt prune --branches`) and build output in every checkout once nothing
+# has written to it for 4 hours.
 # Home (~/.lf): captures, logs, draft store copies and all but the newest backup
 # per database, once untouched for a week. Machine caches: uv, unavailable
 # simulators, idle ~/Library/Caches entries and old Trash.
@@ -33,8 +33,7 @@ src="${LOOPFLOW_SRC:-$HOME/src}"
 lf_home="${LF_HOME:-$HOME/.lf}"
 disk_log="$lf_home/logs/disk.log"
 home_keep_days=7
-build_idle_days=1
-worktree_build_idle_days=3
+build_idle_minutes=240
 uv_clean_over_gib=10
 cache_idle_days=7
 trash_idle_days=30
@@ -201,9 +200,9 @@ home() {
 # Repositories
 
 # Ignored, untracked output in one checkout that no process holds and nothing
-# wrote to within the days given: idle_builds <checkout> <days>
+# wrote to for build_idle_minutes: idle_builds <checkout>
 idle_builds() {
-  local checkout="$1" days="$2" path rel
+  local checkout="$1" path rel
   if [ -z "$held" ]; then
     echo "open-file inspection failed; kept build output in $checkout"
     return
@@ -217,10 +216,10 @@ idle_builds() {
     [ -z "$(git -C "$checkout" ls-files -- "$rel" | head -1)" ] || continue
     if ! grep -qxF -- "$path" "$work/builds-idle"; then
       echo "kept $path (held open)"
-    elif ! untouched "$path" $((days * 1440)); then
-      echo "kept $path (written in the last $days days)"
+    elif ! untouched "$path" "$build_idle_minutes"; then
+      echo "kept $path (written in the last 4 hours)"
     else
-      remove build "$path" "idle $days days in $(basename "$checkout")"
+      remove build "$path" "idle 4 hours in $(basename "$checkout")"
     fi
   done <"$work/builds"
 }
@@ -245,10 +244,10 @@ repository() {
       echo "lf wt prune --builds failed"
     lf wt prune --branches || echo "lf wt prune --branches failed"
   )
-  idle_builds "$repo" "$build_idle_days"
+  idle_builds "$repo"
   linked_worktrees "$repo" >"$work/worktrees"
   while IFS= read -r wt; do
-    idle_builds "$wt" "$worktree_build_idle_days"
+    idle_builds "$wt"
   done <"$work/worktrees"
 }
 
@@ -262,9 +261,9 @@ uv_cache() {
   kib="$(du -sk "$dir" 2>/dev/null | awk '{print $1}')"
   echo "uv cache $(human "${kib:-0}") at $dir"
   if [ "${kib:-0}" -gt $((uv_clean_over_gib * 1024 * 1024)) ] && ! pgrep -x uv >/dev/null; then
-    UV_LOCK_TIMEOUT=5 uv cache clean
+    UV_LOCK_TIMEOUT=120 uv cache clean
   else
-    UV_LOCK_TIMEOUT=5 uv cache prune
+    UV_LOCK_TIMEOUT=120 uv cache prune
   fi
 }
 

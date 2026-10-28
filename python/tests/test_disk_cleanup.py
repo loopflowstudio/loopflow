@@ -107,7 +107,7 @@ def test_idle_ignored_build_output_goes_and_recent_or_tracked_output_stays(
     assert "== repository kata" in out
 
 
-def test_linked_worktree_loses_output_idle_for_three_days(tmp_path: Path) -> None:
+def test_linked_worktree_loses_output_idle_for_four_hours(tmp_path: Path) -> None:
     src = tmp_path / "home/src"
     repo = src / "kata"
     repo.mkdir(parents=True)
@@ -119,13 +119,13 @@ def test_linked_worktree_loses_output_idle_for_three_days(tmp_path: Path) -> Non
     idle, recent = src / "kata.idle", src / "kata.recent"
     for wt in (idle, recent):
         subprocess.run(["git", "-C", str(repo), "worktree", "add", "-q", str(wt)], check=True)
-    _write(idle / "target/debug/kata", 4)
-    _age_tree(idle / "target", 4)
-    _write(recent / "target/debug/kata", 2)
-    _age_tree(recent / "target", 2)
+    _write(idle / "target/debug/kata", 0.25)
+    _age_tree(idle / "target", 0.25)
+    _write(recent / "target/debug/kata", 0.1)
+    _age_tree(recent / "target", 0.1)
 
     out = _run(tmp_path)
 
     assert not (idle / "target").exists(), out
     assert (recent / "target").exists(), out
-    assert "written in the last 3 days" in out
+    assert "written in the last 4 hours" in out

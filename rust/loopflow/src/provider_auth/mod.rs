@@ -2966,18 +2966,18 @@ fn read_claude_keychain_blob_with_security(
             status: output.status,
         });
     }
-    Ok(trim_security_password_output(output.stdout))
+    Ok(decode_security_password_output(output.stdout))
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn trim_security_password_output(mut output: Vec<u8>) -> Vec<u8> {
+fn decode_security_password_output(mut output: Vec<u8>) -> Vec<u8> {
     if output.last() == Some(&b'\n') {
         output.pop();
-        if output.last() == Some(&b'\r') {
-            output.pop();
-        }
     }
-    output
+    // `security -w` renders the whole value as hex if any byte is non-printable,
+    // including UTF-8 and JSON whitespace. A Claude JSON object cannot itself
+    // be an all-hex string. Decode after removing only security's appended LF.
+    hex::decode(&output).unwrap_or(output)
 }
 
 #[cfg(target_os = "macos")]
@@ -4708,15 +4708,30 @@ attributes:
     }
 
     #[test]
-    fn security_password_output_keeps_internal_newlines() {
-        assert_eq!(
-            trim_security_password_output(b"{\n  \"token\": \"value\"\n}\n".to_vec()),
-            b"{\n  \"token\": \"value\"\n}".to_vec()
-        );
-        assert_eq!(
-            trim_security_password_output(b"single-line\r\n".to_vec()),
-            b"single-line".to_vec()
-        );
+    fn security_password_output_preserves_exact_json_bytes() {
+        for value in [
+            " {\"accessToken\":\"synthetic\"} ",
+            "{\n  \"accessToken\": \"synthetic\"\n}\r\n",
+            "{\"accessToken\":\"synthetic\",\"unrelated\":\"雪😀\\n\\\"\\\\\"}",
+        ] {
+            let rendered = if value.bytes().all(|byte| (0x20..=0x7e).contains(&byte)) {
+                value.to_string()
+            } else {
+                hex::encode(value.as_bytes())
+            };
+            assert!(
+                decode_security_password_output(format!("{rendered}\n").into_bytes())
+                    == value.as_bytes()
+            );
+        }
+        // Invalid output remains invalid JSON; it must not become a login.
+        for malformed in ["7b0", "7bzz", "", "{broken}"] {
+            let decoded = decode_security_password_output(format!("{malformed}\n").into_bytes());
+            assert!(
+                claude_token_from_credentials_json(std::str::from_utf8(&decoded).unwrap())
+                    .is_none()
+            );
+        }
     }
 
     #[test]

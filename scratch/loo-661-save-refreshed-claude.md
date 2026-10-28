@@ -1,16 +1,16 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
 Status (2026-10-28): **Implementation incomplete; native acceptance fails.**
-An isolated mocked-refresh fixture now invokes the actual native writer through
-account verification. All eight cases execute and clean up; ordinary ASCII
-replacement passes, large replacements destroy old data, and Unicode exposes a
-readback encoding failure. The defective `security -i` writer remains, with no
-eligible replacement established. This is a failing acceptance boundary, not a repair.
+The reader now decodes Unicode readback exactly. All eight mocked-refresh/native
+storage cases execute and clean up: ordinary ASCII, Unicode and invalid-input
+preservation pass; four large replacements still destroy old data. The defective
+`security -i` writer remains, with no eligible replacement established. The reader
+fix does not complete this repair or permit delivery.
 
-Reconciled against `b909e2f71` on 2026-10-28: finding 38's missing boundary is
-implemented in `1abbf832a` and simplified in `b909e2f71`. The writer candidate remains
-excluded, and findings 39–40 retain the resulting failures. No acceptance constraint
-or delivery boundary changed.
+Implementation on `ad93466cf` (2026-10-28) closes finding 40 with finding 41;
+finding 42 assesses a public CSSM alternative without mutation. Finding 38's
+boundary was implemented in `1abbf832a` and simplified in `b909e2f71`. No acceptance
+constraint or delivery boundary changed.
 
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -62,6 +62,9 @@ Diagnostics and repeated rejected probes cannot close these gaps or justify ship
 - Scoped services use `Claude Code-credentials-<first eight SHA256 hex digits of config
   path>`; the ambient default home falls back to unsuffixed `Claude Code-credentials`.
   Existing account metadata wins; `USER` supplies new items. Readers use `security`.
+  `decode_security_password_output` removes only the tool's appended LF and decodes
+  its all-hex rendering, preserving exact Unicode and whitespace bytes. JSON objects
+  cannot be confused with unencoded all-hex text; invalid JSON remains invalid.
 - `subscription.rs::fresh_claude_token` retains the original `SecretString`, serializes
   once, checks intervening replacement and maps save failures to `Unavailable`.
   `claude_persistence_error` retains only closed storage stages/numeric statuses;
@@ -204,6 +207,29 @@ they establish neither installed binary equivalence nor public-API exhaustion.
   This is distinct from the large-value truncation; it also violates failed-save
   preservation. [Apple's reader source](https://github.com/apple-oss-distributions/SecurityTool/blob/main/keychain_find.c)
   documents the rendering branch; installed fixture results establish this case.
+- **Unicode repair (41, 2026-10-28):** replaced the trim-only reader with decoding
+  and removed that helper's use from the independent native observer. The existing
+  native fixture's Unicode case now accepts identity/usage after one mocked refresh,
+  with exact 512-byte replacement and cleanup. All eight cases complete; the four
+  2,048/8,192-byte cases still leave 2,010/1,994 bytes and lose the old value.
+  Ordinary ASCII and invalid-input preservation still pass. The focused decoder
+  test covers Unicode, escaping, JSON whitespace and invalid output. No credential
+  bytes enter assertions/output, no real account is touched, and no writer changes.
+- **Public CSSM ACL alternative (42, 2026-10-28):** evaluated content replacement
+  plus credential-bearing `CSSM_ChangeKeyAcl` inside the previously examined
+  transaction. The [public declaration](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_cssm/lib/cssmapi.h)
+  accepts credentials but requires a `CSSM_KEY`, not a password-item reference.
+  [SecKeyGetCSSMKey](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKey.cpp)
+  operates on a key item. The examined password-to-key mapping is internal
+  [aclBearer](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItem.cpp),
+  whose [SSGroup lookup](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_cdsa_client/lib/securestorage.cpp)
+  interprets an internal blob label/magic before querying its symmetric key.
+  The public item bridge exposes a database handle and record ID, not that mapping.
+  Thus this examined construction does not establish an eligible public-interface
+  writer; reproducing private layout is not an accepted bridge. Partition credentials
+  and transaction preservation also remain unproved. No password was requested,
+  API invoked or mutation probe repeated. This is a bounded source assessment,
+  not public-API exhaustion or proof that every CSSM construction fails.
 
 ## Writer decision after native reproduction
 
@@ -234,10 +260,8 @@ a scope/trust/storage change. No concrete product decision is ready for acceptan
    OAuth request or automatic retry. Bound new subprocesses to 15 seconds, close
    stdin and reap on every exit. Report uncertain commits and re-read before another
    write; storage failure alone never requires sign-in or deletion.
-2. Correct native reader handling of `security -w`'s hex-rendered Unicode bytes,
-   retaining exact JSON bytes and unrelated fields. This distinct readback defect
-   remains even with a large-value writer; fixing it alone supplies no failed-save
-   preservation or complete repair.
+2. Retain finding 41's passing Unicode coverage while replacing the writer. Reader
+   decoding alone supplies no failed-save preservation or complete repair.
 3. Complete the existing native fixture's acceptance: exact ordinary/2,048/8,192-byte
    production creation and replacement, Unicode/escaping, scoped/ambient selection,
    account/access preservation and varied service/account prefix lengths. Disposable
@@ -255,7 +279,7 @@ a scope/trust/storage change. No concrete product decision is ready for acceptan
    must meet the demo above. Unexpired polls and synthetic success cannot
    establish live acceptance or complete the Task.
 
-## Replacement boundary
+## Delete — do not maintain
 
 - Retired command-boundary and `scratch/keychain-access-probe/` harnesses stay in
   Git at the references above. Do not restore them as acceptance coverage or
@@ -270,6 +294,8 @@ a scope/trust/storage change. No concrete product decision is ready for acceptan
   compatible replacement is proved.
 - Retain shared readers, service/account parsers/tests, managed-file writes,
   explicit profile-capture cleanup and race/rotation tests; they have other consumers.
+- Removed `trim_security_password_output` and its trim-only test; the surviving
+  decoder owns exact output handling and the native observer decodes independently.
 
 ## Verification and delivery
 
@@ -291,4 +317,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check`: PASS; reused `b909e2f71` native command above: FAIL (8 cases, 5 storage failures, all cleaned; build passed with an ld unwind-size warning), `cargo fmt` / `cargo clippy --all-targets -- -D warnings`: PASS. No code changed; gate retains complete acceptance and Infrastructure installed verification.
+Check — `cargo test -p loopflow --lib security_password_output_preserves_exact_json_bytes`: PASS (1); native command above: FAIL (8 cases executed, Unicode passes, 4 large-value failures, all cleaned; ld unwind-size warning); `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check`, `lf context`: PASS. Cargo checks used `scripts/test_network.py` with inherited `LF_*` cleared and stdin closed. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.

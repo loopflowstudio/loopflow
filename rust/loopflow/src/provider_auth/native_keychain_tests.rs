@@ -11,9 +11,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{
-    claude_keychain_service, parse_security_keychain_account, trim_security_password_output,
-};
+use super::{claude_keychain_service, parse_security_keychain_account};
 
 static NATIVE_HOME: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) const CHILD_ROOT: &str = "LOOPFLOW_NATIVE_KEYCHAIN_FIXTURE";
@@ -178,11 +176,11 @@ impl Item {
         if !output.status.success() {
             return None;
         }
-        let bytes = trim_security_password_output(output.stdout);
+        let bytes = output.stdout.strip_suffix(b"\n")?;
         // security -w hex-renders non-printable bytes. This independent observer
         // compares actual bytes, even if the production reader rejects that form.
         Some(if bytes.starts_with(b"{") {
-            bytes
+            bytes.to_vec()
         } else {
             hex::decode(bytes).ok()?
         })

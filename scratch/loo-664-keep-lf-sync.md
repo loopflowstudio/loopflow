@@ -6,10 +6,6 @@ Jack Heart authorized the bounded hotfix and autonomous shipping in comment
 pre-staged telemetry exception. The implementation mechanism follows source and
 fixture evidence; it was not separately reviewed.
 
-Kickoff revalidation on 2026-10-27: current Task definition revision 7 matches
-the selective checkpoint at `3796c6c8f9` and the recovery coverage retained at
-`7c84ab6650`. No additional implementation slice is needed before gate.
-
 ## Outcome and demo
 
 Installed 0.14.19 stopped LOO-661 after staging ordinary edits because Apple Git
@@ -105,8 +101,8 @@ and actionable recovery, and the repair lands with an exact merged revision for
 Infrastructure's release. Installed LOO-661 recovery remains a separate readback
 after that release; a passing source fixture cannot close that obligation.
 
-The existing staged Wave-memory contribution predates the selective checkpoint.
-Proposed correction to its LOO-664 Gotcha: pre-staged telemetry is now preserved
-outside new commits. Memory reconciliation belongs to its authorized owner.
+Until the fixed binary is installed, checkpoint intended edits with explicit
+`lf commit` paths before returning to Graph sync, including this Task's authorized
+Wave-memory contribution. Preserve other work; leave release/install to Infrastructure.
 
 Check: `git diff --check` and `lf context` passed on 2026-10-27 (both budgets within limits); prior unchanged-source evidence: `scripts/test_network.py cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 6 passed, `cargo +stable fmt --all -- --check` and network-isolated `cargo +stable clippy --all-targets -- -D warnings` passed; affected suites remain with gate.

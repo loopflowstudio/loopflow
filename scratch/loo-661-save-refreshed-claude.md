@@ -14,11 +14,6 @@ choices and integrated LOO-657 takeover notices. No quantitative Wave target is 
 Source integration of LOO-664, LOO-665 and v0.15.0 establishes neither installation nor
 Claude recovery. The temporary sync bridge and archive receipts live in
 [questions.md](questions.md).
-October 28 kickoff reinspection at `7f067d39fb38014cffc0a56a084f3d44a517ab72`
-confirms the surviving writer, refresh path and diagnostic stand-in still match
-this plan. The supplied Task definition and Infrastructure memory add no supported
-writer mechanism or installed acceptance. The existing design is retained;
-repeating rejected probes or publishing diagnostics cannot satisfy the accepted repair.
 
 ## Required outcome and next decision
 
@@ -236,4 +231,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); source/plan reconciliation only, no build/test rerun; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 compress); duplicate notes removed, no code changes or build/test rerun; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.

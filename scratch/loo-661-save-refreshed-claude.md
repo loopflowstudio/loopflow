@@ -194,9 +194,49 @@ investigation choice, not a proven fix or waiver of the accepted requirements.
 Private APIs and trust changes remain excluded. Finding 43 justifies no production
 change or native mutation; the reader repair alone cannot advance delivery.
 
+### Containment alternative — draft, not selected (October 28)
+
+The direct conversation preserved in `questions.md` proposes stopping Loopflow's
+native refresh before the OAuth request. Source inspection confirms one boundary
+in `fresh_claude_token`: after the unexpired-token return and before refresh-token
+lookup/POST. Both expiry and the usage request's 401 retry pass through it;
+identity reads also share this function. Native credentials remain authoritative,
+and each subsequent poll rereads them. Managed file-backed accounts would keep
+refreshing. No extra storage, background Claude launch or account-route change is
+needed for that narrower behavior.
+
+Its demo would be an expired native login reporting sanitized `unavailable`, zero
+refresh requests and unchanged bytes, followed by accepted identity/usage after
+an external credential replacement. It sacrifices automatic capacity recovery
+until Claude refreshes or Jack reconnects. It does not repair activation writes,
+arbitrary-size persistence or the already rejected grant. Selecting containment
+therefore requires an explicit product-scope decision; Jack Heart's request for
+help and existing shipping authorization do not select it. LOO-661's complete
+acceptance remains binding.
+
+Read-only upstream review confirms reports of the same transport defect in
+[#28541](https://github.com/anthropics/claude-code/issues/28541) and
+[#30337](https://github.com/anthropics/claude-code/issues/30337), plus reader-access
+loss after provider refresh in
+[#94491](https://github.com/anthropics/claude-code/issues/94491).
+These are reporter observations, not provider guarantees or evidence about the
+installed account. Suggested argv transport violates credential secrecy; splitting
+or shrinking stored JSON changes provider storage semantics. None supplies the
+missing preservation proof. Provider-owned refresh alone is not established as a
+complete solution.
+
+**Planning disposition:** retain the existing repair architecture and its red
+native acceptance. No eligible writer mechanism has been established. The next
+implementation slice remains blocked on that capability; containment remains a
+separate draft choice. Repeating unchanged probes or passing file-backed tests
+cannot resolve either boundary. Wild success is silent native refresh with the
+same readers; the failure to prevent is a reported save error after OAuth rotation
+and destructive local replacement, leaving neither credential usable.
+
 ## Remaining implementation and acceptance
 
-1. Select and prove an eligible writer mechanism before replacing the production
+1. **This slice — writer capability proof and replacement (blocked).** Select and
+   prove an eligible writer mechanism before replacing the production
    transport and exclusive fixture. The private password-taking candidate is excluded.
    Preserve JSON validation, readback, managed login locking, replacement checks,
    omitted refresh tokens, unknown fields and the 15-second HTTP timeout. No extra
@@ -260,4 +300,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check (October 28 realign; prose only) — `git diff --check` and `lf context`: PASS; no Rust changes or test reruns. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.
+Check (October 28 kickoff; prose only) — `git diff --check` and `lf context`: PASS; source/upstream review adds no native mutation or test rerun. Prior `ed6c82b2b` decoder: PASS (1), native acceptance: FAIL (8 executed, Unicode passes, 4 large-value failures, all cleaned), format/Clippy: PASS. Gate retains affected suites and complete acceptance; Infrastructure retains installed verification.

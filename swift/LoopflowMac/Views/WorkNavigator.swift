@@ -166,7 +166,7 @@ struct WorkNavigator: View {
 
     private func waveRow(_ wave: WaveRoadmap) -> some View {
         waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
-                count: wave.tasks.items.count { !$0.task.isTerminal }, unavailableReason: wave.tasks.unavailableReason)
+                count: model.startedTaskCount(wave), unavailableReason: wave.tasks.unavailableReason)
     }
 
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
@@ -191,7 +191,7 @@ struct WorkNavigator: View {
                 if let unavailableReason {
                     Image(systemName: "exclamationmark.triangle").help(unavailableReason)
                 } else {
-                    Text("\(count)").font(Typography.code(10)).help("\(count) open Tasks")
+                    Text("\(count)").font(Typography.code(10)).help("\(count) working or autonomous Tasks")
                 }
             }.font(Typography.body(13)).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -201,7 +201,7 @@ struct WorkNavigator: View {
                 .contentShape(RoundedRectangle(cornerRadius: 6))
         }.buttonStyle(.plain)
             .modifier(FocusedWork(focus: $focusedWork, reference: reference))
-            .accessibilityLabel("\(name), \(count) open Tasks")
+            .accessibilityLabel("\(name), \(count) working or autonomous Tasks")
             .accessibilityIdentifier("work-wave-\(reference?.id ?? "repository")")
             .matchedGeometryEffect(id: scope, in: scopeTitle)
     }

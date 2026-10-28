@@ -108,3 +108,10 @@ open until Jack Heart closes it.
    sessions, with hook errors on switch). *split → LOO-677*.
 
 Jack Heart, 2026-10-28: do not launch another dev app; prove later fixes headless.
+8. MTG-177 stuck in sidebar as Done. *split → LOO-679* (unbound Initiative = repository Wave).
+   Row label/gutter = Session program report (Done = hosting lf exited 0), not Task state;
+   whether rows should show Task state is an open product question.
+9. Remove the Tasks pane from Wave/repo views ("distracting for now"). *fix* — tiles part
+   hidden by default (`WaveViewPart.hiddenByDefault`), Show… restores it. b1f29930c.
+10–12. Window resize distorts fonts; full screen doesn't fill; Dock icon doesn't raise a
+   repo window. *split → LOO-680* (needs a display).

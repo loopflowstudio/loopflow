@@ -210,13 +210,14 @@ struct WorkNavigationTests {
         #expect(model.navigation.sidebarWaveID == nil)
     }
 
-    @Test("A Wave row counts its open Tasks, not every Task it ever had")
-    func waveRowCountsOpenTasks() throws {
+    @Test("A Wave row counts its working and autonomous Tasks, not backlog or done")
+    func waveRowCountsStartedTasks() throws {
         let model = try dashboardModel()
+        // wave-1: shipping issue-now counts; unstarted, never-started and completed Tasks don't.
+        #expect(model.startedTaskCount(try #require(model.visibleRoadmaps.first { $0.wave.id == "wave-1" })) == 1)
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         let row = try navigator.inspect().find(viewWithAccessibilityIdentifier: "work-wave-wave-1")
-        #expect(try row.find(text: "3").string() == "3")
-        #expect(throws: (any Error).self) { try row.find(text: "4") }
+        #expect(try row.find(text: "1").string() == "1")
     }
 
     @Test("Shipping Tasks sit under an Autonomous heading below the Working Tasks, in light and dark",

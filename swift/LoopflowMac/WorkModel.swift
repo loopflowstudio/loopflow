@@ -1855,6 +1855,12 @@ final class WorkModel {
         }
     }
 
+    /// A Wave row's count: its board's Working and Autonomous columns, not Backlog or Done.
+    func startedTaskCount(_ wave: WaveRoadmap) -> Int {
+        let standup = WaveStandup(tasks: wave.tasks.items, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
+        return standup.working.count + standup.autonomous.count
+    }
+
     /// Below the Working Tasks: the scope's Autonomous Tasks, as the Wave board buckets
     /// them (shipping, no one's turn). Dashboards and Available/Busy filters have none.
     var sidebarAutonomousTaskIDs: [String] {

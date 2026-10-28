@@ -2,8 +2,9 @@
 
 2026-10-27. Accepted outcome: Jack Heart's Task brief and comment
 `ab839681-400b-44b9-9c3e-7b32b392dadc` authorize repair through merge.
-Implementation and focused verification are complete. Gate and delivery remain
-with the selected Graph.
+Reconciled 2026-10-27 against `d98b9f4e4e`. Implementation and focused
+verification are complete. Gate and delivery remain with the selected Graph;
+no product decision is pending.
 
 ## Problem and demo
 
@@ -35,6 +36,12 @@ Non-force Git removal refuses tracked/untracked edits but can remove ignored
 files. This hotfix does not promise ignored-artifact preservation in a finished
 checkout. Earlier shell tests stubbed `lf`; the added fixture executes the built
 CLI so it can detect the original deletion rather than just its invocation.
+
+Upstream `0d72f072a4` is integrated by `d98b9f4e4e`; its document-context
+changes do not alter cleanup. Infrastructure and its immediate Release child's
+complete goal/memory files were reviewed. Release's operation-entry lesson
+supports the existing real-CLI script fixture and the separate installed proof;
+no change to the accepted cleanup approach follows.
 
 ## Chosen approach
 
@@ -69,27 +76,6 @@ candidate. Keep current network batching/time bounds; no per-worktree provider
 query, fetch loop, new cache, daemon or retry. Dry-run uses the same classification
 and performs no checkout/ref deletion. Real pruning retains its existing main
 refresh; acceptance fixtures hold facts constant across dry-run and mutation.
-
-## Delete — do not maintain
-
-Completed; no remaining deletion targets:
-
-- Removed `WorktreePrunePolicy`, `abandoned_prune_reason`, `branch_is_stale`,
-  timestamp plumbing and every policy argument.
-- Removed prune reasons `RemoteGone`, `Stale`, `SquashMerged` and `Terminal`;
-  listing observations remain. Removed `Listing.pull_requests_known` and the
-  optional `RemoteFacts.pull_requests` wrapper it alone needed. `RemoteOutcome`
-  still reports network failure; missing PR evidence never authorizes removal.
-- Inlined the surviving two-state PR decision after protections and dirty-file
-  handling. Removed `worktree_prune_reason` and its three exclusive unit tests;
-  real-CLI tests prove dirty retention and closed-PR removal on the surviving path.
-- Prune targets require a branch and matched head. Detached targets and the
-  removal helper's repeated default-branch check are gone; classification already
-  excludes both. The lease-time branch/head/cleanliness checks remain.
-- Removed implicit force from the shared removal primitive; each caller now
-  names its semantics. Reuse shared Git diagnostics for conditional ref deletion.
-
-No second cleanup policy, publication ledger or compatibility path is needed.
 
 ## Implementation and remaining work
 
@@ -142,10 +128,10 @@ uv run pytest python/tests/test_disk_cleanup.py
 ```
 
 The affected runner supplies formatting/static analysis, including
-`cargo clippy --all-targets -- -D warnings`; reconcile the exact test selection
-with the final removal-primitive caller inventory. The Python acceptance uses
-the built candidate (build `cargo build -p loopflow --bin lf` if the harness has
-not materialized it). Linux CI owns portable Rust coverage; macOS owns the
+`cargo clippy --all-targets -- -D warnings`. The selection includes the
+release-lock callers of the shared removal primitive. The Python acceptance
+builds its candidate with `cargo build -p loopflow --bin lf` before running it.
+Linux CI owns portable Rust coverage; macOS owns the
 mechanical script checks. No display or person is required. Installed verification
 repeats the same disposable scenario with the installed executable/script.
 
@@ -165,4 +151,4 @@ redesign, Git gc/prune recovery operations and account configuration are exclude
 Ignored build-output retention remains governed by the existing script contract;
 this hotfix does not redefine ignored files as source or claim they are backed up.
 
-Check: 2026-10-27 `cargo test -p loopflow --lib git::worktrees::tests::prune_`, `cargo test -p loopflow --lib git::tests::local_branch_deletion_retains_a_new_head`, `cargo test -p loopflow --test integration wt_prune_branches::worktree_prune` — 7 passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` — passed. Prior explicit-force and macOS script acceptance receipts: `315e2deda34e7e1ee6675ea8429d8fd6cec58b62:scratch/keep-unpublished-worktrees.md`. Gate owns affected suites; the operator owns installed acceptance.
+Check: 2026-10-27 `git diff --check` — passed; `lf context` — memory/scratch within both limits. Reused unchanged-code results: `cargo test -p loopflow --lib git::worktrees::tests::prune_`, `cargo test -p loopflow --lib git::tests::local_branch_deletion_retains_a_new_head`, `cargo test -p loopflow --test integration wt_prune_branches::worktree_prune` — 7 passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` — passed. Prior explicit-force and macOS script acceptance receipts: `315e2deda34e7e1ee6675ea8429d8fd6cec58b62:scratch/keep-unpublished-worktrees.md`. Gate owns affected suites; the operator owns installed acceptance.

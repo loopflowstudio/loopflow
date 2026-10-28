@@ -18,6 +18,10 @@ Archives remain untouched. A reserved destination proves no move; its sibling
 `receipt.json` records completion, checkpoint and byte verification. Source absence
 applies only at the recorded move; retain later telemetry separately.
 
-The compress inspection still reports installed `lf 0.14.19`; integrated source
-v0.15.0 proves no installation or credential recovery. `.lf/tmp` is absent;
-archive any telemetry recreated before returning to automatic sync.
+The 2026-10-28 realign inspection still reports installed `lf 0.14.19`;
+integrated source v0.15.0 proves no installation or credential recovery.
+Fresh telemetry exists after the preceding compression. This pass reserves
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-eyb90t_7/tmp`
+for the authorized bridge. Its sibling `receipt.json` records checkpoint, exact
+byte verification and source absence after the move; reservation alone proves
+no archive. Later telemetry remains separate.

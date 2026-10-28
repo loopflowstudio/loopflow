@@ -2,7 +2,7 @@
 
 Status (2026-10-28): **Native writer unresolved; implementation incomplete.** The production
 `security -i` transport remains defective; no native acceptance fixture exists.
-Findings 35–36 reject the tested access constructions and authentication/group
+Findings 35–37 reject the tested access constructions and authentication/group
 retention alternatives. A distinct supported mechanism is required before another
 mutation probe; public interfaces are not declared exhausted and no scope change
 is accepted. Live acceptance separately needs browser reconnection for
@@ -41,6 +41,35 @@ advancing work without plumbing failures; no quantitative Wave target is selecte
 
 The target is one native writer shared by refresh and activation. Diagnostics,
 a size refusal, successful API status or post-write repair do not prove preservation.
+
+## Demo and planning decision
+
+Demo: after a naturally required refresh on the repaired installation,
+`lf account claude --json` accepts the same identity and reports verified capacity;
+an existing native Claude Session remains usable. Gate first demonstrates exact
+ordinary, 2,048-byte and 8,192-byte create/replace round trips through the production
+writer and the independent native reader, with old bytes and access retained after
+a failed save. Infrastructure owns installed verification after browser reconnection.
+
+Kickoff decision (2026-10-28): retain this plan and Jack Heart's accepted outcome.
+The replacement architecture remains **draft and blocked on a supported writer**;
+the existing diagnostics are insufficient for shipment. Finding 37's read-only
+check did not identify the missing authorization path. No new mutation probe or
+live-account poll was justified. This is not a claim that all public APIs are
+exhausted, nor approval to use private interfaces or select LOO-325.
+
+**This slice — blocked:** replace the native transport and its exclusive fixture
+together once a candidate meets the preservation conditions below. The focused
+test must invoke that production writer, read exact bytes independently, and show
+an injected failed save retains the prior readable item and access. Until there
+is a viable candidate, no executable implementation sequence or native test command
+can honestly be selected. Browser reconnection unblocks live diagnosis only; it
+does not resolve this writer dependency.
+
+Success means refresh remains invisible to an ongoing Session, including larger
+provider payloads. The critical failure is a reported save error after partial
+replacement or access loss. A return code, readback mismatch, or attempted rollback
+cannot turn that failure into preservation evidence.
 
 ## Surviving implementation
 
@@ -213,6 +242,27 @@ do not collect one speculatively. Private interfaces, trust changes or provider-
 refresh require a scope decision Jack Heart has not made; LOO-325 stays unselected.
 No new candidate qualifies for native round-trip and failed-save-preservation tests.
 
+### 37. Local authentication context is not a demonstrated bridge (2026-10-28)
+
+Read-only review tested whether `kSecUseAuthenticationContext` could supply
+finding 36's missing authority without collecting another secret. Apple's
+[API documentation](https://developer.apple.com/documentation/security/ksecuseauthenticationcontext)
+describes reusable `LAContext` authentication. It does not promise preservation
+of a file-keychain item's partition ACL. [TN3137](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+distinguishes file-keychain ACLs from data-protection access controls; SecItem uses
+a shim for the former. [kSecAttrAccess](https://developer.apple.com/documentation/security/ksecattraccess)
+configures the file-keychain ACL, not the data-protection access-control object.
+
+In pinned Apple source, LAContext externalization occurs in the
+[data-protection implementation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/sec/Security/SecItem.m#L1418-L1425).
+The separate [file-keychain update](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecItem.cpp#L2517-L2526)
+still modifies content before setting access; that implementation contains no
+handling of `kSecUseAuthenticationContext` or `kSecUseCredentialReference`.
+Thus this reviewed path supplies no context-to-database-credential bridge and no
+atomic access-preserving replacement. This is a source conclusion, not an installed
+securityd trace or a general public-API impossibility proof. No authentication,
+Keychain mutation, real credential read, or Session change ran.
+
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair remain excluded (7). Local preservation must
 prove readable old bytes and unchanged access, but cannot prove server validity
@@ -300,4 +350,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — realign (2026-10-28): `git diff --check` and `lf context` pass; source inspection agrees with the remaining plan, no code or probe rerun. Gate owns affected checks; writer mechanism, native acceptance and installed acceptance remain unresolved.
+Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; documentation/source review only, no code or mutation probe rerun. Gate owns affected checks; writer mechanism, native acceptance and installed acceptance remain unresolved.

@@ -7,6 +7,11 @@ replacement passes, large replacements destroy old data, and Unicode exposes a
 readback encoding failure. The defective `security -i` writer remains, with no
 eligible replacement established. This is a failing acceptance boundary, not a repair.
 
+Reconciled against `b909e2f71` on 2026-10-28: finding 38's missing boundary is
+implemented in `1abbf832a` and simplified in `b909e2f71`. The writer candidate remains
+excluded, and findings 39–40 retain the resulting failures. No acceptance constraint
+or delivery boundary changed.
+
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Infrastructure owns release, CLI/Desktop/helper installation and installed acceptance.
@@ -66,6 +71,13 @@ Diagnostics and repeated rejected probes cannot close these gaps or justify ship
   `lf/commands/account_status.rs::managed_rows` observes and polls native identity.
   Existing diagnostic/recovery fields carry failures; SQLite evidence is derived.
   Four diagnostic tests prove redaction, not preservation. No migration, DTO or Swift change.
+- The explicit native fixture exercises refresh, native storage, identity, usage and
+  account reporting with mocked HTTP. Its eight cases cover scoped replacement,
+  two account-name lengths, Unicode and invalid-input rejection. It observes old
+  bytes after each case, but only invalid-input rejection currently passes a
+  failed-save preservation assertion. Account metadata equality proves neither ACL
+  nor encoding-group preservation. Creation through the production writer, ambient
+  selection and injected storage failures remain uncovered.
 
 ## Evidence and excluded alternatives
 
@@ -160,15 +172,15 @@ they establish neither installed binary equivalence nor public-API exhaustion.
   forced to expire or put in argv. Supported
   `lf account connect claude jack@loopflow.studio` needs browser sign-in; no sign-in
   or route change was attempted. Further polling without recovery adds no acceptance.
-- **Acceptance routing (38, 2026-10-28):** source inspection at `f1daf112a`
+- **Earlier acceptance gap (38, 2026-10-28; closed by 39):** source inspection at `f1daf112a`
   confirms `read_claude_login` and `write_claude_login` compile out their native
   dispatch under `cfg(test)`. The direct writer diagnostic fixture substitutes
   `security` through PATH, while `fresh_claude_token` tests use files. Combining
   those passing suites would still leave the refresh-to-native-save boundary
   untested. A standalone test binary alone does not solve this: production OAuth
-  URLs ignore the test endpoint variables. The native acceptance design must
-  exercise the actual storage implementation with isolated synthetic homes and
-  mocked HTTP, without adding a second writer or enabling real OAuth requests.
+  URLs ignore the test endpoint variables. Finding 39 resolves this with the
+  library test build's mocked HTTP and a test-only native-home selection, without
+  adding a second writer or enabling production endpoint overrides.
   This finding adds no native experiment or evidence about the live failure.
 - **Production native acceptance (39, 2026-10-28):** the explicit
   `native_refresh_replaces_exact_bytes_and_preserves_failed_saves` test executes
@@ -203,16 +215,15 @@ after an unprotected commit. **It is not an accepted or proven implementation.**
 
 The password-taking entry is declared in Apple's private
 [`SecKeychainItemPriv.h`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItemPriv.h)
-(`SecKeychainItemSetAccessWithPassword`, lines 190–199), and is absent from this
-Machine's public SDK headers. Its implementation supplies passphrase credentials
-to the ACL edit. The accepted public-interface constraint excludes that candidate;
+(`SecKeychainItemSetAccessWithPassword`, lines 190–199). Its implementation supplies
+passphrase credentials to the ACL edit. The accepted public-interface constraint excludes that candidate;
 no password was requested or read, no private entry invoked, and no previously
 rejected mutation probe repeated. A transaction alone supplies no partition
 authority, and findings 22–26 still leave group/ACL rollback and pre-commit
 verification unproved. The fixture is ready to judge an eligible writer, but no
-mechanism meeting the existing constraints has been established. Dependent writer
-implementation and delivery stop here; this does not establish API exhaustion or
-authorize a scope/trust/storage change.
+mechanism meeting the existing constraints has been established. Writer implementation
+and delivery remain incomplete; this does not establish API exhaustion or authorize
+a scope/trust/storage change. No concrete product decision is ready for acceptance.
 
 ## Remaining implementation and acceptance
 
@@ -223,22 +234,20 @@ authorize a scope/trust/storage change.
    OAuth request or automatic retry. Bound new subprocesses to 15 seconds, close
    stdin and reap on every exit. Report uncertain commits and re-read before another
    write; storage failure alone never requires sign-in or deletion.
-2. Prove production create/replace at ordinary, exactly 2,048 and exactly 8,192
-   serialized bytes, including Unicode/escaping and unrelated fields. Use disposable
-   items created by `security` with default access; candidate and existing readers
-   must return exact bytes without intervention. Verify scoped/ambient selection,
-   account/access preservation and varied service/account prefix lengths. Invalid
-   JSON, injected pre-commit failure and denied/locked storage must leave old data
-   readable; cover partition and partial-commit failures. Compare booleans/lengths,
-   never values in output. Do not apply an unproved candidate to real credentials.
-3. Make the existing native fixture pass after selecting an eligible writer. It
-   already compiles/invokes production storage through `fresh_claude_token`, identity,
-   usage and account-report consumers, while ordinary tests remain file-backed.
-   Extend it for creation, ambient service selection, denied/locked storage,
-   injected pre-commit failure and partition/partial-commit failures. Failed saves
-   must retain old readable data as well as sanitized `unavailable`. Preserve
-   managed-file, replacement-race and native-activation coverage. Unavailable native
-   infrastructure is a failed check, not green; Linux cannot replace macOS proof.
+2. Correct native reader handling of `security -w`'s hex-rendered Unicode bytes,
+   retaining exact JSON bytes and unrelated fields. This distinct readback defect
+   remains even with a large-value writer; fixing it alone supplies no failed-save
+   preservation or complete repair.
+3. Complete the existing native fixture's acceptance: exact ordinary/2,048/8,192-byte
+   production creation and replacement, Unicode/escaping, scoped/ambient selection,
+   account/access preservation and varied service/account prefix lengths. Disposable
+   existing items retain `security`'s default access; candidate and existing readers
+   must return exact bytes without intervention. Extend invalid-input coverage with
+   injected pre-commit, denied/locked, partition and partial-commit failures, asserting
+   old readable bytes and sanitized `unavailable` on failed saves. Keep managed-file,
+   replacement-race and native-activation coverage. Output stays limited to
+   booleans/lengths; no unproved candidate reaches real credentials. Missing native
+   infrastructure remains a failed check; Linux cannot replace macOS proof.
 4. Diagnose recurrence through supported installed account operations, recording
    sanitized stage/code, storage kind and whether refresh occurred. Never force
    expiry, revoke tokens, switch routes or damage a real item. Keep recovery docs
@@ -246,13 +255,7 @@ authorize a scope/trust/storage change.
    must meet the demo above. Unexpired polls and synthetic success cannot
    establish live acceptance or complete the Task.
 
-## Delete — do not maintain
-
-The native fixture uses one typed case payload and Tokio's current-thread test
-runtime; handwritten JSON field decoding and nested runtime setup are removed.
-Subprocess stderr has no consumer and goes directly to null, eliminating its
-reader thread and retained bytes. Stdout comparison, deadlines, cleanup and all
-eight acceptance cases remain. These reductions change no production storage.
+## Replacement boundary
 
 - Retired command-boundary and `scratch/keychain-access-probe/` harnesses stay in
   Git at the references above. Do not restore them as acceptance coverage or
@@ -288,4 +291,4 @@ uv run python scripts/test_network.py cargo test -p loopflow --lib native_refres
 Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — native command above: FAIL (same 8 cases, 5 storage failures, all cleaned; build passed with an ld unwind-size warning); `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: PASS. Gate retains complete acceptance and Infrastructure retains installed verification.
+Check — `git diff --check`: PASS; reused `b909e2f71` native command above: FAIL (8 cases, 5 storage failures, all cleaned; build passed with an ld unwind-size warning), `cargo fmt` / `cargo clippy --all-targets -- -D warnings`: PASS. No code changed; gate retains complete acceptance and Infrastructure installed verification.

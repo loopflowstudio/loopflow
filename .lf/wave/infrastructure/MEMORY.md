@@ -791,18 +791,17 @@ with five-minute turn grace. Configured acceptance remains open.
 ## Claude credential preservation (LOO-661, 2026-10-28)
 
 Jack Heart authorized preservation-first repair; Infrastructure owns installation.
-Command probes found destructive `security -i` failures at 2/8 KiB. Copied partition
-access denied creation; omitting it or trusting `security` caused reader timeouts.
-Originals survived creation probes; safe replacement/group identity remain unproved.
-Source review found no creation authority, group retention or LAContext bridge;
-neither a password alone nor API exhaustion is proved. `invalid_grant` precedes
-saving; browser reconnection leaves historical save causality unresolved. Rollback
-cannot undo OAuth rotation; LOO-325 stays separate.
+Mocked HTTP plus disposable-home native dispatch exposes production storage:
+2/8 KiB `security -i` replacements destroy old bytes; Unicode writes exactly but
+hex-rendered readback fails. Ordinary ASCII and
+invalid-input preservation pass. File/stand-in tests missed this boundary.
 
-File-backed refresh tests and a substituted `security` prove no native persistence.
-Production OAuth ignores test URLs; a separate binary alone supplies no isolation.
-Evidence:
-`775fe0901:scratch/loo-661-save-refreshed-claude.md`, findings 30–38.
+No eligible writer is proved. Partition authority and rollback must work together;
+copied-access/trust probes failed, and the transaction/password candidate uses a
+private API. Account equality proves no ACL/group preservation. API exhaustion is
+unproved. `invalid_grant` precedes saving; browser reconnection leaves historical
+causality unresolved. Rollback cannot undo OAuth rotation; LOO-325 stays separate.
+Evidence: `b909e2f71:scratch/loo-661-save-refreshed-claude.md`, findings 30–40.
 
 ## Codex credential recovery (LOO-665, 2026-10-28)
 

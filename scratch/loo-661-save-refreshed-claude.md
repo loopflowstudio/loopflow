@@ -1,6 +1,12 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status: **Draft implementation mechanism; diagnostics only.**
+Status: **Implementation blocked on writer design; diagnostics only.**
+Implementation review 2026-10-27: the checked-in writer still uses the transport
+invalidated by finding 30. No compatible replacement mechanism is selected or
+proved. Dependent implementation and delivery cannot proceed from this draft;
+the next design must address both the command-buffer corruption and native
+partition-access counterexamples before replacing production code. This is a
+technical prerequisite, not a request to relax Jack Heart's accepted constraints.
 Kickoff reviewed 2026-10-27: replacement writer remains unproved; a new disposable
 counterexample establishes destructive failure in the existing transport (finding 30).
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
@@ -261,4 +267,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — kickoff (2026-10-27): `uv run python scratch/claude_command_boundary_probe.py` completed six cases and six cleanups, exposing four destructive failures; `git diff --check` and `lf context` pass. No Rust changes or Rust rerun; native-writer and installed-refresh acceptance remain unproved.
+Check — implement (2026-10-27): source inspection confirms the unchanged writer; `git diff --check` and `lf context` pass. No Rust changes or repeated probes/tests; native-writer design remains blocked and installed-refresh acceptance remains unproved.

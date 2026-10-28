@@ -10,7 +10,6 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -838,26 +837,13 @@ fn personal_settings(
     })
 }
 
-/// One connection per store for the process, the receipt ledger's when it has
-/// one: each new connection reads the whole schema, and every config load asks
-/// for your values.
+/// The receipt ledger's connection when this Process has one: each new
+/// connection reads the whole schema, and every config load asks for your values.
 fn settings_reader(path: &Path) -> anyhow::Result<crate::store::sqlite::SqliteStore> {
-    static READERS: OnceLock<Mutex<HashMap<PathBuf, crate::store::sqlite::SqliteStore>>> =
-        OnceLock::new();
-    let mut readers = READERS
-        .get_or_init(Default::default)
-        .lock()
-        .expect("settings readers mutex poisoned");
-    if let Some(store) = readers
-        .get(path)
-        .cloned()
-        .or_else(|| crate::journal::retained_ledger(path))
-    {
-        return Ok(store);
+    match crate::journal::retained_ledger(path) {
+        Some(store) => Ok(store),
+        None => Ok(crate::store::sqlite::SqliteStore::open_read_only(path)?),
     }
-    let store = crate::store::sqlite::SqliteStore::open_read_only(path)?;
-    readers.insert(path.to_path_buf(), store.clone());
-    Ok(store)
 }
 
 fn settings_value(values: &BTreeMap<String, String>) -> serde_yaml_ng::Value {

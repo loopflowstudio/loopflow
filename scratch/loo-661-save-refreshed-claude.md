@@ -33,31 +33,13 @@ distinct supported writer addressing findings 35–37: creation with the necessa
 partition authority, or replacement retaining the existing encoding group/access.
 A password alone is unproved; do not collect one speculatively or repeat rejected
 probes. Private interfaces, trust changes and provider-owned refresh require a
-scope decision Jack Heart has not made. Diagnostics alone cannot ship this repair.
+scope decision Jack Heart has not made. Ordinary repair remains authorized; the
+gap is technical. Diagnostics alone cannot ship this repair.
 
 Browser reconnection unblocks live diagnosis only: `invalid_grant` returns before
 `write_claude_login`. Local rollback cannot establish server token validity after
 OAuth rotation because refresh precedes saving without a shared transaction.
 Neither dependency relaxes the preservation requirement or proves a native writer.
-
-### Planning decision, 2026-10-28
-
-Retain this draft and its complete acceptance scope. Source inspection still finds
-the `security -i` transport and refresh-before-save order; no replacement has been
-implemented. The next useful evidence is a supported writer with exact native
-replacement and failure-preservation proof, not another diagnostic-only change.
-This is a technical mechanism gap, not missing permission for ordinary repair.
-If resolving it requires changing storage authority, provider refresh ownership or
-trust policy, that changed outcome needs Jack Heart's decision; none is selected.
-
-Apple's [current TN3137](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
-(September 24 revision, checked October 28) still distinguishes file-based ACLs
-from data-protection access groups and requires the file-based implementation for
-existing file-based items. Its latest addition concerns backup entropy files,
-not an atomic compatible replacement API. Thus it supplies no new mechanism for
-the rejected SecItem or alternate-store routes. This review proves neither public
-API exhaustion nor the historical failure's cause. No mutation probe or live
-refresh was repeated.
 
 ## Surviving implementation
 
@@ -87,8 +69,13 @@ October 28's `SecItemUpdate`/`kSecAttrAccess` and partition-password recheck
 established no new candidate; citations:
 `157cafb2a7b912a1573f839c2c2359e53088ec9f:scratch/loo-661-save-refreshed-claude.md`,
 “Required outcome and next decision.”
+October 28's TN3137 review found file-keychain ACLs still distinct from
+access groups, and no new compatible atomic writer. Its backup-entropy addition
+changed neither conclusion. Full review and link:
+`2cd63f38cfe9c16422feb37b4c6200da57342208:scratch/loo-661-save-refreshed-claude.md`,
+“Planning decision, 2026-10-28.” No mutation or live refresh was repeated.
 Findings retain their original numbers below for lookup. The evidence constrains
-replacement; it is not production acceptance.
+replacement; it establishes neither production acceptance nor API exhaustion.
 
 Native probes used disposable `loopflow-LOO-661-*-probe-<uuid>` services, synthetic
 bytes, bounded/reaped children, captured output and successful cleanup. They neither
@@ -250,4 +237,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); source and current Apple guidance rechecked, memory/scratch fit; prose only, no test rerun or native probe; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 compress); prose only, no test rerun; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.

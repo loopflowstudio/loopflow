@@ -715,7 +715,17 @@ pub fn load_wave_config(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Option<Config>, LoadError> {
-    let layers = config_layers(repo_root, wave)?;
+    load_wave_config_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
+}
+
+/// [`load_wave_config`] with your `lf set` values already read, so a reading
+/// of many Tasks reads them once per repository and Wave.
+pub fn load_wave_config_with(
+    repo_root: Option<&Path>,
+    wave: Option<&str>,
+    personal: &PersonalSettings,
+) -> Result<Option<Config>, LoadError> {
+    let layers = config_layers_with(repo_root, wave, personal)?;
     if layers.is_empty() {
         return Ok(None);
     }
@@ -773,6 +783,14 @@ pub fn config_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Vec<ConfigLayerValues>, LoadError> {
+    config_layers_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
+}
+
+fn config_layers_with(
+    repo_root: Option<&Path>,
+    wave: Option<&str>,
+    personal_values: &PersonalSettings,
+) -> Result<Vec<ConfigLayerValues>, LoadError> {
     let mut layers = Vec::new();
     let global_path = global_config_path();
     if let Some(value) = load_yaml_file(&global_path)? {
@@ -785,7 +803,7 @@ pub fn config_layers(
     // Your values for every repository rank with the global file; yours for
     // the repository and then the Wave rank above every committed layer.
     let mut personal = Vec::new();
-    if let Some((path, settings)) = personal_settings(repo_root, wave) {
+    if let Some((path, settings)) = &personal_values.0 {
         let layer = |layer, values: &BTreeMap<String, String>| {
             (!values.is_empty()).then(|| ConfigLayerValues {
                 layer,
@@ -824,8 +842,19 @@ pub fn config_layers(
     Ok(layers)
 }
 
-/// Your `lf set` values in effect for this repository and Wave. The local
-/// store is optional here: absent, or older than this build, it holds none.
+/// Your `lf set` values in effect for one repository and Wave, with the store
+/// they came from.
+#[derive(Debug, Clone)]
+pub struct PersonalSettings(Option<(PathBuf, crate::store::sqlite::ScopeSettings)>);
+
+impl PersonalSettings {
+    /// The local store is optional here: absent, or older than this build, it
+    /// holds none.
+    pub fn read(repo_root: Option<&Path>, wave: Option<&str>) -> Self {
+        Self(personal_settings(repo_root, wave))
+    }
+}
+
 fn personal_settings(
     repo_root: Option<&Path>,
     wave: Option<&str>,

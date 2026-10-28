@@ -1537,10 +1537,11 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 pub(crate) fn resolve_task_agent(
     worktree: &Path,
     wave: Option<&str>,
+    personal: &crate::config::PersonalSettings,
     agent: Option<&str>,
     skill: Option<&crate::graph::Skill>,
 ) -> String {
-    let config = crate::config::load_wave_config(Some(worktree), wave)
+    let config = crate::config::load_wave_config_with(Some(worktree), wave, personal)
         .ok()
         .flatten()
         .unwrap_or_default();
@@ -1567,12 +1568,13 @@ async fn select_task_agent(
 fn task_configuration_refusal(
     task: &Task,
     wave: Option<&str>,
+    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     checkout_execution_boundary(
         worktree,
-        &resolve_task_agent(worktree, wave, task.agent.as_deref(), skill),
+        &resolve_task_agent(worktree, wave, personal, task.agent.as_deref(), skill),
     )
     .err()
     .map(|error| error.to_string())
@@ -1583,9 +1585,10 @@ fn task_configuration_refusal(
 pub(crate) fn task_process_refusal_after(
     task: &Task,
     wave: Option<&str>,
+    personal: &crate::config::PersonalSettings,
     latest: Option<&crate::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, wave, None)
+    task_configuration_refusal(task, wave, personal, None)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 

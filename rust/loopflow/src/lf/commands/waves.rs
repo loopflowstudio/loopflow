@@ -1541,9 +1541,8 @@ fn snapshot_task_runtime(
     status: TaskState,
     completion_pending: Option<String>,
     owner: Option<crate::durable::TaskOwner>,
+    provider: String,
 ) -> TaskRuntimeSnapshot {
-    let config = crate::config::load_config_or_default(task.worktree.as_deref());
-    let (provider, _) = crate::config::parse_agent(config.agent());
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         reason: if status.is_terminal() {
@@ -1683,6 +1682,12 @@ struct DetailReads<'a> {
     selections: HashMap<crate::durable::TaskId, (String, crate::work::wave::setup::SetupSource)>,
     /// Each Task Wave's name, which selects its agent; read once per Wave.
     wave_names: HashMap<crate::id::WaveId, String>,
+    /// Each Task Wave's and repository's checkout with your `lf set` values,
+    /// which select its agent; read once per Wave and repository.
+    personal: HashMap<
+        (Option<crate::id::WaveId>, crate::durable::RepositoryId),
+        (std::path::PathBuf, crate::config::PersonalSettings),
+    >,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
     /// Each Task's latest Graph and what its execution reads, asked once.
@@ -1700,6 +1705,7 @@ impl<'a> DetailReads<'a> {
         let mut defaults = HashMap::<_, (String, crate::work::wave::setup::SetupSource)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
+        let mut personal = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
                 Some(name) => (name.clone(), crate::work::wave::setup::SetupSource::Task),
@@ -1719,6 +1725,18 @@ impl<'a> DetailReads<'a> {
                 if let Some(wave) = store.sqlite.get_wave(id)? {
                     wave_names.insert(id.clone(), wave.slug().to_owned());
                 }
+            }
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                personal.entry((task.wave_id.clone(), task.repository_id.clone()))
+            {
+                let repo = crate::ops::task::repository_for_task(store, task)?;
+                let wave = task
+                    .wave_id
+                    .as_ref()
+                    .and_then(|id| wave_names.get(id))
+                    .map(String::as_str);
+                let values = crate::config::PersonalSettings::read(Some(&repo), wave);
+                entry.insert((repo, values));
             }
         }
         let mut shipping = HashMap::new();
@@ -1742,6 +1760,7 @@ impl<'a> DetailReads<'a> {
             facts,
             selections,
             wave_names,
+            personal,
             shipping,
             graphs,
             execution,
@@ -1789,7 +1808,24 @@ async fn snapshot_task_detail(
         .get(&task.id)
         .map(|reason| crate::ops::task::completion_pending_text(task, reason));
     let owner = facts.owners.get(&task.id).cloned();
-    let runtime = snapshot_task_runtime(&execution, task, status, pending, owner);
+    let wave = task
+        .wave_id
+        .as_ref()
+        .and_then(|id| reads.wave_names.get(id))
+        .map(String::as_str);
+    let (repo, personal) = reads
+        .personal
+        .get(&(task.wave_id.clone(), task.repository_id.clone()))
+        .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
+    let agent = crate::ops::task::resolve_task_agent(
+        task.worktree.as_deref().unwrap_or(repo),
+        wave,
+        personal,
+        task.agent.as_deref(),
+        None,
+    );
+    let (provider, _) = crate::config::parse_agent(&agent);
+    let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let machine_id = shared
         .checkouts
         .iter()
@@ -1812,24 +1848,18 @@ async fn snapshot_task_detail(
     let launch_refusal = if runtime.status == TaskState::Deferred {
         Some("Task is deferred; resume it before running a Graph".to_string())
     } else if worktree_blocker.is_none() {
-        crate::ops::task::task_process_refusal_after(
-            task,
-            task.wave_id
-                .as_ref()
-                .and_then(|id| reads.wave_names.get(id))
-                .map(String::as_str),
-            latest_event,
+        crate::ops::task::task_process_refusal_after(task, wave, personal, latest_event).or_else(
+            || {
+                matches!(
+                    acquisition.state,
+                    crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
+                )
+                .then(|| {
+                    "Task planning has invalidation or removal evidence; refresh its planning"
+                        .to_string()
+                })
+            },
         )
-        .or_else(|| {
-            matches!(
-                acquisition.state,
-                crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
-            )
-            .then(|| {
-                "Task planning has invalidation or removal evidence; refresh its planning"
-                    .to_string()
-            })
-        })
     } else {
         None
     };

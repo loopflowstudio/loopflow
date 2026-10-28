@@ -440,7 +440,7 @@ pub(crate) async fn codex_usage(
     let response = codex_request(connection, "account/rateLimits/read", json!({})).await?;
     let identity = crate::provider_auth::codex_identity_from_account(home, &account_response)
         .map_err(SubscriptionError::NeedsLogin)?;
-    let snapshot = response.get("rateLimits").filter(|value| !value.is_null());
+    let snapshot = response.get("rateLimits");
     let windows = codex_windows(snapshot)?;
     let plan = account_response
         .pointer("/account/planType")

@@ -355,21 +355,13 @@ impl ProviderAccountRoute {
     /// needs evidence that the configured authority is usable, not another
     /// secret-bearing representation to persist or log.
     pub(crate) async fn verify_ready(&self) -> Result<(), ProviderAccountError> {
-        self.check_identity().await?;
+        let account = self.check_account().await?;
+        let unavailable = |reason| ProviderAccountError::CredentialUnavailable {
+            provider: self.provider,
+            account_id: self.account_id.clone(),
+            reason,
+        };
         if self.provider == Provider::Codex {
-            let (AccountLogin::Stored { store, .. }
-            | AccountLogin::Replayed { catalog: store, .. }) = &self.login;
-            let account = store
-                .get_provider_account("codex", &self.account_id)
-                .await?
-                .ok_or_else(|| {
-                    ProviderAccountError::Runtime("selected account disappeared".into())
-                })?;
-            let unavailable = |reason| ProviderAccountError::CredentialUnavailable {
-                provider: self.provider,
-                account_id: self.account_id.clone(),
-                reason,
-            };
             let preferred = matches!(self.home, RouteHome::Isolated).then(|| self.account_home());
             let access = codex_access::resolve(&account, preferred)
                 .await
@@ -386,28 +378,25 @@ impl ProviderAccountRoute {
             access
                 .ensure_unchanged()
                 .map_err(|error| unavailable(error.to_string()))?;
-            return self.check_identity().await;
+        } else {
+            let home = self.credential_home();
+            crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
+                .await
+                .map_err(|error| unavailable(error.to_string()))?
+                .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
+                    provider: self.provider,
+                    accounts: format!(
+                        "{} (provider CLI reports no active OAuth login)",
+                        self.account_id
+                    ),
+                })?;
         }
-        let home = self.credential_home();
-        crate::provider_auth::prepare_provider_account_access_token(self.provider, &home)
-            .await
-            .map_err(|error| ProviderAccountError::CredentialUnavailable {
-                provider: self.provider,
-                account_id: self.account_id.clone(),
-                reason: error.to_string(),
-            })?
-            .ok_or_else(|| ProviderAccountError::NoAuthenticatedAccount {
-                provider: self.provider,
-                accounts: format!(
-                    "{} (provider CLI reports no active OAuth login)",
-                    self.account_id
-                ),
-            })?;
-        self.check_identity().await?;
+        self.check_account().await?;
         Ok(())
     }
 
-    async fn check_identity(&self) -> Result<(), ProviderAccountError> {
+    /// Validate the route's credential while retaining the catalog's profile home.
+    async fn check_account(&self) -> Result<ProviderAccount, ProviderAccountError> {
         let (AccountLogin::Stored { store, .. } | AccountLogin::Replayed { catalog: store, .. }) =
             &self.login;
         let accounts = store
@@ -421,7 +410,8 @@ impl ProviderAccountRoute {
         selected.home = Some(self.credential_home());
         identity::check_current_identity(&selected, &accounts)
             .await
-            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))
+            .map_err(|error| ProviderAccountError::Runtime(error.to_string()))?;
+        Ok(account.clone())
     }
 
     fn apply(&self, command: &mut Command) {
@@ -452,20 +442,21 @@ impl ProviderAccountRoute {
         command: &mut Command,
     ) -> Result<Option<fs::File>, ProviderAccountError> {
         self.apply(command);
-        if let (Provider::Codex, RouteHome::Isolated, AccountLogin::Stored { store, .. }) =
-            (self.provider, &self.home, &self.login)
-        {
-            return activation::prepare_isolated_codex(store, &self.account_id).await;
-        }
-        let (RouteHome::Shared { cause, .. }, AccountLogin::Stored { store, .. }) =
-            (&self.home, &self.login)
-        else {
+        let AccountLogin::Stored { store, .. } = &self.login else {
             return Ok(None);
         };
-        let launch_home =
-            activation::home_env(self.provider).and_then(|name| launch_env(command, name));
-        let native = activation::native_home(self.provider, launch_home.as_deref());
-        activation::activate(store, self.provider, &self.account_id, &native, *cause).await
+        match &self.home {
+            RouteHome::Isolated if self.provider == Provider::Codex => {
+                activation::prepare_isolated_codex(store, &self.account_id).await
+            }
+            RouteHome::Isolated => Ok(None),
+            RouteHome::Shared { cause, .. } => {
+                let launch_home =
+                    activation::home_env(self.provider).and_then(|name| launch_env(command, name));
+                let native = activation::native_home(self.provider, launch_home.as_deref());
+                activation::activate(store, self.provider, &self.account_id, &native, *cause).await
+            }
+        }
     }
 
     pub(crate) fn launch_as_blocking(

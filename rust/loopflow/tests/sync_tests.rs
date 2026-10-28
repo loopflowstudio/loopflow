@@ -1608,6 +1608,17 @@ fn run_sync_cli(repo: &TestRepo) -> std::process::Output {
         .unwrap()
 }
 
+fn assert_sync_succeeds(repo: &TestRepo) {
+    let output = run_sync_cli(repo);
+    assert!(
+        output.status.success(),
+        "lf sync failed in {}: {}\n{}",
+        repo.path().display(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn assert_sync_preserves_work_with_telemetry(ignored: bool) {
     let _env = EnvGuard::new(&[]);
     let repo = create_telemetry_sync_repo(ignored);
@@ -1636,12 +1647,7 @@ fn assert_sync_preserves_work_with_telemetry(ignored: bool) {
     }
     repo.create_file("ignored.txt", "ignored bytes\n");
 
-    let output = run_sync_cli(&repo);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_sync_succeeds(&repo);
     let checkpoint = git(repo.path(), &["rev-parse", "HEAD^1"]);
     assert_eq!(
         git(repo.path(), &["rev-parse", &format!("{checkpoint}^")]),
@@ -1689,12 +1695,7 @@ fn assert_sync_preserves_work_with_telemetry(ignored: bool) {
     }
     assert_eq!(git(repo.path(), &["show", "HEAD:upstream.txt"]), "upstream");
     let synced_head = repo.head_sha();
-    let retry = run_sync_cli(&repo);
-    assert!(
-        retry.status.success(),
-        "{}",
-        String::from_utf8_lossy(&retry.stderr)
-    );
+    assert_sync_succeeds(&repo);
     assert_eq!(repo.head_sha(), synced_head);
     for path in telemetry {
         // Sync appends to ops.jsonl; preserve its existing bytes as well.
@@ -1711,6 +1712,83 @@ fn assert_sync_preserves_work_with_telemetry(ignored: bool) {
 }
 
 #[test]
+fn sync_preserves_work_with_prestaged_telemetry() {
+    let _env = EnvGuard::new(&[]);
+    for ignored in [false, true] {
+        for ordinary_edits in [false, true] {
+            let repo = create_telemetry_sync_repo(ignored);
+            let modified = ".lf/tmp/modified.jsonl";
+            let deleted = ".lf/tmp/deleted.jsonl";
+            for path in [modified, deleted] {
+                repo.create_file(path, "committed telemetry\n");
+            }
+            git(repo.path(), &["add", "-f", "--", modified, deleted]);
+            repo.commit("existing telemetry baseline");
+            let original_head = repo.head_sha();
+            let telemetry_tree = git(repo.path(), &["rev-parse", "HEAD:.lf/tmp"]);
+            let telemetry = ".lf/tmp/.hidden/staged\ntelemetry.jsonl";
+            for path in [telemetry, modified] {
+                repo.create_file(path, "staged telemetry\n");
+            }
+            git(repo.path(), &["rm", "--", deleted]);
+            git(repo.path(), &["add", "-f", "--", telemetry, modified]);
+            let staged_telemetry = git(repo.path(), &["diff", "--cached", "--binary"]);
+            for path in [telemetry, modified] {
+                repo.create_file(path, "staged telemetry\nworking telemetry\n");
+            }
+            let working_telemetry = git(repo.path(), &["diff", "--binary"]);
+            if ordinary_edits {
+                repo.create_file("modified.txt", "staged work\n");
+                repo.create_file("ignored.txt", "explicitly staged work\n");
+                git(repo.path(), &["add", "-f", "modified.txt", "ignored.txt"]);
+                repo.create_file("modified.txt", "staged work\nworking work\n");
+                repo.create_file("new.txt", "new work\n");
+            }
+
+            assert_sync_succeeds(&repo);
+            let parent = git(repo.path(), &["rev-parse", "HEAD^1"]);
+            if ordinary_edits {
+                assert_eq!(
+                    git(repo.path(), &["rev-parse", &format!("{parent}^")]),
+                    original_head
+                );
+                for revision in [&parent, "HEAD"] {
+                    for (path, content) in [
+                        ("modified.txt", "staged work\nworking work"),
+                        ("ignored.txt", "explicitly staged work"),
+                        ("new.txt", "new work"),
+                    ] {
+                        assert_eq!(
+                            git(repo.path(), &["show", &format!("{revision}:{path}")]),
+                            content
+                        );
+                    }
+                }
+            } else {
+                assert_eq!(parent, original_head);
+            }
+            for revision in [&parent, "HEAD"] {
+                assert_eq!(
+                    git(repo.path(), &["rev-parse", &format!("{revision}:.lf/tmp")]),
+                    telemetry_tree
+                );
+            }
+            assert_eq!(git(repo.path(), &["show", "HEAD:upstream.txt"]), "upstream");
+            let synced_head = repo.head_sha();
+            assert_sync_succeeds(&repo);
+            assert_eq!(repo.head_sha(), synced_head);
+            assert_eq!(
+                git(repo.path(), &["diff", "--cached", "--binary"]),
+                staged_telemetry
+            );
+            assert_eq!(git(repo.path(), &["diff", "--binary"]), working_telemetry);
+            assert!(!repo.path().join(deleted).exists());
+            assert!(git(repo.path(), &["stash", "list"]).is_empty());
+        }
+    }
+}
+
+#[test]
 fn sync_preserves_work_with_missing_or_only_telemetry_without_checkpoint() {
     let _env = EnvGuard::new(&[]);
     for ignored in [false, true] {
@@ -1720,12 +1798,7 @@ fn sync_preserves_work_with_missing_or_only_telemetry_without_checkpoint() {
             if present {
                 repo.create_file(".lf/tmp/local.jsonl", "local telemetry\n");
             }
-            let output = run_sync_cli(&repo);
-            assert!(
-                output.status.success(),
-                "ignored={ignored}, present={present}: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
+            assert_sync_succeeds(&repo);
             assert_eq!(git(repo.path(), &["rev-parse", "HEAD^1"]), original_head);
             assert!(git(repo.path(), &["ls-tree", "-r", "HEAD", "--", ".lf/tmp"]).is_empty());
             assert_eq!(git(repo.path(), &["show", "HEAD:upstream.txt"]), "upstream");

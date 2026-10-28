@@ -1,156 +1,126 @@
 # LOO-664: Keep sync working with ignored telemetry
 
-2026-10-27. Status: implemented, focused CLI regressions passing; bounded hotfix and autonomous
-shipping authorized by Jack Heart in comment
-`297df81a-24b3-4431-8336-a0dfeb3660ab`. Mechanism selected during kickoff,
-not separately reviewed. Gate and delivery remain outstanding.
+2026-10-27. Status: pre-staged telemetry repair implemented; focused CLI tests pass.
+Jack Heart authorized the bounded hotfix and autonomous shipping in comment
+`297df81a-24b3-4431-8336-a0dfeb3660ab`. Iteration feedback rejects the previous
+exception allowing pre-staged telemetry into checkpoints. Gate and delivery remain.
+The outcome and shipping scope are accepted; the implementation mechanism is
+selected from source inspection and fixture evidence, not separately reviewed.
 
 ## Problem and demo
 
-Installed 0.14.19 stopped LOO-661 at sync. Its staging command updates the index,
-then exits 1 because the exclusion path names an ignored directory. Autonomous
-work needs to checkpoint edits and reach the merge without a manual Git repair.
-Local telemetry must stay local even without an ignore rule.
+Installed 0.14.19 stopped LOO-661 after staging ordinary edits because Git rejected
+the ignored telemetry exclusion. Autonomous Tasks need sync to finish without a
+manual Git workaround. This serves Infrastructure's KR that a Session can advance
+a Task without interruption by Loopflow plumbing; no numeric target was supplied.
 
-Demo: in a disposable feature checkout with upstream changes, staged work,
-unstaged edits, and `.lf/tmp/metrics/ops.jsonl`, run `lf sync origin/main`.
-It checkpoints the real edits, incorporates upstream, and finishes successfully.
-The checkpoint contains the intended additions, edits, deletions and renames;
-telemetry remains on disk and is absent from the commit. Repeat without the
-telemetry ignore rule, with the same result. No credentials or real remote needed.
+Demo: in a disposable feature checkout with upstream changes, ordinary edits,
+and distinct staged/working telemetry, run `lf sync origin/main`. Ordinary edits
+appear in the checkpoint, upstream appears in HEAD, and telemetry retains both
+local versions without entering the checkpoint. Repeat with and without the
+ignore rule, then sync again: HEAD stays unchanged on the second sync. Local
+bare remotes suffice; no credentials or display are required.
 
-This serves Infrastructure's KR that a Session can advance a Task without
-Loopflow plumbing interrupting it. No quantitative performance target was supplied.
+## Outcome and architecture
 
-## Current and target architecture
+Automatic feature-branch sync checkpoints ordinary staged and working edits,
+merges upstream, and preserves local `.lf/tmp/` telemetry, including distinct
+pre-staged and working contents. Missing or telemetry-only edits create no
+checkpoint. Ordinary partial staging is consolidated into the checkpoint.
+Telemetry already committed in history is not removed or rewritten; its local
+changes must not enter new checkpoints.
 
-Git's index, working tree, commits and refs are authoritative. CLI
-`run_sync_in` in `rust/loopflow/src/lf/commands/ops/mod.rs` selects a plan and,
-for an automatic feature-branch `MergeTarget` without intervention, invokes
-`stage_uncommitted_work`, checkpoints using `git::commit`, then replans.
-The merge and resolver use the existing recovery machinery. Graph `op: sync`
-enters the same command implementation. Main, manual, plan-only, continue and
-abort paths do not use this staging helper.
+Git remains authoritative for the index, working tree, refs and recovery objects.
+`run_sync_in` in `rust/loopflow/src/lf/commands/ops/mod.rs` owns the checkpoint
+before a `MergeTarget`, followed by replanning. Graph sync uses the same path.
+Main, manual, plan-only, continue and abort retain their current behavior.
 
-Keep that ownership and sequence. Replace the exclusion argument with:
+The whole-index checkpoint is replaced by `checkpoint_uncommitted_work`, which:
 
-```text
-git add -A -- :/ :(exclude,top,glob)[.]lf/tmp/**
-```
+1. Stages ordinary edits using `git add -A -- :/ :(exclude,top,glob)[.]lf/tmp/**`.
+2. Loads that staged tree into a temporary index and restores only `.lf/tmp/`
+   from HEAD there. The real index retains caller-staged telemetry. Starting
+   from the staged tree also retains explicitly staged, otherwise ignored user files.
+3. Commits only if that temporary index differs from HEAD, through the existing
+   Git commit owner, then refreshes ordinary real-index entries against HEAD.
+4. Leaves the existing `with_preserved_edits` merge wrapper to retain residual
+   telemetry and restore its staged/working partition with `stash apply --index`.
+   Recovery failure retains the named stash instead of dropping caller data.
 
-Arguments are passed directly to Git, without shell expansion. `top` anchors
-the exclusion to the checkout root; `glob` and trailing `/**` cover descendants,
-including hidden files. `[.]` matches exactly the dot while avoiding a literal
-ignored directory prefix. Keep a short explanatory comment: simplifying this
-back to `.lf/tmp/**` restores the observed failure.
+The temporary-index pattern matches selected-document commits. A checkpoint
+error propagates without merging; real edits remain staged/on disk. If the commit
+succeeds but real-index refresh fails, the error says the checkpoint was saved;
+it must not imply rollback or completed sync. No new network call, provider launch,
+persisted model or recovery owner is introduced.
 
-Retain `git_stdout` error propagation and the existing staged-diff check.
-No filename parsing, index reset, force-add, ignore-rule mutation, extra Git
-subprocess, or fallback algorithm is needed. Successful sync still consolidates
-staged and unstaged real edits into its checkpoint; preserving a partial-staging
-partition is not a new promise of this repair.
+## Delete — do not maintain
 
-## Risk findings and alternatives
+- Removed `stage_uncommitted_work` and its whole-index commit call in favor of the
+  selective checkpoint helper; no alternate path or fallback remains.
+- Removed the docs and assumptions accepting pre-staged telemetry in checkpoints.
+- The earlier literal-directory exclusion was already deleted at `e94c547222`.
+  Keep the rooted glob: Apple Git 2.50.1 rejects a literal ignored `.lf/tmp`
+  prefix after staging ordinary edits, even with a trailing recursive glob.
 
-- Apple Git 2.50.1 reproduced the original failure with inherited `GIT_*` removed
-  and global/system configuration disabled. Real edits were staged despite exit 1.
-  Ignoring that exit would conceal genuine failures and is rejected.
-- Adding `/`, `/**`, or `glob` to the original literal directory prefix still
-  fails when `.lf/tmp/` is ignored. A wildcard only in the final directory name
-  without a descendant pattern failed to exclude nested telemetry in the
-  non-ignored case. These are not viable repairs.
-- The selected glob passed exact staged-path and checkpoint-content checks with
-  no ignore, `.lf/tmp/`, root `/.lf/`, and `.lf/tmp/*`, each with telemetry
-  present and absent. Nested/hidden telemetry stayed on disk and out of commits.
-  Root-neighbor `.lf/tmp-neighbor/` and nested `nested/.lf/tmp/` remained ordinary
-  user paths whenever not ignored by Git. Spaces, Unicode, newlines, leading
-  dashes and pathspec-looking filenames staged correctly.
-- An existing index lock still fails with an actionable Git error, retaining
-  the original index bytes and working edits. No success can be inferred from
-  partial staging after an error.
-- Plain `git add -A` avoids this failure but admits non-ignored telemetry.
-  `-f` would admit unrelated ignored files. Both violate the brief.
-- Enumerating eligible paths with `ls-files -z` and feeding literal NUL-delimited
-  paths to `git add` could work, but adds parsing, another subprocess and a
-  read/stage interval. The direct glob resolves the demonstrated problem without
-  introducing another staging implementation.
+Keep resolver, scratch preservation, strategy, and existing CLI regression tests.
+LOO-312 / PR #1656 changes onboarding in the same module, outside this helper;
+preserve those independent changes. No schema, DTO, Desktop or Task-state changes.
 
-Git documents ignored exact paths as errors and describes rooted exclusion and
-recursive glob semantics: [git-add](https://git-scm.com/docs/git-add),
-[pathspec glossary](https://git-scm.com/docs/gitglossary#Documentation/gitglossary.txt-aiddefpathspecapathspec).
-The disposable probe establishes the installed Git behavior; it does not prove
-the complete sync path or every Git version. CI supplies the other platform.
+## Evidence and constraints
 
-Success means ordinary autonomous sync no longer needs intervention and leaves
-no telemetry commit. The significant failure modes are silently swallowing a
-real stage error, broadening the exclusion to user paths, losing edits during
-recovery, or a later cleanup restoring the literal-prefix bug. Acceptance checks
-target these outcomes rather than asserting argument strings.
+The rooted exclusion alone fixes the ignored-directory error but cannot remove
+telemetry already in the index. Committing that index violates the accepted
+outcome. Resetting telemetry in the real index would lose its staged/working
+partition; the temporary index avoids that mutation. Starting it at HEAD and
+staging only ordinary working paths would miss explicitly staged ignored user
+files, so the selected implementation starts from the caller's staged tree.
+Plain `git add -A`, force-add, and ignoring Git failures remain rejected: they
+respectively admit non-ignored telemetry, admit unrelated ignored work, or hide
+real failures. Filename enumeration adds parsing without resolving pre-staging.
 
-## Scope and boundaries
+The earlier four CLI tests cover ignored/unignored telemetry, additions, edits,
+deletions, renames, unusual names, root-neighbor and nested user paths, checkpoint
+contents, upstream ancestry, retry, missing/telemetry-only state, and an index
+lock preserving HEAD/index/work. Original mechanism exploration and rejected
+alternatives: `e94c547222:scratch/loo-664-keep-lf-sync.md`.
 
-Change the helper, regression coverage in `rust/loopflow/tests/sync_tests.rs`,
-and the sync paragraph in `docs/ops.md` describing the existing checkpoint and
-telemetry behavior. No schema, DTO, Desktop, Task-state or Graph-definition
-changes. Preserve conflict handling introduced in #1748 / LOO-659.
+The pre-staged regression covers telemetry additions, modifications and deletions,
+distinct staged/working contents, and an unchanged committed telemetry tree. It
+runs ignored/unignored cases with/without ordinary work, including explicitly
+staged ignored user files and repeat sync. Shared CLI assertions report both Git
+output streams; binary diff comparisons verify the full staged/working partition.
 
-Missing telemetry needs no special case. Telemetry-only working files must not
-create a checkpoint. Other ignored files remain ignored. Genuine Git errors
-propagate before checkpoint/merge, retaining whatever Git actually staged and
-never reporting a clean checkout or completed sync.
-
-Generated telemetry is normally untracked. The treatment of telemetry explicitly
-staged or committed by a caller is an identified boundary: exclusion does not
-remove an existing index entry. The bounded repair does not silently unstage
-caller data or rewrite history; see `questions.md`. Acceptance must distinguish
-this from preventing automatic inclusion of local telemetry.
-
-LOO-312 / PR #1656 also edits `commands/ops/mod.rs` for onboarding. Keep its
-independent changes during synchronization. LOO-661 owns credential persistence.
-Infrastructure owns the single coordinated patch release, installation and
-installed readback. This Task supplies the merged revision and remaining installed
-verification; it does not start a competing publisher or install a candidate.
-
-**Delete — do not maintain:** the literal-directory exclusion in
-`stage_uncommitted_work` is replaced, with no fallback. No deletion targets
-remain. Existing resolver, scratch-preservation and strategy tests survive.
-
-**Forbidden outcomes:** force-adding ignored files; discarding staged/unstaged
-work; swallowing `git add` errors; repository ignore configuration as a
-prerequisite; excluding similarly named user directories; a parallel staging
-helper; claiming source tests establish installed recovery of LOO-661.
+Forbidden outcomes: committing local telemetry changes; force-adding ignored
+files; discarding staged/working contents; swallowing Git errors; requiring ignore
+configuration; excluding similarly named ordinary directories; claiming source
+proof establishes installed LOO-661 recovery.
 
 ## Remaining work and acceptance
 
-The pathspec replacement and `sync_preserves_work_with_` CLI tests are implemented.
-They cover ignored/unignored telemetry, staged and unstaged additions/edits,
-deletions, renames, unusual names, neighboring paths, checkpoint contents,
-upstream ancestry, retained telemetry bytes, unrelated ignored files, retry,
-missing/telemetry-only state, and an index-lock failure retaining HEAD/index/work.
-`docs/ops.md` states checkpoint behavior and the pre-staged-file boundary.
-
-The shared fixture pushes only after upstream is ready. Content assertions check
-both checkpoint and merge, then read each working file once; those states remain
-separate preservation obligations. The direct staging helper needs no abstraction.
-
-1. Gate runs the affected suites below, including the unchanged Graph sync
-   preservation and conflict-resolver checks, plus formatting and Clippy.
-2. Review the explicit pre-staged telemetry limitation in `questions.md`.
-3. Deliver through the existing autonomous Graph. Record the exact merged
-   revision; Infrastructure verifies a release containing it through installed
-   sync before calling installed behavior proved.
-
-Gate runs the affected suites once through the changed-aware runner; its Rust
-plan includes formatting and Clippy. The additional suites below are required by
-the Rust test guide for commit behavior. Expect every selected test to pass,
-`cargo fmt` clean and `cargo clippy --all-targets -- -D warnings` clean.
+- **This slice:** retain the implemented selective checkpoint and its five
+  `sync_preserves_work_with_` regressions as one change. No implementation split,
+  fallback or further product decision is needed before gate.
+- Gate owns affected suites, including existing resolver and Graph-sync
+  preservation checks. Formatting and Clippy passed before the explicit-path
+  checkpoint requested by Jack Heart after installed sync stopped the prior
+  Graph. Commit-boundary suites required by the test guide are included below.
+- Caller Graph owns publication and landing. Infrastructure owns the single
+  coordinated release/install and installed-sync readback; this Task supplies
+  its merged revision. No competing publisher or candidate installation.
+- Proposed memory correction for the existing LOO-664 Gotcha: pre-staged telemetry
+  is preserved outside new checkpoints. Wave memory is read-only in this step;
+  the existing uncommitted memory contribution remains untouched.
 
 ```bash
-uv run python scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(agent_startup_tests::) | test(release_tests::) | test(release_lock_tests::)' < /dev/null
+TMPDIR=/private/tmp uv run python scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(agent_startup_tests::) | test(release_tests::) | test(release_lock_tests::)' < /dev/null
 ```
 
-No display, native provider login or real network is part of acceptance. Do not
-claim completion from the staging-only probe; the CLI fixtures cross index,
-checkpoint, merge/recovery and telemetry consumers.
+Done when the actual CLI fixtures prove ordinary edits in checkpoint and merged
+HEAD, upstream ancestry, unchanged local telemetry index/working diffs, no extra
+checkpoint for telemetry-only state or repeat sync, and actionable index-lock
+failure retaining HEAD/index/work. Existing Graph sync and resolver behavior must
+also pass. The affected gate must exit zero, including formatting and Clippy;
+CI owns cross-platform coverage. Merged source is the delivery boundary here;
+installed recovery remains unproved until Infrastructure's released-binary readback.
 
-Check: 2026-10-27 `TMPDIR=/private/tmp uv run python scripts/test_network.py cargo test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 4 passed; `cargo fmt` and `git diff --check` clean; affected suites and Clippy remain with gate.
+Check: `TMPDIR=/private/tmp uv run python scripts/test_network.py cargo test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 5 passed (unchanged source, result reused); `cargo +stable fmt --all -- --check`, `cargo +stable clippy --all-targets -- -D warnings`, and `git diff --check` passed; affected suites remain with gate.

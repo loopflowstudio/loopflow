@@ -1,12 +1,10 @@
 # LOO-664 assumptions — 2026-10-27
 
-- The bounded repair interprets “never commit telemetry” as never automatically
-  adding generated local telemetry. Explicitly pre-staged or already committed
-  telemetry is caller-owned Git state; the existing whole-index checkpoint can
-  include pre-staged telemetry. Changing that requires selective checkpoint
-  semantics or index preservation beyond this pathspec repair. Preserve caller
-  state rather than silently removing it. This limitation must remain visible in
-  review; the staging probe does not establish a blanket guarantee for that case.
-- Preserving staged and unstaged work retains the accepted automatic checkpoint
-  behavior, which consolidates both into a commit. It does not preserve their
-  former staging partition. No product choice blocks the demonstrated hotfix.
+- Iteration feedback rejects the previous pre-staged telemetry exception. New
+  checkpoints exclude its local changes while retaining staged and working
+  contents. Already committed telemetry remains in history; sync does not rewrite
+  it or remove its committed baseline.
+- Ordinary staged and unstaged edits retain the existing consolidated checkpoint
+  behavior. Their former partial-staging partition is not preserved.
+- Temporary checkpoint indexes follow the existing selected-document commit
+  pattern; existing checkout recovery owns preserving telemetry across the merge.

@@ -262,6 +262,7 @@ final class WorkNavigation {
         case sidebarSearch
         case graph(String)
         case workflow(String)
+        case newTask
     }
     @MainActor @Observable
     final class WorkspacePresentation {

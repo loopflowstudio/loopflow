@@ -72,6 +72,7 @@ struct WorkNavigator: View {
                 let taskIDs = model.sidebarTaskIDs
                 let scope = model.navigation.sidebarScope
                 VStack(alignment: .leading, spacing: 5) {
+                    NewTaskRow(model: model)
                     if case .dashboard = scope {
                         HStack {
                             Text(listTitle.uppercased()).lineLimit(1)
@@ -540,6 +541,28 @@ extension WorkJumpScope {
         case .repository: "repository"
         case .wave(let id): "wave-" + id
         }
+    }
+}
+
+/// Always first in the Task list: the main way to start work. It opens the
+/// New Task sheet, as ⌘N does.
+private struct NewTaskRow: View {
+    let model: WorkModel
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Button { model.navigation.palette = .newTask } label: {
+            HStack {
+                Image(systemName: "plus")
+                Text("New Task").lineLimit(1)
+                Spacer()
+                Text("⌘N").font(Typography.code(10))
+            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain)
+            .disabled(model.repoPath == nil)
+            .accessibilityIdentifier("work-new-task")
     }
 }
 

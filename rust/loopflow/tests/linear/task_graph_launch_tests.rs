@@ -542,7 +542,6 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         // The worker's entry points are gone; nothing restarts a Graph.
         for removed in [
             vec!["--task", "INF-123", "graph", "start", "proof"],
-            vec!["task", "create", "--run", "--title", "x"],
             vec!["task", "__worker", registered.task.id.as_str()],
         ] {
             assert!(
@@ -1485,6 +1484,91 @@ fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
     let graph = task.graph();
     assert_eq!(graph["name"], "findings");
     assert_eq!(graph["position"], at("end"));
+}
+
+#[test]
+fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
+    let task = GraphTask::without_wave_graph(&[]);
+    // New Tasks branch from the remote's main, which carries the fixture Graphs.
+    assert!(Command::new("git")
+        .args(["push", "origin", "main"])
+        .current_dir(task.repo.path())
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let tasks = || -> i64 {
+        db.query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap()
+    };
+    // An unknown graph is refused before any Task exists.
+    let before = tasks();
+    let refused = task.run(&["task", "create", "never filed", "--run", "--graph", "nope"]);
+    assert!(!refused.status.success());
+    assert_eq!(tasks(), before);
+
+    let request = "fix the flaky retry test\n\nIt fails one run in ten.";
+    let output = task.run(&[
+        "task", "create", request, "--run", "--graph", "feature", "--json",
+    ]);
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    let ran = task.ran(output);
+    assert!(ran.success(), "{}", ran.text);
+    let issue = receipt["task"]["identifier"].as_str().unwrap();
+    assert_eq!(receipt["task"]["title"], "fix the flaky retry test");
+    assert_eq!(receipt["task"]["description"], request);
+    assert_eq!(receipt["graph"], "feature");
+    let status = task.run(&["desktop", "task", issue, "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    let graph = &status["execution"]["work"]["graph"];
+    assert_eq!(graph["name"], "feature");
+    assert_eq!(graph["position"], at("review"));
+    // The admitted primary conversation opens with the request, word for word.
+    let session = receipt["session_id"].as_str().unwrap();
+    let first_turn: String = db
+        .query_row(
+            "SELECT request FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_turn, request);
+    let primary: String = db
+        .query_row(
+            "SELECT primary_session_id FROM tasks WHERE id=?1",
+            [receipt["task"]["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(primary, session);
+
+    // `-b` runs to the end headless and admits no conversation.
+    let output = task.run(&[
+        "-b", "task", "create", "headless", "--run", "--graph", "proof", "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(receipt["session_id"].is_null(), "{receipt}");
+    assert_eq!(receipt["graph"], "proof");
+
+    // A run that fails still reports the filed Task, so nothing files it twice.
+    let before = tasks();
+    let output = task.run(&[
+        "-b", "task", "create", "fails", "--run", "--graph", "gate", "--json",
+    ]);
+    assert!(!output.status.success());
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    assert_eq!(receipt["task"]["title"], "fails");
+    assert!(receipt["graph"].is_null(), "{receipt}");
+    assert!(receipt["session_id"].is_null(), "{receipt}");
+    assert_eq!(tasks(), before + 1);
 }
 
 #[test]

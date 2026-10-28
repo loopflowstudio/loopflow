@@ -4,14 +4,6 @@ The [design](loo-661-save-refreshed-claude.md) owns the unresolved writer mechan
 rejected alternatives and live diagnosis. No product decision or relaxation of
 preservation, trust or storage authority is assumed.
 
-Findings 36–37 record the missing supported authorization/encoding mechanism;
-the local-authentication-context review identified no bridge in the file-keychain path.
-No scope relaxation is assumed; a database password alone does not resolve it.
-Do not collect a secret speculatively or repeat the rejected mutation probes.
-
-Supported reconnection for jack@loopflow.studio requires browser sign-in (design
-finding 32); this headless run does not initiate or bypass it.
-
 Jack Heart authorized this Task-local LOO-664 sync bridge on 2026-10-27: validate
 and checkpoint explicit paths, then atomically archive complete `.lf/tmp` bytes
 and leave it absent for automatic sync. Checkpointing alone does not repair

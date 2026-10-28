@@ -1963,10 +1963,12 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     let task =
         support::register_task_with_pr(home.path(), &checkout, "task-graph-read", &repo.head_sha());
     observe_planning(&task, &checkout);
-    task.store
-        .sqlite
-        .select_wave_graph(task.task.wave_id.as_ref().unwrap(), "feature")
-        .unwrap();
+    support::select_wave_graph(
+        &checkout,
+        &task.store.sqlite,
+        task.task.wave_id.as_ref().unwrap(),
+        "feature",
+    );
     for skill in [
         "implement-proof",
         "decide-proof",

@@ -488,6 +488,30 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: OpsCommand,
     },
+    /// Set your own value of a setting for this repository, a Wave or every
+    /// repository; it never edits committed config
+    #[command(after_help = SETTING_KEYS)]
+    Set {
+        key: String,
+        value: String,
+        /// Every repository
+        #[arg(long)]
+        global: bool,
+        /// Apply on this Machine only; set by the copy to your other Machines
+        #[arg(long, hide = true)]
+        here: bool,
+    },
+    /// Clear your own value of a setting, so the committed config chooses
+    #[command(after_help = SETTING_KEYS)]
+    Unset {
+        key: String,
+        /// Every repository
+        #[arg(long)]
+        global: bool,
+        /// Apply on this Machine only; set by the copy to your other Machines
+        #[arg(long, hide = true)]
+        here: bool,
+    },
     /// Read Loopflow configuration
     Config {
         #[command(subcommand)]
@@ -1068,17 +1092,29 @@ impl WavePlanTarget {
     }
 }
 
+const SETTING_KEYS: &str = "Keys:
+  graph                 the graph new Tasks take up
+  agent                 the agent work launches on, such as claude:opus
+  skill_agents.<skill>  the agent one skill launches on
+  machine               where new Tasks and the Session run; copied to your other
+                        Machines. A pool or on-demand sends new Tasks there.
+  machine.tasks         where new Tasks run
+  machine.session       where the Session runs; it moves there
+  account.<provider>    the logins that pay, in order: work@,personal@
+
+Scope: this repository; `lf --wave <wave> set` a Wave; --global every repository.
+Yours wins over the committed .lf/config.yaml and .lf/wave/<name>/config.yaml,
+for you only; `lf wave status` shows each value and its source.";
+
 #[derive(Subcommand, Debug)]
 pub enum WaveGraphCommand {
-    /// Show the graph the Wave's Tasks take up by default
+    /// Show the graph the Wave's Tasks take up by default; select one with
+    /// `graph:` in `.lf/wave/<name>/config.yaml`
     Show {
         wave: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Select the graph future Tasks take up; Tasks that took one up keep it.
-    /// Graphs are committed `.lf/graphs/<name>.yaml` files or builtins.
-    Set { name: String, wave: Option<String> },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1379,7 +1415,7 @@ pub enum WaveCommand {
         #[arg(long, requires = "json")]
         watch: bool,
     },
-    /// Select and inspect the graph the Wave's Tasks take up by default
+    /// Show the graph the Wave's Tasks take up by default
     Graph {
         #[command(subcommand)]
         cmd: WaveGraphCommand,
@@ -2211,26 +2247,6 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Run work on a Machine: set a Wave's or this repository's default.
-    /// Bare, it applies to the worktree's Wave, else this repository;
-    /// `lf task move --machine` moves one Task.
-    Use {
-        /// A registered Machine label, this Machine's hostname, or a Machine id
-        machine: String,
-        /// Set this Wave's default for new Tasks and its Wave Session
-        wave: Option<String>,
-        /// Set only where the scope's primary Session runs, and move it there
-        #[arg(long, conflicts_with = "tasks")]
-        session: bool,
-        /// Set only where the scope's new Tasks run
-        #[arg(long)]
-        tasks: bool,
-        /// Apply on this Machine only; set by the copy to your other Machines
-        #[arg(long, hide = true)]
-        here: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Change a saved machine's label
     Rename { label: String, name: String },
     /// Forget a connection without touching remote work
@@ -2408,11 +2424,9 @@ pub enum AccountCommand {
     /// `lf account <provider> use <email>`
     #[command(override_usage = "lf account <PROVIDER> use <EMAIL>")]
     Use { email: String },
-    /// Explain configured and automatic account selection, or replace a route
-    #[command(args_conflicts_with_subcommands = true)]
+    /// Explain configured and automatic account selection; `lf set
+    /// account.<provider>` replaces a route
     Route {
-        #[command(subcommand)]
-        cmd: Option<RouteCommand>,
         #[arg(long, conflicts_with = "default")]
         repo: Option<String>,
         #[arg(long)]
@@ -2441,20 +2455,6 @@ impl AccountCommand {
             ),
         }
     }
-}
-
-#[derive(Debug, Subcommand)]
-pub enum RouteCommand {
-    /// Replace a provider's ordered route
-    Set {
-        provider: String,
-        #[arg(required = true)]
-        accounts: Vec<String>,
-        #[arg(long, conflicts_with = "default")]
-        repo: Option<String>,
-        #[arg(long)]
-        default: bool,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -2694,10 +2694,9 @@ mod tests {
             ],
             vec!["lf", "session", "steer", "session_1", "keep attribution"],
             vec!["lf", "wave", "rename", "product", "--title", "Product"],
-            vec!["lf", "ops", "machine", "use", "mini"],
-            vec!["lf", "ops", "machine", "use", "mini", "product"],
-            vec!["lf", "--repo", "loopflow", "ops", "machine", "use", "mini"],
             vec!["lf", "task", "move", "LOO-1", "--machine", "mini"],
+            vec!["lf", "--wave", "product", "set", "machine", "mini"],
+            vec!["lf", "unset", "account.claude", "--global"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "self", "doctor", "--planning", "--json"],
             vec!["lf", "wave", "status", "product", "--sync"],

@@ -43,6 +43,7 @@ mod task_handoff_tests;
 mod task_initialization_tests;
 mod token_tests;
 mod user_cli_tests;
+mod wave_setup_tests;
 mod work_open_tests;
 mod worktree_tests;
 mod world_recipes;

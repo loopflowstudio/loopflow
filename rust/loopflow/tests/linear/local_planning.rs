@@ -939,7 +939,7 @@ fn public_local_task_places_and_runs_without_a_planning_provider() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "graph", "set", "proof", "inbox"],
+        &["--wave", "inbox", "set", "graph", "proof"],
     );
     let catalog = lf(repo.path(), home.path(), &["graph", "list", "--json"]);
     let committed = catalog
@@ -2777,7 +2777,7 @@ fn wave_documents_and_graphs_follow_files() {
         lf(
             repo.path(),
             home.path(),
-            &["wave", "graph", "set", "finish", "tools/parser"],
+            &["--wave", "tools/parser", "set", "graph", "finish"],
         );
         std::fs::write(root.join("parser/MEMORY.md"), "Edited child memory λ.\n").unwrap();
         let context = lf(
@@ -3317,7 +3317,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "graph", "set", "code", wave.slug()],
+        &["--wave", wave.slug(), "set", "graph", "code"],
     );
     let selected = lf(
         repo.path(),
@@ -3902,7 +3902,7 @@ fn auto_graph_runs_a_task_to_end() {
 }
 
 #[test]
-fn wave_graph_set_selects_the_builtin_auto() {
+fn your_graph_for_a_wave_selects_the_builtin_auto() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     lf(
@@ -3913,7 +3913,7 @@ fn wave_graph_set_selects_the_builtin_auto() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "graph", "set", "auto", "product"],
+        &["--wave", "product", "set", "graph", "auto"],
     );
     let created = lf(
         repo.path(),
@@ -3959,7 +3959,7 @@ fn graph_defaults_follow_task_wave_and_repository() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "graph", "set", "wave", "product"],
+        &["--wave", "product", "set", "graph", "wave"],
     );
     let task = lf(
         repo.path(),
@@ -3981,7 +3981,7 @@ fn graph_defaults_follow_task_wave_and_repository() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "graph", "set", "explicit", "product"],
+        &["--wave", "product", "set", "graph", "explicit"],
     );
     lf(repo.path(), home.path(), &["task", "move", id, "--no-wave"]);
     repo.create_file(".lf/config.yaml", "graph: ''\n");

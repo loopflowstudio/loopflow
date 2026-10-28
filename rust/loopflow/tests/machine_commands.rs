@@ -332,10 +332,9 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .command(&[
             "--repo",
             path.to_str().unwrap(),
-            "machine",
-            "use",
+            "set",
+            "machine.session",
             "mini",
-            "--session",
         ])
         .current_dir(&path)
         .output()
@@ -1646,7 +1645,7 @@ fn task_ownership_never_routes_to_another_persons_machine() {
 }
 
 #[test]
-fn machine_use_copies_wave_and_repository_defaults_to_your_other_machines() {
+fn set_machine_copies_wave_and_repository_defaults_to_your_other_machines() {
     use loopflow::durable::{MachineSetting, OwningMachineSource};
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
@@ -1656,20 +1655,26 @@ fn machine_use_copies_wave_and_repository_defaults_to_your_other_machines() {
     let laptop = plan.local.local_machine().unwrap().id;
     let repository = ["--repository", plan.repository.as_str()];
     let mut wave = repository.to_vec();
-    wave.extend(["machine", "use", "mini", "owners"]);
+    wave.extend(["--wave", "owners", "set", "machine", "mini"]);
     let output = fixture.run(&wave);
     assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners:"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("copied to mini"));
     // A selected repository with no Wave sets the repository's default.
     let mut bare = repository.to_vec();
-    bare.extend(["machine", "use", "mini"]);
+    bare.extend(["set", "machine", "mini"]);
     let output = fixture.run(&bare);
     assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("This repository:"));
     // The Wave Session comes back to the laptop; its Tasks stay on mini.
     let mut session = repository.to_vec();
-    session.extend(["machine", "use", laptop.as_str(), "owners", "--session"]);
+    session.extend([
+        "--wave",
+        "owners",
+        "set",
+        "machine.session",
+        laptop.as_str(),
+    ]);
     let output = fixture.run(&session);
     assert_success(&output);
     assert!(String::from_utf8_lossy(&output.stdout).starts_with("Wave owners: its Session runs"));

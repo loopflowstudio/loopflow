@@ -477,6 +477,7 @@ fn run_native_session(
                 provider,
                 agent_session.cloned(),
                 exact_account_id.cloned(),
+                crate::work::wave::context::ambient_wave_id(),
             )
         })
         .transpose()

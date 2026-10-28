@@ -277,14 +277,13 @@ Pick the user's Machine for a Wave's or the repository's new Tasks. It is their
 personal choice, never committed repository content:
 
 ```bash
-lf machine use <machine-label> <wave>        # this Wave's default, copied to their other Machines
-lf --repo <repo> machine use <machine-label> # this repository's default
+lf --wave <wave> set machine <machine-label>   # this Wave's default, copied to their other Machines
+lf --repo <repo> set machine <machine-label>   # this repository's default
 lf task move <issue> --machine <machine-label> # move one Task there with its Session
-lf machine list                              # each Machine with the defaults naming it
+lf machine list                                # each Machine with the defaults naming it
 ```
 
-Bare `lf machine use <machine-label>` applies to the worktree's Wave, else the
-repository. Resolution for a new Task is Wave → parent Waves →
+`lf set` without `--wave` sets the repository. Resolution for a new Task is Wave → parent Waves →
 repository → the Machine running the command, so one Machine needs no setup.
 An unreachable Machine gets a warning; rerun later. Setting a default moves the
 user's Wave or repository Session to that Machine with its history. Scheduled

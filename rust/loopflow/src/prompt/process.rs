@@ -261,6 +261,15 @@ pub(crate) fn resolve_agent(
 ) -> String {
     crate::config::agent_override()
         .or_else(|| override_agent.map(str::to_owned))
+        .or_else(|| {
+            let skill = skill?;
+            let portable = crate::definition::name::portable_name(&skill.name);
+            config
+                .skill_agents
+                .get(&skill.name)
+                .or_else(|| config.skill_agents.get(portable.as_str()))
+                .cloned()
+        })
         .or_else(|| skill.and_then(|skill| skill.agent.clone()))
         .or_else(|| config.agent.clone())
         .or_else(|| skill.and_then(|skill| skill.default_agent.clone()))

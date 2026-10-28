@@ -79,6 +79,8 @@ pub struct WaveDetailSnapshot<T = RoadmapTask> {
     pub unavailable_tasks: Vec<UnavailableTaskEvidence>,
     /// This Wave's Machine-local Session history, newest first.
     pub history: Evidence<SessionHistory>,
+    /// What the Wave's Tasks run, where, and which logins pay, with each source.
+    pub setup: crate::work::wave::setup::WaveSetup,
 }
 
 /// A reading, or the reason there is none. "We looked and found nothing" and
@@ -541,8 +543,8 @@ pub struct RoadmapTask {
     pub actions: TaskActionModel,
     /// The graph the Task took up, else the one its first `lf task run` takes up.
     pub graph_name: Option<String>,
-    /// `task`, `wave`, `repository` or `builtin`.
-    pub graph_source: Option<String>,
+    /// The layer that chose it: `task`, `personal`, `wave`, `repo`, `global` or `default`.
+    pub graph_source: Option<crate::work::wave::setup::SetupSource>,
     pub latest_graph_process: Option<GraphProcessDetail>,
     pub execution: Option<TaskExecutionSnapshot>,
     pub run_control: TaskRunControl,
@@ -700,6 +702,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
         tasks: task_snapshots.tasks,
         metric_portfolio,
         unavailable_tasks: task_snapshots.unavailable_tasks,
+        setup: crate::work::wave::setup::read_wave_setup(store, wave, &checkout).await?,
     })
 }
 
@@ -936,6 +939,7 @@ impl WaveDetailSnapshot {
             metric_portfolio: self.metric_portfolio,
             unavailable_tasks: self.unavailable_tasks,
             history: self.history,
+            setup: self.setup,
         }
     }
 }
@@ -1269,7 +1273,7 @@ async fn roadmap_snapshot(
             continue;
         }
         roadmaps.push(WaveRoadmap {
-            graph: store.sqlite.selected_wave_graph(wave.id())?,
+            graph: crate::work::wave::config::wave_graph(&checkout, wave.slug())?,
             project_readiness: store.sqlite.project_readiness(wave.id())?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
@@ -1537,9 +1541,8 @@ fn snapshot_task_runtime(
     status: TaskState,
     completion_pending: Option<String>,
     owner: Option<crate::durable::TaskOwner>,
+    provider: String,
 ) -> TaskRuntimeSnapshot {
-    let config = crate::config::load_config_or_default(task.worktree.as_deref());
-    let (provider, _) = crate::config::parse_agent(config.agent());
     TaskRuntimeSnapshot {
         work_id: task.id.to_string(),
         reason: if status.is_terminal() {
@@ -1676,7 +1679,15 @@ struct DetailReads<'a> {
     facts: crate::store::sqlite::TaskDetailFacts,
     /// Each Task's own Workflow, else its Wave's, repository's or the builtin
     /// default, with that source; a default is resolved once per Wave and repository.
-    selections: HashMap<crate::durable::TaskId, (String, &'static str)>,
+    selections: HashMap<crate::durable::TaskId, (String, crate::work::wave::setup::SetupSource)>,
+    /// Each Task Wave's name, which selects its agent; read once per Wave.
+    wave_names: HashMap<crate::id::WaveId, String>,
+    /// Each Task Wave's and repository's checkout with your `lf set` values,
+    /// which select its agent; read once per Wave and repository.
+    personal: HashMap<
+        (Option<crate::id::WaveId>, crate::durable::RepositoryId),
+        (std::path::PathBuf, crate::config::PersonalSettings),
+    >,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<crate::durable::TaskId, crate::ops::task::ship::ShippingSnapshot>,
     /// Each Task's latest Graph and what its execution reads, asked once.
@@ -1691,11 +1702,13 @@ impl<'a> DetailReads<'a> {
             .sqlite
             .latest_task_graphs(&tasks.iter().map(|task| &task.id).collect::<Vec<_>>())?;
         let execution = store.sqlite.graph_execution_facts(graphs.values())?;
-        let mut defaults = HashMap::<_, (String, &'static str)>::new();
+        let mut defaults = HashMap::<_, (String, crate::work::wave::setup::SetupSource)>::new();
         let mut selections = HashMap::new();
+        let mut wave_names = HashMap::new();
+        let mut personal = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
-                Some(name) => (name.clone(), "task"),
+                Some(name) => (name.clone(), crate::work::wave::setup::SetupSource::Task),
                 None => match defaults.entry((task.wave_id.clone(), task.repository_id.clone())) {
                     std::collections::hash_map::Entry::Occupied(entry) => entry.get().clone(),
                     std::collections::hash_map::Entry::Vacant(entry) => entry
@@ -1704,6 +1717,27 @@ impl<'a> DetailReads<'a> {
                 },
             };
             selections.insert(task.id.clone(), selection);
+            if let Some(id) = task
+                .wave_id
+                .as_ref()
+                .filter(|id| !wave_names.contains_key(*id))
+            {
+                if let Some(wave) = store.sqlite.get_wave(id)? {
+                    wave_names.insert(id.clone(), wave.slug().to_owned());
+                }
+            }
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                personal.entry((task.wave_id.clone(), task.repository_id.clone()))
+            {
+                let repo = crate::ops::task::repository_for_task(store, task)?;
+                let wave = task
+                    .wave_id
+                    .as_ref()
+                    .and_then(|id| wave_names.get(id))
+                    .map(String::as_str);
+                let values = crate::config::PersonalSettings::read(Some(&repo), wave);
+                entry.insert((repo, values));
+            }
         }
         let mut shipping = HashMap::new();
         for task in tasks.iter().filter(|task| facts.shipped.contains(&task.id)) {
@@ -1725,6 +1759,8 @@ impl<'a> DetailReads<'a> {
             shared,
             facts,
             selections,
+            wave_names,
+            personal,
             shipping,
             graphs,
             execution,
@@ -1772,7 +1808,24 @@ async fn snapshot_task_detail(
         .get(&task.id)
         .map(|reason| crate::ops::task::completion_pending_text(task, reason));
     let owner = facts.owners.get(&task.id).cloned();
-    let runtime = snapshot_task_runtime(&execution, task, status, pending, owner);
+    let wave = task
+        .wave_id
+        .as_ref()
+        .and_then(|id| reads.wave_names.get(id))
+        .map(String::as_str);
+    let (repo, personal) = reads
+        .personal
+        .get(&(task.wave_id.clone(), task.repository_id.clone()))
+        .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
+    let agent = crate::ops::task::resolve_task_agent(
+        task.worktree.as_deref().unwrap_or(repo),
+        wave,
+        personal,
+        task.agent.as_deref(),
+        None,
+    );
+    let (provider, _) = crate::config::parse_agent(&agent);
+    let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let machine_id = shared
         .checkouts
         .iter()
@@ -1795,16 +1848,18 @@ async fn snapshot_task_detail(
     let launch_refusal = if runtime.status == TaskState::Deferred {
         Some("Task is deferred; resume it before running a Graph".to_string())
     } else if worktree_blocker.is_none() {
-        crate::ops::task::task_process_refusal_after(task, latest_event).or_else(|| {
-            matches!(
-                acquisition.state,
-                crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
-            )
-            .then(|| {
-                "Task planning has invalidation or removal evidence; refresh its planning"
-                    .to_string()
-            })
-        })
+        crate::ops::task::task_process_refusal_after(task, wave, personal, latest_event).or_else(
+            || {
+                matches!(
+                    acquisition.state,
+                    crate::store::PlanningState::Invalid | crate::store::PlanningState::Removed
+                )
+                .then(|| {
+                    "Task planning has invalidation or removal evidence; refresh its planning"
+                        .to_string()
+                })
+            },
+        )
     } else {
         None
     };
@@ -1938,7 +1993,7 @@ async fn snapshot_task_detail(
         condition,
         actions,
         graph_name: Some(graph_name),
-        graph_source: Some(graph_source.to_owned()),
+        graph_source: Some(graph_source),
         latest_graph_process: graph_record,
         execution: Some(execution),
         run_control,
@@ -2369,6 +2424,37 @@ fn work_status_is_terminal(status: &WorkStatus) -> bool {
     matches!(status, WorkStatus::Done | WorkStatus::Abandoned)
 }
 
+fn print_setup(setup: &crate::work::wave::setup::WaveSetup) {
+    use crate::work::wave::setup::SetupValue;
+    let line = |label: &str, value: &SetupValue| {
+        println!(
+            "  {label:<16} {} ({})",
+            value.value.as_deref().unwrap_or("-"),
+            value.source.as_str()
+        );
+    };
+    println!("  setup");
+    line("graph", &setup.graph);
+    line("agent", &setup.agent);
+    for (skill, value) in &setup.skill_agents {
+        line(&format!("  {skill}"), value);
+    }
+    line("tasks machine", &setup.tasks_machine);
+    line("session machine", &setup.session_machine);
+    for (provider, route) in &setup.accounts {
+        let accounts = if route.accounts.is_empty() {
+            "unrouted".to_string()
+        } else {
+            route.accounts.join(" -> ")
+        };
+        println!(
+            "  {:<16} {accounts} ({})",
+            format!("{provider} accounts"),
+            route.source.as_str()
+        );
+    }
+}
+
 fn print_status(status: &WaveDetailSnapshot) {
     let colors = Colors::default();
     let wave = &status.wave;
@@ -2395,6 +2481,7 @@ fn print_status(status: &WaveDetailSnapshot) {
         Some(machine) => println!("  machine      {} ({})", machine.id, machine.route),
         None => println!("  machine      unplaced"),
     }
+    print_setup(&status.setup);
     print_projects(&status.projects);
     print_metric_portfolio(&status.metric_portfolio);
     match &status.tasks {

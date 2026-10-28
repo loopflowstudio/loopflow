@@ -119,16 +119,14 @@ context_budgets:
   scratch_tokens: 8000
 ```
 
-Override individual fields for a Wave in `.lf/wave/<name>/GOAL.md` frontmatter:
+Override individual fields for a Wave in `.lf/wave/<name>/config.yaml`:
 
 ```yaml
----
 context_budgets:
   memory_tokens: 10000
----
 ```
 
-Each field resolves from Wave frontmatter, repo config, personal config, then
+Each field resolves from Wave config, repo config, personal config, then
 the compiled default. `lf context` shows the winning source for every value.
 The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
 integers. These are authoring targets, not launch limits; exceeding them does not
@@ -168,9 +166,9 @@ remain readable through complete-file pointers.
 
 ## Config Files
 
-**Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo.
+**Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo. **Wave config** (`.lf/wave/<name>/config.yaml`) overrides for work in that Wave; repository-only keys (`planning`, `release`, `exclude`, `merge_method`, `land`, `pr`) are an error there. See [Set it up once](work.md#set-it-up-once).
 
-For most settings, repo overrides global. For additive settings (`docs`, `context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
+For most settings, the nearer file wins; `context_budgets` and `skill_agents` merge per key. For additive settings (`docs`, `context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
 
 ```yaml
 # ~/.lf/config.yaml (global)
@@ -375,6 +373,8 @@ Set the default harness, with an optional model.
 ```yaml
 agent: codex          # harness default
 # agent: claude:opus  # harness plus model
+skill_agents:
+  implement: claude:opus  # this skill only, ahead of the skill's own agent
 ```
 
 Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
@@ -570,7 +570,7 @@ than `config.yaml`:
 
 ```bash
 lf account connect claude primary@example.com --chrome-profile primary@example.com
-lf account route set claude primary@ engineering@
+lf set account.claude primary@,engineering@
 lf --account primary@ implement
 ```
 

@@ -333,12 +333,32 @@ pub fn bind_task_planning(repo: &TestRepo) {
         ".lf/config.yaml",
         "planning:\n  provider: linear\n  team: team-task-pr-tests\n",
     );
+    repo.create_file(".lf/wave/task-pr-tests/GOAL.md", "Keep work.\n");
     repo.create_file(
-        ".lf/wave/task-pr-tests/GOAL.md",
-        "---\nlinear:\n  initiative: initiative-task-pr-tests\n---\nKeep work.\n",
+        ".lf/wave/task-pr-tests/config.yaml",
+        "linear:\n  initiative: initiative-task-pr-tests\n",
     );
     repo.stage_all();
     repo.commit("Bind fixture planning before creating Task checkouts");
+}
+
+/// Select a Wave's default graph in its committed `config.yaml` in `repo`.
+#[allow(dead_code)] // Shared helper compiled into integration tests without Wave graphs.
+pub fn select_wave_graph(
+    repo: &Path,
+    store: &loopflow::store::sqlite::SqliteStore,
+    wave: &WaveId,
+    name: &str,
+) {
+    let wave = store.get_wave(wave).unwrap().unwrap();
+    let path = repo.join(".lf/wave").join(wave.slug()).join("config.yaml");
+    let mut config: serde_yaml_ng::Mapping = fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| serde_yaml_ng::from_str(&content).ok())
+        .unwrap_or_default();
+    config.insert("graph".into(), name.into());
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, serde_yaml_ng::to_string(&config).unwrap()).unwrap();
 }
 
 #[allow(dead_code)] // Shared helper compiled into integration tests that do not need Task state.

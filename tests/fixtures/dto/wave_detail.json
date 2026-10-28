@@ -641,5 +641,41 @@
     "observed_at": null,
     "pending_successor": null,
     "activation": null
+  },
+  "setup": {
+    "graph": {
+      "value": "code",
+      "source": "wave"
+    },
+    "agent": {
+      "value": "claude",
+      "source": "repo"
+    },
+    "skill_agents": {
+      "implement": {
+        "value": "claude:opus",
+        "source": "wave"
+      }
+    },
+    "tasks_machine": {
+      "value": "home_00000000000000000000000000000001",
+      "source": "personal"
+    },
+    "session_machine": {
+      "value": "home_00000000000000000000000000000002",
+      "source": "default"
+    },
+    "accounts": {
+      "claude": {
+        "accounts": [
+          "work"
+        ],
+        "source": "personal"
+      },
+      "codex": {
+        "accounts": [],
+        "source": "default"
+      }
+    }
   }
 }

@@ -418,6 +418,7 @@ impl Harness for ClaudeHarness {
             Provider::Claude,
             requested_session.as_ref(),
             self.requested_account_id.as_ref(),
+            crate::work::wave::context::ambient_wave_id().as_ref(),
         )
         .await?;
         self.account_route = account_route;

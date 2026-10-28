@@ -80,8 +80,9 @@ you to try the change, then deliver it and stop again for you to check it on
 `main`. Name it once; the Task keeps it, and each `lf task run <ID>` continues
 from where it stopped. Set `graph: code` in `.lf/config.yaml` and every new Task
 takes it up. `lf -b task run <ID>` runs straight through both stops with an agent
-standing in; `auto` has no stops: `lf wave graph set auto <wave>` and that Wave's
-Tasks run from request to merged PR without you.
+standing in; `auto` has no stops: with `graph: auto` in
+`.lf/wave/<wave>/config.yaml`, that Wave's Tasks run from request to merged PR
+without you.
 
 While it runs:
 

@@ -300,7 +300,11 @@ esac
             .env(key, value)
             .output()
             .unwrap();
-        assert!(output.status.success());
+        assert!(
+            output.status.success(),
+            "{key}={value}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(text.contains("session: usage unknown"));
         assert!(!text.contains("100% used"));
@@ -598,7 +602,7 @@ esac
             "--routing",
             "automatic",
         ],
-        vec!["account", "route", "set", "codex", "active@", "--default"],
+        vec!["set", "account.codex", "active@", "--global"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .current_dir(home.path())
@@ -643,11 +647,11 @@ esac
     );
     let unscoped = Command::new(env!("CARGO_BIN_EXE_lf"))
         .current_dir(home.path())
-        .args(["account", "route", "set", "codex", "active@"])
+        .args(["set", "account.codex", "active@"])
         .output()
         .unwrap();
     assert!(!unscoped.status.success());
-    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("--default"));
+    assert!(String::from_utf8_lossy(&unscoped.stderr).contains("--global"));
 }
 
 #[test]
@@ -1296,8 +1300,8 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
     runtime
         .block_on(store.upsert_provider_account(&account("excluded", excluded.clone())))
         .unwrap();
-    run(&["account", "route", "set", "codex", "excluded@", "--default"]);
-    run(&["account", "route", "set", "codex", "active@"]);
+    run(&["set", "account.codex", "excluded@", "--global"]);
+    run(&["set", "account.codex", "active@"]);
     let routes = || {
         let output = run(&["account", "route", "--json"]);
         let scoped: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();

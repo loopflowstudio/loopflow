@@ -118,3 +118,35 @@ and memory agree on operation-entry proof and separate installed acceptance.
 The existing Wave lesson now also retains the whitespace-filename counterexample.
 
 Check (2026-10-27): `git diff --check` and `lf context` passed; prior network-isolated `cargo +stable test -p loopflow --test integration sync_preserves_work_with_` (7 passed), formatting and Clippy results remain applicable to unchanged code; affected suites remain with gate.
+
+## Concept review — 2026-10-27
+
+No design change and no open product choice. Jack Heart's accepted scope already
+settles the consequential distinction: local telemetry is excluded from new
+checkpoints even when staged; ordinary edits retain consolidated checkpointing.
+The implementation and `docs/ops.md` express that contract without a new flag,
+ignore-rule requirement, public type, persistence record or skill instruction.
+
+| Action | Concept | Existing owner after this repair |
+| --- | --- | --- |
+| Run `lf sync origin/main` on a feature branch | Ordinary work becomes a checkpoint; telemetry remains local | `run_sync_in` → `checkpoint_uncommitted_work` → Git commit |
+| Merge upstream with residual local telemetry | Preserve staged and working contents separately | `with_preserved_edits` → Git index/worktree and stash |
+| Recover from a telemetry restoration conflict | Retained edits have a named recovery object | Existing error gives `git stash apply --index <sha>` after resolving the Git operation |
+
+The former mismatch was treating the entire staged index as checkpoint content
+after excluding telemetry only from staging. The temporary index resolves that
+mismatch while keeping Git as the sole owner of content and recovery. No further
+lifecycle or abstraction needs to be introduced or removed.
+
+Normal sync checkpoints work, incorporates upstream and restores telemetry; a
+repeat creates no checkpoint. A staging failure stops before merging and remains
+an error. A post-commit refresh failure names the saved checkpoint; restoration
+conflicts retain both telemetry versions in the recovery stash. Recovery must not
+be described as automatic success when upstream changed the same telemetry.
+
+Keep the counterexamples already represented in the design and fixtures:
+pre-staged telemetry defeats exclusion alone; explicitly staged ignored work
+defeats rebuilding the checkpoint from HEAD plus ordinary additions; a whitespace
+filename defeats trimmed-output emptiness detection. These constrain the repair,
+not new product choices. Next proof remains the affected gate and Infrastructure's
+separate installed readback; this review changes no code and reruns no Rust checks.

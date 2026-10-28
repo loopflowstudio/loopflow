@@ -1,6 +1,7 @@
 # LOO-664: Keep sync working with ignored telemetry
 
 2026-10-27. Selective checkpoint implemented; gate and delivery remain.
+The current Task definition requires no additional implementation slice.
 Jack Heart authorized the bounded hotfix and autonomous shipping in comment
 `297df81a-24b3-4431-8336-a0dfeb3660ab`. Iteration feedback rejects the previous
 pre-staged telemetry exception. The mechanism follows source and fixture evidence,
@@ -77,7 +78,7 @@ retaining staged/working bytes in the named recovery stash. Binary diffs check
 telemetry's full staged/working partition. A whitespace-only filename regression
 guards against trimming `diff --name-only` into a false empty checkpoint.
 
-Gate, publication and landing remain. Gate includes existing resolver/Graph-sync
+This slice: gate, publication and landing. Gate includes existing resolver/Graph-sync
 tests and commit-boundary suites:
 
 ```bash
@@ -91,16 +92,24 @@ then supplies Infrastructure the exact merged revision. Infrastructure alone own
 coordinated release/install and installed LOO-661 readback. Source fixtures and
 landing cannot close that installed verification obligation.
 
-The memory checkpoint is resolved by
-`0f6969856dcda27735c9e67520116f9e7684616d`: the authorized LOO-664 Wave-memory
-contribution describes selective checkpoints and is committed. The execution
-dependency remains: the Task update of 2026-10-28 03:31 UTC reports that installed
-0.14.19 fails its literal-exclusion staging command even on a clean protected
-branch. Explicit-path checkpoints preserve edits but cannot restore Graph sync.
-Infrastructure has pinned a candidate that passes the clean-checkout reproduction
-and prepared a signed CLI and matching Desktop helper with passing exact-frontier
-installation preflight. Installation and subsequent verification remain pending
-with Infrastructure; this is reported candidate evidence, not installed proof.
-No repeated implementation or unchanged check can resolve that installation boundary.
+The LOO-664 Wave-memory contribution is committed in
+`0f6969856dcda27735c9e67520116f9e7684616d`; preserve it and other memory.
+Installed 0.14.19 still fails on clean protected branches with ignored telemetry.
+Infrastructure reports a pinned candidate passing that reproduction and a signed
+CLI/matching Desktop helper passing exact-frontier installation preflight.
+Installation and LOO-661 readback remain pending; explicit-path checkpoints alone
+cannot restore sync, and source/candidate passes do not prove installed acceptance.
+
+The 2026-10-28 03:39 UTC Task update authorizes a temporary Task-local bridge:
+after validating and checkpointing each step, atomically move `.lf/tmp` into a
+unique durable archive, leaving it absent immediately before automatic sync.
+Preserve old and newly generated telemetry separately. The compress step reserves
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-664-compress-HbQpjT3c/telemetry`
+for this archive. This avoids the installed literal-directory error; it is not
+the shipped repair or permission to change other checkouts or ignore rules.
+
+Compression retains the single checkpoint helper and existing recovery owner;
+their separate indexes and stash are required to preserve telemetry's partition.
+No further code reduction is warranted. Repeated delivery notes are consolidated.
 
 Check (2026-10-27, rustup stable 1.99.1): `uv run python scripts/test_network.py /Users/jack/.cargo/bin/cargo +stable test -p loopflow --test integration sync_preserves_work_with_ < /dev/null` — 7 passed; rustup-first `cargo +stable fmt --all -- --check` and network-isolated `cargo +stable clippy --all-targets -- -D warnings` passed; `git diff --check` and `lf context` passed, both budgets within limits; affected suites remain with gate.

@@ -42,25 +42,21 @@ importing Jack's was refused with 401), and `auto` reaching a merged PR.
 | Conversation admitted by `--run` | The `agent_sessions.request` of its primary session `04df12…` holds the typed request word for word. Graph step sessions have no request. Its cwd is the Task worktree. |
 | The Graph's `implement` step | **Failed:** "no eligible managed codex account". The isolated home has no accounts, and its default agent is codex. `task run` retried it 3 times and stopped. This comes from the demo environment, not from the feature. |
 
-Not yet observed:
-- the tty path (the conversation opening in the terminal with the request as its first turn)
-- a provider actually working the request
-- `auto` reaching a merged PR
-- the Desktop sheet
+Not yet observed (still open after the Desktop demo):
+- a provider actually working the request (no Claude login in the demo store)
+- `auto` reaching a merged PR (depends on LOO-610's `auto` workflow)
 
 ## Feedback
 
-None yet. Jack has not run the demo.
+Jack, at the Desktop demo (2026-10-28): had the sheet redesigned (layout A Linear +
+B composer, finish Paper + Instrument; `scratch/new-task-prototypes/sheet-final.html`),
+then "ok works, ship it."
 
-## What would finish the proof (decision for Jack)
+Superseded: the pre-demo "What would finish the proof" options. Jack ran the dev
+build against an isolated store instead, which showed the Desktop half.
 
-1. **Sign in to Claude in the demo home**, then rerun with `-a claude`, so you see a
-   real run without touching your store.
-2. **Update Loopflow.app to v0.15.0.** The branch build is then store-compatible
-   with your real `~/.lf`, so you can try `lf task create "…" --run` and the Desktop
-   build in a real repository. The same update also fixes the `.lf/tmp` sync bug.
-3. **Accept the mechanics proven above** and review the Desktop sheet from the
-   tests plus a later verify on main.
+## Next
 
-Recommended: 2. It's the only option that shows the Desktop half, and it removes the
-`.lf/tmp` workaround.
+Stand-in review (2026-10-28, headless, for Jack): advance to delivery. The fix found
+at demo is committed with `newTaskSelectsBeforeReadingsConfirm`. A provider-run and
+`auto` → merged PR remain for verify on main once Claude is signed in there.

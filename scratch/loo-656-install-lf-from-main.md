@@ -173,21 +173,17 @@ refusal does: it names the floor migration and `lf self install --main`.
 holds that build: every row a provenance-aware lf wrote carries
 `package_version` and `source_revision`. Settled by the accepted request:
 
-- `incompatible()` reads the newest ledger row's `package_version` and
-  `source_revision` and names that build ("last migrated by lf 0.15.0+abc1234").
-  It falls back to the current generic wording when the ledger has no provenance
-  columns or can't be read. Most call sites hold a connection;
-  `pending_migrations` works on the applied list, so its callers (which hold the
-  connection) attach the build. No new state.
-- One focused test: a store whose newest row carries a known provenance yields a
-  refusal naming that build.
+- `incompatible(conn)` names the build from the newest ledger row via
+  `last_migrated_by` ("last migrated by lf 0.14.2 (012345678)"; an `unknown`
+  revision prints the version alone). A ledger without provenance columns fails
+  that query and keeps the generic wording. `pending_migrations` takes the
+  connection so every refusal path names the build. No new state.
+- Test `a_drifted_store_names_the_build_that_last_migrated_it`.
 
 Reviewed and unchanged: `reader_catalog`/`can_open` match the LOO-669 split
 (`can_open` has no caller until LOO-669 publishes catalogs, as agreed), and
 `lf self install reader-catalog` stays a hidden packaging command. The docs
 changes match the request. No open product choice.
-
-Implemented: `incompatible(conn)` + `last_migrated_by`; `pending_migrations` takes the conn. Check: `cargo test -p loopflow --lib store::migrations::` 121 passed; fmt and clippy clean; full `store::`, Swift and `release_tests` stay with gate/CI.
 
 ## Not in this change: contract enforcement (decision belongs to LOO-669)
 
@@ -205,4 +201,4 @@ catalog makes it visible to updaters.
   deletion, and every package ships `reader-catalog.txt`.
 - First real `lf self install --main` needs a green `Packages (main)` run after merge.
 
-Check (2026-10-28, realign): focused `store::migrations` tests, clippy `--all-targets` and `cargo fmt` clean at e75d1c578; `lf self install reader-catalog` with empty `HOME`/`LF_HOME` prints every released batch and creates nothing; full `store::` module (times out locally), Swift and `release_tests` left to gate/CI.
+Check (2026-10-28, realign): `cargo test -p loopflow --lib store::migrations::` 121 passed at 9fa92571b, `cargo fmt --check` clean; `lf self install reader-catalog` with empty `HOME`/`LF_HOME` prints every released batch and creates nothing; full `store::` module (times out locally), Swift and `release_tests` left to gate/CI.

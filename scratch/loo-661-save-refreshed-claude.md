@@ -1,33 +1,18 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Draft implementation plan blocked on the writer mechanism.**
-The production `security -i` writer remains defective and no native acceptance
-fixture exists. Finding 35 rejects the tested copied-access and trusted-application
-constructions; finding 36 identifies why database authentication and retaining an
-item reference do not solve those failures. Further implementation needs a
-concrete public mechanism; no scope change is accepted. Finding 36 completes the
-requested database-authentication and group-retention investigation, without a
-candidate addressing finding 35. Public interfaces are not declared exhausted.
-Live acceptance independently needs browser reconnection for
-jack@loopflow.studio; the historical save failure remains undiagnosed.
+Status (2026-10-28): **Blocked on a compatible native writer.** The production
+`security -i` transport remains defective; no native acceptance fixture exists.
+Findings 35–36 reject the tested access constructions and authentication/group
+retention alternatives. A distinct supported mechanism is required before another
+mutation probe; public interfaces are not declared exhausted and no scope change
+is accepted. Live acceptance separately needs browser reconnection for
+jack@loopflow.studio. The historical save failure remains undiagnosed.
 
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
 prior plan and dependency reconciliation:
 `61c6f82a7fd9e9c61d3a9e81dfcfa261708536dc:scratch/loo-661-save-refreshed-claude.md`.
-
-Kickoff reconciliation (2026-10-28): retain the existing design and acceptance
-contract. Current source still uses the defective transport; the branch's
-diagnostic changes supply neither replacement nor preservation. Rechecking
-[Apple's pinned command implementation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/SecurityTool/macOS/security.c#L73-L76)
-confirms its fixed 4,096-byte interactive buffer; it supplies no new transport
-candidate. Findings 35–36 remain the decisive native-access counterexamples.
-No new qualifying mechanism, mutation probe or live-account evidence resulted.
-The remaining sequence below is conditional, not an executable repair plan:
-implementation needs a demonstrated supported mechanism preserving bytes and
-native access, or an explicit scope decision from Jack Heart. Browser reconnection
-is a separate live-demo dependency and cannot resolve this storage dependency.
 
 Integrated dependencies (none proves Claude repair or installation):
 
@@ -87,6 +72,8 @@ adds no migration, DTO or Swift change.
 
 ## Evidence and excluded alternatives
 
+Detailed evidence summarized below, including contradictory preservation results:
+`09dfdc6270:scratch/loo-661-save-refreshed-claude.md`, this section.
 Complete findings 1–33, citations, probe receipts and earlier archive references:
 `c871ddfb0c4956fdb816c079c61d71e68767733f:scratch/loo-661-save-refreshed-claude.md`.
 The completed command-boundary probe is preserved at the same commit as
@@ -101,72 +88,47 @@ commit `db15acbe6a7f257a859ad9a3bb86097bfe0679d9`; they do not prove installed b
 equivalence or exhaust public interfaces. The following groups retain the original
 finding numbers so the archived evidence stays addressable.
 
-- **Transport (1–2, 30):** `security -i` has a 4,096-byte input buffer; hex reaches
-  it at 2 KiB, and raw JSON cannot fit 8 KiB. Early probes round-tripped 64/1,242
-  bytes and retained old bytes after a 2,048-byte failure. Later exact-command
-  probes contradicted preservation: both five- and six-character account names
-  at 2,048/8,192 bytes produced write exit 1 and read exit 0, returning neither old
-  nor intended bytes. Read-output lengths were 3,990/1,994, not raw encoding sizes.
-  All six items were deleted; the result reproduced twice with 15-second child
-  deadlines. These probes did not invoke compiled Rust. Published interactive-loop
-  source executes each buffer read and replaces final status per command, consistent
-  with partial replacement then error; installed parsing was not instrumented.
-  Detached `security … -w` returned zero but truncated larger values to 128 bytes.
-  PTYs, file/FD indirection and repeated password options do not solve this:
-  `-w`/`-X` replace, not append; separate commands replace separately.
+- **Transport (1–2, 30):** `security -i` has a 4,096-byte input buffer. Early
+  64/1,242-byte round trips passed; a 2,048-byte failure retained old bytes.
+  Later exact-command probes twice contradicted preservation at 2,048/8,192 bytes
+  with five- and six-character account names: write exit 1, read exit 0, neither
+  old nor intended bytes. They did not invoke compiled Rust. Published parsing
+  executes each buffer read, consistent with partial replacement then error;
+  installed parsing was not instrumented. Detached `security … -w` returned zero
+  but truncated larger values to 128 bytes. PTYs, file/FD indirection and repeated
+  `-w`/`-X` cannot append a password across commands.
 - **Native access (3–5, 8–9, 11, 21, 27–29, 31, 33):**
-  `SecKeychainItemModifyAttributesAndData` returned zero at 2/8 KiB but existing
-  `security` readers exited 128; `ModifyContent` left reads timing out. Native
-  writes replaced `apple-tool:` with writer `cdhash:`. Published non-null updates
-  create a new group and copy access after stripping partition/integrity ACLs;
-  null data leaves bytes unchanged. Preparing old access first therefore does not
-  preserve it. `security-framework` 3.7.0 uses that modifier. Apple-signed
-  `osascript`/`SecItemUpdate` and copied-access restoration also returned zero while
-  reads timed out. Edited partition access failed with `-25293` under disabled UI;
-  initial JXA `-50` results were bridge failures. Apple-anchored `com.apple.security`
-  gets `apple-tool:`, other Apple code `apple:`; signing alone proves no access.
-  Public creation permits explicit access but rejects valid duplicates. SetAccess
-  edits the current group, not the next replacement. Although `kSecAttrAccess`
-  permits a combined update, published `_UpdateKeychainItem` modifies data before
-  setting access; failure does not restore data, and `SecItemUpdate_osx` adds no
-  encompassing transaction. `SecKeychainItemSetAccessWithPassword` is private,
-  requires a Keychain passphrase and changes only access. TN3137's default file
-  shim retains these limits; data protection selects another storage authority.
-  No compatible atomic data/access replacement is established.
+  `SecKeychainItemModifyAttributesAndData` returned zero at 2/8 KiB but `security`
+  reads exited 128; `ModifyContent`, Apple-signed `osascript`/`SecItemUpdate` and
+  copied-access restoration left reads timing out. Writes replaced `apple-tool:`
+  with writer `cdhash:`. Published non-null updates create a group and strip
+  partition/integrity ACLs; null data leaves bytes unchanged. `security-framework`
+  3.7.0 uses that modifier. Partition edits failed with `-25293` under disabled UI;
+  initial JXA `-50` was a bridge failure. Signing/trusting an application alone
+  supplies no partition authority. Combined data/access updates modify data first
+  without encompassing rollback; pre-setting access affects only the old group.
+  Public creation rejects duplicates. Private password-based access repair,
+  TN3137's file shim and a different data-protection authority supply no accepted
+  atomic replacement.
 - **Encoding and other interfaces (10, 12–20):** raw `CSSM_DL_DataModify` bypasses
-  encryption; JSON would overwrite encoded storage. No public password encoder
-  was found; `CSSM_EncryptData` still needs private group/label/IV/ciphertext
-  composition. Private envelope reconstruction/C++ ABI remain excluded.
-  `SecKeychainSetBatchMode` is private; public FileDL controls have the limitation
-  below. Import handles keys/certificates; copy strips access/integrity ACLs and
-  creates a group. Read-only macOS 26.0.1 (25A362) dispatch inspection resolved
-  `KCSetData`/`KCUpdateItem` to staged APIs with published new-group paths.
-  Shared web credentials use another authority; pinned source returns
-  `errSecUnimplemented`. Other findings in 8–20 were source/header review, not
-  new native mutation proof.
+  encryption. `CSSM_EncryptData` still requires private envelope composition;
+  `SecKeychainSetBatchMode` is private. Import handles keys/certificates; copy
+  creates a group and strips access/integrity ACLs. Read-only macOS 26.0.1 dispatch
+  inspection found `KCSetData`/`KCUpdateItem` use staged APIs with published
+  new-group paths. Shared web credentials select another authority and pinned
+  source returns `errSecUnimplemented`. Other findings were source/header review.
 - **Outer transactions (22–26):** FileDL deferred commit around 2,048/8,192-byte
-  modifications returning zero. Retained/fresh password reads returned `-25300`
-  while metadata succeeded. By-ID reads saw new encoded bytes (2,084/8,228), but
-  group-key queries returned end-of-data (`-2147413715`); fresh password queries
-  still saw the original 52-byte encoded record/key. Published source reads
-  modified records by ID but queries the pre-write snapshot, consistent with the
-  unavailable decoding group. Another lookup/wrapper does not supply pre-commit
-  verification. Rollback/autocommit restoration returned zero and fresh `security`
-  readers recovered exact old bytes. This proves those recoveries only, not
-  unchanged ACL identity or general rollback safety. No commit/access-restoration
-  probe ran; committing first abandons verification and leaves access unresolved.
+  modifications returning zero. Password reads failed (`-25300`) while metadata
+  succeeded; by-ID reads saw new encoded data, queries saw the old snapshot and
+  could not find the new decoding group. This prevented pre-commit verification.
+  Rollback/autocommit restoration returned zero and independent readers recovered
+  exact old bytes, proving neither unchanged ACL identity nor general rollback
+  safety. No commit/access-restoration probe ran.
 - **Copied-access creation (34, 2026-10-28):**
-  `SecKeychainItemCreateFromContent` accepts copied access, suggesting a staged
-  candidate could avoid the uncommitted group lookup above. With interaction
-  disabled, disposable 2,048/8,192-byte probes returned zero for original lookup
-  and access-copy, then `-25293` for both creations. Independent `security` reads
-  returned exact old bytes; candidates were absent (exit 44). Original cleanup
-  succeeded; absent-candidate cleanup returned 44. Children had 15-second
-  deadlines and were reaped; output contained only statuses, sizes and equality
-  booleans. No real credential, route, Session or global trust setting changed.
-  Creation failed before promotion or transaction testing; this does not rule out
-  every explicit-access creation. Full API citation, source/runner/result Git blob
-  IDs and reproduction commands:
+  `SecKeychainItemCreateFromContent` with copied access failed `-25293` at both
+  sizes with interaction disabled. Independent reads retained exact old bytes;
+  candidates were absent (44). Promotion/transactions were not tested. This rejects
+  that construction, not every explicit-access creation. Full citations and receipts:
   `78530325c1:scratch/loo-661-save-refreshed-claude.md`, finding 34.
 - **Live observations (6, 32):** launches reported one write/readback failure
   without status and two expired OAuth errors. Later 0.14.18/0.14.19 polls accepted
@@ -338,4 +300,4 @@ Publish/ship only the complete bounded repair through the selected Graph, withou
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-Check — kickoff (2026-10-28): `git diff --check` and `lf context` pass; current writer, archived findings 35–36 and pinned Apple command source reviewed. Prose only; no build or mutation probe rerun. Writer mechanism, native acceptance, gate and installed acceptance remain unresolved.
+Check — compress (2026-10-28): `git diff --check` and `lf context` pass; prose only, no build or mutation probe rerun. Gate owns affected checks; writer mechanism, native acceptance and installed acceptance remain unresolved.

@@ -1,7 +1,7 @@
 # LOO-669 open questions and assumptions
 
 LOO-656's design, migration study/history/research and its own questions live at
-#1755's head `e75d1c578` (`git show e75d1c578:scratch/<file>`). Items from them
+#1755's head `b884d9c83` (`git show b884d9c83:scratch/<file>`). Items from them
 that streams depend on:
 
 - `lf self install --main` installs the CLI only and needs `gh` auth (Actions

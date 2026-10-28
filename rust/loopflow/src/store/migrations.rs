@@ -172,7 +172,7 @@ pub(crate) fn apply_newer_migration(
 pub(crate) fn old_reader_recognizes(conn: &rusqlite::Connection) -> bool {
     let prior = &MIGRATIONS[..MIGRATIONS.len() - 1];
     applied_versions(conn)
-        .and_then(|applied| pending_migrations(&applied, prior).map(<[_]>::is_empty))
+        .and_then(|applied| pending_migrations(conn, &applied, prior).map(<[_]>::is_empty))
         .unwrap_or(false)
 }
 
@@ -628,7 +628,7 @@ fn apply_set(
     if !has_ledger(conn)? {
         // Product tables with no ledger were never written by us.
         if user_table_count(conn)? > 0 {
-            return Err(incompatible());
+            return Err(incompatible(conn));
         }
         conn.execute_batch(
             "CREATE TABLE schema_migrations (
@@ -643,7 +643,7 @@ fn apply_set(
     adopt_permuted_history(conn, set)?;
 
     let applied = applied_versions(conn)?;
-    for (offset, migration) in pending_migrations(&applied, set)?.iter().enumerate() {
+    for (offset, migration) in pending_migrations(conn, &applied, set)?.iter().enumerate() {
         let parent_history = migration_prefix_fingerprint(&set[..applied.len() + offset]);
         migration_preflight(conn, migration, guards)?;
         conn.execute_batch(migration.sql)?;
@@ -936,7 +936,7 @@ fn adopt_permuted_history(conn: &rusqlite::Connection, set: &[Migration]) -> Sto
 
     let expected = expected_schema(set[..prefix_len].iter().map(|migration| migration.sql))?;
     if *product_schema(conn)? != *expected {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     }
 
     let mut applied_at = conn
@@ -995,7 +995,7 @@ fn adopt_legacy_baseline(conn: &rusqlite::Connection, set: &[Migration]) -> Stor
         return Ok(());
     }
     let Some(baseline) = set.first() else {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     };
     conn.execute(
         "UPDATE schema_migrations SET version = ?1 WHERE version = ?2",
@@ -1091,7 +1091,7 @@ fn validate_divergent_schema(
             .map(|migration| migration.sql),
     )?;
     if *product_schema(conn)? != *expected {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     }
     Ok(())
 }
@@ -1106,6 +1106,7 @@ fn validate_divergent_schema(
 /// ledger of the pre-loop store, abandoned when the runtime collapsed to waves,
 /// projects, and tasks — is simply not our database.
 fn pending_migrations<'a>(
+    conn: &rusqlite::Connection,
     applied: &[String],
     set: &'a [Migration],
 ) -> StoreResult<&'a [Migration]> {
@@ -1125,11 +1126,11 @@ fn pending_migrations<'a>(
                     .unwrap_or_else(|| "none".to_string())
             )))
         } else {
-            Err(incompatible())
+            Err(incompatible(conn))
         };
     }
     if applied.len() > known.len() || *applied != known[..applied.len()] {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     }
     Ok(&set[applied.len()..])
 }
@@ -1158,11 +1159,11 @@ fn admitted_newer_floor(
 ) -> StoreResult<Option<String>> {
     let known: Vec<String> = set.iter().map(Migration::version).collect();
     if applied.len() <= set.len() || applied[..set.len()] != known[..] {
-        pending_migrations(applied, set)?;
+        pending_migrations(conn, applied, set)?;
         return Ok(None);
     }
     if !ledger_has_reader_floor(conn)? {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     }
     let mut floor = None;
     for version in &applied[set.len()..] {
@@ -1225,7 +1226,7 @@ fn applied_floor(conn: &rusqlite::Connection, version: &str) -> StoreResult<Stri
 /// when every build that opens the store now still can after it advances.
 pub(crate) fn raised_reader_floor(conn: &rusqlite::Connection) -> StoreResult<Option<String>> {
     let applied = applied_versions(conn)?;
-    Ok(pending_migrations(&applied, MIGRATIONS)?
+    Ok(pending_migrations(conn, &applied, MIGRATIONS)?
         .iter()
         .rev()
         .find(|migration| migration.breaks_readers())
@@ -1267,7 +1268,7 @@ pub(crate) fn pending_unmerged(conn: &rusqlite::Connection) -> StoreResult<Vec<S
     if admitted_newer_floor(conn, &applied, MIGRATIONS)?.is_some() {
         return Ok(Vec::new());
     }
-    Ok(pending_migrations(&applied, MIGRATIONS)?
+    Ok(pending_migrations(conn, &applied, MIGRATIONS)?
         .iter()
         .filter(|migration| !migration.merged)
         .map(Migration::version)
@@ -1327,7 +1328,7 @@ pub fn validate_set(set: &[Migration]) -> Result<(), String> {
 fn validate_schema(conn: &rusqlite::Connection, set: &[Migration]) -> StoreResult<()> {
     let expected = expected_schema(set.iter().map(|migration| migration.sql))?;
     if *product_schema(conn)? != *expected {
-        return Err(incompatible());
+        return Err(incompatible(conn));
     }
     Ok(())
 }
@@ -1414,11 +1415,11 @@ fn expected_schema(
 /// string such as `0.10.001_initial`.
 pub fn latest_version_sqlite(conn: &rusqlite::Connection) -> StoreResult<String> {
     let applied = applied_versions(conn)?;
-    if !pending_migrations(&applied, MIGRATIONS)?.is_empty() {
-        return Err(incompatible());
+    if !pending_migrations(conn, &applied, MIGRATIONS)?.is_empty() {
+        return Err(incompatible(conn));
     }
     validate_schema(conn, MIGRATIONS)?;
-    applied.last().cloned().ok_or_else(incompatible)
+    applied.last().cloned().ok_or_else(|| incompatible(conn))
 }
 
 pub fn latest_known_version() -> String {
@@ -1441,7 +1442,7 @@ pub(crate) fn pending_shared_migration(conn: &rusqlite::Connection) -> StoreResu
     if admitted_newer_floor(conn, &applied, MIGRATIONS)?.is_some() {
         return Ok(None);
     }
-    Ok(pending_migrations(&applied, MIGRATIONS)?
+    Ok(pending_migrations(conn, &applied, MIGRATIONS)?
         .first()
         .map(Migration::version))
 }
@@ -1464,7 +1465,7 @@ pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreRes
             return if user_table_count(conn)? == 0 {
                 Ok(true)
             } else {
-                Err(incompatible())
+                Err(incompatible(conn))
             };
         }
         let applied = applied_versions(conn)?;
@@ -1480,19 +1481,46 @@ pub(crate) fn requires_migration_sqlite(conn: &rusqlite::Connection) -> StoreRes
         if permuted_history(&applied, MIGRATIONS).is_some() {
             return Ok(true);
         }
-        Ok(!pending_migrations(&applied, MIGRATIONS)?.is_empty())
+        Ok(!pending_migrations(conn, &applied, MIGRATIONS)?.is_empty())
     })
 }
 
 /// A history or schema no build of this catalog produced. The data is still
 /// someone's: name the builds that can open it and never suggest deletion.
-fn incompatible() -> StoreError {
+fn incompatible(conn: &rusqlite::Connection) -> StoreError {
+    let keep = match last_migrated_by(conn) {
+        Some(build) => {
+            format!("keep loopflow.db: it was last migrated by lf {build}. Open it with that build")
+        }
+        None => "keep loopflow.db and open it with the lf that last migrated it".to_string(),
+    };
     StoreError::InvalidData(format!(
         "this Loopflow database's migration history or schema differs from lf {} (latest known {}); \
-         keep loopflow.db and open it with the lf that last migrated it, or install the newest with `lf self install --main`",
+         {keep}, or install the newest with `lf self install --main`",
         crate::build_info::BUILD_VERSION,
         latest_known_version(),
     ))
+}
+
+/// The build that wrote the ledger's newest row, when it recorded itself. A
+/// ledger without provenance columns fails the query and names no build.
+fn last_migrated_by(conn: &rusqlite::Connection) -> Option<String> {
+    let (version, revision): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT package_version, source_revision FROM schema_migrations
+             ORDER BY applied_at DESC, rowid DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok()?;
+    let version = version?;
+    Some(match revision.filter(|revision| revision != "unknown") {
+        Some(revision) => format!(
+            "{version} ({})",
+            crate::build_info::short_revision(&revision)
+        ),
+        None => version,
+    })
 }
 
 #[cfg(test)]
@@ -4375,7 +4403,7 @@ mod tests {
         // The installed binary — whose set ends at the store's frontier — still
         // opens the store: it is exactly the recognized prefix, nothing pending.
         assert!(
-            pending_migrations(&applied_versions(&conn).unwrap(), installed)
+            pending_migrations(&conn, &applied_versions(&conn).unwrap(), installed)
                 .unwrap()
                 .is_empty(),
             "the installed binary must keep reading the store the candidate left alone"
@@ -5975,6 +6003,29 @@ mod tests {
 
         let error = apply_sqlite(&conn).unwrap_err();
         assert_keeps_the_store(&error);
+    }
+
+    #[test]
+    fn a_drifted_store_names_the_build_that_last_migrated_it() {
+        let conn = open();
+        apply_sqlite(&conn).unwrap();
+        conn.execute_batch(
+            "UPDATE schema_migrations
+             SET package_version = '0.14.2',
+                 source_revision = '0123456789abcdef0123456789abcdef01234567'
+             WHERE rowid = (SELECT rowid FROM schema_migrations
+                            ORDER BY applied_at DESC, rowid DESC LIMIT 1);
+             DROP INDEX idx_tasks_project;",
+        )
+        .unwrap();
+
+        let error = apply_sqlite(&conn).unwrap_err();
+        assert_keeps_the_store(&error);
+        let message = error.to_string();
+        assert!(
+            message.contains("last migrated by lf 0.14.2 (012345678)"),
+            "{message}"
+        );
     }
 
     #[test]

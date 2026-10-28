@@ -149,7 +149,7 @@ applied versions, checksums and reader floors are read on every open.
 | Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
 | Newer migrations whose floor this build knows | opens; this build's schema must survive unchanged |
 | Newer migrations whose floor this build does not know | names the migration the store needs |
-| Skipped a migration, or drifted from the chain's schema | keep `loopflow.db`; open it with the lf that last migrated it, or `lf self install --main` |
+| Skipped a migration, or drifted from the chain's schema | keep `loopflow.db`; open it with the lf that last migrated it (named from the ledger when that build recorded itself), or `lf self install --main` |
 
 Every refusal names a build that opens the store; none suggests deleting it.
 

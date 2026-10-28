@@ -120,3 +120,6 @@ END;
 CREATE TRIGGER task_graph_is_fixed BEFORE UPDATE OF graph ON task_graphs BEGIN
     SELECT RAISE(ABORT,'A Task Graph is fixed when taken up; take up another to replace it');
 END;
+
+-- A Wave's default is a graph like any other.
+ALTER TABLE waves RENAME COLUMN workflow TO graph;

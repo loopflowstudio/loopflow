@@ -1,6 +1,6 @@
 -- A Wave's default graph is committed in `.lf/wave/<name>/config.yaml`;
 -- the local selection it replaces is dropped.
-ALTER TABLE waves DROP COLUMN workflow;
+ALTER TABLE waves DROP COLUMN graph;
 
 -- Account routes gain a Wave scope, between repository and default.
 CREATE TABLE provider_routes_next (

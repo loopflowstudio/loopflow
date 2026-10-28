@@ -1088,4 +1088,15 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0.14.20.001_release.sql"),
         reader_floor: Some("0.14.20"),
     },
+    Migration {
+        id: MigrationId {
+            major: 0,
+            minor: 15,
+            patch: Some(0),
+            ordinal: 1,
+        },
+        name: "release",
+        sql: include_str!("migrations/0.15.0.001_release.sql"),
+        reader_floor: Some("0.15.0"),
+    },
 ];

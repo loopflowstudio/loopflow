@@ -502,6 +502,26 @@ pub fn delete_local_branch(repo: &Path, branch: &str) -> Result<(), GitError> {
     delete_local_branch_inheriting(repo, branch, &|_| {})
 }
 
+/// Delete only the local ref observed by a completed-work cleanup.
+pub(crate) fn delete_local_branch_at(
+    repo: &Path,
+    branch: &str,
+    head: &str,
+) -> Result<(), GitError> {
+    if worktrees::list_porcelain(repo)?
+        .iter()
+        .any(|(_, checked_out)| checked_out.as_deref() == Some(branch))
+    {
+        return Err(GitError::CommandFailed {
+            command: format!("delete local branch {branch}"),
+            stderr: "branch is checked out; retained".to_string(),
+        });
+    }
+    let reference = format!("refs/heads/{branch}");
+    git_stdout(repo, &["update-ref", "-d", &reference, head])?;
+    Ok(())
+}
+
 pub(crate) fn delete_local_branch_inheriting(
     repo: &Path,
     branch: &str,
@@ -1016,14 +1036,15 @@ pub(crate) fn acquire_worktree_lease_wait(
     })
 }
 
-pub fn worktree_remove(repo: &Path, path: &Path) -> Result<(), GitError> {
+pub fn worktree_remove(repo: &Path, path: &Path, force: bool) -> Result<(), GitError> {
     let lease = acquire_worktree_lease(repo, path, "worktree removal")?;
-    worktree_remove_owned(repo, path, &lease, &|_| {})
+    worktree_remove_owned(repo, path, force, &lease, &|_| {})
 }
 
 pub(crate) fn worktree_remove_owned(
     repo: &Path,
     path: &Path,
+    force: bool,
     lease: &WorktreeLease,
     inherit: &impl Fn(&mut Command),
 ) -> Result<(), GitError> {
@@ -1035,17 +1056,18 @@ pub(crate) fn worktree_remove_owned(
         });
     }
     let path_str = path.to_string_lossy();
-    let output = run_git_inheriting(
-        repo,
-        &["worktree", "remove", "--force", path_str.as_ref()],
-        &|command| {
-            lease.inherit(command);
-            inherit(command);
-        },
-    )?;
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(path_str.as_ref());
+    let output = run_git_inheriting(repo, &args, &|command| {
+        lease.inherit(command);
+        inherit(command);
+    })?;
     if !output.status.success() {
         return Err(GitError::CommandFailed {
-            command: format!("git worktree remove --force {}", path.display()),
+            command: format!("git {}", args.join(" ")),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         });
     }
@@ -1961,6 +1983,22 @@ mod tests {
     }
 
     #[test]
+    fn local_branch_deletion_retains_a_new_head() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let path = repo.create_named_worktree("finished");
+        let observed = rev_parse(&path, "HEAD").unwrap();
+        std::fs::write(path.join("new-work"), "unpublished").unwrap();
+        run_git(&path, &["add", "."]).unwrap();
+        run_git(&path, &["commit", "-m", "new work"]).unwrap();
+        let head = rev_parse(&path, "HEAD").unwrap();
+        assert_ne!(head, observed);
+        assert!(super::delete_local_branch_at(repo.path(), "finished", &head).is_err());
+        worktree_remove(repo.path(), &path, false).unwrap();
+        assert!(super::delete_local_branch_at(repo.path(), "finished", &observed).is_err());
+        assert_eq!(rev_parse(repo.path(), "finished").unwrap(), head);
+    }
+
+    #[test]
     fn git_delete_local_branch() {
         let repo = init_repo();
         commit_file(repo.path(), "README.md", "hello");
@@ -2012,6 +2050,6 @@ mod tests {
         assert!(!wt_path.join(LF_CREATED_MARKER).exists());
 
         // Clean up
-        worktree_remove(repo.path(), &wt_path).expect("remove worktree");
+        worktree_remove(repo.path(), &wt_path, false).expect("remove worktree");
     }
 }

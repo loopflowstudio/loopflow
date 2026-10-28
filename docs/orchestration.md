@@ -170,15 +170,18 @@ withdraws Auto-Ship.
 Builtins are `feature` (explore, demo, deliver, verify), `code` (demo, deliver,
 verify), `auto` (pursue then deliver, no interactive step: request to merged PR
 without you) and `research` (findings, no PR). To change one, copy it, commit it,
-and select it for a Wave:
+and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:
 
 ```bash
-lf graph customize feature            # copies the builtin to .lf/graphs/feature.yaml
-lf wave graph set feature product     # future product Tasks take it up
+lf graph customize feature                # copies the builtin to .lf/graphs/feature.yaml
+lf --wave product set graph feature       # or only for you, without committing
 ```
 
-A Task takes up its Graph on its first `lf task run`: the one you name, then its
-Wave's default, then `graph:` in `.lf/config.yaml`, then builtin `code`. It keeps
+Commit those files; teammates run your definition once they have your commit.
+
+A Task takes up its Graph on its first `lf task run`: the one you name, then
+your `lf set graph` for its Wave and then its repository, then its Wave's
+`graph:`, then the repository's in `.lf/config.yaml`, then builtin `code`. It keeps
 that Graph as it was; later edits apply to Tasks that take it up afterwards.
 
 ## Run Tasks on other machines

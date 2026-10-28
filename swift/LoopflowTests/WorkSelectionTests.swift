@@ -25,13 +25,18 @@ struct WorkSelectionTests {
         #expect(restored == plan)
     }
 
-    @Test func queryPlansArriveWithTheSharedPlanningFrame() throws {
-        let frames = try JSONDecoder().decode([WorkFrame].self, from: loadFixtureData("work_frame.json"))
-        guard case .planning(let planning?) = frames[0].content else {
-            Issue.record("Missing planning frame"); return
+    @Test func queryPlansArriveFromTheirWatch() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
+            as? [[String: Any]])
+        let entry = try #require(entries.first { $0["part"] as? String == "selections" })
+        let frame = try WorkFrame.decode(
+            part: .selections, scope: WorkScope(repo: "/repo", headless: false, task: nil, activity: nil),
+            sequence: 1, line: JSONSerialization.data(withJSONObject: try #require(entry["frame"])))
+        guard case .selections(let plans?) = frame.content else {
+            Issue.record("Missing Dashboard plans"); return
         }
-        #expect(planning.selections?.first?.dashboardID == "picked")
-        #expect(planning.selections?.first?.projection.suppressed.count == 1)
+        #expect(plans.first?.dashboardID == "picked")
+        #expect(plans.first?.projection.suppressed.count == 1)
     }
 
     @Test func dashboardKeepsIdentitySeparateFromItsQuery() async throws {
@@ -76,7 +81,7 @@ struct WorkSelectionTests {
 func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content]) -> WorkViewPlan {
     let refs = members.map { WorkMemberRef(source: [owner.id], work: $0.work) }
     return WorkViewPlan(name: nil, pinned: false, dashboardID: nil, repository: owner.repository,
-        observedAt: 0, selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
+        selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
         projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)), contents: members)

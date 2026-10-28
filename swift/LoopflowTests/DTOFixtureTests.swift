@@ -281,14 +281,13 @@ struct DTOFixtureTests {
         #expect(unknown.state == .unknown)
         #expect(unknown.pid == nil)
         #expect(unknown.parentId == snapshot.nodes[0].id)
-        #expect(unknown.id.hasPrefix("process:"))
+        #expect(unknown.id == "33333333-3333-4333-8333-333333333333")
         #expect(try JSONDecoder().decode(ActivitySnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
     }
 
     @Test("Composed delivery keeps completion independent of the running Graph and its arrival")
     func composedTaskLifecycle() throws {
-        let snapshots = try JSONDecoder().decode(
-            [String: TaskLifecycleCapture].self, from: loadFixtureData("task_lifecycle.json"))
+        let snapshots = try TaskLifecycleCapture.load(loadFixtureData("task_lifecycle.json"))
         let merged = try #require(snapshots["merged"])
         let completed = try #require(snapshots["completed"])
         let arrived = try #require(snapshots["arrived"])
@@ -308,14 +307,7 @@ struct DTOFixtureTests {
         #expect(before.graphProcesses[0].entry.id == after.graphProcesses[0].entry.id)
         #expect(after.graphProcesses[0].steps.allSatisfy { $0.outcome == "succeeded" })
         for capture in [merged, completed, arrived] {
-            guard case .planning(let plan?) = capture.planningFrame.content else {
-                Issue.record("Missing planning frame")
-                return
-            }
-            let row = try #require(plan.roadmap.waves.flatMap { $0.tasks.items }
-                .first { $0.task.identifier == "FIX-1" })
-            #expect(row.runtime?.status == capture.row.runtime?.status)
-            #expect(row.pr?.id == merged.row.pr?.id)
+            #expect(capture.row.pr?.id == merged.row.pr?.id)
         }
     }
 
@@ -536,47 +528,27 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Wave plan uses the same chapter as status")
-    func planUsesChapterSnapshot() async throws {
-        let json = String(decoding: try loadFixtureData("wave_detail.json"), as: UTF8.self)
-        let query = RegistryQuery { args, _ in
-            #expect(args == ["wave", "status", "infrastructure", "--json"])
-            return json
-        }
-        let plan = try await query.plan(wave: "infrastructure", objective: "Make releases boring.", cwd: "/fixture")
-        #expect(plan.currentProject?.current == true)
-        #expect(plan.currentProject?.krs.count == 1)
-    }
-
-    @Test("Work Activity fixture preserves proof links and typed facts")
-    func workActivityFixturePreservesProof() throws {
+    @Test("Work Activity fixture carries Session records tagged with Work")
+    func workActivityFixtureCarriesSessionRecords() throws {
         let data = try loadFixtureData("work_activity_snapshot.json")
         let snapshot = try JSONDecoder().decode(WorkActivitySnapshot.self, from: data)
 
-        #expect(snapshot.limit == 50)
-        #expect(snapshot.items.map(\.subject) == [
-            "W2-144", "W2-144", "W2-144", "product", "mac-surface-ux",
-        ])
+        #expect(snapshot.truncated == false)
+        #expect(snapshot.items.map(\.subject) == ["W2-144", "W2-144", "product"])
         if case .inputCompletionRecorded(_, let captured, let status) = snapshot.items[0].fact {
             #expect(captured == 12)
             #expect(status == "ok")
         } else {
             Issue.record("expected a recorded Session outcome")
         }
-        #expect(snapshot.items[1].fact.github?.number == 1144)
-        #expect(snapshot.items[1].fact.github?.url.host == "github.com")
-        if case .prMergeRequested(_, let request, _) = snapshot.items[2].fact {
-            #expect(request.requestedAt == "2026-07-21T18:35:51Z")
+        if case .providerHistoryRecorded(_, _, _, let process, let status) = snapshot.items[1].fact {
+            #expect(process == "00000001-0000-4000-8000-000000000000")
+            #expect(status == "completed")
         } else {
-            Issue.record("expected a typed PR merge request")
+            Issue.record("expected a provider turn")
         }
-        #expect(snapshot.items[3].work.kind == .wave)
-        if case .steerIssued(_, .imported(let id)) = snapshot.items[3].fact {
-            #expect(id == "run_00000000000000000000000000000001")
-        } else {
-            Issue.record("expected a Run-authored Steer")
-        }
-        #expect(snapshot.items[4].fact == .workCreated)
+        #expect(snapshot.items[2].work.kind == .wave)
+        #expect(snapshot.items[2].fact == .inputCaptured(sessionId: "run_00000000000000000000000000000002", captured: 4))
     }
 
     @Test("unplaced Wave fixture retains planning without a Machine")
@@ -616,8 +588,7 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
         #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")
         #expect(detail.tasks.items[0].pr?.publication?.merge?.mode == .user)
-        #expect(detail.tasks.items[0].directive?.version == 2)
-        #expect(detail.tasks.items[0].directive?.incorporatedAt != nil)
+        #expect(detail.tasks.items.map(\.section) == [.waiting, .notStarted])
         #expect(detail.tasks.items[0].reference.workspace?.slug == "infrastructure-task")
         #expect(detail.tasks.items[0].reference.workspace?.worktree == "/src/loopflow.infrastructure.task")
         #expect(detail.tasks.items[0].reference.issueUrl?.host == "linear.app")
@@ -674,6 +645,15 @@ struct DTOFixtureTests {
         #expect(roadmap.tasks.items.count == 4)
         #expect(roadmap.waves[1].tasks.items.isEmpty)
 
+    }
+
+    @Test("closed Task page carries Wave status rows and their continuation")
+    func closedTaskPageCarriesRowsAndContinuation() throws {
+        let page = try JSONDecoder().decode(ClosedTaskPage.self, from: loadFixtureData("closed_task_page.json"))
+        let task = try #require(page.tasks.first)
+        #expect(task.task.isSuccessful)
+        #expect(task.task.completedAt == "2026-07-14T18:30:00Z")
+        #expect(page.next == task.id)
     }
 
     @Test("metric portfolio fixture preserves every closed evidence payload")
@@ -870,7 +850,7 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
-    @Test("Peer planning retains journal values and independent receipts")
+    @Test("Peer planning keeps independent receipts")
     func peerPlanningStatus() throws {
         let data = try loadFixtureData("peer_planning_status.json")
         let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
@@ -881,16 +861,7 @@ struct DTOFixtureTests {
         #expect(statuses[0].conflicts[0].target == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
-        #expect(statuses[1].changes["title-loser"]?.edit.change.value == .string("Retained title"))
-        #expect(!statuses[1].candidates.contains("title-loser"))
-        #expect(statuses[1].changes["title-head"]?.parents == ["title-loser"])
-        #expect(statuses[1].changes["comment-head"]?.clock == 4)
-        guard case .object(let content) = statuses[1].changes["comment-head"]?.edit.change.value else {
-            Issue.record("expected typed comment content")
-            return
-        }
-        #expect(content["author"] == .object(["kind": .string("person"), "name": .string("Maya")]))
-        for field in ["conflicts", "changes", "candidates", "pending_local"] {
+        for field in ["conflicts", "pending_local"] {
             var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
             object.removeValue(forKey: field)
             #expect(throws: (any Error).self) {
@@ -899,69 +870,61 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Work frames decode every part and keep the wire text a saved workspace needs")
-    func workspaceFramesDecode() throws {
-        let data = try loadFixtureData("work_frame.json")
-        let lines = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        let frames = try lines.map { try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: $0)) }
-
-        #expect(frames.map(\.content.part) == ["planning", "sessions", "task", "work_activity", "activity", "heartbeat", "task", "peer_planning", "checkpoint", "task_history"])
-        #expect(frames.map(\.sequence) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-        guard case .taskHistory(let history?) = frames[9].content else {
-            Issue.record("diagnostic history frame missing")
+    @Test("Watch frames decode through their part and keep the wire text a saved workspace needs")
+    func watchFramesDecode() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("watch_frames.json"))
+            as? [[String: Any]])
+        let scope = WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1",
+                              activity: WorkActivityScope(wave: nil, project: nil, task: "LOO-1"))
+        let lines = try entries.map { try JSONSerialization.data(withJSONObject: try #require($0["frame"])) }
+        let parts = try entries.map { try #require(WorkPart(rawValue: $0["part"] as? String ?? "")) }
+        let frames = try zip(parts, lines).enumerated().map { index, entry in
+            try WorkFrame.decode(part: entry.0, scope: scope, sequence: index + 1, line: entry.1)
+        }
+        #expect(frames.map(\.content.part) == ["planning", "selections", "sessions", "task", "work_activity",
+                                                "activity", "task", "peer_planning"])
+        #expect(frames[0].answers == nil)
+        #expect(frames[2].answers == 7)
+        guard case .planning(let planning?) = frames[0].content,
+              case .selections(let plans?) = frames[1].content,
+              case .sessions(let sessions?) = frames[2].content,
+              case .workActivity(let activity?) = frames[4].content,
+              case .peerPlanning(let peers?) = frames[7].content else {
+            Issue.record("fixture parts changed shape")
             return
         }
-        #expect(!history.work.processes.isEmpty)
-        guard case .peerPlanning(let peers?) = frames[7].content else {
-            Issue.record("peer planning frame missing")
-            return
-        }
+        #expect(planning.waves.isEmpty)
+        #expect(plans.first?.dashboardID == "picked")
+        #expect(sessions.repo == "/src/loopflow")
+        #expect(!sessions.includesHeadless)
+        #expect(activity.scope.task == "LOO-1")
         #expect(peers.repo == "/src/loopflow")
         #expect(peers.destinations.isEmpty)
-        #expect(frames[0].answers == nil)
-        #expect(frames[0].copy == nil)
-        #expect(frames[6].copy == "/Users/fixture/.lf/copies/3f2a9c1b")
-        #expect(frames[1].answers == 7)
-        #expect(frames[0].revisions?.planning == 911)
-        #expect(frames[4].revisions == nil)
-        guard case .checkpoint = frames[8].content else {
-            Issue.record("checkpoint frame missing")
-            return
-        }
-        #expect(frames[8].answers == 8)
-        guard case .task(nil) = frames[2].content else {
+        guard case .task(nil) = frames[3].content else {
             Issue.record("a failed reading has no body")
             return
         }
-        #expect(frames[2].unavailable == "Task LOO-1 is not registered")
+        #expect(frames[3].unavailable == "Task LOO-1 is not registered")
         guard case .task(let read?) = frames[6].content else {
             Issue.record("a read Task part carries its work and Graph processes")
             return
         }
         #expect(read.task == "LOO-1")
-        #expect(read.graphProcesses.isEmpty)
-        guard case .sessions(let sessions?) = frames[1].content,
-              case .workActivity(let activity?) = frames[3].content,
-              case .heartbeat(let heartbeat) = frames[5].content else {
-            Issue.record("fixture parts changed shape")
-            return
-        }
-        #expect(sessions.repo == "/src/loopflow")
-        #expect(!sessions.includesHeadless)
-        #expect(activity.scope.task == "LOO-1")
-        #expect(heartbeat.projections["planning"] == 3)
+        #expect(read.graphProcesses.count == read.work.graphProcesses.count)
+        #expect(read.diagnostics == nil)
 
         // Saved text restores through the decoders one-shot reads use.
         let roadmap = try #require(frames[0].wire?.roadmap)
         #expect(try RegistryQuery.decode(RoadmapSnapshot.self, from: roadmap).waves.isEmpty)
-        let page = try #require(frames[1].wire?.sessionPage)
+        let page = try #require(frames[2].wire?.sessionPage)
         #expect(try RegistryQuery.decode(SessionPage.self, from: page).next == nil)
 
-        for field in ["answers", "copy"] {
-            var missing = lines[0]
+        for field in ["answers", "unavailable", "body"] {
+            var missing = try #require(entries[0]["frame"] as? [String: Any])
             missing.removeValue(forKey: field)
             #expect(throws: (any Error).self) {
-                try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: missing))
+                try WorkFrame.decode(part: .planning, scope: scope, sequence: 1,
+                                     line: JSONSerialization.data(withJSONObject: missing))
             }
         }
     }
@@ -1035,19 +998,27 @@ func sessionInputHistoryFixture() throws {
 }
 
 // Written by the Rust composed lifecycle test from one disposable Home.
-struct TaskLifecycleCapture: Decodable {
+struct TaskLifecycleCapture {
     let row: RoadmapTask
-    let planningFrame: WorkFrame
-    let taskFrame: WorkFrame
+    /// `lf task status FIX-1 --json` as its watch would carry it.
+    let status: [String: Any]
 
-    enum CodingKeys: String, CodingKey {
-        case row
-        case planningFrame = "planning_frame"
-        case taskFrame = "task_frame"
+    static func load(_ data: Data) throws -> [String: TaskLifecycleCapture] {
+        let phases = try #require(JSONSerialization.jsonObject(with: data) as? [String: [String: Any]])
+        return try phases.mapValues { capture in
+            TaskLifecycleCapture(
+                row: try JSONDecoder().decode(RoadmapTask.self,
+                                              from: JSONSerialization.data(withJSONObject: try #require(capture["row"]))),
+                status: try #require(capture["status"] as? [String: Any]))
+        }
     }
 
     func taskPart() throws -> WorkFrame.TaskPart {
-        guard case .task(let part?) = taskFrame.content else {
+        let line: [String: Any] = ["answers": NSNull(), "unavailable": NSNull(), "body": status]
+        let frame = try WorkFrame.decode(
+            part: .task, scope: WorkScope(repo: nil, headless: false, task: "FIX-1", activity: nil),
+            sequence: 1, line: JSONSerialization.data(withJSONObject: line))
+        guard case .task(let part?) = frame.content else {
             throw CocoaError(.coderReadCorrupt)
         }
         return part

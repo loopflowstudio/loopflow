@@ -86,7 +86,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 lf task claim LOO-123               # you, on this Machine
 lf task move LOO-123 --machine mini # same person, mini's Machine
 lf task unclaim LOO-123             # unowned, history intact
-lf task status LOO-123 --json       # ownership: {owner, superseded_by, log}
+lf desktop task LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
@@ -101,17 +101,18 @@ Which Machine runs a person's Wave work is that person's choice, never
 repository content:
 
 ```bash
-lf machine use mini infrastructure            # this Wave's new Tasks and its Session
-lf machine use laptop infrastructure --session  # only the Wave Session
-lf --repo loopflow machine use mini --tasks    # only the repository's new Tasks
-lf machine list                               # each Machine with the defaults naming it
+lf --wave infrastructure set machine mini            # this Wave's new Tasks and its Session
+lf --wave infrastructure set machine.session laptop  # only the Wave Session
+lf --repo loopflow set machine.tasks mini            # only the repository's new Tasks
+lf --wave infrastructure unset machine               # back to the repository's, else this Machine
+lf machine list                                      # each Machine with the defaults naming it
 ```
 
-Bare `lf machine use mini` applies to the worktree's Wave, else this
-repository; `--repo` or a Wave argument always wins.
+`lf set` without `--wave` sets the repository, even in a Wave's Task worktree;
+`lf task move <task> --machine mini` moves one Task.
 A Wave or repository has two settings, where its new Tasks run and where its
-primary Session runs. `--tasks` or `--session` sets one; neither sets both. Each resolves on its own, with no fallback
-from one to the other.
+primary Session runs. `machine.tasks` or `machine.session` sets one; `machine`
+sets both. Each resolves on its own, with no fallback from one to the other.
 A default lives in Machine-local SQLite `scope_defaults`, keyed by Wave or
 repository identity, and is copied to the
 person's other added Machines over `lf --machine`, so the laptop launches there and
@@ -248,7 +249,7 @@ resent. With `LF_RENT_LINUX_BIN` naming a Linux build, the laptop uploads that
 binary instead of the published `lf`, so a development build rents sandboxes
 running its own code.
 
-`lf [--repo REPO] machine use R [WAVE]`, naming a pool or on-demand, sets the
+`lf [--repo REPO] [--wave WAVE] set machine R`, naming a pool or on-demand, sets the
 scope's Tasks capacity (`scope_defaults.tasks_capacity`) in place of a Tasks
 Machine; the nearest scope that sets either wins. `lf task run` places an
 unowned Task by that default as `--pool` or `--rent` would. Its Session stays

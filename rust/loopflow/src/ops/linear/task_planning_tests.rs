@@ -659,46 +659,6 @@ async fn planning_response(
     axum::Json(json!({"data":data}))
 }
 
-#[tokio::test]
-async fn wave_graph_selects_a_committed_definition_offline() {
-    let fixture = Fixture::new().await;
-    let (repo, wave) = planning_repo(&fixture).await;
-    LINEAR_TEST_CONTEXT
-        .scope(fixture.context("http://127.0.0.1:1"), async {
-            let missing = crate::ops::project::set_wave_graph(&repo, Some(wave.slug()), "review")
-                .await
-                .unwrap_err()
-                .to_string();
-            assert!(missing.contains(".lf/graphs/review.yaml"), "{missing}");
-            std::fs::create_dir_all(repo.join(".lf/graphs")).unwrap();
-            std::fs::write(repo.join(".lf/graphs/review.yaml"), "- cmd: help\n").unwrap();
-            let saved = crate::ops::project::set_wave_graph(&repo, Some(wave.slug()), "review")
-                .await
-                .unwrap();
-            assert_eq!(saved, wave.slug());
-            assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());
-            // New Tasks in the Wave take up its selection; the repository's, `code`.
-            let shown = crate::ops::project::wave_graph(&repo, Some(wave.slug()), true)
-                .await
-                .unwrap();
-            assert_eq!(shown.wave_id.as_ref(), Some(wave.id()));
-            assert_eq!(shown.graph.as_deref(), Some("review"));
-            assert_eq!(
-                (shown.default.name.as_str(), shown.default.source.as_str()),
-                ("review", "wave")
-            );
-            let shown = crate::ops::project::wave_graph(&repo, None, false)
-                .await
-                .unwrap();
-            assert_eq!(shown.wave, None);
-            assert_eq!(
-                (shown.default.name.as_str(), shown.default.source.as_str()),
-                ("code", "builtin")
-            );
-        })
-        .await;
-}
-
 fn seed_provider_task(
     runtime: &tokio::runtime::Runtime,
     state: &Arc<tokio::sync::Mutex<PlanningState>>,
@@ -5578,6 +5538,7 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
             home: fixture.directory.path().to_owned(),
             wave: None,
             skill_file: None,
+            submitted_docs: None,
             references: Vec::new(),
         };
         let claude = crate::harness::context::claude_args(&delivery).unwrap();

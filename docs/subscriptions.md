@@ -12,8 +12,8 @@ lf account connect claude personal@example.com --chrome-profile personal@example
 lf account connect codex work@example.com --chrome-profile work@example.com
 lf account
 
-lf account route set claude personal@
-lf account route set codex work@ personal@
+lf set account.claude personal@
+lf set account.codex work@,personal@
 lf account route
 ```
 
@@ -220,18 +220,20 @@ automatic account behaves as `explicit-only` until the date is cleared.
 
 ## Route a repository
 
-A repository account route is an ordered list of subscription logins to try for
-one provider in one repository:
+An account route is an ordered list of subscription logins to try for one
+provider in one repository, one Wave or every repository:
 
 ```bash
-lf account route set claude personal@ work@
-lf account route set codex work@ personal@
-lf account route set codex work@ --default
+lf set account.claude personal@,work@
+lf --wave billing set account.codex work@
+lf set account.codex work@ --global
+lf unset account.codex
 lf account route --json
 ```
 
-Show lists eligible launch candidates in order without selecting one. Explicit
-`--repo` and `--default` work outside Git; a write without either requires a
+A launch uses the nearest of Wave, repository and global routes. Show lists
+eligible launch candidates in order without selecting one; its explicit
+`--repo` and `--default` work outside Git. A repository route requires a
 repository origin.
 
 It is account-selection metadata, not an SSH or network route, and it contains
@@ -249,7 +251,7 @@ attempt, including headless Task steps before a provider session ID is available
 Later attempts retain earlier account evidence; a null account means ambient
 execution. Once the provider reports its native identity, continuation must retain
 that identity and selected account/native Machine. Requested account and actual
-selection are different evidence; [cutover status](architecture-reference.md#cutover-status)
+selection are different evidence; [cutover status](architecture/reference-cutover.md#cutover-status)
 records the remaining history/account conversion.
 
 Prefer an account while keeping the normal route as fallback:
@@ -298,6 +300,15 @@ lf account claude use work@               # the same for ~/.claude and plain cla
 It first saves the current login back to its
 stored account, so a token the provider refreshed while active is kept; a login
 Loopflow has never seen is kept as a new explicit-only account.
+
+When Codex's native and stored copies name the same login but disagree, live
+status checks the native copy first. Only a definite authentication rejection
+allows checking the stored copy. Launches repair rejected credentials in the
+original home after verifying the other copy; conversations and resume IDs stay
+there. Displaced files remain in private `.lf-auth-recovery-*` directories beside
+`auth.json`, including late writes from an already-running client. Timeouts and
+service failures report verification unavailable and leave both copies intact.
+Cached status performs no provider requests. Recovery never restarts a daemon.
 
 For Codex, `use` also restarts its shared background app-server if it still holds
 another login, even when the file was already correct. Running turns get up to

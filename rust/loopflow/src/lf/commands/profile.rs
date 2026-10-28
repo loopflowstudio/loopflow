@@ -2,50 +2,24 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::lf::RouteCommand;
 use crate::profile::{ProviderRoute, RouteScope};
-use crate::provider_account::{account_login, match_account, open_account_store, AccountMatch};
+use crate::provider_account::{account_login, match_account, nearest_provider_route, AccountMatch};
 use crate::provider_auth::Provider;
 use crate::repository::RepoId;
 use crate::store::{ProviderAccount, ProviderAccountId, SharedStore};
 
-pub(super) async fn run_route_async(
-    cmd: Option<&RouteCommand>,
-    repo: Option<&str>,
-    default: bool,
-    json: bool,
-) -> Result<()> {
-    match cmd {
-        Some(RouteCommand::Set {
-            provider,
-            accounts,
-            repo,
-            default,
-        }) => {
-            let scope = if *default {
-                RouteScope::Default
-            } else {
-                RouteScope::Repo(resolve_repo_id(repo.as_deref())?.ok_or_else(|| anyhow!(
-                    "Run lf account route set in a repository with an origin, or pass --repo owner/name or --default."
-                ))?)
-            };
-            let store = open_account_store().await?;
-            set_route(&store, scope, provider, accounts).await
-        }
-        None => {
-            let repo_id = if default {
-                None
-            } else {
-                resolve_repo_id(repo)?
-            };
-            show_routes(
-                crate::provider_account::read_account_store()?.as_ref(),
-                repo_id.as_ref(),
-                json,
-            )
-            .await
-        }
-    }
+pub(super) async fn show_route(repo: Option<&str>, default: bool, json: bool) -> Result<()> {
+    let repo_id = if default {
+        None
+    } else {
+        resolve_repo_id(repo)?
+    };
+    show_routes(
+        crate::provider_account::read_account_store()?.as_ref(),
+        repo_id.as_ref(),
+        json,
+    )
+    .await
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -81,28 +55,13 @@ async fn show_routes(
 ) -> Result<()> {
     let mut reports = Vec::new();
     for provider in [Provider::Claude, Provider::Codex] {
-        let scope = match store {
-            Some(store) => {
-                let route = match repo_id {
-                    Some(repo) => {
-                        store
-                            .provider_route(&RouteScope::Repo(repo.clone()), provider)
-                            .await?
-                    }
-                    None => None,
-                };
-                if let Some(route) = route {
-                    route.scope.id().to_string()
-                } else if store
-                    .provider_route(&RouteScope::Default, provider)
-                    .await?
-                    .is_some()
-                {
-                    "default".into()
-                } else {
-                    "automatic".into()
-                }
-            }
+        let route = match store {
+            Some(store) => nearest_provider_route(store, repo_id, None, provider).await?,
+            None => None,
+        };
+        let scope = match route {
+            Some(route) if route.scope == RouteScope::Default => "default".into(),
+            Some(route) => route.scope.id().to_owned(),
             None => "automatic".into(),
         };
         let (accounts, diagnostic) =
@@ -213,13 +172,14 @@ async fn show_routes(
     Ok(())
 }
 
-async fn set_route(
+/// Replace `provider`'s route at `scope` with the logins in order.
+pub(crate) async fn set_route(
     store: &SharedStore,
     scope: RouteScope,
-    raw_provider: &str,
-    raw_accounts: &[String],
+    label: &str,
+    provider: Provider,
+    raw_accounts: &[&str],
 ) -> Result<()> {
-    let provider = parse_managed_provider(raw_provider)?;
     let mut accounts = Vec::new();
     for raw_account in raw_accounts {
         accounts.push(find_provider_account(store, provider, raw_account).await?);
@@ -231,17 +191,13 @@ async fn set_route(
     let now = now_unix();
     store
         .set_provider_route(&ProviderRoute {
-            scope: scope.clone(),
+            scope,
             provider,
             accounts: account_ids,
             created_at: now,
             updated_at: now,
         })
         .await?;
-    let label = match scope {
-        RouteScope::Repo(repo_id) => repo_id.to_string(),
-        RouteScope::Default => "default".to_string(),
-    };
     println!(
         "{label} {provider}: {}",
         accounts

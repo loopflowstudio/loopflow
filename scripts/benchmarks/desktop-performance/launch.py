@@ -38,7 +38,7 @@ from timings import BUDGETS_MS, _stats
 REPO = Path(__file__).resolve().parents[3]
 SWIFT = REPO / "swift"
 BUNDLE_ID = "com.loopflow.mac.bench"
-READS = '"machine id"|"wave list"|"wave show"*|"session list"|"activity "*|"ps "*|"ps "'
+READS = '"machine id"|"wave list"|"wave show"*|"desktop sessions"|"activity "*|"ps "*|"ps "'
 SHIM = f"""#!/bin/sh
 # Forward the app's startup reads to the real lf; refuse everything else.
 case "$1 $2" in

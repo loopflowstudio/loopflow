@@ -246,8 +246,11 @@ impl SqliteStore {
     pub(crate) fn task_checkouts(&self) -> StoreResult<Vec<TaskCheckout>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
+        let identifiers = TaskIdentifiers::read(&conn)?;
         let mut statement = conn.prepare(TASK_CHECKOUT_COLUMNS)?;
-        let rows = statement.query_map([], |row| map_task_checkout(&conn, row))?;
+        let rows = statement.query_map([], |row| {
+            map_task_checkout(row, |id| Ok(identifiers.short(id)))
+        })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
     }
 
@@ -507,6 +510,110 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         tasks_in(&conn, wave_id)
+    }
+
+    /// Tasks that are neither done nor abandoned: the live plan.
+    pub fn list_open_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        tasks_where(&conn, wave_id, &super::durable::task_open_sql("t"))
+    }
+
+    /// Closed Tasks of one repository (and Wave), newest first, `limit` at a
+    /// time, back to those closed at `since` (RFC 3339, UTC, whole seconds).
+    pub fn closed_tasks_page(
+        &self,
+        repository: &crate::durable::RepositoryId,
+        wave_id: Option<&WaveId>,
+        since: Option<&str>,
+        after: Option<&TaskId>,
+        limit: usize,
+    ) -> StoreResult<ClosedTaskPage> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        let open = super::durable::task_open_sql("t");
+        let query = format!(
+            "{TASK_COLUMNS} WHERE t.repository_id=?1 AND (?2 IS NULL OR p.wave_id=?2)
+             AND NOT {open} AND {TASK_VISIBLE}
+             AND (?3 IS NULL OR ({TASK_CLOSED_AT},t.id) < (
+                SELECT {TASK_CLOSED_AT},t.id FROM tasks t WHERE t.id=?3))
+             AND (?5 IS NULL OR {TASK_CLOSED_AT}>=?5)
+             ORDER BY {TASK_CLOSED_AT} DESC, t.id DESC LIMIT ?4"
+        );
+        let identifiers = TaskIdentifiers::read(&conn)?;
+        let mut statement = conn.prepare(&query)?;
+        let mut tasks = statement
+            .query_map(
+                params![
+                    repository.as_str(),
+                    wave_id.map(WaveId::as_str),
+                    after.map(TaskId::as_str),
+                    limit as i64 + 1,
+                    since
+                ],
+                |row| map_listed_task_row(&identifiers, row),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let next = (tasks.len() > limit).then(|| {
+            tasks.truncate(limit);
+            tasks
+                .last()
+                .expect("a full page has a last Task")
+                .id
+                .clone()
+        });
+        Ok(ClosedTaskPage { tasks, next })
+    }
+
+    /// Open Tasks of one repository whose title or identifier contains `text`,
+    /// ignoring case, optionally within one Wave and one Project (its ID,
+    /// provider ID, slug or name).
+    pub fn open_tasks_matching(
+        &self,
+        repository: &crate::durable::RepositoryId,
+        text: &str,
+        wave_id: Option<&WaveId>,
+        project: Option<&str>,
+    ) -> StoreResult<Vec<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        let open = super::durable::task_open_sql("t");
+        let query = format!(
+            "{TASK_COLUMNS} WHERE t.repository_id=?1 AND {open} AND {TASK_VISIBLE}
+             AND (instr(lower(t.issue_title),?2) OR instr(lower(t.issue_identifier),?2)
+                OR instr(lower(t.id),?2))
+             AND (?3 IS NULL OR p.wave_id=?3)
+             AND (?4 IS NULL OR ?4 IN (p.id,p.external_project_id,p.project_slug)
+                OR lower(p.project_name)=lower(?4))"
+        );
+        let identifiers = TaskIdentifiers::read(&conn)?;
+        let mut statement = conn.prepare(&query)?;
+        let tasks = statement
+            .query_map(
+                params![
+                    repository.as_str(),
+                    text.to_lowercase(),
+                    wave_id.map(WaveId::as_str),
+                    project
+                ],
+                |row| map_listed_task_row(&identifiers, row),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(tasks)
+    }
+
+    /// How many Tasks of a Wave are open, in one statement.
+    pub fn open_task_count(&self, wave_id: &WaveId) -> StoreResult<u32> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let open = super::durable::task_open_sql("t");
+        Ok(conn.query_row(
+            &format!(
+                "SELECT count(*) FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+                 WHERE p.wave_id=?1 AND {open} AND {TASK_VISIBLE}"
+            ),
+            [wave_id.as_str()],
+            |row| row.get(0),
+        )?)
     }
 
     pub fn sync_task_placement(
@@ -1187,9 +1294,25 @@ fn task_acquisition_in(
     task: &Task,
     allow_pending_membership: bool,
 ) -> StoreResult<crate::store::TaskAcquisition> {
-    let (observed_at, invalid, removed, changed): (Option<i64>, bool, bool, bool) = conn
-        .query_row(
-            "SELECT i.observed_at,
+    task_acquisitions_in(conn, &[task], allow_pending_membership)?
+        .remove(&task.id)
+        .ok_or(StoreError::NotFound)
+}
+
+/// Each Task's planning acquisition, in one statement.
+pub(super) fn task_acquisitions_in(
+    conn: &Connection,
+    tasks: &[&Task],
+    allow_pending_membership: bool,
+) -> StoreResult<HashMap<TaskId, crate::store::TaskAcquisition>> {
+    let ids = ids_json(tasks.iter().map(|task| task.id.as_str()));
+    let linear: std::collections::HashSet<&TaskId> = tasks
+        .iter()
+        .filter(|task| task.linear_id.is_some())
+        .map(|task| &task.id)
+        .collect();
+    let mut statement = conn.prepare(
+            "SELECT t.id,i.observed_at,
          COALESCE(i.needs_refresh,0) OR COALESCE(observed.membership_unresolved,0)
          OR COALESCE(observed.archived,0)
          OR COALESCE(parent.membership_unresolved,0) OR COALESCE(parent.archived,0)
@@ -1223,22 +1346,41 @@ fn task_acquisition_in(
          LEFT JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider
                                        AND observed.id=i.project_id
          LEFT JOIN pm_issue_changes changes ON changes.issue_id=t.external_issue_id
-         WHERE t.id=?1",
-            params![task.id.as_str(), allow_pending_membership],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )?;
-    Ok(crate::store::TaskAcquisition {
-        state: if removed {
+         WHERE t.id IN (SELECT value FROM json_each(?1))",
+    )?;
+    let rows = statement.query_map(params![ids, allow_pending_membership], |row| {
+        Ok((
+            TaskId::from_raw(row.get::<_, String>(0)?),
+            row.get::<_, Option<i64>>(1)?,
+            row.get::<_, bool>(2)?,
+            row.get::<_, bool>(3)?,
+            row.get::<_, bool>(4)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (id, observed_at, invalid, removed, changed) = row?;
+        let state = if removed {
             PlanningState::Removed
         } else if invalid || (observed_at.is_none() && changed) {
             PlanningState::Invalid
-        } else if observed_at.is_some() || task.linear_id.is_none() {
+        } else if observed_at.is_some() || !linear.contains(&id) {
             PlanningState::Available
         } else {
             PlanningState::Unavailable
-        },
-        observed_at,
+        };
+        Ok((id, crate::store::TaskAcquisition { state, observed_at }))
     })
+    .collect()
+}
+
+/// IDs as the JSON array batch reads expand with `json_each(?1)`.
+pub(super) fn ids_json<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
+    serde_json::Value::Array(
+        ids.into_iter()
+            .map(|id| serde_json::Value::String(id.to_owned()))
+            .collect(),
+    )
+    .to_string()
 }
 
 fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
@@ -1328,7 +1470,7 @@ pub(super) fn task_checkout_in(
     conn.query_row(
         &format!("{TASK_CHECKOUT_COLUMNS} AND id=?1"),
         [task.as_str()],
-        |row| map_task_checkout(conn, row),
+        |row| map_task_checkout(row, |id| short_task_id(conn, id)),
     )
     .optional()
     .map_err(Into::into)
@@ -1337,9 +1479,12 @@ pub(super) fn task_checkout_in(
 const TASK_CHECKOUT_COLUMNS: &str = "SELECT id, worktree, checkout_machine_id
     FROM tasks WHERE worktree IS NOT NULL";
 
-fn map_task_checkout(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskCheckout> {
+fn map_task_checkout(
+    row: &rusqlite::Row<'_>,
+    short: impl FnOnce(&TaskId) -> StoreResult<Option<String>>,
+) -> rusqlite::Result<TaskCheckout> {
     let task_id = TaskId::from_raw(row.get::<_, String>(0)?);
-    let issue_identifier = short_task_id(conn, &task_id)
+    let issue_identifier = short(&task_id)
         .map_err(|error| invalid_column(0, error))?
         .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
     let machine: Option<String> = row.get(2)?;
@@ -1375,20 +1520,78 @@ pub(super) fn short_task_id(conn: &Connection, id: &TaskId) -> StoreResult<Optio
     let mut query = conn.prepare(
         "SELECT lower(substr(id,6)) FROM tasks WHERE id!=?1 AND substr(lower(id),6,6)=?2",
     )?;
-    let others = query.query_map(params![id.as_str(), &hex[..6]], |row| {
-        row.get::<_, String>(0)
-    })?;
+    let others = query
+        .query_map(params![id.as_str(), &hex[..6]], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(Some(shortest_unique_prefix(&hex, &others)))
+}
+
+/// The local hex prefix, six characters or more, that tells `hex` apart from
+/// every other Task sharing its first six.
+fn shortest_unique_prefix(hex: &str, others: &[String]) -> String {
     // Distinguish every collision with one character beyond its shared prefix.
     let mut length = 6;
     for other in others {
         let shared = hex
             .bytes()
-            .zip(other?.bytes())
+            .zip(other.bytes())
             .take_while(|(a, b)| a == b)
             .count();
         length = length.max(shared + 1).min(hex.len());
     }
-    Ok(Some(hex[..length].to_string()))
+    hex[..length].to_string()
+}
+
+/// Every Task's short identifier, read in one statement for list reads.
+#[derive(Debug)]
+pub(super) struct TaskIdentifiers {
+    issue_identifiers: HashMap<String, String>,
+    by_prefix: HashMap<String, Vec<String>>,
+}
+
+impl TaskIdentifiers {
+    pub(super) fn read(conn: &Connection) -> StoreResult<Self> {
+        let mut statement =
+            conn.prepare("SELECT lower(substr(id,6)),issue_identifier FROM tasks")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut by_prefix = HashMap::<String, Vec<String>>::new();
+        for (hex, _) in &rows {
+            if hex.len() >= 6 {
+                by_prefix
+                    .entry(hex[..6].to_string())
+                    .or_default()
+                    .push(hex.clone());
+            }
+        }
+        Ok(Self {
+            issue_identifiers: rows.into_iter().collect(),
+            by_prefix,
+        })
+    }
+
+    /// What `short_task_id` answers for `id`, without another statement.
+    pub(super) fn short(&self, id: &TaskId) -> Option<String> {
+        let hex = id.as_str().trim_start_matches("task_").to_ascii_lowercase();
+        let identifier = self.issue_identifiers.get(&hex)?;
+        if *identifier != format!("lf-{hex}") {
+            return Some(identifier.clone());
+        }
+        let others: Vec<String> = self
+            .by_prefix
+            .get(&hex[..6])
+            .into_iter()
+            .flatten()
+            .filter(|other| **other != hex)
+            .cloned()
+            .collect();
+        Some(shortest_unique_prefix(&hex, &others))
+    }
 }
 
 pub(super) fn cached_short_task_id(
@@ -1418,7 +1621,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
     t.project_id, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
     t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id";
-const TASK_PR_COLUMNS: &str = "SELECT
+pub(super) const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
     publication_requested_at, after_merge, next_slug, github_number, github_url,
     merge_commit, abandoned_at, created_at, updated_at,
@@ -1838,6 +2041,26 @@ fn map_task_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<
     let identifier = short_task_id(conn, &id)
         .map_err(|error| invalid_column(0, error))?
         .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    map_task_columns(row, id, identifier)
+}
+
+/// A Task row whose identifier comes from the list's one identifier read.
+fn map_listed_task_row(
+    identifiers: &TaskIdentifiers,
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<Task> {
+    let id = TaskId::from_raw(row.get::<_, String>(0)?);
+    let identifier = identifiers
+        .short(&id)
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+    map_task_columns(row, id, identifier)
+}
+
+fn map_task_columns(
+    row: &rusqlite::Row<'_>,
+    id: TaskId,
+    identifier: String,
+) -> rusqlite::Result<Task> {
     Ok(Task {
         id,
 
@@ -1875,7 +2098,7 @@ fn map_task_row(conn: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<
     })
 }
 
-fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
+pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskPr> {
     let publication_requested_at = row.get::<_, Option<i64>>(6)?;
     let github_number = row.get::<_, Option<i64>>(9)?.map(|number| number as u32);
     let github_url = row.get::<_, Option<String>>(10)?;
@@ -2001,7 +2224,7 @@ fn map_task_linear_observation_row(
     })
 }
 
-fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
+pub(super) fn map_task_event_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskEvent> {
     let kind_json: String = row.get(2)?;
     let kind: TaskEventKind =
         serde_json::from_str(&kind_json).map_err(|error| invalid_column(2, error))?;
@@ -2156,15 +2379,42 @@ pub(super) fn request_completion_in(
 }
 
 pub(super) fn tasks_in(conn: &Connection, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
+    tasks_where(conn, wave_id, "1")
+}
+
+fn tasks_where(
+    conn: &Connection,
+    wave_id: Option<&WaveId>,
+    condition: &str,
+) -> StoreResult<Vec<Task>> {
     let filter = match wave_id {
         Some(_) => "p.wave_id=?1 AND ",
         None => "",
     };
-    let query = format!("{TASK_COLUMNS} WHERE {filter}{TASK_VISIBLE} ORDER BY t.updated_at DESC");
+    let query = format!(
+        "{TASK_COLUMNS} WHERE {filter}({condition}) AND {TASK_VISIBLE} ORDER BY t.updated_at DESC"
+    );
+    let identifiers = TaskIdentifiers::read(conn)?;
     let mut statement = conn.prepare(&query)?;
-    let rows = statement.query_map(params_from_iter(wave_id), |row| map_task_row(conn, row))?;
+    let rows = statement.query_map(params_from_iter(wave_id), |row| {
+        map_listed_task_row(&identifiers, row)
+    })?;
     rows.collect::<rusqlite::Result<_>>()
         .map_err(StoreError::from)
+}
+
+/// When a closed Task closed, as RFC 3339 text: abandonment, else completion,
+/// else its last update. Orders the closed-Task pages.
+const TASK_CLOSED_AT: &str = "CASE WHEN t.abandoned_at IS NOT NULL
+    THEN strftime('%Y-%m-%dT%H:%M:%SZ',t.abandoned_at,'unixepoch')
+    ELSE COALESCE(t.planning_completed_at,strftime('%Y-%m-%dT%H:%M:%SZ',t.updated_at,'unixepoch')) END";
+
+/// One page of closed (done or abandoned) Tasks, most recently closed first.
+#[derive(Debug, Clone)]
+pub struct ClosedTaskPage {
+    pub tasks: Vec<Task>,
+    /// The last Task of a full page; pass it as `after` for the next page.
+    pub next: Option<TaskId>,
 }
 
 #[cfg(test)]

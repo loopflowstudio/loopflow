@@ -4,6 +4,8 @@
 //! Machines: your Task's next entry is written on its Machine when that is one
 //! of yours, otherwise on your Machine for its Wave. An inbound entry never
 //! ends this Machine's own open claim; only its own unclaim or handoff does.
+use std::collections::HashMap;
+
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::durable::{
@@ -28,31 +30,44 @@ fn read_kind(value: &str) -> StoreResult<OwnershipKind> {
 }
 
 fn log_in(conn: &Connection, task: &TaskId) -> StoreResult<Vec<Row>> {
+    Ok(logs_in(conn, std::slice::from_ref(task))?
+        .remove(task)
+        .unwrap_or_default())
+}
+
+/// Each Task's ownership log, in one statement.
+fn logs_in(conn: &Connection, tasks: &[TaskId]) -> StoreResult<HashMap<TaskId, Vec<Row>>> {
     // Entries the provider has not stamped yet share whole-second `at` values;
     // insertion order keeps a claim and its handoff in the order they happened.
     let mut statement = conn.prepare(
-        "SELECT id,kind,person,person_key,machine_id,machine_label,at,written_here
-         FROM task_ownership WHERE task_id=?1
+        "SELECT id,kind,person,person_key,machine_id,machine_label,at,written_here,task_id
+         FROM task_ownership WHERE task_id IN (SELECT value FROM json_each(?1))
          ORDER BY ordered_at IS NULL,ordered_at,at,rowid",
     )?;
-    let rows = statement.query_map([task.as_str()], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, Option<String>>(5)?,
-            row.get::<_, i64>(6)?,
-            row.get::<_, bool>(7)?,
-        ))
-    })?;
-    rows.map(|row| {
-        let (id, kind, person, person_key, machine, machine_label, at, written_here) = row?;
-        Ok(Row {
+    let rows = statement.query_map(
+        [super::children::ids_json(tasks.iter().map(TaskId::as_str))],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(6)?,
+                row.get::<_, bool>(7)?,
+                row.get::<_, String>(8)?,
+            ))
+        },
+    )?;
+    let mut logs = HashMap::<TaskId, Vec<Row>>::new();
+    for row in rows {
+        let (id, kind, person, person_key, machine, machine_label, at, written_here, task) = row?;
+        let task = TaskId::from_raw(task);
+        logs.entry(task.clone()).or_default().push(Row {
             entry: TaskOwnershipEntry {
                 id: OwnershipEntryId::from_raw(id),
-                task_id: task.clone(),
+                task_id: task,
                 kind: read_kind(&kind)?,
                 person,
                 person_key,
@@ -61,9 +76,42 @@ fn log_in(conn: &Connection, task: &TaskId) -> StoreResult<Vec<Row>> {
                 at,
             },
             written_here,
-        })
-    })
-    .collect()
+        });
+    }
+    Ok(logs)
+}
+
+/// Each listed Task's current owner as this Machine reads it, with Machine
+/// labels as best known here; Tasks without an owner are absent.
+pub(super) fn owners_in(
+    conn: &Connection,
+    tasks: &[TaskId],
+) -> StoreResult<HashMap<TaskId, TaskOwner>> {
+    let local = local_machine_in(conn)?;
+    let mut labels = conn.prepare("SELECT id,label FROM machines WHERE label IS NOT NULL")?;
+    let labels = labels
+        .query_map([], |row| {
+            Ok((
+                MachineId::from_raw(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+    let mut owners = HashMap::new();
+    for (task, rows) in logs_in(conn, tasks)? {
+        let Some(mut owner) = read_log(&rows, &local).owner else {
+            continue;
+        };
+        if let Some(machine) = owner.machine.id.as_ref() {
+            owner.machine.label = if *machine == local {
+                Some(local_label())
+            } else {
+                labels.get(machine).cloned().or(owner.machine.label.take())
+            };
+        }
+        owners.insert(task, owner);
+    }
+    Ok(owners)
 }
 
 /// Who holds a Task after an entry, with the Machine label as written.

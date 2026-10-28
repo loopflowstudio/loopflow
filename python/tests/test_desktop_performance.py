@@ -533,7 +533,7 @@ def test_fixture_setup_volume_is_excluded_from_scenario_totals(tmp_path: Path) -
         "(directory / f'lf-{os.getpid()}.jsonl').write_text("
         "json.dumps(start) + '\\n' + json.dumps(end))\n"
         "task = {'id': 'owned-task', 'identifier': 'PERF-304', 'worktree': '/checkout'}\n"
-        "answers = {('task', 'status'): {'task': task}}\n"
+        "answers = {('desktop', 'task'): {'task': task}}\n"
         "session = {'id': 'retained-session', 'task_ids': ['owned-task']}\n"
         "print(json.dumps(answers.get(tuple(sys.argv[1:3]), [session])))\n"
     )

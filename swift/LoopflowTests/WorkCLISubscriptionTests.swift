@@ -17,9 +17,9 @@ struct WorkCLISubscriptionTests {
         try await fixture.prepare()
         let seed = try await fixture.json(["task", "create", "--wave", "proof", "--title", "Backlog", "--json"])
         let seedID = try #require(seed["id"] as? String)
-        let status = try await fixture.json(["task", "status", seedID, "--json"])
+        let status = try await fixture.json(["desktop", "task", seedID, "--json"])
         let waveName = try #require((status["execution"] as? [String: Any])?["wave"] as? String)
-        _ = try await fixture.run(["wave", "graph", "set", "proof", waveName])
+        _ = try await fixture.run(["--wave", waveName, "set", "graph", "proof"])
         let query = fixture.lf.query
         let model = WorkModel(query: query, repoPath: fixture.repo.path)
         let keeping = Task { await model.keepWorkCurrent() }
@@ -112,14 +112,15 @@ struct WorkCLISubscriptionTests {
 
         model.select(.wave(id: wave.wave.id))
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
-        // A later subscription reply updates history without restoring the old selection.
+        // A closed Task left the plan; an edit made while it is not shown
+        // reaches it when it is shown again, without restoring the old selection.
         _ = try await fixture.run(["task", "edit", id, "--title", "Updated after navigation"])
-        try await eventually { model.task(id: id)?.task.task.name == "Updated after navigation" }
         #expect(model.selection == .wave(id: wave.wave.id))
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
         #expect(registry.retained(workspace.key) === workspace)
         model.goBack()
         #expect(model.selection == .task(id: id))
+        try await eventually { model.task(id: id)?.task.task.name == "Updated after navigation" }
         #expect(selectedPlanMembers(model).isEmpty)
         let returned = TaskWorkflowHeader(model: model, task: try #require(model.task(id: id)?.task),
                                           work: model.taskWork[id])

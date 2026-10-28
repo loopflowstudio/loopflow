@@ -29,7 +29,7 @@ private final class Feed {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in self.requests.append(request) }
-        }, cancel: { continuation.finish() })
+        }, cancel: { continuation.finish() }, copy: nil)
     }
 
     func send(_ frame: WorkFrame) { continuation?.yield(frame) }
@@ -49,7 +49,7 @@ struct DesktopHeadlessTests {
             }
             if args.first == "roadmap" { return roadmap }
             if args.first == "wave" { return "[]" }
-            if args.first == "session" { return #"{"entries":[],"next":null}"# }
+            if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[],"next":null}"# }
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()
@@ -92,32 +92,18 @@ struct DesktopHeadlessTests {
         _ = try view.inspect().find(button: "Customize")
     }
 
-    @Test("An unplaced Task and its CLI comment thread render without a display")
-    func storedTaskComments() async throws {
+    @Test("An unplaced Task and its CLI comment thread decode without a display")
+    func storedTaskComments() throws {
         struct Proof: Decodable {
             let task: RoadmapTask
             let comments: TaskComments
         }
         let data = try Data(contentsOf: fixtures.appendingPathComponent("local_task.json"))
         let proof = try JSONDecoder().decode(Proof.self, from: data)
-        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let thread = String(decoding: try JSONSerialization.data(withJSONObject: #require(object["comments"])), as: UTF8.self)
-        let model = WorkModel(query: RegistryQuery { args, _ in
-            guard args.prefix(2) == ["task", "comment"] else {
-                throw RegistryQueryError("Unexpected command: \(args)")
-            }
-            return thread
-        })
         #expect(proof.task.reference.workspace == nil)
         #expect(proof.task.task.id == "task_0123456789ab40008000000000000001")
         #expect(proof.task.runControl.unavailable == nil)
-        await model.loadComments(task: proof.task)
-        #expect(model.comments[proof.task.id].value == proof.comments)
-        model.navigation.expandedComments.insert(proof.task.id)
-        let view = TaskCommentsView(model: model, task: proof.task)
-        _ = try view.inspect().find(text: "Fixture Person")
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier:
-            "task-comment-00000000-0000-4000-8000-000000000001")
+        #expect(TaskCommentsView.author(proof.comments.comments[0].author) == "Fixture Person")
         #expect(TaskCommentsView.readableBody(proof.comments.comments[0].body) == "Preserve the escaped quote")
     }
 
@@ -127,28 +113,27 @@ struct DesktopHeadlessTests {
             try #require(JSONSerialization.jsonObject(
                 with: Data(contentsOf: fixtures.appendingPathComponent(name))) as? [String: Any])
         }
-        func frame(_ part: String, sequence: Int, answers: Int, body: [String: Any]) throws -> WorkFrame {
+        func frame(_ part: String, sequence: Int, answers: Int, task: String? = nil,
+                   body: Any) throws -> WorkFrame {
+            if part == "checkpoint" {
+                return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
+            }
             let line: [String: Any] = [
-                "part": part, "sequence": sequence, "answers": answers, "home": fixtureMachineId, "copy": NSNull(),
-                "revisions": NSNull(), "unavailable": NSNull(), "body": body,
+                "answers": answers, "unavailable": NSNull(), "body": body,
             ]
-            return try WorkFrame.decode(line: JSONSerialization.data(withJSONObject: line))
+            return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
+                                        scope: WorkScope(repo: nil, headless: false, task: task, activity: nil),
+                                        sequence: sequence, line: JSONSerialization.data(withJSONObject: line))
         }
         let roadmap = try object("roadmap_snapshot.json")
-        let waves = try #require(roadmap["waves"] as? [[String: Any]]).map { try #require($0["wave"]) }
         var work = try object("task_work.json")
         let run = try object("graph_detail.json")
-        let planning: [String: Any] = ["roadmap": roadmap, "waves": waves]
+        let planning = roadmap
 
         let calls = Recorder()
-        let (oldReads, releaseOldReads) = AsyncStream<Void>.makeStream()
         let feed = Feed()
         let model = WorkModel(query: RegistryQuery(watchWork: { await feed.open() }) { args, _ in
             await calls.add(args)
-            if args.prefix(2) == ["task", "comment"] {
-                for await _ in oldReads { }
-                return #"{"identifier":"old","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null}"#
-            }
             return ""
         })
         model.confirmMachine(fixtureMachineId)
@@ -173,14 +158,12 @@ struct DesktopHeadlessTests {
         }
         #expect(scope.task == task.task.identifier)
 
-        feed.send(try frame("task", sequence: 2, answers: 2,
-                            body: ["task": task.task.identifier, "work": work, "graph_processes": [run], "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
+        // `lf task status`: its work, Graph processes, comments and recorded execution.
+        feed.send(try frame("task", sequence: 2, answers: 2, task: task.task.identifier,
+                            body: ["overview": work, "graph_processes": [run], "execution": ["work": work],
+                                   "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
-        #expect(model.taskDiagnostics[task.id].value == nil)
-        model.observeTaskDiagnostics(task, visible: true)
-        feed.send(try frame("task_history", sequence: 3, answers: feed.requests.last?.id ?? 2,
-                            body: ["task": task.task.identifier, "work": work]))
         try await eventually { model.taskDiagnostics[task.id].value != nil }
         let diagnostics = try #require(model.taskDiagnostics[task.id].value)
         let view = TaskWorkView(model: model, task: task)
@@ -207,12 +190,9 @@ struct DesktopHeadlessTests {
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
 
-        let oldRead = Task { await model.loadComments(task: task) }
-        try await eventually { model.comments.inFlight.contains(task.id) }
-
         // The subscription updates normally; command confirmation is separate.
         let moving = Task { await model.startTask(nil, from: "demo", task: task) }
-        try await eventually { feed.requests.last == .checkpoint(id: 4, replay: []) }
+        try await eventually { feed.requests.last == .checkpoint(id: 3, replay: []) }
         var workflow = try #require(work["graph"] as? [String: Any])
         workflow["position"] = ["kind": "at", "step": "demo"]
         work["graph"] = workflow
@@ -225,23 +205,21 @@ struct DesktopHeadlessTests {
         incomingComments["identifier"] = task.task.identifier
         incomingComments["pending_sync"] = ["c-1"]
         let moved: [String: Any] = [
-            "task": task.task.identifier,
-            "work": work.merging(["graph_processes": [try #require((work["graph_processes"] as? [[String: Any]])?.first), second]]) { $1 },
+            "execution": NSNull(),
+            "overview": work.merging(["graph_processes": [try #require((work["graph_processes"] as? [[String: Any]])?.first), second]]) { $1 },
             "graph_processes": [run, secondRun],
             "comments": incomingComments,
         ]
         // A frame read before the write cannot stand for it.
-        feed.send(try frame("task", sequence: 4, answers: 2, body: moved))
+        feed.send(try frame("task", sequence: 4, answers: 2, task: task.task.identifier, body: moved))
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.navigation.taskRunDrafts[task.id]?.acting == true)
-        feed.send(try frame("task", sequence: 5, answers: 4, body: moved))
-        feed.send(try frame("planning", sequence: 6, answers: 4, body: planning))
-        feed.send(try frame("checkpoint", sequence: 7, answers: 4, body: [:]))
+        feed.send(try frame("task", sequence: 5, answers: 3, task: task.task.identifier, body: moved))
+        feed.send(try frame("planning", sequence: 6, answers: 3, body: planning))
+        feed.send(try frame("checkpoint", sequence: 7, answers: 3, body: [:]))
         await moving.value
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.graph?.position == .at(step: "demo"))
-        releaseOldReads.finish()
-        await oldRead.value
         #expect(model.comments[task.id].value?.comments.count == 3)
         #expect(model.comments[task.id].value?.pendingSync == ["c-1"])
         model.navigation.expandedComments.insert(task.id)
@@ -250,7 +228,6 @@ struct DesktopHeadlessTests {
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
         #expect(model.graphProcesses["44444444-4444-4444-8444-444444444444"]?.entry.name == "pursue")
         #expect(await calls.calls == [
-            ["task", "comment", task.id, "--json"],
             ["task", "run", task.task.identifier, "--from", "demo"],
         ])
     }
@@ -316,7 +293,7 @@ struct DesktopHeadlessTests {
         let started = Recorder()
         let model = WorkModel(query: RegistryQuery(
             run: { args, _ in
-                if args.prefix(2) == ["wave", "show"] { return String(decoding: planning, as: UTF8.self) }
+                if args.prefix(2) == ["desktop", "plan"] { return String(decoding: planning, as: UTF8.self) }
                 if args.prefix(2) == ["task", "run"] || args.prefix(2) == ["task", "complete"]
                     || args.last == "ship" || args.last == "--stop" {
                     await started.add(args)

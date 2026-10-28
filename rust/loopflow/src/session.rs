@@ -353,7 +353,14 @@ pub(crate) fn conversation(
     title: String,
 ) -> anyhow::Result<LfSession> {
     let skill = crate::graph::load_skill(skill, cwd)?.name;
-    let agent = crate::ops::task::resolve_task_agent(cwd, agent, None);
+    let wave = crate::work::wave::context::resolve_ambient_wave_name();
+    let agent = crate::ops::task::resolve_task_agent(
+        cwd,
+        wave.as_deref(),
+        &crate::config::PersonalSettings::read(Some(cwd), wave.as_deref()),
+        agent,
+        None,
+    );
     let (provider, model) = crate::config::parse_agent(&agent);
     Ok(LfSession {
         captured: None,

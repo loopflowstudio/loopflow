@@ -86,6 +86,7 @@ pub(crate) fn preview_prompt(
             .docs
             .iter()
             .chain(&built.components.summaries)
+            .filter(|doc| doc.source != crate::prompt::DocumentSource::Docs)
             .map(
                 |doc| crate::lf::commands::context::preview::ContextReference {
                     path: doc.path.clone(),
@@ -107,7 +108,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
-    let resolved = crate::agent::resolve_session_config(&session, cli)?;
+    let mut resolved = crate::agent::resolve_session_config(&session, cli)?;
     let mut turn = cli.process_options();
     turn.agent = resolved.agent.clone();
     let message = if session.captured.is_some()
@@ -142,11 +143,24 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
         false,
     )?;
     let prepared = built.agent_config;
+    let conversation_context = match (
+        resolved.conversation_context.take(),
+        prepared.conversation_context,
+    ) {
+        (Some(mut saved), Some(current)) => {
+            let submitted = saved.submitted_docs.get_or_insert_with(Vec::new);
+            for path in current.submitted_docs.into_iter().flatten() {
+                if !submitted.contains(&path) {
+                    submitted.push(path);
+                }
+            }
+            Some(saved)
+        }
+        (saved, current) => saved.or(current),
+    };
     built.agent_config = AgentConfig {
         system_prompt: prepared.system_prompt,
-        conversation_context: resolved
-            .conversation_context
-            .or(prepared.conversation_context),
+        conversation_context,
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
@@ -446,8 +460,15 @@ fn build_prompt_at(
     };
     let confine = confine_checkout_agent(task_checkout, is_interactive);
     let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
+    let wave = cli.wave.clone().or_else(|| {
+        cli.resume
+            .is_none()
+            .then(crate::work::wave::context::resolve_ambient_wave_name)
+            .flatten()
+    });
     let config_start = Instant::now();
-    let config = crate::config::load_config(Some(&repo_root))?.unwrap_or_default();
+    let config =
+        crate::config::load_wave_config(Some(&repo_root), wave.as_deref())?.unwrap_or_default();
     debug!(
         elapsed_ms = config_start.elapsed().as_millis(),
         "loaded config"
@@ -475,12 +496,6 @@ fn build_prompt_at(
         Surface::Headless
     };
 
-    let wave = cli.wave.clone().or_else(|| {
-        cli.resume
-            .is_none()
-            .then(crate::work::wave::context::resolve_ambient_wave_name)
-            .flatten()
-    });
     if let Some(skill) = &discovered_skill {
         match crate::definition::name::portable_name(&skill.name).as_str() {
             "task-session" => anyhow::ensure!(
@@ -983,8 +998,13 @@ pub(crate) fn attributed_context(
         } else {
             Kind::Document
         };
+        let content = if document.source == DocumentSource::Docs {
+            crate::prompt::format_document(document)
+        } else {
+            document.content.clone()
+        };
         push(
-            &document.content,
+            &content,
             kind,
             if document.source == DocumentSource::Wave {
                 Scope::Wave

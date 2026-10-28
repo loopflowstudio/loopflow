@@ -386,7 +386,7 @@ struct WorkBreadcrumbs: View {
 }
 
 /// Where the current Task or Wave runs, and the Machines it can run on instead.
-/// Planning supplies the reading; `lf machine use` writes. A Task handoff keeps
+/// Planning supplies the reading; `lf task move --machine` and `lf set machine` write. A Task move keeps
 /// its person, so each choice reads “Run on”.
 struct WorkMachineControl: View {
     let model: WorkModel

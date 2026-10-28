@@ -5,7 +5,7 @@
     "graph": null,
     "default": {
       "name": "code",
-      "source": "repository"
+      "source": "repo"
     }
   },
   {
@@ -14,7 +14,7 @@
     "graph": null,
     "default": {
       "name": "code",
-      "source": "builtin"
+      "source": "default"
     }
   }
 ]

@@ -328,8 +328,8 @@ printf '%s\n' "$LF_HOME" > "$LF_HOME/provider-home"
         &clone,
         &[
             lf.to_str().unwrap(),
-            "session",
-            "list",
+            "desktop",
+            "sessions",
             "--all",
             "--history",
             "--json",
@@ -388,7 +388,7 @@ fn populated_clone_retains_navigation_and_task_primary_without_source_authority(
     };
     let waves = run(&["wave", "list", "--json"]);
     assert!(waves.to_string().contains("task-pr-tests"));
-    let sessions = run(&["session", "list", "--task", "INF-123", "--json"]);
+    let sessions = run(&["desktop", "sessions", "--task", "INF-123", "--json"]);
     let primary = sessions
         .as_array()
         .unwrap()

@@ -302,8 +302,10 @@ process control nor Graph settlement. Attachment claims and provider identity
 are separate: a fresh claim token fences every attachment and release, including
 A → B → A, while an unchanged provider survives handoff. Passive display acquires no claim.
 
-The full contract and current cutover status live in
-[Architecture Reference](docs/architecture-reference.md#core-models-and-apis).
+The full contract lives in
+[Core models and APIs](docs/architecture/reference-models.md#core-models-and-apis);
+the [Architecture Reference](docs/architecture-reference.md) indexes the rest,
+including cutover status.
 
 # Development Environment
 
@@ -447,9 +449,9 @@ Keep canonical owner paths in command references and help, where the tree is
 the point. Preserve established short names; do not expand `wt` to `worktree`.
 `documented_commands` checks example ambiguity against Clap; adding a competing
 command requires updating any shorthand that stops resolving uniquely.
-`docs/lf-reference.md` is generated from the compiled Clap tree: with inherited
-`LF_*` unset, run
-`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration reference_matches_the_compiled_cli < /dev/null`.
+`docs/lf-reference.md` commits only its authored preamble; `website/dev.py sync-docs`
+appends the command tree from `lf help --all --json` (`LF_BIN` or `lf` on PATH).
+Help text lives in Clap, so a CLI change edits no reference file.
 
 User docs follow the same principles as prompts (see PROMPTS.md):
 

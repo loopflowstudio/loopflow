@@ -33,7 +33,7 @@ pub fn run(
         &cli.command,
         Some(crate::lf::Commands::Session {
             cmd: crate::lf::SessionCommand::Attach { .. }
-                | crate::lf::SessionCommand::List { .. }
+                | crate::lf::SessionCommand::List(_)
                 | crate::lf::SessionCommand::Connect { .. }
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
@@ -47,10 +47,6 @@ pub fn run(
                 | crate::lf::TaskCommand::Save { .. }
         }) | Some(crate::lf::Commands::Wave {
             cmd: crate::lf::WaveCommand::Show { .. }
-        }) | Some(crate::lf::Commands::Ops {
-            cmd: crate::lf::OpsCommand::Machine {
-                cmd: crate::lf::MachineCommand::Use { .. }
-            }
         })
     );
     let runtime = tokio::runtime::Runtime::new()?;

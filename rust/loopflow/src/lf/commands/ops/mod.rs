@@ -4,8 +4,7 @@ use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
     create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
     main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
-    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreePrunePolicy,
-    WorktreeSegment,
+    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreeSegment,
 };
 use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
@@ -312,22 +311,15 @@ pub(crate) fn run_sync_in(
         print_sync_plan(&plan);
         return Ok(());
     }
-    // A merge over stashed edits can conflict only when restoring them, after
-    // the resolver is gone. Committing them first turns that into an ordinary
-    // merge conflict the resolver handles, and the edits never live in a stash.
+    // Checkpoint ordinary edits so their conflicts reach the merge resolver,
+    // rather than surfacing during stash restoration after the resolver is gone.
     // The checkpoint moves HEAD, so plan again against it.
     if !manual
         && !on_main
         && matches!(plan.strategy, crate::ops::SyncStrategy::MergeTarget)
         && crate::git::intervention_state(repo_root)?.is_none()
-        && stage_uncommitted_work(repo_root)?
+        && checkpoint_uncommitted_work(repo_root, &plan.base_ref, progress)?
     {
-        progress.status("Committing uncommitted edits before merging...");
-        crate::git::commit(
-            repo_root,
-            &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
-            &|_| {},
-        )?;
         plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     }
     let options = SyncOptions {
@@ -394,15 +386,41 @@ pub(crate) fn run_sync_in(
     Ok(())
 }
 
-/// Stage every edit except local telemetry under `.lf/tmp/`, which is not
-/// work even in a repository that doesn't ignore it. True when any is staged.
-fn stage_uncommitted_work(repo: &Path) -> Result<bool> {
-    crate::git::git_stdout(repo, &["add", "-A", "--", ":/", ":(exclude,top).lf/tmp"])?;
-    Ok(
-        !crate::git::git_stdout(repo, &["diff", "--cached", "--name-only"])?
-            .trim()
-            .is_empty(),
+/// Checkpoint ordinary edits while retaining telemetry's staged and working contents.
+fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress) -> Result<bool> {
+    // A literal `.lf/tmp` prefix makes Git reject the pathspec when ignored.
+    // Use the same rooted glob when staging and refreshing the real index.
+    const EXCLUDE_TELEMETRY: &str = ":(exclude,top,glob)[.]lf/tmp/**";
+    crate::git::git_stdout(repo, &["add", "-A", "--", ":/", EXCLUDE_TELEMETRY])?;
+    // Start from the staged tree so explicitly staged ignored user files survive.
+    // Excluding telemetry from `add` alone cannot exclude already-staged entries.
+    let staged_tree = crate::git::git_stdout(repo, &["write-tree"])?;
+    let directory = tempfile::tempdir()?;
+    let index = directory.path().join("index");
+    let inherit_index = |command: &mut Command| {
+        command.env("GIT_INDEX_FILE", &index);
+    };
+    let run = |args: &[&str]| crate::git::git_stdout_inheriting(repo, args, &inherit_index);
+    run(&["read-tree", staged_tree.trim()])?;
+    run(&["reset", "-q", "HEAD", "--", ":(top,glob)[.]lf/tmp/**"])?;
+    // Filenames can consist entirely of whitespace.
+    if run(&["diff", "--cached", "--name-only"])?.is_empty() {
+        return Ok(false);
+    }
+    progress.status("Committing uncommitted edits before merging...");
+    crate::git::commit(
+        repo,
+        &format!("Checkpoint edits before syncing onto {base}"),
+        &inherit_index,
+    )?;
+    // Refresh only committed paths; the merge's existing preservation wrapper
+    // carries the remaining telemetry through the merge with its index intact.
+    crate::git::git_stdout(
+        repo,
+        &["reset", "-q", "HEAD", "--", ":/", EXCLUDE_TELEMETRY],
     )
+    .map_err(|error| anyhow!("checkpoint saved; index refresh failed: {error}"))?;
+    Ok(true)
 }
 
 fn print_sync_plan(plan: &crate::ops::SyncPlan) {
@@ -1582,8 +1600,8 @@ pub(crate) fn build_cleanup_registries() -> Vec<PathBuf> {
     registries
 }
 
-/// Remove clean worktrees whose branch merged, closed, lost its remote or went
-/// stale, retaining every unfinished Task's checkout and any process's cwd.
+/// Remove clean worktrees with exact-head merged or closed PR evidence,
+/// retaining every unfinished Task's checkout and any process's cwd.
 pub(crate) fn prune_repo_worktrees(
     main_repo: &Path,
     current: &Path,
@@ -1597,7 +1615,6 @@ pub(crate) fn prune_repo_worktrees(
         main_repo,
         current,
         &protected_paths,
-        WorktreePrunePolicy::manual(),
         dry_run,
     )?)
 }
@@ -1616,7 +1633,7 @@ fn wt_prune(dry_run: bool) -> Result<()> {
         for target in &report.candidates {
             println!(
                 "  {} ({reason})  {}",
-                target.branch.as_deref().unwrap_or("detached"),
+                target.branch,
                 target.path.display(),
                 reason = target.reason.as_str(),
             );

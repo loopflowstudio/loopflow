@@ -43,14 +43,30 @@ conversation, use `lf resume` ([Sessions](sessions.md)).
 
 ```bash
 lf wave show                       # each Wave's plan and Tasks, sorted by what they need
-lf task status LOO-12              # owner, state, PR, and every Session and Graph on it
-lf task status LOO-12 --json       # its graph, its interactive steps, and the step it stands at
+lf task status LOO-12              # state, graph step, PR, and every Session and Graph on it
 lf task diff LOO-12 --files        # what it changed so far
 lf task wait LOO-13                # block until its run ends, with no agent polling
 ```
 
-`lf task list` is the flat inventory (`--wave` to narrow it). Every view reads
-this machine's store, so it answers instantly and offline.
+```bash
+lf task list                                  # open Tasks in this repository
+lf task list loo-60                           # identifier or title contains "loo-60"
+lf task list --wave infra --state idle
+lf task list --done --wave infra --since 7d   # closed in the last week
+lf task list --watch                          # a JSON line each time the list changes
+```
+
+`lf task list` is the flat inventory. Every view reads this machine's store, so
+it answers instantly and offline.
+
+`--watch` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
+`lf session list`, `lf history`, `lf planning status`, `lf ps` and the
+`lf desktop` reads, always with `--json`. Each line is
+`{"answers", "unavailable", "body"}`, where `body` is
+what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
+change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
+answers that id. It stops when stdin closes. `lf planning status --watch` also
+keeps the repository's planning exchanged while it runs.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read
 `lf task status`, then launch what remains with `lf task run`. The Task keeps
@@ -96,7 +112,7 @@ planning:
 
 Ref names are not access control; pick a remote whose readers should see the
 plan. When two people edit the same field, the later edit wins and the other
-value stays in `lf planning status`, ready to copy back.
+value stays in `lf planning journal`, ready to copy back.
 
 ### Linear, Asana or Notion
 
@@ -188,11 +204,49 @@ command in your own crontab:
 # 0 9 * * *  cd ~/src/product && lf -b --wave billing wave-operate
 ```
 
+### Set it up once
+
+```yaml
+# .lf/wave/billing/config.yaml: committed, inherited by the Wave's Tasks
+graph: code
+agent: claude
+skill_agents:
+  implement: claude:opus
+context_budgets:
+  memory_tokens: 20000
+```
+
+```bash
+lf --wave billing set machine mini                        # your Machine for its Tasks
+lf --wave billing set account.claude work@example.com     # the login that pays
+lf --wave billing set agent codex                         # your agent here; the team's stays claude
+lf set account.claude me@example.com --global             # every repository
+lf wave status billing                                    # each setting and its source
+```
+
+`config.yaml` has the shape of `.lf/config.yaml` and holds only what the Wave
+changes; launches in the Wave layer it over the repository's and your
+`~/.lf/config.yaml`. Repository settings (`planning`, `release`, `exclude`,
+`merge_method`, `land`, `pr`) are an error there. It also carries the Wave's
+`id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
+settings.
+
+`lf set` never edits committed config. It stores your own value on this
+Machine for the repository, a Wave (`lf --wave <wave> set`) or every repository
+(`--global`); without `--wave` it sets the repository, even in a Wave's Task
+worktree. Your `graph`, `agent` or `skill_agents.<skill>` wins over the
+committed value for you only, and `lf wave status` reports it as `personal`.
+Machines (`machine`, `machine.tasks`, `machine.session`) and account routes
+(`account.<provider>`) exist only this way; a launch uses the nearest of Wave,
+repository and global. `lf unset <key>` hands the choice back.
+
+A Wave without `config.yaml` reads these keys from `GOAL.md` frontmatter, which
+released lf still reads (LOO-640 removes that).
+
 ### Plan a chapter: Projects and KRs
 
 ```bash
 lf wave update-plan --wave billing --plan plan.json
-lf wave graph set feature billing        # the graph its new Tasks take up
 ```
 
 ```json
@@ -220,7 +274,7 @@ comes first and applies with no Wave selected.
 ### Talk to it from Discord
 
 ```yaml
-# .lf/wave/billing/GOAL.md frontmatter
+# .lf/wave/billing/config.yaml
 chat:
   provider: discord
   guild_id: "123456789012345678"

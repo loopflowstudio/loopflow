@@ -119,16 +119,14 @@ context_budgets:
   scratch_tokens: 8000
 ```
 
-Override individual fields for a Wave in `.lf/wave/<name>/GOAL.md` frontmatter:
+Override individual fields for a Wave in `.lf/wave/<name>/config.yaml`:
 
 ```yaml
----
 context_budgets:
   memory_tokens: 10000
----
 ```
 
-Each field resolves from Wave frontmatter, repo config, personal config, then
+Each field resolves from Wave config, repo config, personal config, then
 the compiled default. `lf context` shows the winning source for every value.
 The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
 integers. These are authoring targets, not launch limits; exceeding them does not
@@ -139,10 +137,11 @@ without contacting a provider or reading the clipboard. Defaults are 16,000 toke
 128 KiB for memory and 12,000 tokens / 96 KiB for scratch. Curate stale notes gradually,
 preserving live decisions and evidence; re-query after writing.
 
-The first conversation turn contains the skill followed by the request. Terminal
-launches pass it as an argument; if its UTF-8 size reaches the 122,880-byte argument
-cap, launch fails before starting the provider and reports the size and cap. Headless
-message streams have no terminal-argument cap.
+The first conversation turn contains the skill, request and explicitly selected
+documents. Codex uses app-server input and Claude uses streamed or file input.
+Pi and OpenCode terminal launches retain their 122,880-byte argument cap and
+report oversized input before launch. Provider context-window limits still apply;
+Loopflow never retries with shortened documents.
 
 ## Context Assembly
 
@@ -154,7 +153,7 @@ in a provider request. The harness loads its repo guide natively.
 | Operating and surface instructions, participant, reply guidance | Fixed added-instructions slot | Standalone native skills retain their own guidance |
 | Skill and request | First turn | Selected skill and launch message |
 | Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
-| Explicit docs | File paths in the listing | `docs:` or `--docs` |
+| Explicit docs | Complete reference bodies in the submitted turn | `docs:` in config or Loopflow skill frontmatter, or `--docs` |
 | Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
 | Codebase summaries | Complete private reference files | `summaries:` |
 | Clipboard | Tagged block after the request in the first turn | `-c` |
@@ -167,9 +166,9 @@ remain readable through complete-file pointers.
 
 ## Config Files
 
-**Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo.
+**Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo. **Wave config** (`.lf/wave/<name>/config.yaml`) overrides for work in that Wave; repository-only keys (`planning`, `release`, `exclude`, `merge_method`, `land`, `pr`) are an error there. See [Set it up once](work.md#set-it-up-once).
 
-For most settings, repo overrides global. For additive settings (`docs`, `context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
+For most settings, the nearer file wins; `context_budgets` and `skill_agents` merge per key. For additive settings (`docs`, `context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
 
 ```yaml
 # ~/.lf/config.yaml (global)
@@ -290,8 +289,16 @@ List specific files, globs, or directories for the agent to read. Not included b
 | **Default** | none (empty) |
 
 Each entry is a file (`README.md`), a glob (`'*.md'`), or a directory (`swift/`
-gathers `*.md` under it). Resolved paths appear in the context listing; file
-bodies are not inlined. This doesn't restrict which files the agent can edit.
+gathers `*.md` under it). Complete UTF-8 bodies and source paths enter the submitted
+turn, including absolute files outside the repository. Preview and durable capture
+show those submitted bytes. Dollar signs in reference text use `&#36;` notation
+to avoid invoking native skills. Empty files remain labeled references; missing,
+unreadable or nontext exact selections fail with the path and reason.
+
+Exclusions and the 100-file ceiling still apply. Explicitly selecting an ambient
+file supplies it once in task text instead of the refreshed block. New `--docs`
+selections on `lf -b connect ID --message TEXT` belong to that turn; prior documents
+stay in native history. This doesn't restrict which files the agent can edit.
 Scratch and the selected Wave's checkout Markdown are gathered automatically.
 Wave context reads `.lf/wave/<name>/` and each path-segment ancestor, excluding siblings
 and children; listings point to those files, not database snapshots.
@@ -366,6 +373,8 @@ Set the default harness, with an optional model.
 ```yaml
 agent: codex          # harness default
 # agent: claude:opus  # harness plus model
+skill_agents:
+  implement: claude:opus  # this skill only, ahead of the skill's own agent
 ```
 
 Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
@@ -561,7 +570,7 @@ than `config.yaml`:
 
 ```bash
 lf account connect claude primary@example.com --chrome-profile primary@example.com
-lf account route set claude primary@ engineering@
+lf set account.claude primary@,engineering@
 lf --account primary@ implement
 ```
 

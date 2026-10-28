@@ -1,10 +1,9 @@
-//! Project content and Wave Workflow selection share one transaction in every repository.
+//! Project content saves in one transaction in every repository.
 
 use crate::work::edit::WorkValue as Edit;
 use rusqlite::TransactionBehavior;
 
 use crate::durable::ProjectId;
-use crate::id::WaveId;
 use crate::store::planning_sync::PlanningChange;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::ProjectKR;
@@ -43,30 +42,6 @@ impl SqliteStore {
             )
             .collect();
         PlanningChanges::Project(project).save(&tx, &edits)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    pub fn selected_wave_graph(&self, wave: &WaveId) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row("SELECT graph FROM waves WHERE id=?1", [wave], |row| {
-            row.get(0)
-        })
-        .map_err(Into::into)
-    }
-
-    /// Select the graph future Tasks take up; definitions live in the repository.
-    pub fn select_wave_graph(&self, wave: &WaveId, name: &str) -> StoreResult<()> {
-        crate::task_graph::validate_graph_name(name).map_err(StoreError::InvalidData)?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        super::planning_write::local(
-            &tx,
-            &crate::work::edit::WorkEdit::for_target(
-                wave.as_str(),
-                &[Edit::WaveGraph(Some(name.into()))],
-            ),
-        )?;
         tx.commit()?;
         Ok(())
     }
@@ -320,11 +295,10 @@ mod tests {
     }
 
     #[test]
-    fn workflow_selection_uses_the_same_owner_with_and_without_linear_mapping() {
+    fn unchanged_project_content_saves_nothing_with_and_without_linear_mapping() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("store.db");
         let store = SqliteStore::open_ephemeral(&database).unwrap();
-        let mut waves = Vec::new();
         for (name, mapping) in [("offline", None), ("connected", Some("linear-project"))] {
             let wave = Wave::new(WaveId::new(), name.into(), "/repo".into());
             store.create_wave(&wave).unwrap();
@@ -339,26 +313,15 @@ mod tests {
                     rusqlite::params![project.as_str(), wave.id(), mapping, name],
                 )
                 .unwrap();
-            store.select_wave_graph(wave.id(), "review").unwrap();
+            store.update_project_content(&project, &[], &[]).unwrap();
             let before = store.revisions().unwrap();
             let changes = store.pending_project_changes(&project).unwrap();
-            store.select_wave_graph(wave.id(), "review").unwrap();
             store.update_project_content(&project, &[], &[]).unwrap();
             store
                 .edit_project(&project, Some(name), Some(""), None)
                 .unwrap();
             assert_eq!(store.revisions().unwrap(), before);
             assert_eq!(store.pending_project_changes(&project).unwrap(), changes);
-            waves.push(wave.id().clone());
-        }
-        drop(store);
-        let store = SqliteStore::open_ephemeral(&database).unwrap();
-        for wave in waves {
-            assert!(store.select_wave_graph(&wave, "invalid:review").is_err());
-            assert_eq!(
-                store.selected_wave_graph(&wave).unwrap().as_deref(),
-                Some("review")
-            );
         }
         assert!(store
             .update_project_content(&crate::durable::ProjectId::new(), &[], &[])

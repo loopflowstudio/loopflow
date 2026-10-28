@@ -22,8 +22,8 @@ use crate::work::task::{CiCheck, CiIncident};
 use super::error::{OpsError, OpsResult};
 use super::land::LandOptions;
 use super::pr::{
-    merge_gate_state, merge_needs_integration, merge_request_removal, observe_pr_merge,
-    ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo, RepairWindow,
+    merge_gate_state, merge_request_removal, observe_pr_merge, pr_requires_resync, ManualRemoval,
+    MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo, PrMergeObservation, RepairWindow,
 };
 
 #[derive(Debug, serde::Deserialize)]
@@ -116,9 +116,8 @@ fn observe_github(landing: &PrLanding) -> OpsResult<LandingObservation> {
     let number = u64::from(landing.pr_number);
     let observation = observe_pr_merge(&landing.worktree, number)?;
     decide_merge(
-        observation.pr,
+        &observation,
         &landing.observed_head_sha,
-        observation.request,
         || read_merge_request_removal(&landing.worktree, &landing.repo, landing.pr_number),
         |head| merge_gate_state(&landing.worktree, number, head),
     )
@@ -174,16 +173,19 @@ fn ci_fix(
 /// The one decision over a PR read, its merge-request removal and its head
 /// checks. Each reader runs only when the decision needs it.
 pub(crate) fn decide_merge(
-    pr: PrInfo,
+    observation: &PrMergeObservation,
     fallback_head: &str,
-    request: Option<MergeRequest>,
     removal: impl FnOnce() -> OpsResult<MergeRequestRemoval>,
     checks: impl FnOnce(&str) -> OpsResult<Option<MergeGateReading>>,
 ) -> OpsResult<LandingObservation> {
-    let head_sha = pr.head_sha.unwrap_or_else(|| fallback_head.to_string());
+    let pr = &observation.pr;
+    let head_sha = pr
+        .head_sha
+        .clone()
+        .unwrap_or_else(|| fallback_head.to_string());
     match pr.state.as_str() {
         "merged" => {
-            let merge_commit = pr.merge_commit.ok_or_else(|| {
+            let merge_commit = pr.merge_commit.clone().ok_or_else(|| {
                 OpsError::Message(format!(
                     "GitHub reports pull request #{} merged without a merge commit",
                     pr.number
@@ -200,7 +202,7 @@ pub(crate) fn decide_merge(
     // An open PR without a merge request is waiting on whatever removed it. A
     // removal no person made leaves the head checks to decide; with nothing
     // failing, the missing request itself is the failure a repair re-arms.
-    let unarmed = match request {
+    let unarmed = match observation.request {
         // The queue checks an integrated commit. Its membership takes precedence
         // over the original PR head's mergeability and check results.
         Some(MergeRequest::Queued(_)) => return Ok(LandingObservation::Pending { head_sha }),
@@ -223,7 +225,8 @@ pub(crate) fn decide_merge(
             MergeRequestRemoval::Unknown => Some("unexplained"),
         },
     };
-    if merge_needs_integration(pr.merge_state.as_deref(), request.as_ref()) {
+    // Every eviction returned above.
+    if pr_requires_resync(observation, || Ok(MergeRequestRemoval::Unknown))? {
         return Ok(LandingObservation::Failing {
             head_sha,
             failing_checks: vec![CiCheck {
@@ -1452,6 +1455,7 @@ mod tests {
     use crate::ops::error::{OpsError, OpsResult};
     use crate::ops::pr::{
         ManualRemoval, MergeGateReading, MergeRequest, MergeRequestRemoval, PrInfo,
+        PrMergeObservation,
     };
     use crate::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use crate::store::{SharedStore, StorageConfig};
@@ -1502,9 +1506,12 @@ mod tests {
         for merge_state in ["behind", "dirty", "clean"] {
             pr.merge_state = Some(merge_state.to_string());
             let observed = decide_merge(
-                pr.clone(),
+                &PrMergeObservation::fixture(
+                    pr.clone(),
+                    Some(MergeRequest::Queued("queue-entry".to_string())),
+                    true,
+                ),
                 &landing.observed_head_sha,
-                Some(MergeRequest::Queued("queue-entry".to_string())),
                 unexplained,
                 green,
             )
@@ -1522,9 +1529,8 @@ mod tests {
     fn dequeued_landing_resumes_ordinary_integration_and_authorization_checks() {
         let (landing, pr) = github_landing_fixture();
         let observed = decide_merge(
-            pr,
+            &PrMergeObservation::fixture(pr, Some(MergeRequest::Auto), false),
             &landing.observed_head_sha,
-            Some(MergeRequest::Auto),
             unexplained,
             green,
         )
@@ -1542,9 +1548,12 @@ mod tests {
         pr.merge_commit = Some("integrated-head".to_string());
         assert_eq!(
             decide_merge(
-                pr.clone(),
+                &PrMergeObservation::fixture(
+                    pr.clone(),
+                    Some(MergeRequest::Queued("queue-entry".to_string())),
+                    true,
+                ),
                 &landing.observed_head_sha,
-                Some(MergeRequest::Queued("queue-entry".to_string())),
                 unexplained,
                 green,
             )
@@ -1556,7 +1565,13 @@ mod tests {
         );
         pr.state = "closed".to_string();
         assert_eq!(
-            decide_merge(pr, &landing.observed_head_sha, None, unexplained, green).unwrap(),
+            decide_merge(
+                &PrMergeObservation::fixture(pr, None, true),
+                &landing.observed_head_sha,
+                unexplained,
+                green
+            )
+            .unwrap(),
             LandingObservation::Closed {
                 head_sha: "pr-head".to_string()
             }

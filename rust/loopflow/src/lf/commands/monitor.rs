@@ -10,36 +10,17 @@ use crate::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, Subcommand)]
 pub enum MonitorCommand {
-    /// Observe active conversations and missing process evidence
-    Active {
-        #[arg(long)]
-        json: bool,
-        /// Stream NDJSON until stdin closes
-        #[arg(long, requires = "json")]
-        watch: bool,
-        #[arg(long)]
-        task: Option<String>,
-    },
-    /// Stream planning and activity for the selected Work, each part again only when it changes
-    Work {
-        #[arg(long, required = true)]
-        json: bool,
-        /// Stream NDJSON until stdin closes
-        #[arg(long)]
-        watch: bool,
-    },
     /// Print one parseable snapshot of live Loopflow call trees
     Ps {
         /// Emit the versioned activity snapshot as JSON
         #[arg(long)]
         json: bool,
+        /// Print a JSON line now and each time the call trees change, until stdin closes
+        #[arg(long, requires = "json")]
+        watch: bool,
     },
     /// Refresh live Loopflow call trees on a terminal; print once when redirected
-    Top {
-        /// Emit one versioned activity snapshot as JSON
-        #[arg(long)]
-        json: bool,
-    },
+    Top,
     /// Move idle Sessions still running a superseded lf onto the selected install
     #[command(
         after_help = "A Session moves when nobody is viewing it, no turn, Graph step or headless Run is in progress, and its provider history is saved. Its owner is ended and the Session resumes on the selected lf. A running Graph isn't stopped: its next step launches on the selected lf, and its runner exits with the Graph. Every other process on a superseded lf is listed with why it stays.\n\nExit status: 0 when every movable Session resumed; 1 otherwise."
@@ -65,12 +46,9 @@ pub enum MonitorCommand {
 
 pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
     match command {
-        MonitorCommand::Active { json, watch, task } => {
-            super::session_history::list_active(*json, *watch, task.as_deref())
-        }
-        MonitorCommand::Work { watch, .. } => super::work_watch::run(*watch),
-        MonitorCommand::Ps { json } => super::top::run_ps(*json),
-        MonitorCommand::Top { json } => super::top::run_top(*json),
+        MonitorCommand::Ps { watch: true, .. } => super::top::watch_ps(),
+        MonitorCommand::Ps { json, .. } => super::top::run_ps(*json),
+        MonitorCommand::Top => super::top::run_top(),
         MonitorCommand::Rollover { dry_run, json } => super::rollover::run(*dry_run, *json),
         MonitorCommand::Prune { dry_run, json } => super::top::run_prune(*json, *dry_run),
     }
@@ -90,7 +68,6 @@ struct MonitorItem {
 struct MonitorOverview {
     observed_at: i64,
     items: Vec<MonitorItem>,
-    active: crate::session_record::active::ActiveSessionsSnapshot,
     recent_commands: crate::process::LfProcessPage,
     sessions_next: Option<String>,
     graphs_next: Option<String>,
@@ -105,9 +82,8 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
         } else {
             CanonicalRepo::current()?.map(|repo| repo.to_string())
         };
-        let home = crate::store::lf_home_dir();
-        let active = crate::session_record::active::snapshot(&home, &store.sqlite, None);
-        let mut gaps = active.gaps.clone();
+        let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
+        let mut gaps = Vec::new();
         let mut items = Vec::new();
         let filter = crate::session::SessionFilter {
             repo: repo.clone(),
@@ -132,20 +108,16 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
         };
         for session in sessions {
             use crate::ops::human_session::SessionState;
-            let live = active
-                .sessions
-                .iter()
-                .any(|live| live.id == session.id.as_str());
             let (state, reason, next) = match session.state {
                 SessionState::Closed => (
                     "finished",
                     "Conversation completion is recorded".to_string(),
                     format!("lf session history {}", session.id),
                 ),
-                _ if live => (
+                SessionState::Active | SessionState::Detached => (
                     "active",
                     "Matching provider process observed".into(),
-                    "lf monitor active --json".to_string(),
+                    "lf ps".to_string(),
                 ),
                 _ if session.availability.is_some() => (
                     "available",
@@ -237,9 +209,8 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
             )
             .await?;
         Ok::<_, anyhow::Error>(MonitorOverview {
-            observed_at: active.observed_at,
+            observed_at,
             items,
-            active,
             recent_commands,
             sessions_next,
             graphs_next: graphs.next,

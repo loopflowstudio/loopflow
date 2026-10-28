@@ -286,6 +286,36 @@ ARCHITECTURE_AREA = DocArea(
             "The exhaustive, machine-checked inventory",
             parent="architecture",
         ),
+        DocPage(
+            "Cutover status",
+            "architecture/reference-cutover",
+            "Which cutovers remain open",
+            parent="architecture",
+        ),
+        DocPage(
+            "Models and vocabulary",
+            "architecture/reference-models",
+            "Work, Graph, Process and Session models and their APIs",
+            parent="architecture",
+        ),
+        DocPage(
+            "Code, persistence and public APIs",
+            "architecture/reference-code",
+            "Source territories, persistence and process entry points",
+            parent="architecture",
+        ),
+        DocPage(
+            "Launch, Graphs and delivery",
+            "architecture/reference-runtime",
+            "Harness launch, Task Graphs, communication and delivery",
+            parent="architecture",
+        ),
+        DocPage(
+            "Locks, processes and Machines",
+            "architecture/reference-processes",
+            "OS locks, process control, Machine topology and promotion",
+            parent="architecture",
+        ),
     ),
 )
 

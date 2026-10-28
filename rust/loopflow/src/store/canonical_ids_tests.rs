@@ -1025,7 +1025,7 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
         String::from_utf8_lossy(&bound.stderr)
     );
     for args in [
-        vec!["task", "status", "lOo-506", "--json"],
+        vec!["desktop", "task", "lOo-506", "--json"],
         vec![
             "task",
             "status",
@@ -1059,11 +1059,13 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
             let canonical = args[2].to_ascii_lowercase();
             assert!(json.contains(&canonical), "{json}");
         }
-        if args[0] == "task" {
+        if args[0] == "desktop" {
             assert!(
                 json.contains("ffffffff-ffff-4fff-8fff-ffffffffffff"),
                 "{json}"
             );
+        }
+        if args[0] == "task" {
             assert!(
                 json.contains("task_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
                 "{json}"

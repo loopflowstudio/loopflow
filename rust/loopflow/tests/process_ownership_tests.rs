@@ -95,7 +95,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         assert!(output.status.success(), "{output:?}");
         serde_json::from_slice::<ActivitySnapshot>(&output.stdout).unwrap()
     };
-    let id = format!("process:{}", attachment.agent_process_id);
+    let id = attachment.agent_process_id.to_string();
     // Every read of this Machine's processes recovers first, so the orphan is
     // checked in the store here rather than in a `monitor ps` row.
     assert!(before.completed_at.is_none());
@@ -219,11 +219,11 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     let row = listed
         .nodes
         .iter()
-        .find(|row| row.id == format!("process:{agent}"))
+        .find(|row| row.id == agent)
         .expect("reserved AgentProcess is listed");
     assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
 
-    let status = json(repo.path(), &["task", "status", id, "--json"]);
+    let status = json(repo.path(), &["desktop", "task", id, "--json"]);
     assert!(status.to_string().contains(agent), "{status}");
 
     // Cancellation is the Task's decision; only checkout cleanup is held.
@@ -238,10 +238,7 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     assert!(named.contains(&agent), "{reason}");
     for id in named {
         assert!(
-            listed
-                .nodes
-                .iter()
-                .any(|row| row.id == format!("process:{id}")),
+            listed.nodes.iter().any(|row| row.id == id),
             "blocker {id} is not a listed row: {reason}"
         );
     }
@@ -293,7 +290,7 @@ async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
         let node = snapshot
             .nodes
             .iter()
-            .find(|node| node.id == format!("process:{id}"))
+            .find(|node| node.id == id.as_str())
             .unwrap();
         assert_eq!(node.state, ActivityState::Unknown);
     }
@@ -301,10 +298,10 @@ async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
         snapshot
             .nodes
             .iter()
-            .find(|node| node.id == format!("process:{agent}"))
+            .find(|node| node.id == agent.as_str())
             .unwrap()
             .parent_id,
-        Some(format!("process:{parent}"))
+        Some(parent.to_string())
     );
     let retained: i64 = sql
         .query_row(
@@ -1495,7 +1492,7 @@ async fn monitor_does_not_treat_historical_feedback_as_live_readiness() {
         assert_eq!(item["next_action"], action);
     }
     assert!(overview["recent_commands"]["entries"].is_array());
-    assert!(overview["active"]["gaps"].is_array());
+    assert!(overview["gaps"].is_array());
     assert!(overview["items"]
         .as_array()
         .unwrap()

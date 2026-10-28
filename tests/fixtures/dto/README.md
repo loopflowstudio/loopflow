@@ -4,10 +4,21 @@ Each fixture pins one live wire shape. Swift fixtures cover the per-Wave
 listener and `lf wave status` contracts consumed by the Mac app. Every absent field
 is a parse error or an explicit null.
 
-`task_status.json` pins the planning/execution envelope for available, unavailable,
-invalid, removed and absent planning. Rust round-trips it. This CLI-only contract
-has no Swift mirror: the Mac app reads a Task's work from the workspace stream's
-`task` part (`work_frame.json`). These cases have no execution.
+`task_detail.json` pins `lf task status --json`: one Task row (each fact once:
+state, reason, Workflow stage, PR, next command) with its Sessions, Graph
+processes and comments. `lf task list`, `lf wave show` and `lf wave status`
+print the same row. Rust round-trips it; Desktop reads `lf desktop` instead.
+
+`task_status.json` pins `lf desktop task --json`: the planning/execution envelope
+for available, unavailable, invalid, removed and absent planning, with the Task's
+overview, Graph processes and comments. Rust round-trips it. The Mac app reads the
+overview, Graph processes, comments and recorded work from
+`lf desktop task --watch` (`watch_frames.json`). These cases have no execution.
+
+`watch_frames.json` pins one `--watch` frame per read a window runs:
+`{answers, unavailable, body}`, where `body` is what the
+read prints with `--json`, or `null` with `unavailable` set. Rust checks each body
+against its read's type; Swift decodes each through its part.
 
 `move.json` pins the Session or Task move `lf session send` prints and `lf
 session receive` reads on another Machine. Only lf reads it, so it has no Swift mirror.
@@ -110,13 +121,21 @@ it without manufacturing defaults.
 
 `view_plan.json` pins the shared headless selection/arrangement plan, including
 repeated Work, duplicate suppression and a backlog Task without a primary Session.
-Rust round-trips it; Swift decodes the same plan directly and in `work_frame.json`.
+Rust round-trips it; Swift decodes the same plan directly and from `lf desktop plans --watch` in `watch_frames.json`.
 
 `pane_layout.json` covers portable pane content, focus versus explicit zoom, hidden
 members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
 base recovery. Shell identity is independent of its tool pane; saved intent never
 asserts a live native process. `view_plan.json` includes query discovery
 metadata, independent Dashboard identity and portable tile-face intent.
+
+`session_rows.json` pins `lf session list --json`: one row per Session, each
+fact once, every field required. Desktop reads `lf desktop sessions`
+(`sessions.json`).
+
+`closed_task_page.json` pins `lf task list --done --json`: one page of closed
+Tasks as `lf wave status` Task rows, most recently closed first, and the `next` Task to pass as
+`--after`. Open Tasks come from the plan; closed ones only from these pages.
 
 `retention_summary.json` pins `lf history retention --json`: Sessions by harness,
 account, age and retention state (`provider`, `facts`, `unknown`), the soonest

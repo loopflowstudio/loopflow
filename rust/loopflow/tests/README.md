@@ -246,7 +246,7 @@ running Workflow-edge proof. Prepare the script's uv dependencies before
 running it through `scripts/test_network.py`.
 
 Only attempted effects acknowledge; equal-desired provider readback can instead
-retire an unattempted intention without another write. The portable `work_watch` offline-completion test requires a foreground delivery error
+retire an unattempted intention without another write. The portable `watch` offline-completion test requires a foreground delivery error
 with no Task selected; local frame propagation alone cannot establish sync lifetime.
 Run these through the same external-network denial wrapper as other CLI fixtures.
 
@@ -371,6 +371,9 @@ uv run python tests/goldens/update_goldens.py   # refresh prompt goldens after p
 For document gathering or deduplication changes, run the complete context suite
 alongside the delivery checks; a test-name filter alone misses ancestor coverage.
 Rendering gathered documents must include the production deduplication step.
+Keep the library `context_delivery` filter in the gate plan: it covers direct
+and Wave launches in `ops::run`, outside the prompt modules. Check ambient and
+explicit selections across both the refreshed block and submitted turn.
 
 ```bash
 cargo test -p loopflow --test integration context_tests::
@@ -418,9 +421,9 @@ For Markdown changes under `docs/`, builtins or skills, and changes to README or
 AGENTS, also run `cargo test -p loopflow --test integration documented_commands::`. Its command
 scanner covers prose and headings as well as fenced examples; a focused runtime
 suite does not check those additions.
-`docs/lf-reference.md` renders the compiled command tree below its preamble;
-after a command or help-text change, rewrite it with
-`UPDATE_CLI_REFERENCE=1 cargo test -p loopflow --test integration cli_reference`.
+`docs/lf-reference.md` commits only its preamble; the website's `sync-docs`
+appends the command tree from `lf help --all --json`, so a command or help-text
+change needs no reference update.
 Keep README and docs/index openings identical and regenerate docs/architecture.html
 when its source changes. Retired Project surfaces also affect CLI fallback,
 builtin discovery, prompt goldens and storage settlement.
@@ -757,7 +760,7 @@ must retain Wave identity before projecting accepted Projects.
 ### Shared identity fixtures
 
 When changing Session activity or Waiting, run `session_cli_tests` and
-`work_watch` together. Direct SQL fixtures must carry both the attachment
+`world_recipes` (its `--watch` cases) together. Direct SQL fixtures must carry both the attachment
 token and the AgentProcess id, matching the production activity writer. Rebuild both SwiftPM and
 the Xcode test targets after shared model renames; Foundation types such as
 `Foundation.Process` need explicit qualification where names overlap.

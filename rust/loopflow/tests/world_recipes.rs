@@ -67,8 +67,7 @@ impl Built {
             .as_array()
             .unwrap()
             .iter()
-            .map(|entry| &entry["task"])
-            .find(|task| task["name"] == name)
+            .find(|task| task["title"] == name)
             .unwrap_or_else(|| panic!("no Task {name:?}"))["identifier"]
             .as_str()
             .unwrap()
@@ -76,7 +75,7 @@ impl Built {
     }
 
     fn task_graph(&self, issue: &str) -> Value {
-        self.lf(&["task", "status", issue, "--json"])["execution"]["work"]["graph"].clone()
+        self.lf(&["desktop", "task", issue, "--json"])["execution"]["work"]["graph"].clone()
     }
 
     /// The steps of the Task's latest Graph `name`.
@@ -109,11 +108,53 @@ impl Built {
 #[test]
 fn lifecycle_world_reports_each_state() {
     let built = Built::new("lifecycle");
-    let shown = built.lf(&["wave", "show", "--all", "--json"]);
+    let shown = built.lf(&["desktop", "plan", "--all", "--json"]);
     let tasks = shown["tasks"]["items"].as_array().unwrap();
+    // The plan holds open Tasks; closed ones page in from the history read.
+    let closed_page = built.lf(&["desktop", "done", "--limit", "3", "--json"]);
+    let mut closed = closed_page["tasks"].as_array().unwrap().clone();
+    let after = closed_page["next"].as_str().unwrap();
+    let rest = built.lf(&["desktop", "done", "--after", after, "--json"]);
+    assert!(rest["next"].is_null());
+    closed.extend(rest["tasks"].as_array().unwrap().iter().cloned());
+    let closed_names: Vec<&str> = closed
+        .iter()
+        .map(|task| task["task"]["name"].as_str().unwrap())
+        .collect();
+    // Most recently closed first.
+    assert_eq!(
+        closed_names
+            .iter()
+            .filter(|name| name.starts_with("Shipped"))
+            .copied()
+            .collect::<Vec<_>>(),
+        [
+            "Shipped yesterday",
+            "Shipped this week",
+            "Shipped last fortnight",
+            "Shipped last quarter"
+        ]
+    );
+    // A standup's Done column: one bounded read.
+    let week = built.lf(&["task", "list", "--done", "--since", "7d", "--json"]);
+    let shipped: Vec<&str> = week["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["title"].as_str().unwrap())
+        .filter(|name| name.starts_with("Shipped"))
+        .collect();
+    assert_eq!(shipped, ["Shipped yesterday", "Shipped this week"]);
+    for name in &closed_names {
+        assert!(
+            !tasks.iter().any(|task| task["task"]["name"] == *name),
+            "closed {name} is in the plan"
+        );
+    }
     let task = |name: &str| {
         tasks
             .iter()
+            .chain(&closed)
             .find(|task| task["task"]["name"] == name)
             .unwrap_or_else(|| panic!("{name} is missing"))
     };
@@ -166,6 +207,127 @@ fn lifecycle_world_reports_each_state() {
 }
 
 #[test]
+fn task_list_query_finds_open_tasks_only() {
+    let built = Built::new("lifecycle");
+    let search = |args: &[&str]| {
+        let found = built.lf(&[&["task", "list"], args, &["--json"]].concat());
+        found.as_array().unwrap().to_vec()
+    };
+    let names = |args: &[&str]| {
+        let mut names: Vec<String> = search(args)
+            .iter()
+            .map(|task| task["title"].as_str().unwrap().to_owned())
+            .collect();
+        names.sort_unstable();
+        names
+    };
+    // Every "Shipped" Task is done, so the query leaves it to `--done`.
+    assert!(names(&["shipped"]).is_empty());
+    assert_eq!(
+        names(&["STANDALONE"]),
+        ["Standalone fix", "Standalone idea"]
+    );
+    assert_eq!(names(&["", "--state", "deferred"]), ["Deferred mid-flight"]);
+    let paused = &search(&["deferred mid"])[0];
+    assert_eq!(paused["state"], "deferred");
+    assert_eq!(
+        paused["next"],
+        format!("lf task resume {}", paused["identifier"].as_str().unwrap())
+    );
+    let identifier = paused["identifier"].as_str().unwrap().to_lowercase();
+    assert_eq!(names(&[&identifier]), ["Deferred mid-flight"]);
+}
+
+#[test]
+fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
+    let built = Built::new("lifecycle");
+    let issue = built.issue_named("Standalone fix");
+    let mut watch = built
+        .command(&["task", "list", "--watch"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let stdout = watch.stdout.take().unwrap();
+    let (sender, frames) = std::sync::mpsc::channel::<Value>();
+    std::thread::spawn(move || {
+        for line in std::io::BufRead::lines(std::io::BufReader::new(stdout)) {
+            if sender
+                .send(serde_json::from_str(&line.unwrap()).unwrap())
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    let next = || {
+        frames
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("a frame")
+    };
+    let state = |frame: &Value| {
+        frame["body"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["identifier"] == issue.as_str())
+            .map(|row| row["state"].clone())
+    };
+    let first = next();
+    assert!(first["answers"].is_null(), "{first}");
+    assert_ne!(state(&first), None);
+
+    // An unchanged store sends nothing.
+    assert!(frames
+        .recv_timeout(std::time::Duration::from_secs(3))
+        .is_err());
+
+    success(built.command(&["task", "defer", &issue]).output().unwrap());
+    let deferred = next();
+    assert_eq!(state(&deferred), Some("deferred".into()), "{deferred}");
+
+    // A request replaces the arguments and is always answered.
+    let stdin = watch.stdin.as_mut().unwrap();
+    std::io::Write::write_all(stdin, b"{\"id\":1,\"args\":{\"query\":\"standalone\"}}\n").unwrap();
+    let narrowed = next();
+    assert_eq!(narrowed["answers"], 1);
+    assert_eq!(narrowed["body"].as_array().unwrap().len(), 2, "{narrowed}");
+
+    drop(watch.stdin.take());
+    assert!(watch.wait().unwrap().success());
+}
+
+#[test]
+fn session_list_task_status_and_top_watch_answer_requests() {
+    let built = Built::new("one-task");
+    let issue = built.issue_named("Search Session transcripts");
+    for args in [
+        vec!["session", "list", "--all", "--watch"],
+        vec!["task", "status", issue.as_str(), "--watch"],
+        vec!["monitor", "ps", "--json", "--watch"],
+    ] {
+        let mut watch = built
+            .command(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        std::io::Write::write_all(watch.stdin.as_mut().unwrap(), b"{\"id\":7}\n").unwrap();
+        drop(watch.stdin.take());
+        let output = success(watch.wait_with_output().unwrap());
+        let frames: Vec<Value> = output
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let last = frames.last().unwrap();
+        assert!(last["unavailable"].is_null(), "{args:?}: {last}");
+        assert!(!last["body"].is_null(), "{args:?}: {last}");
+    }
+}
+
+#[test]
 fn world_sessions_resume_live_through_the_stub_provider() {
     let built = Built::new("one-task");
     let sessions = built.lf(&["session", "list", "--json", "--all"]);
@@ -193,6 +355,17 @@ fn one_task_waits_at_demo_after_an_eight_step_pursue() {
         graph["position"],
         serde_json::json!({"kind": "at", "step": "demo"})
     );
+    // `lf task status` says each fact once: the row, then what belongs to it.
+    let status = built.lf(&["task", "status", &issue, "--json"]);
+    let mut keys: Vec<_> = status.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, ["comments", "graph_processes", "sessions", "task"]);
+    assert_eq!(status["task"]["state"], "active");
+    assert_eq!(
+        status["task"]["graph"],
+        serde_json::json!({"name": "feature", "step": "demo"})
+    );
+    assert_eq!(status["task"]["next"], format!("lf task run {issue}"));
 
     let steps = built.graph_steps(&issue, "feature");
     let nodes: Vec<(u64, &str)> = steps

@@ -2,11 +2,12 @@ import Foundation
 import Loopflow
 import Observation
 
-/// One Wave's streamed detail. `sequence` moves with each new reading.
+/// One Wave's share of the planning reading. `sequence` moves with each
+/// planning frame; a nil `snapshot` says why the Wave has no live reading.
 struct StreamedWaveDetail: Sendable {
     let wave: String
     let sequence: Int
-    let snapshot: WaveDetailSnapshot?
+    let snapshot: WaveRoadmap?
     let reason: String?
 }
 
@@ -133,12 +134,9 @@ final class WorkModel {
                   (old.savedRevision ?? 0) > (plan.savedRevision ?? 0) else { return plan }
             return old
         })
-        // A dictionary-subscript write notifies even when equal, and every frame
-        // carries a new observedAt that no view reads. The sidebar, Dashboards and
-        // title read these plans, so an unchanged frame must not republish them.
-        if case .available(let current) = selectionPlans, case .available(let fresh) = next,
-           current.count == fresh.count, zip(current, fresh).allSatisfy({ $0.matches($1) }) {
-        } else { selectionPlans = next }
+        // A write notifies even when equal. The sidebar, Dashboards and title
+        // read these plans, so an unchanged frame must not republish them.
+        if selectionPlans != next { selectionPlans = next }
         reconcileSelectionRepository()
         switch navigation.destination {
         case .dashboard, .workingTasks: if let plan = selectedViewPlan { presentView(plan) }
@@ -1024,6 +1022,9 @@ final class WorkModel {
             }
         }
     }
+    /// The latest row from a Task's own watch, current after the Task leaves
+    /// the plan (completed, canceled).
+    private var watchedTaskRow: RoadmapTask?
     private(set) var waves: WorkReading<[Wave]> = .loading
     private(set) var processActivity: WorkReading<ActivitySnapshot> = .loading
     private struct RepositoryReadingKey: Hashable {
@@ -1047,8 +1048,8 @@ final class WorkModel {
     private(set) var workActivity: WorkReading<WorkActivitySnapshot> = .loading
     /// Selectable Graphs per repository, read once on demand; never per repaint.
     private var graphCatalogReadings: [String: WorkReading<[GraphCatalogEntry]>] = [:]
-    @ObservationIgnored private var definitionRevision: Int64?
-    @ObservationIgnored private var graphCatalogRevisions: [String: Int64] = [:]
+    @ObservationIgnored private var definitionRevision = 0
+    @ObservationIgnored private var graphCatalogRevisions: [String: Int] = [:]
     @ObservationIgnored private var graphCatalogRequests: [String: UUID] = [:]
     private var graphCatalogKey: String { repoPath ?? "" }
     var graphCatalog: WorkReading<[GraphCatalogEntry]> {
@@ -1067,8 +1068,8 @@ final class WorkModel {
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskOverview>()
+    /// Its recorded Sessions and Processes, from the same part.
     private(set) var taskDiagnostics = TaskReadings<TaskWork>()
-    @ObservationIgnored private var diagnosticTask: String?
     /// That Task's Graph processes keyed by Graph process, from the same part.
     private(set) var graphProcesses: [String: GraphProcessDetail] = [:]
     /// Conversation history, read only on disclosure.
@@ -1095,10 +1096,6 @@ final class WorkModel {
     private var sessionsGeneration = 0
     @ObservationIgnored private var sessionsRefresh: (repo: String, generation: Int, task: Task<Void, Never>)?
     private var roadmapGeneration = 0
-    /// The Wave whose detail a view is showing, if any.
-    var detailWaveId: String?
-    /// The scoped Wave's `lf wave status` reading, as last streamed.
-    private(set) var waveDetail: StreamedWaveDetail?
     /// Moves with every planning frame, for views that derive from planning.
     private(set) var planningSequence = 0
     @ObservationIgnored private var workObservation: WorkObservation?
@@ -1236,6 +1233,15 @@ final class WorkModel {
         filterByRepo(roadmap.value?.waves ?? [], repo: { $0.wave.repo })
     }
 
+    /// One Wave's detail, from the planning reading the window already watches.
+    func waveDetail(id: String) -> StreamedWaveDetail? {
+        guard !roadmap.isLoading else { return nil }
+        let wave = roadmap.value?.waves.first { $0.wave.id == id }
+        let reason = roadmap.errorMessage ?? (wave == nil ? "This Wave is not in the current plan" : nil)
+        return StreamedWaveDetail(wave: id, sequence: planningSequence,
+                                  snapshot: reason == nil ? wave : nil, reason: reason)
+    }
+
     var visibleWaves: [WaveViewModel] {
         let registered = filterByRepo(waves.value ?? [], repo: { $0.repo })
         let registeredNames = Set(registered.map { waveIdentity(repo: $0.repo, name: $0.name) })
@@ -1308,21 +1314,28 @@ final class WorkModel {
                 guard !Task.isCancelled else { await opened.cancel(); return }
                 // A new reader numbers its frames from one and reads the store
                 // as it is now, which includes every local write so far.
+                // The store is the data identity: a preview copy, else the shared one.
+                let dataDirectory = opened.copy ?? ""
+                if let workDataDirectory, workDataDirectory != dataDirectory {
+                    dropMachineContent()
+                    finishCheckpoints(through: .max, reason: "Machine changed before the update was confirmed")
+                }
+                workDataDirectory = dataDirectory
+                if previewCopy != opened.copy { previewCopy = opened.copy }
                 workObservation = opened
                 workOpened = .now
                 appliedSequence = [:]
-                definitionRevision = nil
+                definitionRevision = 0
                 graphCatalogRevisions = [:]
                 graphCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
                 syncWorkScope()
-                if let diagnosticTask { _ = send { .taskHistory(id: $0, task: diagnosticTask) } }
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
                     Perf.begin(Perf.workFrameApply, frame.content.part, id: String(frame.sequence))
                     await apply(frame)
                     Perf.end(Perf.workFrameApply, id: String(frame.sequence))
-                    if frame.content.part != "heartbeat" { delay = .seconds(1) }
+                    delay = .seconds(1)
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
             } catch WorkObservationError.configurationChanged {
@@ -1340,22 +1353,12 @@ final class WorkModel {
         }
     }
 
-    func observeTaskDiagnostics(_ task: RoadmapTask, visible: Bool) {
-        if visible { diagnosticTask = task.task.identifier }
-        else {
-            guard diagnosticTask == task.task.identifier else { return }
-            diagnosticTask = nil
-        }
-        _ = send { .taskHistory(id: $0, task: diagnosticTask) }
-    }
-
     var workScope: WorkScope {
         let shown = selection.flatMap { $0.kind == .task ? task(id: $0.id) : nil }
         return WorkScope(
             repo: repoPath,
             headless: false,
             task: shown?.task.task.identifier,
-            wave: detailWaveId,
             activity: activityScope(for: selection))
     }
 
@@ -1399,7 +1402,7 @@ final class WorkModel {
     }
 
     /// Confirmation follows the command's commit. Subscriptions choose what
-    /// to read; a heartbeat or unrelated frame cannot confirm a saved draft.
+    /// to read; an unrelated frame cannot confirm a saved draft.
     func confirmWorkUpdate(after home: String? = nil) async throws {
         if let home, home != workDataDirectory {
             throw RegistryQueryError("Machine changed before the update was confirmed")
@@ -1449,33 +1452,26 @@ final class WorkModel {
 
     private func apply(_ frame: WorkFrame) async {
         let part = frame.content.part
-        if previewCopy != frame.copy { previewCopy = frame.copy }
-        // A preview copy is where the data lives, so it is the data identity.
-        let dataDirectory = frame.copy ?? frame.home
-        if case .heartbeat = frame.content {
-            // Heartbeats can carry a stored-definition commit whose planning
-            // body stayed equal. They do not establish a new Machine identity.
-            if workDataDirectory == dataDirectory { await observeDefinitions(frame.revisions?.planning) }
+        if case .checkpoint = frame.content {
+            // A confirmed command may have changed Workflow definitions.
+            await observeDefinitions()
+            finishCheckpoints(through: frame.answers ?? 0, reason: frame.unavailable)
             return
         }
         guard frame.sequence > appliedSequence[part] ?? 0 else { return }
-        if let workDataDirectory, workDataDirectory != dataDirectory {
-            // The stream names its data directory, not the opaque Machine ID
-            // returned by machine id and used by Session locations.
-            dropMachineContent()
-            finishCheckpoints(through: .max, reason: "Machine changed before the update was confirmed")
-        }
-        workDataDirectory = dataDirectory
         let answers = frame.answers ?? 0
         let reason = frame.unavailable ?? "Work reader returned no \(part) reading"
         switch frame.content {
         case .planning(let body):
             guard answers >= planningFloor else { return }
-            if answers >= scopeFloor { applySelectionPlans(body?.selections, reason: reason) }
             await applyPlanning(body, wire: frame.wire, reason: reason)
             if body != nil, answers >= scopeFloor { await refreshSelectedView() }
             planningSequence = frame.sequence
             resumePlanningWaiters(through: answers)
+        case .selections(let body):
+            guard answers >= max(planningFloor, scopeFloor) else { return }
+            applySelectionPlans(body, reason: reason)
+            if body != nil { await refreshSelectedView() }
         case .peerPlanning(let body):
             guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -1508,36 +1504,27 @@ final class WorkModel {
                 cache?.saveSessions([page], repo: repoPath)
             }
         case .task(let body):
+            // A frame about its own Task stays true after the selection moves on.
+            if let body, let row = body.row, row.task.identifier == body.task, watchedTaskRow != row {
+                watchedTaskRow = row
+            }
             guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
                   let task = task(id: shown.id)?.task else { return }
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
-                break
-            }
-            guard body.task == task.task.identifier else { return }
-            // TaskReadings is not Equatable; skip unchanged comments unless a read is superseded.
-            if comments.inFlight.contains(task.id) || comments[task.id] != .available(body.comments) {
-                comments.receive(body.comments, for: task.id)
-            }
-            let next = WorkReading.available(body.work)
-            if taskWork[task.id] != next { taskWork.values[task.id] = next }
-            let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
-            if graphProcesses != runs { graphProcesses = runs }
-        case .taskHistory(let body):
-            guard answers >= scopeFloor, let shown = selection, shown.kind == .task,
-                  let task = task(id: shown.id)?.task else { return }
-            guard let body else {
+                comments.values[task.id] = .unavailable(lastGood: comments[task.id].value, reason: reason)
                 taskDiagnostics.values[task.id] = .unavailable(lastGood: taskDiagnostics[task.id].value, reason: reason)
                 break
             }
             guard body.task == task.task.identifier else { return }
-            let diagnostics = WorkReading.available(body.work)
-            if taskDiagnostics[task.id] != diagnostics { taskDiagnostics.values[task.id] = diagnostics }
-        case .wave(let body):
-            guard answers >= scopeFloor, let detailWaveId else { return }
-            guard body == nil || body?.wave == detailWaveId else { return }
-            waveDetail = StreamedWaveDetail(wave: detailWaveId, sequence: frame.sequence,
-                                           snapshot: body?.detail, reason: body == nil ? reason : nil)
+            if comments[task.id] != .available(body.comments) { comments.values[task.id] = .available(body.comments) }
+            let next = WorkReading.available(body.work)
+            if taskWork[task.id] != next { taskWork.values[task.id] = next }
+            let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
+            if graphProcesses != runs { graphProcesses = runs }
+            if let work = body.diagnostics, taskDiagnostics[task.id] != .available(work) {
+                taskDiagnostics.values[task.id] = .available(work)
+            }
         case .workActivity(let body):
             guard answers >= scopeFloor, let scope = activityScope(for: selection) else { return }
             guard let body else {
@@ -1557,18 +1544,15 @@ final class WorkModel {
             let next = WorkReading.available(body)
             if processActivity != next { processActivity = next }
         case .checkpoint:
-            await observeDefinitions(frame.revisions?.planning)
-            finishCheckpoints(through: answers, reason: frame.unavailable)
-        case .heartbeat:
             break
         }
         appliedSequence[part] = frame.sequence
-        await observeDefinitions(frame.revisions?.planning)
+        // A changed plan may come with changed Workflow definitions.
+        if part == WorkPart.planning.rawValue { await observeDefinitions() }
     }
 
-    private func observeDefinitions(_ revision: Int64?) async {
-        guard let revision, definitionRevision.map({ revision > $0 }) ?? true else { return }
-        definitionRevision = revision
+    private func observeDefinitions() async {
+        definitionRevision &+= 1
         if graphCatalogReadings[graphCatalogKey] != nil { await loadGraphCatalog() }
     }
 
@@ -1604,7 +1588,7 @@ final class WorkModel {
     private func dropMachineContent() {
         applySelectionPlans(nil, reason: "Work reading changed; showing retained membership")
         selectionReadings = [:]
-        definitionRevision = nil
+        definitionRevision = 0
         graphCatalogRevisions = [:]
         graphCatalogRequests = [:]
         graphCatalogReadings = [:]
@@ -1618,10 +1602,8 @@ final class WorkModel {
         peerPlanningReadings = [:]
         peerPlanningGeneration &+= 1
         savedSessionRepos = []
-        waveDetail = nil
         taskWork = TaskReadings<TaskOverview>()
         taskDiagnostics = TaskReadings<TaskWork>()
-        diagnosticTask = nil
         graphProcesses = [:]
     }
 
@@ -2065,13 +2047,6 @@ final class WorkModel {
         }
     }
 
-    /// Read one Task's thread.
-    func loadComments(task: RoadmapTask) async {
-        await loadTaskReading(\.comments, task: task.id) { [query] in
-            try await query.taskComments(id: task.id, cwd: WaveOrigin.resolve(task.task.repo))
-        }
-    }
-
     func loadSessionHistory(task: RoadmapTask) async {
         await loadTaskReading(\.sessionHistory, task: task.id) { [query] in
             try await query.taskHistory(task: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
@@ -2448,6 +2423,9 @@ final class WorkModel {
 
     func task(id: String) -> (wave: WaveRoadmap?, task: RoadmapTask)? {
         if let current = currentTask(id: id) { return current }
+        if let row = watchedTaskRow, row.id == id || row.runtime?.workId == id {
+            return (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
+        }
         if let retained = navigation.selectedTaskEvidence, retained.task.id == id || retained.task.runtime?.workId == id { return retained }
         return nil
     }
@@ -2937,13 +2915,3 @@ enum TaskOrderDrag {
     }
 }
 
-extension WorkViewPlan {
-    /// Equal apart from when it was observed. Name each displayed field here.
-    func matches(_ other: WorkViewPlan) -> Bool {
-        name == other.name && pinned == other.pinned && dashboardID == other.dashboardID
-            && repository == other.repository && selection == other.selection
-            && savedRevision == other.savedRevision && resolution == other.resolution
-            && arrangement == other.arrangement && projection == other.projection
-            && slots == other.slots && contents == other.contents
-    }
-}

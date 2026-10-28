@@ -114,8 +114,8 @@ fn git_out(repo: &TestRepo, args: &[&str]) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-/// A Task PR's recorded base sits behind the
-/// current `origin/main` because a sibling landed. `land` syncs, heals the
+/// A Task PR's recorded base sits behind the current `origin/main` because a
+/// sibling landed and GitHub reports the PR behind. `land` syncs, heals the
 /// base to the true fork point, and publishes a minimal range — proving the
 /// three views (recorded base, `lf diff --files`, GitHub range) agree.
 #[test]
@@ -125,7 +125,11 @@ fn task_pr_heals_stale_base_and_aligns_the_three_views() {
     let stale_base = repo.head_sha(); // the base recorded at placement time
 
     let log_path = home.path().join("gh.log");
-    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref());
+    // GitHub reports the PR behind main, so `land` merges main before arming.
+    let script = gh_open_pr_script(log_path.to_string_lossy().as_ref()).replace(
+        r#""mergeStateStatus":"CLEAN""#,
+        r#""mergeStateStatus":"BEHIND""#,
+    );
     let _env = EnvGuard::with_lf_home(
         &[("gh", script.as_str()), ("open", noop_open_script())],
         home.path(),

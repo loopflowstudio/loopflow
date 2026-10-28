@@ -57,13 +57,18 @@ pub(crate) mod task_ownership;
 mod steers;
 mod task_comments;
 mod task_content;
+mod task_details;
 pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;
 pub(crate) mod wave_definitions;
 
+pub use children::ClosedTaskPage;
+pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::StoreRevisions;
+pub use scope_defaults::ScopeSettings;
+pub use task_details::TaskDetailFacts;
 pub(crate) use task_work::TaskShipping;
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
@@ -151,7 +156,6 @@ pub(crate) struct WorkIdentity {
     pub parent: Option<WorkRef>,
     pub subject: String,
     pub external_id: Option<String>,
-    pub created_at: Option<i64>,
 }
 
 fn deleted_task_issues_in(
@@ -717,11 +721,11 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         let mut statement = conn.prepare(
-            "SELECT 0 AS kind, id, NULL AS parent, slug, NULL AS external_id, created_at FROM wave_addresses
+            "SELECT 0 AS kind, id, NULL AS parent, slug, NULL AS external_id FROM wave_addresses
              UNION ALL
-             SELECT 1, id, wave_id, project_slug, external_project_id, created_at FROM projects
+             SELECT 1, id, wave_id, project_slug, external_project_id FROM projects
              UNION ALL
-             SELECT 2, id, project_id, issue_identifier, external_issue_id, created_at FROM tasks
+             SELECT 2, id, project_id, issue_identifier, external_issue_id FROM tasks
              ORDER BY kind",
         )?;
         let rows = statement.query_map([], |row| {
@@ -744,7 +748,6 @@ impl SqliteStore {
                 parent,
                 subject: row.get(3)?,
                 external_id: row.get(4)?,
-                created_at: row.get(5)?,
             })
         })?;
         let mut identities = rows.collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1597,6 +1600,19 @@ impl SqliteStore {
         }
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Clear a provider's route at one scope; false when it had none.
+    pub fn clear_provider_route(
+        &self,
+        scope: &RouteScope,
+        provider: Provider,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "DELETE FROM provider_routes WHERE scope = ?1 AND scope_id = ?2 AND provider = ?3",
+            params![scope.kind(), scope.id(), provider.as_str()],
+        )? > 0)
     }
 
     pub fn provider_route(
@@ -2750,6 +2766,8 @@ mod linear_oauth_tests {
 #[cfg(test)]
 mod account_observation_tests {
     use super::SqliteStore;
+    use crate::profile::{ProviderRoute, RouteScope};
+    use crate::provider_auth::Provider;
     use crate::store::{
         AccountLimitWindow, CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
     };
@@ -2775,6 +2793,35 @@ mod account_observation_tests {
             created_at: 1,
             updated_at: 1,
         }
+    }
+
+    #[test]
+    fn route_edits_invalidate_wave_setup() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&directory.path().join("registry.db")).unwrap();
+        let account = account();
+        store.upsert_provider_account(&account).unwrap();
+        let before = store.revisions().unwrap().planning;
+        store
+            .set_provider_route(&ProviderRoute {
+                scope: RouteScope::Default,
+                provider: Provider::Claude,
+                accounts: vec![account.account_id],
+                created_at: 1,
+                updated_at: 1,
+            })
+            .unwrap();
+        let after_set = store.revisions().unwrap().planning;
+        assert!(after_set > before);
+        assert!(store
+            .clear_provider_route(&RouteScope::Default, Provider::Claude)
+            .unwrap());
+        let after_unset = store.revisions().unwrap().planning;
+        assert!(after_unset > after_set);
+        assert!(!store
+            .clear_provider_route(&RouteScope::Default, Provider::Claude)
+            .unwrap());
+        assert_eq!(store.revisions().unwrap().planning, after_unset);
     }
 
     #[test]

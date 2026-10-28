@@ -41,6 +41,17 @@ fn install_codex_fixture(home: &std::path::Path, thread: Option<&str>) {
     }
 }
 
+/// Every Session row, whatever its mode or state.
+const EVERY_SESSION: &[&str] = &[
+    "session",
+    "list",
+    "--all",
+    "--interactive",
+    "all",
+    "--history",
+    "--json",
+];
+
 fn run(home: &std::path::Path, args: &[&str]) -> Output {
     command(home, args).output().unwrap()
 }
@@ -154,7 +165,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         String::from_utf8_lossy(&prepared.stderr)
     );
     let output = command(env!("CARGO_BIN_EXE_lf"))
-        .args(["session", "list", "--json", "--all"])
+        .args(["desktop", "sessions", "--json", "--all"])
         .output()
         .unwrap();
     assert!(
@@ -220,7 +231,7 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
     assert_eq!(inspected["artifact_key"], run_id.as_str());
     assert_eq!(inspected["caller_artifact_key"], CALLER);
     assert!(inspected["recorded_outcome"].is_null());
-    let listed = run(home.path(), &["session", "list", "--all", "--json"]);
+    let listed = run(home.path(), EVERY_SESSION);
     assert!(
         listed.status.success(),
         "{}",
@@ -387,7 +398,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let mut reopened = second.wait_with_output().unwrap();
         reopened.stdout = std::fs::read(metadata_stdout).unwrap();
         reopened.stderr = std::fs::read(metadata_stderr).unwrap();
-        let active = run(home.path(), &["monitor", "active", "--json"]);
+        let active = run(home.path(), EVERY_SESSION);
         // Release the owned provider before asserting, including on the failure path.
         first.stdin.take().unwrap().write_all(b"done\n").unwrap();
         let first = first.wait_with_output().unwrap();
@@ -423,15 +434,19 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         );
 
         assert_eq!(reopened["state"], "active");
-        assert!(active.status.success(), "{:?}", active);
-        let active: serde_json::Value = serde_json::from_slice(&active.stdout).unwrap();
-        assert_eq!(active["gaps"], serde_json::json!([]), "{active}");
-        assert_eq!(active["sessions"].as_array().unwrap().len(), 1, "{active}");
-        assert_eq!(active["sessions"][0]["id"], id);
-        assert_eq!(active["sessions"][0]["processes"][0]["state"], "waiting");
-        let ended = run(home.path(), &["monitor", "active", "--json"]);
-        let ended: serde_json::Value = serde_json::from_slice(&ended.stdout).unwrap();
-        assert_eq!(ended["sessions"], serde_json::json!([]));
+        let state = |output: std::process::Output| {
+            assert!(output.status.success(), "{output:?}");
+            let rows: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            rows.as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["id"] == id)
+                .unwrap_or_else(|| panic!("{rows}"))["state"]
+                .clone()
+        };
+        assert_eq!(state(active), "active");
+        let ended = run(home.path(), EVERY_SESSION);
+        assert_ne!(state(ended), "active");
         if !resume {
             let manifest: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
@@ -788,13 +803,16 @@ fn available_lists_only_conversations_ready_for_input() {
     let available: Vec<serde_json::Value> = serde_json::from_slice(&available.stdout).unwrap();
     assert_eq!(available.len(), 1);
     assert_eq!(available[0]["id"], asked.as_str());
-    assert_eq!(available[0]["availability"], "available");
+    assert_eq!(available[0]["available"], true);
     assert!(listed(home.path(), &working)["availability"].is_null());
     assert!(!list("--needs-me").status.success());
 }
 
 fn listed(home: &std::path::Path, id: &str) -> serde_json::Value {
-    let output = run(home, &["session", "list", "--all", "--history", "--json"]);
+    let output = run(
+        home,
+        &["desktop", "sessions", "--all", "--history", "--json"],
+    );
     assert!(output.status.success(), "{output:?}");
     let sessions: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
     sessions
@@ -1042,7 +1060,7 @@ exit 2
                 );
             }
             if first {
-                let listed = inspect(&["session", "list", "--all", "--json"]);
+                let listed = inspect(&["desktop", "sessions", "--all", "--json"]);
                 assert_eq!(listed.as_array().unwrap().len(), 1, "{listed}");
                 id = listed[0]["id"].as_str().unwrap().to_string();
                 assert_eq!(listed[0]["title"], title(name));
@@ -1741,7 +1759,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     let wait_for = |state: &str| {
         let until = Instant::now() + Duration::from_secs(10);
         loop {
-            let output = run(home.path(), &["session", "list", "--json", "--all"]);
+            let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
             assert!(
                 output.status.success(),
                 "{}",
@@ -1810,7 +1828,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     provider.0.kill().unwrap();
     provider.0.wait().unwrap();
-    let output = run(home.path(), &["session", "list", "--json", "--all"]);
+    let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
     let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let ended = items
         .as_array()
@@ -1837,7 +1855,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     );
     assert!(!stale.status.success());
     assert!(String::from_utf8_lossy(&stale.stderr).contains("Session provider changed"));
-    let output = run(home.path(), &["session", "list", "--json", "--all"]);
+    let output = run(home.path(), &["desktop", "sessions", "--json", "--all"]);
     let items: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let item = items
         .as_array()

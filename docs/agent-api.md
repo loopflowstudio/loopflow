@@ -73,7 +73,7 @@ A child command records its causal parent and, when issued by an agent, its
 calling conversation and AgentProcess. That evidence grants neither
 process-control authority nor permission to move a Graph cursor. An attachment
 handoff retains conversation identity while fencing the old writer.
-Passive observation acquires no claim. See the [contract and cutover status](architecture-reference.md#cutover-status)
+Passive observation acquires no claim. See the [contract and cutover status](architecture/reference-cutover.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
 
 ## Delegate

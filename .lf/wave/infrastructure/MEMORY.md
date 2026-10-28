@@ -1,5 +1,21 @@
 # infrastructure wave memory
 
+## Unpublished checkout preservation (LOO-666, 2026-10-27)
+
+Jack Heart authorized repair through merge after installed 0.14.19 cleanup
+deleted MTG-193's unpushed calibration checkout. Remote absence and inactivity
+prove no delivery. Source now requires merged/closed PR evidence at the exact
+local head, retains existing work protections, and rechecks branch/head/files
+under the removal lease. Explicit disposal stays separate. Ignored artifacts in
+finished checkouts are not protected by non-force Git removal.
+
+Release's entry-point lesson applies: the real CLI/script fixture proves source
+behavior, not installed acceptance. Infrastructure owns patch/install and
+disposable verification before restoring the existing hourly cleanup entry.
+Preserved refs/bundle establish committed-history recovery only; no pre-deletion
+inventory establishes whether uncommitted/ignored data existed. Recovery must
+preserve MTG-193's active checkout and Task. LOO-543 remains separate.
+
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 
 Jack Heart requested Pi through existing Session, Task and Flow paths with exact
@@ -764,13 +780,31 @@ Jack Heart authorized landing and a patch release; shipment remains unproved.
 LOO-340 owns account state/routing and LOO-338 naming. Compare email and per-user
 subject, not workspace identity; usage proves no login. Unavailable identity is not
 rejection. Native refresh, sole browser ownership and installed acceptance remain
-unproved; no installed repair is authorized. Exact decisions, isolation requirements
+unproved by that work. Exact decisions, isolation requirements
 and proofs: `32607f1d2:wave/infrastructure/MEMORY.md`, this heading; mechanics:
 [subscriptions](../../../docs/subscriptions.md).
 
 Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
 with five-minute turn grace. Configured acceptance remains open.
+
+LOO-665 (2026-10-28): Jack Heart authorized the same-login Codex hotfix through
+merge; Infrastructure owns installation/acceptance. Mini's stored limits succeed
+while native returns 401 despite account/read; rotation order remains unknown.
+Jack's 04:13 UTC steer reports isolated same-Session marker recall after upgrading
+Codex to 0.165.0, but shared status still unavailable. This proves neither shared
+recovery nor a fresh 401 diagnosis. Identity alone proves no usable access.
+
+Recovery needs definite target rejection and alternate acceptance; transient
+failure stays unknown. Keep conversation placement independent of credential
+selection. Compare-before-rename cannot preserve an uncooperative writer: retain
+the displaced inode, including later descriptor writes, and refuse stale evidence.
+Save-back must honor the same evidence or it can recreate the failure. General
+refresh coordination and Claude changes remain separate. Explicit continuation
+of a completed Session retains retirement and prior captures; fresh atomic input/
+attachment admission still rejects stale completion snapshots and live owners.
+Release's entry-point lesson applies: public status/launch/resume fixtures prove
+stand-in continuity, not real-provider inference or installed recovery.
 
 ## Account auth consolidation (LOO-320, curated 2026-10-10)
 
@@ -964,6 +998,17 @@ runs prove no firing, and old gaps do not keep later telemetry red.
 
 ## Gotchas
 
+- **Git exclusions can fail after staging work** (LOO-664, 2026-10-27).
+  Apple Git 2.50.1 rejects a literal ignored `.lf/tmp` exclusion after staging
+  ordinary edits. The rooted glob `[.]lf/tmp/**` avoids that literal prefix;
+  exclusion alone leaves pre-staged telemetry in the index. A separate checkpoint
+  index restores telemetry from HEAD; existing stash recovery preserves its local
+  staged/working partition, retaining a named stash on conflict. CLI fixtures
+  cover ignored/unignored and pre-staged telemetry, not installed LOO-661 recovery.
+  Whitespace-only filenames are work: do not trim filename output to detect an
+  empty checkpoint.
+  Jack Heart authorized the bounded hotfix and autonomous shipping; Infrastructure
+  owns the single release/install and subsequent installed verification.
 - **Commit failures need both Git streams** (2026-10-11). Jack Heart requested
   repair and publication without landing. Selected scratch failed because staging
   excluded it in ordinary checkouts and stderr-only conversion hid Git's stdout.

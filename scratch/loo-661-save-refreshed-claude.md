@@ -235,4 +235,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 realign); implementation and remaining acceptance agree with the plan, no code change or build/test rerun. Both context budgets hold; native writer, preservation proof and live diagnosis remain open; Infrastructure owns installed acceptance.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); current writer/refresh source still matches this plan. Retain the existing design: no new supported mechanism or live diagnosis was established, so implementation planning remains blocked. No code change, mutation probe or build/test rerun; both context budgets hold. Infrastructure owns installed acceptance.

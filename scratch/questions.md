@@ -11,8 +11,9 @@ installed19. Preserve new telemetry separately if recreated; never delete logs,
 overwrite archives, change ignore rules, force staging or suppress Git errors.
 LOO-664 / #1754 is integrated; its disposable reproduction proves only the bridge.
 Infrastructure owns CLI/helper installation and installed acceptance.
-The compress checkpoint found `.lf/tmp` absent; no archive was needed.
-Reserved destination if subsequent preparation recreates telemetry:
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-compress-LvZUVt4w/tmp`.
+Realign found `.lf/tmp` present. The complete directory's reserved archive
+for this checkpoint is:
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-realign-rk9ra266/tmp`.
+The atomic move follows successful validation and checkpointing.
 Previous archive paths and references:
 `ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/questions.md`.

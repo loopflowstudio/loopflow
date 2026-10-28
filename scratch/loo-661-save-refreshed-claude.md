@@ -19,6 +19,15 @@ source sync handles ignored and pre-staged telemetry. This supplies no installed
 upgrade or credential-writer repair; the authorized temporary sync bridge remains
 applicable until Infrastructure establishes installed recovery.
 
+Realigned 2026-10-27 after merge `65281101c2`: LOO-665 / #1756
+(`9967df791b`) is integrated. Codex recovery verifies the same login and preserves
+concurrent file writes by retaining the displaced inode. That file mechanism does
+not preserve a Keychain item's partition access and is not a Claude writer
+candidate. Claude still shares `write_claude_login` between refresh and activation;
+the merged Codex changes do not satisfy this repair. Release child memory likewise
+separates public-entry fixtures from installed acceptance. No acceptance or scope
+change follows from either dependency.
+
 ## Required outcome
 
 Installed lf 0.14.18 reported `failed to persist refreshed credential` for
@@ -248,4 +257,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — compress (2026-10-27): `git diff --check` and `lf context` pass; prose-only reduction, no build/test rerun. Gate owns the affected suite; native-writer design and installed-refresh acceptance remain unresolved.
+Check — realign (2026-10-27): `git diff --check` and `lf context` pass; prose-only reconciliation, existing diagnostic/probe evidence reused without reruns. Gate owns affected checks; native-writer design and installed-refresh acceptance remain unresolved.

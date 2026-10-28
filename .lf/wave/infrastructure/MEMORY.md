@@ -790,26 +790,17 @@ with five-minute turn grace. Configured acceptance remains open.
 
 ## Claude credential preservation (LOO-661, 2026-10-27)
 
-Jack Heart authorized bounded repair and delivery, preserving native access,
-credentials and active Sessions; Infrastructure owns release/installation.
-`security -i` exceeds its buffer at 2 KiB. Later 2/8 KiB prefix probes exited 1
-but left neither old nor intended bytes: earlier old-byte retention was fixture
-specific. Native API writes broke reader partitions; access restoration failed.
-Published source commits data before restoring access. No compatible writer is
-proved; excluded routes do not exhaust public interfaces.
+Jack Heart authorized preservation-first repair; Infrastructure owns installation.
+`security -i` failed at 2/8 KiB while replacing old bytes. Native API probes broke
+reader access; FileDL rollback recovered bytes but proved no safe replacement.
+No compatible writer or live failure cause is established. Diagnostics and accepted
+polls prove neither preservation nor refresh. File-backed tests cannot establish
+native acceptance; local rollback cannot undo OAuth rotation. LOO-325 stays separate.
+Release's entry-point lesson applies: prove the production writer, then installed
+refresh. Full counterexamples and limits:
+`65281101c2:scratch/loo-661-save-refreshed-claude.md`.
 
-FileDL rollback recovered old bytes at 2/8 KiB; replacement reads failed and
-group-key queries did not find the new group despite record-by-ID reads finding
-new encoded bytes. Published source's pre-write snapshot matches that failure.
-General rollback safety and unchanged ACL identity remain unproved. Local rollback
-cannot establish server validity after OAuth rotation; refresh precedes saving.
-
-Closed diagnostics keep secrets out and save failures `Unavailable`; failed
-readback proves neither rollback nor safe retry. Launches reported save failure
-and expired OAuth; later accepted polls prove no refresh or live cause. Unit tests
-select files even on macOS; acceptance must exercise the production writer and
-reader, then an installed refresh. LOO-325 concurrency remains unselected.
-Evidence: `ab1fbeab97536857ec30c5d52ff1248194ea84c0:scratch/loo-661-save-refreshed-claude.md`.
+## Codex credential recovery (LOO-665, 2026-10-28)
 
 LOO-665 (2026-10-28): Jack Heart authorized the same-login Codex hotfix through
 merge; Infrastructure owns installation/acceptance. Mini's stored limits succeed
@@ -905,16 +896,9 @@ and [benchmarks](../../../scripts/benchmarks/desktop-performance) retain them.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
-The detailed September 23–25 observations, historical schemas, test counts and
-counterexamples remain in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#continuation-and-recovery-lessons-curated-2026-09-25).
-The September 30 model/cutover decisions above supersede Run, Ask, Project-cursor
-and private-store mechanisms there. Archiving detail does not establish remaining
-acceptance or authorize deleting execution history.
-
-Earlier evidence:
-`15f32f8605c1994788d25bc17dd35f910f15f73f:.lf/wave/infrastructure/MEMORY.md`,
-this heading. Current contracts supersede archived mechanisms without retroactive
-acceptance or authority.
+Historical schemas, counterexamples and archive links:
+`65281101c2:.lf/wave/infrastructure/MEMORY.md`, this heading. Current contracts
+supersede archived mechanisms without retroactive acceptance or cleanup authority.
 
 - Retain authored alternatives, boundaries and captured definitions. Invocation
   claims fence late results; cursor settlement proves no exactly-once effect.

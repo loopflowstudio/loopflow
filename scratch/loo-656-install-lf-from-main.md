@@ -165,6 +165,28 @@ that choice:
    `reader-catalog.txt` in each `lf-<target>` artifact. LOO-669 publishes it next
    to `SHA256SUMS` and calls `can_open`; nothing in LOO-656 calls it yet.
 
+### Concept review of the pursue (headless, 2026-10-28) — next implement direction
+
+Jack asked for "refusals that name the build to install". The newer-schema
+refusal does: it names the floor migration and `lf self install --main`.
+`incompatible()` only says "the lf that last migrated it", but the ledger already
+holds that build: every row a provenance-aware lf wrote carries
+`package_version` and `source_revision`. Settled by the accepted request:
+
+- `incompatible()` reads the newest ledger row's `package_version` and
+  `source_revision` and names that build ("last migrated by lf 0.15.0+abc1234").
+  It falls back to the current generic wording when the ledger has no provenance
+  columns or can't be read. Most call sites hold a connection;
+  `pending_migrations` works on the applied list, so its callers (which hold the
+  connection) attach the build. No new state.
+- One focused test: a store whose newest row carries a known provenance yields a
+  refusal naming that build.
+
+Reviewed and unchanged: `reader_catalog`/`can_open` match the LOO-669 split
+(`can_open` has no caller until LOO-669 publishes catalogs, as agreed), and
+`lf self install reader-catalog` stays a hidden packaging command. The docs
+changes match the request. No open product choice.
+
 ## Not in this change: contract enforcement (decision belongs to LOO-669)
 
 Jack, 2026-10-28, as relayed from LOO-669: "i also declined contract enforcement

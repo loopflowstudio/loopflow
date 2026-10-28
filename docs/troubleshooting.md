@@ -175,12 +175,17 @@ each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
 ## Stale worktrees and branches
 
 ```bash
-lf wt prune --dry-run              # finished or week-stale worktrees
+lf wt prune --dry-run              # finished worktrees
 lf wt prune                        # remove them and their branches
 lf wt prune --branches --dry-run   # finished branches on origin and locally, with reasons
 ```
 
-A branch goes only with evidence at its exact head: a merged or closed PR, a
+Worktree pruning requires a merged or closed PR at the exact local head.
+Unpublished commits survive even when their remote branch is absent or their
+checkout has been idle for weeks. It removes only clean, unprotected checkouts
+and their local branch refs.
+
+With `--branches`, a branch goes only with evidence at its exact head: a merged or closed PR, a
 finished Task already in the default branch, or a release candidate whose tag
 exists. An open PR, a worktree or an unfinished Task always keeps it. Prune
 always preserves uncommitted files; `lf wt delete <name> --force` is for when

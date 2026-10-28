@@ -1,5 +1,21 @@
 # infrastructure wave memory
 
+## Unpublished checkout preservation (LOO-666, 2026-10-27)
+
+Jack Heart authorized repair through merge after installed 0.14.19 cleanup
+deleted MTG-193's unpushed calibration checkout. Remote absence and inactivity
+prove no delivery. Source now requires merged/closed PR evidence at the exact
+local head, retains existing work protections, and rechecks branch/head/files
+under the removal lease. Explicit disposal stays separate. Ignored artifacts in
+finished checkouts are not protected by non-force Git removal.
+
+Release's entry-point lesson applies: the real CLI/script fixture proves source
+behavior, not installed acceptance. Infrastructure owns patch/install and
+disposable verification before restoring the existing hourly cleanup entry.
+Preserved refs/bundle establish committed-history recovery only; no pre-deletion
+inventory establishes whether uncommitted/ignored data existed. Recovery must
+preserve MTG-193's active checkout and Task. LOO-543 remains separate.
+
 ## Pi harness boundaries (LOO-507, 2026-10-17)
 
 Jack Heart requested Pi through existing Session, Task and Flow paths with exact

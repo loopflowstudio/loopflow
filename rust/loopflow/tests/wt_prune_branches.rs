@@ -87,10 +87,14 @@ print(json.dumps({{"data": {{"repository": repository}}}}))
     )
 }
 
-fn prune(repo: &TestRepo, gh: &str, dry_run: bool) -> Output {
+fn run_lf(repo: &TestRepo, gh: &str, args: &[&str]) -> Output {
     let home = tempfile::tempdir().unwrap();
-    let bin = home.path().join("bin");
-    fs::create_dir(&bin).unwrap();
+    run_lf_at_home(repo, gh, args, home.path())
+}
+
+fn run_lf_at_home(repo: &TestRepo, gh: &str, args: &[&str], home: &Path) -> Output {
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
     fs::write(bin.join("gh"), gh).unwrap();
     fs::set_permissions(bin.join("gh"), fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!(
@@ -101,16 +105,21 @@ fn prune(repo: &TestRepo, gh: &str, dry_run: bool) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
     command
         .env_clear()
-        .env("HOME", home.path())
-        .env("LF_HOME", home.path().join(".lf"))
+        .env("HOME", home)
+        .env("LF_HOME", home.join(".lf"))
         .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
         .env("PATH", path)
         .current_dir(repo.path())
-        .args(["wt", "prune", "--branches"]);
-    if dry_run {
-        command.arg("--dry-run");
-    }
+        .args(args);
     command.output().expect("run lf")
+}
+
+fn prune(repo: &TestRepo, gh: &str, dry_run: bool) -> Output {
+    let mut args = vec!["wt", "prune", "--branches"];
+    if dry_run {
+        args.push("--dry-run");
+    }
+    run_lf(repo, gh, &args)
 }
 
 fn pull(number: u64, head: &str, state: &str) -> serde_json::Value {
@@ -265,4 +274,217 @@ echo '{"resources":{"graphql":{"limit":5000,"remaining":12,"reset":1792530300}}}
         "{stderr}"
     );
     assert_eq!(origin_heads(&repo), before);
+}
+
+#[test]
+fn worktree_prune_requires_terminal_evidence_at_the_current_head() {
+    let repo = github_fixture();
+    let mut pulls = HashMap::new();
+    let mut retained = Vec::new();
+    let mut finished = Vec::new();
+    for (index, (branch, state)) in [
+        ("never-pushed", None),
+        ("remote-deleted", None),
+        ("merged", Some("MERGED")),
+        ("squashed", Some("MERGED")),
+        ("closed", Some("CLOSED")),
+        ("moved", Some("MERGED")),
+        ("open", Some("OPEN")),
+        ("dirty", Some("MERGED")),
+        ("untracked", Some("CLOSED")),
+        ("persistent", Some("MERGED")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let path = repo.create_named_worktree(branch);
+        fs::write(path.join("work.txt"), branch).unwrap();
+        git(&path, &["add", "."]);
+        git(&path, &["commit", "-qm", branch]);
+        let head = git(&path, &["rev-parse", "HEAD"]);
+        if let Some(state) = state {
+            pulls.insert(
+                branch,
+                serde_json::json!([pull(index as u64 + 1, &head, state)]),
+            );
+        }
+        match branch {
+            "merged" => {
+                git(repo.path(), &["merge", "--no-edit", branch]);
+            }
+            "squashed" => {
+                // Separate file avoids a conflict with the normal merge fixture.
+                git(&path, &["mv", "work.txt", "squashed.txt"]);
+                git(&path, &["commit", "-qm", "rename"]);
+                let head = git(&path, &["rev-parse", "HEAD"]);
+                pulls.insert(branch, serde_json::json!([pull(2, &head, "MERGED")]));
+                git(repo.path(), &["merge", "--squash", branch]);
+                git(repo.path(), &["commit", "-qm", "squash"]);
+            }
+            "closed" => {
+                git(&path, &["push", "origin", branch]);
+            }
+            "remote-deleted" => {
+                git(&path, &["push", "origin", branch]);
+                git(&path, &["push", "origin", "--delete", branch]);
+            }
+            "moved" => {
+                git(
+                    &path,
+                    &["commit", "--allow-empty", "-qm", "unpublished follow-up"],
+                );
+            }
+            "dirty" => {
+                fs::write(path.join("work.txt"), "unfinished edits").unwrap();
+            }
+            "untracked" => {
+                fs::write(path.join("notes.txt"), "unfinished notes").unwrap();
+            }
+            "persistent" => {
+                git(
+                    &path,
+                    &["config", "branch.persistent.loopflow-persistent", "true"],
+                );
+            }
+            _ => {}
+        }
+        let head = git(&path, &["rev-parse", "HEAD"]);
+        if matches!(branch, "merged" | "squashed" | "closed") {
+            finished.push((branch, path));
+        } else {
+            let content = fs::read(path.join("work.txt")).unwrap();
+            retained.push((branch, path, head, content));
+        }
+    }
+    git(repo.path(), &["push", "origin", "main"]);
+    let fresh = repo.create_named_worktree("fresh");
+    let gh = gh_stub(&pulls);
+    let dry = run_lf(&repo, &gh, &["wt", "prune", "--dry-run"]);
+    assert!(
+        dry.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dry.stderr)
+    );
+    for (_, path) in &finished {
+        assert!(path.exists());
+    }
+
+    let run = run_lf(&repo, &gh, &["wt", "prune"]);
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    for (branch, path) in &finished {
+        assert!(
+            !path.exists(),
+            "{branch}: {}",
+            String::from_utf8_lossy(&run.stdout)
+        );
+        assert!(!local_heads(&repo).contains(&branch.to_string()));
+    }
+    assert!(origin_heads(&repo).contains(&"closed".to_string()));
+    for (branch, path, head, content) in &retained {
+        assert!(path.exists(), "{branch}");
+        assert_eq!(&git(path, &["rev-parse", "HEAD"]), head);
+        assert_eq!(&git(repo.path(), &["rev-parse", branch]), head);
+        assert_eq!(&fs::read(path.join("work.txt")).unwrap(), content);
+        if *branch == "untracked" {
+            assert_eq!(
+                fs::read_to_string(path.join("notes.txt")).unwrap(),
+                "unfinished notes"
+            );
+        }
+    }
+    assert!(fresh.exists());
+    let again = run_lf(&repo, &gh, &["wt", "prune"]);
+    assert!(again.status.success());
+    assert!(String::from_utf8_lossy(&again.stdout).contains("No prunable worktrees"));
+}
+
+#[test]
+fn worktree_prune_retains_work_when_remote_evidence_is_unavailable() {
+    let repo = github_fixture();
+    let path = repo.create_named_worktree("unpublished");
+    fs::write(path.join("work.txt"), "only local copy").unwrap();
+    git(&path, &["add", "."]);
+    git(&path, &["commit", "-qm", "unpublished"]);
+    let head = git(&path, &["rev-parse", "HEAD"]);
+    for gh in [
+        "#!/bin/sh\nexit 1\n",
+        "#!/bin/sh\necho malformed\n",
+        &gh_stub(&HashMap::new()),
+    ] {
+        let run = run_lf(&repo, gh, &["wt", "prune"]);
+        assert!(
+            run.status.success(),
+            "{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        assert_eq!(git(&path, &["rev-parse", "HEAD"]), head);
+        assert_eq!(
+            fs::read_to_string(path.join("work.txt")).unwrap(),
+            "only local copy"
+        );
+    }
+}
+
+#[test]
+fn worktree_prune_preserves_unfinished_tasks_and_unknown_inspection() {
+    let repo = github_fixture();
+    let home = tempfile::tempdir().unwrap();
+    let path = repo.create_named_worktree("unfinished");
+    crate::support::register_task_without_pr(&home.path().join(".lf"), &path, "unfinished", "HEAD");
+    let gh = gh_stub(&HashMap::from([(
+        "unfinished",
+        serde_json::json!([pull(1, &repo.head_sha(), "MERGED")]),
+    )]));
+    let run = run_lf_at_home(&repo, &gh, &["wt", "prune"], home.path());
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(path.exists());
+
+    let database = home.path().join(".lf/loopflow.db");
+    fs::write(&database, "unreadable registry").unwrap();
+    let run = run_lf_at_home(&repo, &gh, &["wt", "prune"], home.path());
+    assert!(!run.status.success());
+    assert!(path.exists());
+    assert!(local_heads(&repo).contains(&"unfinished".to_string()));
+
+    let home = tempfile::tempdir().unwrap();
+    fs::create_dir(home.path().join("bin")).unwrap();
+    let lsof = home.path().join("bin/lsof");
+    fs::write(&lsof, "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(lsof, fs::Permissions::from_mode(0o755)).unwrap();
+    let run = run_lf_at_home(&repo, &gh, &["wt", "prune"], home.path());
+    assert!(!run.status.success());
+    assert!(path.exists());
+}
+
+#[test]
+fn worktree_prune_preserves_a_live_process_checkout() {
+    let repo = github_fixture();
+    let path = repo.create_named_worktree("live");
+    let gh = gh_stub(&HashMap::from([(
+        "live",
+        serde_json::json!([pull(1, &repo.head_sha(), "MERGED")]),
+    )]));
+    let mut process = Command::new("sleep")
+        .arg("60")
+        .current_dir(&path)
+        .spawn()
+        .unwrap();
+    let run = run_lf(&repo, &gh, &["wt", "prune"]);
+    let retained = path.exists();
+    process.kill().unwrap();
+    process.wait().unwrap();
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(retained);
 }

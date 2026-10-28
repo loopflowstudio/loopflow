@@ -324,8 +324,8 @@ exit 92
             checkout.exists(),
             "controller cleanup removed surviving {stage} descendant's checkout"
         );
-        let removal = worktree_remove(repo.path(), &checkout);
-        worktree_remove(repo.path(), &independent).unwrap();
+        let removal = worktree_remove(repo.path(), &checkout, true);
+        worktree_remove(repo.path(), &independent, true).unwrap();
         let contender = release_tag(repo.path(), "0.9.2", None);
         fs::write(state.path().join("allow"), "").unwrap();
         wait_for(&state.path().join("completed"));
@@ -342,7 +342,7 @@ exit 92
             bytes
         );
         wait_until_released(|| release_tag(repo.path(), "0.9.1", None).map(|_| ()));
-        worktree_remove(repo.path(), &checkout).unwrap();
+        worktree_remove(repo.path(), &checkout, true).unwrap();
         assert!(!checkout.exists());
     }
 }
@@ -492,7 +492,7 @@ exit 94
                 checkout.exists(),
                 "controller removed auto-merge child's checkout"
             );
-            assert!(worktree_remove(repo.path(), &checkout).is_err());
+            assert!(worktree_remove(repo.path(), &checkout, true).is_err());
             assert!(fs::read_to_string(checkout.join("RELEASE_NOTES.md"))
                 .unwrap()
                 .contains("Fixture release."));
@@ -514,7 +514,7 @@ exit 94
         }
         wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
         if preparing {
-            worktree_remove(repo.path(), &checkout).unwrap();
+            worktree_remove(repo.path(), &checkout, true).unwrap();
         }
     }
 }
@@ -612,7 +612,7 @@ exit 0
             }
             assert!(!parent.child.wait().unwrap().success());
             let retained = fs::read_to_string(checkout.join("RELEASE_NOTES.md"));
-            let removal = worktree_remove(repo.path(), &checkout);
+            let removal = worktree_remove(repo.path(), &checkout, true);
             let contender = release_tag(repo.path(), "0.9.2", None);
             fs::write(state.path().join("allow"), "").unwrap();
             wait_for(&state.path().join("completed"));
@@ -634,7 +634,7 @@ exit 0
                 _ => unreachable!(),
             }
             wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
-            worktree_remove(repo.path(), &checkout).unwrap();
+            worktree_remove(repo.path(), &checkout, true).unwrap();
         }
     }
 }
@@ -751,7 +751,7 @@ fi
             }
             assert!(!parent.child.wait().unwrap().success());
             let retained = fs::read_to_string(checkout.join("RELEASE_NOTES.md"));
-            let removal = worktree_remove(repo.path(), &checkout);
+            let removal = worktree_remove(repo.path(), &checkout, true);
             let contender = release_tag(repo.path(), "0.9.2", None);
             fs::write(state.path().join("allow"), "").unwrap();
             assert!(
@@ -795,7 +795,7 @@ fi
                 );
             }
             wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
-            worktree_remove(repo.path(), &checkout).unwrap();
+            worktree_remove(repo.path(), &checkout, true).unwrap();
         }
     }
 }
@@ -918,7 +918,7 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
             assert!(!notes().contains("Notes from the surviving provider."));
         } else {
             let contender = release_tag(repo.path(), "0.9.2", None);
-            let removal = worktree_remove(repo.path(), &checkout);
+            let removal = worktree_remove(repo.path(), &checkout, true);
             fs::write(state.path().join("allow"), "").unwrap();
             assert!(
                 matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
@@ -951,7 +951,7 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
             fs::read_to_string(repo.path().join("RELEASE_NOTES.md")).unwrap(),
             "# v0.9.0\n\nPrevious notes.\n"
         );
-        worktree_remove(repo.path(), &checkout).unwrap();
+        worktree_remove(repo.path(), &checkout, true).unwrap();
     }
 }
 
@@ -1063,7 +1063,7 @@ fn surviving_release_lockfile_tool_retains_target_and_checkout() {
             }
             assert!(!parent.child.wait().unwrap().success());
             let contender = release_tag(repo.path(), "0.9.2", None);
-            let removal = worktree_remove(repo.path(), &checkout);
+            let removal = worktree_remove(repo.path(), &checkout, true);
             fs::write(state.path().join("allow"), "").unwrap();
             assert!(
                 matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
@@ -1089,7 +1089,7 @@ fn surviving_release_lockfile_tool_retains_target_and_checkout() {
                 .unwrap()
                 .contains("version = \"0.9.0\""));
             wait_until_released(|| release_tag(repo.path(), "0.9.2", None).map(|_| ()));
-            worktree_remove(repo.path(), &checkout).unwrap();
+            worktree_remove(repo.path(), &checkout, true).unwrap();
         }
     }
 }
@@ -1196,7 +1196,7 @@ fn surviving_release_hook_retains_target_and_checkout_ownership() {
             "cleanup removed surviving {phase} hook's checkout"
         );
         let contender = release_tag(repo.path(), "0.9.2", None);
-        let removal = worktree_remove(repo.path(), &checkout);
+        let removal = worktree_remove(repo.path(), &checkout, true);
         fs::write(state.path().join("allow"), "").unwrap();
         wait_for(&state.path().join("completed"));
         assert!(
@@ -1212,7 +1212,7 @@ fn surviving_release_hook_retains_target_and_checkout_ownership() {
             bytes
         );
         wait_until_released(|| release_tag(repo.path(), "0.9.1", None).map(|_| ()));
-        worktree_remove(repo.path(), &checkout).unwrap();
+        worktree_remove(repo.path(), &checkout, true).unwrap();
         assert!(!checkout.exists());
     }
 }
@@ -1367,7 +1367,7 @@ esac
             assert!(!parent.child.wait().unwrap().success());
             let contender = release_tag(repo.path(), "0.9.2", None);
             let protected_checkout = matches!(stage, "add" | "remove" | "reset");
-            let removal = protected_checkout.then(|| worktree_remove(repo.path(), &checkout));
+            let removal = protected_checkout.then(|| worktree_remove(repo.path(), &checkout, true));
             fs::write(state.path().join("allow"), "").unwrap();
             assert!(
                 matches!(contender, Err(OpsError::ReleaseDeferred { .. })),
@@ -1388,7 +1388,7 @@ esac
                     assert!(out.status.success(), "{out:?}");
                     assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), source);
                     assert!(!checkout.join("prepared.txt").exists());
-                    worktree_remove(repo.path(), &checkout).unwrap();
+                    worktree_remove(repo.path(), &checkout, true).unwrap();
                 }
                 "remove" => assert!(!checkout.exists()),
                 "delete" => assert!(!Command::new(real_git)
@@ -1508,7 +1508,7 @@ exit 1
         release_tag(repo.path(), "0.9.2", None),
         Err(OpsError::ReleaseDeferred { .. })
     ));
-    assert!(worktree_remove(repo.path(), &checkout).is_err());
+    assert!(worktree_remove(repo.path(), &checkout, true).is_err());
     fs::write(state.path().join("allow"), "").unwrap();
     wait_for(&state.path().join("completed"));
     assert_eq!(
@@ -1519,7 +1519,7 @@ exit 1
     assert_eq!(git(&["rev-parse", "HEAD"]), source);
     assert_eq!(git(&["branch", "--show-current"]), caller_branch);
     assert_eq!(fs::read(repo.path().join(".git/index")).unwrap(), index);
-    worktree_remove(repo.path(), &checkout).unwrap();
+    worktree_remove(repo.path(), &checkout, true).unwrap();
     assert_eq!(git(&["rev-parse", &branch]), hook_head.trim());
 }
 
@@ -1691,7 +1691,7 @@ NOTES
         }
         assert!(!parent.child.wait().unwrap().success());
         let contender = release_tag(repo.path(), "0.9.2", None);
-        let removal = worktree_remove(repo.path(), &checkout);
+        let removal = worktree_remove(repo.path(), &checkout, true);
         let persisted = runtime
             .block_on(task.store.active_task_pr(&task.task.id))
             .unwrap()
@@ -1780,7 +1780,7 @@ NOTES
             String::from_utf8(remote.stdout).unwrap().trim(),
             git_read(&["rev-parse", "HEAD"])
         );
-        worktree_remove(repo.path(), &checkout).unwrap();
+        worktree_remove(repo.path(), &checkout, true).unwrap();
     }
 }
 
@@ -1946,7 +1946,7 @@ esac
         release_tag(repo.path(), "0.9.3", None),
         Err(OpsError::ReleaseDeferred { .. })
     ));
-    assert!(worktree_remove(repo.path(), &checkout).is_err());
+    assert!(worktree_remove(repo.path(), &checkout, true).is_err());
     assert_eq!(repo.head_sha(), caller_head);
     assert_eq!(current_branch(repo.path()).unwrap(), caller_branch);
     assert_eq!(

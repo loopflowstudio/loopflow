@@ -4,8 +4,7 @@ use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
     create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
     main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
-    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreePrunePolicy,
-    WorktreeSegment,
+    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreeSegment,
 };
 use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
@@ -1582,8 +1581,8 @@ pub(crate) fn build_cleanup_registries() -> Vec<PathBuf> {
     registries
 }
 
-/// Remove clean worktrees whose branch merged, closed, lost its remote or went
-/// stale, retaining every unfinished Task's checkout and any process's cwd.
+/// Remove clean worktrees with exact-head merged or closed PR evidence,
+/// retaining every unfinished Task's checkout and any process's cwd.
 pub(crate) fn prune_repo_worktrees(
     main_repo: &Path,
     current: &Path,
@@ -1597,7 +1596,6 @@ pub(crate) fn prune_repo_worktrees(
         main_repo,
         current,
         &protected_paths,
-        WorktreePrunePolicy::manual(),
         dry_run,
     )?)
 }
@@ -1616,7 +1614,7 @@ fn wt_prune(dry_run: bool) -> Result<()> {
         for target in &report.candidates {
             println!(
                 "  {} ({reason})  {}",
-                target.branch.as_deref().unwrap_or("detached"),
+                target.branch,
                 target.path.display(),
                 reason = target.reason.as_str(),
             );

@@ -34,26 +34,10 @@ A password alone is unproved; do not collect one speculatively or repeat rejecte
 probes. Private interfaces, trust changes and provider-owned refresh require a
 scope decision Jack Heart has not made. Diagnostics alone cannot ship this repair.
 
-The October 28 kickoff rechecked `SecItemUpdate` with `kSecAttrAccess` and the
-password requirement for partition edits; neither established a new candidate.
-Its documentation citations remain at
-`157cafb2a7b912a1573f839c2c2359e53088ec9f:scratch/loo-661-save-refreshed-claude.md`,
-“Required outcome and next decision.” This is not public-API exhaustion.
-
 Browser reconnection unblocks live diagnosis only: `invalid_grant` returns before
 `write_claude_login`. Local rollback cannot establish server token validity after
 OAuth rotation because refresh precedes saving without a shared transaction.
 Neither dependency relaxes the preservation requirement or proves a native writer.
-
-Planning disposition (2026-10-28): retain this design and its accepted outcome.
-Inspection at `56541b779b94500348267372d85aee3cd97c5549` confirms the writer still
-uses `security -i`, ordinary login tests still select files, and `invalid_grant`
-returns before saving. No new mechanism or changed authorization was supplied.
-The next implementation slice therefore remains blocked on compatible native
-persistence; browser reconnection addresses only the independent live-diagnosis
-dependency. Repeating rejected probes or publishing diagnostics cannot satisfy
-either missing proof. No production edit or credential operation follows from
-this planning pass.
 
 ## Surviving implementation
 
@@ -73,8 +57,9 @@ this planning pass.
   Existing diagnostic/recovery fields carry failures; SQLite evidence is derived.
   Four diagnostic tests prove redaction, not preservation. No migration, DTO or Swift change.
 
-The refresh and redaction paths need no additional abstraction. Keep their behavior while
-replacing the transport; do not polish code already selected for deletion.
+Refresh and redaction already have a direct shared path; retain it when replacing
+the transport. Compression removes repeated planning/receipt history, not evidence
+needed to choose that replacement.
 
 ## Evidence and excluded alternatives
 
@@ -82,6 +67,11 @@ Complete pre-compression plan, citations, dependency history and archive chain:
 `055c8a3005aed51af7551794fc3f34d7a7827cca:scratch/loo-661-save-refreshed-claude.md`.
 Findings 1–33 and the retired command-boundary probe:
 `c871ddfb0c4956fdb816c079c61d71e68767733f:scratch/`.
+October 28's `SecItemUpdate`/`kSecAttrAccess` and partition-password recheck
+established no new candidate; citations:
+`157cafb2a7b912a1573f839c2c2359e53088ec9f:scratch/loo-661-save-refreshed-claude.md`,
+“Required outcome and next decision.” Repeated planning dispositions:
+`aaa11b0433b9b096d54a50b8a65a170607497d67:scratch/loo-661-save-refreshed-claude.md`.
 Findings retain their original numbers below for lookup. The evidence constrains
 replacement; it is not production acceptance.
 
@@ -245,4 +235,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 kickoff); plan-only clarification, no code change or test rerun. Both context budgets hold; native writer, preservation proof and live diagnosis remain open; Infrastructure owns installed acceptance.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 compress); prose-only reduction, no build/test rerun. Both context budgets hold; native writer, preservation proof and live diagnosis remain open; Infrastructure owns installed acceptance.

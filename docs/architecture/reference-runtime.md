@@ -192,7 +192,7 @@ including overlapping backward edges. Neither loop passes nor authored subgraphs
 create Graphs or lifecycles.
 
 Task and taskless execution use one Graph runner and need no synthetic
-planning records. The draft migration archives each earlier Graph row's name,
+planning records. A migration archives each earlier Graph row's name,
 state and last cursor as a `legacy_flow` observation on the Sessions it opened,
 then drops the Graph tables and the Session's Graph column. Configured acceptance
 and the machine's current-state cutover remain separate from schema verification.

@@ -252,7 +252,8 @@ def test_feature_refreshes_main_then_integrates_and_creates_sibling(checkout: Ch
         _run(feature, str(LF), "sync", env=env)
         assert _run(main, "git", "rev-parse", "HEAD") == upstream
         _run(feature, "git", "merge-base", "--is-ancestor", upstream, "HEAD")
-        assert _run(feature, "git", "show", ":feature.txt") == "staged"
+        # Sync checkpoints uncommitted edits before merging.
+        assert _run(feature, "git", "show", "HEAD:feature.txt") == "working"
         assert (feature / "feature.txt").read_text() == "working\n"
     # A behind caller must still integrate when main was refreshed elsewhere.
     upstream = _advance(author, "main-first.txt")
@@ -416,6 +417,6 @@ def test_sibling_syncs_share_main_update_without_rejecting_each_other(checkout: 
     assert _run(main, "git", "rev-parse", "HEAD") == upstream
     for name, caller in zip(["one", "two"], callers):
         _run(caller, "git", "merge-base", "--is-ancestor", upstream, "HEAD")
-        assert _run(caller, "git", "show", f":{name}.txt") == f"{name} staged"
+        assert _run(caller, "git", "show", f"HEAD:{name}.txt") == f"{name} working"
         assert (caller / f"{name}.txt").read_text() == f"{name} working"
     assert _run(main, "git", "stash", "list") == ""

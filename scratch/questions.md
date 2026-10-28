@@ -10,13 +10,13 @@ automatic sync. Preserve later telemetry separately; never overwrite archives,
 change ignore rules, force staging or suppress Git errors. Installed repair remains
 unverified; Infrastructure owns CLI/helper installation and installed acceptance.
 
-Prior archive paths, reservations and receipts remain in
-`f1daf112a5c3b9601e22b593b57e8b86803755fd:scratch/questions.md` and its references.
-The previous realign receipt at
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-8zcoxtyj/receipt.json`
-records a verified two-entry move after checkpoint `f1daf112a`.
+Prior archives and receipts remain in
+`86877c09150f4043164331423f82e223939203ff:scratch/questions.md` and its references.
+The kickoff receipt at
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-xuznj_dj/receipt.json`
+verified source absence after checkpoint `86877c091`; it moved no telemetry.
 That reservation is complete and must not be reused.
 
-This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-kickoff-xuznj_dj/tmp`
+This step reserves `/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-compress-supvaqza/tmp`
 for fresh telemetry after checkpointing. Its sibling `receipt.json` records the
 checkpoint and verified move, or source absence. A reservation alone proves no archive.

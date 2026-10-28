@@ -1,10 +1,9 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Planning blocked on a safe writer; implementation incomplete.**
-The outcome and preservation constraints are accepted; no replacement writer is selected.
-The defective `security -i` writer remains, with no native acceptance fixture.
-The historical save failure is undiagnosed; live acceptance separately needs browser
-reconnection for jack@loopflow.studio. No public-API exhaustion or scope change is assumed.
+Status (2026-10-28, reviewed at `86877c091`): **Implementation incomplete.**
+The branch supplies diagnostics; the defective `security -i` writer remains,
+with no replacement selected or native acceptance fixture. The accepted outcome
+and preservation constraints below remain binding.
 
 Jack Heart authorized bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
@@ -28,26 +27,22 @@ argv, logs, chat or assertions. No global trust changes, real-account deletion, 
 sign-out, account-route changes, alternate credential authority, delete/recreate, file
 migration or unprotected post-commit ACL repair.
 
-**Unresolved mechanism.** No supported writer yet addresses findings 35–37:
-creation with the necessary partition authority, or replacement retaining the
-existing encoding group/access. A password alone is unproved. Private interfaces,
-trust changes and provider-owned refresh are unaccepted scope alternatives, not
-selected designs awaiting implementation. Ordinary repair remains authorized;
-the gap is technical, with no concrete product choice ready for decision.
-Diagnostics alone cannot ship this repair.
+Two independent gaps remain:
 
-The existing plan remains a requirements and evidence record, not an executable
-implementation design. Planning readiness requires a concrete supported mechanism
-that addresses partition authority and failed-save preservation together, followed
-by a disposable-item counterexample test. No such candidate emerges from the
-current source or saved findings. Repeating the same rejected probes or changing
-the diagnostic wording cannot satisfy that prerequisite. This is a technical gap,
-not missing authorization for ordinary repair.
+- **Writer mechanism:** findings 35–37 identify no supported creation with the
+  necessary partition authority or replacement retaining the encoding group/access.
+  A password alone is unproved. Before implementation, select a mechanism addressing
+  partition authority and failed-save preservation together, then test it on disposable
+  items. This plan records requirements and evidence, not an executable design.
+  Ordinary repair is authorized; no concrete product choice is ready for decision.
+  Private interfaces, trust changes and provider-owned refresh remain unaccepted
+  alternatives. Neither public-API exhaustion nor a scope change is established.
+- **Live diagnosis:** jack@loopflow.studio needs browser reconnection; `invalid_grant`
+  returns before `write_claude_login`. The historical save failure remains unexplained.
+  Reconnection cannot prove a writer, and local rollback cannot undo server-side
+  OAuth rotation: refresh and saving share no transaction.
 
-Browser reconnection unblocks live diagnosis only: `invalid_grant` returns before
-`write_claude_login`. Local rollback cannot establish server token validity after
-OAuth rotation because refresh precedes saving without a shared transaction.
-Neither dependency relaxes the preservation requirement or proves a native writer.
+Diagnostics and repeated rejected probes cannot close these gaps or justify shipping.
 
 ## Surviving implementation
 
@@ -173,9 +168,8 @@ they establish neither installed binary equivalence nor public-API exhaustion.
 
 ## Remaining implementation and acceptance
 
-1. **This slice — blocked:** identify and prove a supported writer on disposable
-   synthetic items before
-   replacing the production transport and exclusive fixture.
+1. Prove the writer mechanism above before replacing the production transport and
+   exclusive fixture.
    Preserve JSON validation, readback, managed login locking, replacement checks,
    omitted refresh tokens, unknown fields and the 15-second HTTP timeout. No extra
    OAuth request or automatic retry. Bound new subprocesses to 15 seconds, close
@@ -237,10 +231,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Reconciled 2026-10-28 against `f1daf112a` and the locally available upstream
-`acd37dde7`: the surviving diff supplies diagnostics, not a replacement writer.
-The accepted scope, demo, deletion boundary and failure evidence remain binding.
-Finding 38 makes the missing native test route explicit; it does not select a
-storage mechanism. The plan cannot claim implementation readiness or delivery.
-
-Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only reconciliation, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.
+Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only compression, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.

@@ -2,7 +2,7 @@
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.15.0 collects the 0.14.11–0.14.20 cycle into one release: a Task can now be handed off and left to finish. One Graph carries it from first step to merged PR, `lf ship` or Auto-Ship lands it, and it can run on a Machine you own or one you rent. Two people can share a repository without crossing claims or branches. The store has been cut down to facts, so installs, live views and idle processes stop slowing down as history grows. This cut adds no new compatibility break: older 0.14.x builds already lost the store at 0.14.20, and that floor stays where it is.
+v0.15.0 collects the 0.14.11–0.14.20 cycle into one release: a Task can now be handed off and left to finish. One Graph carries it from first step to merged PR, `lf ship` or Auto-Ship lands it, and it can run on a Machine you own or one you rent. Two people can share a repository without crossing claims or branches. The store has been cut down to facts, so installs, live views and idle processes stop slowing down as history grows. Each Wave's setup now lives in one committed file, with `lf set` for your own overrides. This release changes the store format: **lf < 0.15.0 can no longer open the store (raised by: wave_setup)**. Upgrade every `lf` that shares `~/.lf` together, including the macOS app.
 
 ## Hand a Task off and let it finish
 
@@ -15,6 +15,15 @@ The cycle started with three overlapping models of a Task's progress: Flows, Wor
 - **Agents handle conflicts themselves.** A PR that conflicts with or falls behind `main` is synced and resolved by the agent; it no longer goes to a person as ready for review. Graph `sync` keeps branch commits and checkpoints uncommitted edits before merging, so conflicts reach the resolver rather than a stash. (#1624, #1672, #1748)
 - **Choose a direction before building.** The feature Graph starts at `explore`. It lays out several visions as pages you can read in Desktop's Files view, so you pick one before any code is written. (#1687)
 - **Finished work goes quiet.** Completed and abandoned Tasks with old failed runs no longer ask for attention. Completed Tasks stay complete through Linear rate limits and unrelated edits. (#1621, #1742)
+
+## Set up a Wave once
+
+Setting up an area of work used to take a separate command for each setting, split between `GOAL.md` frontmatter and the store, and nothing showed which value a launch used. (#1751)
+
+- **Committed Wave config.** `.lf/wave/<name>/config.yaml` has the same shape as `.lf/config.yaml` and holds only what the Wave changes: `graph`, `agent`, `skill_agents`, `context_budgets`, plus the Wave's `id`, `linear.initiative` and `chat`. Launches in a Wave layer it over the repository's config and `~/.lf/config.yaml`. Repository-only keys are an error there. (#1751)
+- **`lf set <key> <value>` and `lf unset <key>`** store your own values on this Machine and never edit committed config. They apply to this repository by default, to a Wave with `lf --wave <wave> set`, or everywhere with `--global`. Keys are `graph`, `agent`, `skill_agents.<skill>`, `machine`, `machine.tasks`, `machine.session` and `account.<provider>`. (#1751)
+- **`lf wave status`** shows each setting and where it came from. (#1751)
+- **Removed:** `lf wave graph set` (use `graph:` in the Wave's `config.yaml`, or `lf --wave <wave> set graph`), `lf ops machine use` (use `lf set machine`) and `lf account route set` (use `lf set account.<provider>`). (#1751)
 
 ## Land PRs without babysitting the merge queue
 
@@ -98,7 +107,7 @@ Cleanup policy used to live in three places. Under some of those rules it could 
 
 ## Operational notes
 
-- **Store floor.** Releases in this cycle raised the store's minimum reader at 0.14.12, 0.14.15, 0.14.16, 0.14.17, 0.14.19 and 0.14.20. Coming from anything before 0.14.20, upgrade every CLI, Desktop helper and cron install that shares the store at the same time. v0.15.0 doesn't raise the floor again.
+- **Store floor.** Releases in this cycle raised the store's minimum reader at 0.14.12, 0.14.15, 0.14.16, 0.14.17, 0.14.19 and 0.14.20. v0.15.0 raises it again: upgrade every CLI, Desktop helper and cron install that shares the store at the same time. A Wave graph chosen with `lf wave graph set` lived in `waves.graph`, which this release drops; add `graph:` to the Wave's `config.yaml` before upgrading to keep it. (#1751)
 - **Find stale processes.** Running Sessions and Graph runners keep the binary they started with. `lf monitor ps` shows which ones are behind, and idle Sessions can move to the new install. (#1729)
 - **Update scripts.** `lf wave workflow` → `lf wave graph`. `lf task workflow` and `lf graph route` → `lf task run`, `--from` and `lf task status`. `lf monitor work` → `--watch` on each read. `lf monitor active` → `lf session list --watch` with `lf ps --watch`. `lf disk` → `scripts/disk-cleanup.sh` and `lf monitor prune`. Plumbing commands now live under `lf ops`. (#1708, #1719, #1733, #1744)
 - **Repository `workflow:`** is still accepted as an alias for `graph:`. LOO-637 tracks its removal. (#1733)

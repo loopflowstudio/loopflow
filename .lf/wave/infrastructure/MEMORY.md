@@ -980,6 +980,17 @@ runs prove no firing, and old gaps do not keep later telemetry red.
 
 ## Gotchas
 
+- **Git exclusions can fail after staging work** (LOO-664, 2026-10-27).
+  Apple Git 2.50.1 rejects a literal ignored `.lf/tmp` exclusion after staging
+  ordinary edits. The rooted glob `[.]lf/tmp/**` avoids that literal prefix;
+  exclusion alone leaves pre-staged telemetry in the index. A separate checkpoint
+  index restores telemetry from HEAD; existing stash recovery preserves its local
+  staged/working partition, retaining a named stash on conflict. CLI fixtures
+  cover ignored/unignored and pre-staged telemetry, not installed LOO-661 recovery.
+  Whitespace-only filenames are work: do not trim filename output to detect an
+  empty checkpoint.
+  Jack Heart authorized the bounded hotfix and autonomous shipping; Infrastructure
+  owns the single release/install and subsequent installed verification.
 - **Commit failures need both Git streams** (2026-10-11). Jack Heart requested
   repair and publication without landing. Selected scratch failed because staging
   excluded it in ordinary checkouts and stderr-only conversion hid Git's stdout.

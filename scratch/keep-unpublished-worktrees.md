@@ -100,7 +100,9 @@ continue to own database/sidecar/account-home/newest-backup protections.
 
 Remaining:
 
-1. Gate runs the affected suites below once, including the release-lock callers.
+1. Resolve the release-lock timing uncertainty recorded below before treating
+   gate as an unconditional pass. All selected cases have passing evidence;
+   the first aggregate run still failed.
 2. Publish and merge through the selected Graph. The Infrastructure operator
    owns patch publication/installation, installed disposable acceptance, then
    restoration of only the existing hourly entry. No competing release publisher
@@ -184,3 +186,29 @@ tests, alter implementation, restore a checkout, or change the hourly schedule.
 Check: 2026-10-27 `git diff --check` — passed; `lf context` — memory/scratch within both limits. Reused unchanged-code results: `cargo test -p loopflow --lib git::worktrees::tests::prune_`, `cargo test -p loopflow --lib git::tests::local_branch_deletion_retains_a_new_head`, `cargo test -p loopflow --test integration wt_prune_branches::worktree_prune` — 7 passed; `cargo fmt` and `cargo clippy --all-targets -- -D warnings` — passed. Prior explicit-force and macOS script acceptance receipts: `315e2deda34e7e1ee6675ea8429d8fd6cec58b62:scratch/keep-unpublished-worktrees.md`. Gate owns affected suites; the operator owns installed acceptance.
 
 Check: 2026-10-27 publication — `lf sync` hit known LOO-664 ignored-path staging; `lf sync --manual` passed without conflicts. The planned affected runner passed architecture, 10 cleanup tests (including real CLI/script acceptance), formatting/inventory and 72 website tests; Rust passed 100/103 with three release-lock readiness/lease timeouts (`.lf/tmp/gate/run-62119/rust/rust.log`), so the aggregate run remains failed and skipped Clippy. A materialized rerun of only those three cases with documented `TMPDIR=/private/tmp`, inherited LF_* unset, stdin closed and unchanged four-thread concurrency passed 3/3 (nextest `9cb8c654-4144-4464-accc-fa84741fb265`). This does not establish the cause of the initial failures. Reuse the prior unchanged-source Clippy pass above; all selected cases now have passing evidence. Installed acceptance remains with the Infrastructure operator.
+
+## Gate review — 2026-10-27
+
+Reviewed the branch against `origin/main`, including the shared removal callers,
+real CLI/script fixtures and user docs. No further implementation change was
+needed. `scripts/test.py --list` confirms architecture, cleanup Python, Rust and
+website coverage; the existing filter includes pruning, build cleanup and
+release-lock callers. Reused the unchanged passing suites from run 62119.
+
+Investigated its three failures: publisher preparation and auto-merge rebuilding
+did not reach their child readiness barriers within 20 seconds; CI repair wrote
+its completion marker but the inherited release lock remained held beyond the
+20-second wait. These were fixture deadlines, not nextest or phase budget
+timeouts. The receipt reports at least 125 GB free and no phase overrun; it does
+not establish a cause for the delayed children. The release callers still pass
+`force=true`, preserving their previous removal behavior.
+
+The three-case reproduction also passes with the original `/var/folders`
+temporary root, four test threads, network isolation and inherited LF_* unset.
+Thus the earlier `/private/tmp` pass does not establish a path-related fix.
+No retries or larger deadlines were added. Historical timing remains unresolved;
+passing reproductions do not turn the failed aggregate receipt green. CI and
+installed disposable acceptance remain separate delivery evidence.
+
+Check: `uv run python scripts/materialize_rust_tests.py --prepare-cli -- cargo --config 'target."cfg(all())".runner = ["uv", "run", "--no-sync", "python", "/Users/jack/src/loopflow.loo-666-keep-unpublished-worktrees/scripts/test_network.py"]' nextest run -p loopflow --test integration --no-fail-fast --build-jobs 4 --test-threads 4 -E 'test(release_lock_tests::surviving_release_auto_merge_child_excludes_another_release) | test(release_lock_tests::surviving_ci_repair_keeps_release_and_checkout_exclusive_after_controller_death) | test(release_lock_tests::surviving_publisher_keeps_its_checkout_after_controller_exit)'` — 3/3 passed in 79.895s, nextest `a1c9001d-c02b-47a1-907e-58429f528f58`; log `.lf/tmp/gate/loo-666-timeout-investigation.log`.
+Check: `cargo clippy --all-targets --jobs 4 -- -D warnings` — passed on the current merged source in 69s; replaces reliance on the pre-merge Clippy result. `git diff --check` — passed. `gh pr checks 1753` — product checks skipped, not a CI pass; delivery owns required CI.

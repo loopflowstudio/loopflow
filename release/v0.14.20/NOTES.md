@@ -2,7 +2,7 @@
 
 <!-- loopflow:release-notes=narrative;gate=safe -->
 
-v0.14.20 lets one Graph do what Tasks used to need workflow stages and routes for: run its steps in place, wait in the Task conversation, or run everything headless. Live views now stream from the same commands you run once, so Desktop stops paying for a whole-store snapshot. Disk cleanup moves out of the binary into an hourly script that keeps unpublished work. This release raises the store compatibility floor: **lf < 0.14.20 can no longer open the store (raised by: task_graphs)**. Upgrade every CLI and macOS app that shares the store together.
+v0.14.20 lets one Graph do what Tasks used to need workflow stages and routes for: run its steps in place, wait in the Task conversation, or run everything headless. Live views now stream from the same commands you run once, so Desktop stops paying for a whole-store snapshot. Disk cleanup moves out of the binary into an hourly script that keeps unpublished work. Automatic sync and Codex launches now recover from two failures that used to stop work partway. This release raises the store compatibility floor: **lf < 0.14.20 can no longer open the store (raised by: task_graphs)**. Upgrade every CLI and macOS app that shares the store together.
 
 ## One Graph runs the Task, start to finish
 
@@ -54,6 +54,15 @@ Rust-only PRs waited 10–49 minutes for hosted macOS runners, once in the PR an
 - **main is tested after merge.** `macos-main.yml` tests each commit since the `last-green` tag. Green advances the tag; red bisects first-parent commits and opens an unarmed revert PR for the culprit.
 - **`lf land` merges main only when needed.** That happens on a GitHub conflict, when GitHub requires an up-to-date head and no queue will supply one, or after a queue eviction for `merge_conflict`. Other repairs, including CI fixes, push on top of the tested base. Local merges, first publications and stacked children whose parent landed still merge main.
 
+## Unattended work recovers instead of stopping
+
+Two failures could halt work that nobody was watching: automatic `lf sync` aborting mid-branch on Apple Git 2.50.1, and Codex rejecting its active credentials while Loopflow held a working copy for the same login. Both now repair themselves without disturbing what they protect. (#1754, #1756)
+
+- **`lf sync` leaves telemetry alone.** Sync checkpoints ordinary edits in a `Checkpoint edits before syncing onto <upstream>` commit, merges upstream and leaves `.lf/tmp/` exactly as it was, whether ignored, unignored or already staged. Explicitly staged ignored files stay in the checkpoint. Telemetry-only or absent edits make no checkpoint, so a repeat sync leaves `HEAD` unchanged.
+- **Sync failures say where your work is.** A conflicting telemetry restore keeps the named stash and prints the exact `git stash apply --index <sha>` command. A held `index.lock` fails before touching `HEAD`, the index or the working tree; an index-refresh failure after the commit says the checkpoint was saved.
+- **Codex credentials repair in place.** Status, readiness and reset redemption use verified access. When Codex definitely rejects its credentials and an accepted copy exists for the same login, Loopflow repairs credentials in the conversation's existing home, so Session identity, native thread and history are preserved. Identity mismatches or unavailable verification never trigger the fallback.
+- **Running clients aren't clobbered.** An atomic exchange retains displaced credentials, including later writes from an already-running client, and save-back requires verified access. Account routing is preserved, cached status makes no provider requests, and continuing a completed Session keeps its completion record and prior captures.
+
 ## Operational notes
 
 - **Upgrade the store's readers together.** The `task_graphs` migration raises the minimum reader to 0.14.20. Update the CLI, Desktop helper and cron installations that open the store. It replaces `task_workflows` with `task_graphs`, renames the Wave default column and drops workflow move history; Graph process records and Task events remain. (#1733)
@@ -62,6 +71,7 @@ Rust-only PRs waited 10–49 minutes for hosted macOS runners, once in the PR an
 - **Install the cleanup schedule.** Run `scripts/disk-cleanup.sh install` from the main checkout, then check the cron entry and `~/Library/Logs/loopflow-disk-cleanup-skill.log`. Real laptop cleanup, reclaimed space and cron installation were not verified before merge, nor was installed acceptance of unpublished-work preservation. Checkouts already lost to the old pruning rules are not recovered. Checkouts without matching PR evidence now need explicit disposal. (#1744, #1753)
 - **Watch for macOS regressions on main.** A macOS-only break from a classifier-skipped PR now surfaces after merge. The bisect-and-revert path opens its revert PR unarmed, so someone has to merge it. (#1749)
 - **Installed document delivery is unverified.** Branch receipts show complete Codex capture. Infrastructure owns repeating relative, absolute, external and resumed-turn selections through the installed build. (#1752)
+- **Installed sync and Codex recovery are unverified.** After installing, Infrastructure checks that LOO-661 completes automatic sync on Apple Git 2.50.1, and that Mini's shared-home `lf account codex --json`, a configured headless Codex turn and `lf -b session connect <session-id>` continue on the same native thread. Telemetry committed before this release stays in history. (#1754, #1756)
 
 ## Small changes
 

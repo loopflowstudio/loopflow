@@ -1,19 +1,18 @@
 # LOO-661 open questions and assumptions
 
-The [design](loo-661-save-refreshed-claude.md) owns the unresolved compatible-writer
-mechanism, rejected alternatives and live diagnosis. No product decision is
-pending and no relaxation of preservation, trust or storage authority is assumed.
+The [design](loo-661-save-refreshed-claude.md) owns the unresolved writer mechanism,
+rejected alternatives and live diagnosis. No product decision or relaxation of
+preservation, trust or storage authority is assumed.
 
-2026-10-27: Jack Heart's current Task definition authorizes archiving the complete
-Task-local `.lf/tmp` after validation and an explicit-path checkpoint, leaving it
-absent for automatic sync. Checkpointing alone does not restore installed19 sync.
-This kickoff reserves the post-checkpoint archive at
-`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-kickoff-jsevozxd/tmp`.
-The preceding archive remains recorded in
-`8e52d2e163:scratch/questions.md`.
-Keep earlier archives and new telemetry separate; no logs are deleted or
-overwritten. No ignore-rule change, forced telemetry staging or suppressed Git
-error is authorized.
-This bridge changes neither writer proof nor Infrastructure's installation and
-live-acceptance ownership. Earlier archive paths remain at
-`22d5d8e0e5:scratch/questions.md` and `0288f9d611:scratch/questions.md`.
+Jack Heart authorized this Task-local LOO-664 sync bridge on 2026-10-27: validate
+and checkpoint explicit paths, then atomically archive complete `.lf/tmp` bytes
+and leave it absent for automatic sync. Checkpointing alone does not repair
+installed19. Preserve new telemetry separately if recreated; never delete logs,
+overwrite archives, change ignore rules, force staging or suppress Git errors.
+Reserved post-checkpoint archive:
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261027-compress-vgc7lpb_/tmp`.
+Previous archive paths: `e3f012685c:scratch/questions.md`,
+`8e52d2e163:scratch/questions.md`, `22d5d8e0e5:scratch/questions.md` and
+`0288f9d611:scratch/questions.md`.
+The disposable reproduction proves the bridge only. Infrastructure owns the
+prepared CLI/helper installation and live acceptance.

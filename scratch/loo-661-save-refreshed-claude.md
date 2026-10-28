@@ -4,11 +4,10 @@ Status: **Diagnostics only; replacement writer unproved.**
 Jack Heart accepted bounded repair and autonomous delivery on 2026-10-27 for
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-Reconciled checkout: `8e52d2e163bc9882cdfb17538ee6beb281a0be33` (2026-10-27).
-The full pre-compression plan remains at `ffd265bcd3eafe32d46f9b57e8b8dc5837f12f61`.
-Merged PR #1749 changes CI selection and landing, leaving both credential modules
-unchanged. LOO-657 and v0.14.19 remain integrated; no remote freshness or installed
-upgrade is claimed.
+Full plan and evidence before this reduction:
+`e3f012685c3fa12791da4deac9b71b9979576d6f:scratch/loo-661-save-refreshed-claude.md`.
+PR #1749's CI selection, LOO-657 and v0.14.19 are integrated;
+this establishes no installed upgrade.
 
 ## Required outcome
 
@@ -128,25 +127,15 @@ source/header review, except read-only installed dispatch inspection in 18.
   verified windows each and no diagnostic or recovery instruction. Polls expose neither
   refresh occurrence nor storage stage, payload size or causality. They explain
   neither the earlier failure nor a browser sign-in dependency.
-- **Password-assisted access (28, 2026-10-27):**
-  Apple's documented [`kSecAttrAccess`](https://developer.apple.com/documentation/security/ksecattraccess)
-  supports access updates, but supplies no atomic data/access preservation guarantee.
-  The separately named `SecKeychainItemSetAccessWithPassword` is declared in
-  [`SecKeychainItemPriv.h`](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItemPriv.h),
-  not the installed SDK's public `SecKeychainItem.h`. Its pinned
-  [implementation](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/OSX/libsecurity_keychain/lib/SecKeychainItem.cpp)
-  constructs Keychain-passphrase credentials and edits access without accepting
-  replacement data or combining the writes. It remains excluded: a private API
-  with a password dependency and no atomic replacement. This was source/header
-  review only; no credential read, mutation or live poll ran.
-- **API versus storage (29, 2026-10-27):** Apple's current
-  [TN3137](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
-  confirms that `SecItem` defaults to the file-based Keychain through a shim;
-  selecting the data-protection implementation changes storage and its access
-  model. Thus swapping API names does not bypass the observed partition failures,
-  while enabling data protection would abandon the existing provider item.
-  Neither is a newly viable writer. This is documentation evidence, not a new
-  native probe or proof that all compatible mechanisms are exhausted.
+- **Access/API boundaries (28–29, 2026-10-27):** `kSecAttrAccess` documents access
+  updates without guaranteeing atomic data/access preservation.
+  `SecKeychainItemSetAccessWithPassword` is private (in `SecKeychainItemPriv.h`,
+  absent from the installed public header), requires a Keychain passphrase and
+  changes access without replacing data. TN3137 describes `SecItem`'s default
+  file-Keychain shim; selecting data protection changes storage/access authority
+  and abandons the provider item. Neither route resolves the partition failure.
+  These were source/header/documentation reviews only; full citations remain in
+  `e3f012685c:scratch/loo-661-save-refreshed-claude.md`, findings 28–29.
 
 Argv credentials, broad trust changes, delete/recreate, file migration and
 unprotected post-commit ACL repair violate the brief (7); provider-owned refresh
@@ -218,15 +207,13 @@ With inherited `LF_*` unset and stdin `/dev/null`, run:
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(provider_auth::) | test(subscription::) | test(provider_account::) | test(lf::commands::account_status::) | test(lf::commands::account::)'
 ```
 
-Planned native check (fixture not implemented):
-`cargo test -p loopflow --lib claude_keychain_native -- --test-threads=1`.
-It must meet steps 2–3 above; adapt the command if a dedicated binary is needed.
+No native acceptance fixture exists yet. Record its actual command once implemented
+and require nonzero executed cases meeting steps 2–3; a speculative filter can pass
+with zero tests.
 Publish/ship only the complete bounded repair through the selected Graph, without
 another release publisher. Do not repeat checks solely because a lifecycle phase
 changes.
 
-LOO-664's installed sync failure and Jack Heart's authorized telemetry archive
-bridge remain in `scratch/questions.md`. The disposable reproduction proves the
-bridge, not installed repair; Infrastructure owns the prepared CLI/helper installation.
+The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — kickoff (2026-10-27): bounded `lf account claude --json` accepted both managed accounts; `git diff --check` passed; `lf context` fits both limits. Prose-only changes; no Rust rerun. Gate owns affected suites; compatible-writer and installed-refresh acceptance remain unproved.
+Check — compress (2026-10-27): `git diff --check` and `lf context` pass; prose-only reduction, no Rust rerun. Gate owns affected suites; native-writer and installed-refresh acceptance remain unproved.

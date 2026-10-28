@@ -788,19 +788,20 @@ Main #1511 (`e69d5103f`): Codex terminals use `--no-daemon` (0.161.0-verified).
 Explicit account selection, not launch-time switching, reconciles the shared daemon
 with five-minute turn grace. Configured acceptance remains open.
 
-## Claude credential preservation (LOO-661, 2026-10-27)
+## Claude credential preservation (LOO-661, 2026-10-28)
 
 Jack Heart authorized preservation-first repair; Infrastructure owns installation.
 `security -i` failed at 2/8 KiB while replacing old bytes. Native probes broke
-reader access; FileDL rollback proved no safe replacement. Published combined
-data/access updates commit sequentially, not atomically. No compatible writer or
-historical save-failure cause is established. Later supported polling reports
-`refresh grant rejected` before persistence: reconnection is needed for live
-acceptance, not proof of the original cause. Diagnostics/file fixtures prove no
-native preservation; local rollback cannot undo OAuth rotation. LOO-325 stays separate.
-Release's entry-point lesson applies: production writer proof precedes installed
-refresh acceptance. Counterexamples and limits:
-`56caf253b8:scratch/loo-661-save-refreshed-claude.md`.
+reader access; FileDL rollback proves no safe replacement. Published updates
+commit data before access; preparing access first also loses partition ACLs when
+replacement creates a new group. Public interfaces are not exhausted; no compatible
+writer or historical save-failure cause is established.
+Supported polling reports `refresh grant rejected` before persistence: reconnection
+is needed for live acceptance, not proof of the original cause. Diagnostics prove
+no preservation; local rollback cannot undo OAuth rotation. LOO-325 stays separate.
+Native writer proof precedes installed refresh acceptance. Counterexamples and
+source/installed limits:
+`93db5e13f1:scratch/loo-661-save-refreshed-claude.md`.
 
 ## Codex credential recovery (LOO-665, 2026-10-28)
 

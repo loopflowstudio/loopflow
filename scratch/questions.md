@@ -26,3 +26,9 @@ Previous archive paths and references:
 2026-10-28 kickoff retains both blockers without assuming recovery or a compatible
 writer. Installed `lf --version` remains 0.14.19. Post-checkpoint inspection found
 `.lf/tmp` absent, so no telemetry archive was needed or performed this step.
+
+2026-10-28 realign retains the writer and live-acceptance dependencies.
+Source v0.15.0 is integrated; installed `lf --version` still reports 0.14.19.
+Fresh `.lf/tmp` exists. The reserved post-checkpoint archive destination is
+`/Users/jack/benchmarks/installed-sync-hotfix-20261027/task-telemetry/LOO-661-20261028-realign-3w4gjfu2/tmp`.
+The step output records whether the atomic move completed.

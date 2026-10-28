@@ -24,8 +24,10 @@ Integrated dependencies do not repair Claude persistence or prove installation:
   telemetry bridge remains in `scratch/questions.md` until installed recovery.
 - LOO-665 / #1756 (`9967df791b`) retains displaced file inodes for Codex recovery;
   that mechanism does not preserve Keychain partition access.
-- PR #1758 (`c87b53c5c1`) supplies v0.14.20 release notes. Infrastructure retains
-  installation and installed acceptance.
+- PR #1759 (`635d99fee0`) is integrated: v0.15.0 consolidates the 0.14.11–0.14.20
+  cycle and retains the 0.14.20 store compatibility floor. It supersedes #1758's
+  release metadata, without proving publication, installation or this repair.
+  Infrastructure retains release and installed acceptance.
 
 ## Required outcome
 
@@ -298,4 +300,4 @@ changes.
 
 The authorized LOO-664 sync bridge and archive receipt live in `scratch/questions.md`.
 
-Check — compress (2026-10-28): `git diff --check` and `lf context` pass; prose-only reduction, no build/test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.
+Check — realign (2026-10-28): `git diff --check` and `lf context` pass; prose-only reconciliation, no build/test rerun. Native writer proof and affected gate checks remain pending; Infrastructure owns installed acceptance after supported reconnection.

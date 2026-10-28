@@ -4,7 +4,7 @@ Status: **Implementation blocked on a verified native writer; diagnostics only.*
 Jack Heart authorized bounded repair and autonomous delivery of
 [LOO-661](https://linear.app/loopflow/issue/LOO-661/save-refreshed-claude-credentials-reliably-on-macos).
 Investigation baseline: `0105aa8688764d08d7cdb4a685bbdaccb3aa91a8`;
-reviewed checkout: `e0fbae22bb` (includes LOO-657 and v0.14.19).
+reviewed checkout: `6ab664a7aa` (includes LOO-657 and v0.14.19).
 No remote freshness is claimed.
 
 ## Required outcome
@@ -27,6 +27,22 @@ writer still has its input ceiling; diagnostics do not repair it. Prove a suppor
 mechanism before production cutover. Findings 22–27 below reject the proposed
 outer-transaction verification and explicit-access alternatives without exhausting
 public interfaces. No product decision or additional authorization is pending.
+
+## Demo and decision (2026-10-27)
+
+Jack Heart's preservation requirements are accepted; the replacement mechanism
+remains unselected. The demo is a naturally required Claude refresh followed by
+`lf account claude --json` accepting the same identity and capacity, with native
+Claude still usable without reauthentication. Infrastructure owns installed proof.
+Before that demo, a disposable native item must survive production replacement
+with exactly 2,048 and 8,192 serialized bytes and remain readable by `security`.
+
+**This slice: compatible-writer proof, blocked.** The missing evidence is one
+supported replacement operation that preserves existing reader access and leaves
+the old credential readable on failure. Neither a successful write status nor
+post-write repair establishes that contract. The remaining implementation below
+is conditional on this proof; the diagnostic changes alone are not the repair.
+The existing design and rejected alternatives remain binding evidence.
 
 ## Surviving implementation
 
@@ -82,6 +98,13 @@ review except read-only installed dispatch inspection in 18.
   fills the buffer at 2 KiB; raw JSON cannot fit 8 KiB. Help/parser expose no
   file/FD indirection. Detached `security … -w` returned zero at 128/2,048/8,192
   bytes but truncated large inputs to 128 bytes (`_PASSWORD_LEN + 1`).
+  Source recheck on October 27 also excludes a PTY or repeated password options
+  as a larger transport: `security.c::main` uses the same fixed input buffer
+  with or without a PTY; `isatty` only controls the prompt. Each command receives one password
+  buffer, and `-w`/`-X` replace it rather than append. Multiple commands perform
+  separate replacements. This is source evidence, not another native probe.
+  Sources: [security.c](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/SecurityTool/macOS/security.c),
+  [keychain_add.c](https://github.com/apple-oss-distributions/Security/blob/db15acbe6a7f257a859ad9a3bb86097bfe0679d9/SecurityTool/macOS/keychain_add.c).
 - **Access loss (3–5, 8–9, 11, 21):** `SecKeychainItemModifyAttributesAndData`
   returned zero at 2/8 KiB but the `security` reader exited 128; `ModifyContent`
   left reads timing out. Native writes replaced `apple-tool:` with the writer's
@@ -236,6 +259,11 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(provider_auth:
 
 The native fixture still needs implementation:
 `cargo test -p loopflow --lib claude_keychain_native -- --test-threads=1`.
+This is a planned command, not an existing passing check. Acceptance requires
+nonzero executed native cases: ordinary `cfg(test)` login dispatch uses files,
+so naming/filtering a test does not establish native storage coverage. The fixture
+must demonstrate the refresh-to-native-writer-to-account-report path described
+above, as well as independently reading the item through `security`.
 Register/filter a dedicated native binary if isolation requires one. File-backed
 or Linux tests cannot replace macOS proof; unavailable Keychain infrastructure
 is unavailable, not green. Publish/ship only the complete bounded repair through
@@ -248,4 +276,4 @@ intended step edits with `lf commit <paths>` before sync, preserving unrelated
 staged/unstaged work and normal validation. Do not force-add telemetry or implement
 a competing repair; retain the dependency if checkpointing fails.
 
-Check — compress: `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only reduction; prior diagnostic tests (4), fmt and clippy results remain applicable. Gate owns affected suites; native replacement and installed refresh acceptance remain unproved.
+Check — kickoff (2026-10-27): `git diff --check` passed; `lf context` reports memory/scratch within both limits. Prose-only clarification; no native mutation or live-account poll repeated. Prior diagnostic checks remain applicable; gate owns affected suites, and native replacement plus installed refresh acceptance remain unproved.

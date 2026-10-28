@@ -909,6 +909,7 @@ mod tests {
             home: home.path().to_owned(),
             wave: None,
             skill_file: None,
+            submitted_docs: None,
             references: Vec::new(),
         };
         let binding = codex_delivery_path(home.path(), "native-thread");

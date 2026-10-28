@@ -561,18 +561,20 @@ fn context_delivery_repository_memory_is_included_once_without_a_wave() {
     .unwrap();
     let decisions = loopflow::prompt::drop_duplicate_docs(&mut components, temp.path());
     assert_eq!(components.docs.len(), 1);
-    assert_eq!(components.docs[0].source, DocumentSource::RepoMemory);
+    assert_eq!(components.docs[0].source, DocumentSource::Docs);
     assert!(decisions.iter().any(|decision| {
         decision.source_path.as_deref() == Some("MEMORY.md")
             && decision.decision == loopflow::trace::ContextDecisionKind::Deduplicated
     }));
     let delivery = ContextDelivery::prepare(&components).unwrap();
-    assert!(
-        delivery.references.is_empty(),
-        "repository memory is a live source, not a second reference"
-    );
-    let prompt = delivery.block(ContextMoment::Start).unwrap().text;
+    assert!(delivery.references.is_empty());
+    let prompt = loopflow::prompt::format_first_turn(&components);
     assert_eq!(prompt.matches("Repository decisions.").count(), 1);
+    assert!(!delivery
+        .block(ContextMoment::Start)
+        .unwrap()
+        .text
+        .contains("Repository decisions."));
     assert!(!prompt.contains("<lf:wave name="));
 }
 

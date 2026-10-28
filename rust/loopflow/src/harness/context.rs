@@ -169,6 +169,7 @@ mod tests {
                 home: home.path().to_owned(),
                 wave: Some(format!("wave-{index}")),
                 skill_file: Some(repo.path().join("saved-skill.md")),
+                submitted_docs: None,
                 references: vec![repo.path().join("task-reference.md")],
             })
             .collect();
@@ -213,6 +214,7 @@ mod tests {
             home: home.path().to_owned(),
             wave: None,
             skill_file: None,
+            submitted_docs: None,
             references: Vec::new(),
         };
         let host = serde_json::json!({
@@ -284,6 +286,7 @@ mod tests {
             home: repo.path().join("machine"),
             wave: None,
             skill_file: None,
+            submitted_docs: None,
             references: Vec::new(),
         };
         let original = serde_json::json!({

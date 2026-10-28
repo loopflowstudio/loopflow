@@ -231,4 +231,4 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Check — `git diff --check` and `lf context`: pass (2026-10-28 compress); duplicate notes removed, no code changes or build/test rerun; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.
+Check — `git diff --check` and `lf context`: pass (2026-10-28 realign); fetched main remains `635d99fee`, source and plan agree, memory/scratch fit; no code changes or test rerun; native acceptance remains unimplemented, installed acceptance belongs to Infrastructure.

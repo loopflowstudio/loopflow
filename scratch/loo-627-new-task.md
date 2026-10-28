@@ -144,9 +144,8 @@ the `-b … --graph auto` variant. Leave the surrounding prose as Jack wrote it.
   Auto-Ship (#1733). The conversation still opens and can watch.
 - **Could the conversation adopt the wrong session?** `ensure_task` prefers an
   existing chosen primary or an unfinished interactive conversation. A just-created
-  Task has neither, and Graph step sessions are headless. The implementation has to
-  confirm that `task_conversations` excludes headless step Sessions. If it does not,
-  admission passes the request as an explicit new primary.
+  Task has neither, and Graph step sessions are headless: `task_conversations`
+  reads only `interactive=1` Sessions, so a step Session is never adopted.
 - **Will the operator do the Graph's work twice?** The `task-session` operator could
   start editing in the same worktree while `implement` runs. The guidance line
   already says the run is in progress. The demo checks that the first reply reports
@@ -268,7 +267,7 @@ running Graph.
 
 ## Slices (one PR)
 
-1. **This slice: Rust.**
+1. **Rust.**
    - resolver change
    - `create --run/--graph/REQUEST`
    - `ensure_task(request)`

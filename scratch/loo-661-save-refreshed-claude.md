@@ -1,6 +1,6 @@
 # LOO-661: Save refreshed Claude credentials reliably
 
-Status (2026-10-28): **Draft mechanism; implementation incomplete.**
+Status (2026-10-28): **Planning blocked on a safe writer; implementation incomplete.**
 The outcome and preservation constraints are accepted; no replacement writer is selected.
 The defective `security -i` writer remains, with no native acceptance fixture.
 The historical save failure is undiagnosed; live acceptance separately needs browser
@@ -36,6 +36,14 @@ selected designs awaiting implementation. Ordinary repair remains authorized;
 the gap is technical, with no concrete product choice ready for decision.
 Diagnostics alone cannot ship this repair.
 
+The existing plan remains a requirements and evidence record, not an executable
+implementation design. Planning readiness requires a concrete supported mechanism
+that addresses partition authority and failed-save preservation together, followed
+by a disposable-item counterexample test. No such candidate emerges from the
+current source or saved findings. Repeating the same rejected probes or changing
+the diagnostic wording cannot satisfy that prerequisite. This is a technical gap,
+not missing authorization for ordinary repair.
+
 Browser reconnection unblocks live diagnosis only: `invalid_grant` returns before
 `write_claude_login`. Local rollback cannot establish server token validity after
 OAuth rotation because refresh precedes saving without a shared transaction.
@@ -63,7 +71,7 @@ Neither dependency relaxes the preservation requirement or proves a native write
 
 Full findings, citations, dependency history and archive chain:
 `108095b26cfe5950c7ce42b6115e936601547ede:scratch/loo-661-save-refreshed-claude.md`,
-“Evidence and excluded alternatives.” Finding numbers below retain that lookup.
+“Evidence and excluded alternatives.” Findings 1–37 retain that lookup.
 This archive also points to retired harnesses and complete source reviews.
 
 Probes used disposable `loopflow-LOO-661-*-probe-<uuid>` items, synthetic bytes,
@@ -152,10 +160,21 @@ they establish neither installed binary equivalence nor public-API exhaustion.
   forced to expire or put in argv. Supported
   `lf account connect claude jack@loopflow.studio` needs browser sign-in; no sign-in
   or route change was attempted. Further polling without recovery adds no acceptance.
+- **Acceptance routing (38, 2026-10-28):** source inspection at `f1daf112a`
+  confirms `read_claude_login` and `write_claude_login` compile out their native
+  dispatch under `cfg(test)`. The direct writer diagnostic fixture substitutes
+  `security` through PATH, while `fresh_claude_token` tests use files. Combining
+  those passing suites would still leave the refresh-to-native-save boundary
+  untested. A standalone test binary alone does not solve this: production OAuth
+  URLs ignore the test endpoint variables. The native acceptance design must
+  exercise the actual storage implementation with isolated synthetic homes and
+  mocked HTTP, without adding a second writer or enabling real OAuth requests.
+  This finding adds no native experiment or evidence about the live failure.
 
 ## Remaining implementation and acceptance
 
-1. Prove the mechanism described above on disposable synthetic items before
+1. **This slice — blocked:** identify and prove a supported writer on disposable
+   synthetic items before
    replacing the production transport and exclusive fixture.
    Preserve JSON validation, readback, managed login locking, replacement checks,
    omitted refresh tokens, unknown fields and the 15-second HTTP timeout. No extra
@@ -218,11 +237,10 @@ Record the native acceptance command when implemented; require nonzero cases
 meeting steps 2–3. Publish/ship only the complete repair through the selected Graph,
 without another release publisher or repeated checks merely for a lifecycle change.
 
-Reconciled 2026-10-28 against `95ffdead7` and the locally available upstream
+Reconciled 2026-10-28 against `f1daf112a` and the locally available upstream
 `acd37dde7`: the surviving diff supplies diagnostics, not a replacement writer.
-Infrastructure and its sole immediate child, Release, were read in full; their
-operation-entry and installed-proof lessons remain applicable. No new mechanism
-or accepted scope change follows from that context. The next implementation
-still owns the writer and its exclusive stand-in together.
+The accepted scope, demo, deletion boundary and failure evidence remain binding.
+Finding 38 makes the missing native test route explicit; it does not select a
+storage mechanism. The plan cannot claim implementation readiness or delivery.
 
 Check — `git diff --check` and `lf context`: pass (2026-10-28); prose-only reconciliation, no code tests repeated. Gate retains native acceptance and Infrastructure retains installed verification.

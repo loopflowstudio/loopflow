@@ -1,7 +1,7 @@
 pub(crate) use primary::admit_workspace;
-mod connection;
-pub(crate) use connection::explain_connect;
-pub use connection::{SessionConnectAction, SessionConnectExplanation, SessionConnectIntent};
+mod resume_explanation;
+pub(crate) use resume_explanation::explain_resume;
+pub use resume_explanation::{SessionResumeAction, SessionResumeExplanation, SessionResumeIntent};
 
 mod workspace;
 pub use workspace::SessionWorkspace;
@@ -735,25 +735,17 @@ pub(crate) async fn open(
         Some(key) => store.sqlite.input_provider_session(key)?,
         None => None,
     };
-    if provider_session.is_some() {
-        if let Some(provider) = session.provider.as_deref() {
-            if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
-                provider,
-                session.model.as_deref(),
-                crate::config::agent_override().as_deref(),
-            ) {
-                if !resume {
-                    conversation_log::read(&store.sqlite, session)?;
-                } else {
-                    drop(progress);
-                    new_thread(store, &session.id, Some(&agent), true).await?;
-                    let session = store
-                        .session(&session.id)
-                        .await?
-                        .ok_or_else(|| session_not_found(&session.id))?;
-                    return surface(store, &session).await;
-                }
-            }
+    if let Some(agent) = provider_session.as_ref().and(handoff_agent(session)) {
+        if !resume {
+            conversation_log::read(&store.sqlite, session)?;
+        } else {
+            drop(progress);
+            new_thread(store, &session.id, Some(&agent), true).await?;
+            let session = store
+                .session(&session.id)
+                .await?
+                .ok_or_else(|| session_not_found(&session.id))?;
+            return surface(store, &session).await;
         }
     }
     let admitted;
@@ -1039,6 +1031,19 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
         launch_lock.expect("an unresumed Session retains its launch lock"),
     )
     .await
+}
+
+/// The other harness the invocation selected for a recorded conversation; it
+/// starts a new thread from the log rather than resuming native history.
+pub(super) fn handoff_agent(session: &LfSession) -> Option<String> {
+    match crate::config::resume_choice(
+        session.provider.as_deref()?,
+        session.model.as_deref(),
+        crate::config::agent_override().as_deref(),
+    ) {
+        crate::config::Resume::Import { agent } => Some(agent),
+        crate::config::Resume::Native(_) => None,
+    }
 }
 
 /// Start a fresh provider thread on the same Session, on `agent` or its

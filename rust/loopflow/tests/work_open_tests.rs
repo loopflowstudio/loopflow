@@ -225,7 +225,7 @@ fn same_named_repositories_need_a_qualifier_and_change_nothing() {
 }
 
 #[test]
-fn cmux_opens_the_task_conversation_through_session_connect() {
+fn cmux_opens_the_task_conversation_through_session_resume() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();

@@ -46,6 +46,7 @@
     },
     "action": {
       "intent": "start",
+      "agent": null,
       "fork": false,
       "prepare_only": false
     },
@@ -108,6 +109,7 @@
     },
     "action": {
       "intent": "resume",
+      "agent": "claude",
       "fork": false,
       "prepare_only": true
     },
@@ -169,7 +171,8 @@
       "planning_observed_at": null
     },
     "action": {
-      "intent": "connect_or_resume",
+      "intent": "take_over",
+      "agent": "codex",
       "fork": false,
       "prepare_only": false
     },
@@ -239,5 +242,68 @@
     "unavailable": [
       "Session input has no recorded provider"
     ]
+  },
+  {
+    "resolution": {
+      "observed_at": 1791500000,
+      "machine": {
+        "state": "bound",
+        "value": "home_11111111111111111111111111111111",
+        "source": "observing_machine"
+      },
+      "repository": {
+        "state": "bound",
+        "value": "repo_22222222222222222222222222222222",
+        "source": "selected_plan"
+      },
+      "repository_path": {
+        "state": "bound",
+        "value": "/repo",
+        "source": "local_locator"
+      },
+      "checkout": {
+        "state": "unbound"
+      },
+      "execution_machine": {
+        "state": "unavailable",
+        "reason": "No local execution location; peer execution has not been observed"
+      },
+      "wave": {
+        "state": "bound",
+        "value": "33333333-3333-3333-3333-333333333333",
+        "source": "explicit"
+      },
+      "task": {
+        "state": "bound",
+        "value": "task_44444444444444444444444444444444",
+        "source": "explicit"
+      },
+      "session": {
+        "state": "bound",
+        "value": "session-proof",
+        "source": "explicit"
+      },
+      "process": {
+        "state": "unbound"
+      },
+      "planning_observed_at": null
+    },
+    "action": {
+      "intent": "new_thread",
+      "agent": "codex",
+      "fork": false,
+      "prepare_only": false
+    },
+    "state": "unknown",
+    "actions": [
+      {
+        "kind": "open",
+        "label": "Open here",
+        "help": "Open this Session in a terminal",
+        "unavailable_reason": null
+      }
+    ],
+    "impediments": [],
+    "unavailable": []
   }
 ]

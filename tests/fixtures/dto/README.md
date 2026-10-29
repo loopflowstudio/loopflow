@@ -94,8 +94,9 @@ readiness proof.
 `task_run_explanations.json` covers edge take-up, no-Graph completion, ad-hoc Graph
 selection and unavailable execution evidence. Explanation never claims ownership.
 
-`session_connect_explanations.json` preserves connection intent, preparation versus
-takeover, shared legal actions and unavailable evidence without client acquisition.
+`session_resume_explanations.json` preserves resume intent (start, resume, take over,
+new thread on another agent), the selected agent, preparation versus takeover,
+shared legal actions and unavailable evidence without client acquisition.
 
 `repository_identity.json` carries the selected plan and retained Machine-local locators.
 

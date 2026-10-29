@@ -32,6 +32,16 @@ Accepted by Jack Heart, 2026-10-26 (LOO-610 review, D2). Task definition is the 
 - `TaskCommand::Defer`/`Resume` names
 - Swift: `prepareSessionAttachment`, `SessionOpenMode`, `--try/--takeover/--fresh` args
 
+## Resume explanation (concept review 2026-10-28, implemented)
+
+`lf --explain resume` answers what resume would do, in resume terms: `SessionResumeExplanation`
+(`human_session/resume_explanation.rs`), intents `start|resume|take_over|new_thread`, and the
+action's `agent` (selected `-a`, else the recorded provider). Explanation and opening read the
+same `agent_override()` through `human_session::handoff_agent`, so `-a codex` on a Claude
+conversation reports `new_thread`. Desktop perf keys `connect_prepare_*` stay: benchmark history
+reads them. Desktop's `Preparation {attach, open, moveHere}` is local pane intent over the one
+`resume --prepare` shape; Move here stays explicit.
+
 ## Remaining
 
 - Checks (2026-10-28): lib `human_session:: lf::`, integration `session_cli_tests:: work_open_tests::
@@ -40,5 +50,9 @@ Accepted by Jack Heart, 2026-10-26 (LOO-610 review, D2). Task definition is the 
   flakes in untouched fixture code pass in isolation).
 - Compress (2026-10-28): `new_thread` owns its launch; unused Swift `prepareSession(fork:)` removed.
   `human_session::` lib, `session_cli_tests::`, clippy — pass (two load flakes pass alone).
-- Gate: Swift build + Sessions/WorkDestination tests; `session_lifecycle_tests` (CI-only).
+- Realign (2026-10-28, after merging main #1761 New Task): no new callers of removed
+  verbs; `cargo check -p loopflow --all-targets` — pass. Swift untested against #1761.
+- Implement + compress (2026-10-28, concept review): `dto_fixtures::`, `global_commands
+  session_resume_explain`, lib `human_session::`, `session_cli_tests::`, fmt, clippy — pass (one load flake passes alone).
+- Gate: Swift build (incl. #1761's NewTaskSheet/`prepareTaskSession` path) + Sessions/WorkDestination tests; `session_lifecycle_tests` (CI-only).
 - Assumptions: `scratch/questions.md`.

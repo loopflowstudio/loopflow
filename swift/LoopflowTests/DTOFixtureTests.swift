@@ -46,22 +46,24 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test func sessionConnectExplanationsPreserveIntentAndUnavailableEvidence() throws {
-        let data = try loadFixtureData("session_connect_explanations.json")
-        let reports = try JSONDecoder().decode([SessionConnectExplanation].self, from: data)
+    @Test func sessionResumeExplanationsPreserveIntentAndUnavailableEvidence() throws {
+        let data = try loadFixtureData("session_resume_explanations.json")
+        let reports = try JSONDecoder().decode([SessionResumeExplanation].self, from: data)
         #expect(reports[0].action?.intent == .start)
         #expect(reports[1].action?.fork == false)
         #expect(reports[1].action?.prepareOnly == true)
-        #expect(reports[2].action?.intent == .connectOrResume)
+        #expect(reports[2].action?.intent == .takeOver)
+        #expect(reports[4].action?.intent == .newThread)
+        #expect(reports[4].action?.agent == "codex")
         #expect(!reports[2].unavailable.isEmpty)
         #expect(reports[3].state == nil)
         #expect(reports[3].action == nil)
         #expect(reports[3].actions.isEmpty)
-        #expect(try JSONDecoder().decode([SessionConnectExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        #expect(try JSONDecoder().decode([SessionResumeExplanation].self, from: JSONEncoder().encode(reports)) == reports)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         wire[0].removeValue(forKey: "actions")
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode([SessionConnectExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+            try JSONDecoder().decode([SessionResumeExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
         }
     }
 

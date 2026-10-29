@@ -820,30 +820,33 @@ fn work_links_carry_readable_labels_routes_and_conversation_relation() {
 }
 
 #[test]
-fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
-    use loopflow::lf::commands::context::{SessionConnectExplanation, SessionConnectIntent};
+fn session_resume_explanations_preserve_intent_and_unavailable_evidence() {
+    use loopflow::lf::commands::context::{SessionResumeExplanation, SessionResumeIntent};
     let wire: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/session_connect_explanations.json"
+        "../../../tests/fixtures/dto/session_resume_explanations.json"
     ))
     .unwrap();
-    let reports: Vec<SessionConnectExplanation> = serde_json::from_value(wire.clone()).unwrap();
+    let reports: Vec<SessionResumeExplanation> = serde_json::from_value(wire.clone()).unwrap();
     assert_eq!(
         reports[0].action.as_ref().unwrap().intent,
-        SessionConnectIntent::Start
+        SessionResumeIntent::Start
     );
     assert!(!reports[0].action.as_ref().unwrap().fork);
     assert_eq!(
         reports[1].action.as_ref().unwrap().intent,
-        SessionConnectIntent::Resume
+        SessionResumeIntent::Resume
     );
     assert!(!reports[1].action.as_ref().unwrap().fork);
     assert!(reports[1].action.as_ref().unwrap().prepare_only);
     assert_eq!(
         reports[2].action.as_ref().unwrap().intent,
-        SessionConnectIntent::ConnectOrResume
+        SessionResumeIntent::TakeOver
     );
     assert!(!reports[2].action.as_ref().unwrap().fork);
     assert!(!reports[2].unavailable.is_empty());
+    let new_thread = reports[4].action.as_ref().unwrap();
+    assert_eq!(new_thread.intent, SessionResumeIntent::NewThread);
+    assert_eq!(new_thread.agent.as_deref(), Some("codex"));
     assert!(reports[3].action.is_none());
     assert!(reports[3].state.is_none());
     assert!(reports[3].actions.is_empty());
@@ -851,7 +854,7 @@ fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
     for field in ["resolution", "actions", "impediments", "unavailable"] {
         let mut missing = wire[0].clone();
         missing.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<SessionConnectExplanation>(missing).is_err());
+        assert!(serde_json::from_value::<SessionResumeExplanation>(missing).is_err());
     }
 }
 

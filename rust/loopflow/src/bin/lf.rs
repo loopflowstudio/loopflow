@@ -2121,7 +2121,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             },
     }) = &cli.command
     {
-        let report = loopflow::lf::commands::context::explain_session_connect(
+        let report = loopflow::lf::commands::context::explain_session_resume(
             connection.target(cli, id.as_deref())?,
             *fork,
             connection.prepare,

@@ -1324,7 +1324,7 @@ fn connection_history(db: &rusqlite::Connection, session: &loopflow::session::Lf
 }
 
 #[test]
-fn session_connect_explain_shares_explicit_native_and_inferred_selection_without_effects() {
+fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_effects() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let session = connection_session(home.path(), repo.path());
@@ -1415,6 +1415,18 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     ]);
     assert_eq!(explicit["action"]["fork"], false);
     assert_eq!(forked["action"]["fork"], true);
+    // Another agent starts a new thread from the log instead of resuming.
+    let other = read(&[
+        "-a",
+        "codex",
+        "--json",
+        "session",
+        "resume",
+        &session.id,
+        "--explain",
+    ]);
+    assert_eq!(other["action"]["intent"], "new_thread", "{other}");
+    assert_eq!(other["action"]["agent"], "codex");
     let text = success(
         command(
             home.path(),
@@ -1438,7 +1450,7 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
 }
 
 #[test]
-fn session_connect_explain_preserves_missing_and_stale_evidence() {
+fn session_resume_explain_preserves_missing_and_stale_evidence() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let read = |id: &str| -> serde_json::Value {
@@ -1491,7 +1503,7 @@ fn session_connect_explain_preserves_missing_and_stale_evidence() {
 }
 
 #[test]
-fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
+fn session_resume_explain_observes_takeover_without_signaling_owned_client() {
     use std::os::unix::fs::PermissionsExt;
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
@@ -1560,7 +1572,7 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
 }
 
 #[test]
-fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
+fn session_resume_explain_never_probes_or_claims_a_live_endpoint() {
     use std::os::unix::net::UnixListener;
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
@@ -1602,7 +1614,7 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
         .unwrap(),
     ))
     .unwrap();
-    assert_eq!(report["action"]["intent"], "connect_or_resume");
+    assert_eq!(report["action"]["intent"], "take_over");
     assert_eq!(report["action"]["prepare_only"], false);
     assert!(report["unavailable"]
         .as_array()

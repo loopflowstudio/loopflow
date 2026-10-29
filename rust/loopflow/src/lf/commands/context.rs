@@ -2,7 +2,7 @@
 
 pub mod preview;
 pub use crate::ops::human_session::{
-    SessionConnectAction, SessionConnectExplanation, SessionConnectIntent,
+    SessionResumeAction, SessionResumeExplanation, SessionResumeIntent,
 };
 
 use std::io::Read;
@@ -161,21 +161,21 @@ fn read_registry() -> Result<crate::store::SharedStore> {
         .ok_or_else(|| anyhow!("Local registry is absent"))
 }
 
-/// Explain connection without admitting a provider conversation or acquiring its client.
-pub fn explain_session_connect(
+/// Explain resume without admitting a provider conversation or acquiring its client.
+pub fn explain_session_resume(
     target: crate::ops::human_session::SessionTarget<'_>,
     fork: bool,
     prepare_only: bool,
-) -> Result<SessionConnectExplanation> {
+) -> Result<SessionResumeExplanation> {
     let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     Ok(runtime.block_on(async {
         match read_registry() {
             Ok(store) => {
-                crate::ops::human_session::explain_connect(&store, &cwd, target, fork, prepare_only)
+                crate::ops::human_session::explain_resume(&store, &cwd, target, fork, prepare_only)
                     .await
             }
-            Err(error) => SessionConnectExplanation::unavailable(error),
+            Err(error) => SessionResumeExplanation::unavailable(error),
         }
     }))
 }

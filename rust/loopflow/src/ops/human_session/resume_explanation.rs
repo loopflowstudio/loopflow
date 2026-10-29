@@ -1,4 +1,4 @@
-//! Connection intent is a reading, never admission or a client reservation.
+//! What resume would do is a reading, never admission or a client reservation.
 use std::path::Path;
 
 use anyhow::Result;
@@ -12,31 +12,39 @@ use super::{SessionAction, SessionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum SessionConnectIntent {
+pub enum SessionResumeIntent {
+    /// Nothing to resume: the conversation starts.
     Start,
+    /// Saved provider history resumes.
     Resume,
-    ConnectOrResume,
+    /// A retained terminal or client holds it and hands it over; if it is
+    /// gone, saved history resumes.
+    TakeOver,
+    /// Another harness starts a new thread seeded from the conversation log.
+    NewThread,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionConnectAction {
-    pub intent: SessionConnectIntent,
+pub struct SessionResumeAction {
+    pub intent: SessionResumeIntent,
+    /// The selected agent, else the conversation's recorded provider.
+    pub agent: Option<String>,
     /// A new conversation continues from this one's log; its holder keeps it.
     pub fork: bool,
     pub prepare_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionConnectExplanation {
+pub struct SessionResumeExplanation {
     pub resolution: ContextExplanation,
-    pub action: Option<SessionConnectAction>,
+    pub action: Option<SessionResumeAction>,
     pub state: Option<SessionState>,
     pub actions: Vec<SessionAction>,
     pub impediments: Vec<String>,
     pub unavailable: Vec<String>,
 }
 
-impl SessionConnectExplanation {
+impl SessionResumeExplanation {
     pub(crate) fn unavailable(reason: impl ToString) -> Self {
         Self {
             resolution: ContextExplanation::unavailable(reason.to_string()),
@@ -52,19 +60,27 @@ impl SessionConnectExplanation {
         let mut lines = vec![self.resolution.render()];
         if let Some(action) = &self.action {
             let intent = match action.intent {
-                SessionConnectIntent::Start => "Start this conversation",
-                SessionConnectIntent::Resume => "Resume saved provider history",
-                SessionConnectIntent::ConnectOrResume => {
-                    "Attach to a retained terminal, or explicitly transition a structured Run to native history"
+                SessionResumeIntent::Start => "Start this conversation",
+                SessionResumeIntent::Resume => "Resume saved provider history",
+                SessionResumeIntent::TakeOver => {
+                    "Take over from the terminal or client holding it; if none remains, resume saved provider history"
+                }
+                SessionResumeIntent::NewThread => {
+                    "Start a new thread from this conversation's log"
                 }
             };
+            let agent = action
+                .agent
+                .as_deref()
+                .map(|agent| format!(" on {agent}"))
+                .unwrap_or_default();
             let holder = if action.fork {
                 "fork into a new conversation; whatever holds this one keeps it"
             } else {
                 "take it over; a terminal showing it hands it over, a client lf started stops, unsent text there is lost"
             };
             lines.push(format!(
-                "Action: {intent}; {holder}{}",
+                "Action: {intent}{agent}; {holder}{}",
                 if action.prepare_only {
                     " (preparation only; no client takeover)"
                 } else {
@@ -97,13 +113,13 @@ impl SessionConnectExplanation {
     }
 }
 
-pub(crate) async fn explain_connect(
+pub(crate) async fn explain_resume(
     store: &SharedStore,
     cwd: &Path,
     target: super::SessionTarget<'_>,
     fork: bool,
     prepare_only: bool,
-) -> SessionConnectExplanation {
+) -> SessionResumeExplanation {
     use crate::session::PrimaryScope;
     let selected = async {
         let target = super::resolve_target(store, target).await?;
@@ -125,7 +141,7 @@ pub(crate) async fn explain_connect(
     .await;
     let (scope, selector) = match selected {
         Ok(selected) => selected,
-        Err(error) => return SessionConnectExplanation::unavailable(error),
+        Err(error) => return SessionResumeExplanation::unavailable(error),
     };
     let task = match &scope {
         Some(PrimaryScope::Task(task)) => Some(task.as_str()),
@@ -135,7 +151,7 @@ pub(crate) async fn explain_connect(
         Some(PrimaryScope::Wave(wave)) => Some(wave.as_str()),
         _ => None,
     };
-    let mut report = SessionConnectExplanation {
+    let mut report = SessionResumeExplanation {
         resolution: crate::ops::context::explain_context(
             store,
             cwd,
@@ -177,13 +193,13 @@ pub(crate) async fn explain_connect(
         }
     }
     if let Some(selector) = selector {
-        if let Err(error) = read_connection(store, &selector, fork, prepare_only, &mut report).await
-        {
+        if let Err(error) = read_resume(store, &selector, fork, prepare_only, &mut report).await {
             report.unavailable.push(error.to_string());
         }
     } else {
-        report.action = Some(SessionConnectAction {
-            intent: SessionConnectIntent::Start,
+        report.action = Some(SessionResumeAction {
+            intent: SessionResumeIntent::Start,
+            agent: crate::config::agent_override(),
             fork: false,
             prepare_only,
         });
@@ -191,12 +207,12 @@ pub(crate) async fn explain_connect(
     report
 }
 
-async fn read_connection(
+async fn read_resume(
     store: &SharedStore,
     selector: &str,
     fork: bool,
     prepare_only: bool,
-    report: &mut SessionConnectExplanation,
+    report: &mut SessionResumeExplanation,
 ) -> Result<()> {
     let Some(session) = super::find_session(store, selector, true).await? else {
         report.unavailable.push(format!("Session {selector} is not recorded; provider-conversation admission is not performed by explanation"));
@@ -210,15 +226,21 @@ async fn read_connection(
         .flatten();
     // A metadata read does not acquire viewer control or probe the endpoint.
     let connection = store.sqlite.session_transport(&session.id)?;
-    let intent = if !prepare_only && connection.is_some() {
-        SessionConnectIntent::ConnectOrResume
+    // Opening checks the harness before any holder: another agent never
+    // takes over the running one, it starts a thread from the log.
+    let handoff = provider.as_ref().and(super::handoff_agent(&session));
+    let intent = if !fork && !prepare_only && handoff.is_some() {
+        SessionResumeIntent::NewThread
+    } else if !prepare_only && connection.is_some() {
+        SessionResumeIntent::TakeOver
     } else if provider.is_none() {
-        SessionConnectIntent::Start
+        SessionResumeIntent::Start
     } else {
-        SessionConnectIntent::Resume
+        SessionResumeIntent::Resume
     };
-    report.action = Some(SessionConnectAction {
+    report.action = Some(SessionResumeAction {
         intent,
+        agent: crate::config::agent_override().or_else(|| session.provider.clone()),
         fork,
         prepare_only,
     });

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-618 concept review</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1d1f;--bg:#fdfdfc;--mute:#6b6b6b;--line:#e3e3e0;--new:#1f7a4d;--old:#a33}
+@media (prefers-color-scheme:dark){:root{--fg:#e8e8e6;--bg:#161616;--mute:#9a9a9a;--line:#333;--new:#5cc48e;--old:#e07070}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,system-ui,sans-serif}
+main{max-width:44rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+header p{color:var(--mute);margin:.2rem 0}
+h1{font-size:1.5rem;margin:0 0 .5rem}h2{font-size:1.1rem;margin:2.2rem 0 .6rem}
+code,pre{font:13.5px/1.5 ui-monospace,Menlo,monospace}
+pre{overflow-x:auto;padding:.9rem 1rem;border:1px solid var(--line);border-radius:6px}
+.old{color:var(--old)}.new{color:var(--new)}
+table{border-collapse:collapse;width:100%;font-size:14.5px}td,th{border-bottom:1px solid var(--line);padding:.45rem .4rem;text-align:left;vertical-align:top}
+</style></head><body><main>
+<header>
+<h1>LOO-618: does <code>--explain</code> say what <code>lf resume</code> will do?</h1>
+<p>Task LOO-618 · concept-review step · 2026-10-28 · headless, no decision requested</p>
+<p>Built from <code>ops/human_session/connection.rs</code>, <code>bin/lf.rs</code> (explain path), <code>ops/human_session.rs</code> (<code>new_thread</code>), <code>swift/Loopflow/Models/ContextExplanation.swift</code>, <code>SessionsView.swift</code></p>
+</header>
+
+<h2>The mismatch</h2>
+<p>The command now has one verb. Its explanation still describes the old one, and misses the harness switch entirely.</p>
+<pre>$ lf --explain -a codex resume     <span class="old"># Claude conversation</span>
+<span class="old">Action: Resume saved provider history; take it over …</span>   ← existing
+$ lf -a codex resume
+Started a new codex thread for …, seeded with what the claude thread knew.</pre>
+<pre><span class="new">Action: Start a new codex thread seeded with what the claude thread knew; …</span>   ← proposed</pre>
+
+<h2>Actions → concepts → API</h2>
+<table>
+<tr><th>Person does</th><th>Existing intent</th><th>Proposed intent</th></tr>
+<tr><td><code>lf resume</code>, nothing there</td><td><code>start</code></td><td><code>start</code></td></tr>
+<tr><td><code>lf resume</code>, dead client</td><td><code>resume</code></td><td><code>resume</code></td></tr>
+<tr><td><code>lf resume</code>, another terminal holds it</td><td class="old"><code>connect_or_resume</code> “…or explicitly transition…”</td><td class="new"><code>take_over</code></td></tr>
+<tr><td><code>lf resume -a codex</code> on Claude</td><td class="old">reported as <code>resume</code></td><td class="new"><code>new_thread</code></td></tr>
+</table>
+<p>Types follow: <code>SessionConnect{Explanation,Action,Intent}</code> → <code class="new">SessionResume*</code>, <code>explain_connect</code> → <code class="new">explain_resume</code>, DTO fixture renamed, Swift mirror renamed. Desktop perf keys stay.</p>
+
+<h2>Checked, unchanged</h2>
+<p>Desktop's <code>attach / open / moveHere</code> are pane intents over the one <code>resume --prepare</code> shape. Showing a pane never takes over, so Move here stays explicit.</p>
+
+<h2>Questions</h2>
+<ol><li>None open. Recorded as next implement direction in the working design.</li></ol>
+</main></body></html>

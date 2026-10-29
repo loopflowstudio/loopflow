@@ -55,6 +55,25 @@ agents for no user gain.
 Second pass (graph step, 2026-10-28): implemented docs, skill and bootstrap
 match this review; no further change and no open product choice.
 
+## Demo (headless, 2026-10-28)
+
+No one was available to review this demo; the agent made the call in Jack Heart's place. The real path
+(`scripts/bootstrap-cron-host.sh infrastructure` from main) only runs after merge, so the demo
+ran the script's own macOS block (lines 103–161, sourced as is) with a throwaway wave
+`demo682`. Its wrapper ran a Keychain probe in an `env -i` environment.
+
+- Both agents loaded (`loaded loopflow.cron.demo682.{telemetry-daily,release-run}`);
+  `plutil -lint` OK.
+- `run_telemetry` kickstarted the agent and polled `launchctl print`. On the red
+  path, a probe that asked for a missing item returned the job's exit 44 truthfully. On the green
+  path, the login Keychain info and the Claude credentials item read from the launchd job:
+  `keychain-ok`, exit 0.
+- Cleanup: both demo agents booted out and plists removed (0 `demo682` entries left). The
+  two real `# loopflow:infrastructure:` crontab lines are untouched until the post-merge bootstrap.
+
+Interpretation: the script's install and kickstart mechanics work in the scheduled
+gui-domain context. A real 09:00/10:00 calendar firing remains LOO-645's proof.
+
 ## Considered and left (scope)
 
 - `scripts/disk-cleanup.sh` still installs a crontab entry; it runs no agent and its `lf wt prune` steps already run from cron, so it stays out of scope.
@@ -67,3 +86,5 @@ match this review; no further change and no open product choice.
   telemetry run. LOO-645 confirms two real scheduled releases.
 
 Check: `uv run pytest python/tests/test_release_automation.py python/tests/test_auth_cron_evidence.py -q` → 22 passed. `cargo test -p loopflow --test integration documented_commands::` → 4 passed; `--lib skills::catalog::` → 8 passed.
+
+Gate (2026-10-28): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::) | test(documented_commands::) | test(builtins::)'` → PASS (architecture, python, rust fmt/filtered tests/clippy, website); swift/e2e skipped by path.

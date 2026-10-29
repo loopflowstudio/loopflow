@@ -687,17 +687,18 @@ pub fn desktop_closed_tasks(
     wave: &str,
     after: Option<&str>,
 ) -> Result<ClosedTaskPageSnapshot> {
-    let repo = crate::repo::discover_repo_root(directory)?.unwrap_or_else(|| directory.to_owned());
+    let repo = crate::repo::working_directory_in(directory)?;
     tokio::runtime::Runtime::new()?.block_on(async {
-        match crate::store::read_existing_registry()?.map(std::sync::Arc::new) {
-            Some(store) => {
-                closed_task_page(&store, &repo, Some(wave), None, after, CLOSED_TASK_PAGE).await
-            }
-            None => Ok(ClosedTaskPageSnapshot {
-                tasks: Vec::new(),
-                next: None,
-            }),
-        }
+        let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
+        closed_task_page(
+            store.as_ref(),
+            &repo,
+            Some(wave),
+            None,
+            after,
+            CLOSED_TASK_PAGE,
+        )
+        .await
     })
 }
 
@@ -1179,13 +1180,7 @@ pub fn list_closed_tasks(
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let page = match &store {
-            Some(store) => closed_task_page(store, repo, wave, since, after, limit).await?,
-            None => ClosedTaskPageSnapshot {
-                tasks: Vec::new(),
-                next: None,
-            },
-        };
+        let page = closed_task_page(store.as_ref(), repo, wave, since, after, limit).await?;
         if json {
             let page = shape
                 .print(store.as_ref(), page, ClosedTaskPageSnapshot::rows)
@@ -1208,14 +1203,22 @@ pub fn list_closed_tasks(
     })
 }
 
+/// One page of closed Tasks in `repo`; none without a registry.
 async fn closed_task_page(
-    store: &SharedStore,
+    store: Option<&SharedStore>,
     repo: &Path,
     wave: Option<&str>,
     since: Option<&str>,
     after: Option<&str>,
     limit: usize,
 ) -> Result<ClosedTaskPageSnapshot> {
+    let empty = || ClosedTaskPageSnapshot {
+        tasks: Vec::new(),
+        next: None,
+    };
+    let Some(store) = store else {
+        return Ok(empty());
+    };
     let since = since
         .map(|since| -> Result<String> {
             let since = super::util::parse_since(since, now())?
@@ -1226,10 +1229,7 @@ async fn closed_task_page(
         })
         .transpose()?;
     let Some(scope) = repository_scope(store, repo, wave).await? else {
-        return Ok(ClosedTaskPageSnapshot {
-            tasks: Vec::new(),
-            next: None,
-        });
+        return Ok(empty());
     };
     let after = after
         .map(|selector| {

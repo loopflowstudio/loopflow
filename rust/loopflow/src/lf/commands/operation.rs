@@ -321,11 +321,9 @@ impl Query {
                 super::desktop::saved_layout(None, directory, work)
             }
             Self::People { directory } => pretty(&super::people::people(directory)?.0),
-            Self::Graphs { directory } => {
-                let repo = crate::repo::discover_repo_root(directory)?
-                    .unwrap_or_else(|| directory.clone());
-                pretty(&crate::graph::compiled::graph_catalog(&repo)?)
-            }
+            Self::Graphs { directory } => pretty(&crate::graph::compiled::graph_catalog(
+                &crate::repo::working_directory_in(directory)?,
+            )?),
             Self::ViewPlan {
                 directory,
                 expression,

@@ -23,6 +23,7 @@ use super::work_route::repository_identity;
 use crate::durable::RepositoryId;
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
+use crate::session::SessionFilter;
 
 fn words(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| word.to_string()).collect()
@@ -314,8 +315,10 @@ impl Read {
                 headless,
                 after,
             } => {
-                let mut argv = at(directory, &["desktop", "sessions"]);
-                argv.extend(page_flags(*headless, after.as_deref()));
+                let mut argv = at(directory, &["desktop", "sessions", "--json", "--page"]);
+                argv.extend(words(session_flags(*headless)));
+                argv.extend(words(&["--limit", "100"]));
+                argv.extend(optional("--after", after.as_ref()));
                 argv
             }
             Self::Tokens { directory, days } => {
@@ -353,12 +356,11 @@ impl Read {
             Self::DesktopPlans { directory } => {
                 pretty(&super::desktop::read_plans(None, directory)?)
             }
-            Self::DesktopSessions {
-                directory,
-                headless,
-            } => {
-                let filter = super::session::list_filter(&session_args(*headless)?, directory)?;
-                pretty(&super::session::read_once(&filter, Shape::Desktop)?)
+            Self::DesktopSessions { directory, .. } | Self::SessionPage { directory, .. } => {
+                pretty(&super::session::read_once(
+                    &self.session_filter(directory)?,
+                    Shape::Desktop,
+                )?)
             }
             Self::DesktopTask { directory, issue } => {
                 pretty(&super::desktop::read_task_pane(directory, issue)?)
@@ -479,15 +481,6 @@ impl Read {
                     wave.is_some(),
                 ))??)
             }
-            Self::SessionPage {
-                directory,
-                headless,
-                after,
-            } => {
-                let args = parse_session_args(page_flags(*headless, after.as_deref()))?;
-                let filter = super::session::list_filter(&args, directory)?;
-                pretty(&super::session::read_once(&filter, Shape::Desktop)?)
-            }
             Self::Tokens { directory, days } => super::tokens::codebase(directory, *days),
             Self::Retention => pretty(
                 &super::history_transcript::retention_summary()?
@@ -514,13 +507,11 @@ impl Read {
             Self::DesktopPlans { directory } => {
                 super::desktop::watch_plans(None, directory, transport)
             }
-            Self::DesktopSessions {
-                directory,
-                headless,
-            } => {
-                let filter = super::session::list_filter(&session_args(headless)?, &directory)?;
-                super::session::watch_list(filter, Shape::Desktop, transport)
-            }
+            Self::DesktopSessions { ref directory, .. } => super::session::watch_list(
+                self.session_filter(directory)?,
+                Shape::Desktop,
+                transport,
+            ),
             Self::DesktopTask { directory, issue } => {
                 super::desktop::watch_task_pane(&directory, &issue, transport)
             }
@@ -539,6 +530,16 @@ impl Read {
         }?;
         Ok(subscription.expect("a pulled watch returns its subscription"))
     }
+
+    /// The Sessions a `desktop sessions` read lists, its argv's flags parsed
+    /// as the command parses them, defaults included.
+    fn session_filter(&self, directory: &Path) -> anyhow::Result<SessionFilter> {
+        // Past `--cwd <directory> desktop sessions`.
+        let flags = std::iter::once("sessions".to_owned()).chain(self.argv().into_iter().skip(4));
+        let command = SessionListArgs::augment_args(clap::Command::new("sessions"));
+        let args = SessionListArgs::from_arg_matches(&command.try_get_matches_from(flags)?)?;
+        super::session::list_filter(&args, directory)
+    }
 }
 
 fn session_flags(headless: bool) -> &'static [&'static str] {
@@ -547,28 +548,6 @@ fn session_flags(headless: bool) -> &'static [&'static str] {
     } else {
         &[]
     }
-}
-
-/// `lf desktop sessions`' arguments as its flags parse, defaults included.
-fn session_args(headless: bool) -> anyhow::Result<SessionListArgs> {
-    parse_session_args(session_flags(headless).iter().map(|flag| flag.to_string()))
-}
-
-fn parse_session_args(flags: impl IntoIterator<Item = String>) -> anyhow::Result<SessionListArgs> {
-    let command = SessionListArgs::augment_args(clap::Command::new("sessions"));
-    let flags = std::iter::once("sessions".to_owned()).chain(flags);
-    Ok(SessionListArgs::from_arg_matches(
-        &command.try_get_matches_from(flags)?,
-    )?)
-}
-
-/// The flags of one page of Desktop's Session inventory.
-fn page_flags(headless: bool, after: Option<&str>) -> Vec<String> {
-    let mut flags = words(&["--json", "--page"]);
-    flags.extend(words(session_flags(headless)));
-    flags.extend(words(&["--limit", "100"]));
-    flags.extend(optional("--after", after));
-    flags
 }
 
 /// `future` run to completion on a runtime of its own, as its command does.

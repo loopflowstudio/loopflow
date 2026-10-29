@@ -52,26 +52,19 @@ pub unsafe extern "C" fn lf_subscribe(
     error: *mut *mut c_char,
 ) -> *mut LfSubscription {
     let target = Arc::new(Wakeup(Mutex::new(Some((wakeup, context as usize)))));
-    let started = catch_unwind(AssertUnwindSafe(|| {
-        // SAFETY: the caller passes a NUL-terminated string.
-        let read = parse(unsafe { CStr::from_ptr(read) })?;
-        let wake = target.clone();
-        read.subscribe(move || wake.call())
-            .map_err(|error| format!("{error:#}"))
-    }));
-    let failure = match started {
-        Ok(Ok(subscription)) => {
-            return Box::into_raw(Box::new(LfSubscription {
-                subscription,
-                wakeup: target,
-            }))
-        }
-        Ok(Err(failure)) => failure,
-        Err(panic) => format!("lf_subscribe panicked: {}", panic_message(&panic)),
+    let wake = target.clone();
+    // SAFETY: the caller's guarantees, passed on.
+    let subscription = unsafe {
+        serve("lf_subscribe", read, error, |read| {
+            read.subscribe(move || wake.call())
+        })
     };
-    // SAFETY: the caller passes a writable pointer or null.
-    unsafe { set_error(error, &failure) };
-    std::ptr::null_mut()
+    subscription.map_or(std::ptr::null_mut(), |subscription| {
+        Box::into_raw(Box::new(LfSubscription {
+            subscription,
+            wakeup: target,
+        }))
+    })
 }
 
 /// Read `read` on this thread: what its `lf` command prints, or null with
@@ -81,23 +74,37 @@ pub unsafe extern "C" fn lf_subscribe(
 /// `read` is a NUL-terminated string; `error` is null or writable.
 #[no_mangle]
 pub unsafe extern "C" fn lf_read(read: *const c_char, error: *mut *mut c_char) -> *mut c_char {
-    let result = catch_unwind(AssertUnwindSafe(|| {
+    // SAFETY: the caller's guarantees, passed on.
+    unsafe { serve("lf_read", read, error, |read| read.read()) }
+        .map_or(std::ptr::null_mut(), |json| c_string(&json).into_raw())
+}
+
+/// `serve` applied to the JSON `read`, or `None` with `*error` set when
+/// it is invalid, fails or panics.
+///
+/// # Safety
+/// `read` is a NUL-terminated string; `error` is null or writable.
+unsafe fn serve<T, E: std::fmt::Display>(
+    entry: &str,
+    read: *const c_char,
+    error: *mut *mut c_char,
+    serve: impl FnOnce(Read) -> Result<T, E>,
+) -> Option<T> {
+    let served = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: the caller passes a NUL-terminated string.
-        let read = parse(unsafe { CStr::from_ptr(read) })?;
-        read.read().map_err(|error| format!("{error:#}"))
+        let read = unsafe { CStr::from_ptr(read) };
+        let read = serde_json::from_slice(read.to_bytes())
+            .map_err(|error| format!("invalid read: {error}"))?;
+        serve(read).map_err(|error| format!("{error:#}"))
     }));
-    let failure = match result {
-        Ok(Ok(json)) => return c_string(&json).into_raw(),
+    let failure = match served {
+        Ok(Ok(value)) => return Some(value),
         Ok(Err(failure)) => failure,
-        Err(panic) => format!("lf_read panicked: {}", panic_message(&panic)),
+        Err(panic) => format!("{entry} panicked: {}", panic_message(&panic)),
     };
     // SAFETY: the caller passes a writable pointer or null.
     unsafe { set_error(error, &failure) };
-    std::ptr::null_mut()
-}
-
-fn parse(text: &CStr) -> Result<Read, String> {
-    serde_json::from_slice(text.to_bytes()).map_err(|error| format!("invalid read: {error}"))
+    None
 }
 
 fn c_string(text: &str) -> CString {

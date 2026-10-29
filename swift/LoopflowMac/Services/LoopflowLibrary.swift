@@ -65,12 +65,11 @@ private final class ServedWatch: @unchecked Sendable {
     private func pull() {
         guard let subscription else { return }
         var length = 0
-        var line: Data?
-        if let frame = lf_pull(subscription, &length) {
-            line = Data(bytes: frame, count: length)
-            lf_frame_free(frame, length)
-            continuation.yield(line!)
+        let line = lf_pull(subscription, &length).map { frame in
+            defer { lf_frame_free(frame, length) }
+            return Data(bytes: frame, count: length)
         }
+        if let line { continuation.yield(line) }
         // A failed watch ends, as its `lf` process would have exited, on the
         // pull that returned its `unavailable` frame.
         if lf_ended(subscription) {

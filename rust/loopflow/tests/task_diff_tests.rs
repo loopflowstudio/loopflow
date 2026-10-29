@@ -11,10 +11,9 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
 
-/// What `lf <args>` prints. `doctor` prints its report before exiting 1 on a
-/// failed check, so only empty output is a failed read.
-fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> String {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_lf"))
+/// `lf <args>` in `repo`, with only `home`'s environment and piped stdio.
+fn lf(repo: &Path, home: &Path, args: &[impl AsRef<std::ffi::OsStr>]) -> std::process::Child {
+    Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
         .env("HOME", home)
         .env("LF_HOME", home)
@@ -25,7 +24,13 @@ fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> String 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .unwrap();
+        .unwrap()
+}
+
+/// What `lf <args>` prints. `doctor` prints its report before exiting 1 on a
+/// failed check, so only empty output is a failed read.
+fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> String {
+    let mut child = lf(repo, home, args);
     if let Some(input) = input {
         child
             .stdin
@@ -423,18 +428,7 @@ fn a_read_served_in_process_prints_what_its_lf_command_prints() {
 /// The first frame `lf <args>` prints, with its stdin held open as a watch's
 /// parent holds it.
 fn first_frame(repo: &Path, home: &Path, args: &[String]) -> Value {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .env_clear()
-        .env("HOME", home)
-        .env("LF_HOME", home)
-        .env("PATH", "/usr/bin:/bin")
-        .current_dir(repo)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = lf(repo, home, args);
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap())
         .read_line(&mut line)

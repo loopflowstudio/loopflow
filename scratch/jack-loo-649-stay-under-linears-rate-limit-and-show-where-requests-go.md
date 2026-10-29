@@ -35,6 +35,10 @@ work and the complexity hypothesis (Task comments).
   instead of 100, and reads each changed Project once (`ProjectOwnership`).
   On paper an empty delta fell from ~20k points to a few hundred; the
   `x-complexity` column in the log confirms or refutes it.
+- **Read paths audited**: `task status`, `task workflow` and history reads
+  use stored Tasks and reach Linear only for a Task not yet stored
+  (`acquire_task` / `inspect_task_planning_async` under `Auto`, so a current
+  delta answers). Progress comments are unchanged until the log shows they lead.
 
 ## Remaining
 
@@ -50,4 +54,4 @@ Nothing replaced: the cooldown stays the pause authority; the budget extends it.
 
 ## Checks
 
-- Compress pass: `cargo test -p loopflow --lib -- linear::cooldown linear::request_log linear::team_changes linear_team_checks linear_on_demand native_runner_is_quiet attach_task_github_pr task_comment linear_observe`: 33 passed (31 min under load average ~85); clippy `--all-targets -D warnings` clean. Wider suites: gate.
+- Compress pass: `cargo test -p loopflow --lib -- linear::cooldown linear::request_log linear::team_changes linear_team_checks linear_on_demand native_runner_is_quiet attach_task_github_pr task_comment linear_observe`: 33 passed; clippy `--all-targets -D warnings` clean. Wider suites: gate.

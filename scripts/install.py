@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from bundle_version import read_release_version, stamp_bundle_version
+from bundle_version import read_release_version, read_source_revision, stamp_bundle_version
 
 ROOT = Path(__file__).parent.parent
 DEFAULT_INSTALL_DIR = Path.home() / ".local" / "bin"
@@ -273,7 +273,7 @@ def _install_loopflow(spec: BundleSpec, version: str) -> None:
 
     installed_plist = spec.contents_dir / spec.info_plist.name
     shutil.copy(spec.info_plist, installed_plist)
-    stamp_bundle_version(installed_plist, version)
+    stamp_bundle_version(installed_plist, version, read_source_revision(ROOT))
     for resource in spec.resources:
         shutil.copy(resource, spec.resources_dir / resource.name)
     (spec.contents_dir / "PkgInfo").write_text("APPL????")

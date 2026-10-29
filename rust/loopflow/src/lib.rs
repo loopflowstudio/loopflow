@@ -10,6 +10,7 @@ pub mod config;
 pub mod context_block;
 pub mod context_usage;
 pub mod definition;
+pub(crate) mod desktop_exits;
 pub mod diagnostic_log;
 pub mod durable;
 pub mod error;

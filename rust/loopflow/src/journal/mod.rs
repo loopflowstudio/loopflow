@@ -132,7 +132,7 @@ pub fn take_graph_step() -> bool {
     step
 }
 
-/// A command that changes no state records no Process. Admission still
+/// A command that changes no Work records no Process. Admission still
 /// prepares the store it reads, so a read works on a fresh Machine.
 pub fn mark_read() {
     READ.store(true, Ordering::Relaxed);

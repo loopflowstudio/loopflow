@@ -46,7 +46,7 @@ pub enum MonitorCommand {
 
 impl MonitorCommand {
     /// Whether this command changes state, and so records a Process.
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::Ps { .. } | Self::Top => false,
             Self::Rollover { dry_run, .. } | Self::Prune { dry_run, .. } => !dry_run,

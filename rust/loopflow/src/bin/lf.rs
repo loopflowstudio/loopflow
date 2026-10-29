@@ -1576,9 +1576,9 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
-    // Only a command that changes state records a Process, and a Graph step
+    // Only a command that changes Work records a Process, and a Graph step
     // always does: the Graph reads its result from it.
-    if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_state) {
+    if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_work) {
         journal::mark_read();
     }
     if cli.harness_callback() {

@@ -1039,19 +1039,19 @@ impl DesktopCommand {
 
 impl Commands {
     /// Whether running this command changes state, and so records a Process.
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
-            Self::Task { cmd } => cmd.changes_state(),
-            Self::Wave { cmd } => cmd.changes_state(),
-            Self::Session { cmd } => cmd.changes_state(),
-            Self::Graph { cmd } => cmd.changes_state(),
-            Self::Skill { cmd } => cmd.changes_state(),
-            Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_state()),
-            Self::Desktop { cmd } => cmd.changes_state(),
-            Self::Monitor { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_state()),
-            Self::Ops { cmd } => cmd.changes_state(),
-            Self::Config { cmd } => cmd.changes_state(),
-            Self::Self_ { cmd } => cmd.changes_state(),
+            Self::Task { cmd } => cmd.changes_work(),
+            Self::Wave { cmd } => cmd.changes_work(),
+            Self::Session { cmd } => cmd.changes_work(),
+            Self::Graph { cmd } => cmd.changes_work(),
+            Self::Skill { cmd } => cmd.changes_work(),
+            Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
+            Self::Desktop { cmd } => cmd.changes_work(),
+            Self::Monitor { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
+            Self::Ops { cmd } => cmd.changes_work(),
+            Self::Config { cmd } => cmd.changes_work(),
+            Self::Self_ { cmd } => cmd.changes_work(),
             Self::Portfolio { cmd, .. } => cmd.is_some(),
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
             Self::Ship { .. }
@@ -1068,7 +1068,7 @@ impl Commands {
 }
 
 impl TaskCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::List { .. }
             | Self::Location { .. }
@@ -1102,7 +1102,7 @@ impl TaskCommand {
 }
 
 impl WaveCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::Show { .. } | Self::Graph { .. } | Self::List { .. } => false,
             Self::Status { sync, .. } => *sync,
@@ -1119,7 +1119,7 @@ impl WaveCommand {
 }
 
 impl SessionCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
             Self::Steers { retry, .. } => retry.is_some(),
@@ -1136,7 +1136,7 @@ impl SessionCommand {
 }
 
 impl GraphCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::List { .. } | Self::Show { .. } => false,
             Self::Customize { .. } | Self::Run { .. } | Self::External(_) => true,
@@ -1145,7 +1145,7 @@ impl GraphCommand {
 }
 
 impl SkillCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::Customize { .. } | Self::External(_) => true,
         }
@@ -1153,7 +1153,7 @@ impl SkillCommand {
 }
 
 impl DesktopCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::View { .. }
             | Self::Plans { .. }
@@ -1167,12 +1167,13 @@ impl DesktopCommand {
             | Self::Actions { .. }
             | Self::Events { .. }
             | Self::Wait { .. }
-            | Self::Capture { .. } => false,
-            Self::Layout { save, .. } => *save,
-            Self::Query { .. }
+            | Self::Capture { .. }
+            // Navigation, panes and Dashboard arrangement are not Work; their
+            // saves still persist, without a Process.
+            | Self::Layout { .. }
+            | Self::Query { .. }
             | Self::Pin { .. }
             | Self::Unpin { .. }
-            | Self::Rename { .. }
             | Self::Back { .. }
             | Self::Forward { .. }
             | Self::Goto { .. }
@@ -1180,16 +1181,10 @@ impl DesktopCommand {
             | Self::Previous { .. }
             | Self::WorkingTasks { .. }
             | Self::Enter { .. }
-            | Self::Do { .. }
-            | Self::Send { .. }
-            | Self::SendKey { .. }
-            | Self::Run { .. }
             | Self::Zoom { .. }
             | Self::Focus { .. }
             | Self::Hide { .. }
             | Self::Show { .. }
-            | Self::Close { .. }
-            | Self::Reopen { .. }
             | Self::Move { .. }
             | Self::Resize { .. }
             | Self::Files { .. }
@@ -1198,19 +1193,29 @@ impl DesktopCommand {
             | Self::PageBack { .. }
             | Self::PageForward { .. }
             | Self::Reload { .. }
-            | Self::Switch { .. } => true,
+            | Self::Switch { .. } => false,
+            // Renaming a Task changes Work; renaming a Dashboard is arrangement.
+            Self::Rename { target, .. } => target.starts_with("task:"),
+            // Input reaches a Session or shell, closing ends one, and an
+            // action named at runtime may do either.
+            Self::Do { .. }
+            | Self::Send { .. }
+            | Self::SendKey { .. }
+            | Self::Run { .. }
+            | Self::Close { .. }
+            | Self::Reopen { .. } => true,
         }
     }
 }
 
 impl OpsCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
-            Self::Pr { cmd } => pr_changes_state(cmd.as_ref()),
-            Self::Release { cmd } => cmd.changes_state(),
-            Self::Wt { cmd } => cmd.changes_state(),
-            Self::Machine { cmd } => cmd.changes_state(),
-            Self::Account { cmd, cached, .. } => account_changes_state(cmd.as_ref(), *cached),
+            Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
+            Self::Release { cmd } => cmd.changes_work(),
+            Self::Wt { cmd } => cmd.changes_work(),
+            Self::Machine { cmd } => cmd.changes_work(),
+            Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
             Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
             Self::Commit { .. } | Self::Sync(_) => true,
         }
@@ -1218,7 +1223,7 @@ impl OpsCommand {
 }
 
 /// Bare `lf pr` acts on the current branch's PR.
-fn pr_changes_state(cmd: Option<&PrCommand>) -> bool {
+fn pr_changes_work(cmd: Option<&PrCommand>) -> bool {
     match cmd {
         None => true,
         Some(PrCommand::Checks { .. } | PrCommand::Reviews { .. }) => false,
@@ -1236,7 +1241,7 @@ fn pr_changes_state(cmd: Option<&PrCommand>) -> bool {
 }
 
 /// Bare `lf account` refreshes access and capacity unless it reads the cache.
-fn account_changes_state(cmd: Option<&AccountCommand>, cached: bool) -> bool {
+fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
     match cmd {
         None => !cached,
         Some(AccountCommand::Route { .. }) => false,
@@ -1252,7 +1257,7 @@ fn account_changes_state(cmd: Option<&AccountCommand>, cached: bool) -> bool {
 }
 
 impl ReleaseCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::Check { .. } | Self::Status { .. } => false,
             Self::Run { .. }
@@ -1265,7 +1270,7 @@ impl ReleaseCommand {
 }
 
 impl WtCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::Switch { .. } | Self::List { .. } | Self::Timing { .. } => false,
             Self::Prune { dry_run, .. } => !dry_run,
@@ -1275,7 +1280,7 @@ impl WtCommand {
 }
 
 impl MachineCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
             Self::Credentials { cmd } => match cmd {
@@ -1307,7 +1312,7 @@ impl MachineCommand {
 }
 
 impl ConfigCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::User { .. } => false,
             Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
@@ -1320,7 +1325,7 @@ impl ConfigCommand {
 }
 
 impl SelfCommand {
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::Doctor { .. } => false,
             Self::Install { cmd, .. } => match cmd {
@@ -2911,6 +2916,36 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn only_changes_to_work_record_a_process() {
+        let records = |args: &[&str]| {
+            Cli::try_parse_from(["lf"].iter().chain(args))
+                .unwrap()
+                .command
+                .is_some_and(|command| command.changes_work())
+        };
+        assert!(!records(&["desktop", "focus"]));
+        assert!(!records(&[
+            "desktop",
+            "rename",
+            "query:q",
+            "Mine",
+            "--revision",
+            "1"
+        ]));
+        assert!(records(&[
+            "desktop",
+            "rename",
+            "task:t",
+            "Mine",
+            "--revision",
+            "1"
+        ]));
+        assert!(records(&["desktop", "send", "hello"]));
+        assert!(records(&["task", "create", "--title", "x"]));
+        assert!(!records(&["task", "status", "x"]));
+    }
 
     #[test]
     fn retired_surface_flags_are_rejected_for_a_valid_skill_command() {

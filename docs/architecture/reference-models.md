@@ -342,10 +342,12 @@ completion are distinct: subsequent command work may fail after the agent succee
 
 ### Process lifetime and causality
 
-One actual lf process that changes state gets one LfProcess, including nested
-direct and agent-issued commands. A read (status, list, show, diff, file, every
-`--watch` reader) records none, so it never wakes a Work reader or joins a Task's
-work. `Commands::changes_state` classifies every command once, exhaustively. In-process wrappers reuse it and cannot settle it early; each Graph
+One actual lf process that changes Work (Tasks, Waves, Projects, Sessions,
+Graphs, PRs, planning) gets one LfProcess, including nested direct and
+agent-issued commands. A read (status, list, show, diff, file, every `--watch`
+reader), Desktop navigation and pane or Dashboard arrangement record none, so
+they never wake a Work reader or join a Task's work; arrangement saves still
+persist. Input to a Session or shell is Work. `Commands::changes_work` classifies every command once, exhaustively. In-process wrappers reuse it and cannot settle it early; each Graph
 step is a child process with its own Process.
 The incoming `via_agent` bit describes the caller, not whether the command later
 launches an agent. Agent-issued children resolve stable Session/AgentProcess

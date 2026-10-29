@@ -171,7 +171,7 @@ pub enum HistoryCommand {
 
 impl HistoryCommand {
     /// Whether this command changes state, and so records a Process.
-    pub fn changes_state(&self) -> bool {
+    pub fn changes_work(&self) -> bool {
         match self {
             Self::List { .. }
             | Self::Show { .. }

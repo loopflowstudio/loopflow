@@ -4,6 +4,7 @@
 - `lf wt prune` prints every checkout as `keep`/`remove` with its reason, in text and `--json`.
 - Eligibility follows Task state: done/abandoned Task, merged/closed PR, or no Task/PR with HEAD idle 7 days. Changes under `scratch/` and `.lf/` never keep a checkout (Jack's decision).
 - `--all` removes every checkout not held by an unfinished Task, a persistent (repo/Wave conversation) checkout, the default branch, the current checkout or a running process; unpushed commits and source changes are saved to `refs/lf/pruned/<branch>/<commit>` first.
+- Demo (headless, 2026-10-29, second run after the cleanup): `./target/debug/lf wt prune --dry-run` printed 16 `keep` lines, each with a reason (default branch, current checkout, 12 `Task LOO-… is unfinished`, 2 `persistent`, 1 `no Task or PR, touched 0 days ago`), then the hint that `--all` removes the last one. `--dry-run --all` turned that one (`verify-default-b3db558…`) into `remove (no unfinished Task)`; 15 kept. Not executed: the checkout belongs to a verify run from today and is not this Task's to delete. Decision standing in for Jack: advance — dry-run answers "why is this kept" and `--all` leaves only main, active Task and persistent checkouts.
 - Demo evidence: on 2026-10-29 the branch build's `lf wt prune --dry-run` in loopflow kept 16 checkouts (main, current, 12 unfinished Tasks, 2 persistent, 1 touched today) and removed none — only main and active Task checkouts remain.
 
 ## Disk cleanup (Jack, 2026-10-29) — done by hand from the Task conversation

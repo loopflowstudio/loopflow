@@ -913,11 +913,17 @@ struct TaskStatusArgs {
 
 /// `lf task status <issue> --watch`: `lf task status --json` now and each time
 /// it changes. Only the first reading exchanges planning with the tracker.
-pub fn watch_task_status(repo: &Path, issue: String, shape: Shape) -> Result<()> {
-    super::watch::run(
+pub fn watch_task_status(
+    repo: &Path,
+    issue: String,
+    shape: Shape,
+    transport: super::watch::Transport,
+) -> Result<Option<super::watch::Subscription>> {
+    let repo = repo.to_owned();
+    super::watch::start(
         TaskStatusArgs { issue },
         super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
-        |store, args| {
+        move |store, args| {
             let repo = repo.to_owned();
             async move {
                 let store = super::watch::require_store(store)?;
@@ -928,6 +934,7 @@ pub fn watch_task_status(repo: &Path, issue: String, shape: Shape) -> Result<()>
                 })
             }
         },
+        transport,
     )
 }
 

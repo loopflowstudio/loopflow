@@ -8,16 +8,23 @@ use crate::lf::PlanningCommand;
 use crate::store::{RegistryUnavailable, Store};
 
 pub fn run(cmd: &PlanningCommand) -> Result<()> {
-    // A Work folder without Git still has stored planning status.
-    let repo = match super::util::find_repo_root() {
-        Ok(root) => crate::git::worktrees::main_repo_root(&root)?,
-        Err(_) => std::env::current_dir()?,
-    };
+    let repo = status_repository(&std::env::current_dir()?)?;
     if let PlanningCommand::Status { watch: true, .. } = cmd {
-        return watch_status(&repo);
+        return watch_status(&repo, super::watch::Transport::Stdio).map(drop);
     }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(&repo, cmd))
+}
+
+/// The repository whose planning `directory` reads. A Work folder without Git
+/// still has stored planning status.
+pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> {
+    Ok(
+        match crate::repo::discover_repo_root(directory).ok().flatten() {
+            Some(root) => crate::git::worktrees::main_repo_root(&root)?,
+            None => directory.to_owned(),
+        },
+    )
 }
 
 /// Whether the repository containing `checkout` plans through a Git ref.
@@ -102,12 +109,15 @@ const STATUS_CLOCK: std::time::Duration = std::time::Duration::from_secs(5);
 /// `lf planning status --watch`: the repository's planning is exchanged while
 /// the watch runs, and `lf planning status --json` printed now and each time it
 /// changes. Exchanges commit to the store and wake the watch like any writer.
-fn watch_status(repo: &Path) -> Result<()> {
+pub(crate) fn watch_status(
+    repo: &Path,
+    transport: super::watch::Transport,
+) -> Result<Option<super::watch::Subscription>> {
     let repo_key = repo.to_string_lossy().into_owned();
     let runtime = tokio::runtime::Runtime::new()?;
     let database = crate::store::database_path_from_env()?;
     // Nothing here creates a store; without one there is nothing to exchange.
-    let _sync = database
+    let sync = database
         .exists()
         .then(|| {
             runtime.block_on(async {
@@ -123,10 +133,13 @@ fn watch_status(repo: &Path) -> Result<()> {
         .inspect_err(|error| tracing::warn!(%error, "cannot start repository planning sync"))
         .ok()
         .flatten();
-    super::watch::run(
+    // The exchange runs as long as the watch: its read owns it.
+    let exchange = (sync, runtime);
+    super::watch::start(
         (),
         super::watch::Watched::every(STATUS_CLOCK),
-        |store, ()| {
+        move |store, ()| {
+            let _ = &exchange;
             let repo_key = repo_key.clone();
             async move {
                 let config =
@@ -143,6 +156,7 @@ fn watch_status(repo: &Path) -> Result<()> {
                 Ok(serde_json::json!({"transport": "git", "destinations": destinations}))
             }
         },
+        transport,
     )
 }
 

@@ -233,13 +233,26 @@ pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
     }
     let store = SqliteStore::open_processes_read_only(&path)?;
     let records = store.unfinished_processes()?;
-    let processes = OsProcess::sample(now);
+    // Each unfinished row reads its own receipt and its own OS processes, so
+    // cost follows live work, not history or the rest of the Machine.
+    let mut receipts: HashMap<_, _> = records
+        .iter()
+        .map(|record| (record.id.clone(), recorded_process_receipt(&store, record)))
+        .collect();
+    let mut pids: Vec<u32> = records.iter().filter_map(|record| record.pid).collect();
+    pids.extend(
+        receipts
+            .values()
+            .filter_map(|receipt| receipt.as_ref().ok()?.as_ref().map(|receipt| receipt.pid)),
+    );
+    pids.sort_unstable();
+    pids.dedup();
+    let processes = OsProcess::read_each(&pids, now);
     if let Err(error) = &processes {
         tracing::warn!(%error, "activity OS observation unavailable");
     }
-    // Each unfinished row reads its own receipt, so cost follows live work, not history.
     collect_activity(records, processes.as_deref().ok(), |record| {
-        recorded_process_receipt(&store, record)
+        receipts.remove(&record.id).unwrap_or(Ok(None))
     })
 }
 

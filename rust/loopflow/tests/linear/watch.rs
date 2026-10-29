@@ -17,8 +17,7 @@ use loopflow::work::wave::Wave;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
 
-/// One running `lf … --watch`; its frames are `{answers, home, copy,
-/// revisions, unavailable, body}`.
+/// One running `lf … --watch`; its frames are `{answers, unavailable, body}`.
 struct Watch {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -767,6 +766,19 @@ fn an_operation_served_in_process_reads_what_its_lf_command_prints() {
 
     let home = Machine::new();
     home.plan(2);
+    // A Git checkout of the Wave's repository, enrolled as recovery would.
+    repository(home.repo());
+    let id = home.store.repository_id(home.wave.repo()).unwrap().unwrap();
+    loopflow::repository::location::reconcile(
+        &home.store,
+        &loopflow::repository::CanonicalRepo::discover(home.repo()).unwrap(),
+        Some(&id),
+        None,
+    )
+    .unwrap();
+    let repository = home.repo().to_owned();
+    let folder = home.path().join("folder");
+    std::fs::create_dir_all(&folder).unwrap();
     let history = Operation::History(HistoryWindow {
         since: "7d".into(),
         limit: 50,
@@ -776,9 +788,37 @@ fn an_operation_served_in_process_reads_what_its_lf_command_prints() {
     });
     // A new Operation fails to compile here until it is compared too.
     let operations = match history {
-        Operation::History(_) | Operation::MonitorPs | Operation::DesktopPlan => {
-            [history, Operation::MonitorPs, Operation::DesktopPlan]
-        }
+        Operation::History(_)
+        | Operation::MonitorPs
+        | Operation::DesktopPlan
+        | Operation::DesktopPlans { .. }
+        | Operation::DesktopSessions { .. }
+        | Operation::PlanningStatus { .. }
+        | Operation::DesktopTask { .. } => [
+            history,
+            Operation::MonitorPs,
+            Operation::DesktopPlan,
+            Operation::DesktopPlans {
+                directory: repository.clone(),
+            },
+            Operation::DesktopSessions {
+                directory: repository.clone(),
+                headless: false,
+            },
+            Operation::DesktopSessions {
+                directory: repository.clone(),
+                headless: true,
+            },
+            // A Work folder without Git reads stored status; a Git one
+            // exchanges with a planning remote this fixture lacks.
+            Operation::PlanningStatus {
+                directory: folder.clone(),
+            },
+            Operation::DesktopTask {
+                directory: repository.clone(),
+                issue: "FIX-1".into(),
+            },
+        ],
     };
     let _env = loopflow_test_support::env_lock()
         .lock()
@@ -801,15 +841,16 @@ fn an_operation_served_in_process_reads_what_its_lf_command_prints() {
         drop(subscription);
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
 
-        let mut args: Vec<&str> = argv.iter().map(String::as_str).collect();
-        args.push("--json");
-        let output = lf(home.path(), &args).output().unwrap();
-        assert!(output.status.success(), "{argv:?} failed");
-        let mut printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+        let watch = Watch::open(home.path(), home.path(), &args);
+        let mut printed = watch
+            .next(Duration::from_secs(30))
+            .unwrap_or_else(|| panic!("{argv:?}: no frame"));
+        drop(watch);
 
-        without_reading_time(&mut served["body"]);
+        without_reading_time(&mut served);
         without_reading_time(&mut printed);
-        assert_eq!(served["body"], printed, "{argv:?}");
+        assert_eq!(served, printed, "{argv:?}");
     }
     match saved {
         Some(saved) => std::env::set_var("LF_HOME", saved),

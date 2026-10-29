@@ -3,6 +3,7 @@ use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use super::watch::{Subscription, Transport};
 use super::waves::Shape;
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
@@ -598,10 +599,19 @@ fn selection_repository(
     cli: &crate::lf::Cli,
     store: &crate::store::sqlite::SqliteStore,
 ) -> Result<crate::durable::RepositoryId> {
-    if let Some(repository) = &cli.repository {
+    repository_in(cli.repository.as_ref(), &std::env::current_dir()?, store)
+}
+
+/// `--repository` when given, else the repository containing `directory`.
+fn repository_in(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    store: &crate::store::sqlite::SqliteStore,
+) -> Result<crate::durable::RepositoryId> {
+    if let Some(repository) = selected {
         return Ok(repository.clone());
     }
-    let repo = crate::repository::CanonicalRepo::current()?
+    let repo = crate::repository::CanonicalRepo::containing(directory)?
         .context("select a repository with --repo or --repository")?;
     store
         .repository_id(&repo.to_string())?
@@ -612,14 +622,11 @@ fn selection_repository(
 /// `lf desktop task`: what the Task pane shows, from the same reading as
 /// `lf task status`.
 fn task_pane(issue: &str, watch: bool) -> Result<()> {
+    if watch {
+        return watch_task_pane(&std::env::current_dir()?, issue, Transport::Stdio).map(drop);
+    }
     let repo = crate::ops::task::task_repository(&crate::repo::working_directory()?, Some(issue))?;
     let status = crate::ops::task::task_status(&repo, Some(issue))?;
-    if watch {
-        let task = status
-            .task
-            .context("only a registered Task can be watched")?;
-        return super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop);
-    }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?
             .map(std::sync::Arc::new)
@@ -628,6 +635,20 @@ fn task_pane(issue: &str, watch: bool) -> Result<()> {
         println!("{}", serde_json::to_string(&pane)?);
         Ok(())
     })
+}
+
+/// `lf desktop task --watch` for the Task `issue` names from `directory`.
+pub(crate) fn watch_task_pane(
+    directory: &std::path::Path,
+    issue: &str,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    let repo = crate::ops::task::task_repository(directory, Some(issue))?;
+    let status = crate::ops::task::task_status(&repo, Some(issue))?;
+    let task = status
+        .task
+        .context("only a registered Task can be watched")?;
+    super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop, transport)
 }
 
 /// `lf desktop plans`: every plan a repository window shows, the default and
@@ -644,19 +665,35 @@ fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
         );
         return Ok(());
     }
-    super::watch::run(
+    watch_plans(
+        cli.repository.clone(),
+        std::env::current_dir()?,
+        Transport::Stdio,
+    )
+    .map(drop)
+}
+
+/// `lf desktop plans --watch` for `--repository`, else the repository
+/// containing `directory`.
+pub(crate) fn watch_plans(
+    selected: Option<crate::durable::RepositoryId>,
+    directory: std::path::PathBuf,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    super::watch::start(
         (),
         super::watch::Watched::every(super::watch::PLANNING_CLOCK),
-        |store, ()| {
+        move |store, ()| {
             let result = store
                 .ok_or(crate::store::StoreError::NotFound)
                 .context("Work registry is unavailable")
                 .and_then(|store| {
-                    let repository = selection_repository(cli, &store.sqlite)?;
+                    let repository = repository_in(selected.as_ref(), &directory, &store.sqlite)?;
                     Ok(store.sqlite.selection_plans(&repository)?)
                 });
             async move { result }
         },
+        transport,
     )
 }
 
@@ -918,7 +955,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
                     task.clone(),
                     *all,
                     Shape::Desktop,
-                    super::watch::Transport::Stdio,
+                    Transport::Stdio,
                 )
                 .map(drop)
             } else {

@@ -21,9 +21,10 @@
 
 mod checkouts;
 
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -248,6 +249,8 @@ impl Drop for Subscription {
 trait Inbox: Send + Sync {
     fn deliver(&self, line: &[u8]);
     fn close(&self);
+    /// Ask the watch to look at the store again; false once it has closed.
+    fn look(&self) -> bool;
 }
 
 impl<A: DeserializeOwned + Send> Inbox for (Mutex<Mailbox<A>>, Condvar) {
@@ -260,6 +263,13 @@ impl<A: DeserializeOwned + Send> Inbox for (Mutex<Mailbox<A>>, Condvar) {
     fn close(&self) {
         self.0.lock().expect("watch mailbox poisoned").closed = true;
         self.1.notify_all();
+    }
+
+    fn look(&self) -> bool {
+        let mut mailbox = self.0.lock().expect("watch mailbox poisoned");
+        mailbox.look = true;
+        self.1.notify_all();
+        !mailbox.closed
     }
 }
 
@@ -380,7 +390,7 @@ struct Step {
 /// One watch's reading state: what it last read and sent, and when.
 struct Reader<A, F> {
     shared: Shared<A>,
-    database: std::path::PathBuf,
+    database: PathBuf,
     watched: Watched,
     read: F,
     args: A,
@@ -422,9 +432,8 @@ where
             // only a checkout that changed on disk is asked again.
             crate::git::retain_reads();
         }
-        let changes = shared.clone();
-        let wal = database.clone();
-        std::thread::spawn(move || observe(&changes, &wal, parent));
+        let inbox: Arc<dyn Inbox> = shared.clone();
+        follow_store(&database, &inbox, parent);
         Ok(Self {
             shared,
             database,
@@ -657,24 +666,59 @@ fn accept<A: DeserializeOwned>(mailbox: &mut Mailbox<A>, line: &[u8]) {
     }
 }
 
-/// Wake the watch when the store may have changed, and close it when its
-/// parent exits: a descendant that inherited the pipe can hold stdin open
-/// long after the parent is gone.
-fn observe<A>(shared: &Shared<A>, database: &Path, parent: Option<u32>) {
+/// The watches of one store in this process, and the parent each follows.
+type Followers = Vec<(Weak<dyn Inbox>, Option<u32>)>;
+
+/// Every watch of a store in this process shares one observer of it, so an
+/// app serving many subscriptions watches its store once.
+static OBSERVERS: OnceLock<Mutex<HashMap<PathBuf, Followers>>> = OnceLock::new();
+
+fn observers() -> MutexGuard<'static, HashMap<PathBuf, Followers>> {
+    OBSERVERS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// Wake `inbox` when `database` may have changed, and close it when `parent`
+/// (when it follows one) exits.
+fn follow_store(database: &Path, inbox: &Arc<dyn Inbox>, parent: Option<u32>) {
+    let mut observers = observers();
+    let followers = observers.entry(database.to_owned()).or_default();
+    followers.push((Arc::downgrade(inbox), parent));
+    if followers.len() == 1 {
+        let database = database.to_owned();
+        std::thread::spawn(move || observe(&database));
+    }
+}
+
+/// Wake each watch of `database` when the store may have changed, and close
+/// one whose parent exited: a descendant that inherited the pipe can hold
+/// stdin open long after the parent is gone. Ends with its last watch.
+fn observe(database: &Path) {
     let mut store = StoreChanges::watch(database);
     loop {
         store.wait(CHECK);
-        let mut mailbox = lock(shared);
-        // A watch served in-process follows no parent.
-        if parent.is_some() && parent_process() != parent {
-            mailbox.closed = true;
+        let current = parent_process();
+        let mut observers = observers();
+        let followers = observers
+            .get_mut(database)
+            .expect("a store's followers outlive its observer");
+        followers.retain(|(inbox, parent)| {
+            let Some(inbox) = inbox.upgrade() else {
+                return false;
+            };
+            // A watch served in-process follows no parent.
+            if parent.is_some() && *parent != current {
+                inbox.close();
+                return false;
+            }
+            inbox.look()
+        });
+        if followers.is_empty() {
+            observers.remove(database);
+            return;
         }
-        if mailbox.closed {
-            shared.1.notify_all();
-            break;
-        }
-        mailbox.look = true;
-        shared.1.notify_all();
     }
 }
 

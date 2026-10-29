@@ -1096,7 +1096,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     repo,
                     task.identifier,
                     loopflow::lf::commands::waves::Shape::Tasks,
-                );
+                    loopflow::lf::commands::watch::Transport::Stdio,
+                )
+                .map(drop);
             }
             if *json {
                 loopflow::lf::commands::waves::print_task_detail(status)?;

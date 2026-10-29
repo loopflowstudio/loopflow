@@ -372,9 +372,9 @@ impl SessionFacts {
 
 /// `lf session list` (`Shape::Tasks`) and `lf desktop sessions` (`Shape::Desktop`).
 pub fn list_sessions(args: &SessionListArgs, shape: Shape) -> anyhow::Result<()> {
-    let filter = list_filter(args)?;
+    let filter = list_filter(args, &std::env::current_dir()?)?;
     if args.watch {
-        return watch_list(filter, shape);
+        return watch_list(filter, shape, super::watch::Transport::Stdio).map(drop);
     }
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;
@@ -382,14 +382,18 @@ pub fn list_sessions(args: &SessionListArgs, shape: Shape) -> anyhow::Result<()>
     })
 }
 
-/// `lf session list`'s selection: this repository's unless `--all`.
-fn list_filter(args: &SessionListArgs) -> anyhow::Result<crate::session::SessionFilter> {
+/// `lf session list`'s selection: the repository containing `directory`
+/// unless `--all`.
+pub(crate) fn list_filter(
+    args: &SessionListArgs,
+    directory: &std::path::Path,
+) -> anyhow::Result<crate::session::SessionFilter> {
     Ok(crate::session::SessionFilter {
         available: args.available,
         repo: if args.all {
             None
         } else {
-            crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string())
+            crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string())
         },
         task: args.task.clone(),
         orphan: args.orphan,
@@ -414,17 +418,21 @@ struct SessionWatchArgs {
     interactive: Option<bool>,
 }
 
-fn watch_list(filter: crate::session::SessionFilter, shape: Shape) -> anyhow::Result<()> {
+pub(crate) fn watch_list(
+    filter: crate::session::SessionFilter,
+    shape: Shape,
+    transport: super::watch::Transport,
+) -> anyhow::Result<Option<super::watch::Subscription>> {
     let args = SessionWatchArgs {
         repo: filter.repo.clone(),
         task: filter.task.clone(),
         search: filter.search.clone(),
         interactive: filter.interactive,
     };
-    super::watch::run(
+    super::watch::start(
         args,
         super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
-        |store, args| {
+        move |store, args| {
             let filter = crate::session::SessionFilter {
                 repo: args.repo,
                 task: args.task,
@@ -439,6 +447,7 @@ fn watch_list(filter: crate::session::SessionFilter, shape: Shape) -> anyhow::Re
                 }
             }
         },
+        transport,
     )
 }
 

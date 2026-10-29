@@ -1049,7 +1049,7 @@ mod tests {
 
     #[test]
     fn task_admission_reads_released_evidence_without_reconstructing_provider_content() {
-        use crate::store::migrations::{apply_before_current_draft, upgrade_from_draft};
+        use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
         use crate::work::project::ProjectId;
         use crate::work::task::TaskId;
         use std::sync::{Arc, Mutex};
@@ -1075,7 +1075,7 @@ mod tests {
         ];
         for (sql, expected) in cases {
             let conn = Connection::open_in_memory().unwrap();
-            apply_before_current_draft(&conn, "planning_peers");
+            apply_before_migration(&conn, "planning_peers");
             let wave = WaveId::new();
             let project = ProjectId::new();
             let task = TaskId::new();
@@ -1094,7 +1094,7 @@ mod tests {
                 .unwrap()
                 .collect::<Result<_, _>>()
                 .unwrap();
-            upgrade_from_draft(&conn, "planning_peers");
+            upgrade_from_migration(&conn, "planning_peers");
             let store = SqliteStore {
                 conn: Arc::new(Mutex::new(conn)),
             };
@@ -1352,7 +1352,7 @@ mod tests {
         // An already exact prefixed name also consumes the exception once.
         for historical_name in ["Customer requests", "Product — Customer requests"] {
             let mut conn = Connection::open_in_memory().unwrap();
-            crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
+            crate::store::migrations::apply_before_migration(&conn, "planning_peers");
             let snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
                 "../../../../tests/fixtures/dto/task_history_planning.json"
             ))
@@ -1373,7 +1373,7 @@ mod tests {
                  VALUES('/repo','linear',?1,?2,10,0,0)",
                 params![project.id, original],
             ).unwrap();
-            conn.execute_batch(&crate::store::migrations::current_draft_sql(
+            conn.execute_batch(&crate::store::migrations::migration_section_sql(
                 "planning_peers",
             ))
             .unwrap();
@@ -1429,7 +1429,7 @@ mod tests {
     #[test]
     fn confirming_refresh_uses_released_claim_instead_of_membership_index() {
         let conn = Connection::open_in_memory().unwrap();
-        crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
+        crate::store::migrations::apply_before_migration(&conn, "planning_peers");
         let snapshot: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -1445,7 +1445,7 @@ mod tests {
             ],
         )
         .unwrap();
-        conn.execute_batch(&crate::store::migrations::current_draft_sql(
+        conn.execute_batch(&crate::store::migrations::migration_section_sql(
             "planning_peers",
         ))
         .unwrap();
@@ -1487,7 +1487,7 @@ mod tests {
     #[test]
     fn task_history_enriches_only_absent_completion_dates_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
-        crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
+        crate::store::migrations::apply_before_migration(&conn, "planning_peers");
         let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -1505,7 +1505,7 @@ mod tests {
             params![item.id, item.identifier, item.project_id, old.to_string()],
         )
         .unwrap();
-        conn.execute_batch(&crate::store::migrations::current_draft_sql(
+        conn.execute_batch(&crate::store::migrations::migration_section_sql(
             "planning_peers",
         ))
         .unwrap();
@@ -1527,7 +1527,7 @@ mod tests {
     #[test]
     fn due_dates_enrich_absent_history_but_preserve_observed_null_at_equal_revision() {
         let conn = Connection::open_in_memory().unwrap();
-        crate::store::migrations::apply_before_current_draft(&conn, "planning_peers");
+        crate::store::migrations::apply_before_migration(&conn, "planning_peers");
         let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -1540,7 +1540,7 @@ mod tests {
             params![item.id, item.identifier, item.project_id, old.to_string()],
         )
         .unwrap();
-        crate::store::migrations::upgrade_from_draft(&conn, "planning_peers");
+        crate::store::migrations::upgrade_from_migration(&conn, "planning_peers");
         item.due_date = Some("2026-10-08".into());
         assert!(super::put_item(&conn, "/repo", 2, &item).unwrap());
         let observed: Option<String> = conn

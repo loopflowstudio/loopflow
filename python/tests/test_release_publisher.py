@@ -9,7 +9,6 @@ import urllib.error
 from pathlib import Path
 
 import pytest
-from botocore.exceptions import ClientError
 
 from scripts import deploy_website, publish_release, release_install_smoke
 
@@ -59,7 +58,6 @@ def test_publisher_extracts_the_arm_cli(tmp_path: Path):
 @pytest.mark.parametrize(
     ("code", "output", "error"),
     [
-        (0, '{"candidate":{"authority":"validation_only"}}', "validation-only"),
         (
             1,
             '{"candidate":{"authority":"published"},"verdict":{"kind":"reject"}}',
@@ -562,74 +560,6 @@ def test_direct_publisher_stage_cannot_bypass_the_owning_release_operation(
         monkeypatch.setenv("LF_WORKTREE_LEASE_FD", str(lease.fileno()))
         with pytest.raises(RuntimeError, match="invoke lf release run"):
             publish_release.main()
-
-
-@pytest.mark.parametrize("publication", ["absent", "github", "crate", "dmg", "unknown"])
-def test_source_replacement_requires_known_publication_state(
-    monkeypatch: pytest.MonkeyPatch, publication: str
-):
-    def run(command, **kwargs):
-        if command[0] == "git":
-            return subprocess.CompletedProcess(command, 0, "drafts/remove_ask.sql\n", "")
-        if publication == "github":
-            return subprocess.CompletedProcess(command, 0, '{"isDraft":true}', "")
-        error = "authentication failed" if publication == "unknown" else "release not found"
-        return subprocess.CompletedProcess(command, 1, "", error)
-
-    def urlopen(*args, **kwargs):
-        if publication == "crate":
-            return io.BytesIO(b"{}")
-        raise urllib.error.HTTPError("https://crates.io", 404, "missing", {}, None)
-
-    class Downloads:
-        def head_object(self, **kwargs):
-            if publication != "dmg":
-                raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
-            return {}
-
-    monkeypatch.setattr(publish_release, "_run", run)
-    monkeypatch.setattr(publish_release.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(publish_release, "_r2_client", Downloads)
-    if publication == "unknown":
-        with pytest.raises(RuntimeError, match="authentication failed"):
-            publish_release.inspect_source("exact-commit", "v0.12.30", check_publication=True)
-    else:
-        result = publish_release.inspect_source("exact-commit", "v0.12.30", check_publication=True)
-        assert result["preparation_required"] == ["drafts/remove_ask.sql"]
-        assert bool(result["publications"]) == (publication != "absent")
-
-
-def test_source_inspection_uses_the_commit_not_the_working_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    def run(command, **kwargs):
-        return subprocess.run(command, cwd=tmp_path, text=True, capture_output=True, check=True)
-
-    monkeypatch.setattr(publish_release, "_run", run)
-    run(["git", "init"])
-    run(["git", "config", "user.name", "Release test"])
-    run(["git", "config", "user.email", "release@example.test"])
-    drafts = tmp_path / "rust/loopflow/src/store/migrations/drafts"
-    drafts.mkdir(parents=True)
-    (drafts / "README.md").write_text("Drafts\n")
-    run(["git", "add", "."])
-    run(["git", "commit", "-m", "Prepared source"])
-    prepared = run(["git", "rev-parse", "HEAD"]).stdout.strip()
-    (drafts / "incoming.sql").write_text("SELECT 1;\n")
-    run(["git", "add", "."])
-    run(["git", "commit", "-m", "Concurrent migration"])
-    integrated = run(["git", "rev-parse", "HEAD"]).stdout.strip()
-    (drafts / "incoming.sql").unlink()
-
-    assert publish_release.inspect_source(prepared, "v1.2.3", check_publication=False) == {
-        "preparation_required": [],
-        "publications": None,
-    }
-    observed = publish_release.inspect_source(integrated, "v1.2.3", check_publication=False)
-    assert observed["preparation_required"] == [
-        "rust/loopflow/src/store/migrations/drafts/incoming.sql"
-    ]
-    assert observed["publications"] is None
 
 
 @pytest.mark.parametrize("damage", [None, "bytes", "version", "manifest"])

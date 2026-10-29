@@ -671,7 +671,7 @@ async fn early_observation_records_preflight() {
     )
     .output()
     .unwrap();
-    assert!(!output.status.success(), "{output:?}");
+    assert!(output.status.success(), "{output:?}");
     let conn = rusqlite::Connection::open(&database).unwrap();
     let (count, completed): (i64, i64) = conn
         .query_row(

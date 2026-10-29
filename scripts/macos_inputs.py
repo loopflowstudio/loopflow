@@ -37,11 +37,9 @@ _SWIFT_TEST_INPUTS = (
     "python/tests/conftest.py",
 )
 _PROCESS_INPUTS = (
-    "rust/loopflow/src/data_clone.rs",
     "rust/loopflow/src/store/copy.rs",
     "rust/loopflow/src/journal/os_process.rs",
     "rust/loopflow/src/lf/commands/install",
-    "rust/loopflow/tests/data_clones.rs",
 )
 _MACOS_CFG = re.compile(r'target_os\s*=\s*"macos"')
 

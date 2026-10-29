@@ -1230,3 +1230,31 @@ fn repo_people_keep_unresolved_github_identity_explicit() {
     missing.as_object_mut().unwrap().remove("email");
     assert!(serde_json::from_value::<RepoPerson>(missing).is_err());
 }
+
+#[test]
+fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
+    let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
+    let receipts: Vec<loopflow::lf::commands::task_create::TaskCreateReceipt> =
+        serde_json::from_str(json).unwrap();
+    assert_eq!(receipts[0].graph.as_deref(), Some("code"));
+    assert!(receipts[0].session_id.is_some());
+    // The run failed after the Task was filed.
+    assert_eq!(receipts[1].graph, None);
+    assert_eq!(receipts[1].session_id, None);
+    assert_eq!(
+        serde_json::to_value(&receipts).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
+fn wave_graph_reports_its_default_with_or_without_a_wave() {
+    let json = include_str!("../../../tests/fixtures/dto/wave_graph.json");
+    let graphs: Vec<loopflow::ops::project::WaveGraph> = serde_json::from_str(json).unwrap();
+    assert_eq!(graphs[0].default.source.as_str(), "repo");
+    assert!(graphs[1].wave.is_none());
+    assert_eq!(
+        serde_json::to_value(&graphs).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}

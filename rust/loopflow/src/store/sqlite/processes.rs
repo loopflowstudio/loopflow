@@ -2293,9 +2293,9 @@ mod attachment_tests {
 
     #[test]
     fn attachment_migration_preserves_released_history_and_waiting_evidence() {
-        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "agent_process");
+        apply_before_migration(&conn, "agent_process");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/agent_process_released.sql"
         ))
@@ -2318,12 +2318,12 @@ mod attachment_tests {
             .unwrap()
         };
         let before = history();
-        conn.execute_batch(&current_draft_sql("agent_process"))
+        conn.execute_batch(&migration_section_sql("agent_process"))
             .unwrap();
         assert_eq!(history(), before);
-        conn.execute_batch(&current_draft_sql("lf_process_ids"))
+        conn.execute_batch(&migration_section_sql("lf_process_ids"))
             .unwrap();
-        conn.execute_batch(&current_draft_sql("process_terminal"))
+        conn.execute_batch(&migration_section_sql("process_terminal"))
             .unwrap();
         let terminal: Option<String> = conn
             .query_row(

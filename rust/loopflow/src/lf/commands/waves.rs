@@ -4223,7 +4223,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("released.db");
         let conn = rusqlite::Connection::open(&database).unwrap();
-        crate::store::migrations::apply_before_current_draft(&conn, "task_paused");
+        crate::store::migrations::apply_before_migration(&conn, "task_paused");
         let task = crate::durable::TaskId::new();
         let fixture = include_str!("../../../tests/fixtures/migrations/work_stream_released.sql")
             .replace("{wave}", crate::id::WaveId::new().as_str())
@@ -4233,7 +4233,7 @@ mod tests {
             // The upgrade keeps only Workflows standing at `end`.
             .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
-        crate::store::migrations::upgrade_from_draft(&conn, "task_paused");
+        crate::store::migrations::upgrade_from_migration(&conn, "task_paused");
         conn.execute_batch("ALTER TABLE tasks DROP COLUMN paused")
             .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();

@@ -15,9 +15,11 @@ mod chapters;
 mod children;
 pub(crate) mod ci_incidents;
 pub mod contention;
-pub mod copy;
+pub(crate) mod copy;
 mod durable;
 mod metrics;
+#[cfg(test)]
+mod migration_build;
 mod migration_catalog;
 mod migration_schema;
 pub mod migrations;
@@ -97,8 +99,6 @@ pub enum StoreError {
     PlanningReceiptConflict { effect: &'static str },
     #[error("Project {project_id} membership changed without relationship ordering evidence")]
     ProjectMembershipConflict { project_id: String },
-    #[error("development store is incompatible: {0}")]
-    IncompatibleDevelopment(String),
     #[error("invalid control authority: {0}")]
     InvalidAuthority(String),
 }
@@ -162,10 +162,9 @@ pub(crate) fn custom_home_selected() -> bool {
     !same_database_file(&lf_home_dir(), &default_lf_home_dir()).unwrap_or(false)
 }
 
-/// The default home's database, or this build's copy of it when the build
-/// carries unreleased drafts (see [`copy`]).
+/// The selected home's database.
 pub fn default_db_path() -> PathBuf {
-    copy::selected().unwrap_or_else(|| lf_home_dir().join("loopflow.db"))
+    lf_home_dir().join("loopflow.db")
 }
 
 /// The selected Machine's database. A Machine has exactly one, at a fixed name.
@@ -193,23 +192,18 @@ pub(crate) enum FrontierAdvance {
 /// Whether this open may apply migrations to `path`.
 ///
 /// A private store (any path that is not the machine's shared `~/.lf/loopflow.db`)
-/// may initialize once; subsequent opens require its exact schema. The shared
-/// release store is exclusive to the promotion boundary: a
-/// validation-only build never writes to it, and an ordinary (`Forbidden`) open
-/// neither initializes nor advances it. Bootstrapping a missing or empty shared
-/// store to the candidate's head can strand an older installed binary exactly as
-/// advancing an existing frontier would, so both belong to `Authorized` alone.
+/// migrates itself, unmerged schema work included. The shared store is exclusive
+/// to the install switch: an ordinary (`Forbidden`) open neither initializes nor
+/// advances it. Bootstrapping a missing or empty shared store to the candidate's
+/// head can strand an older installed binary exactly as advancing an existing
+/// frontier would, so both belong to `Authorized` alone.
 fn may_apply_migrations(
     path: &Path,
-    authority: crate::build_info::MigrationAuthority,
     home: &Path,
     advance: FrontierAdvance,
 ) -> Result<bool, std::io::Error> {
     if !same_database_file(path, &home.join(".lf/loopflow.db"))? {
         return Ok(true);
-    }
-    if authority != crate::build_info::MigrationAuthority::Published {
-        return Ok(false);
     }
     Ok(advance == FrontierAdvance::Authorized)
 }
@@ -1265,7 +1259,6 @@ mod tests {
         may_apply_migrations, read_nonterminal_task_worktrees, CredentialState, ProviderAccount,
         ProviderAccountId, RoutingState, StorageConfig,
     };
-    use crate::build_info::MigrationAuthority;
     use crate::child::ChildRef;
     use crate::durable::{Author, WorkRef};
     use crate::id::WaveId;
@@ -1352,24 +1345,15 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let home = directory.path();
         let production = home.join(".lf/loopflow.db");
-        let published = MigrationAuthority::Published;
-        let validation_only = MigrationAuthority::ValidationOnly;
 
-        // A validation-only build never writes migrations to the shared store,
-        // boundary or not.
-        assert!(!may_apply_migrations(&production, validation_only, home, Forbidden).unwrap());
-        assert!(!may_apply_migrations(&production, validation_only, home, Authorized).unwrap());
+        // An ordinary open neither initializes nor advances the shared store;
+        // only the promotion boundary owns both.
+        assert!(!may_apply_migrations(&production, home, Forbidden).unwrap());
+        assert!(may_apply_migrations(&production, home, Authorized).unwrap());
 
-        // A published build's ordinary open neither initializes nor advances the
-        // shared store; only the promotion boundary owns both.
-        assert!(!may_apply_migrations(&production, published, home, Forbidden).unwrap());
-        assert!(may_apply_migrations(&production, published, home, Authorized).unwrap());
-
-        // A private store may initialize regardless of published authority.
-        // Its schema must match exactly on subsequent opens.
+        // A private store migrates itself.
         let isolated = home.join(".lf-dev/branch/loopflow.db");
-        assert!(may_apply_migrations(&isolated, validation_only, home, Forbidden).unwrap());
-        assert!(may_apply_migrations(&isolated, published, home, Forbidden).unwrap());
+        assert!(may_apply_migrations(&isolated, home, Forbidden).unwrap());
     }
 
     fn make_wave(repo: &str) -> Wave {
@@ -3895,10 +3879,6 @@ mod tests {
         {
             let conn = rusqlite::Connection::open(&db_path).expect("open sqlite db");
             super::migrations::apply_sqlite(&conn).expect("apply migrations");
-            // The open below expects this build's schema, drafts included.
-            for draft in crate::build_info::migration_draft_manifest() {
-                conn.execute_batch(draft.sql).expect("apply draft");
-            }
             conn.execute(
                 "INSERT INTO provider_tokens
                  (provider, access_token, refresh_token, expires_at, login, updated_at, credential_type, encrypted)

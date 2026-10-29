@@ -1,5 +1,6 @@
 import json
 import os
+import plistlib
 import shutil
 import stat
 import subprocess
@@ -11,23 +12,27 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
-    nightly = yaml.load(
-        (ROOT / ".github/workflows/nightly-packages.yml").read_text(), Loader=yaml.BaseLoader
+def test_main_packages_build_every_green_main_commit_without_deploying():
+    main = yaml.load(
+        (ROOT / ".github/workflows/main-packages.yml").read_text(), Loader=yaml.BaseLoader
     )
     workflow = yaml.load(
         (ROOT / ".github/workflows/package-build.yml").read_text(), Loader=yaml.BaseLoader
     )
 
-    assert nightly["name"] == "Packages (nightly)"
-    assert nightly["on"]["schedule"] == [{"cron": "0 9 * * *"}]
-    assert nightly["jobs"] == {"packages": {"uses": "./.github/workflows/package-build.yml"}}
+    assert main["name"] == "Packages (main)"
+    assert main["on"]["workflow_run"]["workflows"] == ["CI"]
+    assert main["on"]["workflow_run"]["branches"] == ["main"]
+    packages = main["jobs"]["packages"]
+    assert packages["uses"] == "./.github/workflows/package-build.yml"
+    assert "workflow_run.conclusion == 'success'" in packages["if"]
+    assert "head_sha" in packages["with"]["revision"]
     assert workflow["name"] == "Package build"
     assert set(workflow["on"]) == {"workflow_call"}
     assert "inputs.release_tag" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
     assert "development" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
-    assert "published" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
-    assert "validation_only" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
+    checkout = workflow["jobs"]["native-packages"]["steps"][0]
+    assert checkout["with"]["fetch-depth"] == "0"
     assert workflow["env"]["LOOPFLOW_RELEASE_TAG"] == "${{ inputs.release_tag }}"
 
     native = workflow["jobs"]["native-packages"]
@@ -243,7 +248,9 @@ def _executable(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-def _cron_host(tmp_path: Path, wave_machine: dict | None) -> tuple[Path, dict]:
+def _cron_host(
+    tmp_path: Path, wave_machine: dict | None, system: str = "Linux"
+) -> tuple[Path, dict]:
     """A main checkout and HOME with an installed lf gate and fake host tools."""
     root = tmp_path.resolve()
     repo = root / "loopflow"
@@ -269,21 +276,43 @@ esac
     # A development build earlier on PATH, in a directory with a space.
     tools = root / "Loopflow Dev.app/bin"
     _executable(tools / "lf", "exit 1\n")
-    for tool in HOST_TOOLS + ("loopflow-release-publisher", "launchctl"):
+    for tool in HOST_TOOLS + ("loopflow-release-publisher",):
         _executable(tools / tool, "exit 0\n")
+    _executable(tools / "uname", f"echo {system}\n")
     _executable(
         tools / "crontab",
         # Like crontab, read the whole table before replacing it.
         'if [ "$1" = -l ]; then cat "$HOME/crontab"; '
         'else table="$(cat)"; printf "%s\\n" "$table" > "$HOME/crontab"; fi\n',
     )
+    # A gui domain: kickstart runs the job's program as launchd would and
+    # print reports how it exited.
+    _executable(
+        tools / "launchctl",
+        """echo "$*" >> "$HOME/launchctl"
+case "$1" in
+  bootstrap) cp "$3" "$HOME/loaded-${3##*/}" ;;
+  kickstart)
+    label="${3##*/}"
+    program="$(grep -o '<string>[^<]*\\.sh</string>' "$HOME/loaded-$label.plist" | sed 's/<[^>]*>//g')"
+    /bin/sh "$program"; echo "$?" > "$HOME/exit-$label" ;;
+  print)
+    label="${2##*/}"
+    [ -e "$HOME/loaded-$label.plist" ] || exit 113
+    if [ -e "$HOME/exit-$label" ]; then
+      printf '\\tstate = not running\\n\\tlast exit code = %s\\n' "$(cat "$HOME/exit-$label")"
+    else
+      printf '\\tstate = not running\\n\\tlast exit code = (never exited)\\n'
+    fi ;;
+esac
+""",
+    )
     for tool in ("jq", "git"):
         os.symlink(shutil.which(tool), tools / tool)
-    (home / "crontab").write_text("*/5 * * * * unrelated-job\n")
-    agents = home / "Library/LaunchAgents"
-    agents.mkdir(parents=True)
-    for job in ("telemetry-daily", "release-run"):
-        (agents / f"loopflow.cron.infrastructure.{job}.plist").touch()
+    (home / "crontab").write_text(
+        "*/5 * * * * unrelated-job\n"
+        "0 9 * * * /bin/sh old.sh # loopflow:infrastructure:telemetry-daily\n"
+    )
 
     env = {
         "HOME": str(home),
@@ -317,9 +346,9 @@ def test_cron_bootstrap_installs_jobs_for_a_wave_running_on_its_local_default(tm
     crontab = (home / "crontab").read_text().splitlines()
     assert crontab[0] == "*/5 * * * * unrelated-job"
     jobs = {line.split("# loopflow:infrastructure:")[1]: line for line in crontab[1:]}
+    assert len(jobs) == 2
     assert jobs["telemetry-daily"].startswith("0 9 * * * ")
     assert jobs["release-run"].startswith("0 10 * * * ")
-    assert not list((home / "Library/LaunchAgents").glob("loopflow.cron.*"))
 
     # cron hands sh the first 999 bytes of the command; it runs the wrapper,
     # which runs the installed gate, not PATH's lf.
@@ -330,6 +359,43 @@ def test_cron_bootstrap_installs_jobs_for_a_wave_running_on_its_local_default(tm
     assert (home / "ran").read_text() == "--wave infrastructure --batch graph release-run\n"
 
 
+def test_cron_bootstrap_schedules_macos_jobs_in_the_login_session(tmp_path):
+    repo, env = _cron_host(tmp_path, wave_machine=None, system="Darwin")
+
+    result = _bootstrap(repo, env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    home = Path(env["HOME"])
+    # cron's lines for the Wave give way; unrelated entries stay.
+    assert (home / "crontab").read_text() == "*/5 * * * * unrelated-job\n"
+    agents = home / "Library/LaunchAgents"
+    hours = {"telemetry-daily": 9, "release-run": 10}
+    for job, hour in hours.items():
+        plist = plistlib.loads((agents / f"loopflow.cron.infrastructure.{job}.plist").read_bytes())
+        assert plist["StartCalendarInterval"] == {"Hour": hour, "Minute": 0}
+        assert plist["ProgramArguments"] == [
+            "/bin/sh",
+            str(repo / f".lf/cron/infrastructure.{job}.sh"),
+        ]
+    uid = os.getuid()
+    calls = (home / "launchctl").read_text()
+    assert f"bootstrap gui/{uid} " in calls
+    # The bootstrap's telemetry run went through launchd, not the shell.
+    assert f"kickstart -k gui/{uid}/loopflow.cron.infrastructure.telemetry-daily" in calls
+    assert (home / "ran").read_text() == "--wave infrastructure --batch graph telemetry-daily\n"
+
+
+def test_cron_bootstrap_fails_a_red_launchd_telemetry_run(tmp_path):
+    repo, env = _cron_host(tmp_path, wave_machine=None, system="Darwin")
+    gate = Path(env["HOME"]) / ".lf-machine/install/gates/1/lf"
+    gate.write_text(gate.read_text().replace('>> "$HOME/ran" ;;', '>> "$HOME/ran"; exit 3 ;;'))
+
+    result = _bootstrap(repo, env)
+
+    assert result.returncode == 1
+    assert "the telemetry run is red" in result.stderr
+
+
 def test_cron_bootstrap_refuses_a_line_cron_would_truncate(tmp_path):
     # A checkout path near macOS's 1,024-byte limit leaves no room in the line.
     deep = tmp_path.resolve()
@@ -337,26 +403,13 @@ def test_cron_bootstrap_refuses_a_line_cron_would_truncate(tmp_path):
         deep /= "d" * min(200, 930 - len(str(deep / "loopflow")))
     deep.mkdir(parents=True)
     repo, env = _cron_host(deep, wave_machine=None)
+    before = (Path(env["HOME"]) / "crontab").read_text()
 
     result = _bootstrap(repo, env)
 
     assert result.returncode == 1
     assert "cron runs only the first 999" in result.stderr
-    assert (Path(env["HOME"]) / "crontab").read_text() == "*/5 * * * * unrelated-job\n"
-    agents = Path(env["HOME"]) / "Library/LaunchAgents"
-    assert len(list(agents.glob("loopflow.cron.infrastructure.*.plist"))) == 2
-
-
-def test_cron_bootstrap_keeps_launchd_jobs_when_the_crontab_write_fails(tmp_path):
-    repo, env = _cron_host(tmp_path, wave_machine=None)
-    tools = Path(env["PATH"].split(":")[0])
-    _executable(tools / "crontab", 'if [ "$1" = -l ]; then cat "$HOME/crontab"; else exit 1; fi\n')
-
-    result = _bootstrap(repo, env)
-
-    assert result.returncode != 0
-    agents = Path(env["HOME"]) / "Library/LaunchAgents"
-    assert len(list(agents.glob("loopflow.cron.infrastructure.*.plist"))) == 2
+    assert (Path(env["HOME"]) / "crontab").read_text() == before
 
 
 def test_cron_bootstrap_accepts_a_wave_placed_on_this_machine(tmp_path):
@@ -370,12 +423,13 @@ def test_cron_bootstrap_accepts_a_wave_placed_on_this_machine(tmp_path):
 
 def test_cron_bootstrap_leaves_the_crontab_alone_for_a_wave_placed_elsewhere(tmp_path):
     repo, env = _cron_host(tmp_path, wave_machine={"id": "home_mini", "route": "mini"})
+    before = (Path(env["HOME"]) / "crontab").read_text()
 
     result = _bootstrap(repo, env)
 
     assert result.returncode == 1
     assert "placed on Machine home_mini" in result.stderr
-    assert (Path(env["HOME"]) / "crontab").read_text() == "*/5 * * * * unrelated-job\n"
+    assert (Path(env["HOME"]) / "crontab").read_text() == before
 
 
 def test_release_installer_uses_the_promotion_boundary_to_activate_the_binary():
@@ -403,21 +457,6 @@ def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     assert "-disableAutomaticPackageResolution" in ci_build
 
 
-def test_rust_ci_materializes_drafts_before_building_tests():
-    ci = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
-    steps = ci["jobs"]["rust-build"]["steps"]
-    names = [step.get("name") for step in steps]
-
-    materialize = names.index("Materialize draft migrations for tests")
-    test = names.index("Build and archive Rust tests")
-    command = steps[materialize]["run"]
-
-    assert materialize < test
-    assert "scripts/canonicalize_migrations.py" in command
-    assert "--materialize-for-tests" in command
-    assert '["workspace"]["package"]["version"]' in command
-
-
 def test_changed_aware_runner_includes_ci_static_checks():
     result = subprocess.run(
         [
@@ -437,8 +476,7 @@ def test_changed_aware_runner_includes_ci_static_checks():
 
     assert "cargo fmt --all -- --check" in result.stdout
     assert "cargo clippy --all-targets --jobs 4 -- -D warnings" in result.stdout
-    assert "scripts/materialize_rust_tests.py" in result.stdout
-    assert "--prepare-cli" in result.stdout
+    assert "LOOPFLOW_TEST_LF=" in result.stdout
     assert "nextest run --all" in result.stdout or "test --all" in result.stdout
     assert "uv run python scripts/check_swift_multiplatform_boundaries.py" in result.stdout
 

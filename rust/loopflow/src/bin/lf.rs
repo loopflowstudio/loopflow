@@ -820,17 +820,21 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             use loopflow::lf::WaveGraphCommand;
             tokio::runtime::Runtime::new()?.block_on(async {
                 match cmd {
-                    WaveGraphCommand::Show { wave, json } => {
-                        let selected = project::wave_graph(repo, wave.as_deref()).await?;
+                    WaveGraphCommand::Show {
+                        wave,
+                        no_wave,
+                        json,
+                    } => {
+                        let selected =
+                            project::wave_graph(repo, wave.as_deref(), !*no_wave).await?;
                         if *json {
                             println!("{}", serde_json::to_string_pretty(&selected)?);
                         } else {
                             println!(
-                                "{} · {}",
-                                selected.wave,
-                                selected.graph.as_deref().unwrap_or(
-                                    "no graph selected; Tasks take up the repository's `graph:`, or code"
-                                )
+                                "{} · {} ({} default)",
+                                selected.wave.as_deref().unwrap_or("repository"),
+                                selected.default.name,
+                                selected.default.source.as_str()
                             );
                         }
                     }
@@ -941,7 +945,7 @@ fn read_task_draft() -> anyhow::Result<String> {
     Ok(String::from_utf8(bytes)?)
 }
 
-fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
+fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
         TaskCommand::Claim { issue, json } | TaskCommand::Unclaim { issue, json } => {
             use loopflow::ops::task_ownership::{change, render, OwnershipChange};
@@ -1032,14 +1036,20 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             Ok(())
         }
         TaskCommand::Create {
+            request,
             no_wave,
             wave,
             title,
             notes,
+            run,
+            graph,
             json,
         } => {
-            let report = match notes {
-                Some(notes) => Some(notes.clone()),
+            if let Some(graph) = graph {
+                loopflow::lf::commands::task_create::check_graph(repo, graph)?;
+            }
+            let report = match request.as_ref().or(notes.as_ref()) {
+                Some(text) => Some(text.clone()),
                 None => piped_task_report()?,
             };
             let issue = loopflow::ops::task::task_create(
@@ -1048,10 +1058,11 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                 title.clone(),
                 report,
             )?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&issue)?);
-            } else {
-                println!("{} · {}", issue.title, issue.identifier);
+            match (*json, *run) {
+                (false, _) => println!("{} · {}", issue.title, issue.identifier),
+                (true, false) => println!("{}", serde_json::to_string_pretty(&issue)?),
+                // `--run --json` prints one receipt once the run settles.
+                (true, true) => {}
             }
             if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
                 .planning_transport()
@@ -1062,6 +1073,16 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
                     "Saved locally; pending {provider} sync. Retry with `lf task sync {}`.",
                     issue.identifier
                 );
+            }
+            if *run {
+                loopflow::lf::commands::task_create::start(
+                    cli,
+                    repo,
+                    &issue,
+                    graph.as_deref(),
+                    request.as_deref(),
+                    *json,
+                )?;
             }
             Ok(())
         }
@@ -1425,10 +1446,6 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> std::process::ExitCode {
-    if let Err(error) = loopflow::store::copy::enter() {
-        eprintln!("Error: {error}");
-        return std::process::ExitCode::FAILURE;
-    }
     loopflow::transport::initialize();
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {
@@ -1487,7 +1504,6 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
 }
 
 fn run() -> anyhow::Result<()> {
-    loopflow::data_clone::enter_selected()?;
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Validate addressed commands once, before help, repository lookup, or admission.
     // A rejected destination must not create even a fallback Process on that Machine.
@@ -1525,7 +1541,7 @@ fn run() -> anyhow::Result<()> {
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
         init_tracing(false);
         if !preview {
-            loopflow::installation::dispatch_default_cli()?;
+            loopflow::installation::canonicalize_selected_home()?;
             journal::admit_process(&std::env::current_dir()?, &raw_args);
         }
         ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
@@ -1555,13 +1571,6 @@ fn run() -> anyhow::Result<()> {
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            // Which store this build reads: a draft-carrying build names its copy.
-            if error.kind() == clap::error::ErrorKind::DisplayVersion {
-                if let Some(copy) = loopflow::store::copy::selected() {
-                    let copy = copy.parent().expect("copy database has a directory");
-                    println!("copy: {}", copy.display());
-                }
-            }
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
@@ -1587,12 +1596,6 @@ fn run() -> anyhow::Result<()> {
     if cli.agent.is_some() && !cli.may_launch_agent() {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }
-    // Clone creation must reach an incompatible source read-only, without
-    // admitting a Process or forwarding the development binary to an install.
-    if let Some(Commands::Clone { cmd }) = &cli.command {
-        journal::mark_effect_free_read();
-        return loopflow::data_clone::run(cmd);
-    }
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
     let bypasses_installation_startup_gate = matches!(
@@ -1605,9 +1608,7 @@ fn run() -> anyhow::Result<()> {
                 }
         })
     );
-    if !bypasses_installation_startup_gate {
-        loopflow::installation::dispatch_default_cli()?;
-    }
+    loopflow::installation::canonicalize_selected_home()?;
     // Only an explicit selection becomes an inherited override. Task and
     // repository defaults are filled later and never acquire this precedence.
     let selected_agent = loopflow::config::agent_override().or(cli.agent.clone());
@@ -1807,10 +1808,11 @@ fn run() -> anyhow::Result<()> {
     // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
     if let Some(Commands::Self_ {
-        cmd: loopflow::lf::SelfCommand::Install { cmd },
+        cmd: loopflow::lf::SelfCommand::Install { main, cmd },
     }) = &cli.command
     {
         return match cmd.as_ref() {
+            None if *main => loopflow::lf::commands::install::main_build(),
             None => loopflow::lf::commands::install::latest(),
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
@@ -1820,6 +1822,12 @@ fn run() -> anyhow::Result<()> {
             }
             Some(InstallCommand::Preflight { json }) => {
                 loopflow::lf::commands::install::preflight(*json)
+            }
+            Some(InstallCommand::ReaderCatalog) => {
+                for floor in loopflow::store::migrations::reader_catalog() {
+                    println!("{floor}");
+                }
+                Ok(())
             }
             Some(InstallCommand::AdvanceSwitch { switch }) => {
                 loopflow::lf::commands::install::advance_switch(switch)
@@ -2001,6 +2009,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         Some(Commands::Task {
             cmd:
                 TaskCommand::Create {
+                    request,
                     title,
                     notes,
                     wave,
@@ -2008,10 +2017,10 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     ..
                 },
         }) => {
-            piped_notes = if notes.is_none() {
-                piped_task_report()?
-            } else {
-                None
+            piped_notes = match request {
+                Some(request) => Some(request.clone()),
+                None if notes.is_none() => piped_task_report()?,
+                None => None,
             };
             Some((
                 if *no_wave {
@@ -2582,7 +2591,6 @@ fn execute_command(
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
-        Some(Commands::Clone { .. }) => unreachable!("clone dispatch precedes admission"),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
             in_directory_runtime(args, |repo| match binding {
@@ -2737,11 +2745,11 @@ fn execute_command(
                 | TaskCommand::File { .. }
                 | TaskCommand::Files { .. }
                 | TaskCommand::Save { .. }),
-        }) => run_task_command(&std::env::current_dir()?, cmd),
+        }) => run_task_command(cli, &std::env::current_dir()?, cmd),
         Some(Commands::Task { cmd }) => {
             let directory = loopflow::repo::working_directory()?;
             let repo = selected_task_repository(cli, &directory, cmd.selector())?;
-            with_runtime(&repo, args, || run_task_command(&repo, cmd))
+            with_runtime(&repo, args, || run_task_command(cli, &repo, cmd))
         }
         Some(Commands::Context { json, wave, task }) => {
             loopflow::lf::commands::context::run(*json, wave.as_deref(), task.as_deref())

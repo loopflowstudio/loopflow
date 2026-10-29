@@ -226,14 +226,15 @@ def _architecture_commands(_changed: list[str]) -> list[Command]:
     ]
 
 
+def _test_cli() -> Path:
+    target = Path(os.environ.get("CARGO_TARGET_DIR", "target"))
+    return (target if target.is_absolute() else REPO_ROOT / target) / "debug/lf"
+
+
 def _rust_commands(_changed: list[str], tests: Optional[str] = None) -> list[Command]:
     """Rust checks; `tests` narrows the test run to one nextest filter expression."""
-    macos = platform.system() == "Darwin"
     if tests is not None or shutil.which("cargo-nextest"):
         filters = [] if tests is None else [f"({tests})"]
-        if macos:
-            # Clone fixtures need their own sandbox; the full macOS run covers them.
-            filters.append("not test(data_clones::)")
         scope = ["--all"] if tests is None else ["-p", "loopflow", "--no-tests", "fail"]
         test_argv = [
             "cargo",
@@ -260,8 +261,6 @@ def _rust_commands(_changed: list[str], tests: Optional[str] = None) -> list[Com
             "--test-threads",
             str(MAX_PARALLEL_JOBS),
         ]
-        if macos:
-            test_argv.extend(["--skip", "data_clones::"])
     runner = ["uv", "run", "--no-sync", "python", str(REPO_ROOT / "scripts/test_network.py")]
     test_argv[1:1] = ["--config", 'target."cfg(all())".runner = ' + json.dumps(runner)]
     commands = [
@@ -271,54 +270,14 @@ def _rust_commands(_changed: list[str], tests: Optional[str] = None) -> list[Com
             "rust-test-inventory",
         ),
         Command(["cargo", "fmt", "--all", "--", "--check"], REPO_ROOT, "rustfmt"),
+        # Fixtures run one prepared CLI instead of a Cargo build per test process.
         Command(
-            [
-                "uv",
-                "run",
-                "python",
-                "scripts/materialize_rust_tests.py",
-                "--prepare-cli",
-                "--",
-                *test_argv,
-            ],
+            ["cargo", "build", "-p", "loopflow", "--bin", "lf", "--jobs", str(MAX_PARALLEL_JOBS)],
             REPO_ROOT,
-            "rust",
+            "rust-cli",
         ),
+        Command(["env", f"LOOPFLOW_TEST_LF={_test_cli()}", *test_argv], REPO_ROOT, "rust"),
     ]
-    if macos and tests is None:
-        # Clone fixtures install their own sandbox, which cannot nest with the
-        # network runner's unsandboxed ps exception. Match macOS CI's boundary.
-        selector = "data_clones::"
-        if int(platform.mac_ver()[0].split(".")[0]) < 26:
-            selector += (
-                "clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source"
-            )
-        commands.append(
-            Command(
-                [
-                    "uv",
-                    "run",
-                    "python",
-                    "scripts/materialize_rust_tests.py",
-                    "--prepare-cli",
-                    "--",
-                    "cargo",
-                    "test",
-                    "-p",
-                    "loopflow",
-                    "--test",
-                    "integration",
-                    "--jobs",
-                    str(MAX_PARALLEL_JOBS),
-                    selector,
-                    "--",
-                    "--test-threads",
-                    str(MAX_PARALLEL_JOBS),
-                ],
-                REPO_ROOT,
-                "rust-clones",
-            )
-        )
     # Clippy runs last: a test failure means another edit, and Cargo serializes
     # every build in this target directory anyway.
     commands.append(

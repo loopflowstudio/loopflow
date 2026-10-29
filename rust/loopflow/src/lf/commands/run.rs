@@ -103,7 +103,6 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     if crate::transport::delegate_current(true)? {
         return Ok(());
     }
-    crate::data_clone::require_writable_session(id)?;
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let session = store
         .session(id)?

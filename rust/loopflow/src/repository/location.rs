@@ -137,11 +137,6 @@ pub fn reconcile(
 /// Ordinary reads reconnect enrolled directories and enroll retained identities
 /// witnessed by linked Task checkouts. They never invent an identity.
 pub fn reconnect_current() -> Result<()> {
-    // A disposable registry observes copied addresses without claiming the
-    // source checkout or rewriting its retained history.
-    if crate::data_clone::is_selected() {
-        return Ok(());
-    }
     // Most commands are unrelated to relocation. Inspect only the enclosing
     // Git locator before adding any Git subprocesses or database reads.
     let cwd = std::env::current_dir()?;

@@ -153,8 +153,9 @@ still carries both lf and agent rows during the AgentProcess cutover.
 `GraphCatalogEntry` carries the compiled graph and `GraphComposition`
 disclosure tree. Invalid sources remain visible with their error.
 
-`lf wave graph show/set` reads or changes the Wave's default graph,
-independently of Project history.
+`lf wave graph show [WAVE | --no-wave]` reads the graph a Wave's, or the
+repository's, new Tasks take up and which setting chose it, independently of
+Project history; `lf set graph` changes it.
 
 Task status and roadmap separate `graph_name` with its `graph_source`
 (`task`, `wave`, `repository` or `builtin`), `latest_graph_process`,

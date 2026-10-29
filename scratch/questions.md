@@ -55,3 +55,6 @@
   notarization or install complains.
 - **Sparkle's veto runs `lf install can-open` on the main thread** (≤ 30 s network timeout),
   only when an update is found.
+- **On dev, Desktop stays put rather than following preview (concept review after slice 8).**
+  The alternative keeps Sparkle on preview and has `adopt` leave a dev link alone; that keeps
+  Desktop fresher but runs two streams on one Machine. Chose the simpler one-stream reading.

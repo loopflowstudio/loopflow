@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-669 concept review: slice 3</title>
+<title>LOO-669 concept review: slices 4–8</title>
 <style>
   :root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fbfbf8; --muted:#666; --rule:#ddd; --new:#2f6f3e; --old:#9a3b2b; --code:#f0efe9; }
   @media (prefers-color-scheme: dark) { :root { --fg:#e8e6e1; --bg:#161615; --muted:#9a978f; --rule:#333; --new:#7fc493; --old:#e08b7a; --code:#22221f; } }
@@ -23,46 +23,56 @@
 <body>
 <main>
 <header>
-  <h1>Streams belong in <code>lf release status</code></h1>
-  <p>LOO-669 · concept-review after slice 3 (<code>regressed_in</code>) · 2026-10-29</p>
-  <p>Built from <code>scratch/release-streams.md</code>, <code>release/README.md</code>, <code>rust/loopflow/src/ops/release.rs</code>, <code>rust/loopflow/src/lf/commands/ops/mod.rs</code></p>
+  <h1>The app must follow the stream <code>lf</code> records</h1>
+  <p>LOO-669 · concept-review after slices 4–8 (stream flags, one linked lf, self-update, Sparkle) · 2026-10-29</p>
+  <p>Built from <code>scratch/release-streams.md</code>, <code>scratch/questions.md</code>, <code>rust/loopflow/src/lf/commands/install/published.rs</code>, <code>rust/loopflow/src/lf/commands/install.rs</code>, <code>rust/loopflow/src/store/sqlite.rs</code>, <code>swift/LoopflowMac/AppUpdater.swift</code></p>
 </header>
 
-<p>Run headless, so no decision is requested. The accepted stream names settle the one change. The review sent it back to implement.</p>
+<p>This ran headless, so it asks for no decision. Accepted decisions already settle both mismatches below, so the review sends them back to implement.</p>
 
 <h2>Actions → concepts → APIs</h2>
-<pre>mark a regression     lf task create|edit --regressed-in v0.15.3   Task.regressed_in
-daily release run     lf release run                                advance_stable → stable_advance
-see where things are  lf release status                             ReleaseStatusResult</pre>
-<p>The first two hold up. A regression is one Task field. The fix boundary is the Task's completion, which in the work model is "fix shipped". The third action doesn't show any stream.</p>
+<pre>pick a stream          lf install --dev|--preview|--stable   stream: in ~/.lf/config.yaml
+stay current           launchd/cron → lf install              published::install(recorded)
+app updates itself     Sparkle, appcast-&lt;stream&gt;.xml         AppUpdates.feedURL, can-open veto
+app's first launch     lf install adopt                       promote(app → app), relink lf
+terminal lf            ~/.local/bin/lf → app's lf, or CLI     public_cli_target</pre>
+<p>The model holds: there's one recorded stream, one link, and one promotion path. The two problems are both cases where an updater acts on something other than the recorded stream.</p>
 
-<h2>The mismatch</h2>
+<h2>Mismatch 1: dev on a Mac with the app</h2>
 <p class="tag">Existing behavior</p>
-<pre class="old">$ lf release status
-Target: lf
-Latest tag: v0.16.2
-Workflow: completed / success</pre>
-<p>"Latest" here means the newest tag, which is <code>preview</code>. Since slice 2, GitHub's Latest marker means <code>stable</code>. Why stable hasn't moved shows up only in the cron host's log.</p>
-
+<pre class="old">$ lf install --dev           # lf → ~/.lf/bin/lf-&lt;dev digest&gt;
+  … Sparkle (dev → appcast-preview.xml) installs v0.16.2
+  … app launches → lf install adopt  # lf → Loopflow.app/…/lf (v0.16.2)
+  … launchd → lf install       # dev again: lf → dev digest
+  … repeat</pre>
+<p>Under the accepted decision, Sparkle's feed reads the recorded value. <code>dev</code> has no appcast, so the app shouldn't pick one for it.</p>
 <p class="tag">Proposed (next implement)</p>
-<pre class="new">$ lf release status
-Target: lf
-Preview: v0.16.2 (published 2026-10-29)
-Stable:  v0.15.4
-  v0.16.2 soaks until 2026-11-05
-  LOO-12 holds v0.16.0, v0.16.1
-Workflow: completed / success</pre>
-<p>One function builds this view, and <code>advance_stable</code> logs from it, so the log and status can't disagree. <code>latest_tag</code> becomes <code>preview_tag</code>. It is not a wire DTO.</p>
+<pre class="new">$ lf install --dev           # lf → dev CLI; app runs no updater while dev is recorded
+  … Desktop updates again once CI signs dev app builds and appcast-dev.xml exists</pre>
+
+<h2>Mismatch 2: between Sparkle's install and the next launch</h2>
+<p class="tag">Existing behavior</p>
+<pre class="old">  (quit app; Sparkle installs v0.16.3, which adds a migration)
+$ lf task status
+shared store ~/.lf/loopflow.db does not have migration … yet;
+install a build that carries it with `lf install --dev`</pre>
+<p>The link already reaches the new bundle, but nothing has adopted it yet. Following the advice would move a stable Machine onto dev.</p>
+<p class="tag">Proposed (next implement)</p>
+<pre class="new">$ lf task status
+shared store … does not have migration … yet; run `lf install`
+$ lf install
+Loopflow.app v0.16.3 is installed but not adopted; adopting it.</pre>
 
 <h2>Kept as is</h2>
 <ol>
-  <li>Completion time as the fix boundary. It's conservative when a release lands between merge and completion. A release cut before the fix but published after completion is still the narrow case <code>scratch/questions.md</code> records.</li>
-  <li>Linear label mapping for <code>regressed_in</code>. Still open, and nothing here depends on it. Git planning exchange carries the mark to the release host once that host's lf has the field.</li>
+  <li>On a Mac with the app, the launchd schedule and Sparkle both run daily. When the app is running, the schedule only hands off to Sparkle. When it isn't, the schedule does the work (Jack's "b").</li>
+  <li>The entry gate. It's refreshed on every promotion with the same build, and scheduled jobs and Graph steps pin it. It's a stable path, not a second version.</li>
+  <li>Still open and out of this PR: the Linear mapping for <code>regressed_in</code>, the contract-drop delay (LOO-671), and Developer ID signing of dev app builds in CI.</li>
 </ol>
 
 <h2>Questions</h2>
 <ol>
-  <li>Should status also list <code>dev</code> (newest green main build)? a) yes, b) no, because dev belongs to <code>lf install</code> (slice 4).</li>
+  <li>Until dev app builds exist, on dev should Desktop a) stay where it is (proposed), or b) keep following preview while <code>adopt</code> leaves the dev link alone?</li>
 </ol>
 </main>
 </body>

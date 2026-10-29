@@ -122,7 +122,7 @@ tested before the next starts.
    Slice 3 adds the regression filter inside `stable_advance`.
    Compress: one `parse_version` now serves `bump_version`, `notes_base` and
    `published_releases`; the promote test split into success and tampered cases.
-   Not yet published; full nextest and `clippy --all-targets` are left to gate/CI.
+   Not yet published.
 3. **`regressed_in` Task field** and the stable rule reading it.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default

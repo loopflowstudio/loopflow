@@ -13,6 +13,7 @@ pub mod graph_inventory;
 pub mod history;
 pub mod history_transcript;
 pub mod install;
+pub mod linear_requests;
 pub mod list;
 pub mod machine;
 mod machine_credentials;

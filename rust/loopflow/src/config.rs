@@ -52,6 +52,22 @@ fn load_user_name() -> Result<Option<String>, LoadError> {
         .and_then(normalize_user_name))
 }
 
+/// A boolean this Machine sets for itself in `config.yaml` under `home`, such
+/// as `logs.linear_requests`; never read from a repository. Absent, unreadable
+/// or not a boolean is off.
+pub(crate) fn machine_flag(home: &Path, path: &[&str]) -> bool {
+    let Ok(Some(mut value)) = load_yaml_file(&home.join("config.yaml")) else {
+        return false;
+    };
+    for key in path {
+        match value.get(*key) {
+            Some(child) => value = child.clone(),
+            None => return false,
+        }
+    }
+    value.as_bool().unwrap_or(false)
+}
+
 /// Resolve a direct invocation's participant before execution moves Machines.
 pub fn participant_name() -> Result<Option<String>, LoadError> {
     match std::env::var(USER_NAME_ENV) {

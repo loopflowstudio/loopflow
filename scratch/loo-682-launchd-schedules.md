@@ -52,6 +52,9 @@ sharing would make the script depend on a hidden lf command. The
 scheduled-job word (GOAL.md `## Cron`); renaming them would orphan the loaded
 agents for no user gain.
 
+Second pass (graph step, 2026-10-28): implemented docs, skill and bootstrap
+match this review; no further change and no open product choice.
+
 ## Considered and left (scope)
 
 - `scripts/disk-cleanup.sh` still installs a crontab entry; it runs no agent and its `lf wt prune` steps already run from cron, so it stays out of scope.

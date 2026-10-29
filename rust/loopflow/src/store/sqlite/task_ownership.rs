@@ -345,20 +345,19 @@ fn require_writer_in(conn: &Connection, task: &TaskId) -> StoreResult<MachineId>
 }
 
 /// Handoff and unclaim end your own claim; someone else's stays theirs.
-fn require_my_claim_in(conn: &Connection, task: &TaskId) -> StoreResult<(MachineId, TaskOwner)> {
+/// `None` when nobody owns the Task.
+fn my_claim_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<(MachineId, TaskOwner)>> {
     let local = require_writer_in(conn, task)?;
     let (_, reading) = reading_in(conn, task)?;
     match reading.owner {
-        None => Err(StoreError::InvalidAuthority(format!(
-            "Task {task} is unowned"
-        ))),
+        None => Ok(None),
         Some(holder) if !is_mine_in(conn, task, &holder)? => {
             Err(StoreError::InvalidAuthority(format!(
                 "Task {task} is claimed by {}; claim it to take it over",
                 holder.person.as_deref().unwrap_or("someone else")
             )))
         }
-        Some(holder) => Ok((local, holder)),
+        Some(holder) => Ok(Some((local, holder))),
     }
 }
 
@@ -698,7 +697,11 @@ impl SqliteStore {
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (local, holder) = require_my_claim_in(&tx, task)?;
+        let Some((local, holder)) = my_claim_in(&tx, task)? else {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Task {task} is unowned"
+            )));
+        };
         if *target == local {
             return Err(StoreError::InvalidData(format!(
                 "Task {task} is already owned on this Machine"
@@ -729,14 +732,17 @@ impl SqliteStore {
         Ok(inserted)
     }
 
-    pub fn unclaim_task(&self, task: &TaskId) -> StoreResult<TaskOwnershipEntry> {
+    /// End your claim. An unowned Task is already unclaimed and writes nothing.
+    pub fn unclaim_task(&self, task: &TaskId) -> StoreResult<Option<TaskOwnershipEntry>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (local, holder) = require_my_claim_in(&tx, task)?;
+        let Some((local, holder)) = my_claim_in(&tx, task)? else {
+            return Ok(None);
+        };
         let key = my_key_in(&tx, task)?.or(holder.person_key);
         let entry = append_in(&tx, task, OwnershipKind::Unclaim, person()?, key, &local)?;
         tx.commit()?;
-        Ok(entry)
+        Ok(Some(entry))
     }
 
     /// Queue the claiming person, or nobody, as Linear assignee unless Linear already shows it.
@@ -905,6 +911,13 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn unclaiming_an_unowned_task_writes_nothing() {
+        let (_dir, store, task) = store_with_unowned_task();
+        assert_eq!(store.unclaim_task(&task).unwrap(), None);
+        assert!(store.task_ownership(&task).unwrap().log.is_empty());
     }
 
     #[test]

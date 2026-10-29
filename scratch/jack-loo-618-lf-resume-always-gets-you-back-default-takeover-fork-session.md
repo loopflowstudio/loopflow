@@ -105,6 +105,15 @@ Graph correction exception in `run::resume` (a Graph continuing its own step's R
 it off `resume` needs a hidden command or in-process input capture, more machinery than the
 one-line ancestry check it replaces; it is invisible to people.
 
+## Concept review (headless, 2026-10-29, second pass)
+
+Decided by Jack Heart's decision 5a ("unassign: nobody owns it; clears the Linear assignee")
+and AGENTS.md Flexibility, implemented 2026-10-29: `lf task unassign` on a Task nobody owns
+writes no ownership entry (`unclaim_task` returns `None`) and still clears the Linear
+assignee. Someone else's claim still refuses ("claimed by X; claim it to take it over");
+handoff of an unowned Task still refuses. Proof:
+`local_planning::task_unassign_clears_the_assignee_of_an_unowned_task`.
+
 ## Remaining
 
 - Implementation notes (2026-10-29): "unassigned" = no owner in the ownership log
@@ -120,7 +129,8 @@ one-line ancestry check it replaces; it is invisible to people.
 - Checks (2026-10-29): lib `human_session:: ops::task::ship store::sqlite::{task_work,selections,
   planning_write,task_ownership,ci_incidents} work::selection lf::tests lf::commands::waves
   agent::session:: task_graph_launch_tests::task_ship`, integration `world_recipes:: dto_fixtures::
-  cli_discovery:: machine_commands::task_ownership local_planning::task_unassign_clears_the_assignee`,
+  cli_discovery:: machine_commands::task_ownership local_planning::task_unassign_clears_the_assignee` (+ `_of_an_unowned_task`,
+  `task_ownership::tests::unclaiming_an_unowned_task_writes_nothing`),
   `two_people`, `transport_tests` Graph-step refusal, `session_lifecycle_tests` structured
   correction, `session_launch_contract` schema refusal, Swift `WorkModel|WaveStandup|DTOFixture|
   RegistryQuery|SessionsStore|DesktopHeadlessTests`, fmt, clippy all-targets — pass.

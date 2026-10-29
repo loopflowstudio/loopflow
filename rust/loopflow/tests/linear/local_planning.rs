@@ -451,6 +451,33 @@ fn task_unassign_clears_the_assignee() {
 }
 
 #[test]
+fn task_unassign_clears_the_assignee_of_an_unowned_task() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task", "create", "--wave", "inbox", "--title", "Assigned", "--json",
+        ],
+    );
+    let id = created["id"].as_str().unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "edit", id, "--assignee", "person-id"],
+    );
+    let unassigned = lf(
+        repo.path(),
+        home.path(),
+        &["task", "unassign", id, "--json"],
+    );
+    assert!(unassigned["owner"].is_null());
+    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
+    assert!(status["task"]["assignee"].is_null());
+}
+
+#[test]
 fn stored_fields_preserve_order_assignment_and_project_summary() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();

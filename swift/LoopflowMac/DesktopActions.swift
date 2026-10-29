@@ -267,6 +267,12 @@ struct DesktopAction {
         },
         DesktopAction("next", "Next Task", keys: [.init(.tab, .control)]) { try cycle($0, by: 1) },
         DesktopAction("previous", "Previous Task", keys: [.init(.tab, [.control, .shift])]) { try cycle($0, by: -1) },
+        DesktopAction("new-task", "New Task", keys: [.init(.character("n"), .command)],
+                      available: { $0.model.repoPath != nil }) { context in
+            guard context.model.repoPath != nil else { throw DesktopTargetError("Open a repository first. Nothing changed.") }
+            context.model.navigation.palette = .newTask
+            return nil
+        },
         DesktopAction("working-tasks", WorkNavigation.workingTasksTitle) { context in
             context.model.selectWorkingTasksDashboard()
             return nil

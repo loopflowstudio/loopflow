@@ -16,9 +16,9 @@ already use.
 **1. A Task is a conversation with a workflow behind it.**
 
 ```bash
-lf task create --title "fix the flaky retry test"   # prints the Task ID
-lf -b task run <ID>                                   # its worktree, its agents, its pull request
-lf resume --task <ID>                                 # its conversation, from any terminal
+lf task create "fix the flaky retry test" --run           # files it, starts its workflow, opens its conversation
+lf -b task create "fix the flaky retry test" --run --graph auto   # straight to a merged PR, no stops
+lf resume --task <ID>                                     # its conversation, from any terminal
 ```
 
 Each Task has:

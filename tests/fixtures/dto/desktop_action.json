@@ -60,6 +60,15 @@
       ]
     },
     {
+      "name": "new-task",
+      "title": "New Task",
+      "scope": "window",
+      "arguments": [],
+      "keys": [
+        "⌘N"
+      ]
+    },
+    {
       "name": "working-tasks",
       "title": "Working Tasks",
       "scope": "window",

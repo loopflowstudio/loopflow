@@ -1027,9 +1027,10 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   Membership changes preserve historical execution and require current ownership
   evidence before external effects. Earlier blanket refusal of provider reopening
   is superseded, not evidence that configured continuity passed.
-- **Historical continuity blocked daily telemetry** on August 23 (LOO-241's
-  eight gaps: `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas). Shipped history
-  owns the current rule; fresh failures belong to existing work, not duplicate Tasks.
+- **macOS cron cannot reach the login Keychain** (LOO-682, 2026-10-28): both
+  scheduled jobs failed on publisher/Claude Keychain access. The bootstrap now
+  installs gui-domain LaunchAgents on macOS; Linux keeps crontab. Real scheduled
+  firings remain LOO-645's evidence.
 - **Release orchestration and publication are separate evidence.** August 23's
   unpublished v0.12.14 despite cron/workflow success remains at
   `24db5d4d6:wave/infrastructure/MEMORY.md`, under Gotchas. Judge product state;

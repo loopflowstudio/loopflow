@@ -79,6 +79,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let state: String?
     public let completedAt: String?
     public let dueDate: String?
+    /// The release this bug regressed in; `stable` stays below it until the fix ships.
+    public let regressedIn: String?
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
@@ -88,6 +90,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         case linearId = "linear_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
+        case regressedIn = "regressed_in"
     }
 
     public var terminalLabel: String? {

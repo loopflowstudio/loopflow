@@ -105,6 +105,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         rank,
         assignee: None,
         due_date: input.due_date.clone(),
+        regressed_in: None,
         state: Some("unstarted".into()),
         completed_at: None,
         observation: crate::work::task::Observation::NotRequired,
@@ -510,6 +511,22 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         tasks_in(&conn, wave_id)
+    }
+
+    /// One repository's regression Tasks, open or done; abandoned ones covered nothing.
+    pub fn regression_tasks(&self, repo: &str) -> StoreResult<Vec<Task>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        let query = format!(
+            "{TASK_COLUMNS} WHERE t.repository_id=(SELECT id FROM repository_plans WHERE repo=?1)
+             AND t.regressed_in IS NOT NULL AND t.abandoned_at IS NULL AND {TASK_VISIBLE}"
+        );
+        let identifiers = TaskIdentifiers::read(&conn)?;
+        let mut statement = conn.prepare(&query)?;
+        let tasks = statement
+            .query_map([repo], |row| map_listed_task_row(&identifiers, row))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(tasks)
     }
 
     /// Tasks that are neither done nor abandoned: the live plan.
@@ -1619,7 +1636,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
             AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
         json_object('state','current')),
     t.project_id, t.agent, t.planning_revision, t.branch, t.base_commit, t.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
+    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id,t.regressed_in
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
     id, task_id, sequence, slug, branch, base_commit,
@@ -2090,6 +2107,7 @@ fn map_task_columns(
         rank: row.get(17)?,
         assignee: row.get(18)?,
         due_date: row.get(19)?,
+        regressed_in: row.get(23)?,
         state: row.get(20)?,
         completed_at: row.get(21)?,
         // Runtime freshness is derived when reconciliation decides whether the

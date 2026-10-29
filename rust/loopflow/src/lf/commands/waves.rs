@@ -141,6 +141,7 @@ pub struct TaskSummary {
     pub state: Option<String>,
     pub completed_at: Option<String>,
     pub due_date: Option<String>,
+    pub regressed_in: Option<String>,
     pub assignee: Option<String>,
 }
 
@@ -2289,6 +2290,7 @@ fn task_summary(
         wave_id: task.wave_id.as_ref().map(ToString::to_string),
         acquisition,
         due_date: task.due_date.clone(),
+        regressed_in: task.regressed_in.clone(),
         sync,
         id: task.id.to_string(),
         linear_id: task.linear_id.as_ref().map(|id| id.as_str().to_string()),
@@ -2506,6 +2508,9 @@ fn print_status(status: &WaveDetailSnapshot) {
                 );
                 if let Some(due) = &task.task.due_date {
                     println!("    due        {due}");
+                }
+                if let Some(version) = &task.task.regressed_in {
+                    println!("    regressed  {version}");
                 }
                 for line in task.task.sync.lines() {
                     println!("    {line}");

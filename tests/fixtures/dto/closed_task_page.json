@@ -11,6 +11,7 @@
         "state": "completed",
         "completed_at": "2026-07-14T18:30:00Z",
         "due_date": null,
+        "regressed_in": null,
         "sync": {
           "connected": true,
           "changes": [

@@ -93,7 +93,7 @@ version as `lf --version` — no separate manifest to bump or drift.
 |--------|------------|--------------|
 | `dev` | Newest green main build | Every green main (`lf install --main`) |
 | `preview` | Newest published release | Every release |
-| `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago |
+| `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago that no regression covers |
 
 Publishing never marks a release Latest (`gh release edit --latest=false`).
 After each run, including one with nothing to release, `lf release run` moves
@@ -104,6 +104,17 @@ points `Loopflow-latest.dmg` at that release's DMG after checking it against
 `SHA256SUMS`. A failed promotion leaves the marker for the next run.
 `releases/latest`, `install.sh`, `lf install` and the website's download link
 all serve `stable`.
+
+```bash
+lf task create --title "Sessions lose their name" --regressed-in v0.15.3
+lf task edit LOO-12 --regressed-in v0.15.3      # mark an existing bug
+```
+
+A regression is a bug Task marked with the release it regressed in. While it
+is open, `stable` stays below that release. Completing it (landing the fix)
+makes the first release published afterwards eligible once it soaks; releases
+in between still carry the bug and stay skipped. The run logs which Task holds
+`stable`. It reads the release Machine's Tasks, never Linear.
 
 ## Automation rhythm
 

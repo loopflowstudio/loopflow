@@ -4270,11 +4270,61 @@ fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<Publ
         .collect())
 }
 
-/// The release `stable` should point at now, when that is ahead of where it points.
-fn stable_advance(
-    releases: &[PublishedRelease],
+/// A regression Task as the stable rule reads it: releases from `version` on
+/// carry the bug, until the first release published after its fix landed.
+#[derive(Debug)]
+struct Regression {
+    task: String,
+    version: (u64, u64, u64),
+    fixed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl Regression {
+    fn covers(&self, release: &PublishedRelease) -> bool {
+        release.version >= self.version
+            && self
+                .fixed_at
+                .is_none_or(|fixed_at| release.published_at < fixed_at)
+    }
+}
+
+/// The repository's regression Tasks. A done Task whose completion time is
+/// unreadable keeps covering, so a stalled `stable` is the failure, not a bug.
+fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = runtime.block_on(crate::ops::planning_sync::planning_store())?;
+    let tasks = store
+        .sqlite
+        .regression_tasks(&repo.to_string_lossy())
+        .map_err(|error| OpsError::Message(format!("read regression Tasks: {error}")))?;
+    Ok(tasks
+        .into_iter()
+        .filter(|task| task.state.as_deref() != Some("canceled"))
+        .filter_map(|task| {
+            let fixed_at = if task.state.as_deref() == Some("completed") {
+                task.completed_at
+                    .as_deref()
+                    .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+                    .map(|at| at.with_timezone(&chrono::Utc))
+            } else {
+                None
+            };
+            Some(Regression {
+                version: parse_version(task.regressed_in.as_deref()?)?,
+                task: task.identifier,
+                fixed_at,
+            })
+        })
+        .collect())
+}
+
+/// The release `stable` should point at now, when that is ahead of where it
+/// points: the newest soaked release no regression covers.
+fn stable_advance<'a>(
+    releases: &'a [PublishedRelease],
+    regressions: &[Regression],
     now: chrono::DateTime<chrono::Utc>,
-) -> Option<&PublishedRelease> {
+) -> Option<&'a PublishedRelease> {
     let current = releases
         .iter()
         .find(|release| release.is_latest)
@@ -4282,6 +4332,11 @@ fn stable_advance(
     releases
         .iter()
         .filter(|release| release.published_at + STABLE_SOAK <= now)
+        .filter(|release| {
+            !regressions
+                .iter()
+                .any(|regression| regression.covers(release))
+        })
         .max_by_key(|release| release.version)
         .filter(|candidate| current.is_none_or(|current| candidate.version > current))
 }
@@ -4296,7 +4351,20 @@ fn advance_stable(
     lock: &ReleaseLock,
 ) -> OpsResult<()> {
     let releases = published_releases(repo, target)?;
-    let Some(next) = stable_advance(&releases, chrono::Utc::now()) else {
+    let regressions = regressions(repo)?;
+    for regression in &regressions {
+        if let Some(release) = releases.iter().find(|release| regression.covers(release)) {
+            progress.status(&format!(
+                "{} holds stable below {} (regressed in v{}.{}.{})",
+                regression.task,
+                release.tag,
+                regression.version.0,
+                regression.version.1,
+                regression.version.2
+            ));
+        }
+    }
+    let Some(next) = stable_advance(&releases, &regressions, chrono::Utc::now()) else {
         return Ok(());
     };
     progress.status(&format!(
@@ -4413,21 +4481,72 @@ mod tests {
             published("v0.15.9", 10, false),
             published("v0.15.2", 30, true),
         ];
-        assert_eq!(stable_advance(&releases, now).unwrap().tag, "v0.16.0");
+        assert_eq!(stable_advance(&releases, &[], now).unwrap().tag, "v0.16.0");
 
         let at_stable = [
             published("v0.16.1", 1, false),
             published("v0.16.0", 8, true),
         ];
-        assert!(stable_advance(&at_stable, now).is_none());
+        assert!(stable_advance(&at_stable, &[], now).is_none());
 
         // A pointer moved ahead by hand stays put until a newer release soaks.
         let ahead = [
             published("v0.16.1", 1, true),
             published("v0.16.0", 8, false),
         ];
-        assert!(stable_advance(&ahead, now).is_none());
-        assert!(stable_advance(&[published("v0.16.0", 6, false)], now).is_none());
+        assert!(stable_advance(&ahead, &[], now).is_none());
+        assert!(stable_advance(&[published("v0.16.0", 6, false)], &[], now).is_none());
+    }
+
+    fn regression(version: &str, fixed_days_ago: Option<i64>) -> Regression {
+        Regression {
+            task: "LOO-1".to_string(),
+            version: parse_version(version).unwrap(),
+            fixed_at: fixed_days_ago.map(|days| chrono::Utc::now() - chrono::TimeDelta::days(days)),
+        }
+    }
+
+    #[test]
+    fn an_open_regression_holds_stable_below_the_release_it_regressed_in() {
+        let now = chrono::Utc::now();
+        let releases = [
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.9", 20, false),
+            published("v0.15.2", 30, true),
+        ];
+        let open = [regression("v0.16.0", None)];
+        assert_eq!(
+            stable_advance(&releases, &open, now).unwrap().tag,
+            "v0.15.9"
+        );
+
+        let at_regressed = [regression("v0.15.9", None)];
+        assert!(stable_advance(&releases, &at_regressed, now).is_none());
+    }
+
+    #[test]
+    fn a_fixed_regression_releases_stable_at_the_fix_once_it_soaks() {
+        let now = chrono::Utc::now();
+        // Fixed 10 days ago: v0.16.1 (published 9 days ago) ships the fix.
+        let releases = [
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.2", 30, true),
+        ];
+        let fixed = [regression("v0.16.0", Some(10))];
+        assert_eq!(
+            stable_advance(&releases, &fixed, now).unwrap().tag,
+            "v0.16.1"
+        );
+
+        // The fix shipped in v0.16.1, still soaking; v0.16.0 still carries the bug.
+        let soaking = [
+            published("v0.16.1", 3, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.2", 30, true),
+        ];
+        assert!(stable_advance(&soaking, &[regression("v0.16.0", Some(4))], now).is_none());
     }
 
     #[test]

@@ -615,6 +615,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         rank: 0,
         assignee: None,
         due_date: None,
+        regressed_in: None,
         state: None,
         completed_at: None,
         observation: Observation::NotRequired,

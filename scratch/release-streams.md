@@ -129,7 +129,15 @@ tested before the next starts.
    Second compress: the publisher's release asset set is one `RELEASE_ASSETS`;
    the `stable_advance` test helper derives versions from tags.
    All #1772 CI checks passed, including rust-lint and rust-test that the local gate deferred.
-3. **Next: `regressed_in` Task field** and the stable rule reading it.
+3. **`regressed_in` Task field — built 2026-10-29, unpublished.** Migration
+   `task_regressed_in.sql` (additive `tasks.regressed_in`); `WorkValue::TaskRegressedIn`
+   written through `planning_write::local` (no Linear receipt, like `TaskDeferred`);
+   `lf task create|edit --regressed-in <v>` (`0.15.3` reads as `v0.15.3`); `Task`,
+   `TaskSummary`, `lf task status` and Desktop's `TaskPlanningFactsView` (was
+   `TaskDueDateView`) show it. `stable_advance` skips releases a `Regression`
+   covers: ≥ `regressed_in` and, once the Task is done, published before it closed.
+   `advance_stable` reads `SqliteStore::regression_tasks(repo)` and logs which Task
+   holds stable. Assumptions in `scratch/questions.md`; Linear label mapping stays Open.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default
    stable; switching slower runs `can_open` first. `install.sh --channel`.
@@ -293,3 +301,4 @@ Candidate principles (not decided):
    Outside the range → refused, naming which side to update.
 5. Remote surface comes from the remote: an agent on a remote Machine reads
    that Machine's `lf help`, as Rex derives its CLI from the server.
+- slice 3 implement (2026-10-29): dto_fixtures 46 pass; release_tests stable 2 pass; --lib store/planning/edit/release filters 149 pass; check_migrations ok. clippy, Swift and full gate to gate/CI.

@@ -1041,6 +1041,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             wave,
             title,
             notes,
+            regressed_in,
             run,
             graph,
             json,
@@ -1048,6 +1049,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             if let Some(graph) = graph {
                 loopflow::lf::commands::task_create::check_graph(repo, graph)?;
             }
+
             let report = match request.as_ref().or(notes.as_ref()) {
                 Some(text) => Some(text.clone()),
                 None => piped_task_report()?,
@@ -1057,6 +1059,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 if *no_wave { None } else { wave.as_deref() },
                 title.clone(),
                 report,
+                regressed_in_arg(regressed_in),
             )?;
             match (*json, *run) {
                 (false, _) => println!("{} · {}", issue.title, issue.identifier),
@@ -1120,6 +1123,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     );
                     if let Some(due) = &task.due_date {
                         println!("Due: {due}");
+                    }
+                    if let Some(version) = &task.regressed_in {
+                        println!("Regressed in: {version}");
                     }
                     if let Some(ownership) = &status.ownership {
                         println!("{}", loopflow::ops::task_ownership::render(ownership));
@@ -1315,13 +1321,14 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             rank,
             assignee,
             unassign,
+            regressed_in,
             wave,
         } => {
             let result = loopflow::ops::task::task_edit(
                 repo,
                 issue,
                 wave.as_deref(),
-                task_edit_update(title, notes, *rank, assignee, *unassign),
+                task_edit_update(title, notes, *rank, assignee, *unassign, regressed_in),
             )?;
             println!("{}: updated", result.id);
             print_planning_sync(&result.sync);
@@ -1423,6 +1430,7 @@ fn task_edit_update(
     rank: Option<u32>,
     assignee: &Option<String>,
     unassign: bool,
+    regressed_in: &Option<String>,
 ) -> loopflow::work::task::TaskUpdate {
     loopflow::work::task::TaskUpdate {
         title: title.clone(),
@@ -1433,7 +1441,15 @@ fn task_edit_update(
         } else {
             assignee.clone().map(Some)
         },
+        regressed_in: regressed_in_arg(regressed_in),
     }
+}
+
+/// `0.15.3` reads as `v0.15.3`; an unreadable version reaches validation as typed.
+fn regressed_in_arg(version: &Option<String>) -> Option<String> {
+    version.as_deref().map(|version| {
+        loopflow::work::task::release_version(version).unwrap_or_else(|| version.to_string())
+    })
 }
 
 fn piped_task_report() -> anyhow::Result<Option<String>> {
@@ -2037,13 +2053,19 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     rank,
                     assignee,
                     unassign,
+                    regressed_in,
                     wave,
                     ..
                 },
         }) => Some((
             wave.as_deref().or(cli.wave.as_deref()),
             loopflow::ops::task::TaskPlanningRequest::Edit(task_edit_update(
-                title, notes, *rank, assignee, *unassign,
+                title,
+                notes,
+                *rank,
+                assignee,
+                *unassign,
+                regressed_in,
             )),
         )),
         Some(Commands::Task {

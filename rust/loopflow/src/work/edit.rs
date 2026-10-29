@@ -101,6 +101,7 @@ work_values! {
     (TaskUrl, "task_url", Option<String>),
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
+    (TaskRegressedIn, "task_regressed_in", Option<String>),
     (CommentTask, "comment_task", String),
     (HistoricalProjectWorkflow, "workflow", String),
     // Released peers recorded the Wave default here; it lives in the Wave config.yaml.
@@ -153,6 +154,13 @@ impl WorkValue {
         match self {
             Self::Disposition(v) if !matches!(v.planning_completed, 0 | 1) => {
                 return Err(StoreError::InvalidData("invalid completion value".into()))
+            }
+            Self::TaskRegressedIn(Some(v))
+                if crate::work::task::release_version(v).as_ref() != Some(v) =>
+            {
+                return Err(StoreError::InvalidData(format!(
+                    "regressed-in {v:?} is not a release version like v0.15.3"
+                )))
             }
             Self::MetricTargets(v) => {
                 crate::work::project::validate_metric_targets(v).map_err(StoreError::InvalidData)?

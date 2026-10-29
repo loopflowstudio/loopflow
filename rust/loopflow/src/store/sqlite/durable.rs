@@ -735,6 +735,7 @@ mod durable_store_tests {
             rank: 0,
             assignee: None,
             due_date: None,
+            regressed_in: None,
             state: None,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,

@@ -10,3 +10,19 @@
 - **Stable advance gates on `completion: github-release`**, not on having a
   publisher, so publisher-only targets in other repos keep no Latest marker
   after `--latest=false`. Loopflow's target sets `github-release`.
+- **A done regression covers releases published before it closed (slice 3, 2026-10-29).**
+  The fix release is the first release published after the regression Task
+  completed; releases from `regressed_in` up to it stay ineligible. A release cut
+  before the fix merged but published after the Task closed would count as fixed;
+  assumed rare (a release run takes minutes). A done Task with an unreadable
+  completion time keeps covering, so the failure is a stalled `stable` that the
+  release log names (`LOO-1 holds stable below v0.16.0`), never a shipped bug.
+  Abandoned or canceled regression Tasks cover nothing.
+- **`regressed_in` reaches the release host only through local planning exchange.**
+  It has no Linear field, so the cron Machine sees a mark set elsewhere only
+  through peer planning (git). A released lf reading a peer planning document
+  that carries `task_regressed_in` fails to parse it. Until the Linear label
+  mapping (Open, design) lands, mark regressions on the Machine that runs the
+  release, or after the release host's lf includes this field.
+- **`--regressed-in` sets or replaces the mark; nothing clears it.** Complete or
+  abandon the Task instead. Add `--not-regressed` if a mistaken mark needs undoing.

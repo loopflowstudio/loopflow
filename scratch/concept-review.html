@@ -26,56 +26,46 @@
 </head>
 <body>
 <main>
-<h1>Doctor should show every recent bad exit, and search the five minutes after the last heartbeat</h1>
-<p class="meta">LOO-683 · concept-review (headless) · 2026-10-29 · built from
+<h1>Doctor should say how long Desktop lived and what its last heartbeat saw</h1>
+<p class="meta">LOO-683 · concept-review, second pass (headless) · 2026-10-29 · built from
 <code>scratch/loo-683-desktop-exits.md</code>, <code>rust/loopflow/src/desktop_exits.rs</code>,
-<code>swift/LoopflowMac/Services/{LaunchJournal,DesktopVitals}.swift</code>, <code>swift/README.md</code></p>
+<code>swift/LoopflowMac/Services/DesktopVitals.swift</code></p>
 
-<p>The model holds. Each fact has one writer and one home, and doctor is the only reader.
-Two places in the reader don't match the accepted demo. The accepted decisions
-already settle both, so the next step is implementation, with nothing to decide first.</p>
+<p>No decision is needed. The first pass's two fixes landed, and the model holds:
+each fact has one writer and one home, and doctor is the only reader. The accepted Demo
+line still promises two things the reader doesn't print, so the next step is
+implementation.</p>
 
-<h2>Actions → concepts → APIs</h2>
+<h2>Actions → concepts → APIs (unchanged)</h2>
 <table>
 <tr><th>Person does</th><th>Concept</th><th>API / home</th></tr>
-<tr><td>Quits, force-quits, or Desktop dies</td><td>Launch, with at most one exit record</td><td><code>LaunchJournal.recordExit</code> → <code>launches.ndjson</code></td></tr>
+<tr><td>Quits, force-quits, or Desktop dies</td><td>Launch, with at most one exit record</td><td><code>LaunchJournal</code> → <code>launches.ndjson</code></td></tr>
 <tr><td>Wants to know why it went away</td><td>The ended launches per bundle</td><td><code>lf doctor</code> → <code>desktop-exit</code></td></tr>
 <tr><td>Digs deeper</td><td>Diagnostics: vitals, hangs, stacks</td><td><code>~/.lf/logs/lf.log</code> (<code>desktop=</code> lines)</td></tr>
 <tr><td>Death with no record</td><td>The system's termination record</td><td>runningboardd via <code>/usr/bin/log</code>, over a bounded window</td></tr>
 </table>
 
-<h2>The consequential mismatch: one line per bundle hides repeats</h2>
-<p>On 2026-10-29 Desktop called <code>exit(1)</code> at 07:27, and again at 08:00. With the implemented reader,
-only the 08:00 exit appears. The accepted live acceptance (quit with ⌘Q, then Force Quit, then
-“<code>lf doctor</code> names both”) cannot pass.</p>
+<h2>The mismatch: the heartbeat is read but never shown</h2>
+<p>Doctor finds the last vitals line for the pid, then uses only its timestamp. The
+heartbeat exists so a storm or a memory climb shows up beside the exit. On 2026-10-29 it
+would have put about 1,000 killed reads next to the <code>exit(1)</code>. An unrecorded end also
+returns before its lifetime is added.</p>
 <p class="tag">Implemented</p>
-<pre class="was">⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) ended without a record between 09:10 and 08:02;
-                the system log is searched only over 15 minutes</pre>
-<p class="tag">Proposed (matches the accepted Demo)</p>
-<pre class="proposed">⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system) before 09:16, 1h12m after launch
-                Loopflow 0.15.1 (pid 8811) quit 09:01:40: Quit requested by Dock (pid 612)</pre>
-<p>Rule: per bundle, list the abnormal ends from the last 24 h, newest first, with at most three lines and then
-“… and N earlier”. Then add the most recent end if it is not already listed. A running launch still says
-“running since”.</p>
-
-<h2>Second: the heartbeat already bounds the search</h2>
-<p><code>DesktopVitals</code> writes every 300 s from its own utility queue, which keeps running when the main thread hangs.
-A launch therefore died within about one interval of its last <code>desktop=</code> line. Today the window ends at the next
-launch. When that launch comes more than 15 minutes later, doctor refuses to search.</p>
-<pre class="was">window = [last line, next launch or now]      # refused when longer than 15 min</pre>
-<pre class="proposed">window = [last line, min(next launch or now, last line + 300 s + 60 s)]   # always searched</pre>
-<p>This deletes the refusal branch and its message. A Force Quit at night followed by a relaunch in the morning
-still names SIGKILL.</p>
-
-<h2>Kept</h2>
-<p>The journal path under <code>timings/</code> stays, because <code>timings.py</code> reads it and a rename buys nothing.
-Quit still reports ok, and the check never fails doctor.</p>
+<pre class="was">⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system) before 09:16</pre>
+<p class="tag">Proposed (the accepted Demo)</p>
+<pre class="proposed">⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system) before 09:16, 1h12m after launch; last vitals 09:10: 412 MB, 61 lf reads/5 min</pre>
+<p>Rule: every ended line carries its lifetime. Each abnormal end appends its last vitals
+(footprint, reads, and the killed count when it's nonzero), or nothing when no vitals line
+exists. The storm WARN line counts as a vitals line. Quits stay terse.</p>
 
 <h2>Questions</h2>
-<p>Neither change needs your input before implementation. These stay open from earlier and don't block this Task:</p>
 <ol>
-<li>Read-storm follow-up (56k <code>lf task diff</code> reads SIGKILLed overnight): (a) file it as its own Task, or (b) leave it.</li>
-<li>Cap on listed abnormal ends per bundle: (a) 3 lines then “… and N earlier” (the default), or (b) every end in the last 24 h.</li>
+<li>None open for this step. Questions still open from earlier, which aren't product choices for this Task:
+  <ol type="a">
+  <li>Should the read-storm feedback loop become its own Task? (<code>scratch/questions.md</code>)</li>
+  <li>Where did the second 0.15.0 launch at 07:29:44 come from? New <code>pid</code>/<code>bundle</code> fields will name the next one.</li>
+  </ol>
+</li>
 </ol>
 </main>
 </body>

@@ -231,8 +231,9 @@ New check **`desktop-exit`** in a new module, `rust/loopflow/src/desktop_exits.r
 - `cargo test -p loopflow --lib desktop_exits::`: on fixture journals, quit →
   ok, exit with caller → warn naming the caller, unrecorded with
   `(0, 0, 256)` → "exited with status 1", `(2, 9, 9)` → SIGKILL, no record →
-  "ended without a record", wide window → no lookup, Dev and release bundles
-  reported separately.
+  "ended without a record", a night-long gap searches one heartbeat past the
+  last vitals line, quit then SIGKILL lists both, more than three abnormal ends
+  list three plus "… and N earlier", Dev and release bundles reported separately.
 - `uv run pytest python/tests/test_desktop_timings.py` still passes with `exit`
   events present.
 - `grep -rn "LoggingService\|Library/Logs/Loopflow" swift rust scripts` → no hits.
@@ -271,47 +272,35 @@ Live acceptance (Jack, after merge): quit the app once and force-quit it once;
 - Live acceptance (Jack, after merge): ⌘Q once and Force Quit once; `lf doctor`
   names both.
 
-Compress (2026-10-29): `DesktopLog.sourceRevision` alone shortens the revision;
-`Termination`/`SystemRecord` and `Check::fail` stay private.
-Check: `swift test --filter "LaunchJournalTests|DesktopLogTests"` 11 passed;
-`cargo test -p loopflow --lib desktop_exits::` 8 passed; `pytest test_desktop_timings.py
-test_install_script.py` passed (before compress); `cargo clippy -p loopflow
---all-targets -D warnings` clean.
+## Concept review (2026-10-29, headless) — implemented
 
-## Concept review (2026-10-29, headless) — implemented 2026-10-29
+The concept review kept the model as it was: the journal holds exit facts, lf.log
+holds diagnostics, and `lf doctor` is the one reader. It found two gaps against
+the Demo and the live acceptance. Both are now fixed in `desktop_exits::report`:
 
-The accepted model holds. The launch journal holds exit facts, lf.log holds
-diagnostics, and `lf doctor` is the one reader. The implementation departs from
-the accepted Demo and live acceptance in two places. Both are settled by
-decisions already accepted, so the next step is implementation, not a question:
+1. Per bundle, doctor lists up to 3 abnormal ends within 24 h, newest first, then
+   "… and N earlier". It also lists the latest end and the last quit within 24 h,
+   so ⌘Q followed by Force Quit names both. Before this, the 08:00 `exit(1)` hid
+   the one at 07:27.
+2. The 15-minute refusal is gone. The lookup always searches
+   [last `desktop=` line or `launch.at`, min(next launch or now, that + 360 s)].
+   `DesktopVitals` writes every 300 s from a utility queue that keeps running
+   through main-thread hangs.
 
-1. **Doctor hides earlier abnormal ends.** `report` keeps only the most recent
-   ended launch per bundle. The accepted Demo prints two exits for one bundle,
-   and the live acceptance (⌘Q, then Force Quit, then "`lf doctor` names both")
-   needs both. On 2026-10-29 itself, the 08:00 `exit(1)` would have hidden the
-   07:27 one, so one explained exit would have concealed a repeat.
-   Direction: per bundle, list each launch that ended abnormally within 24 h,
-   newest first, at most 3 lines, followed by "… and N earlier" when more exist.
-   Then add the most recent end if it is not already listed (a quit, or an
-   older end), so a person always sees the latest outcome. A running launch
-   still prints "running since". Status stays warn when any listed end is
-   abnormal and within 24 h. Tests: quit then SIGKILL lists both; two
-   unrecorded `(0,0,256)` ends list both; four abnormal ends list 3 plus
-   "1 earlier".
-2. **The heartbeat bound is half used.** The search window ends at the next
-   launch or now, and doctor declines whenever that span exceeds 15 minutes.
-   Force Quit at night and relaunch in the morning, and doctor says "searched
-   only over 15 minutes". `DesktopVitals` writes every 300 s from its own
-   utility queue, which keeps running through main-thread hangs. So a launch
-   died within about one interval of its last `desktop=` line.
-   Direction: the window is `[last line (or launch.at), min(next launch or now,
-   last line + 300 s + 60 s slack)]`, and it always searches. Delete the
-   15-minute refusal and its message. A missing lf.log line falls back to
-   `launch.at`, with the same cap. Test: last vitals at 09:10, next launch the
-   next day; the lookup receives 09:10–09:16 and reports SIGKILL.
+Kept as is: the journal path under `timings/`, `quit` as ok, and a check that
+never fails.
 
-Kept as is: the journal path under `timings/` (`timings.py` reads it, and
-renaming it would buy nothing), `quit` as ok, and the check never failing.
+Check: `cargo test -p loopflow --lib desktop_exits::` 11 passed; `cargo clippy
+--all-targets -- -D warnings` clean; `swift test --filter "LaunchJournalTests|DesktopLogTests"`
+11 passed; `pytest test_desktop_timings.py test_install_script.py` passed (2026-10-29).
 
-Unchanged open items (not product choices for this Task): the read-storm
-follow-up Task, and the second 07:29:44 launch. See questions.md.
+## Concept review, second pass (2026-10-29): implemented
+
+Both gaps against the Demo line are closed in `desktop_exits::describe`. Every
+ended line carries `, <span> after launch`, measured to the exit's `at` or the
+search window's end. Abnormal ends append `; last vitals HH:MM: <MB> MB, <reads>
+lf reads/5 min[, <killed> killed]` from the newest vitals or storm line for the
+pid. Hang and memory-pressure lines bound the search but carry no vitals.
+
+Check (after compress): `cargo test -p loopflow --lib desktop_exits::` 12 passed; clippy clean.
+Remaining: gate, then Jack's live acceptance (⌘Q once, Force Quit once) after merge.

@@ -8,6 +8,8 @@
 //! (namespace, code, wait status)` for every app. Desktop writes a vitals line
 //! to lf.log every 300 s, so the query searches from the launch's last line (or
 //! its start) through one interval plus slack, never past the next launch.
+//! Every end names how long the launch lived; every end but a quit appends the
+//! last vitals (or read-storm) line, the state Desktop was in before it went.
 //!
 //! Each bundle lists, newest first, up to three launches that ended abnormally in
 //! the last 24 h, its latest end, and its last quit in that time.
@@ -182,15 +184,28 @@ fn describe(
     lookup: &impl Fn(u32, DateTime<Utc>, DateTime<Utc>) -> SystemRecord,
 ) -> String {
     let title = launch.title();
+    let lines = launch
+        .pid
+        .map(|pid| desktop_lines(log, pid, launch.at))
+        .unwrap_or_default();
+    // A quit needs no explaining; any other end shows how Desktop last looked.
+    let vitals = if quit(launch) {
+        String::new()
+    } else {
+        last_vitals(&lines, now)
+    };
     let Some(exit) = &launch.exit else {
         let end = next.unwrap_or(now);
         let Some(pid) = launch.pid else {
             return format!(
-                "{title} ended without a record before {} (its Desktop predates exit records)",
-                clock(end, now)
+                "{title} ended without a record before {}{} (its Desktop predates exit records)",
+                clock(end, now),
+                lived(launch, end)
             );
         };
-        let start = last_desktop_line(log, pid, launch.at)
+        let start = lines
+            .first()
+            .map(|(at, _)| *at)
             .or(launch.at)
             .unwrap_or(end - HEARTBEAT);
         let end = end.min(start + HEARTBEAT);
@@ -208,14 +223,13 @@ fn describe(
                 clock(end, now)
             ),
         };
-        return format!("{title} {what}");
+        return format!("{title} {what}{}{vitals}", lived(launch, end));
     };
 
     let text = |key: &str| exit.get(key).and_then(Value::as_str).unwrap_or("");
     let at = exit.get("at").and_then(Value::as_str).and_then(parse_time);
     let when = at.map_or("at an unknown time".into(), |at| clock(at, now));
-    let reason = text("reason");
-    let what = match reason {
+    let what = match text("reason") {
         "quit" => {
             let sender = match (text("sender"), text("sender_pid")) {
                 ("", "") => String::new(),
@@ -251,13 +265,38 @@ fn describe(
         ),
         other => format!("ended {when} ({other})"),
     };
-    let lived = match (launch.at, at) {
-        (Some(start), Some(end)) if end >= start => {
-            format!(", {} after launch", duration(end - start))
-        }
+    let lived = at.map_or_else(String::new, |at| lived(launch, at));
+    format!("{title} {what}{lived}{vitals}")
+}
+
+/// `, <span> after launch` up to `end`, when both ends are known.
+fn lived(launch: &Launch, end: DateTime<Utc>) -> String {
+    match launch.at {
+        Some(start) if end >= start => format!(", {} after launch", duration(end - start)),
         _ => String::new(),
+    }
+}
+
+/// `; last vitals HH:MM: …` from the newest heartbeat (plain or storm) among `lines`.
+fn last_vitals(lines: &[(DateTime<Utc>, &str)], now: DateTime<Utc>) -> String {
+    let Some((at, line, footprint, reads)) = lines.iter().find_map(|(at, line)| {
+        Some((
+            at,
+            line,
+            field(line, "footprint_mb")?,
+            field(line, "reads")?,
+        ))
+    }) else {
+        return String::new();
     };
-    format!("{title} {what}{lived}")
+    let killed = match field(line, "killed") {
+        None | Some("0") => String::new(),
+        Some(killed) => format!(", {killed} killed"),
+    };
+    format!(
+        "; last vitals {}: {footprint} MB, {reads} lf reads/5 min{killed}",
+        minute(*at, now)
+    )
 }
 
 fn parse(journal: &str) -> Vec<Launch> {
@@ -292,14 +331,15 @@ fn parse(journal: &str) -> Vec<Launch> {
     launches
 }
 
-/// The time of Desktop's last lf.log line for `pid` during this launch.
-fn last_desktop_line(log: &str, pid: u32, since: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
+/// Desktop's lf.log lines for `pid` during this launch with their times, newest first.
+fn desktop_lines(log: &str, pid: u32, since: Option<DateTime<Utc>>) -> Vec<(DateTime<Utc>, &str)> {
     let pid = pid.to_string();
     log.lines()
         .rev()
         .filter(|line| field(line, "desktop").is_some() && field(line, "pid") == Some(pid.as_str()))
-        .filter_map(|line| line.split_whitespace().next().and_then(parse_time))
-        .find(|at| since.is_none_or(|since| *at >= since))
+        .filter_map(|line| Some((line.split_whitespace().next().and_then(parse_time)?, line)))
+        .take_while(|(at, _)| since.is_none_or(|since| *at >= since))
+        .collect()
 }
 
 fn parse_time(text: &str) -> Option<DateTime<Utc>> {
@@ -368,13 +408,22 @@ fn signal_name(number: i64) -> String {
         .map_or_else(|| format!("signal {number}"), |name| (*name).to_string())
 }
 
-/// Local time; the date too when it is not today.
+/// Local time to the second; the date too when it is not today.
 fn clock(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    local(at, now, "%H:%M:%S")
+}
+
+/// Local time to the minute; the date too when it is not today.
+fn minute(at: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    local(at, now, "%H:%M")
+}
+
+fn local(at: DateTime<Utc>, now: DateTime<Utc>, time: &str) -> String {
     let local = at.with_timezone(&Local);
     if local.date_naive() == now.with_timezone(&Local).date_naive() {
-        local.format("%H:%M:%S").to_string()
+        local.format(time).to_string()
     } else {
-        local.format("%b %-d %H:%M:%S").to_string()
+        local.format(&format!("%b %-d {time}")).to_string()
     }
 }
 
@@ -450,7 +499,7 @@ mod tests {
 
     use chrono::{DateTime, TimeDelta, Utc};
 
-    use super::{parse_termination, report, SystemRecord, Termination};
+    use super::{minute, parse_termination, report, SystemRecord, Termination};
     use crate::lf::commands::doctor::Status;
 
     fn now() -> DateTime<Utc> {
@@ -532,7 +581,7 @@ mod tests {
             launch("B", "2026-10-29T16:20:00Z", 9500, MAC),
         ]
         .join("\n");
-        let log = "2026-10-29T16:10:00.123Z  INFO loopflow::desktop: vitals footprint_mb=412 pid=9446 desktop=0.15.1 rev=b11130060\n\
+        let log = "2026-10-29T16:10:00.123Z  INFO loopflow::desktop: vitals footprint_mb=412 peak_mb=530 reads=61 failed=0 killed=0 top=task:40 pid=9446 desktop=0.15.1 rev=b11130060\n\
                    2026-10-29T16:12:00.000Z  WARN loopflow::journal: unrelated pid=9446 lf=0.15.1 rev=b11130060";
         let searched = Cell::new(None);
         let killed = report(
@@ -553,6 +602,10 @@ mod tests {
         assert!(killed.detail.contains(
             "Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system)"
         ));
+        let vitals = minute("2026-10-29T16:10:00Z".parse().unwrap(), now());
+        assert!(killed.detail.ends_with(&format!(
+            ", 1h16m after launch; last vitals {vitals}: 412 MB, 61 lf reads/5 min"
+        )));
         let (start, end) = searched.get().unwrap();
         assert_eq!(
             start,
@@ -590,6 +643,33 @@ mod tests {
         assert!(missing
             .detail
             .contains(" (SIGKILL before the first heartbeat"));
+    }
+
+    #[test]
+    fn a_storm_heartbeat_shows_its_killed_reads() {
+        let journal = [
+            launch("A", "2026-10-29T15:00:00Z", 9446, MAC),
+            exit(
+                "A",
+                "2026-10-29T15:40:00Z",
+                r#""reason":"exit","caller":"LoopflowMac 0x1 main + 4""#,
+            ),
+        ]
+        .join("\n");
+        let log = "2026-10-29T15:35:00Z  WARN loopflow::desktop: lf reads cancelled at storm rate footprint_mb=980 peak_mb=1100 reads=4210 failed=3 killed=4100 top=task:4000 pid=9446 desktop=0.15.1\n\
+                   2026-10-29T15:38:00Z  WARN loopflow::desktop: main thread hung ms=2400 pid=9446 desktop=0.15.1";
+        let check = report(
+            &journal,
+            log,
+            now(),
+            |_| false,
+            |_, _, _| SystemRecord::Missing,
+        );
+        assert_eq!(check.status, Status::Warn);
+        let vitals = minute("2026-10-29T15:35:00Z".parse().unwrap(), now());
+        assert!(check.detail.ends_with(&format!(
+            ", 40m after launch; last vitals {vitals}: 980 MB, 4210 lf reads/5 min, 4100 killed"
+        )));
     }
 
     fn found(namespace: i64, code: i64, status: i64) -> SystemRecord {

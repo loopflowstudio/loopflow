@@ -21,6 +21,3 @@
 - **Quit before a Force Quit (assumption).** The concept review listed abnormal
   ends plus the latest end, which hides a ⌘Q followed by a Force Quit; the live
   acceptance needs both. Doctor also lists the last quit within 24 h.
-- Check (after compress): `cargo test -p loopflow --lib desktop_exits::` 11
-  passed; clippy `--all-targets -D warnings` clean (2026-10-29). Gate and live
-  acceptance remain.

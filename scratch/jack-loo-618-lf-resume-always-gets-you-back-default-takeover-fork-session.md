@@ -48,6 +48,16 @@ Desktop says Hold/Release (`holdTask(_:held:)`, ids `task-hold-release`/`task-ho
 means only a conversation. The status label stays "Deferred": AGENTS.md names that Task state;
 this Task renames the verbs only.
 
+## Concept review (2026-10-28, headless, after Desktop hold)
+
+Nothing to change. Clap surface matches the accepted shape (`Resume {id, --fork, --all}`,
+`New {id}`, `task hold|release`); no live caller of a deleted verb or flag outside shipped
+release notes and the parse-rejection test. Session skills say `lf session new` where they said
+`--fresh`. Settled, not reopened: Desktop's Open-vs-Move-here stays explicit while CLI resume
+takes over by default; the state label stays Deferred; Desktop has no Fork action (acceptance
+doesn't require one). Note for gate: `target/debug/lf help …` printed the installed app's
+old help even with `LF_*` unset, so check help through `cli_discovery`, not by hand.
+
 ## Remaining
 
 - Checks (2026-10-28): lib `human_session:: lf::`, integration `session_cli_tests:: work_open_tests::

@@ -124,6 +124,10 @@ starter.
 
 - Demo on a real Task (see Demo).
 
+Concept review (2026-10-29, headless): no change. The one remaining mismatch is
+that global `-b` means "headless" but on `task run` also approves Auto-Ship; Jack
+deferred splitting it, and `lf task run` help states the approval.
+
 ## Forbidden outcomes
 
 - A second approval column or grant (the #1736 shape). The stop only blocks

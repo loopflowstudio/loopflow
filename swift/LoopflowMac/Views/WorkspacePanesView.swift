@@ -757,9 +757,7 @@ struct SessionPaneView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if workspace.key.kind == .task {
             PaneEmptyState(title: "No Task conversation open", systemImage: "bubble.left",
-                description: workspace.conversationError == nil
-                    ? "Open this Task’s recorded conversation."
-                    : "The conversation could not open. Retry the opening above.") {
+                description: workspace.conversationError ?? "Open this Task’s recorded conversation.") {
                 Button("Open conversation") { Task { await model.openTaskConversation(workspace.key.id) } }
                     .accessibilityIdentifier("task-open-conversation")
             }

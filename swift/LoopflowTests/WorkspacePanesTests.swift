@@ -45,6 +45,19 @@ struct WorkspacePanesTests {
         #expect(sessions.sessions.isEmpty)
     }
 
+    @Test("A failed Task conversation shows its reason beside Open conversation")
+    func failedConversationShowsItsReason() throws {
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let model = WorkModel(query: query, repoPath: location.worktree)
+        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task-a"),
+            title: "Task A", location: location, localMachineId: location.machineId)
+        let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
+        workspace.conversationError = "Conversation launcher unavailable"
+        let view = WorkspacePanesView(workspace: workspace, isFocused: true, sessions: sessions,
+            model: model, onFocus: { _, _ in })
+        _ = try view.inspect().find(text: "Conversation launcher unavailable")
+    }
+
     @Test("Rendering borrows Task A while B is selected, retaining Files and caller-owned focus")
     func renderRetainedOwner() async throws {
         var reads = 0

@@ -135,14 +135,16 @@ PLIST
     fi
     printf 'loaded %s: daily at %02d:00\n' "$label" "$1"
   }
-  agent 9 telemetry-daily
-  agent 10 release-run
   # Earlier bootstraps scheduled these jobs from crontab; one scheduler runs
-  # each job.
+  # each job. Remove the lines before loading the agents: macOS may hold
+  # `crontab -` on a permission prompt, and a bootstrap stopped there must not
+  # leave agents beside cron lines that also start release-run.
   if crontab -l 2>/dev/null | grep -q "# loopflow:$wave:"; then
     { crontab -l | grep -v "# loopflow:$wave:" || true; } | crontab -
     printf 'removed crontab lines # loopflow:%s:\n' "$wave"
   fi
+  agent 9 telemetry-daily
+  agent 10 release-run
   run_telemetry() {
     local label="gui/$uid/loopflow.cron.$wave.telemetry-daily" info code
     # Started by launchd, the run has the same session a scheduled firing has.

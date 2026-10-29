@@ -1,4 +1,4 @@
-//! Claim, hand off and unclaim a Task. Commands already run on the Task's
+//! Claim, hand off and unassign a Task. Commands already run on the Task's
 //! writer: entry dispatch forwards them over `lf --machine` before they arrive.
 use std::path::Path;
 
@@ -11,7 +11,8 @@ pub enum OwnershipChange {
     Claim,
     /// A registered Machine label or a Machine id.
     Handoff(String),
-    Unclaim,
+    /// Nobody owns it, and Linear shows no assignee.
+    Unassign,
 }
 
 fn message(error: impl std::fmt::Display) -> OpsError {
@@ -53,8 +54,12 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                     .handoff_task(&task.id, &target)
                     .map_err(message)?;
             }
-            OwnershipChange::Unclaim => {
-                store.sqlite.unclaim_task(&task.id).map_err(message)?;
+            OwnershipChange::Unassign => {
+                store.sqlite.unassign_task(&task.id).map_err(message)?;
+                store
+                    .sqlite
+                    .assign_task_owner(&task.id, None)
+                    .map_err(message)?;
             }
         }
         let repository = super::task::repository_for_task(&store, &task)?;
@@ -85,7 +90,7 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
     };
     match viewer {
         Ok(viewer) => {
-            if let Err(error) = store.assign_task_owner(task, &viewer) {
+            if let Err(error) = store.assign_task_owner(task, Some(viewer.as_str())) {
                 tracing::warn!(%task, %error, "Linear assignee was not queued");
             }
         }
@@ -107,7 +112,7 @@ pub fn render(ownership: &TaskOwnership) -> String {
         lines.push(format!(
             "  {}  {}  {}",
             crate::lf::output::format_time(entry.at),
-            entry.kind.as_str(),
+            entry.kind.label(),
             entry.owner()
         ));
     }
@@ -121,25 +126,39 @@ mod tests {
         MachineId, OwnershipEntryId, OwnershipKind, TaskId, TaskOwnership, TaskOwnershipEntry,
     };
 
-    #[test]
-    fn log_lines_read_as_a_time_and_a_person_on_a_named_machine() {
-        let ownership = TaskOwnership {
+    /// Lee's ownership log holding one `kind` entry on lee-mbp.
+    fn lees(kind: OwnershipKind) -> TaskOwnership {
+        TaskOwnership {
             owner: None,
             superseded_by: None,
             log: vec![TaskOwnershipEntry {
                 id: OwnershipEntryId::new(),
                 task_id: TaskId::new(),
-                kind: OwnershipKind::Claim,
+                kind,
                 person: Some("Lee".into()),
                 person_key: None,
                 machine_id: Some(MachineId::new()),
                 machine_label: Some("lee-mbp".into()),
                 at: 1_792_600_000,
             }],
-        };
-        let rendered = render(&ownership);
+        }
+    }
+
+    #[test]
+    fn log_lines_read_as_a_time_and_a_person_on_a_named_machine() {
+        let rendered = render(&lees(OwnershipKind::Claim));
         let line = rendered.lines().nth(1).unwrap();
         assert!(line.ends_with("  claim  Lee on lee-mbp"), "{line}");
         assert!(!line.contains("1792600000"), "{line}");
+    }
+
+    #[test]
+    fn an_unassign_reads_as_unassign_and_is_stored_as_released() {
+        let ownership = lees(OwnershipKind::Unassign);
+        let rendered = render(&ownership);
+        let line = rendered.lines().nth(1).unwrap();
+        assert!(line.ends_with("  unassign  Lee on lee-mbp"), "{line}");
+        let wire = serde_json::to_value(&ownership.log[0]).unwrap();
+        assert_eq!(wire["kind"], "unclaim");
     }
 }

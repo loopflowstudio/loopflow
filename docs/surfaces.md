@@ -19,8 +19,8 @@ macOS, then a plain terminal. It reads only the host's own environment
 apps. `--host desktop|cmux|herdr|tmux|terminal` picks one explicitly.
 
 A conversation already live in this host is focused, draft intact. One live in
-another client is reported as `elsewhere`, with the `lf resume --takeover`
-command to move it; opening never steals it. Open the same Task twice while its
+another client is reported as `elsewhere`, with the `lf resume` command that
+moves it; opening never steals it. Open the same Task twice while its
 workspace starts and you get the one workspace.
 
 A Work address names the repository by folder, then the Task or Wave. It never
@@ -120,7 +120,7 @@ Every Task read prints the same Task row, each fact once:
  "pr": {"number": 1719, "url": "…", "phase": "open"}, "next": "lf task run LOO-12"}
 ```
 
-`state` is one of `deferred`, `unstarted`, `idle`, `active`, `moving`,
+`state` is one of `unstarted`, `idle`, `active`, `moving`,
 `shipping`, `done` or `abandoned`; `next` is the command that moves the Task
 on, `null` while it moves by itself.
 
@@ -133,7 +133,7 @@ A Session row:
 ```
 
 `state` is what its agent process shows (`active`, `detached`, `closed`,
-`unknown`); `available` says it is ready for your next turn. `lf connect <id>`
+`unknown`); `available` says it is ready for your next turn. `lf resume <id>`
 opens it.
 
 Desktop's own presentation (sections, conditions, controls) is

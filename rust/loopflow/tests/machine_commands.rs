@@ -260,7 +260,7 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         "--machine",
         "mini",
         "session",
-        "connect",
+        "resume",
         &id,
         "--prepare",
         "--json",
@@ -273,11 +273,10 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         .collect::<Vec<_>>();
     assert_eq!(argv[0], "ssh");
     assert!(argv.contains(&"-tt"));
-    assert!(!argv.contains(&"--takeover"));
     for target in [
-        vec!["session", "connect", id.as_str()],
+        vec!["session", "resume", id.as_str()],
         vec!["session", "resume"],
-        vec!["connect", id.as_str()],
+        vec!["resume", id.as_str()],
         vec!["resume"],
     ] {
         let mut arguments = vec!["--machine", "mini"];
@@ -357,7 +356,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         ),
     );
     let opened = fixture
-        .command(&["connect", "--prepare", "--json"])
+        .command(&["resume", "--prepare", "--json"])
         .current_dir(&path)
         .output()
         .unwrap();
@@ -369,7 +368,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .position(|arg| *arg == "--repository")
         .unwrap();
     assert_eq!(arguments[at + 1], repository);
-    assert!(arguments.contains(&"connect"), "{arguments:?}");
+    assert!(arguments.contains(&"resume"), "{arguments:?}");
 }
 
 #[test]
@@ -1419,7 +1418,7 @@ impl SharedPlan {
 }
 
 #[test]
-fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
+fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     use loopflow::durable::{OwnershipKind, TaskExecutionSource};
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
@@ -1467,16 +1466,16 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
         laptop
     );
 
-    // The laptop now writes; unclaim keeps the history and leaves it unowned.
-    let unclaimed = fixture.json(&[
+    // The laptop now writes; unassign keeps the history and leaves it unowned.
+    let unassigned = fixture.json(&[
         "--repository",
         plan.repository.as_str(),
         "task",
-        "unclaim",
+        "unassign",
         task.as_str(),
         "--json",
     ]);
-    assert!(unclaimed["owner"].is_null());
+    assert!(unassigned["owner"].is_null());
     plan.to_remote();
     for store in [&plan.local, &plan.remote] {
         let ownership = store.task_ownership(&task).unwrap();
@@ -1486,7 +1485,7 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
             [
                 OwnershipKind::Claim,
                 OwnershipKind::Handoff,
-                OwnershipKind::Unclaim
+                OwnershipKind::Unassign
             ]
         );
     }
@@ -1617,7 +1616,7 @@ fn task_ownership_never_routes_to_another_persons_machine() {
             .as_deref(),
         Some("Kim")
     );
-    // Someone else's claim stays theirs: no route to mini, no handoff or unclaim.
+    // Someone else's claim stays theirs: no route to mini, no handoff or unassign.
     let route = plan.local.task_execution_route(&task).unwrap();
     assert_eq!(
         (route.machine_id, route.source),
@@ -1626,7 +1625,7 @@ fn task_ownership_never_routes_to_another_persons_machine() {
             TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine)
         )
     );
-    assert!(plan.local.unclaim_task(&task).is_err());
+    assert!(plan.local.unassign_task(&task).is_err());
     assert!(plan.local.handoff_task(&task, &mini).is_err());
     // Claiming writes here; the later claim wins.
     plan.local.claim_task(&task).unwrap().unwrap();
@@ -1954,7 +1953,7 @@ fn resume_moves_a_session_to_another_machine() {
     )
     .unwrap();
     let admitted = fixture
-        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .command(&["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(&worktree)
         .output()
         .unwrap();
@@ -2048,7 +2047,7 @@ fn a_mid_merge_worktree_refuses_to_move() {
     )
     .unwrap();
     let admitted = fixture
-        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .command(&["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(&worktree)
         .output()
         .unwrap();
@@ -2157,7 +2156,7 @@ fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> St
     )
     .unwrap();
     let admitted = fixture
-        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .command(&["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(cwd)
         .output()
         .unwrap();

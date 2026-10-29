@@ -217,7 +217,7 @@ mutation journal grows with every edit, so `lf planning journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
-error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
+error, rather than inventing an empty plan. Foreground CLI, headless Run and Desktop connections own Git exchange
 for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
 whole-store callback, scheduler or implicit turn/Graph replay is involved.
 
@@ -597,7 +597,7 @@ field is null. A router's message asks for a JSON object containing `path`, one
 of the branch's path names. The contract travels in the message, not as a
 provider schema, and the Graph process accepts the value inside prose or a code fence.
 Session history retains the native output and completion separately. An invalid
-answer is corrected by `lf -b connect ID --message TEXT` in the same
+answer is corrected by `lf -b resume ID --message TEXT` in the same
 conversation, at most twice, then the Graph fails; provider failure remains
 distinct.
 
@@ -643,7 +643,7 @@ authority.
 
 ```bash
 lf session list --json
-lf connect SESSION --prepare --json
+lf resume SESSION --prepare --json
 ```
 
 Discuss design and review feedback in the ongoing Task conversation. Historical

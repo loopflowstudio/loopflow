@@ -153,7 +153,7 @@ pub struct Cli {
     #[arg(long, value_name = "PATH", conflicts_with = "wt")]
     pub cwd: Option<PathBuf>,
 
-    /// The conversation `lf -b connect ID --message TEXT` continues.
+    /// The conversation `lf -b resume ID --message TEXT` continues.
     #[arg(skip)]
     pub resume: Option<String>,
 }
@@ -178,7 +178,10 @@ impl Cli {
             Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
-                SessionCommand::Connect {
+                SessionCommand::Resume {
+                    connection: SessionConnectionArgs { prepare: false, .. },
+                    ..
+                } | SessionCommand::New {
                     connection: SessionConnectionArgs { prepare: false, .. },
                     ..
                 }
@@ -221,13 +224,17 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
-        if let Some(Commands::Session {
-            cmd: SessionCommand::Connect { id, connection, .. },
-        }) = &self.command
-        {
-            connection.target(&self, id.as_deref()).map_err(|error| {
-                clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
-            })?;
+        if let Some(Commands::Session { cmd }) = &self.command {
+            let selected = match cmd {
+                SessionCommand::Resume { id, connection, .. }
+                | SessionCommand::New { id, connection } => Some((id.as_deref(), connection)),
+                _ => None,
+            };
+            if let Some((id, connection)) = selected {
+                connection.target(&self, id).map_err(|error| {
+                    clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
+                })?;
+            }
         }
         // `lf ship ISSUE` selects its Task as `--task` does.
         if let Some(Commands::Ship { issue, .. }) = &mut self.command {
@@ -246,7 +253,7 @@ impl Cli {
         }
         // Work routing consumes the same explicit selector in either flag position.
         if let Some(Commands::Session {
-            cmd: SessionCommand::Connect { connection, .. },
+            cmd: SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. },
         }) = &mut self.command
         {
             if connection.task.is_some() {
@@ -1162,16 +1169,13 @@ impl SessionMode {
     }
 }
 
-/// Shared selection, preparation and next-turn options for resume and connect.
+/// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
     pub wave: Option<String>,
-    /// Create a fresh primary in this scope, keeping the previous client and history
-    #[arg(long, conflicts_with = "id")]
-    pub fresh: bool,
     /// With `-b`: send the conversation its next turn
     #[arg(long)]
     pub message: Option<String>,
@@ -1263,20 +1267,6 @@ pub enum SessionCommand {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         argv: Vec<String>,
     },
-    /// Attach to the current execution without restarting or submitting input
-    Attach {
-        id: String,
-        #[arg(long)]
-        observe: bool,
-        /// Refuse to replace another viewer's input control
-        #[arg(long, conflicts_with = "observe")]
-        if_free: bool,
-        /// Return an attach-only terminal command without acquiring control
-        #[arg(long)]
-        prepare: bool,
-        #[arg(long, requires = "prepare")]
-        json: bool,
-    },
     /// Save a steer for this Session, or without one for the current Wave's or
     /// repository's Sessions, without starting a turn
     #[command(allow_missing_positional = true)]
@@ -1320,27 +1310,35 @@ pub enum SessionCommand {
     },
     /// List Sessions
     List(SessionListArgs),
-    /// Open the ongoing conversation of this scope, or an exact Session
+    /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        visible_alias = "resume",
-        after_help = "Moves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Whatever holds the conversation, it continues here: a terminal showing it hands it over and says where it went; a provider client lf started stops; a dead one resumes from its history. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
-    Connect {
+    Resume {
         /// Session ID, Task identifier, or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
         id: Option<String>,
         #[command(flatten)]
         connection: SessionConnectionArgs,
-        /// Stop Loopflow-owned clients before resuming here
-        #[arg(long, conflicts_with = "try_open")]
-        takeover: bool,
-        /// Ask the provider to resume even when another client is active
-        #[arg(long = "try", conflicts_with = "takeover")]
-        try_open: bool,
+        /// Leave the other client running; continue in a new conversation forked from it
+        #[arg(long, conflicts_with = "message")]
+        fork: bool,
         /// Resume every conversation a restart or crash interrupted; never one
         /// someone left. Terminals attach when they open them.
-        #[arg(long, conflicts_with_all = ["id", "takeover", "try_open", "fresh", "message", "prepare"])]
+        #[arg(long, conflicts_with_all = ["id", "fork", "message", "prepare"])]
         all: bool,
+    },
+    /// Restart this scope's conversation on a fresh provider thread, seeded with
+    /// what the last thread knew; `-a` switches harness
+    #[command(
+        after_help = "The conversation keeps its name, Work and history; the old thread stays in `lf session history`.\n  lf session new -a claude      continue this scope's conversation on Claude"
+    )]
+    New {
+        /// Session ID, Task identifier, or provider conversation ID
+        #[arg(conflicts_with_all = ["task", "wave"])]
+        id: Option<String>,
+        #[command(flatten)]
+        connection: SessionConnectionArgs,
     },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
@@ -1564,7 +1562,7 @@ pub enum TaskCommand {
         #[arg(long, conflicts_with = "done")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "done", value_parser = ["deferred", "unstarted", "idle", "active", "moving", "shipping"])]
+        #[arg(long, conflicts_with = "done", value_parser = ["unstarted", "idle", "active", "moving", "shipping"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,
@@ -1585,10 +1583,6 @@ pub enum TaskCommand {
         watch: bool,
     },
 
-    /// Defer future Task execution without stopping live processes
-    Defer { issue: String },
-    /// Resume a deferred Task without starting execution
-    Resume { issue: String },
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
@@ -1699,8 +1693,9 @@ terminal instead."
         #[arg(long)]
         json: bool,
     },
-    /// Unclaim the Task; it is unowned again, with its history intact
-    Unclaim {
+    /// Unassign the Task: nobody owns it and Linear shows no assignee; nothing
+    /// moves it until someone claims or runs it. History stays intact
+    Unassign {
         issue: String,
         #[arg(long)]
         json: bool,
@@ -1815,10 +1810,8 @@ terminal instead."
         #[arg(long)]
         rank: Option<u32>,
         /// Assignee identity; provider user ID in connected plans
-        #[arg(long, conflicts_with = "unassign")]
-        assignee: Option<String>,
         #[arg(long)]
-        unassign: bool,
+        assignee: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
@@ -1885,12 +1878,10 @@ impl TaskCommand {
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
-            | Self::Unclaim { issue, .. }
+            | Self::Unassign { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Defer { issue }
-            | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -1915,12 +1906,10 @@ impl TaskCommand {
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
-            | Self::Unclaim { issue, .. }
+            | Self::Unassign { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Defer { issue }
-            | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -2719,14 +2708,13 @@ mod tests {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
         assert!(matches!(
-            Cli::try_parse_from(["lf", "task", "defer", "LOO-1"]).unwrap().command,
-            Some(Commands::Task { cmd: TaskCommand::Defer { issue } }) if issue == "LOO-1"
+            Cli::try_parse_from(["lf", "task", "unassign", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Unassign { issue, .. } }) if issue == "LOO-1"
         ));
-        assert!(matches!(
-            Cli::try_parse_from(["lf", "task", "resume", "LOO-1"]).unwrap().command,
-            Some(Commands::Task { cmd: TaskCommand::Resume { issue } }) if issue == "LOO-1"
-        ));
-        for verb in ["recover", "enable", "disable", "prepare", "advance"] {
+        for verb in [
+            "recover", "enable", "disable", "prepare", "advance", "defer", "resume", "hold",
+            "release", "unclaim",
+        ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());
@@ -3389,17 +3377,17 @@ mod tests {
 
     #[test]
     fn session_work_flags_normalize_before_machine_routing() {
-        for command in ["resume", "connect"] {
-            let cli = Cli::try_parse_from(["lf", "session", command, "session-id"])
-                .unwrap()
-                .checked()
-                .unwrap();
-            assert!(matches!(
-                cli.command,
-                Some(Commands::Session {
-                    cmd: SessionCommand::Connect { id: Some(id), .. }
-                }) if id == "session-id"
-            ));
+        let cli = Cli::try_parse_from(["lf", "session", "resume", "session-id"])
+            .unwrap()
+            .checked()
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Resume { id: Some(id), .. }
+            }) if id == "session-id"
+        ));
+        for command in ["resume", "new"] {
             for (flag, value) in [("--task", "LOO-1"), ("--wave", "infra")] {
                 for argv in [
                     vec!["lf", flag, value, "session", command, "--prepare"],
@@ -3419,7 +3407,7 @@ mod tests {
             }
         }
         for argv in [
-            vec!["lf", "--task", "LOO-1", "session", "connect", "session-id"],
+            vec!["lf", "--task", "LOO-1", "session", "resume", "session-id"],
             vec![
                 "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",
             ],
@@ -3440,29 +3428,28 @@ mod tests {
             assert!(Cli::try_parse_from(args).is_err());
         }
 
-        let open = Cli::try_parse_from(["lf", "session", "connect", "run_123", "--takeover"])
-            .expect("parse replacement open");
+        let open = Cli::try_parse_from(["lf", "session", "resume", "run_123", "--fork"])
+            .expect("parse forked open");
         assert!(matches!(
             open.command,
             Some(Commands::Session {
-                cmd: SessionCommand::Connect {
+                cmd: SessionCommand::Resume {
                     id,
-                    takeover: true,
-                    try_open: false,
+                    fork: true,
                     connection: SessionConnectionArgs { json: false, .. },
                     ..
                 }
             }) if id.as_deref() == Some("run_123")
         ));
-        assert!(Cli::try_parse_from([
-            "lf",
-            "session",
-            "connect",
-            "run_123",
-            "--takeover",
-            "--try",
-        ])
-        .is_err());
+        for removed in [
+            vec!["lf", "session", "connect", "run_123"],
+            vec!["lf", "session", "attach", "run_123"],
+            vec!["lf", "session", "resume", "run_123", "--takeover"],
+            vec!["lf", "session", "resume", "run_123", "--try"],
+            vec!["lf", "session", "resume", "--fresh"],
+        ] {
+            assert!(Cli::try_parse_from(removed.clone()).is_err(), "{removed:?}");
+        }
 
         let rename = Cli::try_parse_from([
             "lf",

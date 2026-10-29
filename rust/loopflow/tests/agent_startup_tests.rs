@@ -259,7 +259,7 @@ while [ ! -f "$LF_HOME/release" ]; do sleep 0.02; done
         &repo,
         &bin,
         &temp.path().join("connect"),
-        &["session", "connect", &session],
+        &["session", "resume", &session],
     );
     let resumed = fs::read_to_string(home.join("provider-args")).unwrap();
     assert!(

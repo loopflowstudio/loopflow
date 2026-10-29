@@ -723,7 +723,7 @@ async fn admit(
     let caller = crate::journal::current_lf_process_id();
     let admitted = store
         .sqlite
-        .ensure_primary_session(&scope, None, session, caller.as_ref())?;
+        .ensure_primary_session(&scope, session, caller.as_ref())?;
     anyhow::ensure!(
         admitted.id == moved.id,
         "this Machine already runs its own Session {} for that scope; complete it, then move again",

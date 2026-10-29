@@ -436,20 +436,11 @@ pub(super) fn complete_primary_session_in(
 fn ensure_primary_session_in(
     conn: &Connection,
     scope: &PrimaryScope,
-    replacing: Option<&str>,
     session: LfSession,
     caller_process: Option<&crate::id::LfProcessId>,
 ) -> StoreResult<LfSession> {
-    let current = primary_session_in(conn, scope)?;
-    match current {
-        Some(current) if Some(current.id.as_str()) == replacing => {
-            conn.execute(
-                "UPDATE agent_sessions SET completed_at=?2 WHERE id=?1",
-                params![current.id, crate::store::rows::now_unix()],
-            )?;
-        }
-        Some(current) => return Ok(current),
-        None => {}
+    if let Some(current) = primary_session_in(conn, scope)? {
+        return Ok(current);
     }
     let session = reserve_session_in(conn, session, caller_process)?;
     // A Task's primary stays an ordinary member conversation; its Task
@@ -1186,19 +1177,15 @@ impl SqliteStore {
     }
 
     /// Find the scope's uncompleted primary, or admit `session` as it. When the
-    /// current primary is `replacing`, complete it and admit its successor in
-    /// the same transaction; a repeat naming a replaced predecessor finds the
-    /// successor already admitted.
     pub fn ensure_primary_session(
         &self,
         scope: &PrimaryScope,
-        replacing: Option<&str>,
         session: LfSession,
         caller_process: Option<&crate::id::LfProcessId>,
     ) -> StoreResult<LfSession> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let session = ensure_primary_session_in(&tx, scope, replacing, session, caller_process)?;
+        let session = ensure_primary_session_in(&tx, scope, session, caller_process)?;
         tx.commit()?;
         Ok(session)
     }

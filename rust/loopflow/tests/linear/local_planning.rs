@@ -390,7 +390,7 @@ fn public_local_plan_matches_desktop() {
     assert!(task["reference"]["workspace"].is_null());
     assert!(task["run_control"]["unavailable"].is_null());
     assert_eq!(task["condition"]["unresolved_execution"], false);
-    assert_eq!(task["actions"]["recommended"], "resume");
+    assert_eq!(task["actions"]["recommended"], "run");
     task["condition"]["observed_at"] = serde_json::json!("2026-10-08T00:00:00Z");
     task["condition"]["evidence_age_secs"] = serde_json::json!(0);
     task["runtime"]["updated_at"] = serde_json::json!("2026-10-08T00:00:00Z");
@@ -420,6 +420,61 @@ fn public_local_plan_matches_desktop() {
         actual["comments"].clone(),
     )
     .unwrap();
+}
+
+#[test]
+fn task_unassign_clears_the_assignee() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task", "create", "--wave", "inbox", "--title", "Owned", "--json",
+        ],
+    );
+    let id = created["id"].as_str().unwrap();
+    lf(repo.path(), home.path(), &["task", "claim", id, "--json"]);
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "edit", id, "--assignee", "person-id"],
+    );
+    let unassigned = lf(
+        repo.path(),
+        home.path(),
+        &["task", "unassign", id, "--json"],
+    );
+    assert!(unassigned["owner"].is_null());
+    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
+    assert!(status["task"]["assignee"].is_null());
+}
+
+#[test]
+fn task_unassign_clears_the_assignee_of_an_unowned_task() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let created = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "task", "create", "--wave", "inbox", "--title", "Assigned", "--json",
+        ],
+    );
+    let id = created["id"].as_str().unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "edit", id, "--assignee", "person-id"],
+    );
+    let unassigned = lf(
+        repo.path(),
+        home.path(),
+        &["task", "unassign", id, "--json"],
+    );
+    assert!(unassigned["owner"].is_null());
+    let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
+    assert!(status["task"]["assignee"].is_null());
 }
 
 #[test]
@@ -487,10 +542,11 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
     let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_eq!(status["project"]["summary"], fields["summary"]);
     assert_eq!(status["project"]["name"], "Current");
+    lf(repo.path(), home.path(), &["task", "unassign", id]);
     lf(
         repo.path(),
         home.path(),
-        &["task", "edit", id, "--unassign", "--notes", ""],
+        &["task", "edit", id, "--notes", ""],
     );
     let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert!(status["task"]["assignee"].is_null());
@@ -2053,11 +2109,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 .unwrap();
             assert_eq!(store.pending_task_changes(&second).unwrap(), changes);
         }
-        lf(
-            repo.path(),
-            home.path(),
-            &["task", "edit", selector, "--unassign"],
-        );
+        lf(repo.path(), home.path(), &["task", "unassign", selector]);
         let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
         assert!(reopened.task(&second).unwrap().unwrap().assignee.is_none());
         assert_eq!(reopened.task(&second).unwrap().unwrap().id, second);

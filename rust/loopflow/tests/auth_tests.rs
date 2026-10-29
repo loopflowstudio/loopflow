@@ -1210,7 +1210,7 @@ impl Drop for CodexClient {
 }
 
 #[test]
-fn codex_same_login_recovery_status_launch_resume_and_reset() {
+fn codex_same_login_recovery_status_launch_and_reset() {
     let home = tempfile::tempdir().unwrap();
     let script = support::codex_socket_script(&format!(
         "#!/bin/sh\nexec python3 '{}' \"$@\"\n",
@@ -1366,30 +1366,6 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
     let prior = sessions.session(&session).unwrap().unwrap();
     assert!(prior.completed_at.is_some());
-    let history = sessions.session_history(&session, 0, 0).unwrap();
-    run(&[
-        "-b",
-        "session",
-        "connect",
-        &session,
-        "--message",
-        "Reply with RECOVERED again.",
-    ]);
-    let continued: (String, String) = db
-        .query_row(
-            "SELECT id,provider_thread FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(continued, (session.clone(), thread.clone()));
-    let resumed = sessions.session(&session).unwrap().unwrap();
-    assert_ne!(resumed.captured, prior.captured);
-    assert_eq!(resumed.completed_at, prior.completed_at);
-    assert!(sessions
-        .session_history(&session, 0, 0)
-        .unwrap()
-        .starts_with(&history));
     let listing = run(&["history", "list", "--json"]);
     let listing: serde_json::Value = serde_json::from_slice(&listing.stdout).unwrap();
     assert!(!listing["entries"].as_array().unwrap().is_empty());
@@ -1403,7 +1379,6 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         .map(|row| row["captured"].as_i64().unwrap())
         .collect();
     assert!(captures.contains(&prior.captured.unwrap()));
-    assert!(captures.contains(&resumed.captured.unwrap()));
     run(&["doctor", "--json"]);
     let routed: String = db
         .query_row(
@@ -1417,7 +1392,7 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         &std::fs::read(native.join(format!("turns-{thread}.json"))).unwrap(),
     )
     .unwrap();
-    assert_eq!(turns.as_array().unwrap().len(), 2);
+    assert_eq!(turns.as_array().unwrap().len(), 1);
     assert_eq!(
         std::fs::read_to_string(native.join("history.jsonl")).unwrap(),
         "unrelated native history\n"
@@ -1439,7 +1414,7 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
         .iter()
         .filter(|event| event["method"] == "turn/start")
         .collect();
-    assert_eq!(launches.len(), 4);
+    assert_eq!(launches.len(), 3);
     for event in &launches {
         assert_eq!(event["home"], native.to_str().unwrap());
         assert_eq!(event["email"], "active@example.com");
@@ -1449,7 +1424,7 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
             .iter()
             .filter(|event| event["thread"] == thread)
             .count(),
-        2
+        1
     );
     assert_eq!(
         launches

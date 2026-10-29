@@ -28,7 +28,7 @@ memory and KRs.
 lf comment LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
 lf comment LOO-12                                 # read the thread: yours, teammates', the agents'
 lf interrupt LOO-12                               # stop its running Graph
-lf task defer LOO-12                              # hold future runs and CI repair; live processes finish
+lf task unassign LOO-12                           # nobody owns it: ship and CI repair stop; live processes finish
 ```
 
 A comment saves locally first, then reaches every Session working on the Task at
@@ -36,8 +36,8 @@ its next supported boundary: before a Graph step or after an agent turn. Idle
 Sessions stay idle; nothing is replayed into them. Comments from teammates, in
 Loopflow or in your tracker, arrive the same way.
 
-`lf task resume LOO-12` clears a deferral without starting anything. To reopen a
-conversation, use `lf resume` ([Sessions](sessions.md)).
+`lf task claim LOO-12` takes it back without starting anything; `lf task run`
+claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.md)).
 
 ## See where it stands
 
@@ -88,7 +88,7 @@ until you complete it. Publishing, landing and CI repair are covered in [Ops](op
 ```bash
 lf planning status                 # which plan this repository reads, and what's pending
 lf task claim LOO-12               # take it; the earlier owner's Sessions are told
-lf task unclaim LOO-12             # hand it back, history intact
+lf task unassign LOO-12            # nobody owns it; Linear shows no assignee; history intact
 ```
 
 Tasks, comments and status sync through your Git remote by default, as a ref
@@ -191,7 +191,7 @@ lf wave status billing                            # plan, Tasks, metrics and exe
 ```
 
 `wave-operate` gives every started Task you own a disposition: moving, acted on,
-waiting on a named person, deferred, or unknown. It leaves running Graphs alone,
+waiting on a named person, unassigned, or unknown. It leaves running Graphs alone,
 reruns what remains of a stopped one, and lists unstarted backlog for you to
 pick. It never edits the plan or files Tasks. Teammates' Tasks are listed and
 left alone.

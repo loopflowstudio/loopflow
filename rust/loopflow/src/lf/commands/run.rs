@@ -17,7 +17,7 @@ use crate::prompt::Surface;
 use crate::session_record::{
     AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SubjectAttribution,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -97,7 +97,7 @@ pub(crate) fn preview_prompt(
     })
 }
 
-/// `lf -b connect ID --message TEXT`: one more headless turn of a conversation,
+/// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     if crate::transport::delegate_current(true)? {
@@ -107,6 +107,20 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
+    // A Graph corrects its own step's answer in that step's Run; nobody else
+    // continues a Run.
+    let caller_graph = crate::journal::current_lf_process_id()
+        .map(|process| store.process(&process))
+        .transpose()?
+        .flatten()
+        .and_then(|process| process.parent_lf_process_id);
+    let own_step = caller_graph
+        .is_some_and(|graph| session.graph_lf_process_id.as_deref() == Some(graph.as_str()));
+    if !own_step {
+        if let Some(refusal) = crate::ops::human_session::run_refusal(&store, &session)? {
+            bail!(refusal);
+        }
+    }
     let mut resolved = crate::agent::resolve_session_config(&session, cli)?;
     let mut turn = cli.process_options();
     turn.agent = resolved.agent.clone();
@@ -499,12 +513,11 @@ fn build_prompt_at(
         match crate::definition::name::portable_name(&skill.name).as_str() {
             "task-session" => anyhow::ensure!(
                 task_input.is_some(),
-                "Select a Task with `lf connect --task ISSUE`"
+                "Select a Task with `lf resume --task ISSUE`"
             ),
-            "wave-session" => anyhow::ensure!(
-                wave.is_some(),
-                "Select a Wave with `lf connect --wave NAME`"
-            ),
+            "wave-session" => {
+                anyhow::ensure!(wave.is_some(), "Select a Wave with `lf resume --wave NAME`")
+            }
             _ => {}
         }
     }

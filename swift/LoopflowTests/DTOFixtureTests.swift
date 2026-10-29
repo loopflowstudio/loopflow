@@ -7,13 +7,6 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
-    @Test func pausedTaskStateIsUnfinished() throws {
-        let state = try JSONDecoder().decode(TaskState.self, from: loadFixtureData("task_deferred.json"))
-        #expect(state == .deferred)
-        #expect(!state.isTerminal)
-        #expect(try JSONDecoder().decode(TaskState.self, from: JSONEncoder().encode(state)) == state)
-    }
-
     @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
         let data = try loadFixtureData("task_files_frames.json")
         let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)
@@ -46,24 +39,24 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test func sessionConnectExplanationsPreserveIntentAndUnavailableEvidence() throws {
-        let data = try loadFixtureData("session_connect_explanations.json")
-        let reports = try JSONDecoder().decode([SessionConnectExplanation].self, from: data)
+    @Test func sessionResumeExplanationsPreserveIntentAndUnavailableEvidence() throws {
+        let data = try loadFixtureData("session_resume_explanations.json")
+        let reports = try JSONDecoder().decode([SessionResumeExplanation].self, from: data)
         #expect(reports[0].action?.intent == .start)
-        #expect(reports[0].action?.mode == .refuse)
-        #expect(reports[1].action?.mode == .takeover)
+        #expect(reports[1].action?.fork == false)
         #expect(reports[1].action?.prepareOnly == true)
-        #expect(reports[2].action?.intent == .connectOrResume)
-        #expect(reports[2].action?.mode == .try)
+        #expect(reports[2].action?.intent == .takeOver)
+        #expect(reports[4].action?.intent == .newThread)
+        #expect(reports[4].action?.agent == "codex")
         #expect(!reports[2].unavailable.isEmpty)
         #expect(reports[3].state == nil)
         #expect(reports[3].action == nil)
         #expect(reports[3].actions.isEmpty)
-        #expect(try JSONDecoder().decode([SessionConnectExplanation].self, from: JSONEncoder().encode(reports)) == reports)
+        #expect(try JSONDecoder().decode([SessionResumeExplanation].self, from: JSONEncoder().encode(reports)) == reports)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
         wire[0].removeValue(forKey: "actions")
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode([SessionConnectExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
+            try JSONDecoder().decode([SessionResumeExplanation].self, from: JSONSerialization.data(withJSONObject: wire))
         }
     }
 
@@ -241,7 +234,7 @@ struct DTOFixtureTests {
         #expect(window.session?.actions?.map(\.kind) == [.open, .moveHere])
         #expect(window.session?.actions?.first?.unavailableReason != nil)
         #expect(window.session?.observedAt == nil)
-        #expect(report.windows[1].task?.actions?.recommended == .resume)
+        #expect(report.windows[1].task?.actions?.recommended == .run)
         #expect(report.windows[1].task?.runControl?.unavailable == "Task checkout is on another Machine")
         #expect(window.workspaces.first?.hiddenPanes == ["files-pane"])
         #expect(window.viewParts.isEmpty)
@@ -842,7 +835,7 @@ struct DTOFixtureTests {
         #expect(session.statusLabel == "Available")
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
-            "session", "connect", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+            "session", "resume", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
         ])
 
         let encoded = try JSONEncoder().encode(session)

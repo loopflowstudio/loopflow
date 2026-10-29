@@ -36,8 +36,8 @@ watch, check back or follow up later.
   Nothing resumes a stopped Graph: inspect its history and effects before
   selecting fresh work through `lf task run`.
 - This conversation keeps the instructions it launched with.
-  `lf connect --fresh` gives the repository a fresh conversation after an
-  install.
+  `lf session new` restarts it on a fresh thread with current instructions,
+  seeded with what this one knew.
 
 ## Begin work in a Wave
 

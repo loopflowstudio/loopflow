@@ -17,7 +17,7 @@ ordinary focus leaves the primary Session as its face.
 
 Repository scope comes from the current repository or `--repo`/`--repository`.
 The bounded syntax supports `wave:`, `task:`, `query:`, `kind:task|wave`, and
-`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|deferred|backlog|done`
+`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|done`
 (`available`, `busy`, `blocked` read Task Sessions; the rest the Task). Whitespace means
 AND; OR and parentheses compose expressions. Quote values containing spaces.
 Repository is never a predicate. Task IDs, issue identifiers and unambiguous
@@ -53,7 +53,7 @@ Typed selections contain repository/Wave defaults, explicit Work, ordered
 composition, intersections, predicates and saved-query references. The repository
 default includes started, unfinished Tasks and immediate child Waves; a Wave
 default also lists its unstarted Tasks, which offer Start. Task membership
-includes descendant Waves. Deferred and idle Tasks remain. Explicit references also
+includes descendant Waves. Idle Tasks remain. Explicit references also
 reach backlog and finished Tasks. Preserve authored node IDs across edits: occurrences use those source
 paths and canonical Work keys, so sibling insertion does not change identity.
 

@@ -29,10 +29,6 @@ pub fn run(
             println!("{issue} is already shipping (process {process})");
             return Ok(());
         }
-        ShipStart::Deferred { issue } => {
-            println!("{issue} is deferred; `lf task resume {issue}` before shipping it");
-            return Ok(());
-        }
         ShipStart::AtEnd { issue } => {
             println!("{issue} is already at its end");
             return Ok(());
@@ -108,12 +104,12 @@ fn merged(issue: &str) -> ShipMerge {
     }
 }
 
-/// Say why shipping ends here: deferred, stopped or finished.
+/// Say why shipping ends here: unassigned, stopped or finished.
 fn halt(issue: &str, step: &ShipStep) -> Result<()> {
     match step {
-        ShipStep::Deferred => {
+        ShipStep::Unassigned => {
             println!(
-                "{issue} is deferred; `lf task resume {issue}` and `lf ship` continue shipping"
+                "{issue} is unassigned; `lf task claim {issue}` and `lf ship` continue shipping"
             )
         }
         ShipStep::Stopped => println!("{issue} stopped shipping"),

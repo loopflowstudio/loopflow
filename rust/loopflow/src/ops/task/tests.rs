@@ -62,28 +62,6 @@ async fn task_fixture(identifier: &str) -> TaskFixture {
 }
 
 #[test]
-fn paused_snapshot_never_recommends_running_work() {
-    let _ledger = crate::journal::TestLedgerGuard::new();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let repo = loopflow_test_support::TestRepo::new();
-    let fixture = runtime.block_on(task_fixture_at("DEFER-1", repo.path().into()));
-    fixture
-        .store
-        .sqlite
-        .set_task_deferred(&fixture.task.id, true)
-        .unwrap();
-    let snapshot = runtime
-        .block_on(super::read_task_snapshot(&fixture.store, fixture.task))
-        .unwrap();
-    assert_eq!(snapshot.status, crate::durable::TaskState::Deferred);
-    assert_eq!(
-        snapshot.actions.recommended,
-        Some(crate::ops::task_actions::TaskAction::NoAction)
-    );
-    assert!(snapshot.actions.reason.contains("lf task resume DEFER-1"));
-}
-
-#[test]
 fn task_decision_preserves_unknown_history_and_live_process_protection() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();

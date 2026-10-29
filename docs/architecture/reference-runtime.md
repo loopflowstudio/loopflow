@@ -152,12 +152,12 @@ These examples use current command spellings; the lifecycle contract is above.
 ```bash
 lf -b implement
 lf session list --interactive false --task INF-123 --json
-lf session connect SESSION
+lf resume SESSION
 lf session rename SESSION "Migration review"
 lf session bind SESSION --task INF-123
 ```
 
-Every conversation has one LfSession regardless of launch surface. Connect
+Every conversation has one LfSession regardless of launch surface. Resume
 uses the existing AgentProcess where possible; client replacement retains its active
 turn. Name, feedback, native identity and history survive reconnect and recovery.
 A suggested title cannot overwrite a human-assigned title. CLI and Desktop use

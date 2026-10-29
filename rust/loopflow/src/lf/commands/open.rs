@@ -3,7 +3,7 @@
 //!
 //! Hosts translate only documented caller context and open/focus operations.
 //! They never select a conversation: every terminal destination runs
-//! `lf session connect` for the resolved Work, whose admission and attachment
+//! `lf session resume` for the resolved Work, whose admission and attachment
 //! fences own reuse. Desktop resolves the same address through `--link --json`.
 
 use std::io::IsTerminal;
@@ -179,8 +179,8 @@ impl Resolved {
         }
     }
 
-    fn connect_argv(&self, lf: &str) -> Vec<String> {
-        let mut argv = vec![lf.to_string(), "session".into(), "connect".into()];
+    fn resume_argv(&self, lf: &str) -> Vec<String> {
+        let mut argv = vec![lf.to_string(), "session".into(), "resume".into()];
         match (&self.session, &self.url.target) {
             (Some(session), _) => argv.push(session.clone()),
             (None, WorkTarget::Task(id)) => argv.extend(["--task".into(), id.clone()]),
@@ -190,11 +190,11 @@ impl Resolved {
         argv
     }
 
-    /// The connect argv as one shell command line, for hosts that type it.
+    /// The resume argv as one shell command line, for hosts that type it.
     /// A host's new shell starts from the host's environment, so a private
     /// Home travels with the command.
-    fn connect_shell(&self, lf: &str) -> Result<String, RouteError> {
-        let mut argv = self.connect_argv(lf);
+    fn resume_shell(&self, lf: &str) -> Result<String, RouteError> {
+        let mut argv = self.resume_argv(lf);
         if crate::store::custom_home_selected() {
             let home = format!("LF_HOME={}", crate::store::lf_home_dir().display());
             argv.splice(0..0, ["env".to_owned(), home]);
@@ -212,7 +212,7 @@ impl Resolved {
 
     fn fallback_argv(&self) -> Vec<String> {
         if self.session.is_some() && !matches!(self.url.target, WorkTarget::Task(_)) {
-            return self.connect_argv("lf");
+            return self.resume_argv("lf");
         }
         vec!["lf".into(), "open".into(), self.url.to_string()]
     }
@@ -1215,7 +1215,7 @@ fn elsewhere(target: &Resolved) -> Option<Live> {
         .is_some_and(|owner| crate::transport::controlled(&owner).is_ok_and(|held| !held));
     (!unviewed).then(|| Live {
         reason: format!(
-            "this conversation is already open in another client; move it here with `lf session connect {id} --takeover` (unsent text there is not transferred)"
+            "this conversation is already open in another client; move it here with `lf resume {id}` (unsent text there is not transferred)"
         ),
         placement: summary.terminal_id,
     })
@@ -1251,7 +1251,7 @@ fn open_desktop(
 }
 
 fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.connect_shell(lf)?;
+    let shell = target.resume_shell(lf)?;
     let mut command = Command::new("cmux");
     command
         .env("CMUX_QUIET", "1")
@@ -1278,7 +1278,7 @@ fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteEr
 }
 
 fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.connect_shell(lf)?;
+    let shell = target.resume_shell(lf)?;
     let mut create = Command::new("herdr");
     create
         .args(["workspace", "create", "--cwd"])
@@ -1313,7 +1313,7 @@ fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteE
 /// A new window right after the caller's, named for the Work. Its pane is the
 /// destination: pane IDs are unique for the server's life, unlike indexes.
 fn open_tmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.connect_shell(lf)?;
+    let shell = target.resume_shell(lf)?;
     let window = |after: Option<&str>| {
         let mut command = Command::new("tmux");
         command.arg("new-window");
@@ -1360,7 +1360,7 @@ fn open_terminal(
     in_place: bool,
     lf: &str,
 ) -> Result<Opened, RouteError> {
-    let argv = target.connect_argv(lf);
+    let argv = target.resume_argv(lf);
     if in_place {
         let status = Command::new(&argv[0])
             .args(&argv[1..])
@@ -1381,7 +1381,7 @@ fn open_terminal(
         "cd {} && exec {}",
         shlex::try_quote(&target.cwd().display().to_string())
             .map_err(|error| RouteError::Definite(error.to_string()))?,
-        target.connect_shell(lf)?
+        target.resume_shell(lf)?
     );
     if cfg!(target_os = "macos") {
         // Launch Services opens a .command in the default terminal, without

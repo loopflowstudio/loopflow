@@ -111,7 +111,7 @@ def main() -> None:
         # The upgraded store resolves the Work address back to the same Work.
         again = json.loads(invoke(entry, "open", link, "--link", "--json", cwd=cwd))
         assert again[0]["url"] == link
-    resumed = json.loads(invoke(entry, "connect", "--prepare", "--task", task["id"], "--json"))
+    resumed = json.loads(invoke(entry, "resume", "--prepare", "--task", task["id"], "--json"))
     for field in ["id", "workspace", "work", "provider", "title", "cwd"]:
         assert resumed[field] == session[field]
     assert unpublished.read_text() == "retained edit\n"

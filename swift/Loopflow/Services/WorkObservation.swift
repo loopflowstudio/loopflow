@@ -8,24 +8,15 @@ public struct WorkObservation: Sendable {
     public let request: @Sendable (WorkRequest) -> Void
     /// Returns only after every owned watch has exited.
     public let cancel: @Sendable () async -> Void
-    /// The preview copy directory a draft-carrying build reads; nil on the shared store.
-    public let copy: String?
 
     public init(
         frames: AsyncThrowingStream<WorkFrame, any Error>,
         request: @escaping @Sendable (WorkRequest) -> Void,
-        cancel: @escaping @Sendable () async -> Void,
-        copy: String?
+        cancel: @escaping @Sendable () async -> Void
     ) {
         self.frames = frames
         self.request = request
         self.cancel = cancel
-        self.copy = copy
-    }
-
-    /// The copy `lf --version` names on its `copy:` line.
-    public static func copy(fromVersion output: String) -> String? {
-        output.split(separator: "\n").first { $0.hasPrefix("copy: ") }.map { String($0.dropFirst(6)) }
     }
 }
 
@@ -351,12 +342,11 @@ public final class WorkWatches: @unchecked Sendable {
     private var checkpoints: [(id: Int, waiting: Set<WorkPart>, failed: [String])] = []
     private var finished = false
 
-    public static func observe(copy: String?, launch: @escaping Launch) throws -> WorkObservation {
+    public static func observe(launch: @escaping Launch) throws -> WorkObservation {
         let (frames, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
         let watches = WorkWatches(launch: launch, continuation: continuation)
         try watches.lock.withLock { try watches.select(id: 0) }
-        return WorkObservation(frames: frames, request: { watches.handle($0) }, cancel: { await watches.stop() },
-                               copy: copy)
+        return WorkObservation(frames: frames, request: { watches.handle($0) }, cancel: { await watches.stop() })
     }
 
     private init(launch: @escaping Launch, continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) {

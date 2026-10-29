@@ -116,7 +116,7 @@ installation, release, reconnect, live-provider and process-global fixture targe
 CI and the local Rust plan run `scripts/check_rust_test_inventory.py` before
 compilation and reject unregistered top-level test source files.
 Each Rust partition extracts the same revision's library or integration archive into the checkout's
-`target/` directory and materializes matching migration inputs. The reconnect
+`target/` directory. The reconnect
 target is excluded from that archive and executed in the smoke job. No suite
 is dropped; the aggregate requires the build and every partition to succeed.
 Partitions use six test slots on the ordinary Linux runners. Partition zero
@@ -153,9 +153,9 @@ Weekly dependency PRs come from `.github/dependabot.yml` for `uv`, `cargo`, `swi
 
 Keep `workflow_run.workflows: ["CI"]` in sync with `.github/workflows/ci.yml`. Renaming the CI workflow without updating the Dependabot workflow disables the close-on-red path.
 
-## Nightly packages
+## Main packages
 
-`.github/workflows/nightly-packages.yml` builds the same native `lf` tarballs as the release workflow. Each runner extracts its tarball and runs:
+`.github/workflows/main-packages.yml` builds the same native `lf` tarballs as the release workflow for every main commit CI passes, from a full-history checkout so `build.rs` sees origin/main's migration order. Each runner extracts its tarball and runs:
 
 ```bash
 package-smoke/lf --version
@@ -163,4 +163,4 @@ package-smoke/lf --help
 package-smoke/lf list
 ```
 
-Nightly package artifacts are verification only. They are uploaded for 14 days and not deployed.
+`lf self install --main` installs the newest one with `gh`. The artifacts expire after 14 days; releases stay the durable channel.

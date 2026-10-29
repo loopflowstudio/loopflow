@@ -32,7 +32,7 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
-run through the materializer, then `cargo clippy --all-targets -- -D warnings`.
+run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
 Omit `--rust-filter` (the whole workspace) only to reproduce a CI

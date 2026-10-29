@@ -329,12 +329,6 @@ struct WorkBreadcrumbs: View {
                 trail(showWave: true).fixedSize(horizontal: true, vertical: false)
                 trail(showWave: false)
             }
-            if let copy = model.previewCopy {
-                WorkChip(text: "Preview", tone: .warning)
-                    .fixedSize()
-                    .help("Preview copy: \((copy as NSString).abbreviatingWithTildeInPath) — work here is not in the shared store")
-                    .accessibilityIdentifier("preview-copy")
-            }
         }
         .buttonStyle(.plain)
         .font(Typography.strong(13))

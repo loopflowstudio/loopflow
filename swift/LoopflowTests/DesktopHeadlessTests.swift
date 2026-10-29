@@ -29,7 +29,7 @@ private final class Feed {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in self.requests.append(request) }
-        }, cancel: { continuation.finish() }, copy: nil)
+        }, cancel: { continuation.finish() })
     }
 
     func send(_ frame: WorkFrame) { continuation?.yield(frame) }

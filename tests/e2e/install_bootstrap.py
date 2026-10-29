@@ -1,8 +1,8 @@
 """Exercise candidate installation in a disposable Linux container, never on a host.
 
 Run with uv after copying a release-shaped lf binary to /fixture/bin and the
-shell installer to /fixture/install.sh. Draft migrations must be materialized
-in a disposable source snapshot before building with published authority.
+shell installer to /fixture/install.sh. Build it from a source snapshot whose
+migrations origin/main carries (or with LOOPFLOW_MIGRATION_ORDER naming them).
 Optionally put a checksum-verified older release pair in /fixture/prior.
 
 The HTTPS release transport is local; binaries, checksum checks, promotion,

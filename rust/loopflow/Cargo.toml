@@ -165,7 +165,7 @@ tokio = { version = "1", features = ["test-util"] }
 
 [build-dependencies]
 cc = "1"
-rusqlite = { version = "0.40", features = ["backup", "bundled"] }
+rusqlite = { version = "0.40", features = ["backup", "bundled", "hooks"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

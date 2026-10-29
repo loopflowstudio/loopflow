@@ -38,18 +38,16 @@ enum LocalWaveAgentLauncher {
         }
     }
 
-    /// Use the app's bundled CLI, or the pinned helper inside an offline clone.
+    /// Use the app's bundled CLI, or the explicit `LF_BIN` a private `LF_HOME` selects.
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> String {
-        if let root = environment["LF_CLONE_ROOT"] {
-            let helper = URL(fileURLWithPath: root).appendingPathComponent("bin/lf").path
-            guard environment["LF_HOME"] == root, environment["LF_BIN"] == helper,
-                  FileManager.default.isExecutableFile(atPath: helper) else {
-                throw LocalLfError(errorDescription: "Clone helper or Machine selection is unavailable; relaunch with lf clone run.")
+        if environment["LF_HOME"] != nil, let selected = environment["LF_BIN"] {
+            guard FileManager.default.isExecutableFile(atPath: selected) else {
+                throw LocalLfError(errorDescription: "LF_BIN \(selected) is not an executable lf.")
             }
-            return helper
+            return selected
         }
         guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
             throw LocalLfError(
@@ -97,9 +95,6 @@ enum LocalWaveAgentLauncher {
     }
 
     static func queryGitHub(_ args: [String]) async throws -> String {
-        guard ProcessInfo.processInfo.environment["LF_CLONE_ROOT"] == nil else {
-            throw LocalLfError(errorDescription: "GitHub is unavailable in an offline data clone.")
-        }
         return try await runCheckedOutput(["gh"] + args, cwd: nil)
     }
 

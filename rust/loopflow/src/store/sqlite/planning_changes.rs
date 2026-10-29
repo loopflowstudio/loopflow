@@ -520,19 +520,19 @@ mod tests {
     use super::PlanningChanges;
     use crate::durable::TaskId;
     use crate::store::migrations::{
-        apply_before_current_draft, current_draft_sql, upgrade_from_draft,
+        apply_before_migration, migration_section_sql, upgrade_from_migration,
     };
     use crate::work::edit::WorkValue;
 
     #[test]
     fn released_attempt_acknowledgment_rebases_without_clearing_later_save() {
         let conn = Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/creation_baselines.sql"
         ))
         .unwrap();
-        let sql = current_draft_sql("planning_peers");
+        let sql = migration_section_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
         crate::store::migrations::convert_released_data(&conn, &sql).unwrap();
         let task = TaskId::from_raw("task-receipt");
@@ -591,7 +591,7 @@ mod tests {
                 ),
             ] {
                 let conn = Connection::open_in_memory().unwrap();
-                apply_before_current_draft(&conn, "planning_peers");
+                apply_before_migration(&conn, "planning_peers");
                 conn.execute_batch(include_str!(
                     "../../../tests/fixtures/migrations/planning_relationships.sql"
                 ))
@@ -611,7 +611,7 @@ mod tests {
                     [input.to_string()],
                 )
                 .unwrap();
-                upgrade_from_draft(&conn, "planning_peers");
+                upgrade_from_migration(&conn, "planning_peers");
                 let task = TaskId::from_raw("task-proof");
                 assert!(PlanningChanges::Task(&task)
                     .record(

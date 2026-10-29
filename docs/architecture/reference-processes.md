@@ -206,15 +206,16 @@ the separate `lf reteam` operation.
 6. Recover or roll back from the persisted artifact-selection receipt.
 7. Garbage-collect old artifacts separately from activation.
 
-Only a published release may change the store's migration frontier. An
-unreleased build without migration drafts that knows the store's frontier
-exactly migrates nothing, so promotion accepts it as a hotfix; its receipt,
-`lf --version` and `lf doctor` name it, e.g. `hotfix e9b2c2eac on v0.14.16`.
+Any build may select a store it reads; promotion advances the store only with
+migrations origin/main carries. A release and a CI build of a main commit both
+qualify (`lf self install --main`). An unreleased build's receipt, `lf --version`
+and `lf doctor` name it, e.g. `build e9b2c2eac on v0.14.16`, or `schema work …`
+when it carries an unmerged migration.
 
 The installation promotion lock serializes artifact selection and service
 replacement. It does not discover, drain, stop, or settle conversations and it is not
-held by ordinary harnesses. Store cloning remains useful because preview can
-prove a candidate schema without mutating the selected store.
+held by ordinary harnesses. A store snapshot lets preview prove a candidate
+schema without mutating the selected store.
 
 An already-running `lf` retains its executable and selected store path.
 An execution-schema cutover must account for those writers before activation. On the first published-to-development switch, the process may keep

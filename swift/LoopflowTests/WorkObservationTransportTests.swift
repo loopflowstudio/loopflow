@@ -84,7 +84,7 @@ struct WorkObservationTransportTests {
     @Test("A checkpoint follows once every running watch has answered it")
     func checkpointPerWatch() async throws {
         let watches = FakeWatches()
-        let observation = try WorkWatches.observe(copy: nil, launch: watches.launch)
+        let observation = try WorkWatches.observe(launch: watches.launch)
         var frames = observation.frames.makeAsyncIterator()
         observation.request(.checkpoint(id: 5, replay: []))
         try await watches.answer(["desktop", "plan"], 5)
@@ -98,17 +98,6 @@ struct WorkObservationTransportTests {
         #expect(checkpoint?.content.part == "checkpoint")
         #expect(checkpoint?.answers == 5)
         await observation.cancel()
-    }
-
-    @Test("The observation reads the store `lf --version` names")
-    func previewCopyFromVersion() async throws {
-        let shared = try Launched { _ in "IFS= read -r request" }.observe()
-        #expect(shared.copy == nil)
-        await shared.cancel()
-        let copy = try Launched(version: "lf 0.0.0+abc\ncopy: /home/.lf/copies/3f2a") { _ in "IFS= read -r request" }
-            .observe()
-        #expect(copy.copy == "/home/.lf/copies/3f2a")
-        await copy.cancel()
     }
 
     @Test("A stalled or noncooperative watch is reaped without touching other processes")
@@ -276,14 +265,11 @@ private final class Launched: @unchecked Sendable {
     private let cwd: URL?
     private let configurationChanged: @Sendable () throws -> Bool
     private let script: @Sendable ([String]) -> String
-    /// What `lf --version` prints for this build.
-    private let version: String
 
     init(cwd: URL? = nil, configurationChanged: @escaping @Sendable () throws -> Bool = { false },
-         version: String = "lf 0.0.0", script: @escaping @Sendable ([String]) -> String) {
+         script: @escaping @Sendable ([String]) -> String) {
         self.cwd = cwd
         self.configurationChanged = configurationChanged
-        self.version = version
         self.script = script
     }
 
@@ -292,7 +278,6 @@ private final class Launched: @unchecked Sendable {
 
     func observe() throws -> WorkObservation {
         try LocalWorkObservation.start(process: { [self] args, _ in
-            if args == ["--version"] { return shell("printf '%s\\n' '\(version)'") }
             let process = shell(script(args), cwd: cwd)
             lock.withLock { launched.append((args, process)) }
             return process

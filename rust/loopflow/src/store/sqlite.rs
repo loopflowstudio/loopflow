@@ -82,6 +82,23 @@ const WAL_SIZE_LIMIT_BYTES: i64 = 64 * 1024 * 1024;
 /// The first rollback-to-WAL transition can return BUSY immediately even with
 /// a busy handler: two readers cannot both upgrade their journal lock. Reuse
 /// migration exclusion only for that transition; ordinary WAL opens stay reads.
+/// Why an ordinary open refuses a shared store this build is ahead of, and the fix.
+fn unapplied_message(path: &Path, pending: &str) -> String {
+    if super::migrations::unmerged_migrations().contains(&pending) {
+        format!(
+            "shared store {} does not have this build's unmerged migration {pending}; \
+             run this build with a private LF_HOME",
+            path.display()
+        )
+    } else {
+        format!(
+            "shared store {} does not have migration {pending} yet; install a build that \
+             carries it with `lf self install --main`",
+            path.display()
+        )
+    }
+}
+
 fn configure_write_connection(conn: &mut Connection, path: &Path) -> StoreResult<()> {
     conn.busy_timeout(SQLITE_WRITE_BUSY_TIMEOUT)?;
     // A deferred transaction that reads, then writes after another process
@@ -539,10 +556,7 @@ impl SqliteStore {
     /// Revalidate a connection after a child executable may have upgraded it.
     pub(crate) fn validate_current_schema(&self) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        super::migrations::validate_experimental_schema(
-            &conn,
-            crate::build_info::migration_draft_manifest(),
-        )
+        super::migrations::validate_sqlite_schema(&conn)
     }
 
     /// Open the shared store as `lf install promote` — the single authorized
@@ -552,8 +566,8 @@ impl SqliteStore {
         Self::open(path, super::FrontierAdvance::Authorized)
     }
 
-    /// Open a hermetic, fully-migrated store at `path`: the base canonical
-    /// migrations plus this build's exact embedded draft manifest, reading **no**
+    /// Open a hermetic, fully-migrated store at `path`: this build's whole
+    /// migration catalog, reading **no**
     /// process- or machine-global state — no `LF_HOME`, no install selection, no
     /// shared `~/.lf` identity, no frontier authority. Tests use this so their
     /// schema is deterministic under parallel execution; the production
@@ -568,44 +582,28 @@ impl SqliteStore {
         let mut conn = Connection::open(path)?;
         crate::performance::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path)?;
-        super::migrations::initialize_experimental_sqlite(
-            &conn,
-            crate::build_info::migration_draft_manifest(),
-        )?;
+        super::migrations::apply_sqlite(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
     fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
-        Self::open_with(
-            path,
-            crate::build_info::migration_authority(),
-            &super::machine_home_dir(),
-            advance,
-        )
+        Self::open_with(path, &super::machine_home_dir(), advance)
     }
 
-    /// Open resolving the migration decision against an explicit authority and
-    /// machine home rather than this build's compiled-in values. Production opens
-    /// pass the real ones through [`Self::open`]; the same-module shared-frontier
-    /// regressions pass a temp home and a chosen authority so they drive the
-    /// published and promotion-boundary branches a validation-only test build
-    /// cannot reach through the compiled-in authority.
-    fn open_with(
-        path: &Path,
-        authority: crate::build_info::MigrationAuthority,
-        home: &Path,
-        advance: super::FrontierAdvance,
-    ) -> StoreResult<Self> {
+    /// Open resolving the migration decision against an explicit machine home.
+    /// Production opens pass the real one through [`Self::open`]; the
+    /// same-module shared-frontier regressions pass a temp home.
+    fn open_with(path: &Path, home: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
         let existing_database = std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0);
         // Resolve the frontier authority before touching the filesystem. An
         // ordinary open of a shared store it may not initialize refuses here,
         // before create_dir_all/Connection::open would leave an empty
         // ~/.lf/loopflow.db behind — a file whose mere existence a liveness or
         // bootstrap check could misread as "the shared store is initialized".
-        let may_apply_migrations = super::may_apply_migrations(path, authority, home, advance)
-            .map_err(|error| {
+        let may_apply_migrations =
+            super::may_apply_migrations(path, home, advance).map_err(|error| {
                 StoreError::InvalidData(format!("resolve migration authority: {error}"))
             })?;
         let shared_database = super::same_database_file(path, &home.join(".lf/loopflow.db"))
@@ -616,7 +614,7 @@ impl SqliteStore {
         if !may_apply_migrations && !existing_database {
             return Err(StoreError::InvalidData(format!(
                 "shared store {} is not initialized and an ordinary lf may not create it; \
-                 install a published release with `lf install`",
+                 install lf with `lf self install`",
                 path.display()
             )));
         }
@@ -633,13 +631,7 @@ impl SqliteStore {
         // itself meet another process opening the same WAL database.
         configure_write_connection(&mut conn, path)?;
 
-        if !shared_database {
-            super::migrations::initialize_experimental_sqlite(
-                &conn,
-                crate::build_info::migration_draft_manifest(),
-            )
-            .map_err(|error| super::migrations::experimental_store_diagnostic(&conn, error))?;
-        } else if !may_apply_migrations {
+        if shared_database && !may_apply_migrations {
             // Validate the applied history first (preserving divergent/incompatible
             // and store-ahead errors), then refuse if this binary knows a migration
             // the store has not applied. An ordinary open must not hand back a store
@@ -647,15 +639,21 @@ impl SqliteStore {
             // columns that pending migration adds.
             super::migrations::validate_sqlite_schema(&conn)?;
             if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
-                return Err(StoreError::InvalidData(format!(
-                    "shared store {} is at an older frontier than this lf (pending {pending}); \
-                     an ordinary lf must not advance it — install a published release with \
-                     `lf install`",
-                    path.display()
-                )));
+                return Err(StoreError::InvalidData(unapplied_message(path, &pending)));
             }
         } else if existing_database {
             super::migrations::apply_sqlite_with_backup(&conn, path)?;
+            if !shared_database {
+                // A private home holds exactly this build's schema; one changed
+                // outside lf is never repaired.
+                super::migrations::validate_sqlite_schema(&conn).map_err(|error| {
+                    StoreError::InvalidData(format!(
+                        "{error}\nDatabase: {}\nA private LF_HOME is disposable: start a fresh one; \
+                         lf will not repair it.",
+                        path.display()
+                    ))
+                })?;
+            }
         } else {
             super::migrations::apply_sqlite(&conn)?;
         }
@@ -680,7 +678,7 @@ impl SqliteStore {
         Ok(store)
     }
 
-    /// The oldest lf release that can open this store; `None` when it is empty.
+    /// The migration a reader must know to open this store; `None` when it is empty.
     pub(crate) fn reader_floor(&self) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         crate::store::migrations::store_reader_floor(&conn)
@@ -2228,11 +2226,10 @@ pub(super) fn record_process_in(
 #[cfg(test)]
 mod frontier_tests {
     use super::SqliteStore;
-    use crate::build_info::MigrationAuthority::{self, Published, ValidationOnly};
     use crate::durable::{WorkRef, WorkStatus};
     use crate::id::WaveId;
     use crate::store::migrations::{
-        apply_all_but_head, apply_newer_release, latest_applied_version_sqlite,
+        apply_all_but_head, apply_newer_migration, latest_applied_version_sqlite,
         latest_known_version, prior_known_version,
     };
     use crate::store::FrontierAdvance::{self, Authorized, Forbidden};
@@ -2301,11 +2298,10 @@ mod frontier_tests {
 
     fn open(
         path: &Path,
-        authority: MigrationAuthority,
         home: &Path,
         advance: FrontierAdvance,
     ) -> crate::store::StoreResult<SqliteStore> {
-        SqliteStore::open_with(path, authority, home, advance)
+        SqliteStore::open_with(path, home, advance)
     }
 
     fn frontier(path: &Path) -> Option<String> {
@@ -2338,30 +2334,30 @@ mod frontier_tests {
     }
 
     #[test]
-    fn development_build_uses_compatible_shared_work_without_migrating() {
+    fn any_build_uses_compatible_shared_work_without_migrating() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
-        open(&path, Published, &shared.home, Authorized).unwrap();
+        open(&path, &shared.home, Authorized).unwrap();
         seed_current_wave(&path);
         let before = frontier(&path);
-        let store = open(&path, ValidationOnly, &shared.home, Forbidden).unwrap();
+        let store = open(&path, &shared.home, Forbidden).unwrap();
         let wave = Wave::new(WaveId::new(), "From app".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), before);
-        open(&path, Published, &shared.home, Forbidden).unwrap();
+        open(&path, &shared.home, Forbidden).unwrap();
     }
 
-    /// A newer release that only adds leaves this lf reading and writing the
-    /// shared store; one that breaks names the release that locked it out.
+    /// A newer build that only adds leaves this lf reading and writing the
+    /// shared store; one that breaks names the migration that locked it out.
     #[test]
-    fn an_older_lf_keeps_working_on_a_store_a_newer_release_extended() {
+    fn an_older_lf_keeps_working_on_a_store_a_newer_build_extended() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
-        open(&path, Published, &shared.home, Authorized).unwrap();
+        open(&path, &shared.home, Authorized).unwrap();
         seed_current_wave(&path);
         let conn = rusqlite::Connection::open(&path).unwrap();
-        apply_newer_release(
+        apply_newer_migration(
             &conn,
             "ALTER TABLE waves ADD COLUMN colour TEXT;
              CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
@@ -2370,7 +2366,7 @@ mod frontier_tests {
         .unwrap();
         let newer = frontier(&path);
 
-        let store = open(&path, Published, &shared.home, Forbidden)
+        let store = open(&path, &shared.home, Forbidden)
             .expect("an additive newer release leaves the store readable");
         let wave = Wave::new(WaveId::new(), "From older lf".into(), "/repo".into());
         store.create_wave(&wave).unwrap();
@@ -2383,35 +2379,35 @@ mod frontier_tests {
         );
         assert_eq!(current_wave(&path), "Current");
         assert_eq!(frontier(&path), newer);
-        open(&path, Published, &shared.home, Authorized)
+        open(&path, &shared.home, Authorized)
             .expect_err("promotion never accepts history it does not know");
 
         let broken = SharedMachine::new();
         let path = broken.shared_db();
-        open(&path, Published, &broken.home, Authorized).unwrap();
+        open(&path, &broken.home, Authorized).unwrap();
         let conn = rusqlite::Connection::open(&path).unwrap();
-        let release = apply_newer_release(
+        let newer = apply_newer_migration(
             &conn,
             "CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
             false,
         )
         .unwrap();
-        let refusal = open(&path, Published, &broken.home, Forbidden)
-            .expect_err("a breaking newer release locks this lf out")
+        let refusal = open(&path, &broken.home, Forbidden)
+            .expect_err("a breaking newer migration locks this lf out")
             .to_string();
         assert!(
-            refusal.contains(&format!("this store needs lf {release} or newer (it has "))
-                && refusal.ends_with("install it with lf install"),
+            refusal.contains(&format!(
+                "this store needs an lf that knows {newer} (it has "
+            )) && refusal.ends_with("install it with `lf self install --main`"),
             "{refusal}"
         );
     }
 
     #[test]
-    fn private_development_store_opens_with_the_current_work_schema() {
+    fn a_private_store_opens_with_the_current_work_schema() {
         let shared = SharedMachine::new();
         let path = shared.home.join("private/loopflow.db");
-        let store = open(&path, ValidationOnly, &shared.home, Forbidden)
-            .expect("private development store opens at the embedded draft frontier");
+        let store = open(&path, &shared.home, Forbidden).expect("a private store migrates itself");
         let wave = Wave::new(
             WaveId::new(),
             "private-development".to_string(),
@@ -2437,10 +2433,10 @@ mod frontier_tests {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
 
-        let error = open(&path, Published, &shared.home, Forbidden)
+        let error = open(&path, &shared.home, Forbidden)
             .expect_err("an ordinary open must not initialize the shared store");
         assert!(
-            error.to_string().contains("lf install"),
+            error.to_string().contains("lf self install"),
             "the refusal must name the authorized boundary: {error}"
         );
         assert!(
@@ -2465,16 +2461,13 @@ mod frontier_tests {
 
         // The candidate is one migration ahead; its ordinary open refuses rather
         // than reuse a schema older than its own code.
-        let error = open(&path, Published, &shared.home, Forbidden)
+        let error = open(&path, &shared.home, Forbidden)
             .expect_err("an ordinary open ahead of the frontier must refuse");
         assert!(
-            error.to_string().contains("lf install"),
-            "the refusal must name the authorized boundary: {error}"
-        );
-        assert!(
-            error.to_string().contains(&installed_frontier)
-                || error.to_string().contains(&latest_known_version()),
-            "the refusal names the pending frontier: {error}"
+            error.to_string().contains(&latest_known_version())
+                && (error.to_string().contains("lf self install --main")
+                    || error.to_string().contains("private LF_HOME")),
+            "the refusal names the pending migration and its fix: {error}"
         );
         assert_eq!(
             frontier(&path).as_deref(),
@@ -2498,7 +2491,7 @@ mod frontier_tests {
         let path = shared.shared_db();
 
         // Initialization from absent.
-        open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
+        open(&path, &shared.home, Authorized).expect("boundary initializes");
         assert_eq!(
             frontier(&path).as_deref(),
             Some(latest_known_version().as_str())
@@ -2506,7 +2499,7 @@ mod frontier_tests {
 
         // Once the boundary has initialized it, an ordinary open validates the
         // now-existing store read-only and leaves the frontier at the head.
-        open(&path, Published, &shared.home, Forbidden)
+        open(&path, &shared.home, Forbidden)
             .expect("an ordinary open validates the initialized store");
         assert_eq!(
             frontier(&path).as_deref(),
@@ -2521,7 +2514,7 @@ mod frontier_tests {
             frontier(&advanced_path).as_deref(),
             Some(prior_known_version().as_str())
         );
-        open(&advanced_path, Published, &advanced.home, Authorized).expect("boundary advances");
+        open(&advanced_path, &advanced.home, Authorized).expect("boundary advances");
         assert_eq!(
             frontier(&advanced_path).as_deref(),
             Some(latest_known_version().as_str())
@@ -2545,8 +2538,8 @@ mod frontier_tests {
         );
         assert_eq!(current_wave(&path), "Current");
 
-        open(&path, Published, &shared.home, Forbidden)
-            .expect_err("ordinary branch candidate must not promote its draft migration");
+        open(&path, &shared.home, Forbidden)
+            .expect_err("ordinary branch candidate must not apply its migration");
         assert_eq!(
             frontier(&path).as_deref(),
             Some(installed_frontier.as_str())
@@ -2559,17 +2552,17 @@ mod frontier_tests {
         );
         drop(installed);
 
-        open(&path, Published, &shared.home, Authorized)
+        open(&path, &shared.home, Authorized)
             .expect("explicit promotion advances the shared frontier");
         let promoted_frontier = latest_known_version();
         assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
         assert_eq!(current_wave(&path), "Current");
 
-        open(&path, Published, &shared.home, Authorized)
+        open(&path, &shared.home, Authorized)
             .expect("repeating promotion at the same frontier is a no-op");
         assert_eq!(frontier(&path).as_deref(), Some(promoted_frontier.as_str()));
         assert_eq!(current_wave(&path), "Current");
-        open(&path, Published, &shared.home, Forbidden)
+        open(&path, &shared.home, Forbidden)
             .expect("ordinary current binary opens after promotion");
     }
 
@@ -2579,7 +2572,7 @@ mod frontier_tests {
     fn an_ordinary_open_of_the_shared_store_does_not_scan_stored_rows() {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
-        open(&path, Published, &shared.home, Authorized).expect("boundary initializes");
+        open(&path, &shared.home, Authorized).expect("boundary initializes");
         let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute_batch(
             "PRAGMA foreign_keys = OFF;
@@ -2588,27 +2581,18 @@ mod frontier_tests {
         )
         .unwrap();
 
-        open(&path, Published, &shared.home, Forbidden)
+        open(&path, &shared.home, Forbidden)
             .expect("an ordinary open validates ledger and schema only");
         crate::store::migrations::validate_sqlite(&conn)
             .expect_err("full diagnosis still reports the dangling reference");
     }
 
-    /// A validation-only build never advances the shared store even at the
-    /// nominal boundary, and a private/isolated DB stays freely initializable —
-    /// the isolated dev escape the directive preserves.
+    /// A private path (not ~/.lf/loopflow.db) initializes and migrates itself.
     #[test]
-    fn validation_only_is_walled_from_the_shared_store_but_not_private_ones() {
+    fn a_private_store_initializes_without_the_promotion_boundary() {
         let shared = SharedMachine::new();
-        let path = shared.shared_db();
-        open(&path, ValidationOnly, &shared.home, Authorized)
-            .expect_err("a validation-only build must never initialize the shared store");
-        assert!(!path.exists());
-
-        // A private path (not ~/.lf/loopflow.db) initializes regardless of
-        // authority or boundary.
         let private = shared.home.join(".lf-dev/branch/loopflow.db");
-        open(&private, ValidationOnly, &shared.home, Forbidden).expect("private DB initializes");
+        open(&private, &shared.home, Forbidden).expect("private DB initializes");
         assert_eq!(
             frontier(&private).as_deref(),
             Some(latest_known_version().as_str())

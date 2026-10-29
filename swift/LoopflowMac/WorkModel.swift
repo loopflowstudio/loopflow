@@ -1101,8 +1101,6 @@ final class WorkModel {
     @ObservationIgnored private var workObservation: WorkObservation?
     private var workMachine: String?
     private var workDataDirectory: String?
-    /// The preview copy the local lf reads, when this build carries unreleased drafts.
-    private(set) var previewCopy: String?
     @ObservationIgnored private var workOpened = ContinuousClock.now
     @ObservationIgnored private var nextRequestId = 0
     @ObservationIgnored private var sentScope: WorkScope?
@@ -1314,14 +1312,8 @@ final class WorkModel {
                 guard !Task.isCancelled else { await opened.cancel(); return }
                 // A new reader numbers its frames from one and reads the store
                 // as it is now, which includes every local write so far.
-                // The store is the data identity: a preview copy, else the shared one.
-                let dataDirectory = opened.copy ?? ""
-                if let workDataDirectory, workDataDirectory != dataDirectory {
-                    dropMachineContent()
-                    finishCheckpoints(through: .max, reason: "Machine changed before the update was confirmed")
-                }
-                workDataDirectory = dataDirectory
-                if previewCopy != opened.copy { previewCopy = opened.copy }
+                // Every reader reads the Machine's one store.
+                workDataDirectory = ""
                 workObservation = opened
                 workOpened = .now
                 appliedSequence = [:]

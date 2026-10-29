@@ -74,5 +74,5 @@ old help even with `LF_*` unset, so check help through `cli_discovery`, not by h
   (`git grep SessionConnect|explain_connect|ConnectOrResume` → only `SessionConnectionArgs`,
   the shared `resume`/`session new` Clap args, which stay). #1764 touches CI jobs only; no rerun.
 - Implement (2026-10-28, Desktop hold): `scripts/test_desktop.sh --filter 'WorkModelTests|DesktopHeadlessTests'` — pass.
-- Gate: Swift build (incl. #1761's NewTaskSheet/`prepareTaskSession` path) + Sessions/WorkDestination tests; `session_lifecycle_tests` (CI-only).
+- Publish (2026-10-28): `scripts/test_desktop.sh --filter 'SessionsStoreTests|WorkDestinationTests|WorkModelTests|RegistryQueryTests'` — Swift build against main + 129 tests pass. `session_lifecycle_tests` left to CI.
 - Assumptions: `scratch/questions.md`.

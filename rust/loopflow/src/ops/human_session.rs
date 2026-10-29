@@ -209,7 +209,7 @@ pub(crate) async fn select_connection(
     let (session, started) = match scope {
         PrimaryScope::Repository(repo) => primary::ensure(store, repo.as_path(), None).await?,
         PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str())).await?,
-        PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str()).await?,
+        PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), None).await?,
     };
     Ok(Selected {
         id: session.id.into(),

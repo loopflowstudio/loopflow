@@ -32,6 +32,7 @@ struct ConsoleCommands: Commands {
     @FocusedValue(\.consoleActions) private var actions
     var body: some Commands {
         CommandGroup(after: .newItem) {
+            action("new-task")
             action("run")
             action("close")
             action("reopen")
@@ -1136,6 +1137,8 @@ struct SessionsContentView: View {
                 WorkPalette(model: model, activate: navigate)
             case .sidebarSearch:
                 WorkPalette(model: model, sidebarOnly: true, activate: navigate)
+            case .newTask:
+                NewTaskSheet(model: model)
             case nil:
                 EmptyView()
             }

@@ -76,6 +76,35 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn finished_team_delta_answers_reads_inside_its_window() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        // 2026-10-29T00:00:00Z
+        let start = 1_793_232_000;
+        assert_eq!(
+            store.begin_linear_team_check("team", start, 10).unwrap(),
+            Some(None)
+        );
+        // Begun but unfinished: nothing local answers yet.
+        assert!(!store.linear_team_current("team", start, 10).unwrap());
+        store
+            .finish_linear_team_check("team", "2026-10-29T00:00:00Z")
+            .unwrap();
+        assert!(store.linear_team_current("team", start + 9, 10).unwrap());
+        assert!(!store.linear_team_current("team", start + 10, 10).unwrap());
+        // A tighter budget stretches the window over the same delta.
+        assert!(store.linear_team_current("team", start + 90, 100).unwrap());
+        assert_eq!(
+            store
+                .begin_linear_team_check("team", start + 90, 100)
+                .unwrap(),
+            None
+        );
+    }
+
     #[test]
     fn linear_on_demand_migration_retains_released_work() {
         use crate::store::migrations::{apply_before_current_draft, current_draft_sql};

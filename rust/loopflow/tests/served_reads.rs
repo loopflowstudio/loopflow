@@ -76,6 +76,22 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     .unwrap();
     let task_id = unpublished["id"].as_str().unwrap().to_owned();
     let unpublished = unpublished["identifier"].as_str().unwrap().to_owned();
+    // Unpublished too: abandoning it touches no PR, so needs no GitHub.
+    let abandoned: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--no-wave",
+            "--title",
+            "Abandoned in the app",
+            "--json",
+        ],
+        None,
+    ))
+    .unwrap();
+    let abandoned = abandoned["identifier"].as_str().unwrap().to_owned();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     // Planning status also serves a Work folder without Git.
     let work_folder = home.path().join("folder");
@@ -394,6 +410,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     }) {
         Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
+        | Write::TaskAbandon { .. }
         | Write::TaskDefer { .. }
         | Write::TaskNotes { .. }
         | Write::TaskMove { .. }
@@ -402,6 +419,9 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Write::SessionBind { .. }
         | Write::WaveEnsure { .. }
         | Write::PlanningRefresh { .. }
+        | Write::NewChapter { .. }
+        | Write::GraphCustomize { .. }
+        | Write::Portfolio { .. }
         | Write::DashboardQuery { .. }
         | Write::DashboardPin { .. }
         | Write::DashboardRename { .. }
@@ -455,6 +475,10 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                 Write::PlanningRefresh {
                     directory: directory.clone(),
                     wave: "task-pr-tests".into(),
+                },
+                Write::TaskAbandon {
+                    directory: directory.clone(),
+                    issue: abandoned.clone(),
                 },
             ],
             // Each names the revision its last write left, so it is built again
@@ -538,7 +562,9 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     };
     for write in writes {
         let issue = match &write {
-            Write::TaskComplete { issue, .. } | Write::TaskReopen { issue, .. } => issue.clone(),
+            Write::TaskComplete { issue, .. }
+            | Write::TaskReopen { issue, .. }
+            | Write::TaskAbandon { issue, .. } => issue.clone(),
             _ => "INF-123".to_owned(),
         };
         let recorded = compare(write.clone(), &|| write.clone(), &|| effect(&issue));
@@ -548,6 +574,60 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     compare(save(file_revision()), &|| save(file_revision()), &|| {
         effect("INF-123")
     });
+    // Which repositories the app shows, as the app reads them.
+    let portfolio =
+        || without_clock(serde_json::from_str(&Read::Portfolio.read().unwrap()).unwrap());
+    let manual = Write::Portfolio {
+        change: vec!["manual".into()],
+    };
+    assert!(compare(manual.clone(), &|| manual.clone(), &portfolio) > 0);
+    // A customized Graph is the builtin's copy in the repository.
+    let customized = || {
+        Value::from(
+            fs::read_to_string(repo.path().join(".lf/graphs/code.yaml")).unwrap_or_default(),
+        )
+    };
+    let customize = Write::GraphCustomize {
+        directory: directory.clone(),
+        name: "code".into(),
+    };
+    // `lf` writes its own copy, not the app's.
+    let recustomize = || {
+        fs::remove_file(repo.path().join(".lf/graphs/code.yaml")).unwrap();
+        customize.clone()
+    };
+    assert_eq!(compare(customize.clone(), &recustomize, &customized), 0);
+    // A chapter preview reads the rotation it would make and records nothing.
+    let waves: Value = serde_json::from_str(&Read::Waves.read().unwrap()).unwrap();
+    let wave_id = waves
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|wave| wave.to_string().contains("\"task-pr-tests\""))
+        .and_then(|wave| wave["id"].as_str())
+        .unwrap_or_else(|| panic!("no task-pr-tests Wave in {waves}"))
+        .to_owned();
+    let preview = Write::NewChapter {
+        directory: directory.clone(),
+        name: "October".into(),
+        plan: serde_json::json!({
+            "name": "October",
+            "waves": [{
+                "wave_id": wave_id,
+                "successor_id": "proj_4f6c2b8e-3d5a-4c1e-9b7a-2e8d6f0a1c3b",
+                "create": true,
+                "project_name": "October",
+                "krs": [{"text": "Desktop writes in-process", "holds": false}],
+                "metric_targets": []
+            }]
+        })
+        .to_string(),
+        preview: true,
+    };
+    assert_eq!(
+        compare(preview.clone(), &|| preview.clone(), &|| effect("INF-123")),
+        0
+    );
     // Arrangement persists without a Process, in the app as through `lf`.
     let create = Write::DashboardQuery {
         directory: directory.clone(),

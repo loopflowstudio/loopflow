@@ -851,8 +851,20 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             json,
             ..
         } => {
-            let rotation =
-                loopflow::ops::chapter::new_chapter(repo, name, plan, wave.as_deref(), *dry_run)?;
+            let rotation = loopflow::ops::chapter::new_chapter(
+                repo,
+                name,
+                &std::fs::read(plan)?,
+                wave.as_deref(),
+                *dry_run,
+            )?;
+            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
+                .planning_transport()
+                .remote_name()
+                .filter(|_| !dry_run)
+            {
+                eprintln!("Saved locally; pending {provider} sync.");
+            }
             if *json {
                 println!("{}", serde_json::to_string_pretty(&rotation)?);
             } else {

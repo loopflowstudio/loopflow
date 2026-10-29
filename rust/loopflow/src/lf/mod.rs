@@ -1106,8 +1106,8 @@ impl WaveCommand {
         match self {
             Self::Show { .. } | Self::Graph { .. } | Self::List { .. } => false,
             Self::Status { sync, .. } => *sync,
+            Self::NewChapter { dry_run, .. } => !dry_run,
             Self::EditPlan { .. }
-            | Self::NewChapter { .. }
             | Self::Ensure { .. }
             | Self::BindProject { .. }
             | Self::Rename { .. }
@@ -1138,8 +1138,10 @@ impl SessionCommand {
 impl GraphCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::List { .. } | Self::Show { .. } => false,
-            Self::Customize { .. } | Self::Run { .. } | Self::External(_) => true,
+            // Customizing copies a definition into the repository's files,
+            // as an editor would; `lf` admits no Process for it.
+            Self::List { .. } | Self::Show { .. } | Self::Customize { .. } => false,
+            Self::Run { .. } | Self::External(_) => true,
         }
     }
 }
@@ -1147,7 +1149,8 @@ impl GraphCommand {
 impl SkillCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Customize { .. } | Self::External(_) => true,
+            Self::Customize { .. } => false,
+            Self::External(_) => true,
         }
     }
 }

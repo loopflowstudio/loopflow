@@ -226,6 +226,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
+    case taskAbandon(directory: String, issue: String)
     case taskDefer(directory: String, issue: String, deferred: Bool)
     case taskNotes(directory: String, issue: String, notes: String)
     case taskMove(directory: String, issue: String, wave: String?)
@@ -234,6 +235,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionBind(directory: String, id: String, task: String)
     case waveEnsure(directory: String, wave: String)
     case planningRefresh(directory: String, wave: String)
+    case newChapter(directory: String, name: String, plan: String, preview: Bool)
+    case graphCustomize(directory: String, name: String)
+    /// Run from `/`, as the app's `lf` ran it.
+    case portfolio(change: [String])
     case dashboardQuery(directory: String, id: String, expression: String, revision: Int64?)
     case dashboardPin(directory: String, id: String, pinned: Bool, revision: Int64)
     case dashboardRename(directory: String, id: String, name: String, revision: Int64)
@@ -247,6 +252,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         switch self {
         case .taskComplete(_, let issue): ["task", "complete", issue]
         case .taskReopen(_, let issue): ["task", "reopen", issue]
+        case .taskAbandon(_, let issue): ["task", "abandon", issue]
         case .taskDefer(_, let issue, let deferred): ["task", deferred ? "defer" : "resume", issue]
         case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)"]
         case .taskMove(_, let issue, let wave):
@@ -257,6 +263,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
         case .waveEnsure(_, let wave): ["wave", "ensure", wave, "--json"]
         case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
+        case .newChapter(_, let name, _, let preview):
+            ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"] + (preview ? ["--dry-run"] : [])
+        case .graphCustomize(_, let name): ["graph", "customize", name]
+        case .portfolio(let change): ["portfolio"] + change + ["--json"]
         case .dashboardQuery(_, let id, let expression, let revision):
             ["desktop", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
         case .dashboardPin(_, let id, let pinned, let revision):
@@ -281,6 +291,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     public var input: String? {
         switch self {
         case .taskSave(_, _, _, _, let content): content
+        case .newChapter(_, _, let plan, _): plan
         case .dashboardSlots(_, _, _, let slots): slots
         case .paneLayout(_, _, let layout): layout
         default: nil
@@ -293,6 +304,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task_complete", ["directory": directory, "issue": issue])
         case .taskReopen(let directory, let issue):
             TaggedFields("task_reopen", ["directory": directory, "issue": issue])
+        case .taskAbandon(let directory, let issue):
+            TaggedFields("task_abandon", ["directory": directory, "issue": issue])
         case .taskDefer(let directory, let issue, let deferred):
             TaggedFields("task_defer", ["directory": directory, "issue": issue, "deferred": deferred])
         case .taskNotes(let directory, let issue, let notes):
@@ -310,6 +323,12 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("wave_ensure", ["directory": directory, "wave": wave])
         case .planningRefresh(let directory, let wave):
             TaggedFields("planning_refresh", ["directory": directory, "wave": wave])
+        case .newChapter(let directory, let name, let plan, let preview):
+            TaggedFields("new_chapter", ["directory": directory, "name": name, "plan": plan, "preview": preview])
+        case .graphCustomize(let directory, let name):
+            TaggedFields("graph_customize", ["directory": directory, "name": name])
+        case .portfolio(let change):
+            TaggedFields("portfolio", ["change": change])
         case .dashboardQuery(let directory, let id, let expression, let revision):
             TaggedFields("dashboard_query", ["directory": directory, "id": id, "expression": expression,
                                              "revision": revision])
@@ -460,7 +479,7 @@ public struct RegistryQuery: Sendable {
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
         if arguments.isEmpty { return try Self.decode(Portfolio.self, from: await serve(.portfolio)) }
-        return try Self.decode(Portfolio.self, from: await run(["portfolio"] + arguments + ["--json"], nil))
+        return try Self.decode(Portfolio.self, from: await write(.portfolio(change: arguments)))
     }
 
     /// Keep execution selectors off local filesystem paths. The existing CLI owns
@@ -606,9 +625,8 @@ public struct RegistryQuery: Sendable {
     }
 
     public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
-        var args = ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"]
-        if preview { args.append("--dry-run") }
-        return try Self.decode(ProjectRotationPreview.self, from: await runWithInput(args, cwd, plan))
+        try Self.decode(ProjectRotationPreview.self, from: await write(
+            .newChapter(directory: cwd, name: name, plan: plan, preview: preview)))
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
@@ -707,7 +725,8 @@ public struct RegistryQuery: Sendable {
     }
 
     public func customizeGraph(_ name: String, cwd: String?) async throws -> String {
-        try await run(["graph", "customize", name], cwd).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Without a repository it customizes from `/`, where the app runs.
+        try await write(.graphCustomize(directory: cwd ?? "/", name: name)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Run the Task's graph until its next interactive step; returns once it
@@ -790,7 +809,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func abandonTask(issue: String, cwd: String?) async throws {
-        _ = try await run(["task", "abandon", issue], cwd)
+        _ = try await write(.taskAbandon(directory: cwd ?? "/", issue: issue))
     }
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying

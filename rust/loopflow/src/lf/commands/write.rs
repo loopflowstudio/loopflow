@@ -43,6 +43,9 @@ pub enum Write {
         issue: String,
         notes: String,
     },
+    /// `lf task abandon <issue>`: cancels the Task and removes its PRs and
+    /// branches.
+    TaskAbandon { directory: PathBuf, issue: String },
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
     TaskMove {
         directory: PathBuf,
@@ -74,6 +77,20 @@ pub enum Write {
     WaveEnsure { directory: PathBuf, wave: String },
     /// `lf wave status <wave> --sync --json`: the planning refresh.
     PlanningRefresh { directory: PathBuf, wave: String },
+    /// `lf wave new-chapter --all <name> --plan /dev/stdin --json`, with
+    /// `plan` (JSON) on stdin; `--dry-run` when `preview`, which records nothing.
+    NewChapter {
+        directory: PathBuf,
+        name: String,
+        plan: String,
+        preview: bool,
+    },
+    /// `lf graph customize <name>`: copies a builtin Graph into the repository,
+    /// recording nothing.
+    GraphCustomize { directory: PathBuf, name: String },
+    /// `lf portfolio <change> --json`, run from `/`: which repositories the
+    /// app shows.
+    Portfolio { change: Vec<String> },
     /// `lf desktop query [--revision <revision>] -- <id> <expression>`.
     DashboardQuery {
         directory: PathBuf,
@@ -138,6 +155,7 @@ impl Write {
         let words: Vec<&str> = match self {
             Self::TaskComplete { issue, .. } => vec!["task", "complete", issue],
             Self::TaskReopen { issue, .. } => vec!["task", "reopen", issue],
+            Self::TaskAbandon { issue, .. } => vec!["task", "abandon", issue],
             Self::TaskDefer {
                 issue, deferred, ..
             } => vec!["task", if *deferred { "defer" } else { "resume" }, issue],
@@ -173,6 +191,26 @@ impl Write {
             Self::PlanningRefresh { wave, .. } => {
                 vec!["wave", "status", wave, "--sync", "--json"]
             }
+            Self::NewChapter { name, preview, .. } => {
+                let mut words = vec![
+                    "wave",
+                    "new-chapter",
+                    "--all",
+                    name,
+                    "--plan",
+                    "/dev/stdin",
+                    "--json",
+                ];
+                if *preview {
+                    words.push("--dry-run");
+                }
+                words
+            }
+            Self::GraphCustomize { name, .. } => vec!["graph", "customize", name],
+            Self::Portfolio { change } => std::iter::once("portfolio")
+                .chain(change.iter().map(String::as_str))
+                .chain(["--json"])
+                .collect(),
             Self::DashboardQuery {
                 id,
                 expression,
@@ -235,6 +273,7 @@ impl Write {
     pub fn input(&self) -> Option<&str> {
         match self {
             Self::TaskSave { content, .. } => Some(content),
+            Self::NewChapter { plan, .. } => Some(plan),
             Self::DashboardSlots { slots, .. } => Some(slots),
             Self::PaneLayout { layout, .. } => Some(layout),
             _ => None,
@@ -245,6 +284,7 @@ impl Write {
         match self {
             Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }
+            | Self::TaskAbandon { directory, .. }
             | Self::TaskDefer { directory, .. }
             | Self::TaskNotes { directory, .. }
             | Self::TaskMove { directory, .. }
@@ -253,6 +293,8 @@ impl Write {
             | Self::SessionBind { directory, .. }
             | Self::WaveEnsure { directory, .. }
             | Self::PlanningRefresh { directory, .. }
+            | Self::NewChapter { directory, .. }
+            | Self::GraphCustomize { directory, .. }
             | Self::DashboardQuery { directory, .. }
             | Self::DashboardPin { directory, .. }
             | Self::DashboardRename { directory, .. }
@@ -260,6 +302,7 @@ impl Write {
             | Self::DashboardSlots { directory, .. }
             | Self::TileMove { directory, .. }
             | Self::PaneLayout { directory, .. } => directory,
+            Self::Portfolio { .. } => Path::new("/"),
         }
     }
 
@@ -270,11 +313,14 @@ impl Write {
         match self {
             Self::TaskComplete { issue, .. }
             | Self::TaskReopen { issue, .. }
+            | Self::TaskAbandon { issue, .. }
             | Self::TaskDefer { issue, .. }
             | Self::TaskNotes { issue, .. }
             | Self::TaskMove { issue, .. }
             | Self::TaskSave { issue, .. } => Ok(task_repository(directory, Some(issue))?),
-            Self::WaveEnsure { .. } => crate::repo::require_repo_root(directory, "this command"),
+            Self::WaveEnsure { .. } | Self::NewChapter { .. } => {
+                crate::repo::require_repo_root(directory, "this command")
+            }
             _ => crate::repo::working_directory_in(directory),
         }
     }
@@ -305,6 +351,10 @@ impl Write {
             Self::TaskReopen { issue, .. } => {
                 task_reopen(issue, None)?;
                 format!("{issue}: reopened; its Graph unchanged\n")
+            }
+            Self::TaskAbandon { issue, .. } => {
+                let identifier = crate::ops::task::task_abandon(repo, Some(issue), false)?;
+                format!("{identifier}: canceled; PRs and branches removed\n")
             }
             Self::TaskDefer {
                 issue, deferred, ..
@@ -344,6 +394,35 @@ impl Write {
                 format!(
                     "{}\n",
                     super::waves::refreshed_status(directory, Some(wave))?
+                )
+            }
+            Self::NewChapter {
+                name,
+                plan,
+                preview,
+                ..
+            } => {
+                // A preview records nothing, so it names no repository first.
+                let repo = crate::repo::require_repo_root(repo, "this command")?;
+                pretty(&crate::ops::chapter::new_chapter(
+                    &repo,
+                    name,
+                    plan.as_bytes(),
+                    None,
+                    *preview,
+                )?)?
+            }
+            Self::GraphCustomize { directory, name } => {
+                let repo = crate::repo::working_directory_in(directory)?;
+                format!("{}\n", crate::graph::customize(name, &repo)?.display())
+            }
+            Self::Portfolio { .. } => {
+                let Commands::Portfolio { cmd: Some(cmd), .. } = command else {
+                    unreachable!("a portfolio write names its change")
+                };
+                format!(
+                    "{}\n",
+                    serde_json::to_string(&crate::portfolio::change(&cmd)?)?
                 )
             }
             // Arrangement parses its own argv, so the app and `lf` reach the
@@ -415,6 +494,16 @@ mod tests {
                 "-state:done"
             ]
         );
+        assert_eq!(
+            write(r#"{"write":"portfolio","change":["remove","/r"]}"#),
+            ["--cwd", "/", "portfolio", "remove", "/r", "--json"]
+        );
+        let chapter = serde_json::from_str::<Write>(
+            r#"{"write":"new_chapter","directory":"/r","name":"October","plan":"{}","preview":true}"#,
+        )
+        .unwrap();
+        assert_eq!(chapter.input(), Some("{}"));
+        assert_eq!(chapter.argv().last().map(String::as_str), Some("--dry-run"));
         let save = serde_json::from_str::<Write>(
             r#"{"write":"task_save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
         )
@@ -474,8 +563,32 @@ mod tests {
                 directory: directory.clone(),
                 wave: "product".into(),
             },
+            Write::TaskAbandon {
+                directory: directory.clone(),
+                issue: "FIX-1".into(),
+            },
+            Write::NewChapter {
+                directory: directory.clone(),
+                name: "October".into(),
+                plan: "{}".into(),
+                preview: false,
+            },
+            Write::Portfolio {
+                change: vec!["add".into(), "/tmp/repo".into()],
+            },
         ];
+        // Arrangement, a customized Graph and a chapter preview record nothing.
         let arrangement = [
+            Write::GraphCustomize {
+                directory: directory.clone(),
+                name: "code".into(),
+            },
+            Write::NewChapter {
+                directory: directory.clone(),
+                name: "October".into(),
+                plan: "{}".into(),
+                preview: true,
+            },
             Write::DashboardQuery {
                 directory: directory.clone(),
                 id: "picked".into(),

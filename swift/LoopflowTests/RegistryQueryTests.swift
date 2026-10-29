@@ -77,6 +77,14 @@ struct RegistryQueryTests {
         #expect(try object(query) == object(
             #"{"write":"dashboard_query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#))
         #expect(query.argv == ["desktop", "query", "--", "picked", "-state:done"])
+        let portfolio = ServedWrite.portfolio(change: ["remove", "/r"])
+        #expect(try object(portfolio) == object(#"{"write":"portfolio","change":["remove","/r"]}"#))
+        #expect(portfolio.argv == ["portfolio", "remove", "/r", "--json"])
+        #expect(portfolio.cwd == "/")
+        let chapter = ServedWrite.newChapter(directory: "/r", name: "October", plan: "{}", preview: true)
+        #expect(try object(chapter) == object(
+            #"{"write":"new_chapter","directory":"/r","name":"October","plan":"{}","preview":true}"#))
+        #expect(chapter.input == "{}")
     }
 
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])

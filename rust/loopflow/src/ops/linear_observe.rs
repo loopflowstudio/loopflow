@@ -285,9 +285,9 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
 /// shared budget falls; Asana and Notion keep the healthy window.
 fn fresh_for(repository: &str) -> i64 {
     if super::planning_client::is_linear(repository) {
-        crate::linear::delta_fresh_for().as_secs() as i64
+        crate::linear::delta_fresh_secs()
     } else {
-        crate::linear::delta_fresh_for_healthy().as_secs() as i64
+        crate::linear::HEALTHY_FRESH_SECS
     }
 }
 
@@ -298,11 +298,7 @@ pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
     if !super::planning_client::is_linear(repository) {
         return false;
     }
-    let check =
-        tokio::time::timeout(Duration::from_secs(5), check_repository(store, repository)).await;
-    if !matches!(check, Ok(Ok(_))) {
-        tracing::debug!(?check, "Linear team check pending");
-    }
+    check_repository_bounded(store, repository).await;
     let Ok(team) = super::planning_client::repository_scope(std::path::Path::new(repository))
     else {
         return false;
@@ -312,22 +308,28 @@ pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
         .linear_team_current(
             &team,
             OffsetDateTime::now_utc().unix_timestamp(),
-            fresh_for(repository),
+            crate::linear::delta_fresh_secs(),
         )
         .unwrap_or(false)
 }
 
-/// Bound on-demand work and retain local planning when Linear is unavailable.
-pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
+/// Bring the repository's scope delta up to date within five seconds; whether
+/// it changed local state. Unavailable or slow providers leave state as it is.
+async fn check_repository_bounded(store: &Store, repository: &str) -> bool {
     let check =
         tokio::time::timeout(Duration::from_secs(5), check_repository(store, repository)).await;
-    let changed = match check {
+    match check {
         Ok(Ok(changed)) => changed,
         result => {
             tracing::debug!(?result, "Linear team check pending");
             false
         }
-    };
+    }
+}
+
+/// Bound on-demand work and retain local planning when Linear is unavailable.
+pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
+    let changed = check_repository_bounded(store, repository).await;
     // Each delivery has its own deadline. A shared deadline repeatedly canceled
     // the first slow export and starved every later saved Task.
     if let Err(error) = sync_repository_deliveries(store, repository).await {

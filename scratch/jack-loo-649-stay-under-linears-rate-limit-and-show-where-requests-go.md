@@ -24,7 +24,7 @@ work and the complexity hypothesis (Task comments).
 - **One read freshness check**: `linear_observe::team_current` runs the Team delta
   (no-op inside its window) and says whether local state answers. The window is
   10 s while the budget is healthy, one pacing interval when paced, until reset in
-  the reserve (`delta_fresh_for`). Routed through it: `lf task comment` refresh
+  the reserve (`delta_fresh_secs`). Routed through it: `lf task comment` refresh
   (Linear skips its per-issue trash + observe reads when current) and
   `inspect_task_planning_async` under `Auto`; `link_pr_async` now uses `Auto`
   instead of `Force`. Comments written in lf still push immediately.
@@ -50,4 +50,4 @@ Nothing replaced: the cooldown stays the pause authority; the budget extends it.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- linear::cooldown linear::request_log linear::team_changes linear_team_checks linear_on_demand native_runner_is_quiet attach_task_github_pr task_comment`: 30 passed after two count assertions were moved to the delta's extra `ProjectOwnership` read; clippy clean. Wider suites: gate.
+- Compress pass: `cargo test -p loopflow --lib -- linear::cooldown linear::request_log linear::team_changes linear_team_checks linear_on_demand native_runner_is_quiet attach_task_github_pr task_comment linear_observe`: 33 passed (31 min under load average ~85); clippy `--all-targets -D warnings` clean. Wider suites: gate.

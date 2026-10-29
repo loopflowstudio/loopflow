@@ -5,7 +5,7 @@ use anyhow::Result;
 use time::OffsetDateTime;
 
 use crate::lf::output::{format_int, format_time, truncate, Colors};
-use crate::linear::request_log::{self, RequestOutcome, RequestSummary};
+use crate::linear::request_log::{self, RequestOutcome, RequestSummary, Tally};
 
 const COMMAND_WIDTH: usize = 24;
 const OPERATION_WIDTH: usize = 28;
@@ -52,16 +52,13 @@ fn render(summary: &RequestSummary) -> String {
         ("complexity", summary.complexity),
     ] {
         let Some(allowance) = allowance else { continue };
-        let limit = allowance
-            .limit
-            .and_then(|limit| u64::try_from(limit).ok())
-            .map_or_else(|| "?".into(), format_int);
+        let limit = allowance.limit.map_or_else(|| "?".into(), signed);
         let reset = allowance
             .reset_ms
             .map_or_else(|| "?".into(), |reset| format_time(reset / 1000));
         out.push_str(&format!(
             "Latest {label} allowance: {} of {limit} left, resets {reset}\n",
-            format_int(u64::try_from(allowance.remaining).unwrap_or(0)),
+            signed(allowance.remaining),
         ));
     }
     out.push_str(&format!(
@@ -75,11 +72,9 @@ fn render(summary: &RequestSummary) -> String {
     ));
     for hour in &summary.hours {
         out.push_str(&format!(
-            "{:<14}  {:>8}  {:>8}  {:>10}\n",
+            "{:<14}  {}\n",
             format_time(hour.start_ms / 1000),
-            format_int(hour.spent),
-            format_int(hour.held),
-            format_int(u64::try_from(hour.cost).unwrap_or(0)),
+            tally(&hour.tally)
         ));
     }
     out.push_str(&format!(
@@ -94,13 +89,25 @@ fn render(summary: &RequestSummary) -> String {
     ));
     for caller in &summary.callers {
         out.push_str(&format!(
-            "{:<COMMAND_WIDTH$}  {:<OPERATION_WIDTH$}  {:>8}  {:>8}  {:>10}\n",
+            "{:<COMMAND_WIDTH$}  {:<OPERATION_WIDTH$}  {}\n",
             truncate(&caller.command, COMMAND_WIDTH),
             truncate(&caller.operation, OPERATION_WIDTH),
-            format_int(caller.spent),
-            format_int(caller.held),
-            format_int(u64::try_from(caller.cost).unwrap_or(0)),
+            tally(&caller.tally)
         ));
     }
     out
+}
+
+fn tally(tally: &Tally) -> String {
+    format!(
+        "{:>8}  {:>8}  {:>10}",
+        format_int(tally.spent),
+        format_int(tally.held),
+        signed(tally.cost)
+    )
+}
+
+/// Linear reports these as signed; a negative one reads as none.
+fn signed(value: i64) -> String {
+    format_int(u64::try_from(value).unwrap_or(0))
 }

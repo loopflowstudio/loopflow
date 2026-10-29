@@ -12,7 +12,7 @@
   Issues owned by another Team than the repository's are not covered by its delta.
 - PR link skip covers only Open → Open with no prior error. Merges and abandonments
   are recorded outside the linking path, so Merged/Abandoned always write.
-- `delta_fresh_for` reads the production endpoint's budget; test stand-ins see a
+- `delta_fresh_secs` reads the production endpoint's budget; test stand-ins see a
   healthy (10 s) window.
 - TeamChanges trim was made on the page-size math without live `x-complexity`
   data (no logging was on yet); the log can confirm it.

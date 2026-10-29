@@ -205,8 +205,8 @@ Plan ownership. Backup/export remains unproved.
 
 Jack Heart's `2d140be4` replaces per-agent polling with team deltas at turn, Flow,
 planning-read and write boundaries; only watchers retain a slow clock. No daemon,
-webhook or pub/sub. Ten-second shared attempt freshness differs from the successful
-watermark: failed/interrupted ingestion retains the latter. Exclude terminal Tasks
+webhook or pub/sub. Shared attempt freshness (10 s while Linear's budget is healthy,
+longer as it falls: LOO-649) differs from the successful watermark: failed/interrupted ingestion retains the latter. Exclude terminal Tasks
 and teams without live Tasks; pagination may require multiple requests. Successful
 mutations settle captured receipts directly; uncertain effects retain identity.
 Home-wide reset cooldown handles HTTP 400 limits as well as rate-limit headers.
@@ -255,11 +255,9 @@ unchanged. Lock fixtures prove source behavior only; installed concurrent-Flow
 acceptance and the slow status/ensure cause remain unproved.
 Plan: `scratch/stop-the-session-title-hook.md`.
 
-Jack Heart's October 11 Kata report (`d4991d61`) reproduced consecutive
-prompt timeouts outside Loopflow with one background shell. Shared-store contention
-can explain cross-repository recurrence; the Kata lock holder/cause remain unknown.
-Callback fixtures prove no installed concurrent-Flow/Kata acceptance. Materialized/Linux CI remains open. Report, gate and Task-preservation
-evidence: `4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Session titles.
+Jack Heart's October 11 Kata report (`d4991d61`): prompt timeouts recurred outside
+Loopflow; the Kata lock holder/cause remain unknown. Evidence:
+`4fc8754e7d:.lf/wave/infrastructure/MEMORY.md`, Session titles.
 
 ## Program Status direction (LOO-398/415, reconciled 2026-10-16)
 
@@ -344,8 +342,7 @@ establish reuse, not installation or account continuity.
 The target parses the command in its saved repository; Task, worktree and Wave
 selectors resolve there. `--machine Y machine add X` edits Y's registry. No SSH
 alias or per-call repository override remains.
-Jack Heart's October 7 steer records LOO-411 / PR #1489 merged; main `35e759aaf`
-is integrated. Parent landing grants no later-slice or LOO-413 landing authority.
+LOO-411 / PR #1489 merged (`35e759aaf`).
 
 ## Resident machine logins (LOO-413, 2026-10-08)
 
@@ -502,11 +499,10 @@ migration backups remain (13.6 → 5.9 GiB). Old rows are not rewritten.
 PR #1501 merged as `812d8cc55` (installation unproved): promotion appended every
 release to `retained_published_sets`; a settled install now retains its fallback and the
 prior one, then removes unnamed content-addressed binaries/bundles no live
-process executes. Projected 11.4 GiB here by `du`; APFS clone sharing unmeasured.
+process executes.
 Store growth stays unbounded, about 1.7 MB per capture. Next condition is Jack's
 retention choice: system of record (SQLite or `events.jsonl`) and capture expiry;
-then sizes in `lf home doctor`. 27.9 GiB was reclaimed October 6; Jack's 78.7 GiB
-recording and 81-copy leads were gone before measurement. Left intact: 23 GiB of
+then sizes in `lf home doctor`. Left intact: 23 GiB of
 unread legacy `traces`, `backups`, `lfd.db*`, `logs`; LOO-304's 40 GiB of
 `/private/tmp` fixtures. Unknown ownership is not permission to delete. Test
 `session_record` with `LF_*` cleared.
@@ -516,10 +512,9 @@ storage and autonomous cleanup”; current direction: Capture cutover.
 
 ## Project configuration and review direction (2026-10-05)
 
-LOO-366 remains unfinished under Optional chapters below; LOO-326/370 completed.
-LOO-367's retry retained boot witness 819671 and stopped on that boot. Preserve
-its conversation/Flow; only an authorized restart supplies new death evidence.
-Prior recommendations and review: `906576f39:wave/infrastructure/MEMORY.md`, this heading.
+LOO-366 remains unfinished (Optional chapters below). LOO-367's retry stopped on
+boot witness 819671; preserve its conversation/Flow. Prior review:
+`906576f39:wave/infrastructure/MEMORY.md`, this heading.
 
 ## Release follow-through (reconciled 2026-10-05)
 
@@ -546,9 +541,8 @@ under this heading.
 
 ## Review replacement (2026-10-04)
 
-Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb` with hosted CI green.
-LOO-370 completed October 6. Installed acceptance is unproved; LOO-373 owns
-landing-placement reconciliation.
+Jack Heart authorized LOO-377; #1429 merged as `c5dc238b0afb`. Installed
+acceptance is unproved; LOO-373 owns landing-placement reconciliation.
 
 Save service, attached lf and provider identities before stop removes receipts.
 Lock launch before attachment fencing; settle spawn, then reobserve the Flow.
@@ -625,14 +619,12 @@ Jack declined retired Ask work. Acceptance and viewer artifacts:
 `35e759aaf4:wave/infrastructure/MEMORY.md` under this heading. Legacy retirement
 below supersedes the then-live process handles.
 
-LOO-324 now follows stop-bundling's shared/isolated model. Jack clarified that
-cross-binary history means discovering native Session records across folders,
-not duplicating transcripts or reconstructing new conversations from replayed
-context. Reuse native history and retain Loopflow Session identity. A usage
-threshold such as 90% redirects future launches only; actual exhaustion triggers
-automatic shared failover. Isolated agents retain their own account/fallback.
-The updated Linear brief owns the current scope; stop-bundling's branch evidence
-does not yet establish shipment.
+LOO-324 follows stop-bundling's shared/isolated model. Jack clarified that
+cross-binary history discovers native Session records across folders, never
+duplicated transcripts or replayed context; Loopflow Session identity survives.
+A usage threshold (e.g. 90%) redirects future launches only; actual exhaustion
+triggers shared failover; isolated agents keep their own account/fallback. Its
+Linear brief owns scope; branch evidence establishes no shipment.
 
 [LOO-298 decisions](#data-model-and-performance-decisions-curated-2026-10-17)
 supersede older Run-owner, historical-import, pinned-Home and demo-before-landing
@@ -705,8 +697,6 @@ PR #1456 shipped in v0.13.6. Installed measurements, batching and limits:
   and runs unrecorded. Exact measurements and counterexamples remain in the
   `6448e3c9e7:wave/infrastructure/MEMORY.md` archive; current timings live under
   `<Home>/perf/`.
-- Jack Heart retired further performance acceptance. Only supported settlement
-  preserving the interrupted research Process remains; LOO-408 owns it after installation.
 - **Install preflight/promote read the OS account's Home whatever `LF_HOME`
   says.** Tests running them are container-only installation proofs.
 - Task decisions no longer depend on historical execution; checkout cleanup
@@ -876,9 +866,8 @@ conflict-agent launches. Earlier proofs establish no final-frontier continuity.
 Current attribution and published-installation policy supersede historical
 source-install directions; discarded attribution needs no importer.
 
-Jack Heart retired numeric targets, soak and deeper optimization October 7.
-LOO-291/300's evidence limits are historical, not open acceptance; the archive
-and [benchmarks](../../../scripts/benchmarks/desktop-performance) retain them.
+LOO-291/300's performance limits are historical (targets retired October 7);
+[benchmarks](../../../scripts/benchmarks/desktop-performance) retain them.
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
@@ -994,7 +983,8 @@ Archive: `c756414c8:wave/infrastructure/MEMORY.md`, this heading. Installed
 worker recovery (LOO-295/292; LOO-373 keeps placement):
 `10ca6bd39:wave/infrastructure/MEMORY.md`.
 Cron continuity judges the latest due against exact scheduled receipts; manual
-runs prove no firing, and old gaps do not keep later telemetry red.
+runs prove no firing, and old gaps (LOO-241, `ec126964d`) do not keep later
+telemetry red; fresh failures join existing work.
 
 ## Gotchas
 
@@ -1017,7 +1007,6 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   preserve staged and working bytes. Disposable CLI and 90 commit/Git/worktree
   tests pass; full CI and installed acceptance remain unproved.
 - **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners. `scripts/test.py --all` excludes the explicit-only `--ui-host` diagnostic. The historical runner hang remains at `bc6d11661:wave/infrastructure/MEMORY.md` under Gotchas; changing the gate proves no repair of that hang. Compile-only and skipped checks prove no interaction behavior.
-- **Wait for `cargo test` to finish:** lib failures skip later targets.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier.** Preserve
   an unknown store frontier and its old binary; match embedded SQL against the
@@ -1048,17 +1037,11 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   Membership changes preserve historical execution and require current ownership
   evidence before external effects. Earlier blanket refusal of provider reopening
   is superseded, not evidence that configured continuity passed.
-- **Historical continuity blocked daily telemetry** on August 23 (LOO-241's
-  eight gaps: `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas). Shipped history
-  owns the current rule; fresh failures belong to existing work, not duplicate Tasks.
-- **Release orchestration and publication are separate evidence.** August 23's
-  unpublished v0.12.14 despite cron/workflow success remains at
-  `24db5d4d6:wave/infrastructure/MEMORY.md`, under Gotchas. Judge product state;
-  keep same-tag recovery singular. LOO-261 owns clean-host candidate validation.
-- **Incomplete release synchronization still consumes caller edits**
-  (reproduced 2026-08-23): a scheduled retry removed two pre-run memory edits.
-  LOO-266 owns preserving caller branch, index and working bytes across every
-  release exit; later instances need no second repair Task.
+- **Release orchestration and publication are separate evidence** (v0.12.14:
+  `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas). Judge product state; keep
+  same-tag recovery singular. LOO-261 owns clean-host candidate validation.
+- **Incomplete release synchronization consumes caller edits** (2026-08-23).
+  LOO-266 owns preserving caller branch, index and working bytes on every exit.
 
 ## Durable model lessons (curated 2026-10-02)
 
@@ -1086,8 +1069,7 @@ was selected. Earlier detail: `7fdbe0aea6:wave/infrastructure/MEMORY.md`, this h
 
 ## Archived pointers
 
-Archives authorize no work. Installed worker recovery (LOO-295/292 closed;
-LOO-373 retains placement repair): `10ca6bd39:wave/infrastructure/MEMORY.md`.
+Archives authorize no work; installed worker recovery is under Shipped history.
 Prompt reduction boundary (LOO-287's open proof; Intelligence owns assembly) and
 earlier follow-ups, incl. Jack Heart's unresolved July 6 “up/down 5ths”
 referent: `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.

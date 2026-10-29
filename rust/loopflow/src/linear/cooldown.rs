@@ -24,8 +24,9 @@ const RESERVE_PERCENT: i64 = 10;
 /// Below this share, non-urgent requests are spaced so what remains above the
 /// reserve lasts until the allowance resets.
 const PACE_PERCENT: i64 = 25;
-/// How long a finished team delta answers reads while the budget is healthy.
-const HEALTHY_FRESH_MS: i64 = 10_000;
+/// Seconds a finished scope delta answers reads while the budget is healthy.
+pub(crate) const HEALTHY_FRESH_SECS: i64 = 10;
+const HEALTHY_FRESH_MS: i64 = HEALTHY_FRESH_SECS * 1000;
 
 tokio::task_local! {
     static URGENT: ();
@@ -83,18 +84,17 @@ pub struct Allowances {
 
 impl Allowances {
     pub(super) fn from_headers(headers: &HeaderMap) -> Self {
-        let number = |key: &str| headers.get(key)?.to_str().ok()?.trim().parse::<i64>().ok();
         let allowance = |scope: &str| {
             Some(Allowance {
-                limit: number(&format!("x-ratelimit-{scope}-limit")),
-                remaining: number(&format!("x-ratelimit-{scope}-remaining"))?,
-                reset_ms: number(&format!("x-ratelimit-{scope}-reset")),
+                limit: header_number(headers, &format!("x-ratelimit-{scope}-limit")),
+                remaining: header_number(headers, &format!("x-ratelimit-{scope}-remaining"))?,
+                reset_ms: header_number(headers, &format!("x-ratelimit-{scope}-reset")),
             })
         };
         Self {
             requests: allowance("requests"),
             complexity: allowance("complexity"),
-            cost: number("x-complexity"),
+            cost: header_number(headers, "x-complexity"),
         }
     }
 }
@@ -192,22 +192,14 @@ enum Pressure {
     Reserve { reset_ms: i64 },
 }
 
-/// How long a finished scope delta answers reads with a healthy budget.
-pub(crate) fn delta_fresh_for_healthy() -> Duration {
-    Duration::from_millis(HEALTHY_FRESH_MS.unsigned_abs())
-}
-
-/// How long a finished Linear team delta stands in for Linear before reads
-/// ask again: 10 s while the budget is healthy, one pacing interval while it is
+/// Seconds a finished Linear team delta stands in for Linear before reads ask
+/// again: 10 while the budget is healthy, one pacing interval while it is
 /// paced, and until reset inside the reserve.
-pub(crate) fn delta_fresh_for() -> Duration {
-    let path = Cooldown::for_endpoint(super::LINEAR_BASE_URL).budget;
-    // A torn or missing budget reads as unknown, which is healthy.
-    let budget: Budget = std::fs::read_to_string(path)
-        .ok()
-        .and_then(|value| serde_json::from_str(&value).ok())
+pub(crate) fn delta_fresh_secs() -> i64 {
+    let budget = File::open(Cooldown::for_endpoint(super::LINEAR_BASE_URL).budget)
+        .map(|mut file| read_budget(&mut file))
         .unwrap_or_default();
-    Duration::from_millis(budget.fresh_for_ms(now_ms()).unsigned_abs())
+    budget.fresh_for_ms(now_ms()) / 1000
 }
 
 #[derive(Debug)]
@@ -226,12 +218,8 @@ impl Cooldown {
         }
     }
 
-    async fn lock(&self) -> LinearResult<File> {
-        lock(&self.path).await
-    }
-
     pub(super) async fn check(&self) -> LinearResult<()> {
-        let mut file = self.lock().await?;
+        let mut file = lock(&self.path).await?;
         let until = read_deadline(&mut file)?;
         if until > now_ms() {
             return Err(paused(until));
@@ -286,7 +274,7 @@ impl Cooldown {
         if until <= now {
             return if limited { Err(paused(until)) } else { Ok(()) };
         }
-        let mut file = self.lock().await?;
+        let mut file = lock(&self.path).await?;
         let previous = read_deadline(&mut file)?;
         if until > previous {
             file.seek(SeekFrom::Start(0)).map_err(io_error)?;
@@ -296,7 +284,7 @@ impl Cooldown {
         }
         if previous <= now {
             tracing::warn!(
-                limit = tripped(headers, limited),
+                limit = tripped(headers),
                 reset_epoch_ms = until,
                 "Linear rate limit reached; synchronization paused until reset; pending writes retained"
             );
@@ -345,17 +333,27 @@ fn write_budget(file: &mut File, budget: &Budget) -> LinearResult<()> {
         .map_err(|error| io_error(std::io::Error::other(error)))
 }
 
-/// Which allowances a limited or exhausted response ran out of.
-fn tripped(headers: &HeaderMap, limited: bool) -> String {
-    let number = |key: &str| headers.get(key)?.to_str().ok()?.parse::<i64>().ok();
-    let scopes: Vec<_> = ["requests", "endpoint-requests", "complexity"]
+/// Linear's rate-limit scopes, each with its own `x-ratelimit-<scope>-*` headers.
+const SCOPES: [&str; 3] = ["requests", "endpoint-requests", "complexity"];
+
+fn header_number(headers: &HeaderMap, key: &str) -> Option<i64> {
+    headers.get(key)?.to_str().ok()?.trim().parse().ok()
+}
+
+fn exhausted(headers: &HeaderMap, scope: &str) -> bool {
+    header_number(headers, &format!("x-ratelimit-{scope}-remaining")).is_some_and(|n| n <= 0)
+}
+
+/// Which allowances a paused response ran out of.
+fn tripped(headers: &HeaderMap) -> String {
+    let scopes: Vec<_> = SCOPES
         .into_iter()
-        .filter(|scope| number(&format!("x-ratelimit-{scope}-remaining")).is_some_and(|n| n <= 0))
+        .filter(|scope| exhausted(headers, scope))
         .collect();
-    match (scopes.is_empty(), limited) {
-        (false, _) => scopes.join(","),
-        (true, true) => "unreported".into(),
-        (true, false) => "none".into(),
+    if scopes.is_empty() {
+        "unreported".into()
+    } else {
+        scopes.join(",")
     }
 }
 
@@ -383,22 +381,21 @@ fn read_deadline(file: &mut File) -> LinearResult<i64> {
 }
 
 fn reset_at(headers: &HeaderMap, limited: bool, now: i64) -> Option<i64> {
-    let number = |key: &str| headers.get(key)?.to_str().ok()?.parse::<i64>().ok();
     let mut reset: Option<i64> = None;
-    let mut exhausted = limited;
-    for scope in ["requests", "endpoint-requests", "complexity"] {
-        let empty = number(&format!("x-ratelimit-{scope}-remaining")).is_some_and(|n| n <= 0);
-        exhausted |= empty;
+    let mut any_exhausted = limited;
+    for scope in SCOPES {
+        let empty = exhausted(headers, scope);
+        any_exhausted |= empty;
         if empty || limited {
-            if let Some(value) =
-                number(&format!("x-ratelimit-{scope}-reset")).filter(|value| *value >= 0)
+            if let Some(value) = header_number(headers, &format!("x-ratelimit-{scope}-reset"))
+                .filter(|value| *value >= 0)
             {
                 let value = value.max(now);
                 reset = Some(reset.unwrap_or(value).max(value));
             }
         }
     }
-    if !exhausted {
+    if !any_exhausted {
         return None;
     }
     let retry_after = headers

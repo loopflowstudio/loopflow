@@ -126,22 +126,37 @@ impl PendingRequest {
         })
     }
 
-    pub(super) fn finish(
-        mut self,
-        outcome: RequestOutcome,
-        status: Option<u16>,
-        allowances: Allowances,
-    ) {
-        self.record.outcome = outcome;
-        self.record.status = status;
-        if outcome.spent() {
-            self.record.duration_ms = Some(self.started.elapsed().as_millis() as u64);
+    pub(super) fn finish(mut self, exchange: Exchange) {
+        let record = &mut self.record;
+        record.outcome = exchange.outcome;
+        record.status = exchange.status;
+        if exchange.outcome.spent() {
+            record.duration_ms = Some(self.started.elapsed().as_millis() as u64);
         }
-        self.record.requests = allowances.requests;
-        self.record.complexity = allowances.complexity;
-        self.record.cost = allowances.cost;
-        if let Err(error) = append(&self.path, &self.record) {
+        record.requests = exchange.allowances.requests;
+        record.complexity = exchange.allowances.complexity;
+        record.cost = exchange.allowances.cost;
+        if let Err(error) = append(&self.path, record) {
             tracing::debug!(%error, "Linear request log unavailable");
+        }
+    }
+}
+
+/// What became of one request, and what Linear's answer reported.
+#[derive(Debug)]
+pub(super) struct Exchange {
+    pub(super) outcome: RequestOutcome,
+    pub(super) status: Option<u16>,
+    pub(super) allowances: Allowances,
+}
+
+impl Exchange {
+    /// A request Linear never answered.
+    pub(super) fn unanswered(outcome: RequestOutcome) -> Self {
+        Self {
+            outcome,
+            status: None,
+            allowances: Allowances::default(),
         }
     }
 }
@@ -195,24 +210,40 @@ pub fn read_since(home: &Path, since_ms: i64) -> std::io::Result<Vec<LinearReque
     Ok(records)
 }
 
+/// Requests counted together: those that reached Linear, those held back by
+/// the cooldown or the reserve, and the complexity Linear charged.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Tally {
+    pub spent: u64,
+    pub held: u64,
+    pub cost: i64,
+}
+
+impl Tally {
+    fn add(&mut self, record: &LinearRequestRecord) {
+        if record.outcome.spent() {
+            self.spent += 1;
+        } else {
+            self.held += 1;
+        }
+        self.cost += record.cost.unwrap_or(0);
+    }
+}
+
 /// Requests one command made through one operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CallerTotal {
     pub command: String,
     pub operation: String,
-    /// Requests that reached Linear.
-    pub spent: u64,
-    /// Requests held back by the cooldown or the reserve.
-    pub held: u64,
-    pub cost: i64,
+    #[serde(flatten)]
+    pub tally: Tally,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HourTotal {
     pub start_ms: i64,
-    pub spent: u64,
-    pub held: u64,
-    pub cost: i64,
+    #[serde(flatten)]
+    pub tally: Tally,
 }
 
 /// Recorded Linear requests over one window.
@@ -230,48 +261,40 @@ pub struct RequestSummary {
 
 pub fn summarize(since_ms: i64, records: &[LinearRequestRecord]) -> RequestSummary {
     let mut outcomes = BTreeMap::new();
-    let mut hours: BTreeMap<i64, HourTotal> = BTreeMap::new();
-    let mut callers: BTreeMap<(String, String), CallerTotal> = BTreeMap::new();
+    let mut hours: BTreeMap<i64, Tally> = BTreeMap::new();
+    let mut callers: BTreeMap<(String, String), Tally> = BTreeMap::new();
     for record in records {
         *outcomes.entry(record.outcome).or_default() += 1;
-        let spent = u64::from(record.outcome.spent());
-        let cost = record.cost.unwrap_or(0);
-        let start_ms = record.at_ms - record.at_ms.rem_euclid(3_600_000);
-        let hour = hours.entry(start_ms).or_insert(HourTotal {
-            start_ms,
-            spent: 0,
-            held: 0,
-            cost: 0,
-        });
-        hour.spent += spent;
-        hour.held += 1 - spent;
-        hour.cost += cost;
+        let hour = record.at_ms - record.at_ms.rem_euclid(3_600_000);
+        hours.entry(hour).or_default().add(record);
         let command = record.command.clone().unwrap_or_else(|| "lf".into());
-        let caller = callers
-            .entry((command.clone(), record.operation.clone()))
-            .or_insert(CallerTotal {
-                command,
-                operation: record.operation.clone(),
-                spent: 0,
-                held: 0,
-                cost: 0,
-            });
-        caller.spent += spent;
-        caller.held += 1 - spent;
-        caller.cost += cost;
+        callers
+            .entry((command, record.operation.clone()))
+            .or_default()
+            .add(record);
     }
-    let mut callers: Vec<_> = callers.into_values().collect();
-    callers.sort_by(|left, right| {
-        (right.spent, right.cost, right.held)
-            .cmp(&(left.spent, left.cost, left.held))
-            .then_with(|| (&left.command, &left.operation).cmp(&(&right.command, &right.operation)))
+    let mut callers: Vec<_> = callers
+        .into_iter()
+        .map(|((command, operation), tally)| CallerTotal {
+            command,
+            operation,
+            tally,
+        })
+        .collect();
+    // Heaviest first; the map's order breaks ties by command and operation.
+    callers.sort_by_key(|caller| {
+        let Tally { spent, held, cost } = caller.tally;
+        std::cmp::Reverse((spent, cost, held))
     });
     let latest =
         |pick: fn(&LinearRequestRecord) -> Option<Allowance>| records.iter().rev().find_map(pick);
     RequestSummary {
         since_ms,
         outcomes,
-        hours: hours.into_values().collect(),
+        hours: hours
+            .into_iter()
+            .map(|(start_ms, tally)| HourTotal { start_ms, tally })
+            .collect(),
         callers,
         requests: latest(|record| record.requests),
         complexity: latest(|record| record.complexity),
@@ -349,9 +372,18 @@ mod tests {
         ];
         let summary = summarize(0, &records);
         assert_eq!(summary.callers[0].command, "lf task status");
-        assert_eq!((summary.callers[0].spent, summary.callers[0].held), (2, 1));
+        assert_eq!(
+            (
+                summary.callers[0].tally.spent,
+                summary.callers[0].tally.held
+            ),
+            (2, 1)
+        );
         assert_eq!(summary.hours.len(), 2);
-        assert_eq!((summary.hours[1].spent, summary.hours[1].held), (1, 1));
+        assert_eq!(
+            (summary.hours[1].tally.spent, summary.hours[1].tally.held),
+            (1, 1)
+        );
         assert_eq!(summary.outcomes[&RequestOutcome::Deferred], 1);
     }
 }

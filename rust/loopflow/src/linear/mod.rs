@@ -11,7 +11,7 @@ mod cooldown;
 pub mod request_log;
 mod team_changes;
 
-pub(crate) use cooldown::{delta_fresh_for, delta_fresh_for_healthy, urgent};
+pub(crate) use cooldown::{delta_fresh_secs, urgent, HEALTHY_FRESH_SECS};
 
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
@@ -950,83 +950,72 @@ impl LinearClient {
             self.repository.as_deref(),
             urgent,
         );
-        let finish = |log: Option<request_log::PendingRequest>,
-                      outcome: request_log::RequestOutcome,
-                      status: Option<StatusCode>,
-                      allowances: cooldown::Allowances| {
-            if let Some(log) = log {
-                log.finish(outcome, status.map(|status| status.as_u16()), allowances);
-            }
-        };
-        let request = GraphqlRequest { query, variables };
+        let (exchange, response) = self
+            .send(&GraphqlRequest { query, variables }, urgent)
+            .await;
+        if let Some(log) = log {
+            log.finish(exchange);
+        }
+        let (status, body) = response?;
+        parse_graphql_response(status, &body)
+    }
 
+    /// Send one request through the shared cooldown and budget, reporting what
+    /// became of it alongside the response.
+    async fn send(
+        &self,
+        request: &GraphqlRequest<'_>,
+        urgent: bool,
+    ) -> (
+        request_log::Exchange,
+        LinearResult<(StatusCode, bytes::Bytes)>,
+    ) {
+        use request_log::{Exchange, RequestOutcome};
+        let unanswered = |outcome, error| (Exchange::unanswered(outcome), Err(error));
         let cooldown = cooldown::Cooldown::for_endpoint(&self.base_url);
         if let Err(error) = cooldown.check().await {
-            finish(
-                log,
-                request_log::RequestOutcome::Paused,
-                None,
-                Default::default(),
-            );
-            return Err(error);
+            return unanswered(RequestOutcome::Paused, error);
         }
         if !urgent {
             if let Err(error) = cooldown.admit().await {
-                finish(
-                    log,
-                    request_log::RequestOutcome::Deferred,
-                    None,
-                    Default::default(),
-                );
-                return Err(error);
+                return unanswered(RequestOutcome::Deferred, error);
             }
         }
-        let sent = self
+        let response = match self
             .client
             .post(&self.base_url)
             .bearer_auth(&self.token)
-            .json(&request)
+            .json(request)
             .send()
-            .await;
-        let response = match sent {
+            .await
+        {
             Ok(response) => response,
             Err(err) => {
-                finish(
-                    log,
-                    request_log::RequestOutcome::Failed,
-                    None,
-                    Default::default(),
-                );
-                return Err(LinearError::Message(format!(
-                    "linear request failed: {err}"
-                )));
+                let error = LinearError::Message(format!("linear request failed: {err}"));
+                return unanswered(RequestOutcome::Failed, error);
             }
         };
         let status = response.status();
         let headers = response.headers().clone();
-        let allowances = cooldown::Allowances::from_headers(&headers);
+        let answered = |outcome| Exchange {
+            outcome,
+            status: Some(status.as_u16()),
+            allowances: cooldown::Allowances::from_headers(&headers),
+        };
         let body = match response.bytes().await {
             Ok(body) => body,
             Err(err) => {
-                finish(
-                    log,
-                    request_log::RequestOutcome::Failed,
-                    Some(status),
-                    allowances,
-                );
-                return Err(LinearError::Message(format!(
-                    "failed to read Linear response: {err}"
-                )));
+                let error = LinearError::Message(format!("failed to read Linear response: {err}"));
+                return (answered(RequestOutcome::Failed), Err(error));
             }
         };
-        let observed = cooldown.observe(status, &headers, &body).await;
-        let outcome = match &observed {
-            Err(LinearError::RateLimited { .. }) => request_log::RequestOutcome::RateLimited,
-            _ => request_log::RequestOutcome::Sent,
-        };
-        finish(log, outcome, Some(status), allowances);
-        observed?;
-        parse_graphql_response(status, &body)
+        match cooldown.observe(status, &headers, &body).await {
+            Ok(()) => (answered(RequestOutcome::Sent), Ok((status, body))),
+            Err(error @ LinearError::RateLimited { .. }) => {
+                (answered(RequestOutcome::RateLimited), Err(error))
+            }
+            Err(error) => (answered(RequestOutcome::Sent), Err(error)),
+        }
     }
 
     /// The owning team id of an existing issue. State transitions resolve

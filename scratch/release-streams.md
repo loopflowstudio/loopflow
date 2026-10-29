@@ -120,6 +120,10 @@ tested before the next starts.
    each `package-build.yml` artifact) joins the release assets and `SHA256SUMS`;
    targets must agree on it. `preview` and `dev` need no stored pointer.
    Slice 3 adds the regression filter inside `stable_advance`.
+   Names (concept review, 2026-10-29): GitHub's "Latest" badge, `releases/latest`
+   and `Loopflow-latest.dmg` stay as the external spelling of `stable`. They are
+   fixed URLs that the website, `install.sh` and released `lf` read; Loopflow's own
+   docs and help say "stable".
    Compress: one `parse_version` now serves `bump_version`, `notes_base` and
    `published_releases`; the promote test split into success and tampered cases.
    Second compress: the publisher's release asset set is one `RELEASE_ASSETS`;
@@ -195,7 +199,9 @@ lands and nothing ties it to stable's lag:
   becomes Latest at once, so installs get the reader that admits #1755's slug rows
   immediately. Released after slice 2, Latest stays on v0.15.x until v0.16.0 is
   7 days old, and only dev/preview get it. Both are consistent with the design;
-  the choice is Jack's.
+  the choice is Jack's. No release has run since #1755 (Latest is v0.15.0), so
+  merging slice 2 before any release settles it as "after"; the slice 2
+  PR description has to ask it.
 
 - **Migration after a Sparkle update (LOO-669 builds this, on top of #1755).**
   The only code that migrates `~/.lf` is `SqliteStore::open_as_promotion_boundary`,

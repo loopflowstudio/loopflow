@@ -144,6 +144,17 @@ pub enum HistoryCommand {
         #[arg(long)]
         context: bool,
     },
+    /// Show where this Machine's Linear requests went, by hour, command and operation
+    #[command(
+        after_help = "Requests are recorded only on a Machine whose ~/.lf/config.yaml sets\n\n  logs:\n    linear_requests: true"
+    )]
+    Linear {
+        /// Relative window (7d, 24h, 30m) or RFC3339 start
+        #[arg(long, default_value = "1h")]
+        since: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Launch a new execution from a captured provider request, while this Machine retains its capture
     Replay {
         /// Captured input identity or an unambiguous displayed prefix
@@ -196,6 +207,7 @@ fn parse_cursor(value: &str) -> Result<LfProcessCursor, String> {
 pub fn run(command: &HistoryCommand) -> anyhow::Result<()> {
     match command {
         HistoryCommand::Replay { run } => super::replay::run(run),
+        HistoryCommand::Linear { since, json } => super::linear_requests::run(since, *json),
         HistoryCommand::Export { since } => export(since),
         HistoryCommand::Retention { json } => super::history_transcript::retention(*json),
         HistoryCommand::Search {

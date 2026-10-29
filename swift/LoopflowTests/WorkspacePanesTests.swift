@@ -24,13 +24,21 @@ struct WorkspacePanesTests {
         return try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
     }
 
-    @Test("Toggling both tools away keeps conversation entry in the session pane")
-    func collapsedToolsKeepEntry() throws {
+    /// Task A's workspace and its panes view, whose queries all fail.
+    private func taskPanes() -> (SessionsWorkspace, WorkspacePanesView) {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
-        let model = WorkModel(query: query, repoPath: location.worktree)
         let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task-a"),
             title: "Task A", location: location, localMachineId: location.machineId)
-        let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
+        let view = WorkspacePanesView(workspace: workspace, isFocused: true,
+            sessions: workspace.sessionStore(repoPath: location.worktree, query: query),
+            model: WorkModel(query: query, repoPath: location.worktree),
+            onFocus: { id, _ in workspace.multiplexer.setFocusedPane(id) })
+        return (workspace, view)
+    }
+
+    @Test("Toggling both tools away keeps conversation entry in the session pane")
+    func collapsedToolsKeepEntry() throws {
+        let (workspace, view) = taskPanes()
         try workspace.toggleShell()
         workspace.toggleBrowser()
         try workspace.toggleShell()
@@ -38,11 +46,27 @@ struct WorkspacePanesTests {
         let store = workspace.multiplexer
         #expect(store.visibleLayout?.allPanes.map(\.id) == ["session"])
         #expect(store.shellPane?.content.selectedShell != nil)
-        let view = WorkspacePanesView(workspace: workspace, isFocused: true, sessions: sessions,
-            model: model, onFocus: { id, _ in store.setFocusedPane(id) })
         let button = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
         #expect(try button.labelView().text().string() == "Open conversation")
-        #expect(sessions.sessions.isEmpty)
+        #expect(view.sessions.sessions.isEmpty)
+    }
+
+    @Test("A failed Task conversation shows its reason beside Open conversation")
+    func failedConversationShowsItsReason() throws {
+        let (workspace, view) = taskPanes()
+        workspace.conversationError = "Conversation launcher unavailable"
+        _ = try view.inspect().find(text: "Conversation launcher unavailable")
+    }
+
+    @Test("Collapsed panes offer Open conversation when the named Session isn't held")
+    func collapsedUnheldSessionOffersEntry() throws {
+        let (workspace, view) = taskPanes()
+        let store = workspace.multiplexer
+        store.load(sessionId: "headless-run", location: location)
+        let pane = try #require(store.sessionPane)
+        store.setCollapsed(paneId: pane.id, collapsed: true)
+        #expect(store.visibleLayout == nil)
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
     }
 
     @Test("Rendering borrows Task A while B is selected, retaining Files and caller-owned focus")

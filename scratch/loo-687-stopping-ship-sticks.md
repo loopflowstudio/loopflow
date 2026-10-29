@@ -107,6 +107,14 @@ starter.
   `Comment X by Session <id> for Jack Heart`. The persisted `durable::Author`
   stays `Named(requester)`: adding a variant is a reader-compat change that
   belongs in its own Task. Swift model/view and DTO fixtures are updated.
+- Desktop: Swift `TaskExecution` decodes `lf task status`'s `execution`
+  (work + `started_by`, `ship_approval`, `ship_stop`, explicit Optionals) and
+  replaces the `{work}`-only reading (`WorkModel.taskDiagnostics` →
+  `taskExecution`). The Workflow bar's live line appends `approved by <by>` to
+  the shipping reason, or leads with the `Not shipping: …` stop line. The
+  newest GraphProcessLog row says `started by <starter>` (the overview lists
+  Graphs oldest first, as Rust's latest does). `task_checkout.json` carries a
+  Session starter and a person stop.
 - Docs: AGENTS.md quick reference, `docs/orchestration.md`, `ship.rs` doc.
 - Deleted: `participant_or`; the unconditional route `ship_in` calls; the
   `Person { name }` steer branch for agent comments; the comment list's
@@ -114,10 +122,6 @@ starter.
 
 ## Remaining
 
-- Desktop TaskWorkView: show `ship_stop` where the shipping reason goes, and
-  `started_by` on the run row (Swift `Starter`/`ShipMark` decoding + fixture
-  tests). Status reads them today; Desktop doesn't yet.
-- Swift build/tests of the comment author change run at gate (`scripts/test.py`).
 - Demo on a real Task (see Demo).
 
 ## Forbidden outcomes
@@ -165,4 +169,5 @@ recovery makes the Task shipping or merges its PR until someone runs `lf ship`.
 Status and Desktop name who approved, who stopped, and who started each run.
 Agent-written reasons show the Session as author and Jack as the requester.
 
-Check: implement pass ran `task_graph_launch_tests::task_ship_stop` (3) + `store::sqlite::task_work:: ops::task::ship::` + `task_graph::tests::` + `--test integration dto_fixtures::` + clippy → pass; realign `cargo test -p loopflow --lib process_starter_names` → pass; Swift deferred to gate.
+Check: implement pass 2 ran `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|DTOFixtureTests|LocalWaveAgentLauncherTests'` + `--test integration dto_fixtures::` → pass.
+Check: implement pass ran `task_graph_launch_tests::task_ship_stop` (3) + `store::sqlite::task_work:: ops::task::ship::` + `task_graph::tests::` + `--test integration dto_fixtures::` + clippy → pass; realign `cargo test -p loopflow --lib process_starter_names` → pass; 

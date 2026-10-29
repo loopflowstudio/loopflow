@@ -462,6 +462,11 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         loopflow::ops::task_execution::TaskExecutionState::Idle
     );
     assert_eq!(
+        snapshot.started_by.as_ref().unwrap().to_string(),
+        "Session \"LOO-291 task\" for Maya"
+    );
+    assert_eq!(snapshot.ship_stop.as_ref().unwrap().by.to_string(), "Maya");
+    assert_eq!(
         serde_json::to_value(&snapshot).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );

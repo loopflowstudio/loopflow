@@ -4395,15 +4395,10 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
 mod tests {
     use super::*;
 
-    fn published(
-        tag: &str,
-        version: (u64, u64, u64),
-        days_ago: i64,
-        is_latest: bool,
-    ) -> PublishedRelease {
+    fn published(tag: &str, days_ago: i64, is_latest: bool) -> PublishedRelease {
         PublishedRelease {
             tag: tag.to_string(),
-            version,
+            version: parse_version(tag).unwrap(),
             published_at: chrono::Utc::now() - chrono::TimeDelta::days(days_ago),
             is_latest,
         }
@@ -4413,26 +4408,26 @@ mod tests {
     fn stable_moves_to_the_newest_soaked_release_and_never_back() {
         let now = chrono::Utc::now();
         let releases = [
-            published("v0.16.1", (0, 16, 1), 1, false),
-            published("v0.16.0", (0, 16, 0), 8, false),
-            published("v0.15.9", (0, 15, 9), 10, false),
-            published("v0.15.2", (0, 15, 2), 30, true),
+            published("v0.16.1", 1, false),
+            published("v0.16.0", 8, false),
+            published("v0.15.9", 10, false),
+            published("v0.15.2", 30, true),
         ];
         assert_eq!(stable_advance(&releases, now).unwrap().tag, "v0.16.0");
 
         let at_stable = [
-            published("v0.16.1", (0, 16, 1), 1, false),
-            published("v0.16.0", (0, 16, 0), 8, true),
+            published("v0.16.1", 1, false),
+            published("v0.16.0", 8, true),
         ];
         assert!(stable_advance(&at_stable, now).is_none());
 
         // A pointer moved ahead by hand stays put until a newer release soaks.
         let ahead = [
-            published("v0.16.1", (0, 16, 1), 1, true),
-            published("v0.16.0", (0, 16, 0), 8, false),
+            published("v0.16.1", 1, true),
+            published("v0.16.0", 8, false),
         ];
         assert!(stable_advance(&ahead, now).is_none());
-        assert!(stable_advance(&[published("v0.16.0", (0, 16, 0), 6, false)], now).is_none());
+        assert!(stable_advance(&[published("v0.16.0", 6, false)], now).is_none());
     }
 
     #[test]

@@ -41,6 +41,16 @@ REQUIRED_SECRETS = (
     "R2_SECRET_ACCESS_KEY",
 )
 READER_CATALOG = "reader-catalog.txt"
+# Every GitHub Release carries exactly these assets.
+RELEASE_ASSETS = frozenset(
+    {
+        *(f"lf-{target}.tar.gz" for target in TARGETS),
+        "Loopflow.dmg",
+        "install.sh",
+        READER_CATALOG,
+        "SHA256SUMS",
+    }
+)
 LATEST_DMG_URL = "https://downloads.loopflow.studio/Loopflow-latest.dmg"
 CANDIDATE_STAGES = (
     "artifacts_verified",
@@ -332,14 +342,7 @@ def _verify_candidate_receipt(
     workflow_run_id = os.environ.get("LF_RELEASE_WORKFLOW_RUN_ID")
     if workflow_run_id and receipt.workflow_run_id != workflow_run_id:
         raise RuntimeError("prepared release candidate came from a different workflow run")
-    expected_artifacts = {
-        *(f"lf-{target}.tar.gz" for target in TARGETS),
-        "Loopflow.dmg",
-        "install.sh",
-        READER_CATALOG,
-        "SHA256SUMS",
-    }
-    if set(receipt.artifact_sha256) != expected_artifacts:
+    if set(receipt.artifact_sha256) != RELEASE_ASSETS:
         raise RuntimeError("prepared release candidate artifact set is incomplete")
     if receipt.completed_stages != CANDIDATE_STAGES:
         raise RuntimeError("prepared release candidate proof is incomplete")
@@ -506,14 +509,7 @@ def _download_if_present(url: str, destination: Path) -> bool:
 
 
 def _check_public_hashes(directory: Path, expected: dict[str, str]) -> None:
-    required = {
-        *(f"lf-{target}.tar.gz" for target in TARGETS),
-        "Loopflow.dmg",
-        "install.sh",
-        READER_CATALOG,
-        "SHA256SUMS",
-    }
-    if set(expected) != required:
+    if set(expected) != RELEASE_ASSETS:
         raise RuntimeError("public release proof lacks the complete artifact manifest")
     for name, digest in expected.items():
         artifact = directory / name

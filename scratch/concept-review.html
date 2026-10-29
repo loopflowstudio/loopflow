@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-649 concept review</title>
+<style>
+  :root { --fg:#1d1d1f; --bg:#fdfdfc; --muted:#6b6b70; --rule:#e3e3e0; --new:#1f6f43; --code:#f3f3f0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8e8e6; --bg:#161617; --muted:#9a9aa0; --rule:#2e2e30; --new:#6fd39b; --code:#232325; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, system-ui, sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
+  header p { color:var(--muted); font-size:.9rem; margin:.2rem 0; }
+  h1 { font-size:1.5rem; margin:0 0 .5rem; }
+  h2 { font-size:1.1rem; margin:2.5rem 0 .75rem; }
+  code { background:var(--code); padding:.08rem .3rem; border-radius:4px; font-size:.9em; }
+  table { width:100%; border-collapse:collapse; font-size:.92rem; }
+  th, td { text-align:left; vertical-align:top; padding:.55rem .5rem; border-bottom:1px solid var(--rule); }
+  th { color:var(--muted); font-weight:500; }
+  .new { color:var(--new); }
+  .lead { font-size:1.05rem; }
+  ol li { margin:.4rem 0; }
+  @media (max-width:560px) { table, tbody, tr, td, th { display:block; } thead { display:none; } td { border:0; padding:.2rem 0; } tr { border-bottom:1px solid var(--rule); padding:.6rem 0; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>LOO-649: staying under Linear's rate limit</h1>
+  <p>Concept review · headless Graph step · 2026-10-28</p>
+  <p>Built from: Task definition and Jack Heart's 2026-10-28 comments; <code>linear/cooldown.rs</code>, <code>linear/request_log.rs</code>, <code>linear/mod.rs</code>, <code>ops/linear_observe.rs</code>, <code>lf/commands/linear_requests.rs</code>, <code>config.rs</code></p>
+</header>
+
+<p class="lead"><strong>Decision: nothing to change, and no open product choice.</strong> The implemented concepts line up with the accepted design. The one mismatch worth weighing, two files for one allowance, has to stay as it is.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<p>Green marks what this branch adds. Everything else is existing behavior.</p>
+<table>
+<thead><tr><th>You do</th><th>Concept</th><th>API / state</th></tr></thead>
+<tbody>
+<tr><td>Turn on request logging for this Mac</td><td class="new">Machine flag</td><td class="new"><code>logs: {linear_requests: true}</code> in <code>~/.lf/config.yaml</code>, read by <code>config::machine_flag</code></td></tr>
+<tr><td>Ask where the budget went</td><td class="new">Request log</td><td class="new"><code>lf history linear --since 24h</code> → <code>~/.lf/logs/linear-requests.jsonl</code></td></tr>
+<tr><td>Hit the wall</td><td>Cooldown (pause)</td><td><code>locks/linear-cooldown/&lt;key&gt;</code> deadline; the warning <span class="new">now names <code>limit=requests|complexity</code></span></td></tr>
+<tr><td>Approach the wall</td><td class="new">Budget</td><td class="new"><code>&lt;key&gt;.budget</code>: pace below 25%, hold non-urgent below 10%</td></tr>
+<tr><td>Create a Task, link a PR</td><td class="new">Urgent scope</td><td class="new"><code>linear::urgent(…)</code> skips pacing and the reserve</td></tr>
+<tr><td>Read status or comments</td><td class="new">Freshness window</td><td class="new"><code>linear_observe::team_current</code>: 10 s when healthy, stretched under pressure</td></tr>
+</tbody>
+</table>
+
+<h2>The mismatch weighed: one allowance, two files</h2>
+<p>A pause is just a budget with nothing left until reset, so folding the cooldown deadline into the budget record would mean one lock per request instead of two.</p>
+<p><strong>Rejected.</strong> The installed release of lf reads <code>locks/linear-cooldown/&lt;key&gt;</code> to honor a pause. Move the deadline and an installed lf keeps sending through a pause, which spends the shared hourly budget this Task exists to protect. The cooldown stays the pause authority, and the budget extends it.</p>
+
+<h2>Reads still forced past the window</h2>
+<ul>
+<li>Cold acquisition of a Task that isn't stored yet: there's no local state to serve.</li>
+<li><code>require_outside_current_chapter</code>: chapter rotation needs current Linear state before it moves work.</li>
+</ul>
+<p><code>wave status</code> reaches Linear only through <code>sync_repository</code>, which the window absorbs. Desktop monitoring reads the store.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>None open. The thresholds (10% reserve, 25% pacing) and the YAML switch are reversible assumptions, recorded in <code>scratch/questions.md</code>.</li>
+</ol>
+</main>
+</body>
+</html>

@@ -40,6 +40,22 @@ work and the complexity hypothesis (Task comments).
   (`acquire_task` / `inspect_task_planning_async` under `Auto`, so a current
   delta answers). Progress comments are unchanged until the log shows they lead.
 
+## Concept review (2026-10-28, headless)
+
+Actions → concepts → APIs match the accepted design: turn on a Machine flag →
+request log → `lf history linear`; Linear's allowance → one budget per Home →
+pace/hold non-urgent, `linear::urgent` scope for creations and PR links; reads →
+one Team-delta freshness window → local state. No open product choice.
+
+- Considered merging the cooldown deadline into the budget file (one record, one
+  lock). Rejected: the released lf reads `locks/linear-cooldown/<key>` to honour a
+  pause, so moving it would let an installed lf send through a pause.
+- Remaining `LinearRefresh::Force` reads are deliberate: cold acquisition of a
+  Task not yet stored (nothing local to serve) and chapter-rotation's
+  `require_outside_current_chapter` (needs authority before moving work).
+- `wave status` reaches Linear only through `sync_repository`, which the
+  freshness window absorbs; Desktop monitoring (`monitor ps`) reads the store.
+
 ## Remaining
 
 - Turn logging on for Jack's MacBook, run a normal day, read

@@ -96,7 +96,7 @@ Evidence: `scratch/release-research.md`, `scratch/explore.html`.
 ## Build order (stacked on LOO-656's #1755, Jack Heart, 2026-10-28)
 
 Jack: "we can stack on the migrations branch if necessary." This branch sits on
-#1755's head; `lf sync` follows it through its squash merge. Each slice lands
+#1755's head; #1755 merged to main as `1a60c40fc` and this branch carries it, so a live release is no longer held back. Each slice lands
 working and tested before the next starts.
 
 1. **Minors from main — built 2026-10-28 (committed in `4b6ee82ba`).** `release.rs` drops
@@ -113,6 +113,7 @@ working and tested before the next starts.
    Check (after compress): `cargo test -p loopflow --test release_tests` 71 pass
    (`active_candidate_preparation…` needs >20s on a cold binary, passes warm);
    `--lib ops::release::` 44 pass.
+   Gate 2026-10-29: `cargo fmt --check`, `check_architecture.py`, `check_rust_test_inventory.py` pass; `scripts/test.py --rust-filter 'test(ops::release::) | binary(release_tests) | test(skills::catalog::) | test(builtins::)'` refused at resource preflight (16 GiB free < 32 GiB reserve, recovery freed nothing), so nextest and clippy are deferred to CI.
 2. **Streams as published pointers.** `dev` (green main, from #1755's
    `Packages (main)`), `preview` (every release), `stable` (newest release ≥ 7
    days old with no open `regressed_in` Task covering it). The release run moves

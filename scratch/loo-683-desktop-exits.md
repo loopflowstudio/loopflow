@@ -272,8 +272,12 @@ Live acceptance (Jack, after merge): quit the app once and force-quit it once;
 
 ## Remaining work
 
-- Gate: affected suites once, the Swift Desktop suites, and
-  `--rust-filter 'test(desktop_exits::) | test(doctor::) | test(install::)'`.
+- Gate compile suites (deferred to CI, 2026-10-29): `scripts/test.py --reuse-passing
+  --rust-filter 'test(desktop_exits::) | test(doctor::) | test(install::)'` refused
+  at resource preflight (6.7 GiB free, below the 32 GiB reserve; `resource_envelope.py
+  --recover` reclaimed nothing because every build is active or recent). CI's
+  `rust-test`, `rust-lint` and Swift jobs own Rust nextest, clippy and
+  `scripts/test_desktop.sh` (LaunchJournalTests, DesktopLogTests).
 - Live acceptance (Jack, after merge): ⌘Q once and Force Quit once; `lf doctor`
   names both.
 
@@ -293,3 +297,4 @@ record's own time from `--style ndjson`. Store frontier is read when doctor runs
 the read-storm follow-up is a separate Task and doesn't block this one.
 
 Check (realign, 2026-10-29): `cargo test -p loopflow --lib desktop_exits::` 12 passed; fmt and `clippy --all-targets -D warnings` clean.
+Check (gate, 2026-10-29): `cargo fmt --all -- --check` ok; `pytest python/tests/test_desktop_timings.py` 2 passed; architecture, Swift boundary and Rust test-inventory checks ok; grep for `LoggingService|Library/Logs/Loopflow` in swift/rust/scripts empty; compile suites deferred to CI (disk below reserve).

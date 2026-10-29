@@ -21,6 +21,17 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(run_async(cmd, batch))
 }
 
+async fn existing_store() -> anyhow::Result<Store> {
+    crate::store::open_existing_store()
+        .await
+        .ok_or_else(|| anyhow!("machine commands need an initialized local store"))
+}
+
+/// `lf machine id`: this Machine's durable identity.
+pub async fn local_machine() -> anyhow::Result<Machine> {
+    Ok(existing_store().await?.local_machine().await?)
+}
+
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     match cmd {
         MachineCommand::Connect {
@@ -42,11 +53,18 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::Credentials { cmd } => {
             return super::machine_credentials::receive(cmd).await
         }
+        MachineCommand::Id { json } => {
+            let machine = local_machine().await?;
+            if *json {
+                println!("{}", serde_json::to_string(&machine)?);
+            } else {
+                println!("{}", machine.id);
+            }
+            return Ok(());
+        }
         _ => {}
     }
-    let store = crate::store::open_existing_store()
-        .await
-        .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
+    let store = existing_store().await?;
     match cmd {
         MachineCommand::Public { name } => {
             let name = (name != "off").then_some(name.as_str());
@@ -54,14 +72,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             match name {
                 Some(name) => println!("This Machine is public as {name}"),
                 None => println!("This Machine is private"),
-            }
-        }
-        MachineCommand::Id { json } => {
-            let machine = store.local_machine().await?;
-            if *json {
-                println!("{}", serde_json::to_string(&machine)?);
-            } else {
-                println!("{}", machine.id);
             }
         }
         MachineCommand::Add {
@@ -233,8 +243,10 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             store.remove_machine(label).await?;
             println!("Removed {label}");
         }
-        MachineCommand::Connect { .. } | MachineCommand::Credentials { .. } => {
-            unreachable!("credential commands dispatch before opening the store")
+        MachineCommand::Connect { .. }
+        | MachineCommand::Credentials { .. }
+        | MachineCommand::Id { .. } => {
+            unreachable!("credential and identity commands dispatch before opening the store")
         }
         MachineCommand::End { .. }
         | MachineCommand::Pool { .. }

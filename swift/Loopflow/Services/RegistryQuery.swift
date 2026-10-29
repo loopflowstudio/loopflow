@@ -3,7 +3,7 @@
 // History and explicit lookups are one-shot queries. What a window shows is kept
 // current by the same reads `--watch` streams, one served watch per part.
 //
-// On macOS the Work watches and Task file reads run inside the app through
+// On macOS the Work watches and `ServedQuery` reads run inside the app through
 // Loopflow's Rust library; other reads run the `lf` shipped inside the app.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
@@ -31,11 +31,18 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
 /// A one-shot read Loopflow serves inside the app, encoded as its Rust
-/// `Query`: what `argv` prints, given `input` on stdin.
-public enum TaskQuery: Equatable, Sendable, Encodable {
+/// `Query`: what `argv` prints in `cwd`, given `input` on stdin.
+public enum ServedQuery: Equatable, Sendable, Encodable {
     case taskChanges(issue: String, base: String)
     case taskDiff(issue: String, path: String?, base: String, draft: String?)
     case taskFile(issue: String, path: String)
+    case repositoryIdentity(directory: String)
+    case waves
+    case machineId
+    case portfolio
+    case paneLayout(directory: String, work: String)
+    case people(directory: String)
+    case graphs(directory: String)
 
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
@@ -47,6 +54,30 @@ public enum TaskQuery: Equatable, Sendable, Encodable {
                 + (draft == nil ? [] : ["--draft"])
         case .taskFile(let issue, let path):
             return ["task", "file", issue, path, "--json"]
+        case .repositoryIdentity:
+            return ["config", "repository", "--json"]
+        case .waves:
+            return ["wave", "list", "--all", "--current", "--json"]
+        case .machineId:
+            return ["machine", "id", "--json"]
+        case .portfolio:
+            return ["portfolio", "--json"]
+        case .paneLayout(_, let work):
+            return ["desktop", "layout", work]
+        case .people:
+            return ["ops", "people", "--json"]
+        case .graphs:
+            return ["graph", "list", "--json"]
+        }
+    }
+
+    /// The directory `argv` reads from; Rust's `--cwd`.
+    public var cwd: String? {
+        switch self {
+        case .repositoryIdentity(let directory), .paneLayout(let directory, _),
+             .people(let directory), .graphs(let directory):
+            return directory
+        default: return nil
         }
     }
 
@@ -55,7 +86,7 @@ public enum TaskQuery: Equatable, Sendable, Encodable {
         return nil
     }
 
-    private enum Key: String, CodingKey { case query, issue, base, path, draft }
+    private enum Key: String, CodingKey { case query, issue, base, path, draft, directory, work }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: Key.self)
@@ -74,6 +105,25 @@ public enum TaskQuery: Equatable, Sendable, Encodable {
             try container.encode("task_file", forKey: .query)
             try container.encode(issue, forKey: .issue)
             try container.encode(path, forKey: .path)
+        case .repositoryIdentity(let directory):
+            try container.encode("repository_identity", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+        case .waves:
+            try container.encode("waves", forKey: .query)
+        case .machineId:
+            try container.encode("machine_id", forKey: .query)
+        case .portfolio:
+            try container.encode("portfolio", forKey: .query)
+        case .paneLayout(let directory, let work):
+            try container.encode("pane_layout", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(work, forKey: .work)
+        case .people(let directory):
+            try container.encode("people", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+        case .graphs(let directory):
+            try container.encode("graphs", forKey: .query)
+            try container.encode(directory, forKey: .directory)
         }
     }
 }
@@ -82,9 +132,9 @@ public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner
     private var runWithInput: @Sendable ([String], String?, String) async throws -> String
-    /// What a `TaskQuery`'s `argv` prints: served in the app when the
+    /// What a `ServedQuery`'s `argv` prints: served in the app when the
     /// transport can, else run.
-    private var serve: @Sendable (TaskQuery) async throws -> String
+    private var serve: @Sendable (ServedQuery) async throws -> String
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
@@ -92,15 +142,15 @@ public struct RegistryQuery: Sendable {
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
-        serve: (@Sendable (TaskQuery) async throws -> String)? = nil,
+        serve: (@Sendable (ServedQuery) async throws -> String)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
         self.serve = serve ?? { query in
-            if let input = query.input { return try await runWithInput(query.argv, nil, input) }
-            return try await run(query.argv, nil)
+            if let input = query.input { return try await runWithInput(query.argv, query.cwd, input) }
+            return try await run(query.argv, query.cwd)
         }
         self.run = run
         self.observeFiles = watchFiles
@@ -150,7 +200,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
-        try Self.decode(WorkPaneLayout?.self, from: await run(["desktop", "layout", work], repoPath))
+        try Self.decode(WorkPaneLayout?.self, from: await serve(.paneLayout(directory: repoPath, work: work)))
     }
 
     public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
@@ -159,7 +209,8 @@ public struct RegistryQuery: Sendable {
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
-        try Self.decode(Portfolio.self, from: await run(["portfolio"] + arguments + ["--json"], nil))
+        if arguments.isEmpty { return try Self.decode(Portfolio.self, from: await serve(.portfolio)) }
+        return try Self.decode(Portfolio.self, from: await run(["portfolio"] + arguments + ["--json"], nil))
     }
 
     /// Keep execution selectors off local filesystem paths. The existing CLI owns
@@ -241,12 +292,17 @@ public struct RegistryQuery: Sendable {
             record(stdout)
             return stdout
         }
+        query.serve = { [serve] read in
+            let stdout = try await serve(read)
+            record(stdout)
+            return stdout
+        }
         return query
     }
 
     /// Explicit workspace opening binds a plain repository to its local plan.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
-        try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
+        try Self.decode(RepositoryIdentity.self, from: await serve(.repositoryIdentity(directory: cwd)))
     }
 
     public func repositoryPath(id: String) async throws -> String {
@@ -257,7 +313,7 @@ public struct RegistryQuery: Sendable {
     /// Current Waves across the machine. The shared
     /// reader excludes historical registrations; callers only slice by repo.
     public func allWaves() async throws -> [Wave] {
-        let stdout = try await run(["wave", "list", "--all", "--current", "--json"], nil)
+        let stdout = try await serve(.waves)
         let snapshots = try Self.decode([WaveSnapshot].self, from: stdout)
         return snapshots.map { $0.toWave() }
     }
@@ -324,7 +380,7 @@ public struct RegistryQuery: Sendable {
 
     public func localMachineId() async throws -> String {
         struct MachineIdentity: Decodable { let id: String }
-        return try Self.decode(MachineIdentity.self, from: await run(["machine", "id", "--json"], nil)).id
+        return try Self.decode(MachineIdentity.self, from: await serve(.machineId)).id
     }
 
     /// Whether this transport keeps a workspace current by itself. Without one,
@@ -387,13 +443,14 @@ public struct RegistryQuery: Sendable {
 
     /// Every selectable Graph with the topology it would capture, via the shared loader.
     public func graphCatalog(cwd: String?) async throws -> [GraphCatalogEntry] {
-        let stdout = try await run(["graph", "list", "--json"], cwd)
+        // Without a repository the catalog resolves from `/`, where the app runs.
+        let stdout = try await serve(.graphs(directory: cwd ?? "/"))
         return try Self.decode([GraphCatalogEntry].self, from: stdout)
     }
 
     /// The repository's Task owners with their GitHub users; lf caches each email's lookup.
     public func repoPeople(cwd: String?) async throws -> [RepoPerson] {
-        let stdout = try await run(["ops", "people", "--json"], cwd)
+        let stdout = try await serve(.people(directory: cwd ?? "/"))
         return try Self.decode([RepoPerson].self, from: stdout)
     }
 

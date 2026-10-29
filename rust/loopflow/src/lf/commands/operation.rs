@@ -2,23 +2,36 @@
 //! [`Operation::argv`] names it, and the command's `--watch` and
 //! [`Operation::subscribe`] go through the same function, so the app pulls
 //! exactly the frames `lf <argv> --json --watch` prints. A [`Query`] is a
-//! one-shot read the same way: [`Query::read`] returns what `lf <argv> --json`
+//! one-shot read the same way: [`Query::read`] returns what `lf <argv>`
 //! prints.
 //!
 //! A read the command scopes by its working directory names that directory
 //! instead: `--cwd <directory>` in its argv, and the same path in-process,
 //! where every subscription shares one working directory.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, FromArgMatches};
 use serde::{Deserialize, Serialize};
 
 use super::activity::HistoryWindow;
+use super::machine::local_machine;
 use super::watch::{Subscription, Transport};
-use super::waves::Shape;
+use super::waves::{list as list_waves, Shape};
+use super::work_route::repository_identity;
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
+
+fn words(words: &[&str]) -> Vec<String> {
+    words.iter().map(|word| word.to_string()).collect()
+}
+
+/// `command` as `lf --cwd <directory> …` runs it.
+fn at(directory: &Path, command: &[&str]) -> Vec<String> {
+    let mut argv = vec!["--cwd".to_owned(), directory.display().to_string()];
+    argv.extend(words(command));
+    argv
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -45,12 +58,6 @@ pub enum Operation {
 impl Operation {
     /// The `lf` command that prints this read, without `--json` or `--watch`.
     pub fn argv(&self) -> Vec<String> {
-        let words = |words: &[&str]| words.iter().map(|word| word.to_string()).collect();
-        let at = |directory: &PathBuf, command: &[&str]| {
-            let mut argv = vec!["--cwd".to_owned(), directory.display().to_string()];
-            argv.extend(words(command));
-            argv
-        };
         match self {
             Self::History(window) => window.argv(),
             Self::MonitorPs => words(&["monitor", "ps"]),
@@ -144,15 +151,30 @@ pub enum Query {
     },
     /// `lf task file <issue> <path>`: one file of a Task's checkout.
     TaskFile { issue: String, path: String },
+    /// `lf --cwd <directory> config repository`: the repository's planning
+    /// identity, registered on first sight.
+    RepositoryIdentity { directory: PathBuf },
+    /// `lf wave list --all --current`: every current Wave on this Machine.
+    Waves,
+    /// `lf machine id`: this Machine's identity.
+    MachineId,
+    /// `lf portfolio`: the repositories this Machine's windows show.
+    Portfolio,
+    /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
+    PaneLayout { directory: PathBuf, work: String },
+    /// `lf --cwd <directory> ops people`: who owns the repository's Tasks.
+    People { directory: PathBuf },
+    /// `lf --cwd <directory> graph list`: every Graph a Task there can take up.
+    Graphs { directory: PathBuf },
 }
 
 impl Query {
-    /// The `lf` command that prints this read, without `--json`.
+    /// The `lf` command that prints this read, `--json` included where the
+    /// command takes it.
     pub fn argv(&self) -> Vec<String> {
-        let words = |words: &[&str]| words.iter().map(|word| word.to_string()).collect();
         match self {
             Self::TaskChanges { issue, base } => {
-                words(&["task", "diff", issue, "--files", "--base", base])
+                words(&["task", "diff", issue, "--files", "--base", base, "--json"])
             }
             Self::TaskDiff {
                 issue,
@@ -162,13 +184,23 @@ impl Query {
             } => {
                 let mut argv: Vec<String> = words(&["task", "diff", issue]);
                 argv.extend(path.clone());
-                argv.extend(["--base".into(), base.clone()]);
+                argv.extend(["--base".into(), base.clone(), "--json".into()]);
                 if draft.is_some() {
                     argv.push("--draft".into());
                 }
                 argv
             }
-            Self::TaskFile { issue, path } => words(&["task", "file", issue, path]),
+            Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
+            Self::RepositoryIdentity { directory } => {
+                at(directory, &["config", "repository", "--json"])
+            }
+            Self::Waves => words(&["wave", "list", "--all", "--current", "--json"]),
+            Self::MachineId => words(&["machine", "id", "--json"]),
+            Self::Portfolio => words(&["portfolio", "--json"]),
+            // `desktop layout` always prints JSON.
+            Self::PaneLayout { directory, work } => at(directory, &["desktop", "layout", work]),
+            Self::People { directory } => at(directory, &["ops", "people", "--json"]),
+            Self::Graphs { directory } => at(directory, &["graph", "list", "--json"]),
         }
     }
 
@@ -176,40 +208,53 @@ impl Query {
     pub fn input(&self) -> Option<&str> {
         match self {
             Self::TaskDiff { draft, .. } => draft.as_deref(),
-            Self::TaskChanges { .. } | Self::TaskFile { .. } => None,
+            _ => None,
         }
     }
 
-    /// What `lf <argv> --json` prints, read on the caller's thread.
+    /// What `lf <argv>` prints, read on the caller's thread.
     pub fn read(&self) -> anyhow::Result<String> {
-        let json = match self {
-            Self::TaskChanges { issue, base } => {
-                serde_json::to_string_pretty(&task_changes(issue, base)?)
-            }
+        match self {
+            Self::TaskChanges { issue, base } => pretty(&task_changes(issue, base)?),
             Self::TaskDiff {
                 issue,
                 path,
                 base,
                 draft,
-            } => serde_json::to_string_pretty(&task_diff(
-                issue,
-                path.as_deref(),
-                base,
-                draft.as_deref(),
-            )?),
-            Self::TaskFile { issue, path } => {
-                serde_json::to_string_pretty(&task_file(issue, path, false)?)
+            } => pretty(&task_diff(issue, path.as_deref(), base, draft.as_deref())?),
+            Self::TaskFile { issue, path } => pretty(&task_file(issue, path, false)?),
+            Self::RepositoryIdentity { directory } => {
+                let (_, identity) = repository_identity(directory, None, None)?;
+                pretty(&identity)
             }
-        }?;
-        Ok(json)
+            Self::Waves => {
+                let waves = tokio::runtime::Runtime::new()?.block_on(list_waves(true, true))?;
+                pretty(&waves.unwrap_or_default())
+            }
+            Self::MachineId => pretty(&tokio::runtime::Runtime::new()?.block_on(local_machine())?),
+            Self::Portfolio => pretty(&crate::portfolio::read()?),
+            Self::PaneLayout { directory, work } => {
+                super::desktop::saved_layout(None, directory, work)
+            }
+            Self::People { directory } => pretty(&super::people::people(directory)?.0),
+            Self::Graphs { directory } => {
+                let repo = crate::repo::discover_repo_root(directory)?
+                    .unwrap_or_else(|| directory.clone());
+                pretty(&crate::graph::compiled::graph_catalog(&repo)?)
+            }
+        }
     }
+}
+
+fn pretty(value: &impl Serialize) -> anyhow::Result<String> {
+    Ok(serde_json::to_string_pretty(value)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Operation, Query};
 
-    /// The JSON Desktop's `WorkOperation` and `TaskQuery` encode.
+    /// The JSON Desktop's `WorkOperation` and `ServedQuery` encode.
     #[test]
     fn desktop_encodings_name_their_reads() {
         let history: Operation = serde_json::from_str(
@@ -240,6 +285,9 @@ mod tests {
             r#"{"query":"task_diff","issue":"FIX-1","path":null,"base":"parent","draft":null}"#,
         )
         .unwrap();
-        assert_eq!(diff.argv(), ["task", "diff", "FIX-1", "--base", "parent"]);
+        assert_eq!(
+            diff.argv(),
+            ["task", "diff", "FIX-1", "--base", "parent", "--json"]
+        );
     }
 }

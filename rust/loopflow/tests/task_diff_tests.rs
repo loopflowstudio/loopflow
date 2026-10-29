@@ -147,7 +147,9 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
     use loopflow::lf::commands::operation::Query;
 
     let home = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
+    // Same HOME as `read`'s children: `portfolio` scans `$HOME/src`.
+    let _env = EnvGuard::with_home(&[], Some(home.path()));
+    std::env::set_var("LF_HOME", home.path());
     let repo = TestRepo::new();
     repo.create_file("edit.txt", "before\n");
     repo.stage_all();
@@ -164,7 +166,16 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
     };
     // A new Query fails to compile here until it is compared too.
     let queries = match task_diff(None, None) {
-        Query::TaskChanges { .. } | Query::TaskDiff { .. } | Query::TaskFile { .. } => [
+        Query::TaskChanges { .. }
+        | Query::TaskDiff { .. }
+        | Query::TaskFile { .. }
+        | Query::RepositoryIdentity { .. }
+        | Query::Waves
+        | Query::MachineId
+        | Query::Portfolio
+        | Query::PaneLayout { .. }
+        | Query::People { .. }
+        | Query::Graphs { .. } => [
             Query::TaskChanges {
                 issue: "INF-123".into(),
                 base: "parent".into(),
@@ -176,12 +187,27 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
                 issue: "INF-123".into(),
                 path: "edit.txt".into(),
             },
+            Query::RepositoryIdentity {
+                directory: repo.path().to_owned(),
+            },
+            Query::Waves,
+            Query::MachineId,
+            Query::Portfolio,
+            Query::PaneLayout {
+                directory: repo.path().to_owned(),
+                work: "repository".into(),
+            },
+            Query::People {
+                directory: repo.path().to_owned(),
+            },
+            Query::Graphs {
+                directory: repo.path().to_owned(),
+            },
         ],
     };
     for query in queries {
         let owned = query.argv();
-        let mut argv: Vec<&str> = owned.iter().map(String::as_str).collect();
-        argv.push("--json");
+        let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
         let printed = read(repo.path(), home.path(), &argv, query.input());
         let served: Value = serde_json::from_str(&query.read().unwrap()).unwrap();
         assert_eq!(served, printed, "{argv:?}");

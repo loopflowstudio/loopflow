@@ -15,7 +15,7 @@ enum LoopflowLibrary {
     }
 
     /// What `query.argv` prints, read off the caller's thread.
-    static func read(_ query: TaskQuery) async throws -> String {
+    static func read(_ query: ServedQuery) async throws -> String {
         let json = String(decoding: try JSONEncoder().encode(query), as: UTF8.self)
         return try await Task.detached(priority: .userInitiated) {
             var error: UnsafeMutablePointer<CChar>?

@@ -578,10 +578,9 @@ fn scope_waves_to_repo(waves: Vec<Wave>, all: bool) -> Result<Vec<Wave>> {
 pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+        let Some(snapshots) = list(all, current).await? else {
             return no_registry(json, "[]");
         };
-        let snapshots = wave_snapshots(&store, all, current).await?;
         if json {
             println!("{}", serde_json::to_string(&snapshots)?);
         } else {
@@ -589,6 +588,14 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
         }
         Ok(())
     })
+}
+
+/// `lf wave list`'s rows; `None` before this Machine has a registry.
+pub async fn list(all: bool, current: bool) -> Result<Option<Vec<WaveSnapshot>>> {
+    let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+        return Ok(None);
+    };
+    Ok(Some(wave_snapshots(&store, all, current).await?))
 }
 
 /// The rows of `lf wave list`, in its order.

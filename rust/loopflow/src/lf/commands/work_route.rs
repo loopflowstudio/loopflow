@@ -1,5 +1,5 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
-use crate::durable::{RepositoryId, TaskExecutionRoute, TaskId};
+use crate::durable::{RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
@@ -10,7 +10,25 @@ pub fn identity(
     path: bool,
     json: bool,
 ) -> Result<()> {
-    let repo = crate::repository::CanonicalRepo::current()?
+    let (repo, identity) = repository_identity(&std::env::current_dir()?, bind, relocate)?;
+    if path {
+        println!("{repo}");
+    } else if json {
+        println!("{}", serde_json::to_string(&identity)?);
+    } else {
+        println!("{}", identity.id);
+    }
+    Ok(())
+}
+
+/// The repository containing `directory` and its planning identity,
+/// registering it on first sight as `lf config repository` does.
+pub fn repository_identity(
+    directory: &std::path::Path,
+    bind: Option<&RepositoryId>,
+    relocate: Option<&RepositoryId>,
+) -> Result<(crate::repository::CanonicalRepo, RepositoryIdentity)> {
+    let repo = crate::repository::CanonicalRepo::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf repository` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let identity = runtime.block_on(async {
@@ -21,14 +39,7 @@ pub fn identity(
             .repository_identity(&repo.to_string())?
             .ok_or_else(|| anyhow!("repository identity disappeared after registration"))
     })?;
-    if path {
-        println!("{repo}");
-    } else if json {
-        println!("{}", serde_json::to_string(&identity)?);
-    } else {
-        println!("{}", identity.id);
-    }
-    Ok(())
+    Ok((repo, identity))
 }
 
 pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {

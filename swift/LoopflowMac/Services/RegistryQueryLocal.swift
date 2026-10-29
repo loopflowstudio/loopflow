@@ -1,5 +1,5 @@
 // The local macOS registry query: `RegistryQuery` over this Machine. The Work
-// watches and Task file reads run in the app through Loopflow's library; other
+// watches and served queries run in the app through Loopflow's library; other
 // reads, and the remote Task file watch, run the bundled `lf` off the main actor
 // so a slow query never stalls the UI.
 

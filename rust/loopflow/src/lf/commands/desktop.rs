@@ -796,35 +796,50 @@ fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result
     })
 }
 
+/// `lf desktop layout <work>`: the saved pane intent of a Work, or a
+/// Dashboard's slot layout, in `selected` or the repository containing `directory`.
+pub fn saved_layout(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    work: &str,
+) -> Result<String> {
+    use crate::work::selection::DashboardId;
+    let reader = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = repository_in(selected, directory, &reader.sqlite)?;
+    Ok(match work.strip_prefix("query:") {
+        Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
+            &reader
+                .sqlite
+                .read_dashboard(&repository, &DashboardId(id.into()))?
+                .ok_or(crate::store::StoreError::NotFound)?
+                .saved,
+        ))?,
+        None => serde_json::to_string(&DesktopLayoutRecord::Work(
+            &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
+        ))?,
+    })
+}
+
 fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     use crate::work::selection::{DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
         crate::work::selection::Selection::parse(expression, None)?;
     }
-    let reader = crate::store::read_existing_registry()?
-        .ok_or(crate::store::StoreError::NotFound)
-        .context("Work registry is unavailable")?;
-    let repository = selection_repository(cli, &reader.sqlite)?;
     if let DesktopCommand::Layout {
         work, save: false, ..
     } = command
     {
-        let record = match work.strip_prefix("query:") {
-            Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
-                &reader
-                    .sqlite
-                    .read_dashboard(&repository, &DashboardId(id.into()))?
-                    .ok_or(crate::store::StoreError::NotFound)?
-                    .saved,
-            ))?,
-            None => serde_json::to_string(&DesktopLayoutRecord::Work(
-                &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
-            ))?,
-        };
+        let record = saved_layout(cli.repository.as_ref(), &std::env::current_dir()?, work)?;
         println!("{record}");
         return Ok(());
     }
+    let reader = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = selection_repository(cli, &reader.sqlite)?;
     drop(reader);
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let dashboard_id = |id: &str| DashboardId(id.strip_prefix("query:").unwrap_or(id).into());

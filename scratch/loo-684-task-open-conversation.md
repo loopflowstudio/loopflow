@@ -127,3 +127,4 @@ opening above." copy. `taskLinkExpectedID`/`taskLinkConversation` keep readers
   and the `.opening`-after-prepare expectation at the "Native mount/input is separate" test.
 
 Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|WorkspacePanesTests|WorkNavigationTests|TaskGraphTests|DesktopPerformanceFixtureTests'` passed (119, after compress shared the WorkspacePanes Task setup); the new WorkDestination and collapsed-offer tests fail on the old code. Gate owns the `swift` suite.
+Gate (2026-10-29): `scripts/test.py --reuse-passing` → FAIL at resource preflight (12.5 GiB free < 32 GiB reserve; `--recover` freed nothing), product suites not run; `check_architecture.py` and `check_swift_multiplatform_boundaries.py` pass. The full `swift` suite (app build + view tests) is deferred to CI; the focused desktop run above is the latest local evidence for this tree.

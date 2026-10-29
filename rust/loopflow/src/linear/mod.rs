@@ -8,7 +8,10 @@ use crate::work::wave::metrics::MetricTarget;
 
 use self::project_document::parse_project_document;
 mod cooldown;
+pub mod request_log;
 mod team_changes;
+
+pub(crate) use cooldown::{delta_fresh_secs, urgent, HEALTHY_FRESH_SECS};
 
 use reqwest::StatusCode;
 use serde::de::DeserializeOwned;
@@ -542,7 +545,10 @@ const LIST_ITEMS_QUERY: &str = r#"query ListProjectIssues($projectId: String!, $
   }
 }"#;
 
-const ISSUE_RESPONSE_FIELDS: &str = r#"    id
+/// An issue's own fields, without its Project.
+macro_rules! issue_fields {
+    () => {
+        r#"    id
     identifier
     branchName
     completedAt
@@ -556,18 +562,13 @@ const ISSUE_RESPONSE_FIELDS: &str = r#"    id
     assignee { id }
     state { type }
     team { id }
-    project {
-      id
-      name
-      updatedAt
-      archivedAt
-      description
-      content
-      status { type }
-      initiatives(first: 50) { nodes { id } }
-      teams(first: 50) { nodes { id } }
-    }"#;
-const PROJECT_RESPONSE_FIELDS: &str = r#"    id
+"#
+    };
+}
+
+macro_rules! project_fields {
+    () => {
+        r#"    id
     name
     updatedAt
     archivedAt
@@ -575,7 +576,21 @@ const PROJECT_RESPONSE_FIELDS: &str = r#"    id
     content
     status { type }
     initiatives(first: 50) { nodes { id } }
-    teams(first: 50) { nodes { id } }"#;
+    teams(first: 50) { nodes { id } }"#
+    };
+}
+
+const ISSUE_RESPONSE_FIELDS: &str = concat!(
+    issue_fields!(),
+    "    project {\n",
+    project_fields!(),
+    "\n    }"
+);
+/// Linear scores a query by the page sizes it requests, so a delta that carried
+/// each issue's Project connections cost thousands of points even when empty.
+/// It names the Project; changed Projects are read once each.
+const CHANGED_ISSUE_FIELDS: &str = concat!(issue_fields!(), "    project { id }");
+const PROJECT_RESPONSE_FIELDS: &str = project_fields!();
 
 // Selects `identifier` back because Linear reassigns the issue number on a team
 // move (`W2-155` → `PRD-<next>`); the caller cannot predict the new value.
@@ -927,25 +942,80 @@ impl LinearClient {
                 }
             }
         }
-        let request = GraphqlRequest { query, variables };
+        let urgent = cooldown::is_urgent();
+        let log = request_log::PendingRequest::start(
+            &cooldown::home(&self.base_url),
+            query,
+            &variables,
+            self.repository.as_deref(),
+            urgent,
+        );
+        let (exchange, response) = self
+            .send(&GraphqlRequest { query, variables }, urgent)
+            .await;
+        if let Some(log) = log {
+            log.finish(exchange);
+        }
+        let (status, body) = response?;
+        parse_graphql_response(status, &body)
+    }
 
+    /// Send one request through the shared cooldown and budget, reporting what
+    /// became of it alongside the response.
+    async fn send(
+        &self,
+        request: &GraphqlRequest<'_>,
+        urgent: bool,
+    ) -> (
+        request_log::Exchange,
+        LinearResult<(StatusCode, bytes::Bytes)>,
+    ) {
+        use request_log::{Exchange, RequestOutcome};
+        let unanswered = |outcome, error| (Exchange::unanswered(outcome), Err(error));
         let cooldown = cooldown::Cooldown::for_endpoint(&self.base_url);
-        cooldown.check().await?;
-        let response = self
+        if let Err(error) = cooldown.check().await {
+            return unanswered(RequestOutcome::Paused, error);
+        }
+        if !urgent {
+            if let Err(error) = cooldown.admit().await {
+                return unanswered(RequestOutcome::Deferred, error);
+            }
+        }
+        let response = match self
             .client
             .post(&self.base_url)
             .bearer_auth(&self.token)
-            .json(&request)
+            .json(request)
             .send()
             .await
-            .map_err(|err| LinearError::Message(format!("linear request failed: {err}")))?;
+        {
+            Ok(response) => response,
+            Err(err) => {
+                let error = LinearError::Message(format!("linear request failed: {err}"));
+                return unanswered(RequestOutcome::Failed, error);
+            }
+        };
         let status = response.status();
         let headers = response.headers().clone();
-        let body = response.bytes().await.map_err(|err| {
-            LinearError::Message(format!("failed to read Linear response: {err}"))
-        })?;
-        cooldown.observe(status, &headers, &body).await?;
-        parse_graphql_response(status, &body)
+        let answered = |outcome| Exchange {
+            outcome,
+            status: Some(status.as_u16()),
+            allowances: cooldown::Allowances::from_headers(&headers),
+        };
+        let body = match response.bytes().await {
+            Ok(body) => body,
+            Err(err) => {
+                let error = LinearError::Message(format!("failed to read Linear response: {err}"));
+                return (answered(RequestOutcome::Failed), Err(error));
+            }
+        };
+        match cooldown.observe(status, &headers, &body).await {
+            Ok(()) => (answered(RequestOutcome::Sent), Ok((status, body))),
+            Err(error @ LinearError::RateLimited { .. }) => {
+                (answered(RequestOutcome::RateLimited), Err(error))
+            }
+            Err(error) => (answered(RequestOutcome::Sent), Err(error)),
+        }
     }
 
     /// The owning team id of an existing issue. State transitions resolve

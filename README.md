@@ -113,6 +113,7 @@ You want to do something; here's how through `lf`.
 | rent a machine from Daytona, Modal, RunPod or AWS for one Task and give it back after | `lf task run <ID> --rent <template>` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
 | see what agents cost, by Task, Wave or week | `lf history usage --weekly` |
+| see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf history linear` |
 | open work in Desktop, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
 | plan in Git with no tracker, or in Linear | `lf task list` |
 | keep a longer objective moving with its own memory, plan and setup | `lf wave status` |

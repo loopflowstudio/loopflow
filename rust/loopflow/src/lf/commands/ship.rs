@@ -2,7 +2,8 @@
 //! `lf -b task run` runs it: every step headless, an interactive step standing
 //! in for the person who would be there. A bare ship inside its execution owner
 //! returns once it is shipping and carries on in its log; `-b` stays until the
-//! end. It is started again if it dies while the Task is shipping.
+//! end. It is started again if it dies while the Task is shipping, unless every
+//! attempt of its run failed with one error: then it stops shipping with it.
 
 use std::path::Path;
 
@@ -10,7 +11,8 @@ use anyhow::Result;
 
 use crate::lf::Cli;
 use crate::ops::task::ship::{
-    ship_begin, ship_next, ship_progressed, ship_settle_merge, ShipMerge, ShipStart, ShipStep,
+    ship_begin, ship_halt, ship_next, ship_progressed, ship_settle_merge, ShipMerge, ShipStart,
+    ShipStep,
 };
 use crate::ops::task::{TaskProcessOptions, TaskRunStart};
 
@@ -74,7 +76,12 @@ pub fn run(
         )?;
         if let TaskRunStart::Run(step) = start {
             // This ship has already let its launcher go, or keeps it to the end.
-            super::graph::run_task_graph_for(&headless, &task, &step, false)?;
+            if let Err(error) = super::graph::run_task_graph_for(&headless, &task, &step, false) {
+                if let Some(repeated) = error.downcast_ref::<super::graph::RepeatedRunFailure>() {
+                    ship_halt(&issue, &repeated.cause)?;
+                }
+                return Err(error);
+            }
             crate::ops::task::task_run_finished(&task)?;
             ship_progressed(&task.id)?;
         }

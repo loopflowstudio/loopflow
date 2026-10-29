@@ -112,6 +112,10 @@ one-line ancestry check it replaces; it is invisible to people.
   claims an unowned Task on start (as `task run` does) and stops when it is unassigned
   mid-ship (`ShipStep::Unassigned`); the step already running finishes.
   Desktop reads `runtime.owner` for Claim/Unassign (`RoadmapTask.isUnassigned`).
+  Mid-ship unassign and the Linear assignee clear are covered by
+  `task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish` and
+  `local_planning::task_unassign_clears_the_assignee`. The released 0.14.17 migration
+  comment still says "Defer holds it"; it is a shipped record, so it stays.
 - Demo (answer 6) not run yet: agent-run in a throwaway `LF_HOME` with real Claude.
 - Checks (2026-10-29): lib `human_session:: ops::task::ship store::sqlite::{task_work,selections,
   planning_write,task_ownership,ci_incidents} work::selection lf::tests lf::commands::waves

@@ -166,7 +166,7 @@ struct TaskWorkflowHeader: View {
                 Task { await model.abandonTask(task) }
             }
         } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Hold it instead to keep its work for later.")
+            Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
         }
         .font(Typography.body(12))
         .padding(.horizontal, 14)
@@ -302,7 +302,7 @@ struct TaskShipControl: View {
                 Task { await model.abandonTask(task) }
             }
         } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Hold it instead to keep its work for later.")
+            Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
         }
     }
 }

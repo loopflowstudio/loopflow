@@ -1029,17 +1029,44 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
     })
 }
 
-/// Persist a Machine-local configuration mapping without exposing partial YAML.
-pub(crate) fn write_global_config_at(
-    path: &Path,
-    value: &serde_yaml_ng::Value,
-) -> anyhow::Result<()> {
-    let parent = path.parent().expect("config path has a parent");
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    file.write_all(serde_yaml_ng::to_string(value)?.as_bytes())?;
+/// Read a Machine-local configuration mapping; absent or empty is an empty mapping.
+pub(crate) fn read_global_config_at(path: &Path) -> anyhow::Result<serde_yaml_ng::Value> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(anyhow::Error::new(error).context(format!("Read {}", path.display())))
+        }
+    };
+    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text)? {
+        serde_yaml_ng::Value::Null => Ok(serde_yaml_ng::Value::Mapping(Default::default())),
+        value if value.is_mapping() => Ok(value),
+        _ => anyhow::bail!("{} must contain a configuration mapping", path.display()),
+    }
+}
+
+/// Change `home`'s config.yaml under its lock, persisting it only when `change`
+/// succeeds, without exposing partial YAML.
+pub(crate) fn update_global_config_at<T>(
+    home: &Path,
+    change: impl FnOnce(&mut serde_yaml_ng::Value) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    fs::create_dir_all(home)?;
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(home.join("config.lock"))?;
+    fs2::FileExt::lock_exclusive(&lock)?;
+    let path = home.join("config.yaml");
+    let mut value = read_global_config_at(&path)?;
+    let result = change(&mut value)?;
+    let mut file = tempfile::NamedTempFile::new_in(home)?;
+    file.write_all(serde_yaml_ng::to_string(&value)?.as_bytes())?;
     file.as_file().sync_all()?;
-    file.persist(path)?;
-    Ok(())
+    file.persist(&path)?;
+    Ok(result)
 }
 
 fn global_config_path() -> PathBuf {

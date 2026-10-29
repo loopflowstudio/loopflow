@@ -50,26 +50,28 @@ impl Stream {
 /// Install the newest build on `switch`, recording it as this Machine's
 /// stream, or on the recorded stream (`stable` when none is recorded).
 pub fn install(switch: Option<Stream>) -> Result<()> {
-    let config = crate::installation::account_home()?.join(".lf/config.yaml");
+    let home = crate::installation::account_home()?.join(".lf");
     let stream = match switch {
         Some(stream) => {
-            record_stream(&config, stream)?;
+            record_stream(&home, stream)?;
             println!(
                 "stream: {} (recorded in {})",
                 stream.as_str(),
-                config.display()
+                home.join("config.yaml").display()
             );
             stream
         }
-        None => recorded_stream(&config)?.unwrap_or(Stream::Stable),
+        None => recorded_stream(&home)?.unwrap_or(Stream::Stable),
     };
+    if stream == Stream::Dev {
+        return main_build();
+    }
     let client = Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent(concat!("lf/", env!("CARGO_PKG_VERSION")))
         .build()?;
-    let tag = match stream {
-        Stream::Dev => return main_build(),
-        Stream::Preview => newest_release(
+    let tag = if stream == Stream::Preview {
+        newest_release(
             &client
                 .get(format!(
                     "https://api.github.com/repos/{REPOSITORY}/releases?per_page=20"
@@ -78,8 +80,9 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
                 .context("look up the newest Loopflow release")?
                 .error_for_status()?
                 .text()?,
-        )?,
-        Stream::Stable => release_tag(
+        )?
+    } else {
+        release_tag(
             client
                 .head(format!("{RELEASES}/latest"))
                 .send()
@@ -87,7 +90,7 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
                 .error_for_status()?
                 .url()
                 .path(),
-        )?,
+        )?
     };
     install_release(&client, stream, &tag)
 }
@@ -180,8 +183,10 @@ fn opens_store(store: &Path, catalog: &str) -> Result<bool> {
     Ok(crate::store::migrations::can_open(&conn, &catalog)?)
 }
 
-fn recorded_stream(config: &Path) -> Result<Option<Stream>> {
-    let Some(name) = read_config(config)?
+/// The stream recorded in `home`'s config.yaml.
+fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
+    let config = home.join("config.yaml");
+    let Some(name) = crate::config::read_global_config_at(&config)?
         .get("stream")
         .and_then(|value| value.as_str().map(str::to_string))
     else {
@@ -195,25 +200,11 @@ fn recorded_stream(config: &Path) -> Result<Option<Stream>> {
     })
 }
 
-fn record_stream(config: &Path, stream: Stream) -> Result<()> {
-    fs::create_dir_all(config.parent().expect("config path has a parent"))?;
-    let mut value = read_config(config)?;
-    value["stream"] = stream.as_str().into();
-    crate::config::write_global_config_at(config, &value)
-}
-
-fn read_config(path: &Path) -> Result<serde_yaml_ng::Value> {
-    match fs::read_to_string(path) {
-        Ok(text) => match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text)? {
-            serde_yaml_ng::Value::Null => Ok(serde_yaml_ng::Value::Mapping(Default::default())),
-            value if value.is_mapping() => Ok(value),
-            _ => bail!("{} must contain a configuration mapping", path.display()),
-        },
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(serde_yaml_ng::Value::Mapping(Default::default()))
-        }
-        Err(error) => Err(error).with_context(|| format!("read {}", path.display())),
-    }
+fn record_stream(home: &Path, stream: Stream) -> Result<()> {
+    crate::config::update_global_config_at(home, |config| {
+        config["stream"] = stream.as_str().into();
+        Ok(())
+    })
 }
 
 /// Install the package CI built for the newest green main commit. GitHub keeps
@@ -618,19 +609,20 @@ mod tests {
     #[test]
     fn a_switch_is_recorded_beside_other_machine_settings() {
         let temp = tempfile::tempdir().unwrap();
-        let config = temp.path().join(".lf/config.yaml");
-        assert_eq!(recorded_stream(&config).unwrap(), None);
-        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        let home = temp.path().join(".lf");
+        let config = home.join("config.yaml");
+        assert_eq!(recorded_stream(&home).unwrap(), None);
+        fs::create_dir_all(&home).unwrap();
         fs::write(&config, "repo_root: /src\n").unwrap();
-        record_stream(&config, Stream::Preview).unwrap();
-        assert_eq!(recorded_stream(&config).unwrap(), Some(Stream::Preview));
-        record_stream(&config, Stream::Dev).unwrap();
-        assert_eq!(recorded_stream(&config).unwrap(), Some(Stream::Dev));
+        record_stream(&home, Stream::Preview).unwrap();
+        assert_eq!(recorded_stream(&home).unwrap(), Some(Stream::Preview));
+        record_stream(&home, Stream::Dev).unwrap();
+        assert_eq!(recorded_stream(&home).unwrap(), Some(Stream::Dev));
         assert!(fs::read_to_string(&config)
             .unwrap()
             .contains("repo_root: /src"));
         fs::write(&config, "stream: nightly\n").unwrap();
-        assert!(recorded_stream(&config)
+        assert!(recorded_stream(&home)
             .unwrap_err()
             .to_string()
             .contains("unknown stream `nightly`"));

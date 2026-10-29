@@ -290,21 +290,33 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
 /// Withdraw a Task's Auto-Ship approval: stop its ship process and take back any
 /// merge request Loopflow armed on GitHub. Returns false when it was not shipping.
 pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
+    let by = participant_or("someone");
+    let note = match note {
+        Some(note) => format!("{by}: {note}"),
+        None => by,
+    };
+    withdraw(issue, &note)
+}
+
+/// Withdraw the approval from inside the ship process when every attempt of its
+/// run failed with one error: restarting it would only repeat the failure.
+pub fn ship_halt(issue: &str, cause: &str) -> OpsResult<bool> {
+    withdraw(issue, &format!("Loopflow: {cause}"))
+}
+
+fn withdraw(issue: &str, note: &str) -> OpsResult<bool> {
+    let current = crate::journal::current_lf_process_id();
     let (task, stopped) = block_on_task(async {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
-        let by = participant_or("someone");
-        let note = match note {
-            Some(note) => format!("{by}: {note}"),
-            None => by,
-        };
         let stopped = store
             .sqlite
-            .stop_shipping(&task.id, &note)
+            .stop_shipping(&task.id, note)
             .map_err(task_error)?;
         if let Some(process) = stopped
             .as_ref()
             .and_then(|shipping| shipping.process.as_ref())
+            .filter(|process| current.as_ref() != Some(*process))
         {
             if crate::journal::process_evidence(&store.sqlite, process)
                 == ProcessIdentityEvidence::Live

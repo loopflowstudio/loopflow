@@ -153,6 +153,12 @@ tested before the next starts.
    headless); the in-place promotion entry point for an app updated in place.
 7. **Sparkle, one appcast per stream**, EdDSA key in Doppler, Developer ID
    signing of dev builds in CI; the delegate vetoes updates that fail `can_open`.
+8. **Learn from the best write-up** (task brief): what to adopt from Codex, opencode,
+   Docker, Superlogical, Ghostty and other desktop apps on channels, cadence,
+   versioning, notes, signing, auto-update, rollback and hotfixes. The research
+   exists (`scratch/release-research.md`, cleared; `git show e03537f7ca:scratch/release-research.md`)
+   but nothing durable records the adopt list yet; it needs a home that survives
+   `lf scratch clear` (e.g. a section of `release/README.md`) before the Task completes.
 
 Check (slice 2 gate, 2026-10-29, tree ae4b265b8a): architecture pass, `cargo fmt --check` pass, publisher/automation pytest 55 pass; `--lib ops::release::` 45 and `release_tests daily_run_moves_stable minor notes` 22 passed on this code at compress; gate's nextest and clippy refused by the disk reserve (5.2 GiB free, other Tasks' builds retained), deferred to PR CI.
 

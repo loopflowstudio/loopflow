@@ -16,7 +16,7 @@
   before the fix merged but published after the Task closed would count as fixed;
   assumed rare (a release run takes minutes). A done Task with an unreadable
   completion time keeps covering, so the failure is a stalled `stable` that the
-  release log names (`LOO-1 holds stable below v0.16.0`), never a shipped bug.
+  release log names (`LOO-1 keeps stable off v0.16.0, v0.16.1`), never a shipped bug.
   Abandoned or canceled regression Tasks cover nothing.
 - **`regressed_in` reaches the release host only through local planning exchange.**
   It has no Linear field, so the cron Machine sees a mark set elsewhere only

@@ -1446,10 +1446,6 @@ fn piped_task_report() -> anyhow::Result<Option<String>> {
 }
 
 fn main() -> std::process::ExitCode {
-    if let Err(error) = loopflow::store::copy::enter() {
-        eprintln!("Error: {error}");
-        return std::process::ExitCode::FAILURE;
-    }
     loopflow::transport::initialize();
     let _measurement = loopflow::performance::ProcessMeasurement::start();
     let result = journal::with_process(|| {
@@ -1508,7 +1504,6 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
 }
 
 fn run() -> anyhow::Result<()> {
-    loopflow::data_clone::enter_selected()?;
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Validate addressed commands once, before help, repository lookup, or admission.
     // A rejected destination must not create even a fallback Process on that Machine.
@@ -1546,7 +1541,7 @@ fn run() -> anyhow::Result<()> {
         // The target owns command flags, including --verbose; RUST_LOG controls transport logs.
         init_tracing(false);
         if !preview {
-            loopflow::installation::dispatch_default_cli()?;
+            loopflow::installation::canonicalize_selected_home()?;
             journal::admit_process(&std::env::current_dir()?, &raw_args);
         }
         ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
@@ -1576,13 +1571,6 @@ fn run() -> anyhow::Result<()> {
         Err(error) => {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");
             let _ = error.print();
-            // Which store this build reads: a draft-carrying build names its copy.
-            if error.kind() == clap::error::ErrorKind::DisplayVersion {
-                if let Some(copy) = loopflow::store::copy::selected() {
-                    let copy = copy.parent().expect("copy database has a directory");
-                    println!("copy: {}", copy.display());
-                }
-            }
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
@@ -1603,12 +1591,6 @@ fn run() -> anyhow::Result<()> {
     if cli.agent.is_some() && !cli.may_launch_agent() {
         eprintln!("This command does not start an agent; --agent has no effect.");
     }
-    // Clone creation must reach an incompatible source read-only, without
-    // admitting a Process or forwarding the development binary to an install.
-    if let Some(Commands::Clone { cmd }) = &cli.command {
-        journal::mark_effect_free_read();
-        return loopflow::data_clone::run(cmd);
-    }
     // Installation owns its promotion/recovery authority. In particular,
     // read-only candidate preflight must work before a first install settles.
     let bypasses_installation_startup_gate = matches!(
@@ -1621,9 +1603,7 @@ fn run() -> anyhow::Result<()> {
                 }
         })
     );
-    if !bypasses_installation_startup_gate {
-        loopflow::installation::dispatch_default_cli()?;
-    }
+    loopflow::installation::canonicalize_selected_home()?;
     // Only an explicit selection becomes an inherited override. Task and
     // repository defaults are filled later and never acquire this precedence.
     let selected_agent = loopflow::config::agent_override().or(cli.agent.clone());
@@ -1823,10 +1803,11 @@ fn run() -> anyhow::Result<()> {
     // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
     if let Some(Commands::Self_ {
-        cmd: loopflow::lf::SelfCommand::Install { cmd },
+        cmd: loopflow::lf::SelfCommand::Install { main, cmd },
     }) = &cli.command
     {
         return match cmd.as_ref() {
+            None if *main => loopflow::lf::commands::install::main_build(),
             None => loopflow::lf::commands::install::latest(),
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
@@ -1836,6 +1817,12 @@ fn run() -> anyhow::Result<()> {
             }
             Some(InstallCommand::Preflight { json }) => {
                 loopflow::lf::commands::install::preflight(*json)
+            }
+            Some(InstallCommand::ReaderCatalog) => {
+                for floor in loopflow::store::migrations::reader_catalog() {
+                    println!("{floor}");
+                }
+                Ok(())
             }
             Some(InstallCommand::AdvanceSwitch { switch }) => {
                 loopflow::lf::commands::install::advance_switch(switch)
@@ -2599,7 +2586,6 @@ fn execute_command(
     binding: Option<&loopflow::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
-        Some(Commands::Clone { .. }) => unreachable!("clone dispatch precedes admission"),
         Some(Commands::Inline { prompt }) => {
             let text = prompt.join(" ");
             in_directory_runtime(args, |repo| match binding {

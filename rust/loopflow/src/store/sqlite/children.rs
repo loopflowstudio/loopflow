@@ -2489,10 +2489,10 @@ mod local_planning_tests {
 
     #[test]
     fn retired_branch_lookup_preserves_history_without_full_scans() {
-        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "retired_work_lookup");
+        apply_before_migration(&conn, "retired_work_lookup");
         let wave = WaveId::new();
         let project = ProjectId::new();
         conn.execute(
@@ -2529,7 +2529,7 @@ mod local_planning_tests {
             query.get_status(rusqlite::StatementStatus::FullscanStep)
         };
         let before = read();
-        conn.execute_batch(&current_draft_sql("retired_work_lookup"))
+        conn.execute_batch(&migration_section_sql("retired_work_lookup"))
             .unwrap();
         let after = read();
         eprintln!("branch full-scan steps: {before} → {after}");
@@ -3106,12 +3106,12 @@ mod local_planning_tests {
     #[test]
     fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidence() {
         use crate::store::migrations::{
-            apply_before_current_draft, current_draft_sql, upgrade_from_draft,
+            apply_before_migration, migration_section_sql, upgrade_from_migration,
         };
         use std::sync::{Arc, Mutex};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "local_planning");
+        apply_before_migration(&conn, "local_planning");
         let wave = WaveId::new();
         let orphan_wave = WaveId::new();
         let project = ProjectId::new();
@@ -3193,7 +3193,7 @@ mod local_planning_tests {
         let before: Vec<_> = queries.iter().map(|sql| rows(&conn, sql)).collect();
         conn.execute_batch("PRAGMA foreign_keys=OFF; BEGIN IMMEDIATE;")
             .unwrap();
-        conn.execute_batch(&current_draft_sql("local_planning"))
+        conn.execute_batch(&migration_section_sql("local_planning"))
             .unwrap();
         let violations: i64 = conn
             .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
@@ -3206,7 +3206,7 @@ mod local_planning_tests {
         for ((table, sql), expected) in tables.iter().zip(&queries).zip(before) {
             assert_eq!(rows(&conn, sql), expected, "{table}");
         }
-        upgrade_from_draft(&conn, "optional_task_pr");
+        upgrade_from_migration(&conn, "optional_task_pr");
         let order: String = conn
             .query_row(
                 "SELECT task_order_json FROM pm_projects WHERE id='current'",

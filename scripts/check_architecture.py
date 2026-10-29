@@ -18,6 +18,7 @@ import fnmatch
 import json
 import re
 import sqlite3
+import subprocess
 import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
@@ -26,7 +27,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ARCHITECTURE = Path("docs/architecture-reference.md")
 MIGRATIONS = Path("rust/loopflow/src/store/migrations")
-MIGRATIONS_RS = Path("rust/loopflow/src/store/migration_catalog.rs")
 LF_MOD = Path("rust/loopflow/src/lf/mod.rs")
 CRATE_MANIFEST = Path("rust/loopflow/Cargo.toml")
 PROVIDERS = Path("rust/loopflow/src/provider_auth/mod.rs")
@@ -34,11 +34,10 @@ GRAPHS = Path(".lf/graphs")
 
 CODE_TOKEN = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"\[([^]]+)]\(([^)]+)\)")
-MIGRATION_INCLUDE = re.compile(r'include_str!\("migrations/([^\"]+)"\)')
+RELEASED_MIGRATION = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_[a-z0-9_]+\.sql$")
+SLUG_MIGRATION = re.compile(r"^[a-z][a-z0-9_]*\.sql$")
 COMMAND_EDGE = re.compile(r"(?:std::process::|tokio::process::)?Command::new\(\s*\"([^\"]+)\"")
 SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
-HEADER_LINE = re.compile(r"^--[ \t]*depends_on:")
-DRAFT_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
 GRAPH_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 
 TEXT_SUFFIXES = {".md", ".py", ".rs", ".sh", ".sql", ".swift", ".toml", ".yaml", ".yml"}
@@ -265,43 +264,45 @@ def _discover_executable_edges(root: Path) -> set[str]:
     return edges
 
 
-def _registered_migrations(root: Path) -> list[Path]:
-    source = (root / MIGRATIONS_RS).read_text()
-    registry = source.split("const MIGRATIONS: &[Migration] = &[", 1)[1].split("];", 1)[0]
-    return [root / MIGRATIONS / name for name in MIGRATION_INCLUDE.findall(registry)]
-
-
-def _ordered_draft_sql(root: Path) -> list[str]:
-    drafts_dir = root / MIGRATIONS / "drafts"
-    if not drafts_dir.is_dir():
-        return []
-    drafts: dict[str, tuple[set[str], str]] = {}
-    for path in sorted(drafts_dir.glob("*.sql")):
-        text = path.read_text()
-        name = path.stem
-        depends_match = DRAFT_DEPENDS.search(text)
-        dependencies = set()
-        if depends_match:
-            raw = depends_match.group(1).strip()
-            if raw and raw.casefold() != "none":
-                dependencies = {part.strip() for part in raw.split(",") if part.strip()}
-        sql = "\n".join(line for line in text.splitlines() if not HEADER_LINE.match(line))
-        drafts[name] = (dependencies, sql)
-
-    ordered: list[str] = []
-    remaining = dict(drafts)
-    while remaining:
-        ready = sorted(
-            name
-            for name, (dependencies, _) in remaining.items()
-            if not dependencies & remaining.keys()
+def _ordered_migrations(root: Path) -> list[Path]:
+    """Released batches in id order, then slugs in origin/main's merge order
+    (as `build.rs` orders them), then unmerged slugs by name."""
+    directory = root / MIGRATIONS
+    released = []
+    slugs = []
+    for path in directory.glob("*.sql"):
+        if match := RELEASED_MIGRATION.match(path.name):
+            major, minor, patch, ordinal = match.groups()
+            key = (int(major), int(minor), -1 if patch is None else int(patch), int(ordinal))
+            released.append((key, path))
+        elif SLUG_MIGRATION.match(path.name):
+            slugs.append(path)
+    log = subprocess.run(
+        [
+            "git",
+            "log",
+            "origin/main",
+            "--first-parent",
+            "--diff-merges=first-parent",
+            "--no-renames",
+            "--diff-filter=A",
+            "--reverse",
+            "--name-only",
+            "--format=",
+            "--",
+            str(MIGRATIONS),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    merged = [Path(line).name for line in log.stdout.splitlines()] if log.returncode == 0 else []
+    slugs.sort(
+        key=lambda path: (
+            (0, merged.index(path.name), "") if path.name in merged else (1, 0, path.name)
         )
-        if not ready:
-            raise ValueError(f"draft dependency cycle among {', '.join(sorted(remaining))}")
-        for name in ready:
-            _, sql = remaining.pop(name)
-            ordered.append(sql)
-    return ordered
+    )
+    return [path for _key, path in sorted(released)] + slugs
 
 
 def _discover_tables(root: Path) -> set[str]:
@@ -310,14 +311,12 @@ def _discover_tables(root: Path) -> set[str]:
         connection.execute(
             "CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)"
         )
-        for index, path in enumerate(_registered_migrations(root)):
+        for index, path in enumerate(_ordered_migrations(root)):
             connection.executescript(path.read_text())
             connection.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
                 (path.stem, index),
             )
-        for sql in _ordered_draft_sql(root):
-            connection.executescript(sql)
         rows = connection.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"

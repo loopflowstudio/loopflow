@@ -404,7 +404,7 @@ mod tests {
     use super::{attach_in, retain_filing_export_in, PlanningExport};
     use crate::durable::{ProjectId, TaskId};
     use crate::store::migrations::{
-        apply_before_current_draft, convert_released_data, current_draft_sql,
+        apply_before_migration, convert_released_data, migration_section_sql,
     };
     use crate::store::sqlite::planning_changes::PlanningChanges;
     use crate::store::sqlite::task_history::RetainedFiling;
@@ -413,12 +413,12 @@ mod tests {
     #[test]
     fn historical_creation_keeps_intent_values_after_local_edits() {
         let conn = Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/creation_baselines.sql"
         ))
         .unwrap();
-        let sql = current_draft_sql("planning_peers");
+        let sql = migration_section_sql("planning_peers");
         conn.execute_batch(&sql).unwrap();
         convert_released_data(&conn, &sql).unwrap();
         conn.execute("UPDATE task_creation_intents SET export_json=NULL", [])
@@ -477,7 +477,7 @@ mod tests {
     #[test]
     fn malformed_creation_baseline_keeps_released_receipts_and_schema() {
         let mut conn = Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "planning_peers");
+        apply_before_migration(&conn, "planning_peers");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/creation_baselines.sql"
         ))
@@ -491,7 +491,7 @@ mod tests {
         };
         let before = receipt(&conn);
         let tx = conn.transaction().unwrap();
-        let sql = current_draft_sql("planning_peers");
+        let sql = migration_section_sql("planning_peers");
         tx.execute_batch(&sql).unwrap();
         assert!(convert_released_data(&tx, &sql).is_err());
         tx.rollback().unwrap();
@@ -507,7 +507,7 @@ mod tests {
         for project in [false, true] {
             for changed_readback in [false, true] {
                 let conn = Connection::open_in_memory().unwrap();
-                apply_before_current_draft(&conn, "planning_peers");
+                apply_before_migration(&conn, "planning_peers");
                 conn.execute_batch(include_str!(
                     "../../../tests/fixtures/migrations/creation_baselines.sql"
                 ))
@@ -541,7 +541,7 @@ mod tests {
                     .unwrap()
                 };
                 let before: Value = serde_json::from_str(&receipt()).unwrap();
-                let sql = current_draft_sql("planning_peers");
+                let sql = migration_section_sql("planning_peers");
                 conn.execute_batch(&sql).unwrap();
                 convert_released_data(&conn, &sql).unwrap();
                 let after: Value = serde_json::from_str(&receipt()).unwrap();

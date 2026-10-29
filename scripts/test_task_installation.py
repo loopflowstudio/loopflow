@@ -1,6 +1,7 @@
 """Run Task CLI proofs with disposable OS installation authority."""
 
 import argparse
+import io
 import subprocess
 import tarfile
 import time
@@ -15,7 +16,6 @@ PROOFS = {
     "graph_live_across_switch_runs_next_step_on_selected_install": (
         "os_process::installation_tests"
     ),
-    "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_machine_tests",
     "task_adopts_linear_checkout_and_preserves_graph_history": "task_adoption_tests",
     "declared_agent_can_start_another_tasks_graph": "session_lifecycle_tests",
     "task_graph_read_keeps_captured_topology_and_counts_both_returns": "graph_tests",
@@ -106,6 +106,34 @@ def _wait_for_docker() -> None:
         time.sleep(5)
 
 
+def _migration_order(repo: Path) -> str:
+    """Every slug migration in this tree: origin/main's merge order, then the rest by name."""
+    directory = "rust/loopflow/src/store/migrations"
+    log = subprocess.run(
+        [
+            "git",
+            "log",
+            "origin/main",
+            "--first-parent",
+            "--diff-merges=first-parent",
+            "--no-renames",
+            "--diff-filter=A",
+            "--reverse",
+            "--name-only",
+            "--format=",
+            "--",
+            directory,
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    present = {path.stem for path in (repo / directory).glob("[a-z]*.sql")}
+    merged = [Path(line).stem for line in log.stdout.splitlines() if Path(line).stem in present]
+    order = list(dict.fromkeys(merged)) + sorted(present - set(merged))
+    return "".join(f"{slug}\n" for slug in order)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", default="docker.io/library/rust:trixie")
@@ -167,6 +195,12 @@ def main() -> None:
                     path = Path(raw.decode())
                     if (repo / path).is_file():
                         archive.add(repo / path, arcname=str(Path("source") / path))
+                # The snapshot has no Git history; it builds as the main commit it
+                # would merge into, so its migrations count as merged.
+                order = _migration_order(repo).encode()
+                member = tarfile.TarInfo("source/migration-order.txt")
+                member.size = len(order)
+                archive.addfile(member, io.BytesIO(order))
             assert copy.stdin is not None
             copy.stdin.close()
             if copy.wait() != 0:
@@ -189,11 +223,10 @@ chown -R lf-task-proof:lf-task-proof /source
 chown -R lf-task-proof:lf-task-proof /usr/local/cargo/registry
 runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
     LOOPFLOW_BUILD_PROVENANCE=development CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 \
+    LOOPFLOW_MIGRATION_ORDER=/source/migration-order.txt \
     CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 \
     flock /source/target/.installation-proof.lock sh -ec 'cd /source
         rustc --version
-        version=$(sed -n "s/^version = \"\([^\"]*\)\"/\1/p" Cargo.toml | head -1)
-        python3 scripts/canonicalize_migrations.py "$version" --materialize-for-tests
         PREPARE
         '
 """
@@ -207,7 +240,7 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
         if args.repository_upgrade:
             command = command.replace(
                 "LOOPFLOW_BUILD_PROVENANCE=development",
-                "LOOPFLOW_BUILD_PROVENANCE=release LOOPFLOW_MIGRATION_AUTHORITY=published",
+                "LOOPFLOW_BUILD_PROVENANCE=release",
             )
         subprocess.run(
             ["docker", "exec", container, "sh", "-ec", command], check=True, timeout=1800
@@ -232,6 +265,7 @@ runuser -u lf-task-proof -- env HOME=/home/lf-task-proof \
 runuser -u lf-task-proof -- env HOME=/home/lf-task-proof GIT_ALLOW_PROTOCOL=file \
     LOOPFLOW_TEST_LF=/source/target/debug/lf \
     LOOPFLOW_BUILD_PROVENANCE=development CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 \
+    LOOPFLOW_MIGRATION_ORDER=/source/migration-order.txt \
     CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_DEV_DEBUG=0 \
     flock /source/target/.installation-proof.lock sh -ec 'cd /source
         PYTHONPATH=scripts python3 -c "from test_network import _probe; _probe()"

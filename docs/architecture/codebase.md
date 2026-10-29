@@ -28,7 +28,7 @@ complexity.
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite, migrations, durable domain rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | login, encrypted tokens, account homes and routes |
 | Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifacts, repository identity, subscriptions |
-| Released and draft SQL | `store/migrations/**/*.sql` | 4,900 | immutable schema history and current draft frontier |
+| Migration SQL | `store/migrations/*.sql` | 4,900 | immutable released batches and merged slug migrations |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | shared DTOs/services and macOS presentation |
 | External tests | Rust, Python, and Swift test roots | 27,100 | cross-module, wire, migration, CLI, and app proofs |
 

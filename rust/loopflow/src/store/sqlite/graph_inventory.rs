@@ -661,7 +661,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("released.db");
         let conn = rusqlite::Connection::open(&database).unwrap();
-        crate::store::migrations::apply_before_current_draft(&conn, "rename_flow_to_graph");
+        crate::store::migrations::apply_before_migration(&conn, "rename_flow_to_graph");
         let step = ConcreteStep::Skill(ConcreteSkill {
             skill: Skill::named("implement"),
             id: None,
@@ -686,7 +686,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        crate::store::migrations::upgrade_from_draft(&conn, "rename_flow_to_graph");
+        crate::store::migrations::upgrade_from_migration(&conn, "rename_flow_to_graph");
         drop(conn);
 
         let store = SqliteStore::new(&database).unwrap();

@@ -71,29 +71,29 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
         return main_build();
     }
     let client = http_client()?;
-    let tag = if stream == Stream::Preview {
-        newest_release(
-            &client
-                .get(format!(
-                    "https://api.github.com/repos/{REPOSITORY}/releases?per_page=20"
-                ))
-                .send()
-                .context("look up the newest Loopflow release")?
-                .error_for_status()?
-                .text()?,
-        )?
-    } else {
-        release_tag(
-            client
-                .head(format!("{RELEASES}/latest"))
-                .send()
-                .context("look up the stable Loopflow release")?
-                .error_for_status()?
-                .url()
-                .path(),
-        )?
-    };
+    let tag = stream_release(&client, stream)?;
     install_release(&client, stream, &tag)
+}
+
+/// The release a release stream is at: preview's newest, or stable's GitHub Latest.
+fn stream_release(client: &Client, stream: Stream) -> Result<String> {
+    if stream == Stream::Preview {
+        let releases = client
+            .get(format!(
+                "https://api.github.com/repos/{REPOSITORY}/releases?per_page=20"
+            ))
+            .send()
+            .context("look up the newest Loopflow release")?
+            .error_for_status()?
+            .text()?;
+        return newest_release(&releases);
+    }
+    let latest = client
+        .head(format!("{RELEASES}/latest"))
+        .send()
+        .context("look up the stable Loopflow release")?
+        .error_for_status()?;
+    release_tag(latest.url().path())
 }
 
 fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
@@ -109,14 +109,8 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
         println!("{stream} {tag} is already installed.");
         return Ok(());
     }
-    let temporary = tempfile::tempdir()?;
-    let base = format!("{RELEASES}/download/{tag}");
-    let manifest = client
-        .get(format!("{base}/SHA256SUMS"))
-        .send()?
-        .error_for_status()?
-        .text()?;
-    if !release_opens_store(client, &base, &manifest)? {
+    let manifest = release_manifest(client, tag)?;
+    if !release_opens_store(client, tag, &manifest)? {
         println!(
             "{stream} is at {tag}, which cannot open this Machine's store: a newer lf migrated it. \
              Keeping the installed lf; `lf install` moves to {stream} once it reaches a build that opens the store."
@@ -141,11 +135,8 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
         );
         return Ok(());
     }
-    let installer = client
-        .get(format!("{base}/install.sh"))
-        .send()?
-        .error_for_status()?
-        .bytes()?;
+    let installer = release_asset(client, tag, "install.sh")?;
+    let temporary = tempfile::tempdir()?;
     run_verified_installer(&directory, temporary.path(), tag, &manifest, &installer)?;
     println!(
         "{stream}: {tag}\ninstalled: {}",
@@ -190,13 +181,8 @@ fn applications_dir() -> PathBuf {
 /// updater asks before installing a release.
 pub fn can_open(tag: &str) -> Result<()> {
     let client = http_client()?;
-    let base = format!("{RELEASES}/download/{tag}");
-    let manifest = client
-        .get(format!("{base}/SHA256SUMS"))
-        .send()?
-        .error_for_status()?
-        .text()?;
-    if !release_opens_store(&client, &base, &manifest)? {
+    let manifest = release_manifest(&client, tag)?;
+    if !release_opens_store(&client, tag, &manifest)? {
         bail!(
             "{tag} cannot open this Machine's store: a newer lf migrated it. \
              Loopflow stays on this build until its stream reaches one that opens the store."
@@ -213,17 +199,31 @@ fn http_client() -> Result<Client> {
         .build()?)
 }
 
-/// Whether the release at `base` opens the store, from its digest-checked reader catalog.
-fn release_opens_store(client: &Client, base: &str, manifest: &str) -> Result<bool> {
+fn release_asset(client: &Client, tag: &str, name: &str) -> Result<Vec<u8>> {
+    Ok(client
+        .get(format!("{RELEASES}/download/{tag}/{name}"))
+        .send()?
+        .error_for_status()?
+        .bytes()?
+        .to_vec())
+}
+
+/// Release `tag`'s `SHA256SUMS`, which names the digest of every asset.
+fn release_manifest(client: &Client, tag: &str) -> Result<String> {
+    Ok(String::from_utf8(release_asset(
+        client,
+        tag,
+        "SHA256SUMS",
+    )?)?)
+}
+
+/// Whether release `tag` opens the store, from its digest-checked reader catalog.
+fn release_opens_store(client: &Client, tag: &str, manifest: &str) -> Result<bool> {
     // Releases before v0.16 publish no catalog; promotion still refuses them.
     if manifest_digest(manifest, READER_CATALOG).is_none() {
         return Ok(true);
     }
-    let catalog = client
-        .get(format!("{base}/{READER_CATALOG}"))
-        .send()?
-        .error_for_status()?
-        .bytes()?;
+    let catalog = release_asset(client, tag, READER_CATALOG)?;
     verify_asset(manifest, READER_CATALOG, &catalog)?;
     opens_store(
         &crate::store::production_database_path(),
@@ -563,6 +563,15 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     }
 }
 
+/// The frequency whose rendered schedule is already installed, else daily.
+fn installed_frequency(installed: impl Fn(InstallFrequency) -> bool) -> InstallFrequency {
+    InstallFrequency::value_variants()
+        .iter()
+        .copied()
+        .find(|frequency| installed(*frequency))
+        .unwrap_or(InstallFrequency::Daily)
+}
+
 fn cadence(frequency: InstallFrequency) -> &'static str {
     match frequency {
         InstallFrequency::Weekly => "weekly (Monday at 09:00 local time)",
@@ -581,16 +590,11 @@ fn launchd_schedule(
     let path = home.join("Library/LaunchAgents/com.loopflow.refresh.plist");
     fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;
     let current = fs::read_to_string(&path).ok();
-    let frequency = frequency
-        .or_else(|| {
-            InstallFrequency::value_variants()
-                .iter()
-                .copied()
-                .find(|frequency| {
-                    current.as_deref() == Some(&schedule_plist(home, binary, logs, *frequency))
-                })
+    let frequency = frequency.unwrap_or_else(|| {
+        installed_frequency(|frequency| {
+            current.as_deref() == Some(&schedule_plist(home, binary, logs, frequency))
         })
-        .unwrap_or(InstallFrequency::Daily);
+    });
     let payload = schedule_plist(home, binary, logs, frequency);
     let uid = Command::new("id")
         .arg("-u")
@@ -654,18 +658,12 @@ fn cron_schedule(
     } else {
         String::new()
     };
-    let frequency = frequency
-        .or_else(|| {
-            InstallFrequency::value_variants()
-                .iter()
-                .copied()
-                .find(|frequency| {
-                    current
-                        .lines()
-                        .any(|line| line == cron_line(home, binary, logs, *frequency))
-                })
+    let frequency = frequency.unwrap_or_else(|| {
+        installed_frequency(|frequency| {
+            let line = cron_line(home, binary, logs, frequency);
+            current.lines().any(|entry| entry == line)
         })
-        .unwrap_or(InstallFrequency::Daily);
+    });
     let table = cron_table(&current, &cron_line(home, binary, logs, frequency));
     if table == current {
         println!("Installation already scheduled in your crontab");

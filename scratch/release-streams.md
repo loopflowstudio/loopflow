@@ -211,6 +211,9 @@ commit it, and do not land; publish and land once, after slice 8.
    `--lib lf::commands::install::` 29, clippy, `third_party.py refresh`: pass.
    **Remaining:** Developer ID signing of dev builds in CI (dev stays CLI-only), and a
    live check that a notarized release launches and updates (demo).
+   Compress (slices 4–7): `published.rs` fetches release assets through `release_asset`/`release_manifest`
+   (no per-caller `SHA256SUMS` fetch), resolves a stream's tag in `stream_release`, and launchd and cron
+   share `installed_frequency`. `--lib lf::commands::install::` 28 + clippy: pass.
 8. **Learn from the best — built 2026-10-29.** `release/README.md` "What we took from
    other projects": adopt/decline table, evidence pointer to `e03537f7ca`.
 

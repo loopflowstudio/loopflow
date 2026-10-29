@@ -5,8 +5,12 @@
 //! its caller, a catchable signal, or an uncaught exception. A launch with no
 //! `exit` line ended where Desktop could not see it (SIGKILL, power loss), so the
 //! check asks macOS: runningboardd logs `termination reported by launchd
-//! (namespace, code, wait status)` for every app. That query runs only over a
-//! window of 15 minutes or less, bounded by Desktop's last lf.log line.
+//! (namespace, code, wait status)` for every app. Desktop writes a vitals line
+//! to lf.log every 300 s, so the query searches from the launch's last line (or
+//! its start) through one interval plus slack, never past the next launch.
+//!
+//! Each bundle lists, newest first, up to three launches that ended abnormally in
+//! the last 24 h, its latest end, and its last quit in that time.
 
 use std::path::Path;
 use std::process::Command;
@@ -20,7 +24,9 @@ use crate::lf::commands::doctor::Check;
 
 const NAME: &str = "desktop-exit";
 const RECENT: chrono::TimeDelta = chrono::TimeDelta::hours(24);
-const SEARCH_WINDOW: chrono::TimeDelta = chrono::TimeDelta::minutes(15);
+/// One `DesktopVitals` interval plus slack: an unrecorded end follows the last line within it.
+const HEARTBEAT: chrono::TimeDelta = chrono::TimeDelta::seconds(300 + 60);
+const LISTED: usize = 3;
 const SEARCH_TIMEOUT: Duration = Duration::from_secs(20);
 /// A recorded `exit()` names its caller; the system record around it names the status.
 const EXIT_SLACK: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
@@ -101,27 +107,41 @@ fn report(
             .iter()
             .filter(|launch| launch.bundle.as_deref() == bundle)
             .collect();
-        let ended = group.iter().enumerate().rev().find_map(|(index, launch)| {
+        let mut ends: Vec<(&Launch, Option<DateTime<Utc>>)> = Vec::new();
+        for (index, launch) in group.iter().enumerate().rev() {
             let next = group.get(index + 1).and_then(|next| next.at);
             let gone = launch.pid.is_some_and(|pid| !alive(pid));
-            (launch.exit.is_some() || next.is_some() || gone).then_some((*launch, next))
-        });
-        match ended {
-            Some((launch, next)) => {
-                let (line, recent_failure) = describe(launch, next, log, now, &lookup);
-                warn |= recent_failure;
-                lines.push(line);
-            }
-            None => {
-                let latest = group.last().expect("a bundle has a launch");
+            if launch.exit.is_some() || next.is_some() || gone {
+                ends.push((launch, next));
+            } else if index + 1 == group.len() {
                 lines.push(format!(
                     "{} running since {}",
-                    latest.title(),
-                    latest
+                    launch.title(),
+                    launch
                         .at
                         .map_or("an unknown time".into(), |at| clock(at, now))
                 ));
             }
+        }
+        let recent = |(launch, next): &(&Launch, Option<DateTime<Utc>>)| {
+            ended_at(launch, *next, now).is_none_or(|at| now - at <= RECENT)
+        };
+        let abnormal: Vec<usize> = (0..ends.len())
+            .filter(|&index| !quit(ends[index].0) && recent(&ends[index]))
+            .collect();
+        warn |= !abnormal.is_empty();
+        // The newest abnormal ends, the latest end, and the last recent quit, newest first.
+        let last_quit = ends.iter().position(|end| quit(end.0) && recent(end));
+        for (index, (launch, next)) in ends.iter().enumerate() {
+            if index == 0
+                || Some(index) == last_quit
+                || abnormal.iter().take(LISTED).any(|&shown| shown == index)
+            {
+                lines.push(describe(launch, *next, log, now, &lookup));
+            }
+        }
+        if abnormal.len() > LISTED {
+            lines.push(format!("… and {} earlier", abnormal.len() - LISTED));
         }
     }
     let detail = lines.join(&format!("\n{:20}", ""));
@@ -132,49 +152,63 @@ fn report(
     }
 }
 
-/// The line for one ended launch, and whether it ended abnormally in the last 24 h.
+fn quit(launch: &Launch) -> bool {
+    launch
+        .exit
+        .as_ref()
+        .and_then(|exit| exit.get("reason"))
+        .and_then(Value::as_str)
+        == Some("quit")
+}
+
+/// When `launch` ended: its exit line's time, else by the next launch (or now).
+fn ended_at(
+    launch: &Launch,
+    next: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    match &launch.exit {
+        Some(exit) => exit.get("at").and_then(Value::as_str).and_then(parse_time),
+        None => Some(next.unwrap_or(now)),
+    }
+}
+
+/// The line for one ended launch.
 fn describe(
     launch: &Launch,
     next: Option<DateTime<Utc>>,
     log: &str,
     now: DateTime<Utc>,
     lookup: &impl Fn(u32, DateTime<Utc>, DateTime<Utc>) -> SystemRecord,
-) -> (String, bool) {
+) -> String {
     let title = launch.title();
     let Some(exit) = &launch.exit else {
         let end = next.unwrap_or(now);
-        let recent = now - end <= RECENT;
         let Some(pid) = launch.pid else {
-            return (
-                format!(
-                    "{title} ended without a record before {} (its Desktop predates exit records)",
-                    clock(end, now)
-                ),
-                recent,
+            return format!(
+                "{title} ended without a record before {} (its Desktop predates exit records)",
+                clock(end, now)
             );
         };
         let start = last_desktop_line(log, pid, launch.at)
             .or(launch.at)
-            .unwrap_or(end);
-        let what = if end - start > SEARCH_WINDOW {
-            format!(
-                "ended without a record between {} and {}; the system log is searched only over 15 minutes",
+            .unwrap_or(end - HEARTBEAT);
+        let end = end.min(start + HEARTBEAT);
+        let what = match lookup(pid, start, end) {
+            SystemRecord::Found(termination) => {
+                format!("{} before {}", explain(termination), clock(end, now))
+            }
+            SystemRecord::Missing => format!(
+                "ended without a record between {} and {} (SIGKILL before the first heartbeat, power loss, or the system log rotated)",
                 clock(start, now),
                 clock(end, now)
-            )
-        } else {
-            match lookup(pid, start, end) {
-                SystemRecord::Found(termination) => {
-                    format!("{} before {}", explain(termination), clock(end, now))
-                }
-                SystemRecord::Missing => "ended without a record (SIGKILL before the first heartbeat, power loss, or the system log rotated)".to_string(),
-                SystemRecord::Unavailable => format!(
-                    "ended without a record before {}; system record unavailable",
-                    clock(end, now)
-                ),
-            }
+            ),
+            SystemRecord::Unavailable => format!(
+                "ended without a record before {}; system record unavailable",
+                clock(end, now)
+            ),
         };
-        return (format!("{title} {what}"), recent);
+        return format!("{title} {what}");
     };
 
     let text = |key: &str| exit.get(key).and_then(Value::as_str).unwrap_or("");
@@ -223,8 +257,7 @@ fn describe(
         }
         _ => String::new(),
     };
-    let recent = reason != "quit" && at.is_none_or(|at| now - at <= RECENT);
-    (format!("{title} {what}{lived}"), recent)
+    format!("{title} {what}{lived}")
 }
 
 fn parse(journal: &str) -> Vec<Launch> {
@@ -527,7 +560,7 @@ mod tests {
         );
         assert_eq!(
             end,
-            "2026-10-29T16:20:00Z".parse::<DateTime<Utc>>().unwrap()
+            "2026-10-29T16:16:00.123Z".parse::<DateTime<Utc>>().unwrap()
         );
 
         let status = report(
@@ -556,19 +589,112 @@ mod tests {
         );
         assert!(missing
             .detail
-            .contains("ended without a record (SIGKILL before the first heartbeat"));
+            .contains(" (SIGKILL before the first heartbeat"));
+    }
+
+    fn found(namespace: i64, code: i64, status: i64) -> SystemRecord {
+        SystemRecord::Found(Termination {
+            namespace,
+            code,
+            status,
+        })
     }
 
     #[test]
-    fn a_wide_window_is_never_searched() {
+    fn a_night_long_gap_searches_one_heartbeat_past_the_last_line() {
         let journal = [
-            launch("A", "2026-10-29T10:00:00Z", 9446, MAC),
-            launch("B", "2026-10-29T16:20:00Z", 9500, MAC),
+            launch("A", "2026-10-28T08:00:00Z", 9446, MAC),
+            launch("B", "2026-10-29T08:00:00Z", 9500, MAC),
         ]
         .join("\n");
-        let check = report(&journal, "", now(), |pid| pid == 9500, never);
+        let log = "2026-10-28T09:10:00Z  INFO loopflow::desktop: vitals pid=9446 desktop=0.15.1";
+        let searched = Cell::new(None);
+        let check = report(
+            &journal,
+            log,
+            now(),
+            |pid| pid == 9500,
+            |_, start, end| {
+                searched.set(Some((start, end)));
+                found(2, 9, 9)
+            },
+        );
         assert_eq!(check.status, Status::Warn);
-        assert!(check.detail.contains("searched only over 15 minutes"));
+        assert!(check.detail.contains("(pid 9446) was killed by SIGKILL"));
+        let (start, end) = searched.get().unwrap();
+        assert_eq!(
+            start,
+            "2026-10-28T09:10:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(
+            end,
+            "2026-10-28T09:16:00Z".parse::<DateTime<Utc>>().unwrap()
+        );
+    }
+
+    #[test]
+    fn a_quit_then_a_force_quit_lists_both() {
+        let journal = [
+            launch("A", "2026-10-29T14:00:00Z", 100, MAC),
+            exit(
+                "A",
+                "2026-10-29T14:30:00Z",
+                r#""reason":"quit","sender":"Dock""#,
+            ),
+            launch("B", "2026-10-29T14:31:00Z", 200, MAC),
+            launch("C", "2026-10-29T15:00:00Z", 300, MAC),
+        ]
+        .join("\n");
+        let check = report(
+            &journal,
+            "",
+            now(),
+            |pid| pid == 300,
+            |_, _, _| found(2, 9, 9),
+        );
+        assert_eq!(check.status, Status::Warn);
+        let lines: Vec<&str> = check.detail.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].contains("(pid 300) running since "));
+        assert!(lines[1].contains("(pid 200) was killed by SIGKILL"));
+        assert!(lines[2].contains("(pid 100) quit "));
+    }
+
+    #[test]
+    fn two_unrecorded_exits_list_both() {
+        let journal = [
+            launch("A", "2026-10-29T14:00:00Z", 100, MAC),
+            launch("B", "2026-10-29T15:00:00Z", 200, MAC),
+        ]
+        .join("\n");
+        let check = report(&journal, "", now(), |_| false, |_, _, _| found(0, 0, 256));
+        assert_eq!(check.status, Status::Warn);
+        let lines: Vec<&str> = check.detail.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("(pid 200) exited with status 1 before "));
+        assert!(lines[1].contains("(pid 100) exited with status 1 before "));
+    }
+
+    #[test]
+    fn more_than_three_abnormal_ends_name_the_newest_three() {
+        let journal = (1..=4)
+            .map(|hour| {
+                launch(
+                    &hour.to_string(),
+                    &format!("2026-10-29T1{hour}:00:00Z"),
+                    hour,
+                    MAC,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let check = report(&journal, "", now(), |_| false, |_, _, _| found(2, 9, 9));
+        assert_eq!(check.status, Status::Warn);
+        let lines: Vec<&str> = check.detail.lines().collect();
+        assert_eq!(lines.len(), 4);
+        assert!(lines[0].contains("(pid 4) was killed"));
+        assert!(lines[2].contains("(pid 2) was killed"));
+        assert!(lines[3].ends_with("… and 1 earlier"));
     }
 
     #[test]

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-683 concept review — Desktop exits</title>
+<style>
+  :root { --fg:#1d1d1f; --bg:#fbfbf9; --muted:#6b6b70; --rule:#e2e2dc; --code:#f1f0ea; --new:#2f6f3e; --old:#9a3b2f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8e8e3; --bg:#17171a; --muted:#9a9aa2; --rule:#2c2c31; --code:#222227; --new:#7fc492; --old:#e08b7c; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Iowan Old Style", Georgia, serif; }
+  main { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  h1 { font-size: 1.6rem; line-height:1.25; margin:0 0 .4rem; }
+  h2 { font-size: 1.15rem; margin: 2.6rem 0 .6rem; }
+  .meta { color: var(--muted); font-size: .9rem; }
+  pre, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .84rem; }
+  pre { background: var(--code); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; white-space: pre; }
+  .was { border-left: 3px solid var(--old); }
+  .proposed { border-left: 3px solid var(--new); }
+  .tag { font-style: italic; color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  td, th { text-align: left; vertical-align: top; padding: .45rem .5rem; border-bottom: 1px solid var(--rule); }
+  ol li { margin-bottom: .6rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Doctor should show every recent bad exit, and search the five minutes after the last heartbeat</h1>
+<p class="meta">LOO-683 · concept-review (headless) · 2026-10-29 · built from
+<code>scratch/loo-683-desktop-exits.md</code>, <code>rust/loopflow/src/desktop_exits.rs</code>,
+<code>swift/LoopflowMac/Services/{LaunchJournal,DesktopVitals}.swift</code>, <code>swift/README.md</code></p>
+
+<p>The model holds. Each fact has one writer and one home, and doctor is the only reader.
+Two places in the reader don't match the accepted demo. The accepted decisions
+already settle both, so the next step is implementation, with nothing to decide first.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<table>
+<tr><th>Person does</th><th>Concept</th><th>API / home</th></tr>
+<tr><td>Quits, force-quits, or Desktop dies</td><td>Launch, with at most one exit record</td><td><code>LaunchJournal.recordExit</code> → <code>launches.ndjson</code></td></tr>
+<tr><td>Wants to know why it went away</td><td>The ended launches per bundle</td><td><code>lf doctor</code> → <code>desktop-exit</code></td></tr>
+<tr><td>Digs deeper</td><td>Diagnostics: vitals, hangs, stacks</td><td><code>~/.lf/logs/lf.log</code> (<code>desktop=</code> lines)</td></tr>
+<tr><td>Death with no record</td><td>The system's termination record</td><td>runningboardd via <code>/usr/bin/log</code>, over a bounded window</td></tr>
+</table>
+
+<h2>The consequential mismatch: one line per bundle hides repeats</h2>
+<p>On 2026-10-29 Desktop called <code>exit(1)</code> at 07:27, and again at 08:00. With the implemented reader,
+only the 08:00 exit appears. The accepted live acceptance (quit with ⌘Q, then Force Quit, then
+“<code>lf doctor</code> names both”) cannot pass.</p>
+<p class="tag">Implemented</p>
+<pre class="was">⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) ended without a record between 09:10 and 08:02;
+                the system log is searched only over 15 minutes</pre>
+<p class="tag">Proposed (matches the accepted Demo)</p>
+<pre class="proposed">⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system) before 09:16, 1h12m after launch
+                Loopflow 0.15.1 (pid 8811) quit 09:01:40: Quit requested by Dock (pid 612)</pre>
+<p>Rule: per bundle, list the abnormal ends from the last 24 h, newest first, with at most three lines and then
+“… and N earlier”. Then add the most recent end if it is not already listed. A running launch still says
+“running since”.</p>
+
+<h2>Second: the heartbeat already bounds the search</h2>
+<p><code>DesktopVitals</code> writes every 300 s from its own utility queue, which keeps running when the main thread hangs.
+A launch therefore died within about one interval of its last <code>desktop=</code> line. Today the window ends at the next
+launch. When that launch comes more than 15 minutes later, doctor refuses to search.</p>
+<pre class="was">window = [last line, next launch or now]      # refused when longer than 15 min</pre>
+<pre class="proposed">window = [last line, min(next launch or now, last line + 300 s + 60 s)]   # always searched</pre>
+<p>This deletes the refusal branch and its message. A Force Quit at night followed by a relaunch in the morning
+still names SIGKILL.</p>
+
+<h2>Kept</h2>
+<p>The journal path under <code>timings/</code> stays, because <code>timings.py</code> reads it and a rename buys nothing.
+Quit still reports ok, and the check never fails doctor.</p>
+
+<h2>Questions</h2>
+<p>Neither change needs your input before implementation. These stay open from earlier and don't block this Task:</p>
+<ol>
+<li>Read-storm follow-up (56k <code>lf task diff</code> reads SIGKILLed overnight): (a) file it as its own Task, or (b) leave it.</li>
+<li>Cap on listed abnormal ends per bundle: (a) 3 lines then “… and N earlier” (the default), or (b) every end in the last 24 h.</li>
+</ol>
+</main>
+</body>
+</html>

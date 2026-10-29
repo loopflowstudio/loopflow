@@ -154,13 +154,15 @@ Each fact has one home:
 New check **`desktop-exit`** in a new module, `rust/loopflow/src/desktop_exits.rs`.
 `doctor.rs` adds one line to call it.
 
-- Parse `launches.ndjson`, skipping torn lines. For each bundle, take the most
-  recent launch that has ended: it has an `exit` event, or a later launch of that
-  bundle exists, or its pid is gone.
+- Parse `launches.ndjson`, skipping torn lines. A launch has ended when it has an
+  `exit` event, a later launch of its bundle exists, or its pid is gone. Per
+  bundle, newest first: "running since" for a live latest launch, then up to 3
+  abnormal ends within 24 h ("… and N earlier" beyond), the latest end, and the
+  last quit within 24 h.
 - Recorded `quit`, `exit`, `signal` or `exception`: report it.
 - Not recorded: find the last `desktop=` line in lf.log for that pid (the vitals
-  bound). Run the unified-log query over [bound, next launch or now], only when
-  that window is 15 minutes or less, with a 20 s timeout. Parse
+  bound, else `launch.at`). Always run the unified-log query over [bound,
+  min(next launch or now, bound + 300 s + 60 s)], with a 20 s timeout. Parse
   `termination reported by launchd (ns, code, status)`. Decode namespace 2 as a
   signal name and namespace 1 as jetsam; for namespace 0, `WIFEXITED` gives the
   status. Other namespaces print as numbers. Without a match: "ended without a
@@ -275,3 +277,41 @@ Check: `swift test --filter "LaunchJournalTests|DesktopLogTests"` 11 passed;
 `cargo test -p loopflow --lib desktop_exits::` 8 passed; `pytest test_desktop_timings.py
 test_install_script.py` passed (before compress); `cargo clippy -p loopflow
 --all-targets -D warnings` clean.
+
+## Concept review (2026-10-29, headless) — implemented 2026-10-29
+
+The accepted model holds. The launch journal holds exit facts, lf.log holds
+diagnostics, and `lf doctor` is the one reader. The implementation departs from
+the accepted Demo and live acceptance in two places. Both are settled by
+decisions already accepted, so the next step is implementation, not a question:
+
+1. **Doctor hides earlier abnormal ends.** `report` keeps only the most recent
+   ended launch per bundle. The accepted Demo prints two exits for one bundle,
+   and the live acceptance (⌘Q, then Force Quit, then "`lf doctor` names both")
+   needs both. On 2026-10-29 itself, the 08:00 `exit(1)` would have hidden the
+   07:27 one, so one explained exit would have concealed a repeat.
+   Direction: per bundle, list each launch that ended abnormally within 24 h,
+   newest first, at most 3 lines, followed by "… and N earlier" when more exist.
+   Then add the most recent end if it is not already listed (a quit, or an
+   older end), so a person always sees the latest outcome. A running launch
+   still prints "running since". Status stays warn when any listed end is
+   abnormal and within 24 h. Tests: quit then SIGKILL lists both; two
+   unrecorded `(0,0,256)` ends list both; four abnormal ends list 3 plus
+   "1 earlier".
+2. **The heartbeat bound is half used.** The search window ends at the next
+   launch or now, and doctor declines whenever that span exceeds 15 minutes.
+   Force Quit at night and relaunch in the morning, and doctor says "searched
+   only over 15 minutes". `DesktopVitals` writes every 300 s from its own
+   utility queue, which keeps running through main-thread hangs. So a launch
+   died within about one interval of its last `desktop=` line.
+   Direction: the window is `[last line (or launch.at), min(next launch or now,
+   last line + 300 s + 60 s slack)]`, and it always searches. Delete the
+   15-minute refusal and its message. A missing lf.log line falls back to
+   `launch.at`, with the same cap. Test: last vitals at 09:10, next launch the
+   next day; the lookup receives 09:10–09:16 and reports SIGKILL.
+
+Kept as is: the journal path under `timings/` (`timings.py` reads it, and
+renaming it would buy nothing), `quit` as ok, and the check never failing.
+
+Unchanged open items (not product choices for this Task): the read-storm
+follow-up Task, and the second 07:29:44 launch. See questions.md.

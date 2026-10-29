@@ -25,7 +25,9 @@ Evidence: `scratch/release-research.md`, `scratch/explore.html` (cleared; in git
 - **Stream names: `dev` / `preview` / `stable`** — Jack Heart, 2026-10-28:
   "dev / preview / stable sounds good." `dev` = green main, `preview` = every
   release, `stable` = soaked preview.
-- **Mix in some of vision D** — Jack Heart, 2026-10-28. Scope open (below).
+- **Mix in some of vision D** — Jack Heart, 2026-10-28. What vision D kept (explore,
+  `e03537f7ca`) was the app installing and updating itself and showing what's out on
+  its stream; Sparkle (slice 7) provides that.
 - **Desktop and the installed lf never diverge** — Jack Heart, 2026-10-28:
   "the thing i wanted to decline was having the Desktop and the installed lf be
   able to diverge." One artifact, one version, one updater on a Mac.
@@ -75,8 +77,8 @@ Evidence: `scratch/release-research.md`, `scratch/explore.html` (cleared; in git
   - `lf install` on a Mac with a running Loopflow.app asks it to update through
     Sparkle on the recorded stream; otherwise it installs the build and moves the
     link (decided "b" above).
-  - The stream is recorded once in Home config. `lf install --stream`, the app's
-    Updates setting and Sparkle's feed choice all read and write that one value.
+  - The stream is recorded once in Home config. `lf install --dev|--preview|--stable`,
+    the app's Updates setting and Sparkle's feed choice all read and write that one value.
 - **Stream selection by flag** — Jack Heart, 2026-10-28 (said in LOO-656's
   conversation, relayed to this Task): "i am imagining i can say --dev (or --latest or --main or
   whatever) OR --stable (default unless your config has a different
@@ -179,7 +181,7 @@ commit it, and do not land; publish and land once, after slice 8.
    (`~/.lf-machine/install/gates/1/lf`) is still refreshed: cron and Graph steps pin
    it. An install whose link still reaches the gate counts as not current, so the
    next `lf install` relinks it. `lf install` on a Mac whose running app has
-   `SUPublicEDKey` opens `loopflow://update` and stops; slice 7 adds that route and
+   `SUPublicEDKey` opens `loopflow://update` and stops; slice 7 added that route and
    the key. A running app without it is quit, replaced and reopened as before.
    `--lib lf::commands::install::` 27, clippy: pass.
 6. **Self-update — built 2026-10-29, unpublished.** `install.sh` and `lf install --dev`
@@ -217,7 +219,7 @@ commit it, and do not land; publish and land once, after slice 8.
 8. **Learn from the best — built 2026-10-29.** `release/README.md` "What we took from
    other projects": adopt/decline table, evidence pointer to `e03537f7ca`.
 
-Check (slice 2 gate, 2026-10-29, tree ae4b265b8a): architecture pass, `cargo fmt --check` pass, publisher/automation pytest 55 pass; `--lib ops::release::` 45 and `release_tests daily_run_moves_stable minor notes` 22 passed on this code at compress; gate's nextest and clippy refused by the disk reserve (5.2 GiB free, other Tasks' builds retained), deferred to PR CI.
+Check (slices 3–8, 2026-10-29): focused suites per slice above pass; full gate (nextest, clippy, Swift, release pytest) not yet run on the combined tree — owner: gate before the one PR.
 
 ## Neighbouring Tasks
 
@@ -280,8 +282,9 @@ lands and nothing ties it to stable's lag:
   `interrupt` mentions "scheduled automation"). Filed as LOO-671 (Jack Heart,
   2026-10-28). Open: N (> stable lag, so 30 days still works).
 
-- Sparkle needs an EdDSA key (Doppler), appcast hosting next to the DMGs, and
-  Developer ID signing of dev builds in CI.
+- Sparkle's key and per-stream appcasts exist (slice 7). Still missing: Developer ID
+  signing of dev builds in CI (dev stays CLI-only until then), and a live check that a
+  notarized release launches and updates itself (demo).
 - Linear mapping for `regressed_in` (proposed): Linear has no custom issue
   fields (unverified this session), so sync uses a "Regressed in" label group
   with one label per version (`v0.15.3`). A group allows one label per issue, so
@@ -342,4 +345,3 @@ Candidate principles (not decided):
    Outside the range → refused, naming which side to update.
 5. Remote surface comes from the remote: an agent on a remote Machine reads
    that Machine's `lf help`, as Rex derives its CLI from the server.
-- slice 3 implement (2026-10-29): dto_fixtures 46 pass; release_tests stable 2 pass; --lib store/planning/edit/release filters 149 pass; check_migrations ok. clippy, Swift and full gate to gate/CI.

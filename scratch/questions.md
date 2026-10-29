@@ -43,8 +43,8 @@
   `~/.local/share/loopflow/versions/<v>/`: rollback, pruning and receipts already own
   it, and a dev build can share a version with different bytes. Rename later if the path matters.
 - **`lf install --dev` and `LF_INSTALL_CLI_ONLY=1` still link the CLI alone** on a Mac with
-  the app, so the terminal can run a newer build than Desktop until dev packages ship a
-  signed app (slice 7).
+  the app, so the terminal can run a newer build than Desktop until CI signs dev app builds
+  (slice 7 left dev CLI-only).
 - **`install.sh` run by hand with the app running** still quits, replaces and reopens it;
   only `lf install` hands off to the app's updater.
 - **The publisher host must inject `SPARKLE_ED_PRIVATE_KEY`.** It is now a required secret;

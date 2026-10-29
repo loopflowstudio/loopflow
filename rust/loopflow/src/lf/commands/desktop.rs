@@ -697,22 +697,36 @@ pub(crate) fn watch_plans(
     )
 }
 
-fn view_plan(
-    cli: &crate::lf::Cli,
+/// `lf desktop view [expression] --plan`: what a view shows, in `selected`
+/// or the repository containing `directory`.
+pub fn plan_view(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
     expression: Option<&str>,
-    passive: bool,
-    json: bool,
-) -> Result<()> {
+) -> Result<crate::work::selection::ViewPlan> {
     if let Some(expression) = expression {
         crate::work::selection::Selection::parse(expression, None)?;
     }
     let store = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
-    let repository = selection_repository(cli, &store.sqlite)?;
+    let repository = repository_in(selected, directory, &store.sqlite)?;
+    Ok(store.sqlite.view_plan(&repository, expression)?)
+}
+
+fn view_plan(
+    cli: &crate::lf::Cli,
+    expression: Option<&str>,
+    passive: bool,
+    json: bool,
+) -> Result<()> {
     // Explicit Work context selects the same default model without preparing a checkout.
     let plan = if expression.is_none() && (cli.task.is_some() || cli.wave.is_some()) {
         use crate::work::selection::{Selection, SelectionExpression, SelectionId};
+        let store = crate::store::read_existing_registry()?
+            .ok_or(crate::store::StoreError::NotFound)
+            .context("Work registry is unavailable")?;
+        let repository = selection_repository(cli, &store.sqlite)?;
         let resolution =
             super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None, None)?;
         let expression = if cli.task.is_some() {
@@ -736,7 +750,11 @@ fn view_plan(
             },
         )?
     } else {
-        store.sqlite.view_plan(&repository, expression)?
+        plan_view(
+            cli.repository.as_ref(),
+            &std::env::current_dir()?,
+            expression,
+        )?
     };
     if passive {
         println!(

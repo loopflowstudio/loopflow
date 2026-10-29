@@ -32,6 +32,35 @@ pub async fn local_machine() -> anyhow::Result<Machine> {
     Ok(existing_store().await?.local_machine().await?)
 }
 
+/// `lf machine list`: your registered Machines with the defaults naming them.
+pub async fn machines() -> anyhow::Result<Vec<MachineListing>> {
+    listings(&existing_store().await?, None).await
+}
+
+async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<MachineListing>> {
+    let mut machines = match label {
+        Some(label) => vec![find_machine(store, label).await?],
+        None => store.machines().await?,
+    };
+    let defaults = store.sqlite.machine_defaults()?;
+    // This Machine is listed only when one of your defaults names it.
+    let local = store.local_machine().await?;
+    if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
+        machines.insert(0, local);
+    }
+    Ok(machines
+        .into_iter()
+        .map(|machine| MachineListing {
+            defaults: defaults
+                .iter()
+                .filter(|d| d.machine_id == machine.id)
+                .cloned()
+                .collect(),
+            machine,
+        })
+        .collect())
+}
+
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     match cmd {
         MachineCommand::Connect {
@@ -138,27 +167,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             print_machine(&machine, *json)?;
         }
         MachineCommand::List { label, json } => {
-            let mut machines = match label {
-                Some(label) => vec![find_machine(&store, label).await?],
-                None => store.machines().await?,
-            };
-            let defaults = store.sqlite.machine_defaults()?;
-            // This Machine is listed only when one of your defaults names it.
-            let local = store.local_machine().await?;
-            if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
-                machines.insert(0, local);
-            }
-            let listings = machines
-                .into_iter()
-                .map(|machine| MachineListing {
-                    defaults: defaults
-                        .iter()
-                        .filter(|d| d.machine_id == machine.id)
-                        .cloned()
-                        .collect(),
-                    machine,
-                })
-                .collect::<Vec<_>>();
+            let listings = listings(&store, label.as_deref()).await?;
             if *json {
                 println!("{}", serde_json::to_string(&listings)?);
             } else {
@@ -289,7 +298,7 @@ pub(super) async fn find_machine(store: &Store, selector: &str) -> anyhow::Resul
 
 /// A Machine with your Wave and repository defaults that name it.
 #[derive(Debug, Serialize)]
-struct MachineListing {
+pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,
     defaults: Vec<MachineDefault>,

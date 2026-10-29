@@ -644,9 +644,7 @@ pub fn status(wave: Option<&str>, json: bool, shape: Shape) -> Result<()> {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
             return no_registry(json, "null");
         };
-        let wave = resolve_status_wave(&store, wave).await?;
-        crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
-        let status = wave_detail(&store, &wave).await?;
+        let status = synced_status(&store, &std::env::current_dir()?, wave).await?;
         if json {
             let status = shape
                 .print(Some(&store), status, WaveDetailSnapshot::rows)
@@ -658,6 +656,53 @@ pub fn status(wave: Option<&str>, json: bool, shape: Shape) -> Result<()> {
         Ok(())
     })
 }
+
+/// `lf wave status`' reading from `directory`, after syncing the Wave's
+/// repository with its tracker.
+async fn synced_status(
+    store: &SharedStore,
+    directory: &Path,
+    wave: Option<&str>,
+) -> Result<WaveDetailSnapshot> {
+    let wave = resolve_wave_in(store, directory, wave).await?;
+    crate::ops::linear_observe::sync_repository(store, wave.repo()).await;
+    wave_detail(store, &wave).await
+}
+
+/// `lf --cwd <directory> desktop wave <wave>`: one Wave's plan; None
+/// without a registry.
+pub fn desktop_status(directory: &Path, wave: &str) -> Result<Option<WaveDetailSnapshot>> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+            return Ok(None);
+        };
+        Ok(Some(synced_status(&store, directory, Some(wave)).await?))
+    })
+}
+
+/// `lf --cwd <directory> desktop done --wave <wave> [--after <after>]`:
+/// one page of a Wave's closed Tasks.
+pub fn desktop_closed_tasks(
+    directory: &Path,
+    wave: &str,
+    after: Option<&str>,
+) -> Result<ClosedTaskPageSnapshot> {
+    let repo = crate::repo::discover_repo_root(directory)?.unwrap_or_else(|| directory.to_owned());
+    tokio::runtime::Runtime::new()?.block_on(async {
+        match crate::store::read_existing_registry()?.map(std::sync::Arc::new) {
+            Some(store) => {
+                closed_task_page(&store, &repo, Some(wave), None, after, CLOSED_TASK_PAGE).await
+            }
+            None => Ok(ClosedTaskPageSnapshot {
+                tasks: Vec::new(),
+                next: None,
+            }),
+        }
+    })
+}
+
+/// `lf desktop done`'s default `--limit`.
+pub const CLOSED_TASK_PAGE: usize = 50;
 
 /// `lf wave status --watch`: `lf wave status --json` now and each time it
 /// changes. The watch reads the store; it does not observe the tracker.
@@ -1444,10 +1489,19 @@ fn task_section(
 /// The wave `lf wave status` is about: the name the caller typed, else the wave this
 /// process is running inside.
 async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
+    resolve_wave_in(store, &std::env::current_dir()?, requested).await
+}
+
+/// The Wave `requested` names, as a command run in `directory` resolves it.
+async fn resolve_wave_in(
+    store: &SharedStore,
+    directory: &Path,
+    requested: Option<&str>,
+) -> Result<Wave> {
     // One shared rule for `--wave` and ambient `LF_WAVE_ID`: durable UUID or
     // repository-scoped registered name. Status consumes the resolved row
     // directly, so no second lookup can cross repositories.
-    let repo = crate::repo::find_repo_root().ok();
+    let repo = crate::repo::discover_repo_root(directory)?;
     crate::work::wave::context::resolve_managed_wave(
         Some(&**store),
         repo.as_deref(),

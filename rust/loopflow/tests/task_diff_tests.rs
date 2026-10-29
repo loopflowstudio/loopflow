@@ -158,6 +158,7 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
     repo.create_branch("served-reads");
     register_task_with_pr(home.path(), repo.path(), "served-reads", &base);
     repo.create_file("edit.txt", "working\n");
+    let graph = support::record_graph(home.path(), repo.path(), "code", "implement", "succeeded");
     let task_diff = |path: Option<&str>, draft: Option<&str>| Query::TaskDiff {
         issue: "INF-123".into(),
         path: path.map(str::to_owned),
@@ -175,7 +176,15 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
         | Query::Portfolio
         | Query::PaneLayout { .. }
         | Query::People { .. }
-        | Query::Graphs { .. } => [
+        | Query::Graphs { .. }
+        | Query::ViewPlan { .. }
+        | Query::GraphProcesses { .. }
+        | Query::GraphProcess { .. }
+        | Query::TaskUsage { .. }
+        | Query::TaskContext { .. }
+        | Query::WaveDetail { .. }
+        | Query::ClosedTasks { .. }
+        | Query::Machines => [
             Query::TaskChanges {
                 issue: "INF-123".into(),
                 base: "parent".into(),
@@ -203,6 +212,36 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
             Query::Graphs {
                 directory: repo.path().to_owned(),
             },
+            Query::ViewPlan {
+                directory: repo.path().to_owned(),
+                expression: None,
+            },
+            Query::ViewPlan {
+                directory: repo.path().to_owned(),
+                expression: Some("state:backlog".into()),
+            },
+            Query::GraphProcesses {
+                directory: repo.path().to_owned(),
+                task: "INF-123".into(),
+                after: None,
+            },
+            Query::GraphProcess { id: graph },
+            Query::TaskUsage {
+                task: "INF-123".into(),
+            },
+            Query::TaskContext {
+                task: "INF-123".into(),
+            },
+            Query::WaveDetail {
+                directory: repo.path().to_owned(),
+                wave: "task-pr-tests".into(),
+            },
+            Query::ClosedTasks {
+                directory: repo.path().to_owned(),
+                wave: "task-pr-tests".into(),
+                after: None,
+            },
+            Query::Machines,
         ],
     };
     for query in queries {
@@ -210,6 +249,27 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
         let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
         let printed = read(repo.path(), home.path(), &argv, query.input());
         let served: Value = serde_json::from_str(&query.read().unwrap()).unwrap();
-        assert_eq!(served, printed, "{argv:?}");
+        assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
+}
+
+/// `value` without the times a reading stamps when it runs.
+fn without_clock(mut value: Value) -> Value {
+    match &mut value {
+        Value::Object(fields) => {
+            fields.retain(|key, field| {
+                !(key == "evidence_age_secs" || (key == "observed_at" && field.is_string()))
+            });
+            for field in fields.values_mut() {
+                *field = without_clock(field.take());
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                *item = without_clock(item.take());
+            }
+        }
+        _ => {}
+    }
+    value
 }

@@ -43,6 +43,14 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
     case paneLayout(directory: String, work: String)
     case people(directory: String)
     case graphs(directory: String)
+    case viewPlan(directory: String, expression: String?)
+    case graphProcesses(directory: String, task: String, after: String?)
+    case graphProcess(id: String)
+    case taskUsage(task: String)
+    case taskContext(task: String)
+    case waveDetail(directory: String, wave: String)
+    case closedTasks(directory: String, wave: String, after: String?)
+    case machines
 
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
@@ -68,6 +76,22 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
             return ["ops", "people", "--json"]
         case .graphs:
             return ["graph", "list", "--json"]
+        case .viewPlan(_, let expression):
+            return ["desktop", "view"] + (expression.map { [$0] } ?? []) + ["--plan", "--json"]
+        case .graphProcesses(_, let task, let after):
+            return ["graph", "list", "--processes", "--for-task", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
+        case .graphProcess(let id):
+            return ["graph", "show", id, "--processes", "--json"]
+        case .taskUsage(let task):
+            return ["usage", "--days", "0", "--task", task, "--json"]
+        case .taskContext(let task):
+            return ["usage", "--days", "0", "--task", task, "--context", "--json"]
+        case .waveDetail(_, let wave):
+            return ["desktop", "wave", wave, "--json"]
+        case .closedTasks(_, let wave, let after):
+            return ["desktop", "done", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
+        case .machines:
+            return ["machine", "list", "--json"]
         }
     }
 
@@ -75,7 +99,9 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
     public var cwd: String? {
         switch self {
         case .repositoryIdentity(let directory), .paneLayout(let directory, _),
-             .people(let directory), .graphs(let directory):
+             .people(let directory), .graphs(let directory), .viewPlan(let directory, _),
+             .graphProcesses(let directory, _, _), .waveDetail(let directory, _),
+             .closedTasks(let directory, _, _):
             return directory
         default: return nil
         }
@@ -86,7 +112,7 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
         return nil
     }
 
-    private enum Key: String, CodingKey { case query, issue, base, path, draft, directory, work }
+    private enum Key: String, CodingKey { case query, issue, base, path, draft, directory, work, expression, task, after, id, wave }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: Key.self)
@@ -124,6 +150,35 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
         case .graphs(let directory):
             try container.encode("graphs", forKey: .query)
             try container.encode(directory, forKey: .directory)
+        case .viewPlan(let directory, let expression):
+            try container.encode("view_plan", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(expression, forKey: .expression)
+        case .graphProcesses(let directory, let task, let after):
+            try container.encode("graph_processes", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(task, forKey: .task)
+            try container.encode(after, forKey: .after)
+        case .graphProcess(let id):
+            try container.encode("graph_process", forKey: .query)
+            try container.encode(id, forKey: .id)
+        case .taskUsage(let task):
+            try container.encode("task_usage", forKey: .query)
+            try container.encode(task, forKey: .task)
+        case .taskContext(let task):
+            try container.encode("task_context", forKey: .query)
+            try container.encode(task, forKey: .task)
+        case .waveDetail(let directory, let wave):
+            try container.encode("wave_detail", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(wave, forKey: .wave)
+        case .closedTasks(let directory, let wave, let after):
+            try container.encode("closed_tasks", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(wave, forKey: .wave)
+            try container.encode(after, forKey: .after)
+        case .machines:
+            try container.encode("machines", forKey: .query)
         }
     }
 }
@@ -158,8 +213,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func viewPlan(expression: String?, repoPath: String) async throws -> WorkViewPlan {
-        let args = ["desktop", "view"] + (expression.map { [$0] } ?? []) + ["--plan", "--json"]
-        return try Self.decode(WorkViewPlan.self, from: await run(args, repoPath))
+        try Self.decode(WorkViewPlan.self, from: await serve(.viewPlan(directory: repoPath, expression: expression)))
     }
 
     public func editDashboardQuery(id: String, expression: String, revision: Int64?, repoPath: String) async throws -> Dashboard {
@@ -321,15 +375,14 @@ public struct RegistryQuery: Sendable {
     /// One page of a Wave's closed Tasks, most recently closed first. The
     /// Wave's status carries only its open Tasks.
     public func closedTasks(wave: String, after: String? = nil, cwd: String) async throws -> ClosedTaskPage {
-        var args = ["desktop", "done", "--wave", wave, "--json"]
-        if let after { args += ["--after", after] }
-        return try Self.decode(ClosedTaskPage.self, from: await run(args, cwd))
+        try Self.decode(ClosedTaskPage.self, from: await serve(.closedTasks(directory: cwd, wave: wave, after: after)))
     }
 
     /// One Wave's Project/Task work and recorded execution state.
     public func status(wave: String, cwd: String?) async throws
         -> WaveDetailSnapshot {
-        let stdout = try await run(["desktop", "wave", wave, "--json"], cwd)
+        // Without a repository the Wave resolves from `/`, where the app runs.
+        let stdout = try await serve(.waveDetail(directory: cwd ?? "/", wave: wave))
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
@@ -428,12 +481,10 @@ public struct RegistryQuery: Sendable {
         var after: String?
         var result: [GraphProcessDetail] = []
         repeat {
-            var args = ["graph", "list", "--processes", "--for-task", task, "--json"]
-            if let after { args += ["--after", after] }
-            let page = try Self.decode(Page.self, from: await run(args, nil))
+            // Without a repository the inventory resolves from `/`, where the app runs.
+            let page = try Self.decode(Page.self, from: await serve(.graphProcesses(directory: "/", task: task, after: after)))
             for entry in page.entries {
-                let detail = try Self.decode(GraphProcessDetail.self,
-                    from: await run(["graph", "show", entry.id, "--processes", "--json"], nil))
+                let detail = try Self.decode(GraphProcessDetail.self, from: await serve(.graphProcess(id: entry.id)))
                 result.append(detail)
             }
             after = page.next
@@ -514,8 +565,8 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Your registered Machines. This Machine appears only when a default names it.
-    public func machines(cwd: String?) async throws -> [Machine] {
-        try Self.decode([Machine].self, from: await run(["machine", "list", "--json"], cwd))
+    public func machines() async throws -> [Machine] {
+        try Self.decode([Machine].self, from: await serve(.machines))
     }
 
     /// Move a Task to `machine` through `lf task move --machine`, or set your
@@ -545,15 +596,15 @@ public struct RegistryQuery: Sendable {
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
-    public func taskHistory(task: String, cwd: String?) async throws -> [SessionHistory] {
-        let stdout = try await run(["usage", "--days", "0", "--task", task, "--json"], cwd)
+    public func taskHistory(task: String) async throws -> [SessionHistory] {
+        let stdout = try await serve(.taskUsage(task: task))
         return try Self.decode([SessionHistory].self, from: stdout)
     }
 
     /// What each recorded step's submitted input was made of, oldest first,
     /// with Task totals. Read-only, from retained local captures.
-    public func taskContext(task: String, cwd: String?) async throws -> ContextReport {
-        let stdout = try await run(["usage", "--days", "0", "--task", task, "--context", "--json"], cwd)
+    public func taskContext(task: String) async throws -> ContextReport {
+        let stdout = try await serve(.taskContext(task: task))
         return try Self.decode(ContextReport.self, from: stdout)
     }
 

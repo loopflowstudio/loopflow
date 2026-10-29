@@ -723,7 +723,7 @@ pub enum DesktopCommand {
         #[arg(long)]
         after: Option<String>,
         /// Closed Tasks per page
-        #[arg(long, default_value_t = 50)]
+        #[arg(long, default_value_t = commands::waves::CLOSED_TASK_PAGE)]
         limit: usize,
         #[arg(long, required = true)]
         json: bool,

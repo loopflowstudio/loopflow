@@ -15,7 +15,9 @@ use clap::{Args, FromArgMatches};
 use serde::{Deserialize, Serialize};
 
 use super::activity::HistoryWindow;
-use super::machine::local_machine;
+use super::graph_inventory;
+use super::machine::{local_machine, machines};
+use super::usage;
 use super::watch::{Subscription, Transport};
 use super::waves::{list as list_waves, Shape};
 use super::work_route::repository_identity;
@@ -166,6 +168,38 @@ pub enum Query {
     People { directory: PathBuf },
     /// `lf --cwd <directory> graph list`: every Graph a Task there can take up.
     Graphs { directory: PathBuf },
+    /// `lf --cwd <directory> desktop view [expression] --plan`: what a view
+    /// shows; no expression is the repository's own.
+    ViewPlan {
+        directory: PathBuf,
+        expression: Option<String>,
+    },
+    /// `lf --cwd <directory> graph list --processes --for-task <task>
+    /// [--after <after>]`: one page of the Graphs that ran for a Task.
+    GraphProcesses {
+        directory: PathBuf,
+        task: String,
+        after: Option<String>,
+    },
+    /// `lf graph show <id> --processes`: one Graph that ran, with its steps.
+    GraphProcess { id: String },
+    /// `lf usage --days 0 --task <task>`: every Session input a Task recorded.
+    TaskUsage { task: String },
+    /// `lf usage --days 0 --task <task> --context`: what each of those
+    /// inputs was made of.
+    TaskContext { task: String },
+    /// `lf --cwd <directory> desktop wave <wave>`: one Wave's Projects and
+    /// Tasks, after syncing its repository with the tracker.
+    WaveDetail { directory: PathBuf, wave: String },
+    /// `lf --cwd <directory> desktop done --wave <wave> [--after <after>]`:
+    /// one page of a Wave's closed Tasks.
+    ClosedTasks {
+        directory: PathBuf,
+        wave: String,
+        after: Option<String>,
+    },
+    /// `lf machine list`: your registered Machines.
+    Machines,
 }
 
 impl Query {
@@ -201,6 +235,56 @@ impl Query {
             Self::PaneLayout { directory, work } => at(directory, &["desktop", "layout", work]),
             Self::People { directory } => at(directory, &["ops", "people", "--json"]),
             Self::Graphs { directory } => at(directory, &["graph", "list", "--json"]),
+            Self::ViewPlan {
+                directory,
+                expression,
+            } => {
+                let mut argv = at(directory, &["desktop", "view"]);
+                argv.extend(expression.clone());
+                argv.extend(words(&["--plan", "--json"]));
+                argv
+            }
+            Self::GraphProcesses {
+                directory,
+                task,
+                after,
+            } => {
+                let mut argv = at(
+                    directory,
+                    &["graph", "list", "--processes", "--for-task", task],
+                );
+                if let Some(after) = after {
+                    argv.extend(words(&["--after", after]));
+                }
+                argv.push("--json".into());
+                argv
+            }
+            Self::GraphProcess { id } => words(&["graph", "show", id, "--processes", "--json"]),
+            Self::TaskUsage { task } => words(&["usage", "--days", "0", "--task", task, "--json"]),
+            Self::TaskContext { task } => words(&[
+                "usage",
+                "--days",
+                "0",
+                "--task",
+                task,
+                "--context",
+                "--json",
+            ]),
+            Self::WaveDetail { directory, wave } => {
+                at(directory, &["desktop", "wave", wave, "--json"])
+            }
+            Self::ClosedTasks {
+                directory,
+                wave,
+                after,
+            } => {
+                let mut argv = at(directory, &["desktop", "done", "--wave", wave, "--json"]);
+                if let Some(after) = after {
+                    argv.extend(words(&["--after", after]));
+                }
+                argv
+            }
+            Self::Machines => words(&["machine", "list", "--json"]),
         }
     }
 
@@ -242,8 +326,57 @@ impl Query {
                     .unwrap_or_else(|| directory.clone());
                 pretty(&crate::graph::compiled::graph_catalog(&repo)?)
             }
+            Self::ViewPlan {
+                directory,
+                expression,
+            } => {
+                let plan = super::desktop::plan_view(None, directory, expression.as_deref())?;
+                // The command prints this plan, then exits 3.
+                if plan.resolution.members.is_empty() && !plan.resolution.unavailable.is_empty() {
+                    anyhow::bail!("{}", plan.resolution.unavailable.join("; "));
+                }
+                pretty(&plan)
+            }
+            Self::GraphProcesses {
+                directory,
+                task,
+                after,
+            } => pretty(&graph_inventory::page(
+                directory,
+                &graph_inventory::GraphProcessInventoryArgs {
+                    processes: true,
+                    for_task: Some(task.clone()),
+                    after: after.clone(),
+                    ..Default::default()
+                },
+            )?),
+            Self::GraphProcess { id } => pretty(&graph_inventory::detail(id)?),
+            Self::TaskUsage { task } => pretty(&task_usage(task)?),
+            Self::TaskContext { task } => pretty(&usage::context_report(&task_usage(task)?)?),
+            Self::WaveDetail { directory, wave } => {
+                pretty(&super::waves::desktop_status(directory, wave)?)
+            }
+            Self::ClosedTasks {
+                directory,
+                wave,
+                after,
+            } => pretty(&super::waves::desktop_closed_tasks(
+                directory,
+                wave,
+                after.as_deref(),
+            )?),
+            Self::Machines => pretty(&tokio::runtime::Runtime::new()?.block_on(machines())?),
         }
     }
+}
+
+fn task_usage(task: &str) -> anyhow::Result<Vec<crate::session_record::SessionHistory>> {
+    let filter = super::WorkFilter {
+        wave: None,
+        project: None,
+        task: Some(task),
+    };
+    usage::sessions(0, filter, None)
 }
 
 fn pretty(value: &impl Serialize) -> anyhow::Result<String> {
@@ -288,6 +421,22 @@ mod tests {
         assert_eq!(
             diff.argv(),
             ["task", "diff", "FIX-1", "--base", "parent", "--json"]
+        );
+        let view: Query = serde_json::from_str(
+            r#"{"query":"view_plan","directory":"/r","expression":"state:backlog"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            view.argv(),
+            [
+                "--cwd",
+                "/r",
+                "desktop",
+                "view",
+                "state:backlog",
+                "--plan",
+                "--json"
+            ]
         );
     }
 }

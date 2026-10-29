@@ -2060,13 +2060,13 @@ final class WorkModel {
 
     func loadSessionHistory(task: RoadmapTask) async {
         await loadTaskReading(\.sessionHistory, task: task.id) { [query] in
-            try await query.taskHistory(task: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.taskHistory(task: task.task.identifier)
         }
     }
 
     func loadTaskContext(task: RoadmapTask) async {
         await loadTaskReading(\.taskContext, task: task.id) { [query] in
-            try await query.taskContext(task: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.taskContext(task: task.task.identifier)
         }
     }
 
@@ -2226,8 +2226,8 @@ final class WorkModel {
         }
     }
 
-    func machines(for target: WorkMachineTarget) async throws -> [Machine] {
-        try await query.machines(cwd: machineCwd(target))
+    func machines() async throws -> [Machine] {
+        try await query.machines()
     }
 
     /// Hand off the Task or set the Wave's default, then confirm the Work update

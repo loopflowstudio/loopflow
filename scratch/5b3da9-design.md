@@ -88,7 +88,9 @@ October 28, 2026, a `sqlite3 .backup` copy of Jack Heart's live store, one-shot 
 In-app library:
 - Every local `RegistryQuery` read is served in-process as a `Read`. What still runs `lf` is the writes below, `onMachine` reads and the remote-only `taskLocation`.
 - Desktop files Tasks only with `task create --run`, a launching command (decision above), so no `TaskCreate` write is needed.
-- Writes still on `lf`: `config repository` (prepares the store, which the library never does; revisit at demo), the launching commands (`task create --run`, `task run`, `ship`, `resume --all`, `session connect|attach --prepare`), and the remote ones (`task move --machine`, `set machine`, `onMachine` reads, `taskLocation`).
+- Writes still on `lf`, from `RegistryQuery.swift` (realign, October 29: every remaining `run(` in Swift is there): `config repository` (prepares the store, which the library never does; revisit at demo), the launching commands (`task create --run`, `task run`, `ship`, `ship --stop`, `resume --all`), and the remote ones (`task move --machine`, `set machine`, `onMachine` reads, `taskLocation`).
+- Not yet in-process, and missing from earlier passes' lists: `task claim` / `task unassign` (`assignTask`), a store-and-Linear write through `ops::task_ownership::change` that starts no agent. Make it a `Write` with a served_reads case.
+- Also on `lf`: `session resume --prepare` (`ensurePrimarySession`, `prepareTaskSession`, `prepareSession`) and `session new --prepare` (`resetSession`). Earlier lists called these `session connect|attach --prepare`, which no Swift caller runs. `--prepare` opens or records the Session (`human_session::open(…, !prepare)`) and returns the terminal command without starting a provider, so by Jack Heart's October 29 rule it is a write, not a launch. Serve each as a `Write` sharing `session.rs`'s function, unless it turns out to spawn a process; record that if so.
 - served_reads abandons a PR-less Task. The PR and branch path runs through the same `task_abandon`, covered with a fake `gh` by `task_abandon_composes_cancellation_pr_and_git_from_anywhere`. The chapter rotation is compared as a preview only: an applied one needs a Linear-planned Wave.
 - The working-tasks `TileMove` is proven through the Dashboard board, which uses the same `edit_tiles` writer. The served_reads fixture has no started Task in its repository order.
 - `task move --wave <wave>` back into a Wave is untested in-process: the fixture Wave has no configured Project.
@@ -102,6 +104,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28, 2026, inherited `LF_*` unset. Latest results per check:
+- October 29, realign after the third slice: plan only (Swift `run(` inventory by grep), no rerun.
 - October 29, compress of the third slice (`Write::write` resolves its repository once, for recorded and unrecorded writes alike): `--test served_reads` 1/1, `--lib lf::commands::write::` 2/2, clippy and fmt clean.
 - October 29, third write slice: `--test served_reads` 1/1 (adds abandon, portfolio, graph customize, chapter preview), `--lib lf::commands::write::` 2/2, `--lib -- local_planning::rotation chapter:: lf::tests` 44/44, `-p loopflow-ffi` 3/3, `test_desktop.sh` over `RegistryQueryTests|PortfolioServiceTests|ProjectActivationTests|WorkCLISubscriptionTests|WorkModelTests|DesktopHeadlessTests` 75/75, clippy (`-p loopflow -p loopflow-ffi --all-targets`) and fmt clean.
 - October 29, realign after the second slice: plan only, no rerun.

@@ -36,9 +36,13 @@ Promotion refuses a candidate carrying migrations origin/main has not added.
 Explicit private Homes migrate themselves. Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
-Full installation restarts the replaced Desktop app and its bundled helpers.
-Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI without replacing or
-stopping Desktop and its clients. Promotion advances the shared store through
+On a Mac with Loopflow.app, `~/.local/bin/lf` links to the app's bundled
+`Contents/MacOS/lf`, so the terminal and Desktop always run one build; elsewhere
+it links to the selected build under `~/.lf/bin`. `lf install` replaces a
+Loopflow.app that isn't running. A running app that updates itself is asked to
+update instead, and `lf` follows the new bundle; an older running app is quit,
+replaced and reopened. Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI
+without replacing or stopping Desktop and its clients. Promotion advances the shared store through
 the install switch and retains the prior published artifacts;
 it does not restart Tasks or Flows.
 

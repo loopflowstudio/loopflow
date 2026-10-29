@@ -58,10 +58,12 @@ Evidence: `scratch/release-research.md`, `scratch/explore.html` (cleared; in git
   pattern) — Jack Heart, 2026-10-28: "use sparkle i guess", reconfirmed after
   weighing it against the app driving `lf install`: "seems worth running" for its
   signature checks, out-of-process replacement of a running signed app, and rollout
-  controls. To keep one updater per Mac: with the app present, Sparkle is the only
-  updater, and `lf install` or `install.sh` on that Mac asks the app to update rather
-  than replacing the bundle itself. Sparkle's delegate vetoes any update
-  whose catalog fails `can_open`.
+  controls. Its delegate vetoes any update whose catalog fails `can_open`.
+- **How `lf install` updates Loopflow.app** — Jack Heart, 2026-10-29: "b i guess".
+  When the app is running, `lf install` asks it to update (Sparkle). When it isn't
+  (no GUI session, e.g. over SSH), `lf install` replaces the bundle itself and
+  promotes the store. Replaces the earlier "Sparkle is the only updater" line and
+  the "1 c?" lean.
 - **Release channels move here from LOO-654** — Jack Heart, 2026-10-28. LOO-654's
   brief was edited to point here.
 - **One lf, linked; `lf install` routes through the app when it's there** —
@@ -70,9 +72,9 @@ Evidence: `scratch/release-research.md`, `scratch/explore.html` (cleared; in git
   - `~/.local/bin/lf` is always a link (Jack: "sure", 2026-10-28). With the app it points into
     `Loopflow.app/Contents/MacOS/lf`. On Linux or a Mac without the app it
     points into `~/.local/share/loopflow/versions/<v>/lf`.
-  - `lf install` (and `install.sh` on a Mac) detects an installed Loopflow.app
-    and asks it to update through Sparkle on the recorded stream. Only without the
-    app does it install a version directory and move the link.
+  - `lf install` on a Mac with a running Loopflow.app asks it to update through
+    Sparkle on the recorded stream; otherwise it installs the build and moves the
+    link (decided "b" above).
   - The stream is recorded once in Home config. `lf install --stream`, the app's
     Updates setting and Sparkle's feed choice all read and write that one value.
 - **Stream selection by flag** — Jack Heart, 2026-10-28 (said in LOO-656's
@@ -170,12 +172,16 @@ commit it, and do not land; publish and land once, after slice 8.
    (one locked read-modify-write of `~/.lf/config.yaml`), so neither drops the other's change.
    `--lib install::published::` 8, `install_exposes_refresh` 1, `store::migrations::` 121,
    `frontier_tests` 10, `documented_commands` 4, `test_shell_installer.py` 16, clippy: pass.
-5. **One lf, linked.** `~/.local/bin/lf` links into Loopflow.app or a versions
-   directory; `lf install` on a Mac with the app updates the app. How it does
-   that is still open (see Open): the Decided section has Sparkle as the only
-   updater on a Mac with the app, while Jack's later lean ("1 c?") has `lf
-   install` swap the bundle itself when the app isn't running. Settle before
-   slice 5; it doesn't affect slices 2–4.
+5. **One lf, linked — built 2026-10-29, unpublished.** Promotion links
+   `~/.local/bin/lf` straight to `<app>/Contents/MacOS/lf` when the install includes
+   the app (`public_cli_target`), else to the selected `~/.lf/bin/lf-<digest>`; the
+   content-addressed store is the versions directory. The entry gate
+   (`~/.lf-machine/install/gates/1/lf`) is still refreshed: cron and Graph steps pin
+   it. An install whose link still reaches the gate counts as not current, so the
+   next `lf install` relinks it. `lf install` on a Mac whose running app has
+   `SUPublicEDKey` opens `loopflow://update` and stops; slice 7 adds that route and
+   the key. A running app without it is quit, replaced and reopened as before.
+   `--lib lf::commands::install::` 27, clippy: pass.
 6. **Self-update.** Daily scheduled `lf install` on the recorded stream (Linux,
    headless); the in-place promotion entry point for an app updated in place.
    The schedule already follows the recorded stream (slice 4) and already offers
@@ -255,15 +261,6 @@ lands and nothing ties it to stable's lag:
   launch calls it before anything reads the store. Until it exists, a
   Sparkle-swapped app hits the ordinary-open refusal, which #1755 changes to name
   the build to install.
-
-- How `lf install` asks the app to update: a URL scheme or app intent that
-  starts Sparkle's check, launching the app if it isn't running. And what
-  happens with no GUI session (SSH into a Mac with the app), since Sparkle needs
-  one. Jack Heart leaned toward replacing the bundle directly (2026-10-28, "1
-  c?"): when the app isn't running, `lf install` swaps Loopflow.app itself (it
-  is already notarized; a curl download carries no quarantine) and promotes the
-  store, keeping lockstep. When the app is running (a locked screen still has a
-  session), it asks the app to update instead of replacing a live bundle.
 
 - **Contract via follow-up Tasks** — Jack Heart, 2026-10-28: "i think we can
   probably just do this with follow-up tasks (we can update loopflow to do tasks

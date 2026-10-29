@@ -39,3 +39,11 @@
 - **`install.sh latest` (positional) is no longer special**; channels replace it.
 - **Proposed Wave memory edit (not made; `.lf/wave/` read-only here):** infrastructure MEMORY.md
   line ~663 says `lf self install --main`; it is now `lf install --dev`.
+- **Slice 5 keeps `~/.lf/bin/lf-<digest>` as the versions directory**, not
+  `~/.local/share/loopflow/versions/<v>/`: rollback, pruning and receipts already own
+  it, and a dev build can share a version with different bytes. Rename later if the path matters.
+- **`lf install --dev` and `LF_INSTALL_CLI_ONLY=1` still link the CLI alone** on a Mac with
+  the app, so the terminal can run a newer build than Desktop until dev packages ship a
+  signed app (slice 7).
+- **`install.sh` run by hand with the app running** still quits, replaces and reopens it;
+  only `lf install` hands off to the app's updater.

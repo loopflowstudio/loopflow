@@ -19,6 +19,8 @@ const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
 const MAIN_PACKAGES: &str = "main-packages.yml";
 /// The reader floors a release's build opens (`lf self install reader-catalog`).
 const READER_CATALOG: &str = "reader-catalog.txt";
+/// Starts Loopflow.app's own update check (`LoopflowApp.handleDeepLink`).
+const APP_UPDATE_LINK: &str = "loopflow://update";
 
 /// The build line an install follows (`release/README.md`, Streams).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,6 +137,24 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
             );
             return Ok(());
         }
+    }
+    let app = applications.join("Loopflow.app");
+    if cfg!(target_os = "macos") && !cli_only && updates_itself(&app) && app_is_running(&app)? {
+        // Replacing a running bundle under it is Sparkle's job, not ours.
+        let status = Command::new("/usr/bin/open")
+            .args(["-g", APP_UPDATE_LINK])
+            .status()
+            .context("ask Loopflow.app to update")?;
+        if !status.success() {
+            bail!(
+                "could not ask {} to update ({status}); quit it and rerun `lf install`",
+                app.display()
+            );
+        }
+        println!(
+            "{stream} is at {tag}; Loopflow.app is running, so it installs the update and `lf` follows it."
+        );
+        return Ok(());
     }
     let installer = client
         .get(format!("{base}/install.sh"))
@@ -377,26 +397,42 @@ fn inspect(program: &Path, args: &[&str]) -> Option<Output> {
     })
 }
 
-fn has_release_app(applications: &Path, version: &str) -> bool {
-    let contents = applications.join("Loopflow.app/Contents");
-    let info = inspect(
+fn app_info(app: &Path) -> Option<serde_json::Value> {
+    inspect(
         Path::new("/usr/bin/plutil"),
         &[
             "-convert",
             "json",
             "-o",
             "-",
-            &contents.join("Info.plist").to_string_lossy(),
+            &app.join("Contents/Info.plist").to_string_lossy(),
         ],
     )
     .filter(|output| output.status.success())
-    .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok());
-    info.is_some_and(|info| {
+    .and_then(|output| serde_json::from_slice(&output.stdout).ok())
+}
+
+fn has_release_app(applications: &Path, version: &str) -> bool {
+    let app = applications.join("Loopflow.app");
+    app_info(&app).is_some_and(|info| {
         info["CFBundleShortVersionString"] == version && info["CFBundleVersion"] == version
     }) && ["Loopflow", "lf"].iter().all(|name| {
-        fs::metadata(contents.join("MacOS").join(name))
+        fs::metadata(app.join("Contents/MacOS").join(name))
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
     })
+}
+
+/// An app built with Sparkle's signing key installs its own updates.
+fn updates_itself(app: &Path) -> bool {
+    app_info(app).is_some_and(|info| {
+        info["SUPublicEDKey"]
+            .as_str()
+            .is_some_and(|key| !key.is_empty())
+    })
+}
+
+fn app_is_running(app: &Path) -> Result<bool> {
+    Ok(!super::running_app_processes(&[app.join("Contents/MacOS/Loopflow")])?.is_empty())
 }
 
 fn manifest_digest<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
@@ -543,7 +579,7 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 mod tests {
     use super::{
         is_current, newest_release, newest_run, opens_store, package_target, record_stream,
-        recorded_stream, release_tag, run_verified_installer, Stream,
+        recorded_stream, release_tag, run_verified_installer, updates_itself, Stream,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -690,5 +726,20 @@ mod tests {
         assert!(!current());
         fs::write(contents.join("Info.plist"), "invalid plist").unwrap();
         assert!(!current());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_an_app_with_a_sparkle_key_updates_itself() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = temp.path().join("Loopflow.app");
+        assert!(!updates_itself(&app));
+        fs::create_dir_all(app.join("Contents")).unwrap();
+        for (key, expected) in [("", false), ("test-public-key", true)] {
+            fs::write(app.join("Contents/Info.plist"), format!(
+                "<plist version=\"1.0\"><dict><key>SUPublicEDKey</key><string>{key}</string></dict></plist>"
+            )).unwrap();
+            assert_eq!(updates_itself(&app), expected);
+        }
     }
 }

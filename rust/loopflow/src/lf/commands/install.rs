@@ -1005,33 +1005,48 @@ fn commit_cli_symlink(cli_target: &Path, dest_binary: &Path) -> Result<()> {
     Ok(())
 }
 
-fn entry_gate_targets(
+/// Where the public `lf` links: the app's bundled `lf` when the install includes
+/// Loopflow.app, so Desktop and the terminal run one build, else the selected CLI.
+fn public_cli_target(
+    cli_source: &Path,
+    activation: &crate::installation::ActivationTargets,
+) -> PathBuf {
+    activation
+        .app
+        .as_deref()
+        .map(|app| app.join("Contents/MacOS/lf"))
+        .unwrap_or_else(|| cli_source.to_path_buf())
+}
+
+/// Link the public `lf` to the selected build. The entry gate is refreshed too:
+/// scheduled jobs pin it and Graph steps resolve through it.
+fn activate_cli_targets(
     root: &Path,
     cli_source: &Path,
     activation: &crate::installation::ActivationTargets,
 ) -> Result<()> {
-    let cli_gate = crate::installation::install_entry_gate(
+    crate::installation::install_entry_gate(
         root,
         &crate::installation::ArtifactRole::Cli,
         cli_source,
     )?;
-    commit_cli_symlink(&activation.cli, &cli_gate)?;
-    verify_entry_gate_targets(root, activation)
+    commit_cli_symlink(&activation.cli, &public_cli_target(cli_source, activation))?;
+    verify_cli_target(cli_source, activation)
 }
 
-fn verify_entry_gate_targets(
-    root: &Path,
+fn verify_cli_target(
+    cli_source: &Path,
     activation: &crate::installation::ActivationTargets,
 ) -> Result<()> {
-    let role = crate::installation::ArtifactRole::Cli;
     let target = &activation.cli;
-    let expected = fs::canonicalize(crate::installation::entry_gate_path(root, &role)?)?;
-    let actual = fs::canonicalize(target)
-        .with_context(|| format!("resolve public CLI target {}", target.display()))?;
-    if actual != expected {
+    let expected = public_cli_target(cli_source, activation);
+    let linked = fs::read_link(target)
+        .with_context(|| format!("public CLI target {} is not a link", target.display()))?;
+    if linked != expected || !expected.is_file() {
         return Err(anyhow!(
-            "public CLI target {} bypasses installation entry gate {}",
+            "public CLI target {} links to {}, not the selected {}",
             target.display(),
+            linked.display(),
             expected.display()
         ));
     }
@@ -1092,7 +1107,7 @@ fn activate_prepared_installation_switch(
             },
         )?;
     }
-    entry_gate_targets(root, &receipt.candidate.path, &receipt.activation)?;
+    activate_cli_targets(root, &receipt.candidate.path, &receipt.activation)?;
     if let Some(app) = receipt.activation.app.as_deref() {
         verify_selected_app_bundle(app, &receipt.target.artifact_set)?;
     }
@@ -1925,7 +1940,11 @@ fn active_install_matches_candidate(
         app: artifacts.app_target.map(Path::to_path_buf),
         legacy_app: artifacts.legacy_app_target.map(Path::to_path_buf),
     };
-    if verify_entry_gate_targets(root, &activation).is_err() {
+    let cli = set
+        .artifact(&crate::installation::ArtifactRole::Cli)
+        .expect("verified artifact set has a CLI");
+    let gate = crate::installation::entry_gate_path(root, &crate::installation::ArtifactRole::Cli)?;
+    if !gate.is_file() || verify_cli_target(&cli.path, &activation).is_err() {
         return Ok(false);
     }
     if let Some(app) = artifacts.app_target {
@@ -2016,7 +2035,7 @@ fn activate_switch_targets(
             superseded_app = commit_app_bundle(&staged, &plan)?;
         }
     }
-    entry_gate_targets(root, &receipt.candidate.path, &receipt.activation)?;
+    activate_cli_targets(root, &receipt.candidate.path, &receipt.activation)?;
     if let Some(app_target) = receipt.activation.app.as_deref() {
         verify_selected_app_bundle(app_target, &receipt.target.artifact_set)?;
     }
@@ -2719,11 +2738,13 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 #[cfg(test)]
 mod artifact_tests {
     use super::{
-        app_executable_paths, commit_cli_symlink, copy_tree, prune_superseded_artifacts,
-        retained_published_sets, stage_binary, tree_digest,
+        activate_cli_targets, app_executable_paths, commit_cli_symlink, copy_tree,
+        prune_superseded_artifacts, retained_published_sets, stage_binary, tree_digest,
+        verify_cli_target,
     };
     use crate::installation::{
-        ActiveInstall, ArtifactIdentity, ArtifactRole, ArtifactSet, InstallSelection, InstallSource,
+        entry_gate_path, ActivationTargets, ActiveInstall, ArtifactIdentity, ArtifactRole,
+        ArtifactSet, InstallSelection, InstallSource,
     };
     use std::fs;
     use std::io::{BufRead, BufReader};
@@ -2894,6 +2915,41 @@ mod artifact_tests {
         commit_cli_symlink(&target, &first).unwrap();
         commit_cli_symlink(&target, &second).unwrap();
         assert_eq!(fs::read(&target).unwrap(), b"second");
+    }
+
+    #[test]
+    fn public_lf_is_the_apps_lf_when_the_install_includes_the_app() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("install");
+        let cli = directory.path().join("bin/lf-selected");
+        let app = directory.path().join("Applications/Loopflow.app");
+        let public = directory.path().join(".local/bin/lf");
+        fs::create_dir_all(cli.parent().unwrap()).unwrap();
+        fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        fs::write(&cli, b"selected").unwrap();
+        fs::write(app.join("Contents/MacOS/lf"), b"app").unwrap();
+        let mut activation = ActivationTargets {
+            cli: public.clone(),
+            daemon: None,
+            app: Some(app.clone()),
+            legacy_app: None,
+        };
+
+        activate_cli_targets(&root, &cli, &activation).unwrap();
+        assert_eq!(
+            fs::read_link(&public).unwrap(),
+            app.join("Contents/MacOS/lf")
+        );
+        assert_eq!(
+            fs::read(entry_gate_path(&root, &ArtifactRole::Cli).unwrap()).unwrap(),
+            b"selected"
+        );
+
+        activation.app = None;
+        assert!(verify_cli_target(&cli, &activation).is_err());
+        activate_cli_targets(&root, &cli, &activation).unwrap();
+        assert_eq!(fs::read_link(&public).unwrap(), cli);
+        assert_eq!(fs::read(&public).unwrap(), b"selected");
     }
 
     #[test]

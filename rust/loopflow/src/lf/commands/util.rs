@@ -202,7 +202,7 @@ fn moved_away(
         .transpose()
 }
 
-fn departure_notice(
+pub(crate) fn departure_notice(
     store: &SqliteStore,
     session: &str,
     departure: crate::process::Departure,

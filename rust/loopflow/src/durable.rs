@@ -201,7 +201,9 @@ pub enum OwnershipKind {
     Claim,
     /// Moves the claim to `machine_id`, keeping the person.
     Handoff,
-    Unclaim,
+    /// Stored and sent as `unclaim`, its released spelling.
+    #[serde(rename = "unclaim")]
+    Unassign,
     /// What a Machine knew before ownership existed; never delivered.
     Recorded,
 }
@@ -211,8 +213,16 @@ impl OwnershipKind {
         match self {
             Self::Claim => "claim",
             Self::Handoff => "handoff",
-            Self::Unclaim => "unclaim",
+            Self::Unassign => "unclaim",
             Self::Recorded => "recorded",
+        }
+    }
+
+    /// The command that wrote it, as history shows it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unassign => "unassign",
+            kind => kind.as_str(),
         }
     }
 }

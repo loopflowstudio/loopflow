@@ -390,7 +390,7 @@ fn public_local_plan_matches_desktop() {
     assert!(task["reference"]["workspace"].is_null());
     assert!(task["run_control"]["unavailable"].is_null());
     assert_eq!(task["condition"]["unresolved_execution"], false);
-    assert_eq!(task["actions"]["recommended"], "resume");
+    assert_eq!(task["actions"]["recommended"], "run");
     task["condition"]["observed_at"] = serde_json::json!("2026-10-08T00:00:00Z");
     task["condition"]["evidence_age_secs"] = serde_json::json!(0);
     task["runtime"]["updated_at"] = serde_json::json!("2026-10-08T00:00:00Z");

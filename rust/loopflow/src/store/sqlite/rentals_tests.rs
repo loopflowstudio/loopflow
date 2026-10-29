@@ -213,7 +213,7 @@ fn an_ended_rental_hands_its_open_tasks_back_here() {
         ]
     );
     // This Machine writes the Task again: `lf task run` stays here.
-    store.unclaim_task(&task).unwrap();
+    store.unassign_task(&task).unwrap();
 }
 
 #[test]

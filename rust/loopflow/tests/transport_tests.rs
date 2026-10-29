@@ -131,6 +131,12 @@ impl Fixture {
         ))
     }
     fn viewer(&self, id: &str, control: bool) -> Viewer {
+        self.attach(
+            id,
+            json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}),
+        )
+    }
+    fn attach(&self, id: &str, request: Value) -> Viewer {
         let socket = UnixStream::connect(self.endpoint(id)).unwrap_or_else(|e| {
             panic!(
                 "{}: {e}; home {}",
@@ -145,7 +151,7 @@ impl Fixture {
             socket: BufReader::new(socket),
             token: None,
         };
-        viewer.send(json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}));
+        viewer.send(request);
         let attached = viewer.read();
         assert_eq!(attached["kind"], "attached");
         viewer.token = attached["token"].as_str().map(str::to_owned);
@@ -319,21 +325,22 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     let pid = fixture.wait_file("pid");
     assert_eq!(fixture.wait_file("job"), "detached");
     let mut first = fixture.viewer(&owner, true);
-    let second = fixture.viewer(&owner, true);
-    first.input("stale\n");
+    let second = fixture.attach(
+        &owner,
+        json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80,
+            "moved":"This conversation moved to tmux %4: lf resume s1"}),
+    );
+    // The replaced viewer is told where the conversation went, then let go.
+    let moved = read_until(&mut first, "moved");
+    assert_eq!(
+        moved.last().unwrap()["notice"],
+        "This conversation moved to tmux %4: lf resume s1"
+    );
+    let mut rest = String::new();
+    assert_eq!(first.socket.read_line(&mut rest).unwrap(), 0);
     let mut observer = fixture.viewer(&owner, false);
     assert!(observer.token.is_none());
     observer.send(json!({"kind":"input","token":second.token,"bytes":b"passive\n"}));
-    let old = first.token.clone();
-    first.send(json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80}));
-    let claimed = loop {
-        let frame = first.read();
-        if frame["kind"] == "attached" {
-            break frame;
-        }
-    };
-    assert_ne!(claimed["token"].as_str(), old.as_deref());
-    first.input("stale-after-reclaim\n");
     drop(observer);
     drop(first);
     drop(second); // zero viewers while the same read remains pending

@@ -78,7 +78,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         };
         let completion_refusal = completion_refusal(pr.as_ref(), &task.identifier);
         let worktree_blocker = task_worktree_blocker(store, &task).await?;
-        let resume_refusal = worktree_blocker
+        let run_refusal = worktree_blocker
             .as_ref()
             .map(|blocker| blocker.reason.clone());
         let launch_refusal = if worktree_blocker.is_some() {
@@ -97,7 +97,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
                 .filter(|pr| pr.phase() == PrPhase::Open)
                 .map(|pr| pr.presentation().is_some()),
             completion_refusal: completion_refusal.as_deref(),
-            resume_refusal: resume_refusal.as_deref(),
+            run_refusal: run_refusal.as_deref(),
             ci: active.and_then(|pr| pr.fresh_ci()),
             predecessor_phase,
             launch_refusal: launch_refusal.as_deref(),

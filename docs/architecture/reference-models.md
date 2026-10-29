@@ -183,7 +183,7 @@ provider generation in caller provenance, turn origin and Program Status.
 | `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
 | `tasks` | Project, issue, durable disposition and worktree/delivery facts |
-| `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`) with person, Machine and time; migration-only `recorded` entries are never delivered |
+| `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, Machine and time; migration-only `recorded` entries are never delivered |
 | `projects` | Wave, stable Linear Project identity, status, shared chapter name, Graph and planning facts |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 

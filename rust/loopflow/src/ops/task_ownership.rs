@@ -55,7 +55,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                     .map_err(message)?;
             }
             OwnershipChange::Unassign => {
-                store.sqlite.unclaim_task(&task.id).map_err(message)?;
+                store.sqlite.unassign_task(&task.id).map_err(message)?;
                 store
                     .sqlite
                     .assign_task_owner(&task.id, None)
@@ -112,7 +112,7 @@ pub fn render(ownership: &TaskOwnership) -> String {
         lines.push(format!(
             "  {}  {}  {}",
             crate::lf::output::format_time(entry.at),
-            entry.kind.as_str(),
+            entry.kind.label(),
             entry.owner()
         ));
     }
@@ -126,25 +126,39 @@ mod tests {
         MachineId, OwnershipEntryId, OwnershipKind, TaskId, TaskOwnership, TaskOwnershipEntry,
     };
 
-    #[test]
-    fn log_lines_read_as_a_time_and_a_person_on_a_named_machine() {
-        let ownership = TaskOwnership {
+    /// Lee's ownership log holding one `kind` entry on lee-mbp.
+    fn lees(kind: OwnershipKind) -> TaskOwnership {
+        TaskOwnership {
             owner: None,
             superseded_by: None,
             log: vec![TaskOwnershipEntry {
                 id: OwnershipEntryId::new(),
                 task_id: TaskId::new(),
-                kind: OwnershipKind::Claim,
+                kind,
                 person: Some("Lee".into()),
                 person_key: None,
                 machine_id: Some(MachineId::new()),
                 machine_label: Some("lee-mbp".into()),
                 at: 1_792_600_000,
             }],
-        };
-        let rendered = render(&ownership);
+        }
+    }
+
+    #[test]
+    fn log_lines_read_as_a_time_and_a_person_on_a_named_machine() {
+        let rendered = render(&lees(OwnershipKind::Claim));
         let line = rendered.lines().nth(1).unwrap();
         assert!(line.ends_with("  claim  Lee on lee-mbp"), "{line}");
         assert!(!line.contains("1792600000"), "{line}");
+    }
+
+    #[test]
+    fn an_unassign_reads_as_unassign_and_is_stored_as_released() {
+        let ownership = lees(OwnershipKind::Unassign);
+        let rendered = render(&ownership);
+        let line = rendered.lines().nth(1).unwrap();
+        assert!(line.ends_with("  unassign  Lee on lee-mbp"), "{line}");
+        let wire = serde_json::to_value(&ownership.log[0]).unwrap();
+        assert_eq!(wire["kind"], "unclaim");
     }
 }

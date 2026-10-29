@@ -321,7 +321,7 @@ fn session_action_fixtures_match_the_shared_boundary() {
     ))
     .unwrap();
     for case in cases {
-        assert_eq!(super::session_actions(case.state), case.actions);
+        assert_eq!(super::session_actions(case.state, true), case.actions);
     }
     for fixture in [
         include_str!("../../../../../tests/fixtures/dto/session.json"),
@@ -332,7 +332,10 @@ fn session_action_fixtures_match_the_shared_boundary() {
             .to_string(),
     ] {
         let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
-        assert_eq!(session.actions, super::session_actions(session.state));
+        assert_eq!(
+            session.actions,
+            super::session_actions(session.state, session.interactive)
+        );
         assert_eq!(session.work_path.as_deref(), Some("product / LOO-291"));
         let mut untitled = serde_json::to_value(&session).unwrap();
         untitled.as_object_mut().unwrap().remove("title_source");
@@ -353,7 +356,10 @@ fn graph_membership_fixtures_cover_every_projection_and_are_required() {
     .unwrap();
     let mut kinds = Vec::new();
     for session in &sessions {
-        assert_eq!(session.actions, super::session_actions(session.state));
+        assert_eq!(
+            session.actions,
+            super::session_actions(session.state, session.interactive)
+        );
         kinds.push(match &session.graph_membership {
             super::SessionGraphMembership::Step { occurrence, .. } => match occurrence {
                 super::SessionGraphOccurrence::Unknown => "unknown_occurrence",

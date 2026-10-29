@@ -113,6 +113,28 @@ Re-run after the unowned-unassign change: still no product choice open. No remov
 `Deferred` Task state) survives outside the parse-rejection test; the remaining "headless
 Session" text is a maintainer comment (`harness/claude.rs`).
 
+## Demo findings (agent-run, throwaway LF_HOME, real Claude/Codex, 2026-10-29)
+
+Passed: Run id refused (resume, --fork, -b --message, --prepare, --explain); bare `lf resume`
+starts the repository Session; second terminal's input reaches the same Claude process;
+`--fork` makes "repo (fork)" that knows the source's replies while the source stays live;
+killed process → `lf resume <id>` continues the same thread; raw `claude -p` id → binds one
+Session (reused on repeat) and continues its thread; `session new` and `resume -a codex` hand
+off history and the old terminal prints "This conversation moved to tmux %4: lf resume <id>";
+`task claim/unassign` work, `task hold` is gone.
+
+Fixed (implement, 2026-10-29):
+1. In-terminal takeover tells the old terminal: `transport::attach` sends the new holder's
+   notice (`departure_notice` from `departure_here`) in `Attach.moved`; the replaced
+   controller gets `Response::Moved`, prints it and is disconnected. `attach` lost its dead
+   `observe`/`replace` parameters. Covered in `transport_tests` (`zero_viewers_…`).
+2. `session_actions(state, interactive)`: a Run has no actions (list, surface, explain).
+3. `TaskAction::Resume` → `Run` (wire `run`; Rust, Swift, fixtures).
+4. `OwnershipKind::Unclaim` → `Unassign`: stored/sent as `unclaim` (released CHECK and peer
+   markers), history label `unassign`, comment "unassigned this".
+
+Demo to re-run for case 1 (old terminal prints the notice and returns to its shell).
+
 ## Remaining
 
 - Implementation notes (2026-10-29): "unassigned" = no owner in the ownership log
@@ -124,13 +146,17 @@ Session" text is a maintainer comment (`harness/claude.rs`).
   `task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish` and
   `local_planning::task_unassign_clears_the_assignee`. The released 0.14.17 migration
   comment still says "Defer holds it"; it is a shipped record, so it stays.
-- Demo (answer 6) not run yet: agent-run in a throwaway `LF_HOME` with real Claude.
 - Checks (2026-10-29): lib `human_session:: ops::task::ship store::sqlite::{task_work,selections,
   planning_write,task_ownership,ci_incidents} work::selection lf::tests lf::commands::waves
   agent::session:: task_graph_launch_tests::task_ship`, integration `world_recipes:: dto_fixtures::
   cli_discovery:: machine_commands::task_ownership local_planning::task_unassign_clears_the_assignee` (+ `_of_an_unowned_task`,
-  `task_ownership::tests::unclaiming_an_unowned_task_writes_nothing`),
+  `task_ownership::tests::unassigning_an_unowned_task_writes_nothing`),
   `two_people`, `transport_tests` Graph-step refusal, `session_lifecycle_tests` structured
   correction, `session_launch_contract` schema refusal, Swift `WorkModel|WaveStandup|DTOFixture|
   RegistryQuery|SessionsStore|DesktopHeadlessTests`, fmt, clippy all-targets — pass.
+- Checks (demo fixes, 2026-10-29): lib `human_session:: task_actions:: task_ownership::
+  lf::commands::util:: durable::`, integration `dto_fixtures:: local_planning::
+  machine_commands::task_ownership`, `transport_tests zero_viewers`, Swift
+  `RoadmapView|DTOFixture|RegistryQuery`, fmt, clippy all-targets — pass.
+- Compress (2026-10-29): lib `ops::task_ownership::`, `transport_tests zero_viewers|automatic_attachment`, fmt, clippy all-targets — pass. Kept transport's `replace`/`Busy`: no production client sends `replace=false` now, but a busy owner from the previous build still requires the field.
 - Assumptions: `scratch/questions.md`.

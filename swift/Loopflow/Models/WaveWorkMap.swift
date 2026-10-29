@@ -273,7 +273,7 @@ public enum TaskConditionState: String, Decodable, Sendable, Hashable {
 /// The lifecycle actions Task Work can take. Mirrors the Rust
 /// `TaskAction`; the server computes which are legal, clients never re-derive.
 public enum TaskAction: String, Codable, Sendable, Hashable {
-    case resume
+    case run
     case openPr = "open_pr"
     case noAction = "no_action"
 }

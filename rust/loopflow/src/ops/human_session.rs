@@ -243,8 +243,12 @@ pub struct SessionAction {
     pub unavailable_reason: Option<String>,
 }
 
-pub(crate) fn session_actions(state: SessionState) -> Vec<SessionAction> {
+/// A Run opens nowhere: `lf resume` takes only Sessions.
+pub(crate) fn session_actions(state: SessionState, interactive: bool) -> Vec<SessionAction> {
     use SessionActionKind::{MoveHere, Open};
+    if !interactive {
+        return Vec::new();
+    }
     let active_client = state == SessionState::Active;
     let (label, help) = match state {
         SessionState::Detached => ("Reconnect", "Show the running Session in this terminal"),
@@ -525,7 +529,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         },
     };
     let state = session_state(session);
-    let mut actions = session_actions(state);
+    let mut actions = session_actions(state, session.interactive);
     let open_argv = match human_session_argv(&session.id) {
         Ok(argv) => argv,
         Err(error) => {
@@ -815,7 +819,12 @@ pub(crate) async fn open(
                                 .as_deref(),
                         )?;
                     }
-                    crate::transport::attach(&owner, false, true)?;
+                    let moved = crate::lf::commands::util::departure_notice(
+                        &store.sqlite,
+                        &session.id,
+                        departure_here(),
+                    )?;
+                    crate::transport::attach(&owner, Some(moved))?;
                     return surface(store, session).await;
                 }
             }
@@ -1106,7 +1115,7 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         )?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
-    let actions = session_actions(state);
+    let actions = session_actions(state, session.interactive);
     let open_argv = human_session_argv(&session.id)?;
     let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
         (None, _) if metadata.independent => SessionGraphMembership::Independent,

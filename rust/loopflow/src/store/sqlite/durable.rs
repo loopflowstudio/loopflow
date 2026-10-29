@@ -776,7 +776,7 @@ mod durable_store_tests {
         store.insert_project(&other).unwrap();
         // Another Started Project does not compete with the configured identity.
         // An unclaimed Task is new work again; the newly placed checkout claims its Task.
-        store.unclaim_task(&task_id).unwrap();
+        store.unassign_task(&task_id).unwrap();
         let (new_task, pr) = unregistered_task(&store, &task_id, dir.path().join("new"));
         store.seed_task(&new_task, &pr).unwrap();
         store.require_task_launch(&task_id).unwrap();
@@ -837,7 +837,7 @@ mod durable_store_tests {
         let (_dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
         // Owned Tasks are exempt; an unowned one must be in the selected active Project.
-        store.unclaim_task(&task_id).unwrap();
+        store.unassign_task(&task_id).unwrap();
         store
             .conn
             .lock()
@@ -1305,7 +1305,7 @@ mod durable_store_tests {
     fn checkout_exclusion_preserves_unbound_history_until_binding_retries() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        store.unclaim_task(&task_id).unwrap();
+        store.unassign_task(&task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().join("elsewhere");
         let session = store.create_session(conversation, None).unwrap();
@@ -1355,7 +1355,7 @@ mod durable_store_tests {
     fn checkout_exclusion_covers_missing_subdirectories_and_explicit_tasks() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        store.unclaim_task(&task_id).unwrap();
+        store.unassign_task(&task_id).unwrap();
         let exclusion = store
             .lock_checkout(task.worktree.as_ref().unwrap())
             .unwrap();
@@ -1378,7 +1378,7 @@ mod durable_store_tests {
     fn session_binding_retains_a_task_in_completed_project_history() {
         let (dir, store, task_id) = store_with_task();
         let task = store.task(&task_id).unwrap().unwrap();
-        store.unclaim_task(&task_id).unwrap();
+        store.unassign_task(&task_id).unwrap();
         let mut conversation = unpublished_conversation(None, None, 1);
         conversation.cwd = dir.path().to_path_buf();
         let session = store.create_session(conversation, None).unwrap();

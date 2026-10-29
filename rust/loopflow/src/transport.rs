@@ -76,6 +76,8 @@ enum Request {
         replace: bool,
         rows: u16,
         cols: u16,
+        /// What a controlling viewer this attachment replaces prints as it leaves.
+        moved: Option<String>,
     },
     Input {
         token: String,
@@ -135,6 +137,10 @@ enum Response {
         code: u8,
     },
     Detached,
+    /// Another viewer took input control; this one prints `notice` and leaves.
+    Moved {
+        notice: Option<String>,
+    },
     Busy,
     /// How a viewer that detaches can return.
     Return {
@@ -184,7 +190,7 @@ pub fn delegate_current(batch: bool) -> Result<bool> {
         // relayed screen; an interactive run keeps the terminal it reads from.
         let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
         let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
-        attach(&owner, false, true)?;
+        attach(&owner, None)?;
         Ok(true)
     }
 }
@@ -485,6 +491,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let (viewing, ending) = lifetime::spawn(id.clone());
     let mut viewed = None;
     loop {
+        let mut replaced = None;
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
             viewers.push(Viewer {
@@ -537,6 +544,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             replace,
                             rows,
                             cols,
+                            moved,
                         } => {
                             if wants_control
                                 && !replace
@@ -550,6 +558,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             let (rows, cols) = dimensions(rows, cols);
                             if wants_control {
                                 hint_due = true;
+                                if viewer.token != control {
+                                    replaced = control.clone().map(|token| (token, moved));
+                                }
                                 let token = uuid::Uuid::new_v4().to_string();
                                 control = Some(token.clone());
                                 viewer.token = Some(token);
@@ -642,6 +653,20 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             })();
             result.is_ok()
         });
+        // The viewer that held control learns where it went and leaves, so it
+        // neither mirrors output nor swallows keystrokes.
+        if let Some((token, notice)) = replaced {
+            viewers.retain_mut(|v| {
+                if v.token.as_ref() != Some(&token) {
+                    return true;
+                }
+                let _ = v.queue(&Response::Moved {
+                    notice: notice.clone(),
+                });
+                let _ = v.flush();
+                false
+            });
+        }
         if let Some(response) = returning.take() {
             viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
         }
@@ -955,7 +980,9 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
     })
 }
 
-pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<()> {
+/// Attach this terminal with input control, taking it from any other viewer;
+/// that viewer prints `moved` as it leaves.
+pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     let mut socket = UnixStream::connect(endpoint(id)?).context(
         "Execution owner is unavailable; no provider was restarted and no input was replayed",
     )?;
@@ -965,10 +992,11 @@ pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<(
     send(
         &mut socket,
         &Request::Attach {
-            control: !observe,
-            replace,
+            control: true,
+            replace: true,
             rows,
             cols,
+            moved,
         },
     )?;
     let mut terminal = None;
@@ -1050,6 +1078,13 @@ pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<(
                         }
                     }
                     Response::Detached => return Ok(()),
+                    Response::Moved { notice } => {
+                        drop(terminal.take());
+                        if let Some(notice) = notice {
+                            eprintln!("\n{notice}");
+                        }
+                        return Ok(());
+                    }
                     Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                     Response::Return { detach } => returning = Some(detach),
                     Response::NativeEnded | Response::Controlled { .. } => {}
@@ -1078,9 +1113,7 @@ pub(crate) fn attach(id: &LfProcessId, observe: bool, replace: bool) -> Result<(
                         )?;
                     }
                 }
-            } else if terminal.is_some()
-                && (bytes[..n].contains(&0x1d) || (observe && bytes[..n].contains(&0x03)))
-            {
+            } else if terminal.is_some() && bytes[..n].contains(&0x1d) {
                 // Restore the terminal before saying how to return.
                 drop(terminal.take());
                 if let Some(detach) = &returning {

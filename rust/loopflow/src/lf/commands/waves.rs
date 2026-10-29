@@ -1904,7 +1904,7 @@ async fn snapshot_task_detail(
     } else {
         None
     };
-    let resume_refusal = worktree_blocker
+    let run_refusal = worktree_blocker
         .as_ref()
         .map(|blocker| blocker.reason.clone());
     let predecessor_phase = task
@@ -1922,7 +1922,7 @@ async fn snapshot_task_detail(
             .filter(|pr| pr.phase() == PrPhase::Open)
             .map(|pr| pr.presentation().is_some()),
         completion_refusal: completion_refusal.as_deref(),
-        resume_refusal: resume_refusal.as_deref(),
+        run_refusal: run_refusal.as_deref(),
         ci: active.and_then(|pr| pr.fresh_ci()),
         predecessor_phase,
         launch_refusal: launch_refusal.as_deref(),
@@ -3968,7 +3968,7 @@ mod tests {
                 latest_pr_merge_request: None,
                 latest_pr_presentation_current: None,
                 completion_refusal: None,
-                resume_refusal: None,
+                run_refusal: None,
                 ci: None,
                 predecessor_phase: None,
                 launch_refusal: Some("next launch configuration is invalid"),
@@ -4088,7 +4088,7 @@ mod tests {
                     latest_pr_merge_request: None,
                     latest_pr_presentation_current: None,
                     completion_refusal: None,
-                    resume_refusal: None,
+                    run_refusal: None,
                     ci: None,
                     predecessor_phase: None,
                     launch_refusal: Some("worktree is missing"),
@@ -4118,7 +4118,7 @@ mod tests {
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
             completion_refusal: None,
-            resume_refusal: None,
+            run_refusal: None,
             ci: None,
             predecessor_phase: None,
             launch_refusal: None,

@@ -263,7 +263,7 @@ struct RegistryQueryTests {
           "unresolved_execution": true
         },
         "actions": {
-          "recommended": "resume",
+          "recommended": "run",
           "reason": "resume the parked Task"
         },
         "pr": null,
@@ -294,7 +294,7 @@ struct RegistryQueryTests {
         #expect(result.history.items[0].skill == "task/pursue")
         #expect(result.history.items[0].usage.inputTokens == 1000)
         #expect(result.workMap.tasks.items[0].condition.state == .clear)
-        #expect(result.workMap.tasks.items[0].actions.recommended == .resume)
+        #expect(result.workMap.tasks.items[0].actions.recommended == .run)
     }
 
     @Test("lf wave show is one optionally scoped machine query")

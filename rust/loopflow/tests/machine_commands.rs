@@ -1418,7 +1418,7 @@ impl SharedPlan {
 }
 
 #[test]
-fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
+fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     use loopflow::durable::{OwnershipKind, TaskExecutionSource};
     let fixture = preview_machines();
     let plan = SharedPlan::new(&fixture);
@@ -1466,8 +1466,8 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
         laptop
     );
 
-    // The laptop now writes; unclaim keeps the history and leaves it unowned.
-    let unclaimed = fixture.json(&[
+    // The laptop now writes; unassign keeps the history and leaves it unowned.
+    let unassigned = fixture.json(&[
         "--repository",
         plan.repository.as_str(),
         "task",
@@ -1475,7 +1475,7 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
         task.as_str(),
         "--json",
     ]);
-    assert!(unclaimed["owner"].is_null());
+    assert!(unassigned["owner"].is_null());
     plan.to_remote();
     for store in [&plan.local, &plan.remote] {
         let ownership = store.task_ownership(&task).unwrap();
@@ -1485,7 +1485,7 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
             [
                 OwnershipKind::Claim,
                 OwnershipKind::Handoff,
-                OwnershipKind::Unclaim
+                OwnershipKind::Unassign
             ]
         );
     }
@@ -1616,7 +1616,7 @@ fn task_ownership_never_routes_to_another_persons_machine() {
             .as_deref(),
         Some("Kim")
     );
-    // Someone else's claim stays theirs: no route to mini, no handoff or unclaim.
+    // Someone else's claim stays theirs: no route to mini, no handoff or unassign.
     let route = plan.local.task_execution_route(&task).unwrap();
     assert_eq!(
         (route.machine_id, route.source),
@@ -1625,7 +1625,7 @@ fn task_ownership_never_routes_to_another_persons_machine() {
             TaskExecutionSource::OwningMachine(OwningMachineSource::ThisMachine)
         )
     );
-    assert!(plan.local.unclaim_task(&task).is_err());
+    assert!(plan.local.unassign_task(&task).is_err());
     assert!(plan.local.handoff_task(&task, &mini).is_err());
     // Claiming writes here; the later claim wins.
     plan.local.claim_task(&task).unwrap().unwrap();

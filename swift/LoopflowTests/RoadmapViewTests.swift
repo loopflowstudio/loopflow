@@ -15,7 +15,7 @@ struct RoadmapViewTests {
 
         // Continuing started work is a fresh Start, never an inferred attach
         // or interrupt action.
-        #expect(tasks[0].actions.recommended == .resume)
+        #expect(tasks[0].actions.recommended == .run)
         #expect(roadmapTaskAction(tasks[0]) == .run)
 
         // An explicit User merge request advertises Open PR: the server

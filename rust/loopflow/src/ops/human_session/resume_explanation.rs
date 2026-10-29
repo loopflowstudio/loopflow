@@ -284,6 +284,6 @@ async fn read_resume(
         .ok_or_else(|| super::session_not_found(&session.id))?;
     let state = super::session_state(&metadata);
     report.state = Some(state);
-    report.actions = super::session_actions(state);
+    report.actions = super::session_actions(state, session.interactive);
     Ok(())
 }

@@ -72,6 +72,16 @@ calls `WorkModel.openTaskConversation`. It returns without effect in two ways:
 - *Settle `.opening` with a timeout*: a guard on a guard. Deleting the guard
   removes the failure class.
 
+## Concept review (2026-10-29) — resolved
+
+The rule "decide by what the pane shows, not what it names" had a third door:
+the collapsed-panes offer still tested `sessionId != nil`. Now one predicate,
+`SessionsWorkspace.showsConversation(held:)`, answers it for both
+`WorkModel.showsTaskConversation` and the collapsed offer;
+`SessionPaneView.item` stays the per-pane lookup. A window restored at launch
+with a stale pane still shows the empty state until a click or sidebar
+selection, which matches the acceptance criteria.
+
 ## Demo
 
 Headless: the new WorkDestination test builds LOO-675's shape — Task workspace
@@ -84,7 +94,8 @@ detached Session. Live, after merge (Jack's): open LOO-675 in Desktop.
 
 - In: `WorkModel.openTaskConversation`, `openLinkedTask`, `prepareLinkedTask`,
   `openTaskDestination` hand-off; `WorkspacePanesView.emptyWorkspace` copy;
-  tests in `swift/LoopflowTests/WorkDestinationTests.swift`.
+  collapsed-panes offer; `SessionsWorkspace.showsConversation(held:)`;
+  tests in `WorkDestinationTests.swift` and `WorkspacePanesTests.swift`.
 - Out: Desktop durable logging (LOO-683); Dashboard tile offer
   (`attachTaskConversation`, already reports via `conversationError`); Rust/CLI;
   `DesktopOpening` wire shape (unchanged — no new status).
@@ -115,4 +126,4 @@ opening above." copy. `taskLinkExpectedID`/`taskLinkConversation` keep readers
   including existing `taskConversationActiveElsewhere`, `taskEntryOpensConversationThenRetainsWorkspace`
   and the `.opening`-after-prepare expectation at the "Native mount/input is separate" test.
 
-Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|WorkspacePanesTests|WorkNavigationTests|TaskGraphTests|DesktopPerformanceFixtureTests'` passed (125); the two new WorkDestination tests fail on the old WorkModel. Gate owns the `swift` suite.
+Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|WorkspacePanesTests|WorkNavigationTests|TaskGraphTests|DesktopPerformanceFixtureTests'` passed (119 after the collapsed-offer change); the new WorkDestination and collapsed-offer tests fail on the old code. Gate owns the `swift` suite.

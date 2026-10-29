@@ -58,6 +58,23 @@ struct WorkspacePanesTests {
         _ = try view.inspect().find(text: "Conversation launcher unavailable")
     }
 
+    @Test("Collapsed panes offer Open conversation when the named Session isn't held")
+    func collapsedUnheldSessionOffersEntry() throws {
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("Rendering cannot open work") }
+        let model = WorkModel(query: query, repoPath: location.worktree)
+        let workspace = SessionsWorkspace(key: .init(repository: "repo", kind: .task, id: "task-a"),
+            title: "Task A", location: location, localMachineId: location.machineId)
+        let sessions = workspace.sessionStore(repoPath: location.worktree, query: query)
+        let store = workspace.multiplexer
+        store.load(sessionId: "headless-run", location: location)
+        let pane = try #require(store.sessionPane)
+        store.setCollapsed(paneId: pane.id, collapsed: true)
+        #expect(store.visibleLayout == nil)
+        let view = WorkspacePanesView(workspace: workspace, isFocused: true, sessions: sessions,
+            model: model, onFocus: { _, _ in })
+        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-open-conversation").button()
+    }
+
     @Test("Rendering borrows Task A while B is selected, retaining Files and caller-owned focus")
     func renderRetainedOwner() async throws {
         var reads = 0

@@ -667,16 +667,14 @@ final class WorkModel {
         }
     }
 
-    /// Whether the Task's retained workspace shows a Session, as its pane would:
-    /// a saved layout can name a headless Run or an aged-out Session the store
-    /// doesn't hold, and that pane renders as "No Task conversation open".
+    /// Whether the Task's retained workspace shows a Session, as its pane would.
     private func showsTaskConversation(_ task: RoadmapTask) -> Bool {
         guard let registry = workspaceRegistry, let repository = workspaceRepository, let repoPath,
               repoPath.normalizedFilePath == task.task.repo.normalizedFilePath,
               let workspace = registry.retained(workspaceKey(for: .task(id: task.id), repository: repository))
         else { return false }
         let held = Set(registry.sessionStore(repository: repository, repoPath: repoPath, query: query).sessions.map(\.id))
-        return workspace.multiplexer.layout.allPanes.contains { $0.sessionId.map(held.contains) == true }
+        return workspace.showsConversation(held: held)
     }
 
     /// Attach a Task's primary conversation in its retained workspace without

@@ -25,7 +25,7 @@ struct WorkspacePanesView: View {
                 PaneEmptyState(title: "Panes collapsed", systemImage: "rectangle.compress.vertical",
                                description: "Your panes are retained. Show a pane to continue.") {
                     if workspace.key.kind == .task,
-                       !store.layout.allPanes.contains(where: { $0.sessionId != nil }) {
+                       !workspace.showsConversation(held: Set(sessions.sessions.map(\.id))) {
                         Button("Open conversation") {
                             Task { await model.openTaskConversation(workspace.key.id) }
                         }

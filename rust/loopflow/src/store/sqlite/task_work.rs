@@ -324,66 +324,54 @@ pub(crate) struct ShipStop {
     pub by: Option<LfProcessId>,
 }
 
-fn process_id(id: Option<String>) -> StoreResult<Option<LfProcessId>> {
-    id.map(|id| {
-        LfProcessId::parse(&id)
-            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-    })
-    .transpose()
-}
-
 pub(super) fn ship_stop_in(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Option<ShipStop>> {
     use rusqlite::OptionalExtension;
-    conn.query_row(
-        "SELECT ship_stopped_at,ship_stopped_lf_process_id FROM tasks
-         WHERE id=?1 AND ship_stopped_at IS NOT NULL",
-        [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )
-    .optional()?
-    .map(|(at, by)| {
-        Ok(ShipStop {
-            at,
-            by: process_id(by)?,
-        })
-    })
-    .transpose()
+    Ok(conn
+        .query_row(
+            "SELECT ship_stopped_at,ship_stopped_lf_process_id FROM tasks
+             WHERE id=?1 AND ship_stopped_at IS NOT NULL",
+            [task.as_str()],
+            |row| {
+                Ok(ShipStop {
+                    at: row.get(0)?,
+                    by: row.get(1)?,
+                })
+            },
+        )
+        .optional()?)
 }
+
 pub(super) fn shipping_in(
     conn: &rusqlite::Connection,
     task: &TaskId,
 ) -> StoreResult<Option<TaskShipping>> {
     use rusqlite::OptionalExtension;
-    conn.query_row(
-        &format!("{SHIPPING_SELECT} WHERE id=?1 AND shipped_at IS NOT NULL"),
-        [task.as_str()],
-        read_shipping,
-    )
-    .optional()?
-    .map(|(_, shipping)| shipping)
-    .transpose()
+    Ok(conn
+        .query_row(
+            &format!("{SHIPPING_SELECT} WHERE id=?1 AND shipped_at IS NOT NULL"),
+            [task.as_str()],
+            read_shipping,
+        )
+        .optional()?
+        .map(|(_, shipping)| shipping))
 }
 
 const SHIPPING_SELECT: &str =
     "SELECT id,shipped_at,ship_approved_lf_process_id,ship_lf_process_id,ship_restarts FROM tasks";
 
-type ShippingRow = (String, StoreResult<TaskShipping>);
-
-fn read_shipping(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShippingRow> {
-    let (approved_by, process): (Option<String>, Option<String>) = (row.get(2)?, row.get(3)?);
-    let (shipped_at, restarts) = (row.get(1)?, row.get(4)?);
-    let shipping = process_id(approved_by).and_then(|approved_by| {
-        Ok(TaskShipping {
-            shipped_at,
-            approved_by,
-            process: process_id(process)?,
-            restarts,
-        })
-    });
-    Ok((row.get(0)?, shipping))
+fn read_shipping(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, TaskShipping)> {
+    Ok((
+        row.get(0)?,
+        TaskShipping {
+            shipped_at: row.get(1)?,
+            approved_by: row.get(2)?,
+            process: row.get(3)?,
+            restarts: row.get(4)?,
+        },
+    ))
 }
 
 /// End the Task's handoff, returning what it was, when it was shipping.
@@ -900,7 +888,7 @@ impl SqliteStore {
             .map(|(id, shipping)| {
                 let id = TaskId::parse(&id)
                     .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-                Ok((id, shipping?))
+                Ok((id, shipping))
             })
             .collect()
     }

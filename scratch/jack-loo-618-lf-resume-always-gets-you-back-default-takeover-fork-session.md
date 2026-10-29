@@ -42,19 +42,11 @@ conversation reports `new_thread`. Desktop perf keys `connect_prepare_*` stay: b
 reads them. Desktop's `Preparation {attach, open, moveHere}` is local pane intent over the one
 `resume --prepare` shape; Move here stays explicit.
 
-## Desktop Task hold (concept review 2026-10-28, implemented)
+## Desktop Task hold (concept review 2026-10-28, implemented in b75b9a0cf)
 
-The rename exists so "Resume" means only a conversation. Desktop's Task header, Auto-Ship
-hover row and Task context menu now say Hold/Release, next to the Session pane's own Resume
-button. Settled by the accepted `hold/release` decision:
-
-- Buttons `Hold`/`Release`, menu `Hold Task`/`Release Task`; abandon copy "Hold it instead to
-  keep its work for later." (`:169,:305`).
-- `WorkModel.deferTask(_:deferred:)` / `RegistryQuery.deferTask` → `holdTask(_:held:)`; accessibility
-  ids `task-defer-resume`/`task-defer` → `task-hold-release`/`task-hold`; update
-  `DesktopHeadlessTests.swift:459` and `WorkModelTests.swift:842`.
-- The status label stays "Deferred": `deferred` is the Task state AGENTS.md names, and this Task
-  renames the verbs only.
+Desktop says Hold/Release (`holdTask(_:held:)`, ids `task-hold-release`/`task-hold`) so "Resume"
+means only a conversation. The status label stays "Deferred": AGENTS.md names that Task state;
+this Task renames the verbs only.
 
 ## Remaining
 

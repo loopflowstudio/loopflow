@@ -23,6 +23,13 @@ enum GhosttyTerminalShortcut: String {
               let characters else { return nil }
         self.init(rawValue: characters.lowercased())
     }
+
+    /// ⌘` and ⌘⇧` cycle the app's windows, one per repository, as in every Mac app.
+    /// The terminal hands them back to AppKit instead of sending them to its PTY.
+    static func cyclesWindows(characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
+        let held = modifiers.intersection([.command, .control, .option, .shift])
+        return (held == .command && characters == "`") || (held == [.command, .shift] && characters == "~")
+    }
 }
 
 struct GhosttyTerminalView: View {
@@ -937,6 +944,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         guard let surface else { return super.performKeyEquivalent(with: event) }
 
         let mods = event.modifierFlags
+        if GhosttyTerminalShortcut.cyclesWindows(characters: event.charactersIgnoringModifiers, modifiers: mods) {
+            return false
+        }
         // Only the exact host shortcuts belong here. Modified combinations
         // retain Ghostty bindings and the application's terminal key protocol.
         switch GhosttyTerminalShortcut(characters: event.charactersIgnoringModifiers, modifiers: mods) {

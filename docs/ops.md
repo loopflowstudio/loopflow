@@ -109,8 +109,29 @@ or systemd timer:
 ```bash
 # crontab -e
 */5 * * * *  cd ~/src/product && lf pr reconcile       # settle landings with Desktop closed
-0 9 * * 1    cd ~/src/product && lf release run patch  # Monday's release
 ```
+
+On macOS, a command that runs an agent or reads Keychain credentials, such as a
+release, belongs in a LaunchAgent in your login session. Cron runs outside it
+and cannot reach the Keychain:
+
+```xml
+<!-- ~/Library/LaunchAgents/com.example.product-release.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.example.product-release</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/zsh</string><string>-lc</string>
+    <string>cd ~/src/product &amp;&amp; lf release run patch</string></array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>9</integer></dict>
+</dict></plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.product-release.plist
+```
+
+Crontab stays the answer on Linux and for jobs that need no Keychain.
 
 `lf pr reconcile` checks every recorded landing once and settles verified
 merges, then exits. It repairs nothing.

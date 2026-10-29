@@ -171,7 +171,9 @@ struct WaveStandupTests {
                                               title: "repo", location: nil)
         let view = WorkNavigation.Board.repository
         #expect(model.navigation.waveView == view)
-        // Nothing hidden: the board header has no Show… menu.
+        // The Tasks strip starts hidden; the board header's Show… brings it back.
+        #expect(model.desktopViewParts(repository: "repo").map(\.hidden) == [false, false, true])
+        try WaveStandupBoard(model: model, view: view).inspect().find(viewWithAccessibilityIdentifier: "show-pane-tiles").button().tap()
         #expect(throws: (any Error).self) {
             try WaveStandupBoard(model: model, view: view).inspect().find(viewWithAccessibilityIdentifier: "show-hidden-panes")
         }
@@ -214,6 +216,7 @@ struct WaveStandupTests {
                                                            args: args), model: model, workspaces: registry)
         }
         func parts() -> [DesktopViewPart] { model.desktopViewParts(repository: "repo") }
+        model.setHidden(.tiles, false, in: view)
         // The hover button and `lf desktop zoom -p board` share one zoom; the crumb names it.
         conversation.stripHover("wave-board").isHovered = true
         let board = HideablePart(part: .board, view: view, model: model, workspace: conversation) { Text("Board") }

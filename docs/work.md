@@ -197,12 +197,18 @@ pick. It never edits the plan or files Tasks. Teammates' Tasks are listed and
 left alone.
 
 The Wave's conversation carries the same pass each time you return. Between
-turns, running Graphs keep going on their own. For a schedule, put an ordinary
-command in your own crontab:
+turns, running Graphs keep going on their own. For a schedule, run an ordinary
+command from your own scheduler:
 
 ```bash
 # 0 9 * * *  cd ~/src/product && lf -b --wave billing wave-operate
 ```
+
+On macOS, a scheduled command that runs an agent or reads Keychain credentials
+belongs in a LaunchAgent in your login session (`StartCalendarInterval` in
+`~/Library/LaunchAgents`), because cron runs outside the login session and
+cannot reach the Keychain. Crontab works on Linux and for jobs that need no
+Keychain.
 
 ### Set it up once
 

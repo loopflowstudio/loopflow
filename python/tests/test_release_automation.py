@@ -385,6 +385,21 @@ def test_cron_bootstrap_schedules_macos_jobs_in_the_login_session(tmp_path):
     assert (home / "ran").read_text() == "--wave infrastructure --batch graph telemetry-daily\n"
 
 
+def test_cron_bootstrap_loads_no_macos_agent_until_the_wave_leaves_crontab(tmp_path):
+    repo, env = _cron_host(tmp_path, wave_machine=None, system="Darwin")
+    home = Path(env["HOME"])
+    # macOS refused, or a permission prompt went unanswered and was stopped.
+    crontab = Path(env["PATH"].split(":")[0]) / "crontab"
+    crontab.write_text(crontab.read_text().replace('else table="$(cat)";', "else exit 1;"))
+
+    result = _bootstrap(repo, env)
+
+    assert result.returncode != 0
+    assert "loopflow:infrastructure:telemetry-daily" in (home / "crontab").read_text()
+    assert not (home / "launchctl").exists()
+    assert not list((home / "Library/LaunchAgents").glob("*.plist"))
+
+
 def test_cron_bootstrap_fails_a_red_launchd_telemetry_run(tmp_path):
     repo, env = _cron_host(tmp_path, wave_machine=None, system="Darwin")
     gate = Path(env["HOME"]) / ".lf-machine/install/gates/1/lf"

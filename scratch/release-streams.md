@@ -144,7 +144,7 @@ tested before the next starts.
 7. **Sparkle, one appcast per stream**, EdDSA key in Doppler, Developer ID
    signing of dev builds in CI; the delegate vetoes updates that fail `can_open`.
 
-Check (slice 2, 2026-10-29): spec re-checked, no gap; `--lib ops::release::` 45 pass, `release_tests daily_run_moves_stable minor notes` 22 pass, publisher/automation pytest 55 pass, fmt and architecture pass (after second compress: `--lib ops::release::` 45, publisher/automation pytest 55 pass); gate's nextest and clippy refused by the disk reserve (5.8 GiB free, other Tasks' builds), deferred to PR CI.
+Check (slice 2 gate, 2026-10-29, tree ae4b265b8a): architecture pass, `cargo fmt --check` pass, publisher/automation pytest 55 pass; `--lib ops::release::` 45 and `release_tests daily_run_moves_stable minor notes` 22 passed on this code at compress; gate's nextest and clippy refused by the disk reserve (5.2 GiB free, other Tasks' builds retained), deferred to PR CI.
 
 ## Neighbouring Tasks
 

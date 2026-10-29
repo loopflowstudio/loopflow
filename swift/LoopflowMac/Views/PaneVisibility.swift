@@ -75,7 +75,9 @@ struct HideablePart<Content: View>: View {
                             model.setHidden(part, true, in: view)
                         }
                     }
-                    .padding(4)
+                    // Clear the tile's rounded corner, not just its edge.
+                    .padding(Spacing.sm)
+                    .accessibilityIdentifier("wave-part-actions-\(part.rawValue)")
                 }
             }
             .background(PaneHoverRegion(identifier: "wave-hover-\(part.rawValue)") { [hover] inside in

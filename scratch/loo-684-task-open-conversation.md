@@ -126,4 +126,4 @@ opening above." copy. `taskLinkExpectedID`/`taskLinkConversation` keep readers
   including existing `taskConversationActiveElsewhere`, `taskEntryOpensConversationThenRetainsWorkspace`
   and the `.opening`-after-prepare expectation at the "Native mount/input is separate" test.
 
-Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|WorkspacePanesTests|WorkNavigationTests|TaskGraphTests|DesktopPerformanceFixtureTests'` passed (119 after the collapsed-offer change); the new WorkDestination and collapsed-offer tests fail on the old code. Gate owns the `swift` suite.
+Check: `scripts/test_desktop.sh --filter 'WorkDestinationTests|WorkspacePanesTests|WorkNavigationTests|TaskGraphTests|DesktopPerformanceFixtureTests'` passed (119, after compress shared the WorkspacePanes Task setup); the new WorkDestination and collapsed-offer tests fail on the old code. Gate owns the `swift` suite.

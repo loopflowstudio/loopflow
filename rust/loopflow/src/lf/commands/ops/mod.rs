@@ -1078,9 +1078,33 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     let repo_root = find_repo_root()?;
     let status = release_status(&repo_root, target_name)?;
     println!("Target: {}", status.target);
-    match status.latest_tag.as_deref() {
-        Some(tag) => println!("Latest tag: {tag}"),
-        None => println!("Latest tag: (none)"),
+    let preview = status.preview_tag.as_deref().unwrap_or("(none)");
+    let streams = status.streams.as_ref();
+    match streams
+        .and_then(|streams| streams.preview.as_ref())
+        .filter(|release| status.preview_tag.as_deref() == Some(release.tag.as_str()))
+    {
+        Some(release) => println!(
+            "Preview: {preview} (published {})",
+            release.published_at.format("%Y-%m-%d")
+        ),
+        None => println!("Preview: {preview}"),
+    }
+    if let Some(streams) = streams {
+        let stable = streams
+            .stable
+            .as_ref()
+            .map_or("(none)", |release| release.tag.as_str());
+        match streams.next_stable.as_ref() {
+            Some(next) => println!(
+                "Stable: {stable} (moves to {} on the next release run)",
+                next.tag
+            ),
+            None => println!("Stable: {stable}"),
+        }
+        for hold in &streams.holds {
+            println!("  {hold}");
+        }
     }
 
     match status.workflow_status.as_deref() {

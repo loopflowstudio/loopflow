@@ -140,25 +140,18 @@ tested before the next starts.
    keeps stable off which releases. Assumptions in `scratch/questions.md`; Linear label mapping stays Open.
    Compress: `planning_write::read` takes optional Task columns through one helper.
    `cargo test --lib ops::release:: store::sqlite::planning` + `--test release_tests stable regression`: pass.
-   **Next, from the slice 3 concept review (2026-10-29): show the streams in `lf release status`.**
-   Today it prints `Latest tag: v0.16.x`. That is the newest release (`preview`), but
-   since slice 2 GitHub's "Latest" means `stable`, so the line reads as the wrong
-   stream. Why `stable` hasn't moved is visible only in the cron host's release log.
-   The accepted names (Loopflow's help says `stable`/`preview`) imply the fix:
-   - `lf release status` prints `Preview: v0.16.2 (published 2026-10-29)` in place
-     of `Latest tag`. For `completion: github-release` targets it adds `Stable: v0.15.4`,
-     and when stable is behind the newest release, the reason for each newer release:
-     `v0.16.2 soaks until 2026-11-05` or `LOO-12 holds v0.16.0, v0.16.1`.
-   - One function computes this view from `published_releases`, `regressions` and
-     `stable_advance`. `advance_stable` logs from the same function, so the cron
-     log and status can't disagree. `ReleaseStatusResult.latest_tag` becomes
-     `preview_tag` (not a wire DTO; `release_tests` callers update).
-   - Demo: mark a regression in a fixture repo and run `lf release status`. It names
-     the Task holding `stable`. This is the slice 3 demo that the log line can't give.
-   This settles nothing new. "Landing the fix closes the Task" above means
-   *completing* the Task, which in the work model follows the merge. Completion
-   time is the fix boundary the code uses, and the Task's accepted outcome is
-   exactly "fix shipped". Kept.
+   **Streams in `lf release status` (slice 3 concept review, 2026-10-29) — built.**
+   `release_streams` (from `published_releases`, `regressions`, `stable_advance`) returns
+   `ReleaseStreams { preview, stable, next_stable, holds }`; `StableHold` prints
+   `v0.16.2 soaks until 2026-11-05` / `LOO-12 holds v0.16.0, v0.16.1` for every release
+   newer than where stable is or is about to be. `advance_stable` logs those holds and
+   moves to `next_stable`, so the cron log and status read one view.
+   `ReleaseStatusResult.latest_tag` became `preview_tag` (newest tag, published or
+   completing) plus `streams` for `github-release` targets; the CLI prints
+   `Preview: <tag> (published <date>)`, `Stable: <tag>` (with `moves to <tag> on the next
+   release run` when pending) and the holds indented under it.
+   `ReleaseRunOutcome::NoChanges.latest_tag` keeps its name: it is the notes baseline, not a stream.
+   `cargo test --lib ops::release::` 48 + `--test release_tests -- stable status regression` 9: pass.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default
    stable; switching slower runs `can_open` first. `install.sh --channel`.

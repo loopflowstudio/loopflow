@@ -25,3 +25,8 @@ Check: `uv run pytest python/tests/test_release_automation.py -k cron` — 8 pas
 - Implied follow-up, not now: on macOS the crontab-removal branch exists only to retire this Mac's pre-#1764 lines. Once installed acceptance passes, it is a migration leftover; realign may delete it (and its test) then. Deleting it before acceptance would strand the old lines.
 - Left alone as cosmetic: "cron" naming (`loopflow.cron.*` labels, `.lf/cron/`, `bootstrap-cron-host.sh`) on a platform that uses launchd. Renaming labels would need its own bootout migration for no user benefit.
 - No open product choice.
+
+## Demo decision pass 1 (2026-10-28, headless, standing in for Jack Heart): advance
+- Observed: `uv run pytest python/tests/test_release_automation.py -k cron` — 8 passed, including the stopped-`crontab -` case (no agent loaded, Wave's cron lines kept). The branch diff moves the crontab removal ahead of `agent 9`/`agent 10`. PR #1768 open, checks green.
+- Machine unchanged: both `# loopflow:infrastructure:` cron lines remain, no `loopflow.cron.*` agent loaded — consistent with the stopped headless bootstrap.
+- Not proven here: installed acceptance needs a logged-in Terminal to approve macOS's crontab prompt (see Remains). That is Jack's action after merge, not a repairable code gap, so it does not justify another implement pass.

@@ -14,37 +14,32 @@ pre{padding:.9rem 1rem;overflow-x:auto;border-radius:6px}code{padding:0 .2rem}
 .proposed::before{content:"Proposed";display:block;color:var(--new);font-weight:600;font-size:.9rem}
 ol li{margin:.5rem 0}
 </style></head><body><main>
-<h1>A Session ended by a rebuild should say so to the person watching it</h1>
-<p class="meta">LOO-678 · concept-review step · 2026-10-28 · built from
+<h1>The built change matches the design; nothing to change</h1>
+<p class="meta">LOO-678 · concept-review step (second pass) · 2026-10-28 · built from
 <code>scratch/loo-678-5-whys-syspolicyd.md</code>, <code>rust/loopflow/src/transport/lifetime.rs</code>,
-<code>rust/loopflow/src/transport.rs</code>, <code>scratch/questions.md</code></p>
+<code>rust/loopflow/src/transport.rs</code>, <code>rust/loopflow/src/platform/mod.rs</code>,
+<code>rust/loopflow/src/transport/README.md</code>, <code>scratch/questions.md</code></p>
 
-<h2>Actions → concepts → APIs</h2>
-<p>A person rebuilds lf or removes a worktree. The Session owner running that build notices its
-executable is gone (one <code>stat</code> every 2 s), waits for any turn or Graph step to settle,
-and signals itself. The exit is recorded; <code>lf resume &lt;session&gt;</code> reopens the conversation.
-One owner, one executable identity, one end path. These concepts hold up.</p>
-
-<h2>The mismatch</h2>
-<p>The design ends idle owners <em>even while someone is attached</em>. Today that person sees:</p>
-<pre>$ lf resume session_…        # attached, idle
-$                            # exit 143, nothing else</pre>
-<p>The reason and the way back go only to <code>logs/lf.log</code>.</p>
-<div class="proposed">
-<pre>This Session's lf build was replaced; `lf resume session_…` reopens it.
+<h2>Actions → concepts → APIs (as built)</h2>
+<p>A person rebuilds lf or removes a worktree. The Session owner running that build stats its
+canonical executable every 2 s from its one lifetime thread. Once the file is removed or replaced
+and the owner waits for a person, it tells attached viewers and signals itself with
+<code>libc::kill</code>; the exit is recorded.</p>
+<pre>$ lf resume session_…        # attached, idle; worktree build relinked
+This Session's lf build was replaced; `lf resume session_…` reopens it.
 $</pre>
-<p>The owner sends that line through the existing <code>Response::InputHint</code> before it ends.
-No new protocol variant, no second thread.</p>
-</div>
+<p>One owner, one executable identity, one end path. Installed <code>lf-&lt;digest&gt;</code> owners
+survive <code>lf install</code>. The first pass's mismatch (silent exit for attached viewers) is
+resolved through the existing <code>Response::InputHint</code>.</p>
 
-<h2>Also noted</h2>
-<p>The branch condenses four unrelated Wave memory entries but never writes the LOO-678 entry
-that the condensing was meant to make room for. Realign should do both or neither.</p>
+<h2>Left open, not blocking this PR</h2>
+<div class="proposed">
+<p>A follow-up could let <code>lf resume --all</code> reopen executable-ended Sessions under the new
+build so Dev.app rebuilds keep conversations open. Excluded here.</p>
+</div>
 
 <h2>Questions</h2>
 <ol>
-<li>Should an attached viewer get the one-line reason before an executable-ended Session exits?
-(a) yes, via InputHint — taken as the next implement direction · (b) no, the log is enough</li>
 <li>Should <code>lf resume --all</code> restore executable-ended Sessions under the new build?
 (a) no, as built · (b) yes, in a follow-up Task</li>
 </ol>

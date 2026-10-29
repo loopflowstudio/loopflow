@@ -196,6 +196,10 @@ end sends no hint (it has no viewers).
 **Plan/branch mismatch: settled 2026-10-28** by reverting the MEMORY.md compaction (see
 Proposed Wave memory).
 
+**Second pass (2026-10-28, headless, after implement):** the implemented change matches
+the accepted design — one watcher loop, one end path, InputHint reuse, `libc::kill`,
+README corrected. No rename, merge or deletion left to make. Advances.
+
 Open product choice, not blocking (recorded in `scratch/questions.md`, reversible):
 whether `lf resume --all` should restore executable-ended Sessions under the new build
 so Dev.app rebuilds keep conversations open. Excluded from this PR.

@@ -126,7 +126,7 @@ lf land --wait-and-fix           # stay until it merges, fixing CI on the way
 ## Keep it current
 
 ```bash
-lf install                       # the latest published release, from any directory
+lf install                       # the stable release, from any directory
 lf install --main                # the newest green main build (needs gh auth)
 lf schedule                      # check at login and weekly (macOS); also daily, hourly, 5min
 lf doctor                        # installation, store and process health

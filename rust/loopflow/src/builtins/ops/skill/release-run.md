@@ -38,6 +38,9 @@ That command is responsible for:
 - preparing and signing the publisher's exact artifact set
 - tagging that commit only after its workflow and publisher preparation succeed
 - waiting for the target's configured completion evidence
+- for a `github-release` target, moving GitHub's Latest marker (the `stable`
+  pointer) forward to the newest release published at least 7 days ago, even
+  when there was nothing to release
 
 The repository owns `verify` and `prepare` commands, the selected candidate
 workflow, and the publisher under `release.targets` in `.lf/config.yaml`. Keep

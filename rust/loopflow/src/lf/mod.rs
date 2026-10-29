@@ -2156,7 +2156,7 @@ pub enum SelfCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Install the latest published Loopflow release from any directory
+    /// Install the stable Loopflow release from any directory
     Install {
         /// Install the newest green main build instead (needs `gh` auth)
         #[arg(long)]

@@ -126,9 +126,11 @@ working and tested before the next starts.
    each `package-build.yml` artifact) joins the release assets and `SHA256SUMS`;
    targets must agree on it. `preview` and `dev` need no stored pointer.
    Slice 3 adds the regression filter inside `stable_advance`.
-   Check: `--lib ops::release::tests::stable` 1 pass; `--test release_tests
-   daily_run_moves_stable` 1 pass; `pytest test_release_publisher.py
-   test_release_automation.py` 55 pass; `--lib builtins::` 12 pass.
+   Compress: one `parse_version` now serves `bump_version`, `notes_base` and
+   `published_releases`; the promote test split into success and tampered cases.
+   Check (after compress): `--lib ops::release::` 45 pass; `--test release_tests
+   daily_run_moves_stable minor notes` 22 pass; `pytest test_release_publisher.py
+   test_release_automation.py` 55 pass; clippy `--lib` clean.
 3. **`regressed_in` Task field** and the stable rule reading it.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default

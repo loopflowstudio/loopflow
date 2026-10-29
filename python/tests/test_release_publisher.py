@@ -407,18 +407,20 @@ def test_preview_release_proof_leaves_the_stable_dmg_alone(tmp_path: Path, publi
     assert "website_release_verified" in result.completed_stages
 
 
-@pytest.mark.parametrize("tampered", [False, True])
-def test_promote_points_the_stable_dmg_at_the_published_release(public_release, tampered: bool):
+def test_promote_points_the_stable_dmg_at_the_published_release(public_release):
     remote, _ = public_release
-    remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"] = b"stable release"
-    if tampered:
-        remote["https://public/Loopflow.dmg"] = b"substituted"
-        with pytest.raises(RuntimeError, match="differs from SHA256SUMS"):
-            publish_release.promote_release("v1.2.3")
-        assert remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"] == b"stable release"
-        return
+    remote[publish_release.LATEST_DMG_URL] = b"stable release"
     publish_release.promote_release("v1.2.3")
-    assert remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"] == b"notarized artifact"
+    assert remote[publish_release.LATEST_DMG_URL] == b"notarized artifact"
+
+
+def test_promote_refuses_a_dmg_that_differs_from_its_checksums(public_release):
+    remote, _ = public_release
+    remote[publish_release.LATEST_DMG_URL] = b"stable release"
+    remote["https://public/Loopflow.dmg"] = b"substituted"
+    with pytest.raises(RuntimeError, match="differs from SHA256SUMS"):
+        publish_release.promote_release("v1.2.3")
+    assert remote[publish_release.LATEST_DMG_URL] == b"stable release"
 
 
 def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(

@@ -369,29 +369,25 @@ pub fn generate_release(
 
 /// Parse `X.Y.Z` and bump the specified component.
 pub fn bump_version(current: &str, bump: &str) -> OpsResult<String> {
-    let clean = current.trim().trim_start_matches('v');
-    let parts: Vec<&str> = clean.split('.').collect();
-    if parts.len() != 3 {
-        return Err(OpsError::Parse(format!(
-            "invalid version format: {current}"
-        )));
-    }
-    let major: u32 = parts[0]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid major version: {}", parts[0])))?;
-    let minor: u32 = parts[1]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid minor version: {}", parts[1])))?;
-    let patch: u32 = parts[2]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid patch version: {}", parts[2])))?;
-
+    let (major, minor, patch) = parse_version(current)
+        .ok_or_else(|| OpsError::Parse(format!("invalid version format: {current}")))?;
     match bump {
         "major" => Ok(format!("{}.0.0", major + 1)),
         "minor" => Ok(format!("{}.{}.0", major, minor + 1)),
         "patch" => Ok(format!("{}.{}.{}", major, minor, patch + 1)),
         _ => Err(OpsError::Parse(format!("unknown bump type: {bump}"))),
     }
+}
+
+/// `X.Y.Z`, with an optional leading `v`.
+fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .map(|part| part.parse().ok());
+    let triple = (parts.next()??, parts.next()??, parts.next()??);
+    parts.next().is_none().then_some(triple)
 }
 
 pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseStatusResult> {
@@ -3225,17 +3221,10 @@ fn normalize_version(version: &str) -> String {
 /// Minor notes cover the whole cycle since the preceding `.0`; other versions
 /// cover changes since the latest tag.
 fn notes_base(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<Option<String>> {
-    let version = normalize_version(version);
-    let _ = bump_version(&version, "patch")?;
+    let (major, minor, patch) = parse_version(version)
+        .ok_or_else(|| OpsError::Parse(format!("invalid version format: {version}")))?;
     let latest = latest_tag_optional(repo, target)?;
-    let parts: Vec<u32> = version
-        .split('.')
-        .map(|part| part.parse().expect("version was validated"))
-        .collect();
-    let [major, minor, 0] = parts[..] else {
-        return Ok(latest);
-    };
-    if latest.is_none() || minor == 0 {
+    if patch != 0 || minor == 0 || latest.is_none() {
         return Ok(latest);
     }
     let tag = target_tag(target, &format!("{major}.{}.0", minor - 1));
@@ -4232,7 +4221,6 @@ fn github_release_state(repo: &Path, tag: &str) -> OpsResult<GitHubReleaseState>
 // back. `dev` is green main and has no pointer here.
 
 const STABLE_SOAK: chrono::TimeDelta = chrono::TimeDelta::days(7);
-const STREAM_RELEASE_LIMIT: &str = "100";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -4260,7 +4248,7 @@ fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<Publ
             "release",
             "list",
             "--limit",
-            STREAM_RELEASE_LIMIT,
+            "100",
             "--json",
             "tagName,isLatest,isDraft,isPrerelease,publishedAt",
         ],
@@ -4271,13 +4259,10 @@ fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<Publ
         .into_iter()
         .filter(|entry| !entry.is_draft && !entry.is_prerelease)
         .filter_map(|entry| {
-            let version = version_from_tag(&entry.tag_name, target).ok()?;
-            let mut parts = version.split('.').map(|part| part.parse::<u64>().ok());
-            let triple = (parts.next()??, parts.next()??, parts.next()??);
-            parts.next().is_none().then_some(())?;
+            let version = parse_version(&version_from_tag(&entry.tag_name, target).ok()?)?;
             Some(PublishedRelease {
                 tag: entry.tag_name,
-                version: triple,
+                version,
                 published_at: entry.published_at?,
                 is_latest: entry.is_latest,
             })
@@ -4292,9 +4277,8 @@ fn stable_advance(
 ) -> Option<&PublishedRelease> {
     let current = releases
         .iter()
-        .filter(|release| release.is_latest)
-        .map(|release| release.version)
-        .max();
+        .find(|release| release.is_latest)
+        .map(|release| release.version);
     releases
         .iter()
         .filter(|release| release.published_at + STABLE_SOAK <= now)

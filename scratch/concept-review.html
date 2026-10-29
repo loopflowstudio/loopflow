@@ -6,11 +6,10 @@
 <title>Resume concept review</title>
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--muted:#6b6862;--rule:#e3e0d9;--code:#f1efe9;--now:#8a5a00;--prop:#1f5f8b;--bad:#9b2c2c;--gone:#8d8a83}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--fg:#e9e7e2;--muted:#9a968e;--rule:#2e2d2a;--code:#22211f;--now:#e0b25c;--prop:#79b8e6;--bad:#f08a8a;--gone:#77746e}}
-:root[data-theme="dark"]{--bg:#161615;--fg:#e9e7e2;--muted:#9a968e;--rule:#2e2d2a;--code:#22211f;--now:#e0b25c;--prop:#79b8e6;--bad:#f08a8a;--gone:#77746e}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#e9e7e2;--muted:#9a968e;--rule:#2e2d2a;--code:#22211f;--now:#e0b25c;--prop:#79b8e6;--bad:#f08a8a;--gone:#77746e}}
 body{background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0}
 main{max-width:740px;margin:0 auto;padding:40px 16px 80px}
-h1{font-size:1.5rem;margin:0 0 4px}h2{font-size:1.15rem;margin:44px 0 8px}h3{font-size:1rem;margin:24px 0 6px}
+h1{font-size:1.5rem;margin:0 0 4px}h2{font-size:1.15rem;margin:44px 0 8px}
 .meta{color:var(--muted);font-size:.88rem}
 code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:.88em}
 pre{background:var(--code);padding:12px 14px;border-radius:6px;overflow-x:auto;font-size:.84rem;line-height:1.55}
@@ -19,50 +18,40 @@ table{width:100%;border-collapse:collapse;font-size:.9rem}
 td,th{text-align:left;vertical-align:top;padding:8px 6px;border-bottom:1px solid var(--rule)}
 th{font-weight:600}
 .now{color:var(--now)}.prop{color:var(--prop)}.bad{color:var(--bad);font-weight:600}.gone{color:var(--gone);text-decoration:line-through}
-.callout{border-left:3px solid var(--bad);padding:2px 0 2px 14px;margin:16px 0}
+.callout{border-left:3px solid var(--prop);padding:2px 0 2px 14px;margin:16px 0}
 .legend{font-size:.88rem;color:var(--muted)}
-ol li{margin-bottom:12px}
 </style>
 </head>
 <body><main>
-<h1>Unassign should always end unassigned</h1>
-<p class="meta">LOO-618 · concept-review step (headless, second pass) · 2026-10-29<br>
-Built from <code>scratch/jack-loo-618-…md</code>, <code>scratch/questions.md</code>, <code>ops/task_ownership.rs:43–68</code>, <code>store/sqlite/task_ownership.rs:347–363</code>, PR #1767.</p>
+<h1>Demo fixes match the decisions; nothing open</h1>
+<p class="meta">LOO-618 · concept-review step (headless, third pass) · 2026-10-29<br>
+Built from <code>scratch/jack-loo-618-…md</code> (Demo findings, Takeover scope, Task assignment), <code>scratch/questions.md</code>, <code>lf/commands/util.rs</code> (<code>departure_notice</code>), <code>transport.rs</code> (<code>attach</code>), <code>durable.rs</code> (<code>OwnershipKind</code>), PR #1767.</p>
 
-<p><strong>Implemented (2026-10-29):</strong> <code>lf task unassign</code> on a Task nobody owns no longer refuses and still clears the Linear assignee, from Jack Heart's decision 5a. Below, “Before” is the code as this review found it.</p>
+<p>No decision needed. Each demo finding was a place the code fell short of a decision Jack Heart had already made; the fixes close them without a new concept.</p>
 
-<p class="legend"><span class="now">Amber</span> = on this branch (PR #1767). <span class="prop">Blue</span> = implemented after this review. <span class="gone">Struck</span> = deleted.</p>
+<p class="legend"><span class="bad">Red</span> = what the demo saw. <span class="prop">Blue</span> = on the branch now.</p>
 
 <h2>Actions → concepts → commands</h2>
 <div class="tbl"><table>
-<tr><th>You want to…</th><th>Before (main)</th><th>Now</th></tr>
-<tr><td>Get back to a conversation</td><td><span class="gone">lf connect</span>, <span class="gone">session attach</span>, <span class="gone">--try --takeover --if-free --observe</span></td><td class="now"><code>lf resume [id|task]</code>: takes over an interactive Session; the old terminal names where it went</td></tr>
-<tr><td>Look at a Run (<code>-b</code>, Graph step)</td><td>resume interrupted it</td><td class="now">refused, pointing to <code>lf resume --task &lt;task&gt;</code></td></tr>
-<tr><td>Keep the other client running</td><td>none</td><td class="now"><code>lf resume --fork</code></td></tr>
-<tr><td>Restart, or switch harness</td><td><span class="gone">--fresh</span></td><td class="now"><code>lf session new [-a codex]</code></td></tr>
-<tr><td>Take a Task on</td><td><code>task claim</code></td><td class="now"><code>lf task claim</code>; <code>task run</code> and <code>ship</code> claim if unowned</td></tr>
-<tr><td>Stop anything moving a Task</td><td><span class="gone">task defer / resume</span></td><td class="now"><code>lf task unassign</code>: no owner, no Linear assignee</td></tr>
+<tr><th>You do…</th><th>Demo saw</th><th>Now</th></tr>
+<tr><td><code>lf resume &lt;id&gt;</code> in a second terminal</td><td class="bad">old terminal said nothing</td><td class="prop">old terminal prints “This conversation moved to ttys004: lf resume &lt;id&gt;” and returns to its shell</td></tr>
+<tr><td>Select a Run (<code>-b</code>, Graph step)</td><td class="bad">offered “Open here”</td><td class="prop">no actions; resume refuses, naming <code>lf resume --task</code></td></tr>
+<tr><td><code>lf task status</code></td><td class="bad"><code>action: resume</code></td><td class="prop"><code>action: run</code></td></tr>
+<tr><td><code>lf task unassign</code>, then history</td><td class="bad"><code>unclaim</code></td><td class="prop"><code>unassign</code> (“unassigned this”)</td></tr>
 </table></div>
 
-<h2>The mismatch</h2>
+<h2>Kept on purpose</h2>
 <div class="callout">
-<p>A Task assigned to you in Linear (by <code>task edit --assignee</code>, or in Linear itself) but never claimed in lf:</p>
-<pre>$ lf task unassign LOO-700
-error: Task task_… is unowned</pre>
-<p>Linear still shows you as assignee. The command refuses before reaching <code>assign_task_owner(None)</code>, so the state it names is unreachable.</p>
+<pre>This conversation moved to another terminal on this Machine.</pre>
+<p>Printed only when the new holder recorded no terminal. It says what lf knows rather than guessing a name.</p>
+<p>The ownership entry is still stored and sent as <code>unclaim</code>: released builds' CHECK constraint and peers read that value. People only see <code>unassign</code>.</p>
 </div>
 
-<div class="tbl"><table>
-<tr><th>Who owns it</th><th>Before</th><th>Now</th></tr>
-<tr><td>You</td><td class="now">ends claim, clears assignee</td><td>unchanged</td></tr>
-<tr><td>Nobody</td><td class="bad">refused; assignee kept</td><td class="prop">no ownership write; clears assignee</td></tr>
-<tr><td>Someone else</td><td class="now">refused: “claim it to take it over”</td><td>unchanged — real authority, not a guard</td></tr>
-</table></div>
-
-<p>Proof: <code>local_planning::task_unassign_clears_the_assignee_of_an_unowned_task</code>, a test with an unowned, Linear-assigned Task; <code>lf task unassign</code> succeeds and the assignee clears.</p>
+<h2>Remaining</h2>
+<p>Live re-run of the in-terminal takeover notice. <code>transport_tests</code> covers it in code, but nobody has watched it in a real terminal yet.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Unassign on an unowned Task: (a) clear the Linear assignee and succeed; (b) keep refusing. Settled as (a) from decision 5a; reversible.</li>
+<li>None open. All of these follow from decisions 1a–6.</li>
 </ol>
 </main></body></html>

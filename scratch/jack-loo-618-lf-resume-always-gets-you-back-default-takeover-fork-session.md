@@ -113,6 +113,12 @@ Re-run after the unowned-unassign change: still no product choice open. No remov
 `Deferred` Task state) survives outside the parse-rejection test; the remaining "headless
 Session" text is a maintainer comment (`harness/claude.rs`).
 
+Third pass, after the demo fixes: still no product choice open. All four demo findings follow
+from accepted decisions (old terminal names the holder; Runs aren't resumable; unassign, not
+unclaim). Kept: `departure_notice`'s "another terminal on this Machine" when the new holder
+recorded no terminal; it only names what lf knows. Kept: the stored `unclaim` wire value
+under the `Unassign` name, since released builds' CHECK constraint and peers read it.
+
 ## Demo findings (agent-run, throwaway LF_HOME, real Claude/Codex, 2026-10-29)
 
 Passed: Run id refused (resume, --fork, -b --message, --prepare, --explain); bare `lf resume`

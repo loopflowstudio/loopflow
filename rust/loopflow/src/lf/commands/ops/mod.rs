@@ -1661,10 +1661,10 @@ fn print_prune_report(report: &WorktreePruneReport, all: bool, dry_run: bool) {
             retained.reason
         );
     }
-    let (verb, removing) = if dry_run {
-        ("remove", &report.candidates)
+    let (verb, summary, removing) = if dry_run {
+        ("remove", "to remove", &report.candidates)
     } else {
-        ("removed", &report.removed)
+        ("removed", "removed", &report.removed)
     };
     for target in removing {
         println!(
@@ -1681,7 +1681,7 @@ fn print_prune_report(report: &WorktreePruneReport, all: bool, dry_run: bool) {
         );
     }
     println!(
-        "{} to remove, {} kept.",
+        "{} {summary}, {} kept.",
         removing.len(),
         report.retained.len()
     );

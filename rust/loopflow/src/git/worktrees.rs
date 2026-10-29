@@ -1455,25 +1455,28 @@ fn days_since_head_moved(path: &Path) -> Result<u64, GitError> {
     Ok(now.saturating_sub(moved) / (24 * 60 * 60))
 }
 
-/// Record what removal would otherwise lose, source changes or a head no remote
-/// has, as `refs/lf/pruned/<branch>/<commit>`.
-fn save_unpublished(repo: &Path, target: &WorktreePruneTarget) -> Result<Option<String>, GitError> {
-    let commit = if target.source_changes > 0 {
-        crate::git::snapshot_source_changes(&target.path)?
-    } else if !git_stdout(
+/// Whether any remote-tracking ref already contains `commit`.
+fn is_published(repo: &Path, commit: &str) -> Result<bool, GitError> {
+    let containing = git_stdout(
         repo,
         &[
             "for-each-ref",
             "--count=1",
             "--format=%(refname)",
             "--contains",
-            &target.head,
+            commit,
             "refs/remotes",
         ],
-    )?
-    .trim()
-    .is_empty()
-    {
+    )?;
+    Ok(!containing.trim().is_empty())
+}
+
+/// Record what removal would otherwise lose, source changes or a head no remote
+/// has, as `refs/lf/pruned/<branch>/<commit>`.
+fn save_unpublished(repo: &Path, target: &WorktreePruneTarget) -> Result<Option<String>, GitError> {
+    let commit = if target.source_changes > 0 {
+        crate::git::snapshot_source_changes(&target.path)?
+    } else if is_published(repo, &target.head)? {
         return Ok(None);
     } else {
         target.head.clone()
@@ -1492,7 +1495,11 @@ fn save_unpublished(repo: &Path, target: &WorktreePruneTarget) -> Result<Option<
     Ok(Some(reference))
 }
 
-fn remove_worktree_target(repo: &Path, target: &mut WorktreePruneTarget) -> Result<(), GitError> {
+/// Remove the checkout and its branch, returning the ref that saved its work.
+fn remove_worktree_target(
+    repo: &Path,
+    target: &WorktreePruneTarget,
+) -> Result<Option<String>, GitError> {
     let lease = acquire_worktree_lease(repo, &target.path, "worktree pruning")?;
     if current_branch(&target.path)? != target.branch
         || rev_parse(&target.path, "HEAD")? != target.head
@@ -1503,34 +1510,22 @@ fn remove_worktree_target(repo: &Path, target: &mut WorktreePruneTarget) -> Resu
             stderr: format!("{} changed since listing; retained", target.path.display()),
         });
     }
-    target.saved_ref = save_unpublished(repo, target)?;
+    let saved_ref = save_unpublished(repo, target)?;
     // Only notes, Loopflow state and ignored output remain, or `--all` saved them.
     worktree_remove_owned(repo, &target.path, true, &lease, &|_| {})?;
-    match &target.branch {
-        Some(branch) => delete_local_branch_at(repo, branch, &target.head),
-        None => Ok(()),
+    if let Some(branch) = &target.branch {
+        delete_local_branch_at(repo, branch, &target.head)?;
     }
+    Ok(saved_ref)
 }
 
-/// The value held for `path` or a path inside it.
-fn held_by<'a, V>(path: &Path, holders: &'a HashMap<PathBuf, V>) -> Option<&'a V> {
+/// The first holder of `path` or of a path inside it.
+fn held_by<'a, V>(path: &Path, holders: impl IntoIterator<Item = (&'a PathBuf, V)>) -> Option<V> {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    holders.iter().find_map(|(held, value)| {
+    holders.into_iter().find_map(|(held, value)| {
         let held = held.canonicalize().unwrap_or_else(|_| held.clone());
         (held == path || held.starts_with(&path)).then_some(value)
     })
-}
-
-fn path_is_protected(path: &Path, protected_paths: &HashSet<PathBuf>) -> bool {
-    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    protected_paths
-        .iter()
-        .map(|protected| {
-            protected
-                .canonicalize()
-                .unwrap_or_else(|_| protected.clone())
-        })
-        .any(|protected| protected == path || protected.starts_with(&path))
 }
 
 #[derive(Debug)]
@@ -1558,7 +1553,12 @@ fn classify(
         Some(Keep::UnfinishedTask { task: task.clone() })
     } else if branch.is_some_and(|branch| ownership.live_branches.contains(branch)) {
         Some(Keep::UnfinishedTaskBranch)
-    } else if path_is_protected(&state.path, &ownership.process_paths) {
+    } else if held_by(
+        &state.path,
+        ownership.process_paths.iter().map(|path| (path, ())),
+    )
+    .is_some()
+    {
         Some(Keep::InUse)
     } else {
         None
@@ -1568,14 +1568,9 @@ fn classify(
     }
 
     let source_changes = source_changes(&state.path)?;
-    let finished = held_by(&state.path, &ownership.finished_checkouts)
-        .cloned()
-        .map(Some)
-        .or_else(|| {
-            branch
-                .filter(|branch| ownership.finished_branches.contains(*branch))
-                .map(|_| None)
-        });
+    let finished_task = held_by(&state.path, &ownership.finished_checkouts).cloned();
+    let finished = finished_task.is_some()
+        || branch.is_some_and(|branch| ownership.finished_branches.contains(branch));
     let verdict = if source_changes > 0 {
         Err(Keep::Dirty {
             files: source_changes,
@@ -1586,8 +1581,10 @@ fn classify(
         Ok(WorktreePruneReason::Merged)
     } else if state.pull_request == Some(PullRequestState::Closed) {
         Ok(WorktreePruneReason::ClosedPullRequest)
-    } else if let Some(task) = finished {
-        Ok(WorktreePruneReason::FinishedTask { task })
+    } else if finished {
+        Ok(WorktreePruneReason::FinishedTask {
+            task: finished_task,
+        })
     } else if state.pull_request == Some(PullRequestState::Open) {
         Err(Keep::OpenPullRequest)
     } else {
@@ -1651,9 +1648,12 @@ pub fn prune_worktrees(
         return Ok(report);
     }
 
-    for mut target in report.candidates.clone() {
-        match remove_worktree_target(repo, &mut target) {
-            Ok(()) => report.removed.push(target),
+    for target in report.candidates.clone() {
+        match remove_worktree_target(repo, &target) {
+            Ok(saved_ref) => report.removed.push(WorktreePruneTarget {
+                saved_ref,
+                ..target
+            }),
             Err(error) => report.failed.push(WorktreePruneFailure {
                 target,
                 error: error.to_string(),
@@ -2555,7 +2555,7 @@ mod tests {
             fs::write(path.join("work.txt"), "delivered").unwrap();
             git(&path, &["add", "."]);
             git(&path, &["commit", "-qm", "delivered"]);
-            let mut target = super::WorktreePruneTarget {
+            let target = super::WorktreePruneTarget {
                 branch: Some("finished".to_string()),
                 head: crate::git::rev_parse(&path, "HEAD").unwrap(),
                 path: path.clone(),
@@ -2570,7 +2570,7 @@ mod tests {
                 "untracked" => fs::write(path.join("notes.txt"), "unfinished").unwrap(),
                 _ => unreachable!(),
             }
-            assert!(super::remove_worktree_target(fixture.path(), &mut target).is_err());
+            assert!(super::remove_worktree_target(fixture.path(), &target).is_err());
             assert!(path.exists());
             assert!(crate::git::rev_parse(fixture.path(), "finished").is_ok());
             if matches!(change, "tracked" | "untracked") {
@@ -2590,11 +2590,9 @@ mod tests {
         let path = fixture.create_named_worktree("protected");
         // Path protection also includes a process holding a nested directory.
         fs::create_dir(path.join("nested")).unwrap();
-        assert!(super::path_is_protected(
-            &path,
-            &HashSet::from([path.join("nested")])
-        ));
-        let mut target = super::WorktreePruneTarget {
+        let nested = path.join("nested");
+        assert!(super::held_by(&path, [(&nested, ())]).is_some());
+        let target = super::WorktreePruneTarget {
             branch: Some("protected".to_string()),
             head: crate::git::rev_parse(&path, "HEAD").unwrap(),
             path: path.clone(),
@@ -2604,7 +2602,7 @@ mod tests {
         };
         let _lease =
             crate::git::acquire_worktree_lease(fixture.path(), &path, "live operation").unwrap();
-        assert!(super::remove_worktree_target(fixture.path(), &mut target).is_err());
+        assert!(super::remove_worktree_target(fixture.path(), &target).is_err());
         assert!(path.exists());
     }
 

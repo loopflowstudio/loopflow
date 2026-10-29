@@ -3,8 +3,9 @@
 //! An owner whose lf executable is removed or replaced (a worktree deleted, a
 //! build relinked, Dev.app rebuilt) ends as soon as its Sessions wait for a
 //! person, viewers notwithstanding: it would otherwise run a vanished build
-//! indefinitely. An owner nobody has viewed for `session.end_detached_after`
-//! ends the same way. Ending stops its agent and records its exit, so
+//! indefinitely. Its attached viewers are told why and how to return. An owner
+//! nobody has viewed for `session.end_detached_after` ends the same way.
+//! Ending stops its agent and records its exit, so
 //! `lf resume` reopens the conversation from provider history and
 //! `lf resume --all` leaves it alone.
 
@@ -23,23 +24,26 @@ const LONGEST_PAUSE: Duration = Duration::from_secs(5 * 60);
 /// How often an owner looks at its executable.
 const EXECUTABLE_PAUSE: Duration = Duration::from_secs(2);
 
-/// Record viewer changes sent on the returned channel and end this owner once
-/// its executable is gone or it has gone unviewed past its limit.
-pub(super) fn spawn(owner: LfProcessId) -> mpsc::Sender<bool> {
+/// Record viewer changes sent on the first channel. Once the executable is gone
+/// or the owner has gone unviewed past its limit, send the second channel what
+/// to tell attached viewers; the serve loop delivers it and ends the owner.
+pub(super) fn spawn(owner: LfProcessId) -> (mpsc::Sender<bool>, mpsc::Receiver<Option<String>>) {
     let executable = Executable::current();
     let (viewers, changes) = mpsc::channel();
+    let (end, ending) = mpsc::channel();
     std::thread::spawn(move || {
-        if let Err(error) = watch(&owner, executable.as_ref(), &changes) {
+        if let Err(error) = watch(&owner, executable.as_ref(), &changes, &end) {
             tracing::warn!(%error, %owner, "Session owner policy stopped");
         }
     });
-    viewers
+    (viewers, ending)
 }
 
 fn watch(
     owner: &LfProcessId,
     executable: Option<&Executable>,
     changes: &mpsc::Receiver<bool>,
+    end: &mpsc::Sender<Option<String>>,
 ) -> Result<()> {
     let store = crate::journal::process_ledger()?;
     let repo = store.process(owner)?.and_then(|process| process.repo);
@@ -69,15 +73,27 @@ fn watch(
                 let gone = executable
                     .and_then(|executable| executable.gone().map(|how| (executable, how)));
                 if (gone.is_some() || expired) && store.owner_waits_for_person(owner)? {
-                    match gone {
-                        Some((executable, how)) => tracing::warn!(
-                            %owner,
-                            path = %executable.path.display(),
-                            "ending a Session whose lf executable was {how}"
-                        ),
-                        None => tracing::info!(%owner, "ending a Session nobody has viewed"),
+                    let hint = match gone {
+                        Some((executable, how)) => {
+                            tracing::warn!(
+                                %owner,
+                                path = %executable.path.display(),
+                                "ending a Session whose lf executable was {how}"
+                            );
+                            store.owner_sessions(owner)?.first().map(|session| {
+                                format!(
+                                    "This Session's lf build was {how}; `lf resume {session}` reopens it."
+                                )
+                            })
+                        }
+                        None => {
+                            tracing::info!(%owner, "ending a Session nobody has viewed");
+                            None
+                        }
+                    };
+                    if end.send(hint).is_err() {
+                        crate::platform::kill_process(std::process::id());
                     }
-                    crate::platform::kill_process(std::process::id());
                     return Ok(());
                 }
                 if expired {

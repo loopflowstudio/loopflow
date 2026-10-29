@@ -1,6 +1,6 @@
 # LOO-678: Sessions end when their lf build is gone
 
-Status: draft design (kickoff, 2026-10-28; reconfirmed in kickoff the same day). Jack Heart asked for a 5-whys investigation,
+Status: implemented on this branch (2026-10-28); gate, publication and live acceptance remain. Jack Heart asked for a 5-whys investigation,
 then a fix and shipped PR (Task comment, 2026-10-28).
 
 ## Problem
@@ -29,6 +29,21 @@ lf resume <session>        # reopens the conversation under the installed lf
 
 Live acceptance (Jack, after merge): rebuild Dev.app and remove a worktree while Sessions
 from each are open; `top -l 2 -stats pid,command,cpu | grep syspolicyd` stays near 0%.
+
+## Proposed Wave memory (not written)
+
+An earlier pass compacted four
+unrelated entries (LOO-499/503/504/440) to make room; implement reverted it on
+2026-10-28 because no Graph step on this branch calls for maintaining Wave memory.
+The branch's MEMORY.md now equals main's, which `lf context` puts at 16332/16000
+tokens (332 over, inherited from main). Compress left it alone for the same reason.
+A memory-maintaining step writes this entry and owns any compaction:
+
+LOO-678 (2026-10-28): a Session owner ends itself when its canonical lf executable is
+removed or replaced and it waits for a person; installed `lf-<digest>` owners survive
+`lf install`. Ending must launch nothing (`kill_process` uses `libc::kill`). The
+syspolicyd spawner and kernel trigger stayed unidentified; the next occurrence logs the
+path to `logs/lf.log`.
 
 ## Five whys
 
@@ -88,10 +103,9 @@ runs. The fix ties it to the executable: the one participant always present deci
 
 **Every Session owner watches its own executable and ends when it is removed or replaced.**
 
-- At `transport::serve` start, record the identity of `current_exe()`: path plus
-  `(dev, ino, len, mtime)` from `fs::metadata`.
-- The owner's existing watcher thread (`transport/idle.rs`, renamed to what it now is:
-  the owner's lifetime policy) wakes at least every 2 s and stats the path. Missing file or
+- At `transport::serve` start, record the identity of `canonicalize(current_exe())`:
+  path plus `(dev, ino, len, mtime, mtime_nsec)` from `fs::metadata`.
+- The owner's existing watcher thread (`transport/lifetime.rs`, formerly `idle.rs`) wakes at least every 2 s and stats the path. Missing file or
   changed identity = **executable gone**. One `stat` per owner per 2 s.
 - Executable gone and the owner waits for a person (`owner_waits_for_person`) → end now,
   **viewers notwithstanding**. Holding a turn or a Graph step → end when it settles,
@@ -101,7 +115,7 @@ runs. The fix ties it to the executable: the one participant always present deci
   and `lf resume --all` leaves it alone.
 - `platform::kill_process` signals with `libc::kill` instead of spawning `kill` (all four
   callers). Ending must launch nothing.
-- One `tracing::warn!` with owner, Session, path and `removed|replaced` → `logs/lf.log`, so
+- One `tracing::warn!` with owner, path and `removed|replaced` → `logs/lf.log`, so
   the next occurrence names itself.
 - Correct the transport README: document the executable rule; delete the Machine-wide sweep
   and 48-hour claims.
@@ -130,8 +144,8 @@ teaching each remover about processes.
   `lf session list`/Desktop and resumes with `lf resume`.
 - **Source of truth:** the owner's `processes` row (completion) and Session history, written
   by the existing exit path. No new persisted field.
-- **Affected surfaces:** `transport.rs` (identity at serve start), `transport/idle.rs`
-  (policy), `platform/mod.rs` (`kill_process`), `transport/README.md`. No DTO, schema or
+- **Affected surfaces:** `transport.rs` (spawns the policy), `transport/lifetime.rs`
+  (identity and policy), `platform/mod.rs` (`kill_process`), `transport/README.md`. No DTO, schema or
   Swift change; Desktop reads the existing ended state.
 - **Absent/error states:** `current_exe()` or the first `metadata` fails → no executable
   rule for that owner, one warning; detached limit still applies. A transient stat error
@@ -168,10 +182,28 @@ One PR.
    running/ends/stop and working-turn helpers are `Fixture` methods shared with the
    detached-limit and resume-all tests. Remaining: gate, publication, Jack's live acceptance.
 
+## Concept review (2026-10-28, headless)
+
+Concepts hold: one owner, one executable identity, one end path. No rename or merge.
+
+**Attached viewers learn why (implemented 2026-10-28).** The lifetime thread sends
+the serve loop `This Session's lf build was <removed|replaced>; \`lf resume <session>\`
+reopens it.` over a channel; the serve loop queues it as the existing
+`Response::InputHint` to attached viewers, flushes, then signals itself as before. No new
+variant, DTO or thread; headless-Run and busy-owner rules unchanged. The detached-limit
+end sends no hint (it has no viewers).
+
+**Plan/branch mismatch: settled 2026-10-28** by reverting the MEMORY.md compaction (see
+Proposed Wave memory).
+
+Open product choice, not blocking (recorded in `scratch/questions.md`, reversible):
+whether `lf resume --all` should restore executable-ended Sessions under the new build
+so Dev.app rebuilds keep conversations open. Excluded from this PR.
+
 ## Done when
 
-- Deleting or replacing the binary under an idle, viewed Session ends it within 10 s; a
-  busy one ends after its turn; both resume. (`cargo test -p loopflow --test transport_tests
+- Deleting or replacing the binary under an idle, viewed Session ends it within 10 s and
+  its viewer prints the reason and `lf resume <session>`; a busy one ends after its turn. (`cargo test -p loopflow --test transport_tests
   sessions_end_when_their_lf_executable_goes < /dev/null`, passes headless.)
 - `detached_sessions_end_after_their_limit` still passes.
 - The focused test serves one owner through a symlink to the copy and swaps the symlink to
@@ -179,4 +211,4 @@ One PR.
 - `grep -n 'Command::new("kill")' rust/loopflow/src/platform/mod.rs` → no match.
 - Jack's live acceptance above (post-merge verify).
 
-Check results: `cargo test -p loopflow --test transport_tests -- sessions_end_when_their_lf_executable_goes detached_sessions_end_after_their_limit resume_all_restores_interrupted_sessions_and_leaves_left_ones` pass, `cargo clippy -p loopflow --all-targets -- -D warnings` clean after compress (2026-10-28). Gate owns affected suites.
+Check results: `cargo test -p loopflow --test transport_tests sessions_end_when_their_lf_executable_goes < /dev/null` pass (viewer hint asserted), `cargo clippy -p loopflow --all-targets -- -D warnings` clean (2026-10-28). Gate owns affected suites.

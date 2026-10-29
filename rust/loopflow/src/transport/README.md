@@ -31,7 +31,8 @@ skips. Desktop runs it at launch.
 A Session nobody views ends after `session.end_detached_after` (default `24h`,
 `off` disables it), counted from when its last viewer left. A Session whose lf
 executable is removed or replaced (a deleted worktree, a relinked build, a rebuilt
-Dev.app) ends within seconds, viewed or not, and logs the path to `logs/lf.log`.
+Dev.app) ends within seconds, viewed or not, and logs the path to `logs/lf.log`;
+an attached viewer prints why and the `lf resume <session>` that reopens it.
 A turn in progress or a Graph step keeps its owner running until it settles; a
 viewer keeps it only from the detached limit; headless Runs are never ended. Each
 owner judges only itself and ends by signaling itself, which stops its agent and

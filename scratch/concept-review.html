@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-678 concept review</title>
+<style>
+:root{color-scheme:light dark;--fg:#1b1b1b;--bg:#fdfdfb;--mute:#6a6a6a;--line:#ddd;--new:#2f7d4a;--code:#f2f1ec}
+@media (prefers-color-scheme:dark){:root{--fg:#e8e6e1;--bg:#161616;--mute:#9a9a9a;--line:#333;--new:#6fcf8e;--code:#222}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,system-ui,sans-serif}
+main{max-width:44rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+h1{font-size:1.5rem;margin:0 0 .25rem}h2{font-size:1.1rem;margin:2.5rem 0 .5rem}
+.meta{color:var(--mute);font-size:.9rem}
+pre,code{font:.88rem/1.5 ui-monospace,Menlo,monospace;background:var(--code)}
+pre{padding:.9rem 1rem;overflow-x:auto;border-radius:6px}code{padding:0 .2rem}
+.proposed{border-left:3px solid var(--new);padding-left:1rem}
+.proposed::before{content:"Proposed";display:block;color:var(--new);font-weight:600;font-size:.9rem}
+ol li{margin:.5rem 0}
+</style></head><body><main>
+<h1>A Session ended by a rebuild should say so to the person watching it</h1>
+<p class="meta">LOO-678 · concept-review step · 2026-10-28 · built from
+<code>scratch/loo-678-5-whys-syspolicyd.md</code>, <code>rust/loopflow/src/transport/lifetime.rs</code>,
+<code>rust/loopflow/src/transport.rs</code>, <code>scratch/questions.md</code></p>
+
+<h2>Actions → concepts → APIs</h2>
+<p>A person rebuilds lf or removes a worktree. The Session owner running that build notices its
+executable is gone (one <code>stat</code> every 2 s), waits for any turn or Graph step to settle,
+and signals itself. The exit is recorded; <code>lf resume &lt;session&gt;</code> reopens the conversation.
+One owner, one executable identity, one end path. These concepts hold up.</p>
+
+<h2>The mismatch</h2>
+<p>The design ends idle owners <em>even while someone is attached</em>. Today that person sees:</p>
+<pre>$ lf resume session_…        # attached, idle
+$                            # exit 143, nothing else</pre>
+<p>The reason and the way back go only to <code>logs/lf.log</code>.</p>
+<div class="proposed">
+<pre>This Session's lf build was replaced; `lf resume session_…` reopens it.
+$</pre>
+<p>The owner sends that line through the existing <code>Response::InputHint</code> before it ends.
+No new protocol variant, no second thread.</p>
+</div>
+
+<h2>Also noted</h2>
+<p>The branch condenses four unrelated Wave memory entries but never writes the LOO-678 entry
+that the condensing was meant to make room for. Realign should do both or neither.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>Should an attached viewer get the one-line reason before an executable-ended Session exits?
+(a) yes, via InputHint — taken as the next implement direction · (b) no, the log is enough</li>
+<li>Should <code>lf resume --all</code> restore executable-ended Sessions under the new build?
+(a) no, as built · (b) yes, in a follow-up Task</li>
+</ol>
+</main></body></html>

@@ -271,6 +271,19 @@ impl Viewer {
         self.socket.read_line(&mut line).unwrap();
         serde_json::from_str(&line).unwrap()
     }
+    /// Every hint received until the owner closes this connection.
+    fn hints(&mut self) -> Vec<String> {
+        let mut hints = Vec::new();
+        let mut line = String::new();
+        while matches!(self.socket.read_line(&mut line), Ok(1..)) {
+            let value: Value = serde_json::from_str(&line).unwrap();
+            if value["kind"] == "input_hint" {
+                hints.push(value["hint"].as_str().unwrap().to_owned());
+            }
+            line.clear();
+        }
+        hints
+    }
     fn input(&mut self, text: &str) {
         self.send(json!({"kind":"input","token":self.token,"bytes":text.as_bytes()}));
     }
@@ -1160,6 +1173,16 @@ fn sessions_end_when_their_lf_executable_goes() {
 
     fixture.ends(&owners[0]);
     fixture.ends(&owners[1]);
+    // Their viewers learn why and how to return.
+    for (index, how) in [(0, "removed"), (1, "replaced")] {
+        let session = fixture.session_of_owner(&owners[index]);
+        assert_eq!(
+            viewers[index].hints(),
+            [format!(
+                "This Session's lf build was {how}; `lf resume {session}` reopens it."
+            )]
+        );
+    }
     // Several judgments later, the busy and installed owners still run.
     std::thread::sleep(Duration::from_secs(4));
     assert!(fixture.running(&owners[2]), "busy owner ended mid-turn");

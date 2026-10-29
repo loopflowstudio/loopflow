@@ -404,7 +404,7 @@ def cmd_run_debug(repo: Path = REPO_ROOT, world: Path | None = None) -> int:
         return result
     if not _check_repository_opening(repo, world):
         return 1
-    print("Logs: ~/Library/Logs/Loopflow/")
+    print("Logs: ~/.lf/logs/lf.log (exits: lf doctor)")
     print(f"Stream log: {LOOPFLOW_STREAM_LOG}")
     print(f"Bundled lf: {DEV_APP}/Contents/MacOS/lf")
     print(

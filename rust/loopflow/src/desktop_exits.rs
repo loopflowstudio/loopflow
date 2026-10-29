@@ -33,12 +33,13 @@ const SEARCH_TIMEOUT: Duration = Duration::from_secs(20);
 /// A recorded `exit()` names its caller; the system record around it names the status.
 const EXIT_SLACK: chrono::TimeDelta = chrono::TimeDelta::seconds(60);
 
-/// runningboardd's `(namespace, code, wait status)` for a process launchd reaped.
+/// runningboardd's `(namespace, code, wait status)` for a process launchd reaped, and when.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Termination {
     namespace: i64,
     code: i64,
     status: i64,
+    at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,18 +210,28 @@ fn describe(
             .or(launch.at)
             .unwrap_or(end - HEARTBEAT);
         let end = end.min(start + HEARTBEAT);
-        let what = match lookup(pid, start, end) {
-            SystemRecord::Found(termination) => {
-                format!("{} before {}", explain(termination), clock(end, now))
-            }
-            SystemRecord::Missing => format!(
+        let (what, end) = match lookup(pid, start, end) {
+            SystemRecord::Found(termination) => match termination.at {
+                Some(at) => (explain(termination, &format!(" {}", clock(at, now))), at),
+                None => (
+                    format!("{} before {}", explain(termination, ""), clock(end, now)),
+                    end,
+                ),
+            },
+            SystemRecord::Missing => (
+                format!(
                 "ended without a record between {} and {} (SIGKILL before the first heartbeat, power loss, or the system log rotated)",
-                clock(start, now),
-                clock(end, now)
+                    clock(start, now),
+                    clock(end, now)
+                ),
+                end,
             ),
-            SystemRecord::Unavailable => format!(
-                "ended without a record before {}; system record unavailable",
-                clock(end, now)
+            SystemRecord::Unavailable => (
+                format!(
+                    "ended without a record before {}; system record unavailable",
+                    clock(end, now)
+                ),
+                end,
             ),
         };
         return format!("{title} {what}{}{vitals}", lived(launch, end));
@@ -250,7 +261,9 @@ fn describe(
             };
             let status = match (launch.pid, at) {
                 (Some(pid), Some(at)) => match lookup(pid, at - EXIT_SLACK, at + EXIT_SLACK) {
-                    SystemRecord::Found(termination) => format!("; {}", explain(termination)),
+                    SystemRecord::Found(termination) => {
+                        format!("; {}", explain(termination, ""))
+                    }
                     _ => String::new(),
                 },
                 _ => String::new(),
@@ -348,21 +361,25 @@ fn parse_time(text: &str) -> Option<DateTime<Utc>> {
         .map(|at| at.with_timezone(&Utc))
 }
 
-fn explain(termination: Termination) -> String {
+/// How the process ended; `when` (` HH:MM:SS` or empty) follows the verb.
+fn explain(termination: Termination, when: &str) -> String {
     let Termination {
         namespace,
         code,
         status,
+        ..
     } = termination;
     match namespace {
-        0 if status & 0x7f == 0 => format!("exited with status {}", (status >> 8) & 0xff),
-        0 => format!("was killed by {}", signal_name(status & 0x7f)),
-        1 => format!("was ended by jetsam (memory pressure, code {code})"),
-        2 if code == 9 => "was killed by SIGKILL (Force Quit, kill -9, or the system)".to_string(),
-        2 => format!("was killed by {}", signal_name(code)),
-        _ => {
-            format!("was ended by the system (namespace {namespace}, code {code}, status {status})")
+        0 if status & 0x7f == 0 => format!("exited{when} with status {}", (status >> 8) & 0xff),
+        0 => format!("was killed{when} by {}", signal_name(status & 0x7f)),
+        1 => format!("was ended{when} by jetsam (memory pressure, code {code})"),
+        2 if code == 9 => {
+            format!("was killed{when} by SIGKILL (Force Quit, kill -9, or the system)")
         }
+        2 => format!("was killed{when} by {}", signal_name(code)),
+        _ => format!(
+            "was ended{when} by the system (namespace {namespace}, code {code}, status {status})"
+        ),
     }
 }
 
@@ -456,7 +473,7 @@ fn system_record(pid: u32, start: DateTime<Utc>, end: DateTime<Utc>) -> SystemRe
     let format = "%Y-%m-%d %H:%M:%S+0000";
     let mut command = Command::new(binary);
     command
-        .args(["show", "--style", "compact", "--start"])
+        .args(["show", "--style", "ndjson", "--start"])
         .arg(start.format(format).to_string())
         .arg("--end")
         .arg(end.format(format).to_string())
@@ -473,10 +490,25 @@ fn system_record(pid: u32, start: DateTime<Utc>, end: DateTime<Utc>) -> SystemRe
     }
 }
 
+/// The newest termination among `log show --style ndjson` records.
 fn parse_termination(output: &str) -> Option<Termination> {
+    output.lines().rev().find_map(|line| {
+        let record = serde_json::from_str::<Value>(line).ok()?;
+        let message = record.get("eventMessage").and_then(Value::as_str)?;
+        // ndjson timestamps carry their offset: `2026-10-29 07:27:25.606149-0700`.
+        let at = record
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|at| DateTime::parse_from_str(at, "%Y-%m-%d %H:%M:%S%.f%z").ok())
+            .map(|at| at.with_timezone(&Utc));
+        parse_message(message, at)
+    })
+}
+
+fn parse_message(message: &str, at: Option<DateTime<Utc>>) -> Option<Termination> {
     const MARKER: &str = "termination reported by launchd (";
-    let start = output.rfind(MARKER)? + MARKER.len();
-    let inner = output[start..].split(')').next()?;
+    let start = message.rfind(MARKER)? + MARKER.len();
+    let inner = message[start..].split(')').next()?;
     let mut numbers = inner.split(',').map(|part| part.trim().parse::<i64>());
     let (Some(Ok(namespace)), Some(Ok(code)), Some(Ok(status)), None) = (
         numbers.next(),
@@ -490,6 +522,7 @@ fn parse_termination(output: &str) -> Option<Termination> {
         namespace,
         code,
         status,
+        at,
     })
 }
 
@@ -499,7 +532,7 @@ mod tests {
 
     use chrono::{DateTime, TimeDelta, Utc};
 
-    use super::{minute, parse_termination, report, SystemRecord, Termination};
+    use super::{clock, minute, parse_termination, report, SystemRecord, Termination};
     use crate::lf::commands::doctor::Status;
 
     fn now() -> DateTime<Utc> {
@@ -564,6 +597,7 @@ mod tests {
                     namespace: 0,
                     code: 0,
                     status: 256,
+                    at: Some("2026-10-29T14:27:25.606Z".parse().unwrap()),
                 })
             },
         );
@@ -591,20 +625,14 @@ mod tests {
             |pid| pid == 9500,
             |_, start, end| {
                 searched.set(Some((start, end)));
-                SystemRecord::Found(Termination {
-                    namespace: 2,
-                    code: 9,
-                    status: 9,
-                })
+                found_at(2, 9, 9, "2026-10-29T16:14:02Z")
             },
         );
         assert_eq!(killed.status, Status::Warn);
-        assert!(killed.detail.contains(
-            "Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system)"
-        ));
+        let ended = clock("2026-10-29T16:14:02Z".parse().unwrap(), now());
         let vitals = minute("2026-10-29T16:10:00Z".parse().unwrap(), now());
         assert!(killed.detail.ends_with(&format!(
-            ", 1h16m after launch; last vitals {vitals}: 412 MB, 61 lf reads/5 min"
+            "Loopflow 0.15.1 (pid 9446) was killed {ended} by SIGKILL (Force Quit, kill -9, or the system), 1h14m after launch; last vitals {vitals}: 412 MB, 61 lf reads/5 min"
         )));
         let (start, end) = searched.get().unwrap();
         assert_eq!(
@@ -621,17 +649,12 @@ mod tests {
             log,
             now(),
             |pid| pid == 9500,
-            |_, _, _| {
-                SystemRecord::Found(Termination {
-                    namespace: 0,
-                    code: 0,
-                    status: 256,
-                })
-            },
+            |_, _, _| found(0, 0, 256),
         );
         assert!(status
             .detail
             .contains("(pid 9446) exited with status 1 before "));
+        assert!(status.detail.contains(", 1h16m after launch"));
 
         let missing = report(
             &journal,
@@ -677,6 +700,16 @@ mod tests {
             namespace,
             code,
             status,
+            at: None,
+        })
+    }
+
+    fn found_at(namespace: i64, code: i64, status: i64, at: &str) -> SystemRecord {
+        SystemRecord::Found(Termination {
+            namespace,
+            code,
+            status,
+            at: Some(at.parse().unwrap()),
         })
     }
 
@@ -747,12 +780,27 @@ mod tests {
             launch("B", "2026-10-29T15:00:00Z", 200, MAC),
         ]
         .join("\n");
-        let check = report(&journal, "", now(), |_| false, |_, _, _| found(0, 0, 256));
+        let check = report(
+            &journal,
+            "",
+            now(),
+            |_| false,
+            |pid, _, _| match pid {
+                100 => found_at(0, 0, 256, "2026-10-29T14:03:00Z"),
+                _ => found_at(0, 0, 256, "2026-10-29T15:04:30Z"),
+            },
+        );
         assert_eq!(check.status, Status::Warn);
         let lines: Vec<&str> = check.detail.lines().collect();
         assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("(pid 200) exited with status 1 before "));
-        assert!(lines[1].contains("(pid 100) exited with status 1 before "));
+        let second = clock("2026-10-29T15:04:30Z".parse().unwrap(), now());
+        let first = clock("2026-10-29T14:03:00Z".parse().unwrap(), now());
+        assert!(lines[0].contains(&format!(
+            "(pid 200) exited {second} with status 1, 4m after launch"
+        )));
+        assert!(lines[1].contains(&format!(
+            "(pid 100) exited {first} with status 1, 3m after launch"
+        )));
     }
 
     #[test]
@@ -829,15 +877,20 @@ mod tests {
 
     #[test]
     fn the_system_log_line_parses_its_termination() {
-        let line = "2026-10-29 07:27:25.606 Df runningboardd[401:bc6806b] [com.apple.runningboard:ttl] [app<application.com.loopflow.mac.354611862.354611868(501)>:52901] termination reported by launchd (0, 0, 256)";
+        let output = [
+            r#"{"subsystem":"com.apple.runningboard","category":"ttl","timestamp":"2026-10-29 07:27:25.606149-0700","eventMessage":"[app<application.com.loopflow.mac.354611862.354611868(501)>:52901] termination reported by launchd (0, 0, 256)","processID":401}"#,
+            r#"{"count":1,"finished":1}"#,
+        ]
+        .join("\n");
         assert_eq!(
-            parse_termination(line),
+            parse_termination(&output),
             Some(Termination {
                 namespace: 0,
                 code: 0,
-                status: 256
+                status: 256,
+                at: Some("2026-10-29T14:27:25.606149Z".parse().unwrap()),
             })
         );
-        assert_eq!(parse_termination("Timestamp  Ty Process[PID:TID]"), None);
+        assert_eq!(parse_termination(r#"{"count":0,"finished":1}"#), None);
     }
 }

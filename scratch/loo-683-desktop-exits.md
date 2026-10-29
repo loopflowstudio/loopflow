@@ -161,13 +161,18 @@ New check **`desktop-exit`** in a new module, `rust/loopflow/src/desktop_exits.r
   last quit within 24 h.
 - Recorded `quit`, `exit`, `signal` or `exception`: report it.
 - Not recorded: find the last `desktop=` line in lf.log for that pid (the vitals
-  bound, else `launch.at`). Always run the unified-log query over [bound,
+  bound, else `launch.at`). Always run `log show --style ndjson` over [bound,
   min(next launch or now, bound + 300 s + 60 s)], with a 20 s timeout. Parse
-  `termination reported by launchd (ns, code, status)`. Decode namespace 2 as a
+  `termination reported by launchd (ns, code, status)` and the record's
+  offset-carrying `timestamp` into `Termination.at`. Decode namespace 2 as a
   signal name and namespace 1 as jetsam; for namespace 0, `WIFEXITED` gives the
-  status. Other namespaces print as numbers. Without a match: "ended without a
-  record (SIGKILL before the first heartbeat, power loss, or the system log
-  rotated)".
+  status. Other namespaces print as numbers. The line names that time
+  (`was killed 09:14:02 by SIGKILL …`) and `lived` measures to it; only a
+  time-less record falls back to `before <window end>`. Without a match: "ended
+  without a record (SIGKILL before the first heartbeat, power loss, or the system
+  log rotated)".
+- Every ended line carries `, <span> after launch`;
+  abnormal ends append `; last vitals HH:MM: <MB> MB, <reads> lf reads/5 min`.
 - Status: ok for `quit` or a still-running launch; warn for any other end within
   24 h. Older ends are ok, with their detail. The check never fails, so doctor's
   exit status does not change.
@@ -272,35 +277,12 @@ Live acceptance (Jack, after merge): quit the app once and force-quit it once;
 - Live acceptance (Jack, after merge): ⌘Q once and Force Quit once; `lf doctor`
   names both.
 
-## Concept review (2026-10-29, headless) — implemented
+## Concept reviews (2026-10-29)
 
-The concept review kept the model as it was: the journal holds exit facts, lf.log
-holds diagnostics, and `lf doctor` is the one reader. It found two gaps against
-the Demo and the live acceptance. Both are now fixed in `desktop_exits::report`:
+Three headless passes kept the model: the journal holds exit facts, lf.log holds
+diagnostics, `lf doctor` is the one reader. Their gaps (listing every abnormal
+end, no 15-minute refusal, lifetime and vitals, the system record's own time) are
+folded into the Rust approach above. The read-storm follow-up stays an exclusion;
+filing it is Jack's call (questions.md).
 
-1. Per bundle, doctor lists up to 3 abnormal ends within 24 h, newest first, then
-   "… and N earlier". It also lists the latest end and the last quit within 24 h,
-   so ⌘Q followed by Force Quit names both. Before this, the 08:00 `exit(1)` hid
-   the one at 07:27.
-2. The 15-minute refusal is gone. The lookup always searches
-   [last `desktop=` line or `launch.at`, min(next launch or now, that + 360 s)].
-   `DesktopVitals` writes every 300 s from a utility queue that keeps running
-   through main-thread hangs.
-
-Kept as is: the journal path under `timings/`, `quit` as ok, and a check that
-never fails.
-
-Check: `cargo test -p loopflow --lib desktop_exits::` 11 passed; `cargo clippy
---all-targets -- -D warnings` clean; `swift test --filter "LaunchJournalTests|DesktopLogTests"`
-11 passed; `pytest test_desktop_timings.py test_install_script.py` passed (2026-10-29).
-
-## Concept review, second pass (2026-10-29): implemented
-
-Both gaps against the Demo line are closed in `desktop_exits::describe`. Every
-ended line carries `, <span> after launch`, measured to the exit's `at` or the
-search window's end. Abnormal ends append `; last vitals HH:MM: <MB> MB, <reads>
-lf reads/5 min[, <killed> killed]` from the newest vitals or storm line for the
-pid. Hang and memory-pressure lines bound the search but carry no vitals.
-
-Check (after compress): `cargo test -p loopflow --lib desktop_exits::` 12 passed; clippy clean.
-Remaining: gate, then Jack's live acceptance (⌘Q once, Force Quit once) after merge.
+Check (implement, 2026-10-29): `cargo test -p loopflow --lib desktop_exits::` 12 passed; fmt and clippy clean.

@@ -26,46 +26,37 @@
 </head>
 <body>
 <main>
-<h1>Doctor should say how long Desktop lived and what its last heartbeat saw</h1>
-<p class="meta">LOO-683 · concept-review, second pass (headless) · 2026-10-29 · built from
-<code>scratch/loo-683-desktop-exits.md</code>, <code>rust/loopflow/src/desktop_exits.rs</code>,
-<code>swift/LoopflowMac/Services/DesktopVitals.swift</code></p>
+<h1>Doctor should say when the system ended Desktop, not when its search stopped</h1>
+<p class="meta">LOO-683 · concept-review, third pass (headless) · 2026-10-29 · built from scratch/loo-683-desktop-exits.md, rust/loopflow/src/desktop_exits.rs, and a live <code>/usr/bin/log show</code> on Jack's Mac</p>
 
-<p>No decision is needed. The first pass's two fixes landed, and the model holds:
-each fact has one writer and one home, and doctor is the only reader. The accepted Demo
-line still promises two things the reader doesn't print, so the next step is
-implementation.</p>
+<p>Most of the model holds. The journal holds exit facts. <code>lf.log</code> holds diagnostics. <code>lf doctor</code> is the one reader. One mismatch remains, and it lands on the exit the live acceptance produces: a Force Quit, which nothing in the app can record.</p>
 
-<h2>Actions → concepts → APIs (unchanged)</h2>
+<h2>What Jack does</h2>
+<p>Force Quits Loopflow, relaunches it, and runs <code>lf doctor</code>.</p>
+
+<h2>What doctor prints</h2>
+<pre class="was">Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system) before 09:16:00, 1h18m after launch; last vitals 09:10: 412 MB, 61 lf reads/5 min</pre>
+<p class="tag">Existing behavior: the time is the end of the search window, up to 6 minutes late, and the lifetime is measured to it.</p>
+
+<pre class="proposed">Loopflow 0.15.1 (pid 9446) was killed 09:14:02 by SIGKILL (Force Quit, kill -9, or the system), 1h12m after launch; last vitals 09:10: 412 MB, 61 lf reads/5 min</pre>
+<p class="tag">Proposed, and this is the Demo line already accepted.</p>
+
+<h2>Why it is available</h2>
+<pre>2026-10-29 07:27:25.606 Df runningboardd[401:bc6806b] … :52901] termination reported by launchd (0, 0, 256)</pre>
+<p>Doctor already reads this line. It parses the tuple and drops the timestamp. That time is local, with no offset, so the query should use <code>--style ndjson</code> or <code>--timezone UTC</code>.</p>
+
+<h2>Concepts → APIs</h2>
 <table>
-<tr><th>Person does</th><th>Concept</th><th>API / home</th></tr>
-<tr><td>Quits, force-quits, or Desktop dies</td><td>Launch, with at most one exit record</td><td><code>LaunchJournal</code> → <code>launches.ndjson</code></td></tr>
-<tr><td>Wants to know why it went away</td><td>The ended launches per bundle</td><td><code>lf doctor</code> → <code>desktop-exit</code></td></tr>
-<tr><td>Digs deeper</td><td>Diagnostics: vitals, hangs, stacks</td><td><code>~/.lf/logs/lf.log</code> (<code>desktop=</code> lines)</td></tr>
-<tr><td>Death with no record</td><td>The system's termination record</td><td>runningboardd via <code>/usr/bin/log</code>, over a bounded window</td></tr>
+<tr><th>Concept</th><th>Now</th><th>Proposed</th></tr>
+<tr><td>Termination</td><td>namespace, code, status</td><td>+ <code>at</code></td></tr>
+<tr><td>describe (unrecorded)</td><td><code>&lt;how&gt; before &lt;window end&gt;</code></td><td><code>&lt;how&gt; &lt;at&gt;</code>; window end only when the time does not parse</td></tr>
+<tr><td>lived</td><td>to the window end</td><td>to <code>at</code></td></tr>
 </table>
-
-<h2>The mismatch: the heartbeat is read but never shown</h2>
-<p>Doctor finds the last vitals line for the pid, then uses only its timestamp. The
-heartbeat exists so a storm or a memory climb shows up beside the exit. On 2026-10-29 it
-would have put about 1,000 killed reads next to the <code>exit(1)</code>. An unrecorded end also
-returns before its lifetime is added.</p>
-<p class="tag">Implemented</p>
-<pre class="was">⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system) before 09:16</pre>
-<p class="tag">Proposed (the accepted Demo)</p>
-<pre class="proposed">⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system) before 09:16, 1h12m after launch; last vitals 09:10: 412 MB, 61 lf reads/5 min</pre>
-<p>Rule: every ended line carries its lifetime. Each abnormal end appends its last vitals
-(footprint, reads, and the killed count when it's nonzero), or nothing when no vitals line
-exists. The storm WARN line counts as a vitals line. Quits stay terse.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>None open for this step. Questions still open from earlier, which aren't product choices for this Task:
-  <ol type="a">
-  <li>Should the read-storm feedback loop become its own Task? (<code>scratch/questions.md</code>)</li>
-  <li>Where did the second 0.15.0 launch at 07:29:44 come from? New <code>pid</code>/<code>bundle</code> fields will name the next one.</li>
-  </ol>
-</li>
+<li>No product choice is open in this pass. The change follows from the accepted Demo line.</li>
+<li>Still yours: should the read-storm feedback loop become its own Task? a) file it, b) leave it.</li>
 </ol>
 </main>
 </body>

@@ -22,4 +22,6 @@ The user-facing model matches the Task's accepted direction: one verdict per che
 - Jack's rule: a live but idle conversation does not protect a dead worktree. Prune still keeps any checkout with an `lsof` path inside it as "in use". Needs Session availability per holding process to tell an idle agent conversation from live work; substantial enough to stay explicit, not folded into this PR. No Task filed yet.
 - Saved refs under `refs/lf/pruned/` never expire.
 
+Gate (2026-10-29): `scripts/test.py --reuse-passing --rust-filter 'test(worktree_tests::) | test(wt_prune_branches::) | test(git::worktrees::) | test(git::tests::) | test(documented_commands::) | test(cli_discovery::)'` PASS (architecture, python, 128 Rust tests, fmt, clippy, website). Fixed two tests still expecting "No prunable worktrees" and `test_disk_cleanup` keeping an idle unpushed checkout; it now asserts removal with the commit saved under refs/lf/pruned/.
+
 Check: `./target/debug/lf wt prune --dry-run` in loopflow — 0 to remove, 16 kept, reasons as above.

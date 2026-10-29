@@ -229,6 +229,8 @@ async fn read_resume(
     // Opening checks the harness before any holder: another agent never
     // takes over the running one, it starts a thread from the log.
     let handoff = provider.as_ref().and(super::handoff_agent(&session));
+    // Opening refuses a Run whatever the flags, so nothing would happen.
+    let refusal = super::run_refusal(&store.sqlite, &session)?;
     let intent = if !fork && !prepare_only && handoff.is_some() {
         SessionResumeIntent::NewThread
     } else if !prepare_only && connection.is_some() {
@@ -238,12 +240,17 @@ async fn read_resume(
     } else {
         SessionResumeIntent::Resume
     };
-    report.action = Some(SessionResumeAction {
-        intent,
-        agent: crate::config::agent_override().or_else(|| session.provider.clone()),
-        fork,
-        prepare_only,
-    });
+    match refusal {
+        Some(refusal) => report.impediments.push(refusal),
+        None => {
+            report.action = Some(SessionResumeAction {
+                intent,
+                agent: crate::config::agent_override().or_else(|| session.provider.clone()),
+                fork,
+                prepare_only,
+            })
+        }
+    }
     if connection.is_some() {
         report.unavailable.push("Retained execution endpoint is not probed; an unavailable owner leaves continuity unknown".into());
     }

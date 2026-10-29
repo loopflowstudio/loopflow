@@ -2,52 +2,93 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-618 concept review</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resume concept review</title>
 <style>
-:root{color-scheme:light dark;--fg:#1d1d1f;--bg:#fdfdfc;--mute:#6b6b6b;--line:#e3e3e0;--new:#1f7a4d;--old:#a33}
-@media (prefers-color-scheme:dark){:root{--fg:#e8e8e6;--bg:#161616;--mute:#9a9a9a;--line:#333;--new:#5cc48e;--old:#e07070}}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,system-ui,sans-serif}
-main{max-width:44rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
-header p{color:var(--mute);margin:.2rem 0}
-h1{font-size:1.5rem;margin:0 0 .5rem}h2{font-size:1.1rem;margin:2.2rem 0 .6rem}
-code,pre{font:13.5px/1.5 ui-monospace,Menlo,monospace}
-pre{overflow-x:auto;padding:.9rem 1rem;border:1px solid var(--line);border-radius:6px}
-.old{color:var(--old)}.new{color:var(--new)}
-table{border-collapse:collapse;width:100%;font-size:14.5px}td,th{border-bottom:1px solid var(--line);padding:.45rem .4rem;text-align:left;vertical-align:top}
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--muted:#6b6862;--rule:#e3e0d9;--code:#f1efe9;--now:#8a5a00;--prop:#1f5f8b;--bad:#9b2c2c;--gone:#8d8a83}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161615;--fg:#e9e7e2;--muted:#9a968e;--rule:#2e2d2a;--code:#22211f;--now:#e0b25c;--prop:#79b8e6;--bad:#f08a8a;--gone:#77746e}}
+:root[data-theme="dark"]{--bg:#161615;--fg:#e9e7e2;--muted:#9a968e;--rule:#2e2d2a;--code:#22211f;--now:#e0b25c;--prop:#79b8e6;--bad:#f08a8a;--gone:#77746e}
+body{background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0}
+main{max-width:740px;margin:0 auto;padding:40px 16px 80px}
+h1{font-size:1.5rem;margin:0 0 4px}h2{font-size:1.15rem;margin:44px 0 8px}h3{font-size:1rem;margin:24px 0 6px}
+.meta{color:var(--muted);font-size:.88rem}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:.88em}
+pre{background:var(--code);padding:12px 14px;border-radius:6px;overflow-x:auto;font-size:.84rem;line-height:1.55}
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.9rem}
+td,th{text-align:left;vertical-align:top;padding:8px 6px;border-bottom:1px solid var(--rule)}
+th{font-weight:600}
+.now{color:var(--now)}.prop{color:var(--prop)}.bad{color:var(--bad);font-weight:600}.gone{color:var(--gone);text-decoration:line-through}
+.callout{border-left:3px solid var(--bad);padding:2px 0 2px 14px;margin:16px 0}
+.legend{font-size:.88rem;color:var(--muted)}
+ol li{margin-bottom:12px}
 </style>
 </head>
-<body>
-<main>
-<header>
-<h1>LOO-618: Desktop still says &ldquo;Resume&rdquo; for a held Task</h1>
-<p>Task LOO-618 &middot; concept-review step (second pass) &middot; 2026-10-28 &middot; headless, no decision requested</p>
-<p>Built from <code>lf/mod.rs</code> (Session/Task commands), <code>swift/Loopflow/Services/RegistryQuery.swift</code>, <code>swift/LoopflowMac/Views/TaskWorkView.swift</code>, <code>docs/work.md</code></p>
-</header>
+<body><main>
+<h1>Getting back to a conversation, and giving up a Task</h1>
+<p class="meta">LOO-618 · concept review with Jack Heart, at the demo stage · 2026-10-29<br>
+Built from <code>scratch/jack-loo-618-…md</code>, <code>scratch/questions.md</code>, <code>ops/human_session.rs:800–985</code>, <code>lf/commands/util.rs:213</code>, <code>lf/commands/graph.rs:187–205</code>, <code>store/sqlite/durable.rs:320</code>, <code>ops/task_ownership.rs:66–96</code>, <code>durable.rs:381</code>, PR #1767.</p>
 
-<h2>The mismatch</h2>
-<p>The CLI renamed <code>task resume</code> to <code>task release</code> so &ldquo;resume&rdquo; would mean one thing: get back to a conversation. Desktop kept the old words on the Task, a few inches from the Session pane&rsquo;s own Resume button.</p>
-<pre>Task header        [Complete] <span class="old">[Resume]</span> [Abandon…]     ← existing (held Task)
-                   [Complete] <span class="new">[Release]</span> [Abandon…]    ← proposed
-Context menu       <span class="old">Defer Task / Resume Task</span>             ← existing
-                   <span class="new">Hold Task / Release Task</span>             ← proposed
-Session pane       [Resume]                             unchanged: that one is a conversation</pre>
+<p><strong>Decision needed:</strong> when <code>lf resume</code> takes over a conversation that belongs to a running Graph step, should the Graph stop (as if interrupted) or should you get a fork? Today it does neither cleanly, and the Graph restarts behind you.</p>
 
-<h2>Actions &rarr; concepts &rarr; API</h2>
-<table>
-<tr><th>Person does</th><th>CLI</th><th>Desktop</th></tr>
-<tr><td>Get back to a conversation</td><td><code>lf resume</code></td><td>Resume (one <code>resume --prepare</code> shape)</td></tr>
-<tr><td>Restart / switch harness</td><td><code>lf session new [-a]</code></td><td><code>session new &lt;id&gt; --prepare</code></td></tr>
-<tr><td>Stop future runs of a Task</td><td><code>lf task hold</code></td><td><span class="old">Defer</span> &rarr; <span class="new">Hold</span></td></tr>
-<tr><td>Let it run again</td><td><code>lf task release</code></td><td><span class="old">Resume</span> &rarr; <span class="new">Release</span></td></tr>
-</table>
-<p>Swift follows the verbs: <code>deferTask(_:deferred:)</code> &rarr; <code>holdTask(_:held:)</code>, accessibility ids <code>task-hold-release</code>/<code>task-hold</code>. The status label stays &ldquo;Deferred&rdquo;: that is the Task state the governing style guide names, and this Task renames verbs only.</p>
+<p class="legend"><span class="now">Amber</span> = on this branch (PR #1767). <span class="prop">Blue</span> = proposed, not built. <span class="gone">Struck</span> = deleted.</p>
 
-<h2>Checked, unchanged</h2>
-<p>No CLI or Desktop caller uses <code>session attach</code>, <code>connect</code>, <code>--takeover</code>, <code>--try</code>, <code>--if-free</code>, <code>--fresh</code> or <code>task pause/resume</code>. <code>resume</code> and <code>session new</code> help describe the accepted behavior. Release notes keep their shipped wording.</p>
+<h2>Actions → concepts → commands</h2>
+<div class="tbl"><table>
+<tr><th>You want to…</th><th>Before (main)</th><th>After</th></tr>
+<tr><td>Get back to a conversation</td><td><span class="gone">lf connect</span>, <span class="gone">session attach</span>, <span class="gone">--try --takeover --if-free --observe</span></td><td class="now"><code>lf resume [id|task]</code>: takes over whatever holds it</td></tr>
+<tr><td>Keep the other client running</td><td>none</td><td class="now"><code>lf resume --fork</code>: a new Session seeded from the log</td></tr>
+<tr><td>Restart, or switch harness</td><td><span class="gone">--fresh</span> (a successor Session)</td><td class="now"><code>lf session new [-a codex]</code>: same Session, new thread, handoff</td></tr>
+<tr><td>See what resume will do</td><td><code>--explain</code> in connect terms</td><td class="now"><code>lf --explain resume</code>: start · resume · take_over · new_thread</td></tr>
+<tr><td>Stop anything moving a Task</td><td><span class="gone">task defer</span> / <span class="gone">task resume</span></td><td><span class="now">task hold / release</span> → <span class="prop"><code>lf task unassign</code></span></td></tr>
+<tr><td>Take a Task on</td><td><code>task claim</code>; <code>task run</code> claims if unowned</td><td class="prop"><code>lf task claim</code>, and <code>task run</code> claims if unowned (unchanged)</td></tr>
+</table></div>
+
+<p>The concepts underneath: a <strong>Session</strong> (one ongoing conversation), the <strong>thread</strong> it currently uses (provider conversation; replaceable, kept in history), the <strong>holder</strong> (whoever is running that thread now), and for Tasks, an <strong>owner</strong> (person on a Machine, mirrored as Linear assignee).</p>
+
+<h2>What happens to whoever held it</h2>
+<div class="tbl"><table>
+<tr><th>Holder</th><th>On <code>lf resume</code></th><th>Turn in progress</th></tr>
+<tr><td>Another lf terminal</td><td class="now">Provider process keeps running and control moves here. Old terminal: <code>This conversation moved to another terminal on this Machine.</code></td><td>Finishes here</td></tr>
+<tr><td>Headless Run (<code>-b</code>)</td><td class="now">Agent stopped as <code>interrupted</code>; thread resumes interactively here</td><td>Cut off; written files stay</td></tr>
+<tr><td><strong>Graph step</strong></td><td class="bad">Same as headless, and then the Graph restarts</td><td>Cut off</td></tr>
+<tr><td>Raw <code>claude</code>/<code>codex</code></td><td class="now">Untouched; both on one thread (accepted by Jack Heart)</td><td>Both continue</td></tr>
+<tr><td>Nobody (died)</td><td class="now">Native history resumes</td><td>None</td></tr>
+</table></div>
+
+<div class="callout">
+<h3>The mismatch</h3>
+<p>Stopping a step's agent makes the step fail. <code>lf task run</code> only holds back when the Task has an <code>interrupt</code> event, and takeover writes none, so the route starts again (attempt 2 of 3) in the same worktree while you type to the step's old thread. That puts two agents in one checkout, reached by a bare <code>lf resume</code>.</p>
+<p class="meta">Read from code, not demonstrated. To confirm: <code>lf resume &lt;step session&gt;</code> during <code>implement</code>, then <code>lf graph list --for-task</code>.</p>
+</div>
+
+<pre><span class="prop">a. You take the work.</span> Resuming a step's Session records an interrupt:
+   the Graph stops, no retry, you continue on the step's thread.
+   The next lf task run starts that route again.
+
+<span class="prop">b. You get a fork.</span> For a step's Session, resume behaves as --fork:
+   the Graph keeps going and you talk to a copy seeded from its log.
+
+<span class="now">c. Today.</span> The step dies, the Graph retries, two agents.</pre>
+
+<h2>Giving up a Task: hold → assignment</h2>
+<p>Jack Heart's direction: no deferred state, only assigned or not. Starting assigns, unassigning clears Linear.</p>
+<pre><span class="prop">lf task claim LOO-618      # you own it; Linear assignee = you; operators may move it
+lf task unassign LOO-618   # nobody owns it; Linear cleared; nothing moves it
+lf task run LOO-618        # claims if unowned, then runs</span></pre>
+<p><strong>What exists:</strong> <code>task claim/unclaim</code> already exist. Claim sets the Linear assignee; unclaim leaves it. <code>task edit --assignee/--unassign</code> sets the same field a third way. <code>Deferred</code> is a separate bit read by task run (refuses), ship (stops), CI repair and Wave operators (skip).</p>
+<p><strong>What changes:</strong> operators already leave unowned backlog alone, so unassigned covers what deferred did. <code>task run</code> on an unassigned Task claims and goes instead of refusing. Ship and CI repair check for an owner. The lost case is "mine, but leave it alone". Under this model you unassign, and Linear shows that honestly.</p>
+<p><strong>Deleted:</strong> <span class="gone">hold/release</span>, <span class="gone">TaskState::Deferred</span>, <span class="gone">set_task_deferred</span> and its peer event, <span class="gone">edit --unassign</span>. About 25 files plus Swift and skills.</p>
 
 <h2>Questions</h2>
-<ol><li>None open. Recorded as the next implement direction in the working design.</li></ol>
-</main>
-</body>
+<ol>
+<li>A Graph step's conversation is taken over: <strong>a</strong> record an interrupt and stop the Graph, <strong>b</strong> fork by default, <strong>c</strong> keep today's behavior.</li>
+<li>A headless Run is mid-turn: <strong>a</strong> stop it now (today), <strong>b</strong> let the turn finish, then take over.</li>
+<li>The old terminal names where it went (<code>moved to Desktop</code>, <code>moved to ttys004</code>): <strong>a</strong> yes, <strong>b</strong> keep "another terminal".</li>
+<li>Assignment instead of hold: <strong>a</strong> in this PR, <strong>b</strong> its own Task, with hold/release here until it lands, <strong>c</strong> its own Task, and this PR drops defer/resume with nothing in between.</li>
+<li>Giving a Task up is called <strong>a</strong> <code>unassign</code> (Linear's word) or <strong>b</strong> <code>unclaim</code> (pairs with claim).</li>
+<li>Seeing takeover, fork and crash-resume live: <strong>a</strong> I run them in a throwaway <code>LF_HOME</code> with real Claude, <strong>b</strong> you <code>lf install</code> this build and try it on yours.</li>
+</ol>
+<p><strong>Decided by Jack Heart, 2026-10-29:</strong> 1a as an explicit <code>lf task interrupt</code>; 2: headless Runs (including Graph steps) are never taken over, and resume offers <code>--fork</code>, waiting, or interrupt; 3a. 4a: assignment replaces hold in this PR. 5a: <code>unassign</code>. 6: the agent demos in a throwaway <code>LF_HOME</code>.</p>
+</main></body>
 </html>

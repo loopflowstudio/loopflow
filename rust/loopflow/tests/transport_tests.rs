@@ -1297,7 +1297,7 @@ fn headless_graph_settles_its_original_step_after_creator_teardown() {
 }
 
 #[test]
-fn explicit_native_resume_interrupts_original_graph_without_replay() {
+fn resume_refuses_a_graph_step_and_leaves_it_running() {
     headless_graph(true);
 }
 
@@ -1345,39 +1345,13 @@ fn headless_graph(resume: bool) {
         .unwrap();
     assert!(outcome.is_none(), "viewer death settled the execution");
     if resume {
-        // Replace only the next native executable, leaving the running server intact.
-        std::fs::copy(&provider, bin.join("opencode-server.py")).unwrap();
-        std::fs::write(
-            &provider,
-            "#!/bin/sh\nif [ \"$1\" = serve ]; then exec python3 \"$(dirname \"$0\")/opencode-server.py\" \"$@\"; fi\nprintf '%s\\n' \"$@\" > \"$HOME/resumed-args\"\n",
-        )
-        .unwrap();
-        let output = fixture
-            .command(&["resume", &session])
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    bin.display(),
-                    std::env::var("PATH").unwrap_or_default()
-                ),
-            )
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let args = fixture.wait_file("resumed-args");
-        assert!(args.contains("--session\n"), "{args}");
-        assert!(
-            !args.contains("Do the fixture work."),
-            "input replayed: {args}"
-        );
-    } else {
-        std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
+        // A Run is never resumed or taken over: the step keeps its turn.
+        let output = fixture.command(&["resume", &session]).output().unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert!(error.contains("is a Run (proof · probe · running)"), "{error}");
     }
+    std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let outcome: Option<String> = sql
@@ -1386,7 +1360,7 @@ fn headless_graph(resume: bool) {
             })
             .unwrap();
         if let Some(outcome) = outcome {
-            assert_eq!(outcome, if resume { "failed" } else { "succeeded" });
+            assert_eq!(outcome, "succeeded");
             break;
         }
         assert!(Instant::now() < deadline, "step did not settle");
@@ -1406,31 +1380,11 @@ fn headless_graph(resume: bool) {
             })
             .unwrap();
         if let Some(outcome) = outcome {
-            assert_eq!(outcome, if resume { "failed" } else { "succeeded" });
+            assert_eq!(outcome, "succeeded");
             break;
         }
         assert!(Instant::now() < deadline, "Graph did not settle");
         std::thread::sleep(Duration::from_millis(20));
-    }
-    if resume {
-        let step_code: i32 = sql
-            .query_row(
-                "SELECT exit_code FROM processes WHERE id=?1",
-                [&step],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let graph_code: i32 = sql
-            .query_row(
-                "SELECT exit_code FROM processes WHERE id=?1",
-                [&graph],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(step_code, 130);
-        assert_eq!(graph_code, 3, "held Graph must not request a retry");
-        let interrupted: i64 = sql.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%' AND payload LIKE '%interrupted%'", [&session], |r| r.get(0)).unwrap();
-        assert_eq!(interrupted, 1);
     }
     let captures: i64 = sql
         .query_row(

@@ -128,12 +128,13 @@ Fresh native launches and saved-history resumes share invocation admission and
 attachment settlement. A recorded client move is an intentional command exit,
 not provider failure; it does not establish a successful provider turn.
 
-### Headless stop and resume
+### Runs are not resumed
 
-Claude and OpenCode connect stop the recorded headless AgentProcess, then reopen
-its saved native conversation (Claude `--resume`, OpenCode `--session`). This is
-not live takeover. Missing native identity refuses before stopping. Session identity,
-native history and unfinished turns survive; group death is not turn completion.
+`lf resume` takes only Sessions. A Run's id (`-b`, a Graph step), running or
+finished, is refused, with `--fork`, `--prepare`, `-b resume --message` and
+`lf --explain resume` alike, and the refusal points to `lf resume --task <task>`.
+Resume never stops a Run; stopping a Graph is `lf task interrupt`. The one exception
+is the Graph process continuing its own step's Run to correct a structured answer.
 
 Harness stop and resume use common exact-identity group close under the frozen
 attachment fence. Superseded callers, unknown identity and duplicate OS owners

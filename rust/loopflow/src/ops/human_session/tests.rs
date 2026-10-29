@@ -1,134 +1,65 @@
-#[cfg(unix)]
 #[test]
-fn public_open_stops_headless_group_and_resumes_saved_conversation() {
-    use std::os::unix::fs::PermissionsExt;
-    const CHILD: &str = "LOOPFLOW_RESUME_TEST_CHILD";
-    if std::env::var_os(CHILD).is_none() {
-        for provider in ["claude", "opencode"] {
-            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-            child.args(["--exact", "ops::human_session::tests::public_open_stops_headless_group_and_resumes_saved_conversation", "--nocapture"]);
-            for (key, _) in std::env::vars_os() {
-                if key.to_string_lossy().starts_with("LF_") {
-                    child.env_remove(key);
-                }
-            }
-            let output = child.env(CHILD, provider).output().unwrap();
-            assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        return;
-    }
-    let provider_name = std::env::var(CHILD).unwrap();
+fn resume_refuses_a_run_and_leaves_its_provider_running() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
-    let bin = home.join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let lf = bin.join("lf");
-    std::fs::write(&lf, "#!/bin/sh\nexit 95\n").unwrap();
-    std::fs::set_permissions(&lf, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::env::set_var("LF_BIN", &lf);
-    let native = bin.join(&provider_name);
-    let mut script = "#!/bin/sh\nstate=$(ps -o stat= -p \"$(cat provider-pid)\" | tr -d ' ')\ncase \"$state\" in \"\"|Z*) ;; *) exit 96;; esac\nprintf '%s\\n' \"$@\" > client-args\n".to_owned();
-    if provider_name == "opencode" {
-        std::fs::write(
-            bin.join("opencode-server.py"),
-            include_str!("../../../tests/support/opencode_server.py").replace("__WAIT__", "False"),
-        )
-        .unwrap();
-        std::fs::write(home.join("native-sessions.json"), r#"{"saved-thread":[]}"#).unwrap();
-        script.push_str("exec python3 \"$(dirname \"$0\")/opencode-server.py\" \"$@\"\n");
-    }
-    std::fs::write(&native, script).unwrap();
-    std::fs::set_permissions(&native, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let _path = crate::test_ambient::EnvGuard::clear(&["PATH"]);
-    std::env::set_var("PATH", format!("{}:/usr/bin:/bin", bin.display()));
     let runtime = tokio::runtime::Runtime::new().unwrap();
     crate::journal::with_process(|| {
-            crate::journal::admit_process(home, &["lf".into(), "session".into()]);
-            runtime.block_on(async {
-                let store = std::sync::Arc::new(
-                    crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
-                        home.join("loopflow.db"),
-                    ))
-                    .await?,
-                );
-                let capture = crate::session_record::CaptureHandle::begin_at(
-                    home,
-                    crate::session_record::SessionCaptureSpec {
-                        harness: provider_name.clone(),
-                        model: None,
-                        surface: "headless".into(),
-                        cwd: home.into(),
-                        repo: None,
-                        worktree: None,
-                        skill: None,
-                        subjects: vec![],
-                        graph: crate::session_record::SessionGraphMembership::Independent,
-                        work: None,
-                    },
-                )?;
-                let session = store
-                    .sqlite
-                    .session_for_artifact(&capture.artifact_key())?
-                    .unwrap();
-                let launcher = crate::id::LfProcessId::new();
-                rusqlite::Connection::open(home.join("loopflow.db"))?.execute(
-                    "INSERT INTO processes(id,trace_id,started_at) SELECT ?1,trace_id,started_at FROM processes WHERE id=?2",
-                    rusqlite::params![launcher, crate::journal::current_lf_process_id().unwrap()],
-                )?;
-                let first = store.sqlite.claim_session_attachment(&session.id, None, &launcher, true)?;
-                let mut command = tokio::process::Command::new("/bin/sleep");
-                command
-                    .env_clear()
-                    .arg("60")
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null());
-                let mut provider = crate::harness::agent_process::spawn(
-                    command,
-                    None,
-                    &(store.sqlite.clone(), session.id.to_string(), first.clone()),
-                )?;
-                std::fs::write(home.join("provider-pid"), provider.id().unwrap().to_string())?;
-                // Without native identity, connect must leave the running provider alone.
-                let refused = super::open(&store, &session.id, false, true).await;
-                assert!(refused.unwrap_err().to_string().contains("identity is unavailable"));
-                assert!(provider.try_wait()?.is_none());
-                assert_eq!(store.sqlite.session_attachment(&session.id)?, Some(first.clone()));
-                crate::session_record::write_provider_session(
-                    &capture.artifact_dir(), &"saved-thread".into(), None,
-                )?;
-                let origin = store.sqlite.session_turn_origin(&session.id, &first)?;
-                store.sqlite.record_session_turn_origin(&"saved-thread".into(), "pending", &origin)?;
-                let result = super::open(&store, &session.id, false, true).await;
-                let alive = !crate::journal::OsProcess::group(provider.id().unwrap())?.is_empty();
-                if alive {
-                    provider.kill().await?;
-                }
-                result?;
-                assert!(!alive, "native resume left the headless provider running");
-                let row = store.sqlite.process(&first.agent_process_id)?.unwrap();
-                assert!(row.completed_at.is_some());
-                assert!(store.sqlite.with_session_attachment(&session.id, &first, || Ok(())).is_err());
-                let history = store.sqlite.session_history(&session.id, 0, 0)?;
-                assert!(history.iter().any(|event| event.provider_turn.as_deref() == Some("pending")
-                    && event.kind == crate::session::SessionEventKind::Started));
-                assert!(!history.iter().any(|event| event.provider_turn.as_deref() == Some("pending")
-                    && event.kind == crate::session::SessionEventKind::Completed));
-                let args = std::fs::read_to_string(home.join("client-args"))?;
-                let flag = if provider_name == "claude" { "--resume" } else { "--session" };
-                assert!(args.contains(&format!("{flag}\nsaved-thread\n")), "{args}");
-                assert_eq!(store.sqlite.input_provider_session(session.input_key()?)?.unwrap()
-                    .agent_session.as_str(), "saved-thread");
-                Ok::<_, anyhow::Error>(())
-            })
+        crate::journal::admit_process(home, &["lf".into(), "session".into()]);
+        runtime.block_on(async {
+            let store = std::sync::Arc::new(
+                crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                    home.join("loopflow.db"),
+                ))
+                .await?,
+            );
+            let capture = crate::session_record::CaptureHandle::begin_at(
+                home,
+                crate::session_record::SessionCaptureSpec {
+                    harness: "claude".into(),
+                    model: None,
+                    surface: "headless".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: Some("implement".into()),
+                    subjects: vec![],
+                    graph: crate::session_record::SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )?;
+            let session = store
+                .sqlite
+                .session_for_artifact(&capture.artifact_key())?
+                .unwrap();
+            let launcher = crate::id::LfProcessId::new();
+            rusqlite::Connection::open(home.join("loopflow.db"))?.execute(
+                "INSERT INTO processes(id,trace_id,started_at) SELECT ?1,trace_id,started_at FROM processes WHERE id=?2",
+                rusqlite::params![launcher, crate::journal::current_lf_process_id().unwrap()],
+            )?;
+            let first = store.sqlite.claim_session_attachment(&session.id, None, &launcher, true)?;
+            let mut command = tokio::process::Command::new("/bin/sleep");
+            command.env_clear().arg("60");
+            let mut provider = crate::harness::agent_process::spawn(
+                command,
+                None,
+                &(store.sqlite.clone(), session.id.to_string(), first.clone()),
+            )?;
+            let opened = super::open(&store, &session.id, false, true).await;
+            let forked = super::open(&store, &session.id, true, true).await;
+            let running = provider.try_wait()?.is_none();
+            provider.kill().await?;
+            assert!(running, "resume stopped the Run's provider");
+            for refused in [opened, forked] {
+                let message = refused.unwrap_err().to_string();
+                assert!(message.contains("is a Run (implement · running)"), "{message}");
+                assert!(message.contains("`lf resume` opens this checkout's Session"), "{message}");
+            }
+            assert_eq!(store.sqlite.session_attachment(&session.id)?, Some(first));
+            Ok::<_, anyhow::Error>(())
         })
-        .unwrap();
+    })
+    .unwrap();
 }
 
 #[test]

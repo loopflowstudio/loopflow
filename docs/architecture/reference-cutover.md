@@ -40,8 +40,8 @@ accounts/routes and resumable conversations. Configured acceptance is separate.
 
 Current CLI examples use supported spellings. `lf resume` selects a Session ID,
 Task or Wave. Retained native terminals attach without replacing their provider.
-Explicit native resume of a structured Run may restart the provider while preserving
-Session/history, without resubmitting input.
+A Run's id, running or finished, is refused with a pointer to its Task's Session;
+only a Graph continues its own step's Run (structured-output correction).
 A Graph whose process died leaves its
 Processes as history; nothing resumes it. `session list` supports
 `--interactive false`, `--history`, `--task` and `--search`; `--all` means all

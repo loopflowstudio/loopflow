@@ -706,9 +706,10 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
     )?))
 }
 
-/// Get back to a conversation. Whatever holds it gives it up: a terminal
-/// showing it hands over control, a provider client lf started stops. With
-/// `fork`, the holder keeps it and a new conversation continues from its log.
+/// Get back to a Session. Whatever holds it gives it up: a terminal showing
+/// it hands over control, a provider client lf started stops. With `fork`,
+/// the holder keeps it and a new Session continues from its log. A Run is
+/// refused; it is never taken over or resumed.
 pub(crate) async fn open(
     store: &SharedStore,
     session_id: &str,
@@ -727,6 +728,9 @@ pub(crate) async fn open(
     };
     let session = &target;
     crate::data_clone::require_writable_session(&session.id)?;
+    if let Some(refusal) = run_refusal(&store.sqlite, session)? {
+        bail!(refusal);
+    }
     if fork {
         drop(progress);
         return self::fork(store, session, resume).await;
@@ -831,7 +835,6 @@ pub(crate) async fn open(
     let native = NativeSession::of(session)?;
     if resume {
         crate::lf::commands::util::require_provider_session_process(&native.dir)?;
-        transition_headless_to_native(store, session, provider_session.as_ref()).await?;
     }
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
@@ -846,7 +849,7 @@ pub(crate) async fn open(
             crate::harness::agent_process::stop_session_agent(
                 &store.sqlite,
                 &session.id,
-                crate::process::Departure::Terminal,
+                departure_here(),
             )?;
             eprintln!(
                 "Stopped the {} client that had this conversation; continuing here.",
@@ -910,79 +913,43 @@ async fn fork(store: &SharedStore, source: &LfSession, launch: bool) -> Result<S
     Ok(record)
 }
 
-/// Explicit resume retires a structured Run before opening its native history.
-/// Require native identity before stopping useful work; viewer attachment never enters here.
-async fn transition_headless_to_native(
-    store: &SharedStore,
-    session: &LfSession,
-    provider: Option<&crate::session_record::ProviderSessionRef>,
-) -> Result<()> {
-    let Some(expected) = store.sqlite.session_attachment(&session.id)? else {
-        return Ok(());
+/// Why `lf resume` refuses a Run (a headless conversation, alone or a Graph
+/// step), running or finished: it takes only Sessions. None for a Session.
+pub(crate) fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<String>> {
+    if session.interactive {
+        return Ok(None);
+    }
+    let summary = store
+        .session_summary(&session.id, crate::store::rows::now_unix())?
+        .ok_or_else(|| session_not_found(&session.id))?;
+    let running = summary.completed_at.is_none()
+        && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
+    let mut what: Vec<&str> = Vec::new();
+    what.extend(summary.task_identifier.as_deref());
+    what.extend(summary.graph.as_ref().map(|graph| graph.name.as_str()));
+    what.extend(summary.skill.as_deref());
+    what.push(if running { "running" } else { "finished" });
+    let pointer = match &summary.task_identifier {
+        Some(task) => format!("`lf resume --task {task}` opens its Task's Session"),
+        None => "`lf resume` opens this checkout's Session".to_string(),
     };
-    let Some(agent) = store
-        .sqlite
-        .agent_processes()?
-        .into_iter()
-        .find(|agent| agent.process.id == expected.agent_process_id)
-    else {
-        return Ok(());
+    Ok(Some(format!(
+        "{} is a Run ({}); `lf resume` takes only Sessions. {pointer}.",
+        session.id,
+        what.join(" · ")
+    )))
+}
+
+/// The terminal this process runs in, named for the one a move leaves.
+fn departure_here() -> crate::process::Departure {
+    let to = if crate::session_record::current_terminal_id().is_some() {
+        Some("Desktop".to_string())
+    } else if let Some(placement) = crate::lf::commands::open::host_placement() {
+        Some(placement.replacen(':', " ", 1))
+    } else {
+        crate::session_record::stdin_tty().map(|tty| tty.trim_start_matches("/dev/").to_string())
     };
-    if agent.interactive || agent.process.completed_at.is_some() {
-        return Ok(());
-    }
-    // A private server can die before creating a native conversation. Retire
-    // its stale attachment so the prepared input can start normally.
-    if crate::journal::process_evidence(&store.sqlite, &agent.process.id)
-        == crate::journal::ProcessIdentityEvidence::Dead
-    {
-        anyhow::ensure!(
-            store.sqlite.settle_agent_process(&agent, || {
-                if crate::journal::process_evidence(&store.sqlite, &agent.process.id)
-                    != crate::journal::ProcessIdentityEvidence::Dead
-                {
-                    return Err(crate::store::StoreError::InvalidAuthority(
-                        "AgentProcess death changed".into(),
-                    ));
-                }
-                Ok(())
-            })?,
-            "Session attachment changed before observing death"
-        );
-        return Ok(());
-    }
-    let provider = provider.ok_or_else(|| {
-        anyhow!(
-            "Native conversation identity is unavailable; cannot stop and resume this headless run"
-        )
-    })?;
-    if let Some(thread) = store.sqlite.session_thread(&session.id)? {
-        anyhow::ensure!(
-            thread == provider.agent_session,
-            "Recorded conversation differs from the headless conversation"
-        );
-    }
-    let process = crate::journal::current_lf_process_id()
-        .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
-    let sqlite = store.sqlite.clone();
-    let id = session.id.clone();
-    tokio::task::spawn_blocking(move || {
-        let attachment = sqlite.claim_session_attachment(&id, Some(&expected), &process, false)?;
-        sqlite.finish_session_attachment(&id, &attachment, "interrupted", None, || {
-            if !crate::harness::agent_process::close_session_agent_process(&sqlite, &id)? {
-                return Err(crate::store::StoreError::InvalidAuthority(
-                    "Headless AgentProcess identity is unavailable".into(),
-                ));
-            }
-            Ok(true)
-        })
-    })
-    .await??;
-    eprintln!(
-        "Stopped headless {}; resuming the same native conversation (not live takeover).",
-        session.provider.as_deref().unwrap_or("provider")
-    );
-    Ok(())
+    crate::process::Departure::Terminal { to }
 }
 
 /// Open a conversation: resume its native history, else
@@ -1064,11 +1031,14 @@ pub(crate) async fn new_thread(
         .ok_or_else(|| session_not_found(id))?;
     let session = primary::admit_workspace(store, session).await?;
     let from = session.provider.clone().unwrap_or_default();
+    if let Some(refusal) = run_refusal(&store.sqlite, &session)? {
+        bail!(refusal);
+    }
     let request = conversation_log::continuation(&store.sqlite, &session)?;
     crate::harness::agent_process::stop_session_agent(
         &store.sqlite,
         &session.id,
-        crate::process::Departure::Terminal,
+        departure_here(),
     )?;
     let mut next = session;
     if let Some(agent) = agent {
@@ -1430,7 +1400,7 @@ pub(crate) fn resume_native_session(
     crate::harness::agent_process::stop_session_agent(
         &store.sqlite,
         &session.id,
-        crate::process::Departure::Terminal,
+        departure_here(),
     )?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);

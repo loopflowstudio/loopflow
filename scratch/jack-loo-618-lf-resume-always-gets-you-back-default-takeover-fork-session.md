@@ -8,7 +8,8 @@ Accepted by Jack Heart, 2026-10-26 (LOO-610 review, D2). Task definition is the 
   (canonical `lf session resume`). One verb, no open-mode flags.
   - Live lf terminal → attach and take control (transport `replace=true`); the old
     terminal says where it went (#1746).
-  - Live provider client lf launched but no lf terminal → stop it, resume here, say so.
+  - A Run's id (`-b`, Graph step) → refused; points to the Task's Session (Jack Heart,
+    2026-10-29; see Takeover scope).
   - Dead / never launched → resume native history or launch the prepared input.
   - Raw provider id → `provider_conversation::admit` binds a Session, then resume.
   - Scope with no conversation → start one and say so.
@@ -57,6 +58,49 @@ release notes and the parse-rejection test. Session skills say `lf session new` 
 takes over by default; the state label stays Deferred; Desktop has no Fork action (acceptance
 doesn't require one). Note for gate: `target/debug/lf help …` printed the installed app's
 old help even with `LF_*` unset, so check help through `cli_discovery`, not by hand.
+
+## Takeover scope (Jack Heart, 2026-10-29, accepted; next implement)
+
+Jack Heart decided (concept review answers 1a, 2, 3a):
+
+- **`lf resume` takes only Sessions** (Jack Heart, 2026-10-29). Product words: Session =
+  interactive, Run = headless; both are one `LfSession` record. A Run's id, running or
+  finished, is refused: no takeover, no `--fork`, no interrupt hint. The refusal names the Run
+  (Task · Graph · step, running/finished) and points to `lf resume --task <task>`. Same for
+  `lf -b resume <id> --message` and `--prepare`. Delete `transition_headless_to_native` and
+  the dead-headless native-resume path. `lf resume --all` restores interrupted Sessions only.
+  Lost on purpose: continuing a finished step's own thread; the Task Session reads its log.
+- **1a:** stopping a Graph is `lf task interrupt` (records the `interrupt` event; no retry).
+  Resume never stops a Graph.
+- **The old terminal names where it went:** "This conversation moved to Desktop" / "to ttys004"
+  instead of "another terminal on this Machine" (`lf/commands/util.rs:213`), from the new
+  holder's recorded terminal (`record_session_terminal`).
+- `lf --explain resume <run>` reports the same refusal.
+- Interactive takeover is unchanged: same provider process, control moves, turn finishes here.
+
+## Task assignment replaces hold (Jack Heart, 2026-10-29, accepted; this PR; next implement)
+
+Jack Heart decided (answers 4a, 5a): a Task is assigned or not; there is no deferred state.
+
+- `lf task claim <task>`: you own it on this Machine; Linear assignee = you. Unchanged.
+- `lf task unassign <task>` (renames `task unclaim`): nobody owns it; **clears the Linear
+  assignee** (today unclaim leaves it); nothing moves it. History intact.
+- `lf task run` claims an unowned Task and runs (unchanged); it no longer refuses a held Task.
+- Unassigned replaces deferred everywhere it was read: ship stops, CI repair skips, Wave
+  operators skip (they already leave unowned backlog alone).
+- Delete: `task hold/release` (this branch), `TaskState::Deferred`, `set_task_deferred` and its
+  peer `deferred/resumed` planning event, `task edit --unassign` (and `--assignee` if it only
+  duplicates claim), `task_row.rs` hold hint, Desktop Hold/Release (`holdTask`) → Unassign/Claim.
+- Stored deferred events: ignore on read; no schema change unless a column holds the bit
+  (then one draft migration). Existing deferred Tasks read as their ownership says.
+- AGENTS.md Task state list drops `deferred`; skills (task/wave operate) say unassigned.
+
+## Demo (Jack Heart, 2026-10-29: answer 6, agent-run)
+
+Jack Heart won't run it live; the agent runs it in a throwaway `LF_HOME` with real Claude
+(branch builds forward to the installed lf on the main home). Cases: live interactive
+takeover (old terminal names the new one), a Run's id refused with the Task pointer,
+`--fork`, dead process resumes, raw `claude` id, `session new -a`, `task claim/unassign`.
 
 ## Remaining
 

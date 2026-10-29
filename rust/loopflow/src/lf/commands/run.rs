@@ -17,7 +17,7 @@ use crate::prompt::Surface;
 use crate::session_record::{
     AgentProcessRequest, CaptureHandle, SessionCaptureSpec, SubjectAttribution,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -108,6 +108,20 @@ pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     let session = store
         .session(id)?
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
+    // A Graph corrects its own step's answer in that step's Run; nobody else
+    // continues a Run.
+    let caller_graph = crate::journal::current_lf_process_id()
+        .map(|process| store.process(&process))
+        .transpose()?
+        .flatten()
+        .and_then(|process| process.parent_lf_process_id);
+    let own_step = caller_graph
+        .is_some_and(|graph| session.graph_lf_process_id.as_deref() == Some(graph.as_str()));
+    if !own_step {
+        if let Some(refusal) = crate::ops::human_session::run_refusal(&store, &session)? {
+            bail!(refusal);
+        }
+    }
     let mut resolved = crate::agent::resolve_session_config(&session, cli)?;
     let mut turn = cli.process_options();
     turn.agent = resolved.agent.clone();

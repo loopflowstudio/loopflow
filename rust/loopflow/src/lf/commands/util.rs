@@ -209,7 +209,10 @@ fn departure_notice(
 ) -> Result<String> {
     use crate::process::Departure;
     Ok(match departure {
-        Departure::Terminal => {
+        Departure::Terminal { to: Some(to) } => {
+            format!("This conversation moved to {to}: lf resume {session}")
+        }
+        Departure::Terminal { to: None } => {
             "This conversation moved to another terminal on this Machine.".into()
         }
         Departure::Account { account } => {
@@ -1106,6 +1109,31 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
+    fn a_terminal_move_names_the_terminal_it_went_to() {
+        use crate::process::Departure;
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("db")).unwrap();
+        let notice = |to: Option<&str>| {
+            departure_notice(
+                &store,
+                "s1",
+                Departure::Terminal {
+                    to: to.map(str::to_owned),
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            notice(Some("Desktop")),
+            "This conversation moved to Desktop: lf resume s1"
+        );
+        assert_eq!(
+            notice(None),
+            "This conversation moved to another terminal on this Machine."
+        );
+    }
+
+    #[test]
     fn a_machine_move_names_the_task_that_went_with_it() {
         use crate::durable::{MachineId, TaskId};
         use crate::process::Departure;
@@ -1406,7 +1434,7 @@ mod tests {
                     return crate::harness::agent_process::stop_session_agent(
                         &store,
                         agent.process.agent_session_id.as_deref().unwrap(),
-                        crate::process::Departure::Terminal,
+                        crate::process::Departure::Terminal { to: None },
                     );
                 }
                 assert!(

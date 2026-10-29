@@ -59,6 +59,9 @@ replayed. Terminals attach when they open them.
 | comments and steers | saved; delivered at the agent's next boundary |
 | a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |
 
+`lf resume` takes Sessions. A Run (`-b`, a Graph step), running or finished, is
+refused with a pointer to `lf resume --task <task>`; the Task's Session reads its log.
+
 ## Bring in one you started elsewhere
 
 ```bash

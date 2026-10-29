@@ -19,3 +19,13 @@
 
 - Harness-agnostic `--fork` (conversation-log seed) is fine for now.
 - No signalling of raw `claude`/`codex` clients lf didn't start; `lf resume` continues and docs point to close-or-`--fork`.
+
+## Run refusal (headless implement, 2026-10-29)
+
+- A Graph's structured-output correction runs `lf -b session resume <step-run> --message`
+  (`graph.rs`). Refusing every Run would break it, so the Graph process continuing its own
+  step's Run (caller's parent = the Run's `graph_lf_process_id`) is the one exception.
+  Reversible: the correction could move to a non-resume spelling later.
+- A Run is `!interactive`. An `interactive:` Graph step is a Session and stays resumable.
+- Desktop selecting a Run row now shows the refusal text (which names `lf resume --task`);
+  no Swift change made for it.

@@ -200,7 +200,7 @@ provider has not saved a transcript yet, the current terminal stays open; finish
 its first turn and retry the switch. A failed status observer reconnects on the
 next status event without replacing the conversation.
 Repository, Wave, Task and exact Session
-preparation all use `lf connect --prepare`; reset uses `--fresh` for its scope.
+preparation all use `lf resume --prepare`; reset uses `lf session new` for its scope.
 
 Shell panes with Ghostty shell integration group each completed command and its
 output into a full-width block. A command that exited non-zero has a red

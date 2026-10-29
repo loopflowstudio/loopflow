@@ -320,8 +320,8 @@ struct WorkNavigationTests {
         let key = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
         let entry = registry.open(key, title: "Repository", location: record.workspace?.identity)
         let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
-            // Gate the conversation's preparation; showing it then attaches at once.
-            if args.contains("--prepare"), !args.contains("attach") { await gate.wait() }
+            // Gate the repository conversation's preparation; showing it then attaches at once.
+            if args.first == "--repo" { await gate.wait() }
             return json
         })
         let first = Task { await entry.openPrimaryConversation(store: store, registry: registry) }
@@ -1082,7 +1082,7 @@ struct WorkNavigationTests {
          "workspace":{"machine_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
+         "ready_summary":null,"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
         """.utf8))
     }
 }

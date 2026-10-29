@@ -10,7 +10,7 @@ step. Resolve routine decisions autonomously and ask for needed judgment in the
 present conversation, then continue. Headless, exit when blocked or completed. An
 already satisfied Task needs no new execution. A Task whose shared status is
 Deferred stays held: inspect or discuss it, but do not launch work or resume it
-automatically. `lf task resume <issue>` clears the hold without starting execution.
+automatically. `lf task release <issue>` clears the hold without starting execution.
 
 Finish with one disposition and its evidence: **moving** (a live Graph process was
 observed and left alone), **acted** (you continued, recovered or delivered it

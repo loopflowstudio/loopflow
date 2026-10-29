@@ -616,7 +616,7 @@ pub(crate) fn select_task_run(
     if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Deferred
     {
         return Err(task_error(format!(
-            "Task is deferred; use `lf task resume {issue}` before running a Graph"
+            "Task is deferred; use `lf task release {issue}` before running a Graph"
         )));
     }
     let current = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;

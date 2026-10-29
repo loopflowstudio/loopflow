@@ -321,9 +321,9 @@ fn plan_in(
                 location: Some(location),
             }) = &content.face
             {
-                match crate::ops::human_session::human_session_argv(session_id, "connect") {
+                match crate::ops::human_session::human_session_argv(session_id) {
                     Ok(mut argv) => {
-                        // Keep the existing connect command and data-selection fences.
+                        // Keep the existing resume command and data-selection fences.
                         let at = argv.len() - 3;
                         argv.splice(
                             at..at,

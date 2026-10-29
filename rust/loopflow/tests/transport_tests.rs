@@ -80,7 +80,7 @@ impl Fixture {
     fn start(&self, argv: &[&str]) -> String {
         self.owner(self.serve(true, argv))
     }
-    /// A Session row naming `owner`, so the public attach command resolves it.
+    /// A Session row naming `owner`, so `lf session resume` attaches to it.
     fn session(&self, owner: &str) -> String {
         let session = "session_5e55105e000040008000000000000001";
         let sql = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
@@ -376,7 +376,7 @@ fn pipe_eof_delivers_all_input_before_the_command_exits() {
     let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", "cat; printf final >&2"]));
     let session = fixture.session(&owner);
     let mut viewer = fixture
-        .command(&["session", "attach", &session])
+        .command(&["session", "resume", &session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -470,7 +470,7 @@ enum SilentOwner {
 }
 
 #[test]
-fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
+fn acknowledged_viewer_remains_attached_past_handshake_deadline() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(
         false,
@@ -482,12 +482,9 @@ fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
     ));
     let session = fixture.session(&owner);
     let mut viewers = Vec::new();
-    for observe in [false, true] {
-        let mut command = fixture.command(&["session", "attach", &session]);
-        if observe {
-            command.arg("--observe");
-        }
-        let mut viewer = command
+    {
+        let mut viewer = fixture
+            .command(&["session", "resume", &session])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -503,8 +500,8 @@ fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
         assert_eq!(&ready, b"ready");
         viewers.push(viewer);
     }
-    // Both the controller and a nonterminal observer (no input token) have
-    // acknowledged. Only the handshake is bounded, not their connection.
+    // The controller has acknowledged. Only the handshake is bounded, not
+    // its connection.
     std::thread::sleep(Duration::from_secs(6));
     for viewer in &mut viewers {
         assert!(viewer.try_wait().unwrap().is_none());
@@ -544,7 +541,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     let listener = UnixListener::bind(&endpoint).unwrap();
     listener.set_nonblocking(true).unwrap();
     let mut viewer = fixture
-        .command(&["session", "attach", session])
+        .command(&["session", "resume", session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -670,27 +667,15 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
         .unwrap();
     let attachment: (String, String) = sql.query_row("SELECT id,attachment_token FROM processes WHERE agent_session_id=?1 AND kind='agent' AND completed_at IS NULL", [&session], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     let prepared = fixture
-        .command(&[
-            "session",
-            "attach",
-            &session,
-            "--if-free",
-            "--prepare",
-            "--json",
-        ])
+        .command(&["session", "resume", &session, "--prepare", "--json"])
         .output()
         .unwrap();
     assert!(prepared.status.success(), "{prepared:?}");
     let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
     let argv = prepared["open_argv"].as_array().unwrap();
     assert_eq!(
-        &argv[argv.len() - 4..],
-        &[
-            json!("session"),
-            json!("attach"),
-            json!(session),
-            json!("--if-free")
-        ]
+        &argv[argv.len() - 3..],
+        &[json!("session"), json!("resume"), json!(session)]
     );
     assert_eq!(fixture.wait_file("launches"), launched);
     let first = fixture.viewer(&owner, true);
@@ -708,7 +693,7 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     assert!(!fixture.home.path().join("answer").exists());
     // The public Session operation resolves exactly the same retained owner.
     let mut replacement = fixture
-        .command(&["session", "attach", &session])
+        .command(&["session", "resume", &session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1096,7 +1081,7 @@ read -r answer < /dev/tty
     // `lf resume` reopens the ended conversation from its saved history.
     let mut reopen = fixture.serve(
         true,
-        &[env!("CARGO_BIN_EXE_lf"), "session", "connect", &idle],
+        &[env!("CARGO_BIN_EXE_lf"), "session", "resume", &idle],
     );
     reopen.env("PATH", &path);
     let reopened = fixture.owner(reopen);
@@ -1368,7 +1353,7 @@ fn headless_graph(resume: bool) {
         )
         .unwrap();
         let output = fixture
-            .command(&["connect", &session, "--try"])
+            .command(&["resume", &session])
             .env(
                 "PATH",
                 format!(

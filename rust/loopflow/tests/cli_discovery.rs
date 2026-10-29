@@ -915,13 +915,14 @@ fn retired_installation_and_capture_paths_do_not_resolve() {
 }
 
 #[test]
-fn command_tree_only_aliases_resume_to_connect() {
+fn command_tree_has_no_command_aliases() {
     fn check(command: &clap::Command) {
-        let aliases = command.get_all_aliases().collect::<Vec<_>>();
-        if !aliases.is_empty() {
-            assert_eq!(command.get_name(), "connect");
-            assert_eq!(aliases, ["resume"]);
-        }
+        assert_eq!(
+            command.get_all_aliases().count(),
+            0,
+            "{}",
+            command.get_name()
+        );
         for arg in command.get_arguments() {
             // Loaded 0.14.14 cron jobs pass `--flow`; LOO-574 removes the alias.
             if command.get_name() == "run"

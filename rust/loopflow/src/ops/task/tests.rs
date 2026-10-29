@@ -80,7 +80,7 @@ fn paused_snapshot_never_recommends_running_work() {
         snapshot.actions.recommended,
         Some(crate::ops::task_actions::TaskAction::NoAction)
     );
-    assert!(snapshot.actions.reason.contains("lf task resume DEFER-1"));
+    assert!(snapshot.actions.reason.contains("lf task release DEFER-1"));
 }
 
 #[test]

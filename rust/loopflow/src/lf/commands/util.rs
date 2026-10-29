@@ -180,7 +180,7 @@ fn spawn_session_command_with_env(
         Ok(())
     } else if agent_session.is_some() {
         Err(anyhow!(
-            "{} exited with {}. If another client still owns this session, close it or use `lf session connect --takeover`.",
+            "{} exited with {}. If another client still owns this session, close it and run `lf resume` again.",
             command.program,
             outcome.status,
         ))

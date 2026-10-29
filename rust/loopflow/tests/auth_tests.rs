@@ -1370,7 +1370,7 @@ fn codex_same_login_recovery_status_launch_resume_and_reset() {
     run(&[
         "-b",
         "session",
-        "connect",
+        "resume",
         &session,
         "--message",
         "Reply with RECOVERED again.",

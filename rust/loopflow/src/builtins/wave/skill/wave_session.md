@@ -34,7 +34,7 @@ watch, check back or follow up later.
   Nothing resumes a stopped Graph: inspect its history and effects before
   selecting fresh work through `lf task run`.
 - This conversation keeps the instructions it launched with.
-  `lf connect --wave <wave> --fresh` gives the Wave a fresh conversation after an install.
+  `lf session new --wave <wave>` restarts it on a fresh thread with current instructions, seeded with what this one knew.
 
 ## Begin work in a Wave
 

@@ -169,17 +169,14 @@ public enum SessionConnectIntent: String, Codable, Equatable, Sendable {
     case connectOrResume = "connect_or_resume"
 }
 
-public enum SessionOpenMode: String, Codable, Equatable, Sendable {
-    case refuse, takeover, `try`
-}
-
 public struct SessionConnectAction: Codable, Equatable, Sendable {
     public let intent: SessionConnectIntent
-    public let mode: SessionOpenMode
+    /// A new conversation continues from this one; its holder keeps it.
+    public let fork: Bool
     public let prepareOnly: Bool
 
     enum CodingKeys: String, CodingKey {
-        case intent, mode
+        case intent, fork
         case prepareOnly = "prepare_only"
     }
 }

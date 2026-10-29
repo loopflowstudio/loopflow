@@ -518,7 +518,7 @@ impl World {
         Ok(task)
     }
 
-    /// Defer a Task the way `lf task defer` does.
+    /// Defer a Task the way `lf task hold` does.
     pub fn defer(&self, task: &Task) -> Result<()> {
         Ok(crate::ops::task::task_defer(&task.identifier, true)?)
     }
@@ -804,8 +804,8 @@ impl World {
                 &store,
                 &self.repo,
                 Some(wave),
-                false,
-            ))?;
+            ))?
+            .0;
         let session = self
             .runtime
             .block_on(store.session(record.id.as_str()))?

@@ -9,19 +9,34 @@ comes back after a crash.
 ## Come back to a conversation
 
 ```bash
-lf resume                          # this checkout's ongoing conversation: its Task's, or the repository's
-lf resume --wave billing           # the Wave's ongoing conversation
-lf resume --fresh --task LOO-12    # a new conversation for the Task; the old one keeps its history
+lf resume                          # this checkout's ongoing conversation: its Task's, the Wave's, or the repository's
+lf resume LOO-12                   # a Task's conversation, from anywhere
+lf resume <session>                # an exact conversation
 lf session list --available        # conversations available for your next turn, across this repository
 ```
 
-Each scope (repository, Wave, Task) has one ongoing conversation. `lf resume`
-opens it, creating one when absent, with that scope's operating instructions.
-Reopening keeps its native history and the instructions it launched with; use
-`--fresh` for current ones.
+`lf resume` always gets you back, with no flags to choose:
 
-An interactive Session whose terminal closed while its agent kept running lists
-as `detached`; `lf resume <session>` reattaches without restarting the agent.
+| The conversation is… | `lf resume` |
+|---|---|
+| running with no terminal showing it (`detached`) | reattaches; nothing restarts |
+| shown in another lf terminal | takes it over; that terminal says where it went |
+| running in a provider client lf started elsewhere | stops that client and continues here |
+| ended or crashed | continues the same provider thread from its history |
+| missing for this scope | starts one and says so |
+
+Each scope (repository, Wave, Task) has one ongoing conversation, with that
+scope's operating instructions.
+
+```bash
+lf resume <session> --fork         # leave the other client running; continue in a new conversation from it
+lf session new                     # restart this scope's conversation on a fresh thread, seeded with what the last one knew
+```
+
+`--fork` makes a new Session in the same Work, starting from the conversation's
+log. `lf session new` keeps the same Session and name: a new provider thread
+starts from that log and current instructions, and the old thread stays in
+`lf session history`.
 
 `lf session list --all` covers every repository on this machine; `--history`
 adds finished conversations, and `--search` narrows the list.
@@ -55,18 +70,19 @@ One the provider started on its own is found in its home and becomes a Session
 the first time you resume it: from then on it lists, renames, binds and resumes
 like any other.
 
-If another client still has it open, `--takeover` stops Loopflow-owned clients
-first; `--try` asks the provider to resume anyway.
+A raw `claude` or `codex` still open on it isn't one lf can stop; close it, or
+`--fork` to leave it running.
 
 ## Switch agents mid-conversation
 
 ```bash
 lf -a codex resume <session>       # the same Session, continued on Codex
+lf session new -a claude           # this scope's conversation, continued on Claude
 ```
 
 The Session keeps its name, Task and history. The new agent starts from a plain
 log of the conversation so far (what was asked, what was answered, one line per
-tool call), not a summary.
+tool call), not a summary. On the harness it already uses, `-a` changes nothing.
 
 ## Steer without interrupting
 
@@ -92,16 +108,6 @@ lf -b resume <session> --message "now add the migration test"
 Runs the next turn in the Session's saved workspace, from any directory, with
 its native history and without re-running the original skill. Output prints and
 the command returns when the turn ends.
-
-## Watch a run without taking it over
-
-```bash
-lf session attach <session> --observe
-```
-
-Attaches to the running execution read-only: nothing restarts and no input is
-sent. Drop `--observe` to take input control; `--if-free` refuses if someone
-else has it.
 
 ## Name it and file it
 
@@ -138,15 +144,16 @@ choose again. Connecting logins and setting routes: [Ops](ops.md).
 
 **Session selectors.** `resume`, `rename` and `bind` take a Session ID or a
 provider conversation ID; `resume` also takes a Task identifier, which opens
-that Task's conversation. `lf task resume` is different: it clears a Task pause.
+that Task's conversation. `lf task hold` and `lf task release` are about the
+Task's runs, not its conversation.
 
 **One primary per scope.** A Task keeps its selected primary conversation;
-opening another Session doesn't change it, and `--fresh` replaces it while the
-old one keeps its client and history.
+opening or forking another Session doesn't change it.
 
 **Preparing a terminal.** `lf resume <session> --prepare --json` returns the
-command to open it without starting the provider; for a remote machine, an SSH
-command.
+command to open it without starting the provider (with `--fork`, the fork's);
+for a remote machine, an SSH command. Running that command takes over as
+`lf resume` does.
 
 **Native history.** `lf session history <session>` reads the provider's start,
 usage and completion receipts.

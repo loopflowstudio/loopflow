@@ -826,7 +826,7 @@ struct WorkModelStreamTests {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let query = RegistryQuery(watchWork: { await feed.open() }) { args, _ in
-            guard args.starts(with: ["task", "defer"]) else {
+            guard args.starts(with: ["task", "hold"]) else {
                 throw RegistryQueryError("unexpected read: \(args)")
             }
             return ""

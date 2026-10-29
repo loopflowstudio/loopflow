@@ -279,8 +279,8 @@ struct TaskShipControl: View {
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(acting || readingUnavailable != nil)
-                        .help(deferred ? "lf task resume: let it run again"
-                                     : "lf task defer: hold it, keeping its checkout, PR and interactive step")
+                        .help(deferred ? "lf task release: let it run again"
+                                     : "lf task hold: hold it, keeping its checkout, PR and interactive step")
                         .accessibilityIdentifier("task-defer")
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))

@@ -1012,12 +1012,12 @@ fn run_task_command(repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Defer { issue } | TaskCommand::Resume { issue } => {
-            let deferred = matches!(command, TaskCommand::Defer { .. });
-            loopflow::ops::task::task_defer(issue, deferred)?;
+        TaskCommand::Hold { issue } | TaskCommand::Release { issue } => {
+            let held = matches!(command, TaskCommand::Hold { .. });
+            loopflow::ops::task::task_defer(issue, held)?;
             println!(
                 "{issue}: {}; execution unchanged",
-                if deferred { "deferred" } else { "resumed" }
+                if held { "held" } else { "released" }
             );
             Ok(())
         }
@@ -2091,21 +2091,18 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     }
     if let Some(Commands::Session {
         cmd:
-            loopflow::lf::SessionCommand::Connect {
+            loopflow::lf::SessionCommand::Resume {
                 id,
                 connection,
-                takeover,
-                try_open,
+                fork,
                 all: false,
             },
     }) = &cli.command
     {
         let report = loopflow::lf::commands::context::explain_session_connect(
             connection.target(cli, id.as_deref())?,
-            *takeover,
-            *try_open,
+            *fork,
             connection.prepare,
-            connection.fresh,
         )?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);

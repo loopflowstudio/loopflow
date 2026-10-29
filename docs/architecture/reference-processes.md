@@ -131,7 +131,7 @@ person's other added Machines over `lf --machine`; an unreachable Machine gets a
 warning and a later rerun. Resolution for an unowned Task walks its Wave, its parent
 Waves, its repository, then this Machine, so single-Machine use needs no setup. A scope's Session Machine is a separate setting with the same
 resolution (`--session`; `--tasks` sets only the Tasks'). Setting it moves the
-Wave primary Session to the new Machine with its native provider history. `lf session connect --wave <w>`, bare connects that
+Wave primary Session to the new Machine with its native provider history. `lf resume --wave <w>`, bare resumes that
 resolve to a Wave or the repository, and Desktop's Wave Session route to the Session
 Machine. A Task's Machine is captured in its claim: changing the Wave Machine moves
 no existing Task, and `lf task move <task> --machine <machine>` moves one: its Graph stops,

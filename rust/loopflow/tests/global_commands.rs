@@ -909,7 +909,7 @@ fn non_agent_context_previews_reject_before_reading_stdin() {
         vec!["task", "save", "unknown", "note.md", "--revision", "old"],
         vec!["task", "run", "unknown"],
         vec!["open"],
-        vec!["session", "connect", "unknown"],
+        vec!["session", "resume", "unknown"],
     ] {
         let output = command(home.path(), repo.path(), &args)
             .arg("--context")
@@ -1346,7 +1346,7 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     };
     let explicit = read(&[
         "session",
-        "connect",
+        "resume",
         &session.id,
         "--explain",
         "--prepare",
@@ -1354,7 +1354,7 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     ]);
     let native = read(&[
         "session",
-        "connect",
+        "resume",
         "native-proof",
         "--explain",
         "--prepare",
@@ -1389,7 +1389,7 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
             repo.path(),
             &[
                 "session",
-                "connect",
+                "resume",
                 &session.id,
                 "--explain",
                 "--prepare",
@@ -1404,31 +1404,22 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     assert_eq!(missing_bin["state"], explicit["state"]);
     assert_eq!(missing_bin["actions"], explicit["actions"]);
     assert_eq!(missing_bin["unavailable"], explicit["unavailable"]);
-    let replace = read(&[
+    let forked = read(&[
         "session",
-        "connect",
+        "resume",
         &session.id,
-        "--takeover",
+        "--fork",
         "--explain",
         "--prepare",
         "--json",
     ]);
-    let try_open = read(&[
-        "session",
-        "connect",
-        &session.id,
-        "--try",
-        "--explain",
-        "--prepare",
-        "--json",
-    ]);
-    assert_eq!(replace["action"]["mode"], "takeover");
-    assert_eq!(try_open["action"]["mode"], "try");
+    assert_eq!(explicit["action"]["fork"], false);
+    assert_eq!(forked["action"]["fork"], true);
     let text = success(
         command(
             home.path(),
             repo.path(),
-            &["session", "connect", &session.id, "--takeover", "--explain"],
+            &["session", "resume", &session.id, "--explain"],
         )
         .output()
         .unwrap(),
@@ -1440,7 +1431,7 @@ fn session_connect_explain_shares_explicit_native_and_inferred_selection_without
     assert_eq!(before, fs::read(db_path).unwrap());
     assert!(!home.path().join(".lf/runs").exists());
     assert!(!home.path().join(".lf/human-sessions").exists());
-    let prepared = read(&["session", "connect", "native-proof", "--prepare", "--json"]);
+    let prepared = read(&["session", "resume", "native-proof", "--prepare", "--json"]);
     assert_eq!(prepared["id"], explicit["resolution"]["session"]["value"]);
     assert_eq!(prepared["state"], explicit["state"]);
     assert_eq!(prepared["actions"], explicit["actions"]);
@@ -1455,7 +1446,7 @@ fn session_connect_explain_preserves_missing_and_stale_evidence() {
             command(
                 home.path(),
                 repo.path(),
-                &["session", "connect", id, "--explain", "--prepare", "--json"],
+                &["session", "resume", id, "--explain", "--prepare", "--json"],
             )
             .output()
             .unwrap(),
@@ -1534,10 +1525,10 @@ fn session_connect_explain_observes_takeover_without_signaling_owned_client() {
         .unwrap();
         db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
         let before = fs::read(&db_path).unwrap();
-        for flag in [None, Some("--takeover"), Some("--try")] {
+        for flag in [None, Some("--fork")] {
             let mut args = vec![
                 "session",
-                "connect",
+                "resume",
                 &session.id,
                 "--explain",
                 "--prepare",
@@ -1605,7 +1596,7 @@ fn session_connect_explain_never_probes_or_claims_a_live_endpoint() {
         command(
             home.path(),
             repo.path(),
-            &["--json", "session", "connect", &session.id, "--explain"],
+            &["--json", "session", "resume", &session.id, "--explain"],
         )
         .output()
         .unwrap(),
@@ -1679,7 +1670,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     };
     let before = identity(&old);
     let session: serde_json::Value = serde_json::from_str(&success(
-        command(home.path(), &old, &["connect", "--prepare", "--json"])
+        command(home.path(), &old, &["resume", "--prepare", "--json"])
             .output()
             .unwrap(),
     ))
@@ -1700,7 +1691,7 @@ fn repository_move_keeps_identity_work_and_sibling_checkouts() {
     );
     assert_eq!(identity(&moved), after);
     let resumed: serde_json::Value = serde_json::from_str(&success(
-        command(home.path(), &moved, &["connect", "--prepare", "--json"])
+        command(home.path(), &moved, &["resume", "--prepare", "--json"])
             .output()
             .unwrap(),
     ))

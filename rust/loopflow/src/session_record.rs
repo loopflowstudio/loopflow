@@ -1115,7 +1115,7 @@ pub(crate) fn write_provider_session(
 }
 
 /// The resume reference: the newest one names the native conversation and
-/// account `lf session connect` reopens.
+/// account `lf resume` reopens.
 pub(crate) fn provider_session_observation(
     session: &crate::session::LfSession,
     input: &str,

@@ -122,10 +122,10 @@ so single-Machine use needs no setup. `lf wave show`'s `machine` field reads the
 same resolver.
 
 Setting the Session Machine moves the Wave Session with its native provider
-history, as `lf --machine <machine> resume <session>` does. `lf session connect --wave <w>`,
-a bare connect resolving to a Wave or the repository, and Desktop's Wave Session
+history, as `lf --machine <machine> resume <session>` does. `lf resume --wave <w>`,
+a bare resume resolving to a Wave or the repository, and Desktop's Wave Session
 route to the Session Machine over `lf --machine`. `lf open` reads a primary on
-another of your Machines through that connect, never from this Machine's copy.
+another of your Machines through that resume, never from this Machine's copy.
 
 A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
 moves no existing Task; `lf task move <task> --machine <machine>` moves one. It

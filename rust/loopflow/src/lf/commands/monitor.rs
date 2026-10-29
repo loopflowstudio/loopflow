@@ -122,7 +122,7 @@ pub fn overview(json: bool, all: bool) -> anyhow::Result<()> {
                 _ if session.availability.is_some() => (
                     "available",
                     "Its conversation is available for your input".into(),
-                    format!("lf session connect {}", session.id),
+                    format!("lf resume {}", session.id),
                 ),
                 _ => (
                     "unknown",

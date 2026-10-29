@@ -32,9 +32,9 @@ pub fn run(
     let resident_operation = matches!(
         &cli.command,
         Some(crate::lf::Commands::Session {
-            cmd: crate::lf::SessionCommand::Attach { .. }
-                | crate::lf::SessionCommand::List(_)
-                | crate::lf::SessionCommand::Connect { .. }
+            cmd: crate::lf::SessionCommand::List(_)
+                | crate::lf::SessionCommand::Resume { .. }
+                | crate::lf::SessionCommand::New { .. }
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
@@ -168,7 +168,9 @@ pub fn run(
     }
     let preparation = match &cli.command {
         Some(crate::lf::Commands::Session {
-            cmd: crate::lf::SessionCommand::Connect { connection, .. },
+            cmd:
+                crate::lf::SessionCommand::Resume { connection, .. }
+                | crate::lf::SessionCommand::New { connection, .. },
         }) if connection.prepare && !preview => Some(connection),
         _ => None,
     };

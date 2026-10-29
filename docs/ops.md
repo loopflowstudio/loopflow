@@ -87,8 +87,8 @@ repairs its PR.
 Hold repair for one Task, or cap startup retries within one repair:
 
 ```bash
-lf task defer LOO-12          # hold future runs and repair; running work continues
-lf task resume LOO-12
+lf task hold LOO-12            # hold future runs and repair; running work continues
+lf task release LOO-12         # let it run again
 ```
 
 ```yaml

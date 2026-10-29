@@ -260,7 +260,7 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         "--machine",
         "mini",
         "session",
-        "connect",
+        "resume",
         &id,
         "--prepare",
         "--json",
@@ -273,11 +273,10 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
         .collect::<Vec<_>>();
     assert_eq!(argv[0], "ssh");
     assert!(argv.contains(&"-tt"));
-    assert!(!argv.contains(&"--takeover"));
     for target in [
-        vec!["session", "connect", id.as_str()],
+        vec!["session", "resume", id.as_str()],
         vec!["session", "resume"],
-        vec!["connect", id.as_str()],
+        vec!["resume", id.as_str()],
         vec!["resume"],
     ] {
         let mut arguments = vec!["--machine", "mini"];
@@ -357,7 +356,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         ),
     );
     let opened = fixture
-        .command(&["connect", "--prepare", "--json"])
+        .command(&["resume", "--prepare", "--json"])
         .current_dir(&path)
         .output()
         .unwrap();
@@ -369,7 +368,7 @@ fn bare_connect_in_the_repository_opens_its_session_on_your_session_machine() {
         .position(|arg| *arg == "--repository")
         .unwrap();
     assert_eq!(arguments[at + 1], repository);
-    assert!(arguments.contains(&"connect"), "{arguments:?}");
+    assert!(arguments.contains(&"resume"), "{arguments:?}");
 }
 
 #[test]
@@ -1954,7 +1953,7 @@ fn resume_moves_a_session_to_another_machine() {
     )
     .unwrap();
     let admitted = fixture
-        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .command(&["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(&worktree)
         .output()
         .unwrap();
@@ -2048,7 +2047,7 @@ fn a_mid_merge_worktree_refuses_to_move() {
     )
     .unwrap();
     let admitted = fixture
-        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .command(&["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(&worktree)
         .output()
         .unwrap();
@@ -2157,7 +2156,7 @@ fn claude_conversation(fixture: &Machines, cwd: &Path, conversation: &str) -> St
     )
     .unwrap();
     let admitted = fixture
-        .command(&["session", "connect", conversation, "--prepare", "--json"])
+        .command(&["session", "resume", conversation, "--prepare", "--json"])
         .current_dir(cwd)
         .output()
         .unwrap();

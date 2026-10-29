@@ -193,7 +193,7 @@ sys.stdin.read()
             "-b",
             "--isolate",
             "session",
-            "connect",
+            "resume",
             &session,
             "--message",
             "RESUME_END",
@@ -543,7 +543,7 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
         .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
         .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
         .current_dir(repo.path())
-        .args(["-b", "session", "connect", session, "--message", "AFTER"])
+        .args(["-b", "session", "resume", session, "--message", "AFTER"])
         .stdin(Stdio::null())
         .output()
         .unwrap();

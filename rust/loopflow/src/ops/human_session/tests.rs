@@ -96,7 +96,7 @@ fn public_open_stops_headless_group_and_resumes_saved_conversation() {
                 )?;
                 std::fs::write(home.join("provider-pid"), provider.id().unwrap().to_string())?;
                 // Without native identity, connect must leave the running provider alone.
-                let refused = super::open(&store, &session.id, super::OpenMode::Try, true).await;
+                let refused = super::open(&store, &session.id, false, true).await;
                 assert!(refused.unwrap_err().to_string().contains("identity is unavailable"));
                 assert!(provider.try_wait()?.is_none());
                 assert_eq!(store.sqlite.session_attachment(&session.id)?, Some(first.clone()));
@@ -105,7 +105,7 @@ fn public_open_stops_headless_group_and_resumes_saved_conversation() {
                 )?;
                 let origin = store.sqlite.session_turn_origin(&session.id, &first)?;
                 store.sqlite.record_session_turn_origin(&"saved-thread".into(), "pending", &origin)?;
-                let result = super::open(&store, &session.id, super::OpenMode::Try, true).await;
+                let result = super::open(&store, &session.id, false, true).await;
                 let alive = !crate::journal::OsProcess::group(provider.id().unwrap())?.is_empty();
                 if alive {
                     provider.kill().await?;
@@ -391,13 +391,6 @@ fn session_action_fixtures_match_the_shared_boundary() {
     .unwrap();
     for case in cases {
         assert_eq!(super::session_actions(case.state), case.actions);
-        for action in case.actions {
-            let outcome = super::require_session_action(case.state, action.kind);
-            assert_eq!(
-                outcome.err().map(|error| error.to_string()),
-                action.unavailable_reason
-            );
-        }
     }
     for fixture in [
         include_str!("../../../../../tests/fixtures/dto/session.json"),
@@ -616,11 +609,11 @@ fn old_captured_membership_keeps_its_provenance_without_a_fabricated_node() {
 fn human_sessions_open_through_the_public_session_command() {
     let _lock = crate::journal::test_env_lock();
     let home = SessionHome::new();
-    let argv = human_session_argv("session_123", "connect").unwrap();
+    let argv = human_session_argv("session_123").unwrap();
 
     assert_eq!(
         &argv[argv.len() - 3..],
-        ["session", "connect", "session_123"]
+        ["session", "resume", "session_123"]
     );
     assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
     assert!(!argv.iter().any(|argument| argument == "tmux"));

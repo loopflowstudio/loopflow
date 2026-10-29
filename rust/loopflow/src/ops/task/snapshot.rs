@@ -71,7 +71,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         TaskActionModel {
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: format!(
-                "Task is deferred; `lf task resume {}` clears the hold without starting execution",
+                "Task is deferred; `lf task release {}` clears the hold without starting execution",
                 task.identifier
             ),
         }

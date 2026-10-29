@@ -3,7 +3,7 @@
 ```bash
 lf -b implement
 lf session list --interactive false --json
-lf session connect SESSION
+lf resume SESSION
 ```
 
 These commands use the current parser. This guide specifies the accepted
@@ -223,8 +223,9 @@ Attachment exit retains an exact history-event reference rather than deriving a
 receipt from counter arithmetic. Migration preserves old event keys and payloads,
 including captured input, native identity and historical outcomes.
 
-`session connect --takeover` stops the exact owned clients and reconnects to the
-live AgentProcess, preserving the active turn and sibling conversations.
+`lf resume` takes over: it attaches to a live owner, else stops the exact owned
+clients and resumes the same provider thread, preserving sibling conversations.
+`--fork` leaves the holder running and starts a new Session from its log.
 There is no separate Session AgentProcess-restart operation. Mere process silence,
 tmux visibility, causal ancestry or a stored active label grants no termination
 authority, and recovery never authorizes killing a shared AgentProcess for one thread.
@@ -243,7 +244,7 @@ iteration counts to GraphProcess, beside the Graph's name and launched graph. A
 step's result is how its process exited. A deciding or routing step gets its
 answer contract in its message and the Graph process reads the final answer of the
 Session turn that step Process captured; an invalid answer is corrected by
-resuming the same conversation (`lf -b connect ID --message TEXT`), at most
+resuming the same conversation (`lf -b resume ID --message TEXT`), at most
 twice, then the Graph fails. A mechanical step is its own child Process and invents
 no LfSession. After an operation the Graph process stops the Graph when a landing of
 its checkout is still being watched; neither failed. A killed Graph process leaves its Processes

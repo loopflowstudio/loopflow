@@ -46,7 +46,7 @@
     },
     "action": {
       "intent": "start",
-      "mode": "refuse",
+      "fork": false,
       "prepare_only": false
     },
     "state": "unknown",
@@ -108,7 +108,7 @@
     },
     "action": {
       "intent": "resume",
-      "mode": "takeover",
+      "fork": false,
       "prepare_only": true
     },
     "state": "unknown",
@@ -170,7 +170,7 @@
     },
     "action": {
       "intent": "connect_or_resume",
-      "mode": "try",
+      "fork": false,
       "prepare_only": false
     },
     "state": "unknown",

@@ -56,7 +56,7 @@ const AUTHORED_CONTEXT: &[&[&str]] = &[&["context"]];
 
 /// Session entry uses an explicit Work target or checkout discovery, never an
 /// ambient Wave. `session_launch_contract` covers both forms and their effects.
-const SESSION_TARGETS: &[&[&str]] = &[&["session", "connect"]];
+const SESSION_TARGETS: &[&[&str]] = &[&["session", "resume"]];
 
 /// Membership changes name an explicit destination and preserve execution context.
 /// `lf set` and `lf unset` take only the typed root `--wave`, else apply to the

@@ -50,11 +50,9 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("session_connect_explanations.json")
         let reports = try JSONDecoder().decode([SessionConnectExplanation].self, from: data)
         #expect(reports[0].action?.intent == .start)
-        #expect(reports[0].action?.mode == .refuse)
-        #expect(reports[1].action?.mode == .takeover)
+        #expect(reports[1].action?.fork == false)
         #expect(reports[1].action?.prepareOnly == true)
         #expect(reports[2].action?.intent == .connectOrResume)
-        #expect(reports[2].action?.mode == .try)
         #expect(!reports[2].unavailable.isEmpty)
         #expect(reports[3].state == nil)
         #expect(reports[3].action == nil)
@@ -842,7 +840,7 @@ struct DTOFixtureTests {
         #expect(session.statusLabel == "Available")
         #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
-            "session", "connect", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
+            "session", "resume", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
         ])
 
         let encoded = try JSONEncoder().encode(session)

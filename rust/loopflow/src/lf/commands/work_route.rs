@@ -118,7 +118,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
         // `resume --task X` opens the Task's conversation where the Task runs.
         Some(Commands::Session {
             cmd:
-                SessionCommand::Connect {
+                SessionCommand::Resume {
                     id: None,
                     connection,
                     ..
@@ -132,13 +132,13 @@ fn launch_task(cli: &Cli) -> Option<&str> {
     }
 }
 
-/// Bare `lf connect` in a Task's worktree acts on that Task, so it routes to
+/// Bare `lf resume` in a Task's worktree acts on that Task, so it routes to
 /// its Machine exactly as `--task` does.
 fn worktree_task(cli: &Cli) -> Result<Option<String>> {
     let bare = match &cli.command {
         Some(Commands::Session {
             cmd:
-                SessionCommand::Connect {
+                SessionCommand::Resume {
                     id: None,
                     all: false,
                     ..
@@ -250,7 +250,7 @@ pub(super) fn resumed_session(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Session {
             cmd:
-                SessionCommand::Connect {
+                SessionCommand::Resume {
                     id: Some(id),
                     all: false,
                     ..
@@ -265,7 +265,7 @@ pub(super) fn resumed_task(cli: &Cli) -> Option<&str> {
     match &cli.command {
         Some(Commands::Session {
             cmd:
-                SessionCommand::Connect {
+                SessionCommand::Resume {
                     id: None,
                     connection,
                     ..
@@ -302,7 +302,7 @@ fn dispatch_moved_task_conversation(
     task: &TaskId,
 ) -> Result<bool> {
     let Some(Commands::Session {
-        cmd: SessionCommand::Connect { connection, .. },
+        cmd: SessionCommand::Resume { connection, .. },
     }) = &cli.command
     else {
         return Ok(false);
@@ -365,13 +365,13 @@ fn without_placement(args: Vec<String>) -> Vec<String> {
 
 /// A Wave's or repository's Session lives on your Session Machine for it. The
 /// destination runs it wherever it arrives, even if its own copy differs. A
-/// bare connect resolves its scope from the worktree exactly as the local
-/// connect would, then routes the same way.
+/// bare resume resolves its scope from the worktree exactly as the local
+/// resume would, then routes the same way.
 fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     let (
         Some(Commands::Session {
             cmd:
-                SessionCommand::Connect {
+                SessionCommand::Resume {
                     id: None,
                     all: false,
                     ..

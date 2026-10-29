@@ -28,7 +28,7 @@ pub fn run(
             return Ok(());
         }
         ShipStart::Deferred { issue } => {
-            println!("{issue} is deferred; `lf task resume {issue}` before shipping it");
+            println!("{issue} is deferred; `lf task release {issue}` before shipping it");
             return Ok(());
         }
         ShipStart::AtEnd { issue } => {
@@ -106,7 +106,7 @@ fn halt(issue: &str, step: &ShipStep) -> Result<()> {
     match step {
         ShipStep::Deferred => {
             println!(
-                "{issue} is deferred; `lf task resume {issue}` and `lf ship` continue shipping"
+                "{issue} is deferred; `lf task release {issue}` and `lf ship` continue shipping"
             )
         }
         ShipStep::Stopped => println!("{issue} stopped shipping"),

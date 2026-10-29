@@ -97,7 +97,7 @@ pub(crate) fn preview_prompt(
     })
 }
 
-/// `lf -b connect ID --message TEXT`: one more headless turn of a conversation,
+/// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 pub fn resume(id: &str, message: &str, cli: &Cli) -> Result<()> {
     if crate::transport::delegate_current(true)? {
@@ -500,12 +500,11 @@ fn build_prompt_at(
         match crate::definition::name::portable_name(&skill.name).as_str() {
             "task-session" => anyhow::ensure!(
                 task_input.is_some(),
-                "Select a Task with `lf connect --task ISSUE`"
+                "Select a Task with `lf resume --task ISSUE`"
             ),
-            "wave-session" => anyhow::ensure!(
-                wave.is_some(),
-                "Select a Wave with `lf connect --wave NAME`"
-            ),
+            "wave-session" => {
+                anyhow::ensure!(wave.is_some(), "Select a Wave with `lf resume --wave NAME`")
+            }
             _ => {}
         }
     }

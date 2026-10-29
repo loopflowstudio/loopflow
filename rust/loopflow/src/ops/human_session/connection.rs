@@ -8,7 +8,7 @@ use crate::ops::context::{ContextExplanation, ContextFact};
 use crate::ops::WorkSelection;
 use crate::store::SharedStore;
 
-use super::{OpenMode, SessionAction, SessionState};
+use super::{SessionAction, SessionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -21,7 +21,8 @@ pub enum SessionConnectIntent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionConnectAction {
     pub intent: SessionConnectIntent,
-    pub mode: OpenMode,
+    /// A new conversation continues from this one's log; its holder keeps it.
+    pub fork: bool,
     pub prepare_only: bool,
 }
 
@@ -57,13 +58,13 @@ impl SessionConnectExplanation {
                     "Attach to a retained terminal, or explicitly transition a structured Run to native history"
                 }
             };
-            let mode = match action.mode {
-                OpenMode::Refuse => "refuse an active native client",
-                OpenMode::Takeover => "replace Loopflow-owned clients; unsent text there is lost",
-                OpenMode::Try => "ask the provider even if another client is active",
+            let holder = if action.fork {
+                "fork into a new conversation; whatever holds this one keeps it"
+            } else {
+                "take it over; a terminal showing it hands it over, a client lf started stops, unsent text there is lost"
             };
             lines.push(format!(
-                "Action: {intent}; {mode}{}",
+                "Action: {intent}; {holder}{}",
                 if action.prepare_only {
                     " (preparation only; no client takeover)"
                 } else {
@@ -100,9 +101,8 @@ pub(crate) async fn explain_connect(
     store: &SharedStore,
     cwd: &Path,
     target: super::SessionTarget<'_>,
-    mode: OpenMode,
+    fork: bool,
     prepare_only: bool,
-    fresh: bool,
 ) -> SessionConnectExplanation {
     use crate::session::PrimaryScope;
     let selected = async {
@@ -111,20 +111,14 @@ pub(crate) async fn explain_connect(
             return Ok((None, Some(id.to_string())));
         }
         let Some(scope) = super::checkout_scope(store, cwd, target).await? else {
-            if !fresh {
-                if let Some(id) = super::checkout_conversation(store, cwd).await? {
-                    return Ok((None, Some(id)));
-                }
+            if let Some(id) = super::checkout_conversation(store, cwd).await? {
+                return Ok((None, Some(id)));
             }
             return Err(super::unassociated_checkout(cwd)?);
         };
-        let session = if fresh {
-            None
-        } else {
-            match &scope {
-                PrimaryScope::Task(task) => super::primary::task_conversation(store, task).await?,
-                _ => store.sqlite.primary_session(&scope)?,
-            }
+        let session = match &scope {
+            PrimaryScope::Task(task) => super::primary::task_conversation(store, task).await?,
+            _ => store.sqlite.primary_session(&scope)?,
         };
         Ok::<_, anyhow::Error>((Some(scope), session.map(|session| session.id.to_string())))
     }
@@ -183,14 +177,14 @@ pub(crate) async fn explain_connect(
         }
     }
     if let Some(selector) = selector {
-        if let Err(error) = read_connection(store, &selector, mode, prepare_only, &mut report).await
+        if let Err(error) = read_connection(store, &selector, fork, prepare_only, &mut report).await
         {
             report.unavailable.push(error.to_string());
         }
     } else {
         report.action = Some(SessionConnectAction {
             intent: SessionConnectIntent::Start,
-            mode,
+            fork: false,
             prepare_only,
         });
     }
@@ -200,7 +194,7 @@ pub(crate) async fn explain_connect(
 async fn read_connection(
     store: &SharedStore,
     selector: &str,
-    mode: OpenMode,
+    fork: bool,
     prepare_only: bool,
     report: &mut SessionConnectExplanation,
 ) -> Result<()> {
@@ -225,7 +219,7 @@ async fn read_connection(
     };
     report.action = Some(SessionConnectAction {
         intent,
-        mode,
+        fork,
         prepare_only,
     });
     if connection.is_some() {
@@ -262,18 +256,5 @@ async fn read_connection(
     let state = super::session_state(&metadata);
     report.state = Some(state);
     report.actions = super::session_actions(state);
-    // Retained terminal attachment precedes the native-client refusal in ordinary open.
-    // With no socket observation, report the native fallback's refusal conditionally.
-    if !prepare_only && provider.is_some() {
-        if let Err(error) = mode.require_action(state) {
-            if intent == SessionConnectIntent::ConnectOrResume {
-                report
-                    .unavailable
-                    .push(format!("If live connection is unavailable: {error}"));
-            } else {
-                report.impediments.push(error.to_string());
-            }
-        }
-    }
     Ok(())
 }

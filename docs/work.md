@@ -28,7 +28,7 @@ memory and KRs.
 lf comment LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
 lf comment LOO-12                                 # read the thread: yours, teammates', the agents'
 lf interrupt LOO-12                               # stop its running Graph
-lf task defer LOO-12                              # hold future runs and CI repair; live processes finish
+lf task hold LOO-12                               # hold future runs and CI repair; live processes finish
 ```
 
 A comment saves locally first, then reaches every Session working on the Task at
@@ -36,7 +36,7 @@ its next supported boundary: before a Graph step or after an agent turn. Idle
 Sessions stay idle; nothing is replayed into them. Comments from teammates, in
 Loopflow or in your tracker, arrive the same way.
 
-`lf task resume LOO-12` clears a deferral without starting anything. To reopen a
+`lf task release LOO-12` lifts the hold without starting anything. To reopen a
 conversation, use `lf resume` ([Sessions](sessions.md)).
 
 ## See where it stands

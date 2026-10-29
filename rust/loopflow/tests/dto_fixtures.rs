@@ -821,9 +821,7 @@ fn work_links_carry_readable_labels_routes_and_conversation_relation() {
 
 #[test]
 fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
-    use loopflow::lf::commands::context::{
-        OpenMode, SessionConnectExplanation, SessionConnectIntent,
-    };
+    use loopflow::lf::commands::context::{SessionConnectExplanation, SessionConnectIntent};
     let wire: serde_json::Value = serde_json::from_str(include_str!(
         "../../../tests/fixtures/dto/session_connect_explanations.json"
     ))
@@ -833,18 +831,18 @@ fn session_connect_explanations_preserve_intent_and_unavailable_evidence() {
         reports[0].action.as_ref().unwrap().intent,
         SessionConnectIntent::Start
     );
-    assert_eq!(reports[0].action.as_ref().unwrap().mode, OpenMode::Refuse);
+    assert!(!reports[0].action.as_ref().unwrap().fork);
     assert_eq!(
         reports[1].action.as_ref().unwrap().intent,
         SessionConnectIntent::Resume
     );
-    assert_eq!(reports[1].action.as_ref().unwrap().mode, OpenMode::Takeover);
+    assert!(!reports[1].action.as_ref().unwrap().fork);
     assert!(reports[1].action.as_ref().unwrap().prepare_only);
     assert_eq!(
         reports[2].action.as_ref().unwrap().intent,
         SessionConnectIntent::ConnectOrResume
     );
-    assert_eq!(reports[2].action.as_ref().unwrap().mode, OpenMode::Try);
+    assert!(!reports[2].action.as_ref().unwrap().fork);
     assert!(!reports[2].unavailable.is_empty());
     assert!(reports[3].action.is_none());
     assert!(reports[3].state.is_none());

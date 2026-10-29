@@ -2625,7 +2625,7 @@ mod local_planning_tests {
         );
         let process = crate::id::LfProcessId::new();
         store.conn.lock().unwrap().execute(
-            "INSERT INTO processes(id,trace_id,started_at,command,cwd) VALUES(?1,'trace',1,'lf session connect','/fixture')",
+            "INSERT INTO processes(id,trace_id,started_at,command,cwd) VALUES(?1,'trace',1,'lf session resume','/fixture')",
             [&process],
         ).unwrap();
         store

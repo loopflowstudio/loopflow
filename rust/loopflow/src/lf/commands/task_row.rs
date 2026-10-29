@@ -183,7 +183,7 @@ impl TaskNames {
 fn next_command(task: &RoadmapTask, state: TaskState) -> Option<String> {
     let id = &task.task.identifier;
     match state {
-        TaskState::Deferred => Some(format!("lf task resume {id}")),
+        TaskState::Deferred => Some(format!("lf task release {id}")),
         TaskState::Done | TaskState::Abandoned | TaskState::Moving | TaskState::Shipping => None,
         _ if task
             .pr

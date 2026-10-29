@@ -1,10 +1,8 @@
 # Retain execution across terminal loss
 
 ```sh
-lf session attach SESSION
-lf session attach SESSION --if-free
-lf session attach SESSION --observe
-lf --machine build session attach SESSION
+lf resume SESSION
+lf --machine build resume SESSION
 ```
 
 Ctrl+] detaches a viewer. Ctrl+C in an attached terminal reaches the running
@@ -12,14 +10,12 @@ program. A Task step's live controls (`/status`, `/interrupt`, `/detach`,
 messages) are shown to each controlling viewer as it attaches; headless output
 and observers never see them. Closing a terminal leaves execution, provider requests and capture
 settlement with the detached owner; `lf session list` shows its Session as
-`detached` and `lf connect` reattaches it. Observing takes no input claim; a controlling
-attachment revokes the previous viewer's input token. `--if-free` refuses when
-another viewer controls input. Desktop uses it for restoration; it never displaces
-a viewer just because a pane becomes visible. `session attach --prepare --json`
-returns an attach-only command without opening a socket or starting a provider,
-or `null` when nothing is running to attach to. Repository, Wave and Task ensure
-prepare metadata without launching execution; existing executions return no
-command and attach when shown. Ended execution needs explicit resume.
+`detached` and `lf resume` reattaches it. Attaching takes control: the previous
+viewer's input token is revoked and that terminal says where the conversation went.
+`lf resume SESSION --prepare --json` returns the one command Desktop runs, without
+opening a socket or starting a provider. Desktop decides from the record's `state`
+whether showing a pane reattaches: a `detached` Session reattaches, an `active` one
+waits for Move here, and an ended one waits for an explicit open.
 
 `lf resume --all` is the one automatic restart: it resumes Sessions whose owner
 never recorded an exit and is gone from the OS, as after a reboot, crash or kill.
@@ -39,7 +35,7 @@ reopens the conversation from provider history; `lf resume --all` skips it.
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the
 Session and saved conversation, but does not preserve its old in-flight turn or
-resubmit its input. `session attach` never performs that transition.
+resubmit its input.
 
 An unavailable owner leaves delivery unknown. Reconnection does not launch another
 provider or replay a Graph. Finished Runs retain results in Session history.

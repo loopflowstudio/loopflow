@@ -297,7 +297,7 @@ unreadable or nontext exact selections fail with the path and reason.
 
 Exclusions and the 100-file ceiling still apply. Explicitly selecting an ambient
 file supplies it once in task text instead of the refreshed block. New `--docs`
-selections on `lf -b connect ID --message TEXT` belong to that turn; prior documents
+selections on `lf -b resume ID --message TEXT` belong to that turn; prior documents
 stay in native history. This doesn't restrict which files the agent can edit.
 Scratch and the selected Wave's checkout Markdown are gathered automatically.
 Wave context reads `.lf/wave/<name>/` and each path-segment ancestor, excluding siblings

@@ -244,7 +244,7 @@ struct DashboardTile: View {
                         .equatable()
                 } else if let task = task?.task {
                     // Only an unstarted Task offers Start. A started one opens its conversation,
-                    // which `lf session connect --task` creates when only headless Runs exist.
+                    // which `lf resume --task` creates when only headless Runs exist.
                     if task.awaitsStart {
                         TaskStartOffer(model: model, task: task)
                     } else {

@@ -35,27 +35,20 @@ before_agent_start, so context projects at the model-request boundary. Native
 assistant checkpoints retain partial usage without completing the turn. Public
 steers use shared callback receipts; queued or emitted is not model incorporation.
 
-Six real-Pi/local-model probes cover failure, empty answers, overflow refresh,
-native resume, Unicode PTY input and public steering; Task/Flow fixtures cover JSON
-routing and nested Work/cwd. Neither proves authenticated execution or visuals. Direct Pi account access passed separately;
-account preference grants no product restriction. Remaining gate/demo boundaries
-stay in the Task plan. Release's entry-point lesson applies.
+Real-Pi/local-model probes and Task/Flow fixtures prove behavior, not
+authenticated execution or visuals; direct Pi account access passed separately and
+grants no product restriction. Probe list: `acd37dde71:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Remaining gate/demo boundaries stay in the Task plan.
 
-## Opening work conversations (LOO-499, 2026-10-17)
+## Opening work conversations (LOO-499 → LOO-618, 2026-10-28)
 
-Jack Heart selected `resume` as an exact `connect` alias, matching scope/session
-skills on first creation, and case-insensitive Task tickets everywhere; he
-authorized pursue while retaining demo and merge review. The working diff uses
-physical checkout scope or an explicit target, never global recency. Ordinary
-skills claim no primary. Fresh selects a successor without stopping the previous
-client; ordinary connect recovers it after an uncertain reply. Preparation launches
-no provider; explanation admits nothing.
-
-Clap aliases canonicalize before routing. Desktop reset preserves concurrent
-updates without restoring predecessor snapshots. Store/stand-in proofs establish
-no installed continuity for CLI, Desktop or remote callers; LOO-475 retains
-installed acceptance and LOO-415's transport and attachment fences stay intact.
-Publication and the full affected gate remain unproved.
+Jack Heart decided (2026-10-26) that `lf resume` always gets you back: it takes
+over from whatever holds the conversation, `--fork` leaves the holder running,
+`lf session new [-a]` restarts on a fresh thread seeded from the conversation log,
+`task hold/release` replace `defer/resume`. `connect`, `attach` and the open-mode
+flags are gone. Scope still comes from physical checkout or an explicit target, never
+recency; preparation launches no provider. LOO-499 history:
+`acd37dde71:.lf/wave/infrastructure/MEMORY.md`, its heading.
 
 ## Waited landing (LOO-503, 2026-10-17)
 
@@ -76,32 +69,20 @@ Merge cannot invent completion intent. Release's entry-point lesson still applie
 configured GitHub delivery and installed upgrade remain unproved. Native repair
 startup also waits without a cutoff; viewer and release publication policies stay separate.
 
-## Native terminal diagnostics (LOO-501/508, 2026-10-18)
+## Native terminal diagnostics (LOO-501/508/516, 2026-10-18)
 
-Jack Heart authorized repair/delivery preserving editing, diagnostics and history;
-account changes remain outside scope. LOO-501 evidence:
-`036008ec26:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Jack Heart authorized repair preserving editing, diagnostics and history; accounts
+stay out of scope. Merged #1595 (`e204ce6072`) scopes parent output to announced
+private Process logs; transport keeps native descriptors, OpenCode its stderr log.
+Installed repair, macOS pending-request and title/reconnect startup remain unproved.
 
-LOO-508 reproduced raw Loopflow output across a Codex draft, not destroyed input.
-Tracing alone misses direct writes, inherited helpers and waiting launchers.
-Merged #1595 (`e204ce6072`) scopes parent output to announced private Process logs;
-transport retains native descriptors and OpenCode its provider stderr log.
-Codex/local-model PTY evidence covers launch/reconnect, warning, Unicode editing,
-submission, resize, history and cleanup; Claude/OpenCode coverage
-uses stand-ins. Linux's 39 checks and Clippy passed; macOS pending-request and
-title/reconnect startup remained unresolved in branch evidence. Installed repair
-and account access remain unproved.
-
-LOO-516 (2026-10-18): Jack Heart requested durable private relay-failure evidence,
-not attribution of an unobserved cause. The working change retains bounded
-observed Session events with the original AgentProcess, operation and direction;
-unexpected renderer resets remain evidence even when disconnect handling returns
-success. Explicit client close stays quiet. Observations neither claim attachment
-nor settle turns; store failure must not end reconnect or reach the renderer.
-Keep observed-event identity independent of a native started turn: startup may
-fail before one exists. Real-Codex disposable startup faults and history reads
-prove retention, not the original installed reset's cause. Gate, CI and delivery
-remain open; Release's entry-point lesson applies.
+LOO-516: Jack Heart requested durable private relay-failure evidence, not
+attribution of an unobserved cause. Retain bounded observed Session events with
+the original AgentProcess, operation and direction, independent of a started
+native turn. Unexpected renderer resets stay evidence; explicit close stays quiet.
+Observations claim no attachment and settle no turns; store failure must not end
+reconnect. Gate, CI and delivery remain open. Detail and probe evidence:
+`acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
@@ -282,8 +263,8 @@ Jack Heart accepted per-Session lf owners (per-shell PTY owners for shells),
 shared Work-keyed lfdb presentation intent, and uniform repository/Wave/Task
 creation and lifecycle, including nested CLI callers without Desktop. No shared
 daemon, automatic turn replay or selected eager-start policy. LOO-415 owns
-transport; PR #1581 supplies the independent owner and attach-only path, with
-terminal restoration limits still explicit. LOO-497 owns the shared layout API;
+transport; PR #1581 supplies the independent owner (LOO-618 folded its attach-only
+path into `lf resume`), with terminal restoration limits still explicit. LOO-497 owns the shared layout API;
 LOO-489 integrates it.
 
 Application retention now keeps repository registries across window closure;
@@ -1000,22 +981,15 @@ runs prove no firing, and old gaps do not keep later telemetry red.
 
 - **Git exclusions can fail after staging work** (LOO-664, 2026-10-27).
   Apple Git 2.50.1 rejects a literal ignored `.lf/tmp` exclusion after staging
-  ordinary edits. The rooted glob `[.]lf/tmp/**` avoids that literal prefix;
-  exclusion alone leaves pre-staged telemetry in the index. A separate checkpoint
-  index restores telemetry from HEAD; existing stash recovery preserves its local
-  staged/working partition, retaining a named stash on conflict. CLI fixtures
-  cover ignored/unignored and pre-staged telemetry, not installed LOO-661 recovery.
-  Whitespace-only filenames are work: do not trim filename output to detect an
-  empty checkpoint.
-  Jack Heart authorized the bounded hotfix and autonomous shipping; Infrastructure
-  owns the single release/install and subsequent installed verification.
-- **Commit failures need both Git streams** (2026-10-11). Jack Heart requested
-  repair and publication without landing. Selected scratch failed because staging
-  excluded it in ordinary checkouts and stderr-only conversion hid Git's stdout.
-  Shared diagnostics retain both streams or a silent failure's exit status;
-  scratch exclusion belongs only to persistent workspaces. Separate-index proofs
-  preserve staged and working bytes. Disposable CLI and 90 commit/Git/worktree
-  tests pass; full CI and installed acceptance remain unproved.
+  edits; the rooted glob `[.]lf/tmp/**` avoids it, and a separate checkpoint index
+  restores pre-staged telemetry from HEAD while stash recovery keeps the staged/
+  working partition. Whitespace-only filenames are work: never trim filename output
+  to detect an empty checkpoint. Jack Heart authorized the hotfix; Infrastructure
+  owns release/install and installed LOO-661 verification.
+- **Commit failures need both Git streams** (2026-10-11). Shared diagnostics keep
+  Git's stdout and stderr, or a silent failure's exit status; scratch exclusion
+  belongs only to persistent workspaces. Full CI and installed acceptance remain
+  unproved.
 - **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners. `scripts/test.py --all` excludes the explicit-only `--ui-host` diagnostic. The historical runner hang remains at `bc6d11661:wave/infrastructure/MEMORY.md` under Gotchas; changing the gate proves no repair of that hang. Compile-only and skipped checks prove no interaction behavior.
 - **Wait for `cargo test` to finish:** lib failures skip later targets.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the materialized migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
@@ -1048,17 +1022,12 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   Membership changes preserve historical execution and require current ownership
   evidence before external effects. Earlier blanket refusal of provider reopening
   is superseded, not evidence that configured continuity passed.
-- **Historical continuity blocked daily telemetry** on August 23 (LOO-241's
-  eight gaps: `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas). Shipped history
-  owns the current rule; fresh failures belong to existing work, not duplicate Tasks.
-- **Release orchestration and publication are separate evidence.** August 23's
-  unpublished v0.12.14 despite cron/workflow success remains at
-  `24db5d4d6:wave/infrastructure/MEMORY.md`, under Gotchas. Judge product state;
-  keep same-tag recovery singular. LOO-261 owns clean-host candidate validation.
-- **Incomplete release synchronization still consumes caller edits**
-  (reproduced 2026-08-23): a scheduled retry removed two pre-run memory edits.
-  LOO-266 owns preserving caller branch, index and working bytes across every
-  release exit; later instances need no second repair Task.
+- **Shipped history owns the current telemetry rule** (LOO-241's August 23 gaps:
+  `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas); fresh failures join existing work.
+- **Release orchestration and publication are separate evidence** (unpublished
+  v0.12.14: `24db5d4d6:wave/infrastructure/MEMORY.md`, Gotchas). Judge product
+  state; keep same-tag recovery singular. LOO-261 owns clean-host validation;
+  LOO-266 owns preserving caller branch, index and working bytes on every release exit.
 
 ## Durable model lessons (curated 2026-10-02)
 

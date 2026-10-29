@@ -106,7 +106,7 @@ lf resume --all                            # after a crash or reboot, every inte
 ```bash
 lf -b implement
 lf session list --interactive false --json
-lf session connect SESSION
+lf resume SESSION
 lf task run INF-123
 ```
 

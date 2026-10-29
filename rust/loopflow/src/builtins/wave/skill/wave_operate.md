@@ -67,7 +67,7 @@ the Task as unknown and do not act on it. Include Tasks status lists under
 | acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
 | available | Work the person can take up now: a review, demo, concrete choice or merge click, with its conversation link or PR. Never completed or approved for them. |
 | dependency or capacity | The named Task, PR, running check, account or limit. |
-| deferred | The person's instruction to stop, or an explicit hold (`lf task defer <issue>`) on work nothing else is moving. |
+| deferred | The person's instruction to stop, or an explicit hold (`lf task hold <issue>`) on work nothing else is moving. |
 | unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second Graph process. |
 
 “Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.

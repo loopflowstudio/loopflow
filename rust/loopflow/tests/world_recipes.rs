@@ -232,7 +232,7 @@ fn task_list_query_finds_open_tasks_only() {
     assert_eq!(paused["state"], "deferred");
     assert_eq!(
         paused["next"],
-        format!("lf task resume {}", paused["identifier"].as_str().unwrap())
+        format!("lf task release {}", paused["identifier"].as_str().unwrap())
     );
     let identifier = paused["identifier"].as_str().unwrap().to_lowercase();
     assert_eq!(names(&[&identifier]), ["Deferred mid-flight"]);
@@ -283,7 +283,7 @@ fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
         .recv_timeout(std::time::Duration::from_secs(3))
         .is_err());
 
-    success(built.command(&["task", "defer", &issue]).output().unwrap());
+    success(built.command(&["task", "hold", &issue]).output().unwrap());
     let deferred = next();
     assert_eq!(state(&deferred), Some("deferred".into()), "{deferred}");
 
@@ -333,7 +333,7 @@ fn world_sessions_resume_live_through_the_stub_provider() {
     let sessions = built.lf(&["session", "list", "--json", "--all"]);
     let id = sessions[0]["id"].as_str().unwrap();
     let mut connect = built
-        .command(&["session", "connect", id])
+        .command(&["session", "resume", id])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

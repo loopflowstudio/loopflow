@@ -169,6 +169,4 @@ recovery makes the Task shipping or merges its PR until someone runs `lf ship`.
 Status and Desktop name who approved, who stopped, and who started each run.
 Agent-written reasons show the Session as author and Jack as the requester.
 
-Check: implement pass 2 ran `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|DTOFixtureTests|LocalWaveAgentLauncherTests'` + `--test integration dto_fixtures::` → pass.
-Check: implement pass ran `task_graph_launch_tests::task_ship_stop` (3) + `store::sqlite::task_work:: ops::task::ship::` + `task_graph::tests::` + `--test integration dto_fixtures::` + clippy → pass; realign `cargo test -p loopflow --lib process_starter_names` → pass; 
-Check: compress ran `cargo test -p loopflow --lib ship` → 75 pass, 2 `planning_lookup_tests` failed under load and pass alone (22/22); clippy → pass.
+Check: `task_graph_launch_tests::task_ship_stop` (3), `store::sqlite::task_work::`, `ops::task::ship::`, `task_graph::tests::`, `process_starter_names`, `--test integration dto_fixtures::`, `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|DTOFixtureTests|LocalWaveAgentLauncherTests'`, clippy → pass (compress `ship` filter: 2 `planning_lookup_tests` flaked under load, pass alone).

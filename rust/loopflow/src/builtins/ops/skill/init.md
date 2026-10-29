@@ -287,8 +287,12 @@ lf machine list                                # each Machine with the defaults 
 repository → the Machine running the command, so one Machine needs no setup.
 An unreachable Machine gets a warning; rerun later. Setting a default moves the
 user's Wave or repository Session to that Machine with its history. Scheduled
-commands are ordinary crontab lines on the Machine that runs them. Existing Tasks
-stay on the Machine in their claim until `lf task move` moves them.
+commands are ordinary scheduler entries on the Machine that runs them. On macOS,
+a command that runs an agent or reads Keychain credentials belongs in a
+gui-domain LaunchAgent (`StartCalendarInterval`), because cron runs outside the
+login session and cannot reach the Keychain; crontab serves Linux and jobs that
+need no Keychain. Existing Tasks stay on the Machine in their claim until
+`lf task move` moves them.
 
 `lf --machine` always runs the remote `lf`; ordinary `ssh` owns arbitrary remote
 commands. Connect required logins with `lf machine connect` in a foreground

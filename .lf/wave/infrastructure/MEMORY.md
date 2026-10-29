@@ -601,36 +601,26 @@ telemetry failures remain contrary evidence. Reproduce a current failure before
 repeating analytics repair. Recovery fixtures are not Scheduled evidence. No
 installed pass or accepted Intelligence handoff is established.
 
-Jack Heart waived the interactive demo and authorized #1419 landing October 4
-(PR #1441 made Desktop proof headless); installed acceptance and two automatic
-settlements remain unproved. No local reconciliation authorizes installation,
-schedule/Home changes or review completion. Reporting proves no operation
-success; activation proves neither installation nor settlement. Telemetry
-publication was authorized; recovery after LOO-382 stays with its operator. Exact dated proofs, authorizations and earlier archive references:
+LOO-357/PR #1441 removed the UI-host prerequisite; Jack Heart waived the
+interactive demo and authorized #1419 landing October 4. Installed acceptance and
+two automatic settlements remain unproved; no local reconciliation authorizes
+installation, schedule/Home changes or review completion. Reporting proves no
+operation success; activation proves neither accounting installation nor
+qualifying settlement. Dated proofs and authorizations:
 `6935bfbadbc2cecca1321dda4bd6668b3d42a062:wave/infrastructure/MEMORY.md`,
 Scheduled release accounting.
 
 ## Operator acceptance and account direction (2026-10-04)
 
-Jack Heart closed LOO-295 and LOO-342 on machine usage. LOO-367/285's retained
-Flow progress and PR #1283 established continuation;
-installed routing established one Home.
-Jack declined retired Ask work. Acceptance and viewer artifacts:
-`35e759aaf4:wave/infrastructure/MEMORY.md` under this heading. Legacy retirement
-below supersedes the then-live process handles.
-
-LOO-324 now follows stop-bundling's shared/isolated model. Jack clarified that
-cross-binary history means discovering native Session records across folders,
-not duplicating transcripts or reconstructing new conversations from replayed
-context. Reuse native history and retain Loopflow Session identity. A usage
-threshold such as 90% redirects future launches only; actual exhaustion triggers
-automatic shared failover. Isolated agents retain their own account/fallback.
-The updated Linear brief owns the current scope; stop-bundling's branch evidence
-does not yet establish shipment.
-
+Jack Heart closed LOO-295 and LOO-342 on machine usage and declined retired Ask
+work; acceptance artifacts: `35e759aaf4:wave/infrastructure/MEMORY.md`, this
+heading. LOO-324: cross-binary history discovers native Session records across
+folders, never duplicating transcripts or replaying context. A usage threshold
+redirects future launches only; actual exhaustion triggers shared failover;
+isolated agents keep their own account/fallback. The Linear brief owns scope.
 [LOO-298 decisions](#data-model-and-performance-decisions-curated-2026-10-17)
 supersede older Run-owner, historical-import, pinned-Home and demo-before-landing
-directions; earlier incidents evidence their own versions, not restorable owners.
+directions.
 
 ## Optional chapters and Task workflows (curated 2026-10-12)
 
@@ -996,19 +986,12 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   index restores telemetry from HEAD; existing stash recovery preserves its local
   staged/working partition, retaining a named stash on conflict. CLI fixtures
   cover ignored/unignored and pre-staged telemetry, not installed LOO-661 recovery.
-  Whitespace-only filenames are work: do not trim filename output to detect an
-  empty checkpoint.
-  Jack Heart authorized the bounded hotfix and autonomous shipping; Infrastructure
-  owns the single release/install and subsequent installed verification.
-- **Commit failures need both Git streams** (2026-10-11). Jack Heart requested
-  repair and publication without landing. Selected scratch failed because staging
-  excluded it in ordinary checkouts and stderr-only conversion hid Git's stdout.
-  Shared diagnostics retain both streams or a silent failure's exit status;
-  scratch exclusion belongs only to persistent workspaces. Separate-index proofs
-  preserve staged and working bytes. Full CI and installed acceptance remain
-  unproved.
-- **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners. `scripts/test.py --all` excludes the explicit-only `--ui-host` diagnostic. The historical runner hang remains at `bc6d11661:wave/infrastructure/MEMORY.md` under Gotchas; changing the gate proves no repair of that hang. Compile-only and skipped checks prove no interaction behavior.
-- **Wait for `cargo test` to finish:** lib failures skip later targets.
+  Whitespace-only filenames are work: never trim them to detect an empty
+  checkpoint. Infrastructure owns the release/install and installed verification.
+- **Commit failures need both Git streams** (2026-10-11). Shared diagnostics
+  retain stdout and stderr or a silent failure's exit status; scratch exclusion
+  belongs only to persistent workspaces.
+- **Desktop gates are headless** (rechecked at `bc6d11661`). `--swift` runs app/model/view checks; `--loopflow` builds app/UI runners; `--all` excludes explicit-only `--ui-host`. Runner-hang history: `bc6d11661:wave/infrastructure/MEMORY.md`, Gotchas.
 - **Rust compilation does not validate SQLite column names.** Runtime SQL whose shape depends on a released schema must be shared with a behavior test that prepares and executes it against the migration head. Epoch Work ownership is three exclusive foreign keys (`wave_id`, `project_id`, `task_id`); generic kind/id belongs to explicit routes such as synchronous cross-Work questions, not to Epochs.
 - **Source history must reconstruct every applied release frontier.** Preserve
   an unknown store frontier and its old binary; match embedded SQL against the
@@ -1033,9 +1016,10 @@ runs prove no firing, and old gaps do not keep later telemetry red.
   Membership changes preserve historical execution and require current ownership
   evidence before external effects. Earlier blanket refusal of provider reopening
   is superseded, not evidence that configured continuity passed.
-- **Historical continuity blocked daily telemetry** on August 23 (LOO-241's
-  eight gaps: `ec126964d:wave/infrastructure/MEMORY.md`, Gotchas). Shipped history
-  owns the current rule; fresh failures belong to existing work, not duplicate Tasks.
+- **macOS cron cannot reach the login Keychain** (LOO-682, 2026-10-28): both
+  scheduled jobs failed on publisher/Claude Keychain access. The bootstrap now
+  installs gui-domain LaunchAgents on macOS; Linux keeps crontab. Real scheduled
+  firings remain LOO-645's evidence.
 - **Release orchestration and publication are separate evidence.** August 23's
   unpublished v0.12.14 despite cron/workflow success remains at
   `24db5d4d6:wave/infrastructure/MEMORY.md`, under Gotchas. Judge product state;
@@ -1082,11 +1066,9 @@ referent: `7b28ab1ca:wave/infrastructure/MEMORY.md`, those headings.
 Jack Heart's October 9–10 LOO-444 decisions supersede LOO-429's all-system
 assembly: fixed additions per surface/reply-settings/participant profile; first
 turn skill, request, tagged clipboard. Terminal argv stays, with one size refusal
-naming bytes/cap; no alternative transport. Conversation context rereads checkout
-Wave/ancestor files and scratch, not SQLite. Small files stay whole; marked start
-excerpts name complete source/size. Excerpt interpretation awaits Jack's review;
-shrinking memory is undecided. Reserve listing and compact-only active skill;
-overflow pointers remain proposed UX. Plan: `scratch/what-goes-in-system-prompt.md`.
+naming bytes/cap. Context rereads checkout Wave/ancestor files and scratch, not
+SQLite; small files stay whole, marked start excerpts name source/size.
+Excerpt interpretation and memory shrinking await Jack's review.
 
 Inlining, the constant trigger and Codex base overrides are removed.
 Capture/context hooks compose at terminal spawn, replacing the temporary profile. Budget the fully rendered 10,000 UTF-8

@@ -304,30 +304,6 @@ struct ReleaseCandidate {
     branch: String,
 }
 
-/// Pins a minor to its closing patch across publication interruptions.
-#[derive(Debug, Serialize, Deserialize)]
-struct MinorRelease {
-    version: String,
-    patch_version: String,
-    notes_base: String,
-    patch_commit: Option<String>,
-    prepared_tree: Option<String>,
-    completed: bool,
-}
-
-impl MinorRelease {
-    fn save(&self, repo: &Path, target: &ReleaseTarget) -> OpsResult<()> {
-        let json = serde_json::to_vec_pretty(self)
-            .map_err(|err| OpsError::Parse(format!("minor release receipt: {err}")))?;
-        write_atomic(&minor_receipt_path(repo, target), &json)
-    }
-}
-
-fn minor_receipt_path(repo: &Path, target: &ReleaseTarget) -> PathBuf {
-    repo.join(".lf/releases")
-        .join(format!("minor-{}.json", sanitize_ref_segment(&target.name)))
-}
-
 impl ReleaseCandidate {
     fn new(target: &ReleaseTarget, tag: &str, commit: &str) -> Self {
         let target_name = sanitize_ref_segment(&target.name);
@@ -757,213 +733,11 @@ pub fn release_run(
     target_name: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<ReleaseRunOutcome> {
-    if version_input.trim() == "minor" || is_minor_version(version_input) {
-        return release_minor(repo, version_input, target_name, progress);
-    }
-    release_run_single(repo, version_input, target_name, progress)
-}
-
-fn release_minor(
-    repo: &Path,
-    version_input: &str,
-    target_name: Option<&str>,
-    progress: &impl Progress,
-) -> OpsResult<ReleaseRunOutcome> {
-    let (repo, target) = resolve_repo_and_target(repo, target_name)?;
-    if version_input.trim() != "minor" {
-        let version = normalize_version(version_input);
-        if remote_tag_sha(&repo, &target_tag(&target, &version))?.is_some()
-            || latest_tag_optional(&repo, &target)?.is_none()
-        {
-            return release_run_single(&repo, &version, target_name, progress);
-        }
-    }
-    let lock = ReleaseLock::acquire(&repo, &target.name)?;
-    let receipt_path = minor_receipt_path(&repo, &target);
-    let _lease = acquire_worktree_lease(&repo, &receipt_path, "minor release")?;
-    let default_branch = get_default_branch(&repo)?;
-    fetch_inheriting(
-        &repo,
-        "origin",
-        &format!("+refs/heads/{default_branch}:refs/remotes/origin/{default_branch}"),
-        &|command| lock.inherit(command),
-    )?;
-    let source = rev_parse(&repo, &format!("origin/{default_branch}"))?;
-    let mut pair: Option<MinorRelease> = match fs::read(&receipt_path) {
-        Ok(bytes) => Some(
-            serde_json::from_slice(&bytes)
-                .map_err(|err| OpsError::Parse(format!("{}: {err}", receipt_path.display())))?,
-        ),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => return Err(err.into()),
-    };
-    let changes = collect_release_changes_at(&repo, &target, &source)?;
-    if let Some(pair) = pair.as_ref().filter(|pair| !pair.completed) {
-        if version_input.trim() != "minor" && normalize_version(version_input) != pair.version {
-            return Err(OpsError::Message(format!(
-                "minor {} is still pending; resume it with `lf release run minor` before selecting {version_input}",
-                pair.version
-            )));
-        }
-    }
-    if pair.as_ref().is_some_and(|pair| pair.completed) {
-        let completed = pair.as_ref().expect("completed receipt exists");
-        if changes.previous_tag.as_deref() == Some(&target_tag(&target, &completed.version))
-            && changes.commits.is_empty()
-        {
-            return Ok(ReleaseRunOutcome::NoChanges {
-                target: target.name,
-                latest_tag: changes.previous_tag,
-                origin_commit: source.clone(),
-            });
-        }
-        pair = None;
-    }
-    let mut pair = match pair {
-        Some(pair) => pair,
-        None => {
-            let previous_tag = changes.previous_tag.as_deref().ok_or_else(|| {
-                OpsError::Message("a minor release needs a preceding release cycle".into())
-            })?;
-            let previous_version = version_from_tag(previous_tag, &target)?;
-            if changes.commits.is_empty() && previous_version.ends_with(".0") {
-                return Ok(ReleaseRunOutcome::NoChanges {
-                    target: target.name,
-                    latest_tag: changes.previous_tag,
-                    origin_commit: source.clone(),
-                });
-            }
-            let version = resolve_version(Some(previous_tag), version_input, &target)?;
-            let notes_base = minor_notes_base(&repo, &version, &target)?;
-            let patch_version = if changes.commits.is_empty() {
-                previous_version
-            } else {
-                bump_version(&previous_version, "patch")?
-            };
-            let pair = MinorRelease {
-                version,
-                patch_version,
-                notes_base,
-                patch_commit: None,
-                prepared_tree: None,
-                completed: false,
-            };
-            pair.save(&repo, &target)?;
-            pair
-        }
-    };
-
-    if pair.patch_commit.is_none() {
-        if let Some(tag) = changes.previous_tag.as_deref() {
-            let latest = version_from_tag(tag, &target)?;
-            if closing_patch_successor(&pair.patch_version, &latest) {
-                pair.patch_version = latest;
-                pair.save(&repo, &target)?;
-            }
-        }
-        let patch_tag = target_tag(&target, &pair.patch_version);
-        if let Some(commit) = remote_tag_sha(&repo, &patch_tag)? {
-            let complete = if target.publisher.is_empty() {
-                release_completion_satisfied(&repo, &patch_tag, &target)?
-            } else {
-                github_release_exists(&repo, &patch_tag)?
-            };
-            if complete {
-                progress.status(&format!("Reusing completed closing patch {patch_tag}..."));
-                pair.patch_commit = Some(commit);
-                pair.save(&repo, &target)?;
-            }
-        }
-    }
-    if pair.patch_commit.is_none() {
-        progress.status(&format!(
-            "Completing closing patch {}...",
-            pair.patch_version
-        ));
-        let outcome = release_run_inner(
-            &repo,
-            &pair.patch_version,
-            target_name,
-            progress,
-            &lock,
-            None,
-        )?;
-        let receipt = match outcome {
-            ReleaseRunOutcome::Released(receipt) | ReleaseRunOutcome::Resumed(receipt) => receipt,
-            ReleaseRunOutcome::NoChanges { .. } => {
-                return Err(OpsError::Message(format!(
-                    "closing patch {} has not been published; retry the minor release",
-                    pair.patch_version
-                )));
-            }
-        };
-        // A preceding incomplete release can be resumed by the single-release
-        // runner. Accept a corrected closing patch in this cycle, but keep the
-        // pair pending if the runner only completed an older release.
-        if !closing_patch_successor(&pair.patch_version, &receipt.version) {
-            return Err(OpsError::Message(format!(
-                "completed preceding release {}; retry `lf release run minor` to finish {} and {}",
-                receipt.tag, pair.patch_version, pair.version
-            )));
-        }
-        pair.patch_version = receipt.version;
-        pair.patch_commit = Some(receipt.commit);
-        pair.save(&repo, &target)?;
-    }
-    let version = pair.version.clone();
-    let result = release_run_inner(
-        &repo,
-        &version,
-        target_name,
-        progress,
-        &lock,
-        Some(&mut pair),
-    )?;
-    match &result {
-        ReleaseRunOutcome::Released(receipt) | ReleaseRunOutcome::Resumed(receipt)
-            if receipt.version == pair.version => {}
-        _ => {
-            return Err(OpsError::Message(format!(
-                "minor {} remains pending; retry `lf release run minor` to finish the recorded pair",
-                pair.version
-            )));
-        }
-    }
-    pair.completed = true;
-    pair.save(&repo, &target)?;
-    Ok(result)
-}
-
-fn release_run_single(
-    repo: &Path,
-    version_input: &str,
-    target_name: Option<&str>,
-    progress: &impl Progress,
-) -> OpsResult<ReleaseRunOutcome> {
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
-    let lock = ReleaseLock::acquire(&main_repo, &target.name)?;
-    release_run_inner(
-        &main_repo,
-        version_input,
-        target_name,
-        progress,
-        &lock,
-        None,
-    )
-}
-
-fn release_run_inner(
-    repo: &Path,
-    version_input: &str,
-    target_name: Option<&str>,
-    progress: &impl Progress,
-    lock: &ReleaseLock,
-    mut minor: Option<&mut MinorRelease>,
-) -> OpsResult<ReleaseRunOutcome> {
+    let lock = &ReleaseLock::acquire(&main_repo, &target.name)?;
     if !command_exists("gh") {
         return Err(OpsError::Message("gh CLI not found".into()));
     }
-    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
     let default_branch = get_default_branch(&main_repo)?;
     fetch_inheriting(
         &main_repo,
@@ -976,12 +750,12 @@ fn release_run_inner(
     run_publisher_check(&main_repo, &target, progress)?;
 
     let latest_tag = latest_tag_optional(&main_repo, &target)?;
-    let verify_version = resolve_version(latest_tag.as_deref(), version_input, &target)?;
+    let version = resolve_version(latest_tag.as_deref(), version_input, &target)?;
     verify_source(
         &main_repo,
         &source_commit,
         &target,
-        &verify_version,
+        &version,
         latest_tag.as_deref(),
         progress,
         lock,
@@ -1028,29 +802,15 @@ fn release_run_inner(
         }
     }
 
-    let changes = collect_release_changes_at(&main_repo, &target, &source_commit)?;
-    if changes.commits.is_empty() && minor.is_none() {
+    let changes = collect_version_changes(&main_repo, &target, &version, &source_commit)?;
+    if changes.commits.is_empty() {
         return Ok(ReleaseRunOutcome::NoChanges {
             target: target.name,
-            latest_tag: changes.previous_tag,
+            latest_tag,
             origin_commit: source_commit,
         });
     }
 
-    let version = resolve_version(changes.previous_tag.as_deref(), version_input, &target)?;
-
-    let changes = if let Some(pair) = minor.as_deref() {
-        collect_changes_between(
-            &main_repo,
-            Some(&pair.notes_base),
-            pair.patch_commit
-                .as_deref()
-                .expect("closing patch completed"),
-            &target,
-        )?
-    } else {
-        changes
-    };
     let new_tag = target_tag(&target, &version);
     if remote_tag_sha(&main_repo, &new_tag)?.is_some() {
         progress.status(&format!("Resuming release completion for {new_tag}..."));
@@ -1130,9 +890,7 @@ fn release_run_inner(
                 // merged after the release PR ship under the same version.
                 let main_ref = format!("origin/{default_branch}");
                 let current_main = run_stdout(&main_repo, "git", &["rev-parse", &main_ref])?;
-                // A minor publishes its patch's exact snapshot, never a later main.
-                if minor.is_none()
-                    && current_main != release_commit
+                if current_main != release_commit
                     && is_ancestor(&main_repo, &release_commit, &current_main)
                 {
                     progress.status(&format!(
@@ -1180,32 +938,15 @@ fn release_run_inner(
             &worktree_path(&main_repo, &wt_name),
             "release PR preparation",
         )?;
-        let wt = create_named_worktree(
-            &main_repo,
-            &wt_name,
-            Some(
-                minor
-                    .as_deref()
-                    .and_then(|pair| pair.patch_commit.as_deref())
-                    .unwrap_or(&source_commit),
-            ),
-            &|command| {
-                lock.inherit(command);
-                lease.inherit(command);
-            },
-        )?;
+        let wt = create_named_worktree(&main_repo, &wt_name, Some(&source_commit), &|command| {
+            lock.inherit(command);
+            lease.inherit(command);
+        })?;
         let wt_path = wt.path;
         let wt_branch = wt.branch;
 
         let prepared = prepare_release_in_worktree(
-            &wt_path,
-            &version,
-            &changes,
-            &target,
-            minor.as_deref_mut(),
-            progress,
-            lock,
-            &lease,
+            &wt_path, &version, &changes, &target, progress, lock, &lease,
         );
         cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, lease, progress, lock);
         let prepared = prepared?;
@@ -1216,25 +957,6 @@ fn release_run_inner(
         )?
     };
 
-    if let Some(pair) = minor.as_deref() {
-        ensure_commit_local(&main_repo, &merged_commit, lock)?;
-        let observed = rev_parse(&main_repo, &format!("{merged_commit}^{{tree}}"))?;
-        if pair.prepared_tree.as_deref() != Some(&observed) {
-            let difference = match pair.prepared_tree.as_deref() {
-                Some(expected) => {
-                    run_stdout(&main_repo, "git", &["diff", "--stat", expected, &observed])?
-                }
-                None => "prepared tree receipt is missing".to_string(),
-            };
-            return Err(OpsError::Message(format!(
-                "minor {} candidate {merged_commit} differs from its prepared patch {} snapshot; \
-             no minor tag was published (receipt: {})\n{difference}",
-                pair.version,
-                pair.patch_version,
-                minor_receipt_path(&main_repo, &target).display()
-            )));
-        }
-    }
     let tag = target_tag(&target, &version);
     let candidate = ReleaseCandidate::new(&target, &tag, &merged_commit);
     finish_candidate(&main_repo, &candidate, &target, progress, lock)
@@ -1582,18 +1304,6 @@ fn run_publisher_check(
     Ok(())
 }
 
-fn closing_patch_successor(selected: &str, completed: &str) -> bool {
-    let (Some((selected_cycle, selected_patch)), Some((completed_cycle, completed_patch))) =
-        (selected.rsplit_once('.'), completed.rsplit_once('.'))
-    else {
-        return false;
-    };
-    matches!(
-        (selected_patch.parse::<u32>(), completed_patch.parse::<u32>()),
-        (Ok(selected), Ok(completed)) if selected_cycle == completed_cycle && completed >= selected
-    )
-}
-
 fn prepare_publisher(
     repo: &Path,
     candidate: &ReleaseCandidate,
@@ -1773,13 +1483,11 @@ struct PreparedRelease {
     head_sha: String,
 }
 
-#[allow(clippy::too_many_arguments)] // Exact release selection and both held mutation capabilities.
 fn prepare_release_in_worktree(
     wt_path: &Path,
     version: &str,
     changes: &ReleaseChangeSet,
     target: &ReleaseTarget,
-    minor: Option<&mut MinorRelease>,
     progress: &impl Progress,
     lock: &ReleaseLock,
     lease: &WorktreeLease,
@@ -1796,7 +1504,7 @@ fn prepare_release_in_worktree(
         lease.inherit(command);
     })?;
 
-    if !target.prepare.is_empty() && minor.is_none() {
+    if !target.prepare.is_empty() {
         progress.status("Running repository release preparation...");
         run_release_hooks(
             wt_path,
@@ -1827,18 +1535,6 @@ fn prepare_release_in_worktree(
             lease.inherit(command);
         },
     )?;
-
-    if let Some(pair) = minor {
-        let mut add = lock.command("git");
-        add.current_dir(wt_path).args(["add", "--all"]);
-        lease.inherit(&mut add);
-        command_stdout(&mut add)?;
-        let mut tree = lock.command("git");
-        tree.current_dir(wt_path).arg("write-tree");
-        lease.inherit(&mut tree);
-        pair.prepared_tree = Some(command_stdout(&mut tree)?);
-        pair.save(&main_repo_root(wt_path)?, target)?;
-    }
 
     progress.status("Committing release changes...");
     let _ = commit_workflow(
@@ -1983,14 +1679,6 @@ fn finish_release_pr(
                 return Ok(commit);
             }
             ReleasePrWait::NeedsIntegration => {
-                let pair_path = minor_receipt_path(main_repo, target);
-                if pair_path.exists() {
-                    let pair: MinorRelease = serde_json::from_slice(&fs::read(&pair_path)?)
-                        .map_err(|e| OpsError::Parse(e.to_string()))?;
-                    if pair.version == version && !pair.completed {
-                        return Err(OpsError::Message(format!("minor {version} is paired with patch {}; preserve its product snapshot before integrating (receipt: {})", pair.patch_version, pair_path.display())));
-                    }
-                }
                 progress.status(&format!(
                     "Release PR #{} needs current main; rebuilding on it...",
                     prepared.pr_number
@@ -2041,9 +1729,9 @@ fn finish_release_pr(
                     ]);
                     lease.inherit(&mut merge);
                     command_stdout(&mut merge)?;
-                    let changes = collect_release_changes_at(main_repo, target, &main_ref)?;
+                    let changes = collect_version_changes(main_repo, target, version, &main_ref)?;
                     prepare_release_in_worktree(
-                        &wt.path, version, &changes, target, None, progress, lock, &lease,
+                        &wt.path, version, &changes, target, progress, lock, &lease,
                     )
                 })();
                 cleanup_release_worktree(main_repo, &wt.path, &wt.branch, lease, progress, lock);
@@ -3517,43 +3205,29 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
 }
 
+/// Minor notes cover the whole cycle since the preceding `.0`; other versions
+/// cover changes since the latest tag.
 fn notes_base(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<Option<String>> {
     let version = normalize_version(version);
     let _ = bump_version(&version, "patch")?;
     let latest = latest_tag_optional(repo, target)?;
-    if latest.is_some() && is_minor_version(&version) {
-        minor_notes_base(repo, &version, target).map(Some)
-    } else {
-        Ok(latest)
+    let parts: Vec<u32> = version
+        .split('.')
+        .map(|part| part.parse().expect("version was validated"))
+        .collect();
+    let [major, minor, 0] = parts[..] else {
+        return Ok(latest);
+    };
+    if latest.is_none() || minor == 0 {
+        return Ok(latest);
     }
-}
-
-fn is_minor_version(version: &str) -> bool {
-    let version = normalize_version(version);
-    let parts: Vec<&str> = version.split('.').collect();
-    parts.len() == 3
-        && parts[1] != "0"
-        && parts[2] == "0"
-        && bump_version(&version, "patch").is_ok()
-}
-
-fn minor_notes_base(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<String> {
-    let version = normalize_version(version);
-    let _ = bump_version(&version, "patch")?;
-    let parts: Vec<&str> = version.split('.').collect();
-    let minor: u32 = parts[1].parse().expect("version was validated");
-    let previous = minor.checked_sub(1).ok_or_else(|| {
-        OpsError::Message(format!(
-            "{version} has no preceding minor in its major series"
-        ))
-    })?;
-    let tag = target_tag(target, &format!("{}.{previous}.0", parts[0]));
+    let tag = target_tag(target, &format!("{major}.{}.0", minor - 1));
     if !ref_exists(repo, &format!("refs/tags/{tag}"))? {
         return Err(OpsError::Message(format!(
             "minor release notes require baseline tag {tag}; supply --prev-tag for a notes-only override"
         )));
     }
-    Ok(tag)
+    Ok(Some(tag))
 }
 
 fn version_from_tag(tag: &str, target: &ReleaseTarget) -> OpsResult<String> {
@@ -3609,16 +3283,18 @@ fn tag_glob(target: &ReleaseTarget) -> String {
 
 fn collect_release_changes(repo: &Path, target: &ReleaseTarget) -> OpsResult<ReleaseChangeSet> {
     let base = format!("origin/{}", get_default_branch(repo)?);
-    collect_release_changes_at(repo, target, &base)
+    let previous_tag = latest_tag_optional(repo, target)?;
+    collect_changes_between(repo, previous_tag.as_deref(), &base, target)
 }
 
-fn collect_release_changes_at(
+fn collect_version_changes(
     repo: &Path,
     target: &ReleaseTarget,
+    version: &str,
     source: &str,
 ) -> OpsResult<ReleaseChangeSet> {
-    let previous_tag = latest_tag_optional(repo, target)?;
-    collect_changes_between(repo, previous_tag.as_deref(), source, target)
+    let base = notes_base(repo, version, target)?;
+    collect_changes_between(repo, base.as_deref(), source, target)
 }
 
 fn collect_changes_between(
@@ -4940,7 +4616,6 @@ mod tests {
             "0.11.4",
             &changes,
             &target,
-            None,
             &crate::ops::progress::NullProgress,
             &lock,
             &lease,

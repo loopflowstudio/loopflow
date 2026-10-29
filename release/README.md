@@ -204,22 +204,15 @@ Target areas still filter that history. Existing manifest versions need no reset
 the requested version owns the release. Notes and previews use the same initial
 range when no target tag exists, unless `--prev-tag` supplies a base.
 
-Subsequent minor releases summarize a completed patch cycle. When changes remain,
-`lf release run minor` publishes the next patch first. When the latest completed
-patch already contains everything, it reuses that patch. The minor uses the
-same product snapshot; version metadata and release notes change. Patch notes
-compare against the preceding release, while minor notes compare against the
-preceding `.0` tag. A missing cycle baseline is reported explicitly.
-An explicit minor version such as `lf release run 0.13.0` follows the same policy
-once the target has release history.
+A minor release cuts from current main like any other release and runs the
+target's `prepare` hooks. It may carry code merged after the latest patch; no
+closing patch is published first. Patch notes compare against the preceding
+release, while minor notes cover the whole cycle since the preceding `.0` tag.
+A missing cycle baseline is reported explicitly. `lf release run minor` and an
+explicit minor version such as `lf release run 0.13.0` behave the same.
 
-The selected pair and snapshot survive interruption in
-`.lf/releases/minor-<target>.json`. Retrying reuses a valid closing patch; replacing
-an unprepared candidate advances the closing patch within the same cycle. A
-completed successor is recovered even if publication finished before the pair
-was saved. A minor candidate whose merged tree differs from its
-prepared snapshot is stopped before tagging. Notes previews print Markdown to
-stdout and progress to stderr, without changing manifests or release archives.
+Notes previews print Markdown to stdout and progress to stderr, without
+changing manifests or release archives.
 For an existing version, previews end at its tag and read historical release
 context. Unreleased versions end at HEAD.
 

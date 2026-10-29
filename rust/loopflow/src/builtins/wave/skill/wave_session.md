@@ -33,6 +33,9 @@ watch, check back or follow up later.
   ship process lands and repairs it; reading its status restarts one that died.
   Nothing resumes a stopped Graph: inspect its history and effects before
   selecting fresh work through `lf task run`.
+- `lf task run <issue>` launches a Task. `lf -b task run` and `lf ship` approve
+  Auto-Ship, which may merge its PR: run them only when the person asks to ship
+  or land, and never to re-ship a Task someone stopped.
 - This conversation keeps the instructions it launched with.
   `lf connect --wave <wave> --fresh` gives the Wave a fresh conversation after an install.
 

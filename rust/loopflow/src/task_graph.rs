@@ -79,6 +79,24 @@ fn names(step: &ConcreteStep) -> Vec<&str> {
         .collect()
 }
 
+/// The name a Task waits at before a step that merges: `lf land` or `lf pr
+/// arm` however the graph spells it, or the `pr-land` skill.
+pub(crate) fn landing_name(step: &ConcreteStep) -> Option<String> {
+    match step {
+        ConcreteStep::Command(command) => {
+            use clap::Parser;
+            crate::lf::navigation::normalize_args(command.item.argv())
+                .and_then(crate::lf::Cli::try_parse_from)
+                .is_ok_and(|cli| cli.merges())
+                .then(|| command.item.display_name())
+        }
+        ConcreteStep::Skill(skill) if skill.skill.name == "pr-land" => {
+            Some(names(step)[0].to_owned())
+        }
+        _ => None,
+    }
+}
+
 /// Visit every place in order, descending into XOR paths by name.
 fn walk<'a>(
     steps: &'a [ConcreteStep],
@@ -156,6 +174,17 @@ impl CapturedGraph {
             .into_iter()
             .find(|(_, skill)| skill.interactive_step() == Some(step))
             .map(|(place, _)| place)
+    }
+
+    /// The step that merges named `step`, where a Task someone stopped shipping waits.
+    pub fn landing_step(&self, step: &str) -> Option<Place> {
+        let mut found = None;
+        walk(&self.steps, &[], &mut |place, concrete| {
+            if found.is_none() && landing_name(concrete).as_deref() == Some(step) {
+                found = Some(place);
+            }
+        });
+        found
     }
 
     /// The place after `place` in its body, or in the body that XOR belongs
@@ -368,7 +397,7 @@ impl TaskGraph {
             }
         }];
         lines.push(format!(
-            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` runs straight through, interactive steps headless; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
+            "`lf task run {issue} --from <step>` starts anywhere, to go back or skip ahead; `lf -b task run {issue}` and `lf ship {issue}` run headless to `end` and approve Auto-Ship, which may merge the PR, so run them only when the person asks to ship or land; `lf graph <graph>` in the Task worktree runs a Graph without moving the Task."
         ));
         lines.join("\n")
     }
@@ -397,6 +426,27 @@ mod tests {
         let path = repo.join(path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, content).unwrap();
+    }
+
+    #[test]
+    fn a_step_that_merges_is_a_landing_step_however_it_is_spelled() {
+        let repo = tempfile::tempdir().unwrap();
+        write(
+            repo.path(),
+            ".lf/graphs/landings.yaml",
+            "- cmd: pr publish\n- cmd: land --wait-and-fix\n- cmd: task pr land\n- cmd: pr arm\n",
+        );
+        let graph = CapturedGraph::load("landings", repo.path())
+            .unwrap()
+            .unwrap();
+        assert!(graph.landing_step("pr publish").is_none());
+        for step in ["land --wait-and-fix", "pr land", "pr arm"] {
+            assert!(graph.landing_step(step).is_some(), "{step}");
+        }
+        let deliver = CapturedGraph::load("deliver", repo.path())
+            .unwrap()
+            .unwrap();
+        assert!(deliver.landing_step("land --wait-and-fix").is_some());
     }
 
     #[test]

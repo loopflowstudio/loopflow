@@ -254,7 +254,7 @@ fn task_graph_row(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Opt
 /// Put the Task on a run from `start`, carried by `by`, if it still stands
 /// where the caller read it: at `step`, with `stopped` the run that last left
 /// it, if any. With `ships`, the run reaches `end` and hands the Task off,
-/// granting merge authority.
+/// granting merge authority unless a person stopped shipping it.
 #[allow(clippy::too_many_arguments)]
 fn start_run_in(
     tx: &rusqlite::Transaction<'_>,
@@ -291,19 +291,66 @@ fn start_run_in(
             task,
             by,
             "it runs to the end with no interactive step left",
+            Approval::Route,
         )?;
     }
     Ok(true)
 }
 
-/// A Task handed off to finish on its own: since when, this Machine's
-/// process carrying it there, and how many times in a row that process was
-/// started again after it failed.
+/// A Task handed off to finish on its own: since when, the process that
+/// approved it, this Machine's process carrying it there, and how many times
+/// in a row that process was started again after it failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskShipping {
     pub shipped_at: i64,
+    pub approved_by: Option<LfProcessId>,
     pub process: Option<LfProcessId>,
     pub restarts: u32,
+}
+
+/// How a Task comes to ship. A person's stop blocks only a route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Approval {
+    /// `lf ship`: approves it and lifts any stop.
+    Explicit,
+    /// A run reaching `end`: approves it unless a person stopped shipping.
+    Route,
+}
+
+/// A person's `lf ship --stop`: when, and the process that ran it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ShipStop {
+    pub at: i64,
+    pub by: Option<LfProcessId>,
+}
+
+fn process_id(id: Option<String>) -> StoreResult<Option<LfProcessId>> {
+    id.map(|id| {
+        LfProcessId::parse(&id)
+            .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
+    })
+    .transpose()
+}
+
+pub(super) fn ship_stop_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<ShipStop>> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        "SELECT ship_stopped_at,ship_stopped_lf_process_id FROM tasks
+         WHERE id=?1 AND ship_stopped_at IS NOT NULL",
+        [task.as_str()],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()?
+    .map(|(at, by)| {
+        Ok(ShipStop {
+            at,
+            by: process_id(by)?,
+        })
+    })
+    .transpose()
 }
 pub(super) fn shipping_in(
     conn: &rusqlite::Connection,
@@ -311,27 +358,32 @@ pub(super) fn shipping_in(
 ) -> StoreResult<Option<TaskShipping>> {
     use rusqlite::OptionalExtension;
     conn.query_row(
-        "SELECT shipped_at,ship_lf_process_id,ship_restarts FROM tasks
-         WHERE id=?1 AND shipped_at IS NOT NULL",
+        &format!("{SHIPPING_SELECT} WHERE id=?1 AND shipped_at IS NOT NULL"),
         [task.as_str()],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        read_shipping,
     )
     .optional()?
-    .map(|(shipped_at, process, restarts)| shipping(shipped_at, process, restarts))
+    .map(|(_, shipping)| shipping)
     .transpose()
 }
 
-fn shipping(shipped_at: i64, process: Option<String>, restarts: u32) -> StoreResult<TaskShipping> {
-    Ok(TaskShipping {
-        shipped_at,
-        restarts,
-        process: process
-            .map(|id| {
-                LfProcessId::parse(&id)
-                    .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))
-            })
-            .transpose()?,
-    })
+const SHIPPING_SELECT: &str =
+    "SELECT id,shipped_at,ship_approved_lf_process_id,ship_lf_process_id,ship_restarts FROM tasks";
+
+type ShippingRow = (String, StoreResult<TaskShipping>);
+
+fn read_shipping(row: &rusqlite::Row<'_>) -> rusqlite::Result<ShippingRow> {
+    let (approved_by, process): (Option<String>, Option<String>) = (row.get(2)?, row.get(3)?);
+    let (shipped_at, restarts) = (row.get(1)?, row.get(4)?);
+    let shipping = process_id(approved_by).and_then(|approved_by| {
+        Ok(TaskShipping {
+            shipped_at,
+            approved_by,
+            process: process_id(process)?,
+            restarts,
+        })
+    });
+    Ok((row.get(0)?, shipping))
 }
 
 /// End the Task's handoff, returning what it was, when it was shipping.
@@ -349,55 +401,65 @@ pub(super) fn unship_in(
             ),
         )?;
         conn.execute(
-            "UPDATE tasks SET ship_lf_process_id=NULL,ship_restarts=0 WHERE id=?1",
+            "UPDATE tasks SET ship_lf_process_id=NULL,ship_approved_lf_process_id=NULL,ship_restarts=0
+             WHERE id=?1",
             [task.as_str()],
         )?;
     }
     Ok(shipping)
 }
 
+/// Approve Auto-Ship, carried by `by`. A route writes nothing and returns
+/// `None` while a person's stop stands; an explicit approval lifts the stop.
 fn ship_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
     by: &LfProcessId,
     note: &str,
-) -> StoreResult<TaskShipping> {
+    approval: Approval,
+) -> StoreResult<Option<TaskShipping>> {
     let state = super::durable::task_state_in(tx, task)?;
     if state.is_terminal() {
         return Err(crate::store::StoreError::InvalidAuthority(format!(
             "Task is {state}; it cannot ship"
         )));
     }
-    let shipped_at = match shipping_in(tx, task)? {
-        Some(shipping) => shipping.shipped_at,
-        None => {
-            let now = crate::store::rows::now_unix();
-            super::planning_write::local(
-                tx,
-                &crate::work::edit::WorkEdit::for_target(
-                    task.as_str(),
-                    &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
-                ),
+    match approval {
+        Approval::Route if ship_stop_in(tx, task)?.is_some() => return Ok(None),
+        Approval::Route => {}
+        Approval::Explicit => {
+            tx.execute(
+                "UPDATE tasks SET ship_stopped_at=NULL,ship_stopped_lf_process_id=NULL WHERE id=?1",
+                [task.as_str()],
             )?;
-            super::children::insert_task_event_in(
-                tx,
-                task,
-                &crate::work::task::TaskEventKind::Progress {
-                    summary: format!("Shipping: {note}"),
-                },
-            )?;
-            now
         }
-    };
+    }
+    if shipping_in(tx, task)?.is_none() {
+        let now = crate::store::rows::now_unix();
+        super::planning_write::local(
+            tx,
+            &crate::work::edit::WorkEdit::for_target(
+                task.as_str(),
+                &[crate::work::edit::WorkValue::TaskShippedAt(Some(now))],
+            ),
+        )?;
+        super::children::insert_task_event_in(
+            tx,
+            task,
+            &crate::work::task::TaskEventKind::Progress {
+                summary: format!("Shipping: {note}"),
+            },
+        )?;
+        tx.execute(
+            "UPDATE tasks SET ship_approved_lf_process_id=?2 WHERE id=?1",
+            rusqlite::params![task.as_str(), by.as_str()],
+        )?;
+    }
     tx.execute(
         "UPDATE tasks SET ship_lf_process_id=?2 WHERE id=?1",
         rusqlite::params![task.as_str(), by.as_str()],
     )?;
-    Ok(TaskShipping {
-        shipped_at,
-        process: Some(by.clone()),
-        restarts: shipping_in(tx, task)?.map_or(0, |shipping| shipping.restarts),
-    })
+    shipping_in(tx, task)
 }
 
 /// The run `carrier` started stopped at `step`, or reached `end`: put the
@@ -424,7 +486,13 @@ fn arrive_in(
         // A routed path may reach end even though another path had an
         // interactive step, so launch-time prediction is not sufficient.
         if !super::durable::task_state_in(tx, task)?.is_terminal() {
-            ship_in(tx, task, carrier, "its run reached the end")?;
+            ship_in(
+                tx,
+                task,
+                carrier,
+                "its run reached the end",
+                Approval::Route,
+            )?;
         }
         super::children::request_completion_in(tx, task, None)?;
     }
@@ -740,7 +808,7 @@ impl SqliteStore {
             rusqlite::params![task.as_str(), END, crate::store::rows::now_unix()],
         )? > 0;
         if ended {
-            ship_in(&tx, task, by, "its run reached the end")?;
+            ship_in(&tx, task, by, "its run reached the end", Approval::Route)?;
             super::children::request_completion_in(&tx, task, None)?;
         }
         tx.commit()?;
@@ -757,8 +825,8 @@ impl SqliteStore {
         Ok(set)
     }
 
-    /// Hand the Task off to finish on its own, carried by `by`. Shipping that
-    /// already began keeps its start; only the carrier changes.
+    /// Hand the Task off to finish on its own, carried by `by`, lifting any
+    /// stop. Shipping that already began keeps its start; only the carrier changes.
     pub(crate) fn ship_task(
         &self,
         task: &TaskId,
@@ -767,21 +835,32 @@ impl SqliteStore {
     ) -> StoreResult<TaskShipping> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let shipping = ship_in(&tx, task, by, note)?;
+        let shipping =
+            ship_in(&tx, task, by, note, Approval::Explicit)?.expect("explicit approval ships");
         tx.commit()?;
         Ok(shipping)
     }
 
-    /// Withdraw a Task's Auto-Ship approval. Returns the approval and the process
-    /// that carried it, when it was approved.
+    /// Withdraw a Task's Auto-Ship approval. With `stopped_by`, a person
+    /// stopped it: the stop stands, even when it was not shipping, until
+    /// `lf ship` approves it again. Returns the approval and the process that
+    /// carried it, when it was approved.
     pub(crate) fn stop_shipping(
         &self,
         task: &TaskId,
         note: &str,
+        stopped_by: Option<&LfProcessId>,
     ) -> StoreResult<Option<TaskShipping>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
+        if let Some(by) = stopped_by {
+            tx.execute(
+                "UPDATE tasks SET ship_stopped_at=?2,ship_stopped_lf_process_id=?3 WHERE id=?1",
+                rusqlite::params![task.as_str(), crate::store::rows::now_unix(), by.as_str()],
+            )?;
+        }
         let Some(shipping) = unship_in(&tx, task)? else {
+            tx.commit()?;
             return Ok(None);
         };
         super::children::insert_task_event_in(
@@ -801,29 +880,27 @@ impl SqliteStore {
         shipping_in(&conn, task)
     }
 
+    /// The person's stop that keeps a run from approving the Task, if one stands.
+    pub(crate) fn task_ship_stop(&self, task: &TaskId) -> StoreResult<Option<ShipStop>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        ship_stop_in(&conn, task)
+    }
+
     /// Handed-off Tasks whose checkout is on this Machine, with their handoffs.
     pub(crate) fn local_shipping_tasks(&self) -> StoreResult<Vec<(TaskId, TaskShipping)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT id,shipped_at,ship_lf_process_id,ship_restarts FROM tasks
-             WHERE shipped_at IS NOT NULL
-             AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')",
-        )?;
+        let mut query = conn.prepare(&format!(
+            "{SHIPPING_SELECT} WHERE shipped_at IS NOT NULL
+             AND checkout_machine_id=(SELECT id FROM machines WHERE route='local')"
+        ))?;
         let rows = query
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                ))
-            })?
+            .query_map([], read_shipping)?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter()
-            .map(|(id, shipped_at, process, restarts)| {
+            .map(|(id, shipping)| {
                 let id = TaskId::parse(&id)
                     .map_err(|error| crate::store::StoreError::InvalidData(error.to_string()))?;
-                Ok((id, shipping(shipped_at, process, restarts)?))
+                Ok((id, shipping?))
             })
             .collect()
     }
@@ -1013,11 +1090,29 @@ mod tests {
         let again = store.ship_task(&task, &by, "again").unwrap();
         assert_eq!(again.shipped_at, shipping.shipped_at);
         // Stop withdraws the approval; the run still going keeps it moving.
-        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), Some(shipping));
+        assert_eq!(shipping.approved_by, Some(by.clone()));
+        let stopper = LfProcessId::new();
+        assert_eq!(
+            store.stop_shipping(&task, "stop", Some(&stopper)).unwrap(),
+            Some(shipping)
+        );
         assert_eq!(state(), crate::durable::TaskState::Moving);
-        assert_eq!(store.stop_shipping(&task, "stop").unwrap(), None);
-        // Approved again with nothing running, it is idle until its ship process restarts.
+        assert_eq!(store.stop_shipping(&task, "stop", None).unwrap(), None);
+        // The person's stop stands: a relaunch running to the end does not approve it.
+        let relaunch = store.task_graph_row(&task).unwrap().unwrap();
+        assert!(store
+            .start_task_graph_run(&task, &relaunch, &start, &by, true)
+            .unwrap());
+        assert!(store.task_shipping(&task).unwrap().is_none());
+        assert_eq!(state(), crate::durable::TaskState::Moving);
+        assert_eq!(
+            store.task_ship_stop(&task).unwrap().unwrap().by,
+            Some(stopper)
+        );
+        // Approved again with nothing running, it is idle until its ship process
+        // restarts. Only `lf ship` lifts the stop.
         store.ship_task(&task, &by, "again").unwrap();
+        assert!(store.task_ship_stop(&task).unwrap().is_none());
         store
             .conn
             .lock()

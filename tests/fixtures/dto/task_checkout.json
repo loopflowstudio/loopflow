@@ -42,5 +42,8 @@
   "pr": null,
   "branch": "jack/workspace",
   "base_commit": "1111111111111111111111111111111111111111",
-  "repository_id": "repo_00000000000040008000000000000001"
+  "repository_id": "repo_00000000000040008000000000000001",
+  "started_by": null,
+  "ship_approval": null,
+  "ship_stop": null
 }

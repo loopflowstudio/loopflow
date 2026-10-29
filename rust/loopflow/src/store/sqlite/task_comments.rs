@@ -263,18 +263,20 @@ pub(super) fn comment_steer_in(
     task: &TaskId,
     comment: &TaskComment,
 ) -> StoreResult<()> {
-    let TaskCommentAuthor::Person { name } = &comment.author else {
-        return Ok(());
+    let name = match &comment.author {
+        TaskCommentAuthor::Person { name } => name,
+        TaskCommentAuthor::Session { requester, .. } => requester,
+        TaskCommentAuthor::Integration => return Ok(()),
     };
     if !crate::ops::linear_observe::is_direction_comment(&comment.body, Some("local")) {
         return Ok(());
     }
-    let text = match name {
-        Some(name) => format!("Comment {} by {name}:\n\n{}", comment.id, comment.body),
-        None => format!(
+    let text = match &comment.author {
+        TaskCommentAuthor::Person { name: None } => format!(
             "Comment {} (attribution unresolved):\n\n{}",
             comment.id, comment.body
         ),
+        author => format!("Comment {} by {author}:\n\n{}", comment.id, comment.body),
     };
     SqliteStore::save_task_steer_in(
         tx,

@@ -36,6 +36,13 @@ fn task_comments_keep_authorship_and_require_every_field() {
         thread.comments[2].author,
         TaskCommentAuthor::Person { name: None }
     );
+    assert_eq!(
+        thread.comments[3].author,
+        TaskCommentAuthor::Session {
+            session_id: "session_05214bdabd2e4f66b4a8951aac87e9e7".into(),
+            requester: Some("Maya".into())
+        }
+    );
     // What `lf task comment ISSUE --json` prints is exactly what Swift decodes,
     // including explicit nulls Swift requires to be present.
     assert_eq!(

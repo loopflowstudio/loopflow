@@ -489,8 +489,11 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("task_comments.json")
         let thread = try JSONDecoder().decode(TaskComments.self, from: data)
         #expect(thread.identifier == "LOO-291")
-        #expect(thread.comments.map(\.id) == ["c-bot", "c-1", "c-2"])
-        #expect(thread.comments.map(\.author) == [.integration, .person(name: "Maya"), .person(name: nil)])
+        #expect(thread.comments.map(\.id) == ["c-bot", "c-1", "c-2", "c-3"])
+        #expect(thread.comments.map(\.author) == [
+            .integration, .person(name: "Maya"), .person(name: nil),
+            .session(id: "session_05214bdabd2e4f66b4a8951aac87e9e7", requester: "Maya"),
+        ])
         #expect(thread.comments[0].createdAt == nil)
         #expect(thread.comments[1].body == "- first\n  - nested\n\n[spec](https://example.com)")
         var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])

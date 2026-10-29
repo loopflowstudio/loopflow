@@ -38,7 +38,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id OR ship_approved_lf_process_id=p.id OR ship_stopped_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)";
 
@@ -439,6 +439,59 @@ impl SqliteStore {
                 read_process,
             )
             .optional()?)
+    }
+
+    /// Who started `id`: the first Session in its ancestry, else `person` at
+    /// its root. A chain missing rows leaves attribution unresolved.
+    pub(crate) fn process_starter(
+        &self,
+        id: &LfProcessId,
+        person: Option<&str>,
+    ) -> StoreResult<crate::process::Starter> {
+        use crate::process::Starter;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut current = Some(id.clone());
+        let mut seen = std::collections::HashSet::new();
+        while let Some(id) = current.take().filter(|id| seen.insert(id.clone())) {
+            let Some((parent, session)) = conn
+                .query_row(
+                    "SELECT parent_lf_process_id,caller_session_id FROM processes WHERE id=?1",
+                    [&id],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<LfProcessId>>(0)?,
+                            row.get::<_, Option<crate::id::LfSessionId>>(1)?,
+                        ))
+                    },
+                )
+                .optional()?
+            else {
+                return Ok(Starter::Person { name: None });
+            };
+            if let Some(session) = session {
+                let name = conn
+                    .query_row(
+                        "SELECT title FROM agent_sessions WHERE id=?1",
+                        [session.as_str()],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten()
+                    .filter(|title| !title.is_empty());
+                return Ok(Starter::Session {
+                    id: session,
+                    name,
+                    requester: person.map(str::to_owned),
+                });
+            }
+            if parent.is_none() {
+                return Ok(Starter::Person {
+                    name: person.map(str::to_owned),
+                });
+            }
+            current = parent;
+        }
+        Ok(Starter::Person { name: None })
     }
 
     /// When `id` failed, the time it ended and the error that caused it: the

@@ -29,6 +29,46 @@ pub struct LfProcess {
     pub error: Option<String>,
 }
 
+/// Who started a Process, derived from its ancestry: the first Session an
+/// agent ran it from, else the person at the root of its chain.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Starter {
+    /// A person ran it. `name` is absent when no participant is configured or
+    /// the chain is missing rows: attribution unresolved.
+    Person { name: Option<String> },
+    /// An agent in this Session ran it, for its person.
+    Session {
+        id: LfSessionId,
+        name: Option<String>,
+        requester: Option<String>,
+    },
+}
+
+impl std::fmt::Display for Starter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Person { name: Some(name) } => f.write_str(name),
+            Self::Person { name: None } => f.write_str("attribution unresolved"),
+            Self::Session {
+                id,
+                name,
+                requester,
+            } => {
+                match name {
+                    Some(name) => write!(f, "Session {name:?}")?,
+                    None => write!(f, "Session {id}")?,
+                }
+                match requester {
+                    Some(requester) => write!(f, " for {requester}"),
+                    None => Ok(()),
+                }
+            }
+        }
+    }
+}
+
 /// Both kinds have one durable identity and one inventory entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -13,7 +13,7 @@ struct WorkObservationTransportTests {
     func servedInProcess() async throws {
         setenv("LF_HOME", Self.home.path, 1)
         defer { unsetenv("LF_HOME") }
-        let watch = try LoopflowLibrary.watch(.desktopPlan)
+        let watch = try LoopflowLibrary.watch(.allPlans)
         var lines = watch.lines.makeAsyncIterator()
         let first = try #require(try await lines.next())
         let frame = try #require(try JSONSerialization.jsonObject(with: first) as? [String: Any])
@@ -25,14 +25,14 @@ struct WorkObservationTransportTests {
         #expect(try await lines.next() == nil)
     }
 
-    @Test("An operation Loopflow does not serve fails its watch")
-    func unservedOperation() async throws {
+    @Test("A read Loopflow does not serve fails its watch")
+    func unservedRead() async throws {
         setenv("LF_HOME", Self.home.path, 1)
         defer { unsetenv("LF_HOME") }
         let watch = try LoopflowLibrary.watch(.desktopTask(directory: "/", issue: "NONE-404"))
         do {
             for try await _ in watch.lines {}
-            Issue.record("An unserved operation finished successfully")
+            Issue.record("An unserved read finished successfully")
         } catch {
             #expect(error is RegistryQueryError)
         }
@@ -44,13 +44,13 @@ struct WorkObservationTransportTests {
         let watches = FakeWatches()
         let observation = try WorkWatches.observe(launch: watches.launch)
         var frames = observation.frames.makeAsyncIterator()
-        try await watches.answer(.desktopPlan, 0)
+        try await watches.answer(.allPlans, 0)
         #expect(try await frames.next()?.sequence == 1)
         observation.request(.scope(id: 2, WorkScope(repo: "/src/loopflow", headless: false, task: "LOO-1", activity: nil)))
         // The plan answers from its last reading.
         #expect(try await frames.next()?.answers == 2)
         #expect(watches.launched.contains(.desktopTask(directory: "/src/loopflow", issue: "LOO-1")))
-        #expect(watches.launched.filter { $0 == .desktopPlan }.count == 1)
+        #expect(watches.launched.filter { $0 == .allPlans }.count == 1)
         await observation.cancel()
     }
 
@@ -60,7 +60,7 @@ struct WorkObservationTransportTests {
         let observation = try WorkWatches.observe(launch: watches.launch)
         var frames = observation.frames.makeAsyncIterator()
         observation.request(.checkpoint(id: 5, replay: []))
-        try await watches.answer(.desktopPlan, 5)
+        try await watches.answer(.allPlans, 5)
         #expect(try await frames.next()?.answers == 5)
         #expect(watches.requests(.monitorPs) == [#"{"id":5}"#])
         // The live-process watch has not answered, so nothing is confirmed yet.
@@ -79,9 +79,9 @@ struct WorkObservationTransportTests {
         let watches = FakeWatches()
         let observation = try WorkWatches.observe(launch: watches.launch)
         switch kind {
-        case "malformed": watches.send(.desktopPlan, "{bad}")
-        case "wrong-type": watches.send(.desktopPlan, #"{"answers":"not a number"}"#)
-        default: watches.end(.desktopPlan)
+        case "malformed": watches.send(.allPlans, "{bad}")
+        case "wrong-type": watches.send(.allPlans, #"{"answers":"not a number"}"#)
+        default: watches.end(.allPlans)
         }
         do {
             for try await _ in observation.frames {
@@ -147,12 +147,12 @@ struct WorkObservationTransportTests {
 /// Watches with no reader: a test sends each line a watch would.
 private final class FakeWatches: @unchecked Sendable {
     private let lock = NSLock()
-    private var watches: [(operation: WorkOperation, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [String])] = []
+    private var watches: [(read: ServedRead, lines: AsyncThrowingStream<Data, any Error>.Continuation, sent: [String])] = []
 
     var launch: WorkWatches.Launch {
-        { [self] operation in
+        { [self] read in
             let (lines, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
-            let index = lock.withLock { watches.append((operation, continuation, [])); return watches.count - 1 }
+            let index = lock.withLock { watches.append((read, continuation, [])); return watches.count - 1 }
             return LineWatch(lines: lines, send: { [self] line in
                 lock.withLock { watches[index].sent.append(String(decoding: line, as: UTF8.self)
                     .trimmingCharacters(in: .newlines)) }
@@ -160,26 +160,26 @@ private final class FakeWatches: @unchecked Sendable {
         }
     }
 
-    var launched: [WorkOperation] { lock.withLock { watches.map(\.operation) } }
+    var launched: [ServedRead] { lock.withLock { watches.map(\.read) } }
 
-    func requests(_ operation: WorkOperation) -> [String] {
-        lock.withLock { watches.first { $0.operation == operation }?.sent ?? [] }
+    func requests(_ read: ServedRead) -> [String] {
+        lock.withLock { watches.first { $0.read == read }?.sent ?? [] }
     }
 
-    func send(_ operation: WorkOperation, _ line: String) {
-        _ = lock.withLock { watches.first { $0.operation == operation }?.lines.yield(Data(line.utf8)) }
+    func send(_ read: ServedRead, _ line: String) {
+        _ = lock.withLock { watches.first { $0.read == read }?.lines.yield(Data(line.utf8)) }
     }
 
-    func end(_ operation: WorkOperation) {
-        lock.withLock { watches.first { $0.operation == operation }?.lines.finish() }
+    func end(_ read: ServedRead) {
+        lock.withLock { watches.first { $0.read == read }?.lines.finish() }
     }
 
     /// Answer request `id` (0 answers none) with a failed reading.
-    func answer(_ operation: WorkOperation, _ id: Int) async throws {
-        for _ in 0..<400 where id != 0 && !requests(operation).contains(#"{"id":\#(id)}"#) {
+    func answer(_ read: ServedRead, _ id: Int) async throws {
+        for _ in 0..<400 where id != 0 && !requests(read).contains(#"{"id":\#(id)}"#) {
             try await Task.sleep(for: .milliseconds(5))
         }
-        send(operation, id == 0 ? #"{"answers":null,"unavailable":"gone","body":null}"#
+        send(read, id == 0 ? #"{"answers":null,"unavailable":"gone","body":null}"#
              : #"{"answers":\#(id),"unavailable":"gone","body":null}"#)
     }
 }

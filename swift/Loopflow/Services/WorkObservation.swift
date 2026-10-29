@@ -66,41 +66,6 @@ public enum WorkRequest: Equatable, Sendable {
     }
 }
 
-/// A read Loopflow serves inside the app, encoded as its Rust `Operation`.
-/// Each is an `lf` command, which `lf <argv> --json --watch` prints the same.
-public enum WorkOperation: Equatable, Sendable, Encodable {
-    /// `lf history --since <since> --limit <limit> [--wave …] [--project …] [--task …]`
-    case history(since: String, limit: Int, wave: String?, project: String?, task: String?)
-    /// `lf monitor ps`
-    case monitorPs
-    /// `lf desktop plan --all`
-    case desktopPlan
-    /// `lf --cwd <directory> desktop plans`
-    case desktopPlans(directory: String)
-    /// `lf --cwd <directory> desktop sessions [--interactive all]`
-    case desktopSessions(directory: String, headless: Bool)
-    /// `lf --cwd <directory> planning status`
-    case planningStatus(directory: String)
-    /// `lf --cwd <directory> desktop task <issue>`
-    case desktopTask(directory: String, issue: String)
-
-    public func encode(to encoder: any Encoder) throws {
-        let tagged = switch self {
-        case .history(let since, let limit, let wave, let project, let task):
-            TaggedFields("history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
-        case .monitorPs: TaggedFields("monitor_ps")
-        case .desktopPlan: TaggedFields("desktop_plan")
-        case .desktopPlans(let directory): TaggedFields("desktop_plans", ["directory": directory])
-        case .desktopSessions(let directory, let headless):
-            TaggedFields("desktop_sessions", ["directory": directory, "headless": headless])
-        case .planningStatus(let directory): TaggedFields("planning_status", ["directory": directory])
-        case .desktopTask(let directory, let issue):
-            TaggedFields("desktop_task", ["directory": directory, "issue": issue])
-        }
-        try tagged.encode(to: encoder, tag: "operation")
-    }
-}
-
 /// One watch a window runs, and the read behind it.
 public enum WorkPart: String, CaseIterable, Sendable {
     case task, sessions, planning, selections, activity
@@ -108,9 +73,9 @@ public enum WorkPart: String, CaseIterable, Sendable {
     case workActivity = "work_activity"
 
     /// The read this part watches for `scope`; nil when the scope shows no such part.
-    public func operation(for scope: WorkScope) -> WorkOperation? {
+    public func read(for scope: WorkScope) -> ServedRead? {
         switch self {
-        case .planning: return .desktopPlan
+        case .planning: return .allPlans
         case .activity: return .monitorPs
         case .selections: return scope.repo.map { .desktopPlans(directory: $0) }
         case .peerPlanning: return scope.repo.map { .planningStatus(directory: $0) }
@@ -339,12 +304,12 @@ public struct LineWatch: Sendable {
 /// observation. A scope change restarts only the watches whose read changed;
 /// the others answer it from their last frame without reading again.
 public final class WorkWatches: @unchecked Sendable {
-    /// Serves `operation` as `lf <read> --json --watch` prints it.
-    public typealias Launch = @Sendable (_ operation: WorkOperation) throws -> LineWatch
+    /// Serves `read` as `lf <read> --watch` prints it.
+    public typealias Launch = @Sendable (_ read: ServedRead) throws -> LineWatch
 
     private struct Running {
         let generation: Int
-        let operation: WorkOperation
+        let read: ServedRead
         let watch: LineWatch
         let reader: Task<Void, Never>
         /// The request it was started after: every reading it makes is newer.
@@ -403,16 +368,16 @@ public final class WorkWatches: @unchecked Sendable {
     private func select(id: Int) throws {
         var stopped: [Running] = []
         for part in WorkPart.allCases {
-            let operation = part.operation(for: scope)
-            if var current = running[part], current.operation == operation {
+            let read = part.read(for: scope)
+            if var current = running[part], current.read == read {
                 current.floor = id
                 running[part] = current
                 if let last = current.last { yield(part, last) }
                 continue
             }
             if let current = running.removeValue(forKey: part) { stopped.append(current) }
-            guard let operation else { continue }
-            let watch = try launch(operation)
+            guard let read else { continue }
+            let watch = try launch(read)
             generation += 1
             let generation = generation
             let reader = Task { [weak self] in
@@ -423,7 +388,7 @@ public final class WorkWatches: @unchecked Sendable {
                     self?.ended(part, generation, error: error)
                 }
             }
-            running[part] = Running(generation: generation, operation: operation, watch: watch,
+            running[part] = Running(generation: generation, read: read, watch: watch,
                                     reader: reader, launched: id, floor: id)
         }
         if !stopped.isEmpty {

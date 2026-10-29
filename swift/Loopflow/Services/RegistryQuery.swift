@@ -3,7 +3,7 @@
 // History and explicit lookups are one-shot queries. What a window shows is kept
 // current by the same reads `--watch` streams, one served watch per part.
 //
-// On macOS the Work watches and `ServedQuery` reads run inside the app through
+// On macOS the Work watches and `ServedRead` reads run inside the app through
 // Loopflow's Rust library; other reads run the `lf` shipped inside the app.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
@@ -30,9 +30,14 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); machine-wide reads such as `lf wave list` ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
-/// A one-shot read Loopflow serves inside the app, encoded as its Rust
-/// `Query`: what `argv` prints in `cwd`, given `input` on stdin.
-public enum ServedQuery: Equatable, Sendable, Encodable {
+/// A read Loopflow serves inside the app, encoded as its Rust `Read`: what
+/// `argv` prints in `cwd`, given `input` on stdin. A read whose command takes
+/// `--watch` is also served as that watch.
+public enum ServedRead: Equatable, Sendable, Encodable {
+    case monitorPs
+    case desktopPlans(directory: String)
+    case desktopSessions(directory: String, headless: Bool)
+    case desktopTask(directory: String, issue: String)
     case taskChanges(issue: String, base: String)
     case taskDiff(issue: String, path: String?, base: String, draft: String?)
     case taskFile(issue: String, path: String)
@@ -63,9 +68,20 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
     case doctor
     case bindPreview(session: String, task: String)
 
+    /// `lf desktop plan --all`: every repository's Waves and Tasks.
+    public static let allPlans = ServedRead.roadmap(directory: "/", wave: nil, task: nil, all: true)
+
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
         switch self {
+        case .monitorPs:
+            return ["monitor", "ps", "--json"]
+        case .desktopPlans:
+            return ["desktop", "plans", "--json"]
+        case .desktopSessions(_, let headless):
+            return ["desktop", "sessions"] + (headless ? ["--interactive", "all"] : []) + ["--json"]
+        case .desktopTask(_, let issue):
+            return ["desktop", "task", issue, "--json"]
         case .taskChanges(let issue, let base):
             return ["task", "diff", issue, "--files", "--base", base, "--json"]
         case .taskDiff(let issue, let path, let base, let draft):
@@ -148,6 +164,12 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
+        case .monitorPs: TaggedFields("monitor_ps")
+        case .desktopPlans(let directory): TaggedFields("desktop_plans", ["directory": directory])
+        case .desktopSessions(let directory, let headless):
+            TaggedFields("desktop_sessions", ["directory": directory, "headless": headless])
+        case .desktopTask(let directory, let issue):
+            TaggedFields("desktop_task", ["directory": directory, "issue": issue])
         case .taskChanges(let issue, let base):
             TaggedFields("task_changes", ["issue": issue, "base": base])
         case .taskDiff(let issue, let path, let base, let draft):
@@ -198,7 +220,7 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
     }
 
     public func encode(to encoder: any Encoder) throws {
-        try tagged.encode(to: encoder, tag: "query")
+        try tagged.encode(to: encoder, tag: "read")
     }
 }
 
@@ -238,9 +260,9 @@ public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner
     private var runWithInput: @Sendable ([String], String?, String) async throws -> String
-    /// What a `ServedQuery`'s `argv` prints: served in the app when the
+    /// What a `ServedRead`'s `argv` prints: served in the app when the
     /// transport can, else run.
-    private var serve: @Sendable (ServedQuery) async throws -> String
+    private var serve: @Sendable (ServedRead) async throws -> String
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
@@ -248,7 +270,7 @@ public struct RegistryQuery: Sendable {
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
-        serve: (@Sendable (ServedQuery) async throws -> String)? = nil,
+        serve: (@Sendable (ServedRead) async throws -> String)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner

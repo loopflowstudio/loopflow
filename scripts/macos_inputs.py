@@ -35,7 +35,7 @@ _SWIFT_TEST_INPUTS = (
     "scripts/desktop-",
     "scripts/check_swift_multiplatform_boundaries.py",
     "rust/loopflow-ffi/",
-    "rust/loopflow/src/lf/commands/operation.rs",
+    "rust/loopflow/src/lf/commands/read.rs",
     # swift-test runs this check, and pytest loads any conftest beside it.
     "python/tests/test_desktop_performance.py",
     "python/tests/conftest.py",

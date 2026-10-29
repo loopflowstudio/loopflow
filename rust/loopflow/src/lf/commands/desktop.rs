@@ -625,15 +625,26 @@ fn task_pane(issue: &str, watch: bool) -> Result<()> {
     if watch {
         return watch_task_pane(&std::env::current_dir()?, issue, Transport::Stdio).map(drop);
     }
-    let repo = crate::ops::task::task_repository(&crate::repo::working_directory()?, Some(issue))?;
+    let pane = read_task_pane(&std::env::current_dir()?, issue)?;
+    println!("{}", serde_json::to_string(&pane)?);
+    Ok(())
+}
+
+/// What `lf desktop task <issue> --json` prints from `directory`.
+pub(crate) fn read_task_pane(
+    directory: &std::path::Path,
+    issue: &str,
+) -> Result<super::waves::DesktopTaskPane> {
+    let repo = crate::ops::task::task_repository(
+        &crate::repo::working_directory_in(directory)?,
+        Some(issue),
+    )?;
     let status = crate::ops::task::task_status(&repo, Some(issue))?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
-        let pane = super::waves::task_pane(&store, status).await?;
-        println!("{}", serde_json::to_string(&pane)?);
-        Ok(())
+        super::waves::task_pane(&store, status).await
     })
 }
 
@@ -655,14 +666,8 @@ pub(crate) fn watch_task_pane(
 /// each saved Dashboard, as Desktop reads them.
 fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
     if !watch {
-        let store = crate::store::read_existing_registry()?
-            .ok_or(crate::store::StoreError::NotFound)
-            .context("Work registry is unavailable")?;
-        let repository = selection_repository(cli, &store.sqlite)?;
-        println!(
-            "{}",
-            serde_json::to_string(&store.sqlite.selection_plans(&repository)?)?
-        );
+        let plans = read_plans(cli.repository.as_ref(), &std::env::current_dir()?)?;
+        println!("{}", serde_json::to_string(&plans)?);
         return Ok(());
     }
     watch_plans(
@@ -671,6 +676,19 @@ fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
         Transport::Stdio,
     )
     .map(drop)
+}
+
+/// What `lf desktop plans --json` prints for `--repository`, else the
+/// repository containing `directory`.
+pub(crate) fn read_plans(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+) -> Result<Vec<crate::work::selection::ViewPlan>> {
+    let store = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = repository_in(selected, directory, &store.sqlite)?;
+    Ok(store.sqlite.selection_plans(&repository)?)
 }
 
 /// `lf desktop plans --watch` for `--repository`, else the repository
@@ -984,6 +1002,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
         } => {
             return if *watch {
                 super::waves::watch_show(
+                    std::env::current_dir()?,
                     wave.clone(),
                     task.clone(),
                     *all,

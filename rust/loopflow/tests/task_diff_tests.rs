@@ -1,9 +1,11 @@
 use crate::support;
 
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
@@ -147,9 +149,9 @@ fn diff_files_preserves_comparison_identity_and_draft_editing() {
 }
 
 #[test]
-fn a_query_served_in_process_reads_what_its_lf_command_prints() {
+fn a_read_served_in_process_prints_what_its_lf_command_prints() {
     use loopflow::lf::commands::activity::HistoryWindow;
-    use loopflow::lf::commands::operation::Query;
+    use loopflow::lf::commands::read::Read;
 
     let home = tempfile::tempdir().unwrap();
     // Same HOME as `read`'s children: `portfolio` scans `$HOME/src`.
@@ -165,15 +167,14 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
     register_task_with_pr(home.path(), repo.path(), "served-reads", &base);
     repo.create_file("edit.txt", "working\n");
     let graph = support::record_graph(home.path(), repo.path(), "code", "implement", "succeeded");
-    let task_diff = |path: Option<&str>, draft: Option<&str>| Query::TaskDiff {
+    let task_diff = |path: Option<&str>, draft: Option<&str>| Read::TaskDiff {
         issue: "INF-123".into(),
         path: path.map(str::to_owned),
         base: "parent".into(),
         draft: draft.map(str::to_owned),
     };
-    // A new Query fails to compile here until it is compared too.
     let repository: Value = serde_json::from_str(
-        &Query::RepositoryIdentity {
+        &Read::RepositoryIdentity {
             directory: repo.path().to_owned(),
         }
         .read()
@@ -189,165 +190,207 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
     ))
     .unwrap();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
-    let queries = match task_diff(None, None) {
-        Query::TaskChanges { .. }
-        | Query::TaskDiff { .. }
-        | Query::TaskFile { .. }
-        | Query::RepositoryIdentity { .. }
-        | Query::Waves
-        | Query::MachineId
-        | Query::Portfolio
-        | Query::PaneLayout { .. }
-        | Query::People { .. }
-        | Query::Graphs { .. }
-        | Query::ViewPlan { .. }
-        | Query::GraphProcesses { .. }
-        | Query::GraphProcess { .. }
-        | Query::Usage { .. }
-        | Query::TaskContext { .. }
-        | Query::WaveDetail { .. }
-        | Query::ClosedTasks { .. }
-        | Query::Machines
-        | Query::History(_)
-        | Query::Roadmap { .. }
-        | Query::PlanningStatus { .. }
-        | Query::WorkLink { .. }
-        | Query::RepositoryPath { .. }
-        | Query::WaveGraph { .. }
-        | Query::SessionPage { .. }
-        | Query::Tokens { .. }
-        | Query::Retention
-        | Query::Doctor
-        | Query::BindPreview { .. } => [
-            Query::TaskChanges {
-                issue: "INF-123".into(),
-                base: "parent".into(),
-            },
-            task_diff(None, None),
-            task_diff(Some("edit.txt"), None),
-            task_diff(Some("edit.txt"), Some("draft\n")),
-            Query::TaskFile {
-                issue: "INF-123".into(),
-                path: "edit.txt".into(),
-            },
-            Query::RepositoryIdentity {
-                directory: repo.path().to_owned(),
-            },
-            Query::Waves,
-            Query::MachineId,
-            Query::Portfolio,
-            Query::PaneLayout {
-                directory: repo.path().to_owned(),
-                work: "repository".into(),
-            },
-            Query::People {
-                directory: repo.path().to_owned(),
-            },
-            Query::Graphs {
-                directory: repo.path().to_owned(),
-            },
-            Query::ViewPlan {
-                directory: repo.path().to_owned(),
-                expression: None,
-            },
-            Query::ViewPlan {
-                directory: repo.path().to_owned(),
-                expression: Some("state:backlog".into()),
-            },
-            Query::GraphProcesses {
-                directory: repo.path().to_owned(),
-                task: "INF-123".into(),
-                after: None,
-            },
-            Query::GraphProcess { id: graph },
-            Query::Usage {
-                days: 0,
-                wave: None,
-                project: None,
-                task: Some("INF-123".into()),
-            },
-            Query::Usage {
-                days: 30,
-                wave: Some("task-pr-tests".into()),
-                project: None,
-                task: None,
-            },
-            Query::TaskContext {
-                task: "INF-123".into(),
-            },
-            Query::WaveDetail {
-                directory: repo.path().to_owned(),
-                wave: "task-pr-tests".into(),
-            },
-            Query::ClosedTasks {
-                directory: repo.path().to_owned(),
-                wave: "task-pr-tests".into(),
-                after: None,
-            },
-            Query::Machines,
-            Query::History(HistoryWindow {
-                since: "7d".into(),
-                limit: 50,
-                wave: None,
-                project: None,
-                task: Some("INF-123".into()),
-            }),
-            Query::Roadmap {
-                directory: "/".into(),
-                wave: None,
-                task: None,
-                all: true,
-            },
-            Query::Roadmap {
-                directory: repo.path().to_owned(),
-                wave: None,
-                task: Some("INF-123".into()),
-                all: false,
-            },
-            Query::PlanningStatus {
-                directory: repo.path().to_owned(),
-            },
-            Query::WorkLink {
-                directory: "/".into(),
-                url: format!("loopflow://{folder}/task/INF-123"),
-            },
-            Query::RepositoryPath {
-                id: serde_json::from_value(repository["id"].clone()).unwrap(),
-            },
-            Query::WaveGraph {
-                directory: repo.path().to_owned(),
-                wave: Some("task-pr-tests".into()),
-            },
-            Query::WaveGraph {
-                directory: repo.path().to_owned(),
-                wave: None,
-            },
-            Query::SessionPage {
-                directory: repo.path().to_owned(),
-                headless: true,
-                after: None,
-            },
-            Query::Tokens {
-                directory: repo.path().to_owned(),
-                days: None,
-            },
-            Query::Tokens {
-                directory: repo.path().to_owned(),
-                days: Some(1),
-            },
-            Query::Retention,
-            Query::Doctor,
-            Query::BindPreview {
-                session: session["id"].as_str().unwrap().into(),
-                task: "INF-123".into(),
-            },
-        ],
+    // Planning status without Git reads stored status; a Git checkout's
+    // watch exchanges with a planning remote this fixture lacks.
+    let work_folder = home.path().join("folder");
+    fs::create_dir_all(&work_folder).unwrap();
+    let history = || {
+        Read::History(HistoryWindow {
+            since: "7d".into(),
+            limit: 50,
+            wave: None,
+            project: None,
+            task: Some("INF-123".into()),
+        })
     };
-    for query in queries {
-        let owned = query.argv();
+    let all_plans = || Read::Roadmap {
+        directory: "/".into(),
+        wave: None,
+        task: None,
+        all: true,
+    };
+    let sessions = |headless| Read::DesktopSessions {
+        directory: repo.path().to_owned(),
+        headless,
+    };
+    let task_pane = || Read::DesktopTask {
+        directory: repo.path().to_owned(),
+        issue: "INF-123".into(),
+    };
+    let plans = || Read::DesktopPlans {
+        directory: repo.path().to_owned(),
+    };
+    // A new Read fails to compile here until it is compared too.
+    let (reads, watches) = match task_diff(None, None) {
+        Read::MonitorPs
+        | Read::DesktopPlans { .. }
+        | Read::DesktopSessions { .. }
+        | Read::DesktopTask { .. }
+        | Read::TaskChanges { .. }
+        | Read::TaskDiff { .. }
+        | Read::TaskFile { .. }
+        | Read::RepositoryIdentity { .. }
+        | Read::Waves
+        | Read::MachineId
+        | Read::Portfolio
+        | Read::PaneLayout { .. }
+        | Read::People { .. }
+        | Read::Graphs { .. }
+        | Read::ViewPlan { .. }
+        | Read::GraphProcesses { .. }
+        | Read::GraphProcess { .. }
+        | Read::Usage { .. }
+        | Read::TaskContext { .. }
+        | Read::WaveDetail { .. }
+        | Read::ClosedTasks { .. }
+        | Read::Machines
+        | Read::History(_)
+        | Read::Roadmap { .. }
+        | Read::PlanningStatus { .. }
+        | Read::WorkLink { .. }
+        | Read::RepositoryPath { .. }
+        | Read::WaveGraph { .. }
+        | Read::SessionPage { .. }
+        | Read::Tokens { .. }
+        | Read::Retention
+        | Read::Doctor
+        | Read::BindPreview { .. } => (
+            [
+                Read::MonitorPs,
+                plans(),
+                sessions(true),
+                task_pane(),
+                Read::TaskChanges {
+                    issue: "INF-123".into(),
+                    base: "parent".into(),
+                },
+                task_diff(None, None),
+                task_diff(Some("edit.txt"), None),
+                task_diff(Some("edit.txt"), Some("draft\n")),
+                Read::TaskFile {
+                    issue: "INF-123".into(),
+                    path: "edit.txt".into(),
+                },
+                Read::RepositoryIdentity {
+                    directory: repo.path().to_owned(),
+                },
+                Read::Waves,
+                Read::MachineId,
+                Read::Portfolio,
+                Read::PaneLayout {
+                    directory: repo.path().to_owned(),
+                    work: "repository".into(),
+                },
+                Read::People {
+                    directory: repo.path().to_owned(),
+                },
+                Read::Graphs {
+                    directory: repo.path().to_owned(),
+                },
+                Read::ViewPlan {
+                    directory: repo.path().to_owned(),
+                    expression: None,
+                },
+                Read::ViewPlan {
+                    directory: repo.path().to_owned(),
+                    expression: Some("state:backlog".into()),
+                },
+                Read::GraphProcesses {
+                    directory: repo.path().to_owned(),
+                    task: "INF-123".into(),
+                    after: None,
+                },
+                Read::GraphProcess { id: graph },
+                Read::Usage {
+                    days: 0,
+                    wave: None,
+                    project: None,
+                    task: Some("INF-123".into()),
+                },
+                Read::Usage {
+                    days: 30,
+                    wave: Some("task-pr-tests".into()),
+                    project: None,
+                    task: None,
+                },
+                Read::TaskContext {
+                    task: "INF-123".into(),
+                },
+                Read::WaveDetail {
+                    directory: repo.path().to_owned(),
+                    wave: "task-pr-tests".into(),
+                },
+                Read::ClosedTasks {
+                    directory: repo.path().to_owned(),
+                    wave: "task-pr-tests".into(),
+                    after: None,
+                },
+                Read::Machines,
+                history(),
+                all_plans(),
+                Read::Roadmap {
+                    directory: repo.path().to_owned(),
+                    wave: None,
+                    task: Some("INF-123".into()),
+                    all: false,
+                },
+                Read::PlanningStatus {
+                    directory: repo.path().to_owned(),
+                },
+                Read::WorkLink {
+                    directory: "/".into(),
+                    url: format!("loopflow://{folder}/task/INF-123"),
+                },
+                Read::RepositoryPath {
+                    id: serde_json::from_value(repository["id"].clone()).unwrap(),
+                },
+                Read::WaveGraph {
+                    directory: repo.path().to_owned(),
+                    wave: Some("task-pr-tests".into()),
+                },
+                Read::WaveGraph {
+                    directory: repo.path().to_owned(),
+                    wave: None,
+                },
+                Read::SessionPage {
+                    directory: repo.path().to_owned(),
+                    headless: true,
+                    after: None,
+                },
+                Read::Tokens {
+                    directory: repo.path().to_owned(),
+                    days: None,
+                },
+                Read::Tokens {
+                    directory: repo.path().to_owned(),
+                    days: Some(1),
+                },
+                Read::Retention,
+                Read::Doctor,
+                Read::BindPreview {
+                    session: session["id"].as_str().unwrap().into(),
+                    task: "INF-123".into(),
+                },
+            ],
+            [
+                history(),
+                Read::MonitorPs,
+                all_plans(),
+                plans(),
+                sessions(false),
+                sessions(true),
+                Read::PlanningStatus {
+                    directory: work_folder,
+                },
+                task_pane(),
+            ],
+        ),
+    };
+    for served in reads {
+        let owned = served.argv();
         let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
-        let printed = read(repo.path(), home.path(), &argv, query.input());
-        let served = query.read().unwrap();
+        let printed = read(repo.path(), home.path(), &argv, served.input());
+        let served = served.read().unwrap();
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
             // `config repository --path` prints a path, not JSON.
             assert_eq!(served.trim(), printed.trim(), "{argv:?}");
@@ -356,6 +399,49 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
         let served: Value = serde_json::from_str(&served).unwrap();
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
+    for served in watches {
+        let mut argv = served.argv();
+        argv.push("--watch".into());
+        let (sender, wakes) = mpsc::channel();
+        let sender = std::sync::Mutex::new(sender);
+        let subscription = served
+            .subscribe(move || {
+                let _ = sender.lock().unwrap().send(());
+            })
+            .unwrap();
+        // The app pulls on its own thread after a data-free wakeup.
+        wakes.recv_timeout(Duration::from_secs(30)).unwrap();
+        let served: Value =
+            serde_json::from_slice(&subscription.pull().expect("a first frame")).unwrap();
+        drop(subscription);
+        assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
+        let printed = first_frame(repo.path(), home.path(), &argv);
+        assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
+    }
+}
+
+/// The first frame `lf <args>` prints, with its stdin held open as a watch's
+/// parent holds it.
+fn first_frame(repo: &Path, home: &Path, args: &[String]) -> Value {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home)
+        .env("LF_HOME", home)
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(repo)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    serde_json::from_str(&line).unwrap_or_else(|_| panic!("{args:?}: no frame"))
 }
 
 /// `value` without the times a reading stamps when it runs.

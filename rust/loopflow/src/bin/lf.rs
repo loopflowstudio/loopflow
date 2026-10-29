@@ -2707,14 +2707,19 @@ fn execute_command(
                     watch: true,
                     ..
                 },
-        }) => loopflow::lf::commands::waves::watch_show(
-            wave.clone(),
-            task.clone(),
-            *all,
-            loopflow::lf::commands::waves::Shape::Tasks,
-            loopflow::lf::commands::watch::Transport::Stdio,
-        )
-        .map(drop),
+        }) => std::env::current_dir()
+            .map_err(anyhow::Error::from)
+            .and_then(|directory| {
+                loopflow::lf::commands::waves::watch_show(
+                    directory,
+                    wave.clone(),
+                    task.clone(),
+                    *all,
+                    loopflow::lf::commands::waves::Shape::Tasks,
+                    loopflow::lf::commands::watch::Transport::Stdio,
+                )
+            })
+            .map(drop),
         Some(Commands::Wave {
             cmd:
                 WaveCommand::Show {

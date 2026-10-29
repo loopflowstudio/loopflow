@@ -805,16 +805,16 @@ pub(crate) fn show_json(
     })
 }
 
-/// `lf wave show --watch`: `lf wave show --json` now and each time it changes.
-/// The watch reads the store; it does not observe the tracker.
+/// `lf wave show --watch` in `directory`: `lf wave show --json` now and each
+/// time it changes. The watch reads the store; it does not observe the tracker.
 pub fn watch_show(
+    directory: std::path::PathBuf,
     wave: Option<String>,
     task: Option<String>,
     all: bool,
     shape: Shape,
     transport: super::watch::Transport,
 ) -> Result<Option<super::watch::Subscription>> {
-    let directory = std::env::current_dir()?;
     super::watch::start(
         (),
         super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),

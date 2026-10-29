@@ -1,15 +1,15 @@
-//! The C ABI `include/loopflow.h` declares, in Ghostty's embedding shape. An
-//! app subscribes to an [`Operation`]; Loopflow calls a data-free wakeup from
-//! any thread, and the app pulls the JSON frames its `lf` command prints on its
-//! own queue. A one-shot [`Query`] returns what its `lf` command prints. The
-//! frames are the DTOs Swift already decodes. Every entry point
+//! The C ABI `include/loopflow.h` declares, in Ghostty's embedding shape. Both
+//! entry points take a JSON [`Read`]. `lf_read` returns what its `lf` command
+//! prints. `lf_subscribe` serves its `--watch`: Loopflow calls a data-free
+//! wakeup from any thread, and the app pulls the frames that command prints on
+//! its own queue. Results are the DTOs Swift already decodes. Every entry point
 //! catches panics, so a Rust panic reaches the app as an error, never a crash.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex};
 
-use loopflow::lf::commands::operation::{Operation, Query};
+use loopflow::lf::commands::read::Read;
 use loopflow::lf::commands::watch::{panic_message, Subscription};
 
 /// One served watch, owned by the app until `lf_unsubscribe`.
@@ -39,14 +39,14 @@ impl Wakeup {
     }
 }
 
-/// Start serving `operation`; `wakeup` says when to pull.
+/// Start serving `read`'s watch; `wakeup` says when to pull.
 ///
 /// # Safety
-/// `operation` is a NUL-terminated string; `error` is null or writable;
+/// `read` is a NUL-terminated string; `error` is null or writable;
 /// `wakeup` accepts calls from any thread with `context`.
 #[no_mangle]
 pub unsafe extern "C" fn lf_subscribe(
-    operation: *const c_char,
+    read: *const c_char,
     wakeup: LfWakeup,
     context: *mut c_void,
     error: *mut *mut c_char,
@@ -54,12 +54,9 @@ pub unsafe extern "C" fn lf_subscribe(
     let target = Arc::new(Wakeup(Mutex::new(Some((wakeup, context as usize)))));
     let started = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: the caller passes a NUL-terminated string.
-        let text = unsafe { CStr::from_ptr(operation) };
-        let operation: Operation = serde_json::from_slice(text.to_bytes())
-            .map_err(|error| format!("invalid operation: {error}"))?;
+        let read = parse(unsafe { CStr::from_ptr(read) })?;
         let wake = target.clone();
-        operation
-            .subscribe(move || wake.call())
+        read.subscribe(move || wake.call())
             .map_err(|error| format!("{error:#}"))
     }));
     let failure = match started {
@@ -77,21 +74,19 @@ pub unsafe extern "C" fn lf_subscribe(
     std::ptr::null_mut()
 }
 
-/// Read `query` on this thread: the JSON its `lf` command prints, or null
-/// with `*error` set. Free either with `lf_string_free`.
+/// Read `read` on this thread: what its `lf` command prints, or null with
+/// `*error` set. Free either with `lf_string_free`.
 ///
 /// # Safety
-/// `query` is a NUL-terminated string; `error` is null or writable.
+/// `read` is a NUL-terminated string; `error` is null or writable.
 #[no_mangle]
-pub unsafe extern "C" fn lf_read(query: *const c_char, error: *mut *mut c_char) -> *mut c_char {
-    let read = catch_unwind(AssertUnwindSafe(|| {
+pub unsafe extern "C" fn lf_read(read: *const c_char, error: *mut *mut c_char) -> *mut c_char {
+    let result = catch_unwind(AssertUnwindSafe(|| {
         // SAFETY: the caller passes a NUL-terminated string.
-        let text = unsafe { CStr::from_ptr(query) };
-        let query: Query = serde_json::from_slice(text.to_bytes())
-            .map_err(|error| format!("invalid query: {error}"))?;
-        query.read().map_err(|error| format!("{error:#}"))
+        let read = parse(unsafe { CStr::from_ptr(read) })?;
+        read.read().map_err(|error| format!("{error:#}"))
     }));
-    let failure = match read {
+    let failure = match result {
         Ok(Ok(json)) => return c_string(&json).into_raw(),
         Ok(Err(failure)) => failure,
         Err(panic) => format!("lf_read panicked: {}", panic_message(&panic)),
@@ -99,6 +94,10 @@ pub unsafe extern "C" fn lf_read(query: *const c_char, error: *mut *mut c_char) 
     // SAFETY: the caller passes a writable pointer or null.
     unsafe { set_error(error, &failure) };
     std::ptr::null_mut()
+}
+
+fn parse(text: &CStr) -> Result<Read, String> {
+    serde_json::from_slice(text.to_bytes()).map_err(|error| format!("invalid read: {error}"))
 }
 
 fn c_string(text: &str) -> CString {
@@ -224,33 +223,27 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_operation_is_an_error_not_a_subscription() {
-        let operation = CString::new(r#"{"operation":"rm_rf"}"#).unwrap();
+    fn an_unknown_read_is_an_error_not_a_subscription() {
+        let read = CString::new(r#"{"read":"rm_rf"}"#).unwrap();
         let mut error = std::ptr::null_mut();
-        let subscription = unsafe {
-            lf_subscribe(
-                operation.as_ptr(),
-                forward,
-                std::ptr::null_mut(),
-                &mut error,
-            )
-        };
+        let subscription =
+            unsafe { lf_subscribe(read.as_ptr(), forward, std::ptr::null_mut(), &mut error) };
         assert!(subscription.is_null());
         let message = unsafe { CStr::from_ptr(error) }
             .to_str()
             .unwrap()
             .to_owned();
         unsafe { lf_string_free(error) };
-        assert!(message.contains("invalid operation"), "{message}");
+        assert!(message.contains("invalid read"), "{message}");
     }
 
     #[test]
-    fn a_failed_query_is_an_error_not_a_result() {
+    fn a_failed_read_is_an_error_not_a_result() {
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
-        let query = CString::new(r#"{"query":"task_file","issue":"NONE-1","path":"a"}"#).unwrap();
+        let read = CString::new(r#"{"read":"task_file","issue":"NONE-1","path":"a"}"#).unwrap();
         let mut error = std::ptr::null_mut();
-        assert!(unsafe { lf_read(query.as_ptr(), &mut error) }.is_null());
+        assert!(unsafe { lf_read(read.as_ptr(), &mut error) }.is_null());
         assert!(!error.is_null());
         unsafe { lf_string_free(error) };
     }
@@ -261,10 +254,13 @@ mod tests {
         std::env::set_var("LF_HOME", home.path());
         let (sender, wakes) = mpsc::channel::<()>();
         let context = Box::into_raw(Box::new(sender));
-        let operation = CString::new(r#"{"operation":"desktop_plan"}"#).unwrap();
+        let read = CString::new(
+            r#"{"read":"roadmap","directory":"/","wave":null,"task":null,"all":true}"#,
+        )
+        .unwrap();
         let mut error = std::ptr::null_mut();
         let subscription =
-            unsafe { lf_subscribe(operation.as_ptr(), forward, context.cast(), &mut error) };
+            unsafe { lf_subscribe(read.as_ptr(), forward, context.cast(), &mut error) };
         assert!(!subscription.is_null());
         wakes.recv_timeout(Duration::from_secs(30)).unwrap();
         let mut length = 0;

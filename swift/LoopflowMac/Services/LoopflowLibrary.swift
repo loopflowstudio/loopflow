@@ -6,17 +6,17 @@ import LoopflowFFI
 /// Loopflow's reads served inside the app by its Rust library (`loopflow.h`),
 /// with no `lf` process. Each returns what its `lf` command prints.
 enum LoopflowLibrary {
-    /// Serve `operation` as `lf <read> --json --watch` streams it. Loopflow's
+    /// Serve `read` as `lf <read> --watch` streams it. Loopflow's
     /// wakeup only schedules a pull on this watch's own queue, where the
     /// reading runs; nothing reads on the caller's thread.
-    static func watch(_ operation: WorkOperation) throws -> LineWatch {
-        let served = ServedWatch(try JSONEncoder().encode(operation))
+    static func watch(_ read: ServedRead) throws -> LineWatch {
+        let served = ServedWatch(try JSONEncoder().encode(read))
         return LineWatch(lines: served.lines, send: served.send, cancel: served.cancel)
     }
 
-    /// What `query.argv` prints, read off the caller's thread.
-    static func read(_ query: ServedQuery) async throws -> String {
-        let json = String(decoding: try JSONEncoder().encode(query), as: UTF8.self)
+    /// What `read.argv` prints, read off the caller's thread.
+    static func read(_ read: ServedRead) async throws -> String {
+        let json = String(decoding: try JSONEncoder().encode(read), as: UTF8.self)
         return try await Task.detached(priority: .userInitiated) {
             var error: UnsafeMutablePointer<CChar>?
             guard let result = lf_read(json, &error) else {
@@ -42,23 +42,23 @@ private final class ServedWatch: @unchecked Sendable {
     private let queue = DispatchQueue(label: "studio.loopflow.watch", qos: .utility)
     private var subscription: OpaquePointer?
 
-    init(_ operation: Data) {
+    init(_ read: Data) {
         (lines, continuation) = AsyncThrowingStream.makeStream()
         continuation.onTermination = { [self] _ in queue.async { self.end() } }
-        queue.async { self.subscribe(String(decoding: operation, as: UTF8.self)) }
+        queue.async { self.subscribe(String(decoding: read, as: UTF8.self)) }
     }
 
-    private func subscribe(_ operation: String) {
+    private func subscribe(_ read: String) {
         let context = Unmanaged.passRetained(self).toOpaque()
         var error: UnsafeMutablePointer<CChar>?
-        subscription = lf_subscribe(operation, { context in
+        subscription = lf_subscribe(read, { context in
             guard let context else { return }
             let watch = Unmanaged<ServedWatch>.fromOpaque(context).takeUnretainedValue()
             watch.queue.async { watch.pull() }
         }, context, &error)
         if subscription == nil {
             Unmanaged<ServedWatch>.fromOpaque(context).release()
-            continuation.finish(throwing: RegistryQueryError(take(error) ?? "Loopflow could not serve \(operation)"))
+            continuation.finish(throwing: RegistryQueryError(take(error) ?? "Loopflow could not serve \(read)"))
         }
     }
 

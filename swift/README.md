@@ -720,10 +720,10 @@ lf planning status --json --watch          # sync receipts; keeps planning excha
 A window serves these `--watch` reads inside the app, one subscription per
 part, through `RegistryQuery.watchWork()` and Loopflow's Rust library
 (`rust/loopflow-ffi/include/loopflow.h`): no `lf` process runs. Each part names
-its `WorkOperation`, the `lf` command above that prints the same frames. Task
+its `ServedRead`, the `lf` command above that prints the same frames. Task
 file and diff reads, the repository's identity, the Wave list, this Machine's
 identity, the portfolio, a Work's saved panes, Task owners and the Graph
-catalog (`ServedQuery`) are served the
+catalog are `ServedRead`s too, read once and served the
 same way, so opening a window starts no `lf`; other reads still run the bundled
 `lf`. The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its

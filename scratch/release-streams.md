@@ -122,7 +122,7 @@ tested before the next starts.
    Slice 3 adds the regression filter inside `stable_advance`.
    Compress: one `parse_version` now serves `bump_version`, `notes_base` and
    `published_releases`; the promote test split into success and tampered cases.
-   Not yet published.
+   Ready to publish.
 3. **`regressed_in` Task field** and the stable rule reading it.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default
@@ -138,7 +138,7 @@ tested before the next starts.
 7. **Sparkle, one appcast per stream**, EdDSA key in Doppler, Developer ID
    signing of dev builds in CI; the delegate vetoes updates that fail `can_open`.
 
-Check (slice 2, 2026-10-29): `--lib ops::release::` 45 pass, `release_tests daily_run_moves_stable minor notes` 22 pass, publisher/automation pytest 55 pass; clippy `--all-targets` and nextest deferred to gate/CI.
+Check (slice 2, 2026-10-29): spec re-checked, no gap; `--lib ops::release::` 45 pass, `release_tests daily_run_moves_stable minor notes` 22 pass, publisher/automation pytest 55 pass, fmt and architecture pass; gate's nextest and clippy refused by the disk reserve (5.8 GiB free, other Tasks' builds), deferred to PR CI.
 
 ## Neighbouring Tasks
 

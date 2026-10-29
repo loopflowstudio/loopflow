@@ -58,7 +58,7 @@ an incompatible store still reports readable Process evidence.
 
 Binary freshness compares against locally cached `origin/main`, without
 fetching. That reference may be stale, and merged source may be newer than the
-latest published release. `lf install` installs that published release; Doctor
+stable release. `lf install` installs that stable release; Doctor
 itself installs nothing.
 
 Contention reads the last day of `logs/lf.log`: `database is locked` failures

@@ -1466,6 +1466,47 @@ fn release_run_checks_the_host_local_publisher_role() {
 }
 
 #[test]
+fn daily_run_moves_stable_to_the_newest_soaked_release() {
+    let repo = TestRepo::new();
+    let log = repo.path().join("effects.log");
+    let days_ago = |days| (chrono::Utc::now() - chrono::TimeDelta::days(days)).to_rfc3339();
+    let releases = serde_json::json!([
+        {"tagName": "v0.9.3", "isLatest": false, "isDraft": false, "isPrerelease": false, "publishedAt": days_ago(1)},
+        {"tagName": "v0.9.2", "isLatest": false, "isDraft": false, "isPrerelease": false, "publishedAt": days_ago(8)},
+        {"tagName": "v0.9.1", "isLatest": true, "isDraft": false, "isPrerelease": false, "publishedAt": days_ago(20)},
+    ]);
+    let gh = format!(
+        "#!/bin/sh\n[ \"$1\" != --version ] || exit 0\ncase \"$1 $2\" in\n  'release view') echo '{{\"isDraft\":false}}'; exit 0;;\n  'release list') cat <<'JSON'\n{releases}\nJSON\n    exit 0;;\n  'release edit') echo \"gh $*\" >> '{log}'; exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $*\" >&2\nexit 1\n",
+        log = log.display()
+    );
+    let _env = EnvGuard::new(&[("gh", gh.as_str())]);
+    repo.create_file(
+        "publisher.sh",
+        &format!(
+            "#!/bin/sh\n[ \"$1\" = check ] || echo \"publisher $*\" >> '{}'\n",
+            log.display()
+        ),
+    );
+    repo.create_file(
+        ".lf/config.yaml",
+        "release:\n  targets:\n    default:\n      completion: github-release\n      publisher: [\"sh\", \"{repo}/publisher.sh\"]\n",
+    );
+    repo.create_file(".gitignore", "effects.log\n");
+    repo.stage_all();
+    repo.commit("Configure release streams");
+    git(&repo, &["push", "origin", "HEAD"]);
+    git(&repo, &["tag", "v0.9.3"]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
+
+    assert!(matches!(outcome, ReleaseRunOutcome::NoChanges { .. }));
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
+    );
+}
+
+#[test]
 fn release_run_proves_the_candidate_before_pushing_the_version_tag() {
     let repo = TestRepo::new();
     let head = prepare_candidate_release_repo(&repo);

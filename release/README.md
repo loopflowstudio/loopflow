@@ -16,7 +16,7 @@ launchctl list | grep loopflow.cron            # macOS: LaunchAgents; Linux: cro
 ```
 
 ```bash
-lf install                                   # install the latest published release
+lf install                                   # install the stable release
 lf install --main                            # install the newest green main build
 uv run python scripts/install.py local        # build only under local-bin/
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable experiment
@@ -77,13 +77,33 @@ the app is not a side artifact.
 | Artifact | Where | Versioned by |
 |----------|-------|--------------|
 | `lf-<target>.tar.gz` | GitHub Release | `Cargo.toml` |
-| `Loopflow-<version>.dmg`, `Loopflow-latest.dmg` | R2 `downloads/` + GitHub Release | tag |
+| `Loopflow-<version>.dmg` | R2 `downloads/` + GitHub Release | tag |
+| `Loopflow-latest.dmg` | R2 `downloads/` | the `stable` release |
+| `reader-catalog.txt` | GitHub Release | the reader floors this build opens |
 | `SHA256SUMS` | GitHub Release | release artifact bytes |
 | `loopflow` crate | crates.io | `Cargo.toml` |
 
 `Loopflow.app`'s `CFBundleShortVersionString`/`CFBundleVersion` are stamped from
 the release version at build time (`RELEASE_TAG`), so the app reports the same
 version as `lf --version` — no separate manifest to bump or drift.
+
+## Streams
+
+| Stream | What it is | How it moves |
+|--------|------------|--------------|
+| `dev` | Newest green main build | Every green main (`lf install --main`) |
+| `preview` | Newest published release | Every release |
+| `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago |
+
+Publishing never marks a release Latest (`gh release edit --latest=false`).
+After each run, including one with nothing to release, `lf release run` moves
+`stable` forward for a target with `completion: github-release`. It never
+moves it back: a Latest set ahead by hand stays until a newer release soaks.
+Before moving the marker it runs the publisher's `promote --tag <tag>`, which
+points `Loopflow-latest.dmg` at that release's DMG after checking it against
+`SHA256SUMS`. A failed promotion leaves the marker for the next run.
+`releases/latest`, `install.sh`, `lf install` and the website's download link
+all serve `stable`.
 
 ## Automation rhythm
 
@@ -93,7 +113,7 @@ version as `lf --version` — no separate manifest to bump or drift.
 | Daily | Loopflow host `release-run` crontab line | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
 | Local | `scripts/install.py local` | Build `lf` and `Loopflow.app` into `local-bin/` | No |
-| Local | `lf install` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Machine |
+| Local | `lf install` | Download, verify, and promote the stable control plane and Mac app | Yes, installed Machine |
 
 GitHub owns credential-free compilation. The maintained Loopflow host owns the
 credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
@@ -178,13 +198,13 @@ installation; native macOS packaging and smoke checks remain separate.
 Required headless Desktop checks remain in gate and CI; the optional UI-host
 exercise is not a publication prerequisite.
 The publisher retains candidate hashes and gate evidence before external writes.
-Its `verify --tag <tag>` mode checks the public asset set and hashes, both versioned
-and latest DMGs, website release identity, crate version, and installed `lf`
-version and selected bytes in a disposable Linux container. Scheduled settlement
-uses `reconcile --tag <tag>`:
+Its `verify --tag <tag>` mode checks the public asset set and hashes, the
+versioned DMG, the latest DMG when the tag is `stable`, website release identity,
+crate version, and installed `lf` version and selected bytes in a disposable
+Linux container. Scheduled settlement uses `reconcile --tag <tag>`:
 it repairs missing crate/versioned-DMG publication and stale website/latest-DMG
 stages from the exact source and verified public artifacts, then repeats read-back.
-Repair requires this tag to remain GitHub's latest release. Unavailable services
+Website repair requires this tag to remain the newest published release. Unavailable services
 and conflicting immutable bytes fail without overwriting them. A crash after
 publication does not require signing again or republishing GitHub assets just to
 obtain a receipt. Public assets do not substitute for required verification.

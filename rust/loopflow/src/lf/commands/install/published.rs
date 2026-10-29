@@ -22,7 +22,7 @@ pub fn latest() -> Result<()> {
     let response = client
         .head(format!("{RELEASES}/latest"))
         .send()
-        .context("look up the latest published Loopflow release")?
+        .context("look up the stable Loopflow release")?
         .error_for_status()?;
     let tag = release_tag(response.url().path())?;
     let directory = install_dir()?;
@@ -291,7 +291,7 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
     }
     let home = dirs::home_dir().context("cannot determine the installation home")?;
     let binary = install_dir()?.join("lf");
-    let logs = home.join("Library/Logs/Loopflow");
+    let logs = crate::store::lf_home_dir().join("logs");
     let path = home.join("Library/LaunchAgents/com.loopflow.refresh.plist");
     fs::create_dir_all(&logs)?;
     fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;

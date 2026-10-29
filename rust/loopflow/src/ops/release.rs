@@ -369,29 +369,25 @@ pub fn generate_release(
 
 /// Parse `X.Y.Z` and bump the specified component.
 pub fn bump_version(current: &str, bump: &str) -> OpsResult<String> {
-    let clean = current.trim().trim_start_matches('v');
-    let parts: Vec<&str> = clean.split('.').collect();
-    if parts.len() != 3 {
-        return Err(OpsError::Parse(format!(
-            "invalid version format: {current}"
-        )));
-    }
-    let major: u32 = parts[0]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid major version: {}", parts[0])))?;
-    let minor: u32 = parts[1]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid minor version: {}", parts[1])))?;
-    let patch: u32 = parts[2]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid patch version: {}", parts[2])))?;
-
+    let (major, minor, patch) = parse_version(current)
+        .ok_or_else(|| OpsError::Parse(format!("invalid version format: {current}")))?;
     match bump {
         "major" => Ok(format!("{}.0.0", major + 1)),
         "minor" => Ok(format!("{}.{}.0", major, minor + 1)),
         "patch" => Ok(format!("{}.{}.{}", major, minor, patch + 1)),
         _ => Err(OpsError::Parse(format!("unknown bump type: {bump}"))),
     }
+}
+
+/// `X.Y.Z`, with an optional leading `v`.
+fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .map(|part| part.parse().ok());
+    let triple = (parts.next()??, parts.next()??, parts.next()??);
+    parts.next().is_none().then_some(triple)
 }
 
 pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseStatusResult> {
@@ -604,7 +600,7 @@ pub fn release_tag(repo: &Path, version: &str, target_name: Option<&str>) -> Ops
     tag_and_push_ref(&main_repo, &version, &target, None, &lock)
 }
 
-/// Stage assets on a draft GitHub Release or publish that draft as latest.
+/// Stage assets on a draft GitHub Release or publish that draft without marking it Latest.
 pub fn release_publish(
     repo: &Path,
     tag: &str,
@@ -645,7 +641,9 @@ pub fn release_publish(
             &lock,
             &main_repo,
             "gh",
-            &["release", "edit", tag, "--draft=false", "--latest"],
+            // GitHub's Latest marker is the `stable` pointer; only the release
+            // run moves it, once this release has soaked.
+            &["release", "edit", tag, "--draft=false", "--latest=false"],
         )?;
         return Ok(());
     }
@@ -727,6 +725,7 @@ pub fn release_publish(
 /// 5) build the merged commit under a provisional candidate ref
 /// 6) prepare the publisher's signed artifact set, when configured
 /// 7) tag the proven commit and publish those exact artifacts
+/// 8) move the `stable` pointer forward, for targets completing on a GitHub Release
 pub fn release_run(
     repo: &Path,
     version_input: &str,
@@ -738,23 +737,37 @@ pub fn release_run(
     if !command_exists("gh") {
         return Err(OpsError::Message("gh CLI not found".into()));
     }
-    let default_branch = get_default_branch(&main_repo)?;
+    let outcome = release_version(&main_repo, &target, version_input, progress, lock)?;
+    if target.completion == ReleaseCompletion::GithubRelease {
+        advance_stable(&main_repo, &target, progress, lock)?;
+    }
+    Ok(outcome)
+}
+
+fn release_version(
+    main_repo: &Path,
+    target: &ReleaseTarget,
+    version_input: &str,
+    progress: &impl Progress,
+    lock: &ReleaseLock,
+) -> OpsResult<ReleaseRunOutcome> {
+    let default_branch = get_default_branch(main_repo)?;
     fetch_inheriting(
-        &main_repo,
+        main_repo,
         "origin",
         &format!("+refs/heads/{default_branch}:refs/remotes/origin/{default_branch}"),
         &|command| lock.inherit(command),
     )?;
-    let source_commit = rev_parse(&main_repo, &format!("origin/{default_branch}"))?;
+    let source_commit = rev_parse(main_repo, &format!("origin/{default_branch}"))?;
 
-    run_publisher_check(&main_repo, &target, progress)?;
+    run_publisher_check(main_repo, target, progress)?;
 
-    let latest_tag = latest_tag_optional(&main_repo, &target)?;
-    let version = resolve_version(latest_tag.as_deref(), version_input, &target)?;
+    let latest_tag = latest_tag_optional(main_repo, target)?;
+    let version = resolve_version(latest_tag.as_deref(), version_input, target)?;
     verify_source(
-        &main_repo,
+        main_repo,
         &source_commit,
-        &target,
+        target,
         &version,
         latest_tag.as_deref(),
         progress,
@@ -763,10 +776,10 @@ pub fn release_run(
 
     if let Some(tag) = latest_tag.as_deref() {
         if !target.publisher.is_empty()
-            && github_release_state(&main_repo, tag)? != GitHubReleaseState::Published
+            && github_release_state(main_repo, tag)? != GitHubReleaseState::Published
         {
-            let candidate = release_candidate_for_tag(&main_repo, tag, &target)?;
-            let run = find_workflow_run(&main_repo, &candidate, &target)?.ok_or_else(|| {
+            let candidate = release_candidate_for_tag(main_repo, tag, target)?;
+            let run = find_workflow_run(main_repo, &candidate, target)?.ok_or_else(|| {
                 OpsError::Message(format!(
                     "latest release {tag} is incomplete and has no hosted build to resume"
                 ))
@@ -782,42 +795,42 @@ pub fn release_run(
                 )));
             } else {
                 progress.status(&format!("Resuming incomplete release {tag}..."));
-                return resume_existing_release(&main_repo, tag, &target, progress, lock);
+                return resume_existing_release(main_repo, tag, target, progress, lock);
             }
         } else if target.publisher.is_empty()
             && matches!(version_input.trim(), "patch" | "minor" | "major")
-            && !release_completion_satisfied(&main_repo, tag, &target)?
+            && !release_completion_satisfied(main_repo, tag, target)?
         {
             progress.status(&format!("Resuming release completion for {tag}..."));
-            return resume_existing_release(&main_repo, tag, &target, progress, lock);
+            return resume_existing_release(main_repo, tag, target, progress, lock);
         }
     }
 
     if !matches!(version_input.trim(), "patch" | "minor" | "major") {
-        let version = resolve_version(None, version_input, &target)?;
-        let tag = target_tag(&target, &version);
-        if remote_tag_sha(&main_repo, &tag)?.is_some() {
+        let version = resolve_version(None, version_input, target)?;
+        let tag = target_tag(target, &version);
+        if remote_tag_sha(main_repo, &tag)?.is_some() {
             progress.status(&format!("Resuming release completion for {tag}..."));
-            return resume_existing_release(&main_repo, &tag, &target, progress, lock);
+            return resume_existing_release(main_repo, &tag, target, progress, lock);
         }
     }
 
-    let changes = collect_version_changes(&main_repo, &target, &version, &source_commit)?;
+    let changes = collect_version_changes(main_repo, target, &version, &source_commit)?;
     if changes.commits.is_empty() {
         return Ok(ReleaseRunOutcome::NoChanges {
-            target: target.name,
+            target: target.name.clone(),
             latest_tag,
             origin_commit: source_commit,
         });
     }
 
-    let new_tag = target_tag(&target, &version);
-    if remote_tag_sha(&main_repo, &new_tag)?.is_some() {
+    let new_tag = target_tag(target, &version);
+    if remote_tag_sha(main_repo, &new_tag)?.is_some() {
         progress.status(&format!("Resuming release completion for {new_tag}..."));
-        return resume_existing_release(&main_repo, &new_tag, &target, progress, lock);
+        return resume_existing_release(main_repo, &new_tag, target, progress, lock);
     }
 
-    let latest_candidate = find_latest_candidate_workflow(&main_repo, &new_tag, &target)?;
+    let latest_candidate = find_latest_candidate_workflow(main_repo, &new_tag, target)?;
     let mut resumed_candidate = None;
     let mut retry_after = None;
     if let Some(run) = latest_candidate {
@@ -834,14 +847,14 @@ pub fn release_run(
         let preparation_missing = run.status == "completed"
             && conclusion == "success"
             && !target.publisher.is_empty()
-            && !publisher_artifact_dir(&main_repo, &new_tag, &commit, run.database_id)
+            && !publisher_artifact_dir(main_repo, &new_tag, &commit, run.database_id)
                 .join("candidate.json")
                 .is_file();
         if !build_failed && !preparation_missing {
             resumed_candidate = Some(commit);
         } else {
             let main_ref = format!("origin/{default_branch}");
-            let current_main = run_stdout(&main_repo, "git", &["rev-parse", &main_ref])?;
+            let current_main = run_stdout(main_repo, "git", &["rev-parse", &main_ref])?;
             if current_main == commit {
                 if preparation_missing {
                     resumed_candidate = Some(commit);
@@ -867,14 +880,14 @@ pub fn release_run(
         }
     }
 
-    let mut wt_name = release_worktree_name(&target, &version);
+    let mut wt_name = release_worktree_name(target, &version);
     if let Some(commit) = retry_after.as_deref() {
         let revision = commit.get(..9).unwrap_or(commit);
         wt_name.push_str("-retry-");
         wt_name.push_str(revision);
     }
-    let branch = release_branch_name(&main_repo, &wt_name)?;
-    let existing_pr = find_release_pr(&main_repo, &branch)?;
+    let branch = release_branch_name(main_repo, &wt_name)?;
+    let existing_pr = find_release_pr(main_repo, &branch)?;
     let merged_commit = if let Some(commit) = resumed_candidate {
         commit
     } else if let Some(pr) = existing_pr {
@@ -889,9 +902,9 @@ pub fn release_run(
                 // No candidate was built yet, so the version is unspent: corrections
                 // merged after the release PR ship under the same version.
                 let main_ref = format!("origin/{default_branch}");
-                let current_main = run_stdout(&main_repo, "git", &["rev-parse", &main_ref])?;
+                let current_main = run_stdout(main_repo, "git", &["rev-parse", &main_ref])?;
                 if current_main != release_commit
-                    && is_ancestor(&main_repo, &release_commit, &current_main)
+                    && is_ancestor(main_repo, &release_commit, &current_main)
                 {
                     progress.status(&format!(
                         "Release PR #{} merged at {release_commit}; building {main_ref} at {current_main} with the fixes merged since...",
@@ -910,15 +923,15 @@ pub fn release_run(
                     ))
                 })?;
                 progress.status(&format!("Resuming release PR #{}...", pr.number));
-                arm_resumed_release(&main_repo, pr.number, head_sha, progress, lock)?;
+                arm_resumed_release(main_repo, pr.number, head_sha, progress, lock)?;
                 finish_release_pr(
-                    &main_repo,
+                    main_repo,
                     &wt_name,
                     PreparedRelease {
                         pr_number: pr.number,
                         head_sha: head_sha.to_string(),
                     },
-                    &target,
+                    target,
                     &version,
                     progress,
                     lock,
@@ -934,11 +947,11 @@ pub fn release_run(
     } else {
         progress.status(&format!("Creating release worktree {wt_name}..."));
         let lease = acquire_worktree_lease(
-            &main_repo,
-            &worktree_path(&main_repo, &wt_name),
+            main_repo,
+            &worktree_path(main_repo, &wt_name),
             "release PR preparation",
         )?;
-        let wt = create_named_worktree(&main_repo, &wt_name, Some(&source_commit), &|command| {
+        let wt = create_named_worktree(main_repo, &wt_name, Some(&source_commit), &|command| {
             lock.inherit(command);
             lease.inherit(command);
         })?;
@@ -946,20 +959,20 @@ pub fn release_run(
         let wt_branch = wt.branch;
 
         let prepared = prepare_release_in_worktree(
-            &wt_path, &version, &changes, &target, progress, lock, &lease,
+            &wt_path, &version, &changes, target, progress, lock, &lease,
         );
-        cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, lease, progress, lock);
+        cleanup_release_worktree(main_repo, &wt_path, &wt_branch, lease, progress, lock);
         let prepared = prepared?;
 
         progress.status("Waiting for release PR to merge...");
         finish_release_pr(
-            &main_repo, &wt_name, prepared, &target, &version, progress, lock,
+            main_repo, &wt_name, prepared, target, &version, progress, lock,
         )?
     };
 
-    let tag = target_tag(&target, &version);
-    let candidate = ReleaseCandidate::new(&target, &tag, &merged_commit);
-    finish_candidate(&main_repo, &candidate, &target, progress, lock)
+    let tag = target_tag(target, &version);
+    let candidate = ReleaseCandidate::new(target, &tag, &merged_commit);
+    finish_candidate(main_repo, &candidate, target, progress, lock)
 }
 
 fn resume_existing_release(
@@ -3208,17 +3221,10 @@ fn normalize_version(version: &str) -> String {
 /// Minor notes cover the whole cycle since the preceding `.0`; other versions
 /// cover changes since the latest tag.
 fn notes_base(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<Option<String>> {
-    let version = normalize_version(version);
-    let _ = bump_version(&version, "patch")?;
+    let (major, minor, patch) = parse_version(version)
+        .ok_or_else(|| OpsError::Parse(format!("invalid version format: {version}")))?;
     let latest = latest_tag_optional(repo, target)?;
-    let parts: Vec<u32> = version
-        .split('.')
-        .map(|part| part.parse().expect("version was validated"))
-        .collect();
-    let [major, minor, 0] = parts[..] else {
-        return Ok(latest);
-    };
-    if latest.is_none() || minor == 0 {
+    if patch != 0 || minor == 0 || latest.is_none() {
         return Ok(latest);
     }
     let tag = target_tag(target, &format!("{major}.{}.0", minor - 1));
@@ -4207,6 +4213,118 @@ fn github_release_state(repo: &Path, tag: &str) -> OpsResult<GitHubReleaseState>
     })
 }
 
+// -- Streams ------------------------------------------------------------------
+//
+// `preview` is the newest published release. `stable` is GitHub's Latest
+// marker, which every install path reads (`releases/latest`): the release run
+// moves it to the newest release that has soaked for `STABLE_SOAK`, and never
+// back. `dev` is green main and has no pointer here.
+
+const STABLE_SOAK: chrono::TimeDelta = chrono::TimeDelta::days(7);
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhReleaseListEntry {
+    tag_name: String,
+    is_latest: bool,
+    is_draft: bool,
+    is_prerelease: bool,
+    published_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug)]
+struct PublishedRelease {
+    tag: String,
+    version: (u64, u64, u64),
+    published_at: chrono::DateTime<chrono::Utc>,
+    is_latest: bool,
+}
+
+fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<PublishedRelease>> {
+    let json = run_stdout(
+        repo,
+        "gh",
+        &[
+            "release",
+            "list",
+            "--limit",
+            "100",
+            "--json",
+            "tagName,isLatest,isDraft,isPrerelease,publishedAt",
+        ],
+    )?;
+    let entries: Vec<GhReleaseListEntry> = serde_json::from_str(&json)
+        .map_err(|err| OpsError::Parse(format!("failed to parse GitHub Releases: {err}")))?;
+    Ok(entries
+        .into_iter()
+        .filter(|entry| !entry.is_draft && !entry.is_prerelease)
+        .filter_map(|entry| {
+            let version = parse_version(&version_from_tag(&entry.tag_name, target).ok()?)?;
+            Some(PublishedRelease {
+                tag: entry.tag_name,
+                version,
+                published_at: entry.published_at?,
+                is_latest: entry.is_latest,
+            })
+        })
+        .collect())
+}
+
+/// The release `stable` should point at now, when that is ahead of where it points.
+fn stable_advance(
+    releases: &[PublishedRelease],
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<&PublishedRelease> {
+    let current = releases
+        .iter()
+        .find(|release| release.is_latest)
+        .map(|release| release.version);
+    releases
+        .iter()
+        .filter(|release| release.published_at + STABLE_SOAK <= now)
+        .max_by_key(|release| release.version)
+        .filter(|candidate| current.is_none_or(|current| candidate.version > current))
+}
+
+/// Move `stable` forward. A configured publisher first points its own
+/// stable-only artifacts (the Mac app download) at the release, so the marker
+/// moves last and a failed promotion retries on the next run.
+fn advance_stable(
+    repo: &Path,
+    target: &ReleaseTarget,
+    progress: &impl Progress,
+    lock: &ReleaseLock,
+) -> OpsResult<()> {
+    let releases = published_releases(repo, target)?;
+    let Some(next) = stable_advance(&releases, chrono::Utc::now()) else {
+        return Ok(());
+    };
+    progress.status(&format!(
+        "Moving stable to {} (published {})...",
+        next.tag,
+        next.published_at.format("%Y-%m-%d")
+    ));
+    let publisher = expand_publisher_command(repo, &target.publisher);
+    if let Some((program, args)) = publisher.split_first() {
+        let mut cmd = lock.command(program);
+        cmd.args(args)
+            .args(["promote", "--tag", &next.tag])
+            .env("LF_RELEASE_MAIN_REPO", repo)
+            .current_dir(repo);
+        run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+            command: err.command_line(),
+            stderr: err.stderr,
+        })?;
+    }
+    run_locked_stdout(
+        lock,
+        repo,
+        "gh",
+        &["release", "edit", &next.tag, "--latest"],
+    )?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)] // Hook expansion and the two independent ownership scopes.
 fn run_release_hooks(
     repo: &Path,
@@ -4276,6 +4394,41 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn published(tag: &str, days_ago: i64, is_latest: bool) -> PublishedRelease {
+        PublishedRelease {
+            tag: tag.to_string(),
+            version: parse_version(tag).unwrap(),
+            published_at: chrono::Utc::now() - chrono::TimeDelta::days(days_ago),
+            is_latest,
+        }
+    }
+
+    #[test]
+    fn stable_moves_to_the_newest_soaked_release_and_never_back() {
+        let now = chrono::Utc::now();
+        let releases = [
+            published("v0.16.1", 1, false),
+            published("v0.16.0", 8, false),
+            published("v0.15.9", 10, false),
+            published("v0.15.2", 30, true),
+        ];
+        assert_eq!(stable_advance(&releases, now).unwrap().tag, "v0.16.0");
+
+        let at_stable = [
+            published("v0.16.1", 1, false),
+            published("v0.16.0", 8, true),
+        ];
+        assert!(stable_advance(&at_stable, now).is_none());
+
+        // A pointer moved ahead by hand stays put until a newer release soaks.
+        let ahead = [
+            published("v0.16.1", 1, true),
+            published("v0.16.0", 8, false),
+        ];
+        assert!(stable_advance(&ahead, now).is_none());
+        assert!(stable_advance(&[published("v0.16.0", 6, false)], now).is_none());
+    }
 
     #[test]
     fn merge_request_removals_decide_landing_and_release_alike() {

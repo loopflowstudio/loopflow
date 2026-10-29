@@ -211,8 +211,8 @@ commit it, and do not land; publish and land once, after slice 8.
    `--lib lf::commands::install::` 29, clippy, `third_party.py refresh`: pass.
    **Remaining:** Developer ID signing of dev builds in CI (dev stays CLI-only), and a
    live check that a notarized release launches and updates (demo).
-8. **Learn from the best write-up** (task brief): adopt list in a durable home
-   (`release/README.md`); research at `git show e03537f7ca:scratch/release-research.md`.
+8. **Learn from the best — built 2026-10-29.** `release/README.md` "What we took from
+   other projects": adopt/decline table, evidence pointer to `e03537f7ca`.
 
 Check (slice 2 gate, 2026-10-29, tree ae4b265b8a): architecture pass, `cargo fmt --check` pass, publisher/automation pytest 55 pass; `--lib ops::release::` 45 and `release_tests daily_run_moves_stable minor notes` 22 passed on this code at compress; gate's nextest and clippy refused by the disk reserve (5.2 GiB free, other Tasks' builds retained), deferred to PR CI.
 

@@ -147,6 +147,27 @@ makes the first release published afterwards eligible once it soaks; releases
 in between still carry the bug and stay skipped. The run logs which Task holds
 `stable`. It reads the release Machine's Tasks, never Linear.
 
+## What we took from other projects
+
+Surveyed 2026-10-28 for LOO-669 (ideas only; no code taken).
+
+| Practice | Seen in | Here |
+|----------|---------|------|
+| Cut every release from main; no paired minor/patch snapshot | Docker, opencode, Codex alphas, Ghostty tip | Adopted: a minor is a bigger number cut from main like any release |
+| Stable is a pointer to a build that already shipped, moved forward, never rebuilt | Claude Code, Rust, Zed, Deno | Adopted: `stable` follows releases ≥ 7 days old |
+| Skip bad builds instead of yanking them | Claude Code, Rust's regression labels | Adopted: `--regressed-in` holds `stable` below a regression |
+| One appcast per stream, chosen by a setting | Ghostty | Adopted: `appcast-preview.xml` and `appcast-stable.xml` |
+| Signed, notarized builds of main (`tip`) | Ghostty, Deno canary | Not yet: `dev` is CLI-only until CI signs the app |
+| Refuse newer-format data and name which side to update | Rex, Firefox | Adopted: `can_open` before every install, never "delete the store" |
+| A channel switch never installs older | 1Password, Claude Code `minimumVersion` | Partly: the schedule never moves back; an explicit switch may, when the store allows it |
+| One install per machine; the app carries its CLI | Rex; Atuin's duplicate-install bugs | Adopted: `~/.local/bin/lf` links into Loopflow.app |
+| Separate data per channel | Zed, Warp, VS Code | Declined: the store is the work model, and Tasks must not split by stream |
+| Release branches and cherry-picks for hotfixes | Zed, Tailscale | Declined for now: fix forward on main; branch only when main can't carry the fix (Docker's rule) |
+| Notes accrue as work lands | Zed `Release Notes:`, VS Code | Already here: `release/unreleased/DECISIONS.md` |
+| Unsigned build jobs, signing only on attested artifacts | opencode | Already close: the cron host signs and publishes; CI builds |
+
+Evidence and links: `git show e03537f7ca:scratch/release-research.md`.
+
 ## Automation rhythm
 
 | Cadence | Workflow | What it does | Ships? |

@@ -6,7 +6,8 @@ is not.
 
 ```bash
 scripts/bootstrap-cron-host.sh infrastructure
-crontab -l | grep loopflow:infrastructure
+launchctl list | grep loopflow.cron.infrastructure   # macOS
+crontab -l | grep loopflow:infrastructure            # Linux
 ```
 
 With no Wave Machine default, the Wave runs where it is read, so any Machine
@@ -18,7 +19,7 @@ lf set machine mini --wave infrastructure
 lf wave status infrastructure --json | jq -r '.wave.machine.id'   # must equal `lf machine id`
 ```
 
-`bootstrap-cron-host.sh` fails before changing the crontab when the Wave is
+`bootstrap-cron-host.sh` fails before changing any schedule when the Wave is
 placed on another Machine.
 
 ## Host prerequisites
@@ -54,14 +55,23 @@ changes.
 
 ## Release schedules
 
-Each job is a short crontab line that runs a generated wrapper:
+On macOS each job is a LaunchAgent in your login session's gui domain,
+`~/Library/LaunchAgents/loopflow.cron.<wave>.<job>.plist`, with a daily
+`StartCalendarInterval` (09:00 telemetry, 10:00 release). cron runs jobs outside
+the login session, where the login Keychain holding provider and publisher
+credentials is out of reach: the publisher finds no token and Claude logins
+cannot be written. The agents need someone logged in to the Machine; the
+bootstrap fails with that instruction when the gui domain is missing.
+
+On Linux each job is a crontab line:
 
 ```
 0 9 * * *  /bin/sh ~/src/loopflow/.lf/cron/infrastructure.telemetry-daily.sh # loopflow:infrastructure:telemetry-daily
 0 10 * * * /bin/sh ~/src/loopflow/.lf/cron/infrastructure.release-run.sh # loopflow:infrastructure:release-run
 ```
 
-The wrapper holds the ordinary lf command in that minimal environment:
+Both schedulers run the same generated wrapper, which holds the ordinary lf
+command in that minimal environment:
 
 ```bash
 cat .lf/cron/infrastructure.release-run.sh
@@ -70,25 +80,31 @@ cat .lf/cron/infrastructure.release-run.sh
 
 cron reads only the first 999 bytes of a command and runs that prefix, and the
 host PATH alone can exceed it, so the command lives in the wrapper. The
-bootstrap refuses to write a line of 1,000 bytes or more. Its telemetry check
-runs the same wrapper cron runs.
+bootstrap refuses to write a line of 1,000 bytes or more.
+
+The bootstrap's telemetry check runs the job the way its scheduler does: on
+macOS `launchctl kickstart` starts the loaded agent and the bootstrap waits for
+its exit code; on Linux it runs the wrapper. It never starts `release-run`.
 
 `release-run` resolves to `.lf/graphs/release-run.yaml`, whose single operation
 is `release run patch`. The release command's exit status is the job's; an
 agent's successful report cannot turn a blocked release into success. Rerun the
 bootstrap to rewrite the wrappers after the host path or checkout moves.
 
-Earlier lf scheduled these jobs as launchd agents named
-`loopflow.cron.<wave>.<job>`. The bootstrap unloads and deletes them before
-writing the crontab, so one scheduler runs each job. Check which one is live:
+One scheduler runs each job. On macOS the bootstrap first removes the Wave's
+`# loopflow:<wave>:` crontab lines, leaving other entries alone, then replaces
+any loaded agent of the same label. macOS may ask permission for that crontab
+write, so run the bootstrap from a logged-in Terminal; a bootstrap stopped at
+the prompt has loaded no agent beside the old lines.
 
 ```bash
-crontab -l | grep loopflow:infrastructure   # both jobs
-launchctl list | grep loopflow.cron         # nothing
+launchctl print gui/$(id -u)/loopflow.cron.infrastructure.release-run | grep -E 'state|last exit'
+crontab -l | grep loopflow:infrastructure   # nothing on macOS
 ```
 
-cron uses host-local time and skips firings while the Machine sleeps. Place the
-Wave on an always-on Machine when uninterrupted wall-clock cadence matters.
+launchd runs a firing missed during sleep when the Machine wakes; cron skips
+it. Both use host-local time. Place the Wave on an always-on Machine when
+uninterrupted wall-clock cadence matters.
 
 Loopflow remains the concrete deployment. Mirror this shape into Cadenza only
 when its release needs it; do not extract a generic deployment platform.

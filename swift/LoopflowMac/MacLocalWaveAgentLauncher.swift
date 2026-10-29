@@ -76,7 +76,7 @@ enum LocalWaveAgentLauncher {
             let message = detail.isEmpty
                 ? "lf \(subargs.joined(separator: " ")) failed (\(result.status))"
                 : detail
-            throw LocalLfError(errorDescription: message)
+            throw RegistryQueryError(message, stdout: result.stdout)
         }
         return result.stdout
     }

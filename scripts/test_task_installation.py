@@ -16,7 +16,6 @@ PROOFS = {
     "graph_live_across_switch_runs_next_step_on_selected_install": (
         "os_process::installation_tests"
     ),
-    "default_and_nested_commands_use_the_installed_cli_and_main_home": "one_machine_tests",
     "task_adopts_linear_checkout_and_preserves_graph_history": "task_adoption_tests",
     "declared_agent_can_start_another_tasks_graph": "session_lifecycle_tests",
     "task_graph_read_keeps_captured_topology_and_counts_both_returns": "graph_tests",

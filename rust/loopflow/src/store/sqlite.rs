@@ -643,6 +643,17 @@ impl SqliteStore {
             }
         } else if existing_database {
             super::migrations::apply_sqlite_with_backup(&conn, path)?;
+            if !shared_database {
+                // A private home holds exactly this build's schema; one changed
+                // outside lf is never repaired.
+                super::migrations::validate_sqlite_schema(&conn).map_err(|error| {
+                    StoreError::InvalidData(format!(
+                        "{error}\nDatabase: {}\nA private LF_HOME is disposable: start a fresh one; \
+                         lf will not repair it.",
+                        path.display()
+                    ))
+                })?;
+            }
         } else {
             super::migrations::apply_sqlite(&conn)?;
         }

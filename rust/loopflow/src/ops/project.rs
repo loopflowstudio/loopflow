@@ -282,23 +282,40 @@ pub async fn edit(
     read_saved(&store, &project.id)
 }
 
-#[derive(Debug, serde::Serialize)]
+/// The graph a scope's new Tasks take up, resolved through your `lf set graph`,
+/// the Wave's and the repository's `graph:`, then `code`.
+/// The repository scope has no Wave.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WaveGraph {
-    pub wave_id: crate::id::WaveId,
-    pub wave: String,
-    pub graph: Option<String>,
+    pub wave_id: Option<crate::id::WaveId>,
+    pub wave: Option<String>,
+    pub default: GraphDefault,
 }
 
-pub async fn wave_graph(repo: &Path, selector: Option<&str>) -> OpsResult<WaveGraph> {
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GraphDefault {
+    pub name: String,
+    pub source: crate::work::wave::setup::SetupSource,
+}
+
+/// `selector: None` reads the ambient Wave; `in_wave: false` the repository.
+pub async fn wave_graph(
+    repo: &Path,
+    selector: Option<&str>,
+    in_wave: bool,
+) -> OpsResult<WaveGraph> {
     let store = read_store()?;
-    let wave = graph_wave(&store, repo, selector).await?;
-    let layers =
-        crate::config::config_layers(Some(repo), Some(wave.slug())).map_err(project_error)?;
-    let (name, layer) = crate::config::graph_setting(&layers).map_err(project_error)?;
+    let wave = if in_wave {
+        Some(graph_wave(&store, repo, selector).await?)
+    } else {
+        None
+    };
+    let (name, source) =
+        crate::ops::task::scope_graph_default(repo, wave.as_ref().map(|wave| wave.slug()))?;
     Ok(WaveGraph {
-        graph: layer.map(|_| name),
-        wave_id: wave.id().clone(),
-        wave: wave.slug().into(),
+        wave_id: wave.as_ref().map(|wave| wave.id().clone()),
+        wave: wave.as_ref().map(|wave| wave.slug().into()),
+        default: GraphDefault { name, source },
     })
 }
 

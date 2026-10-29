@@ -11,8 +11,8 @@ find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
-scripts/bootstrap-cron-host.sh infrastructure  # preflight, crontab lines, one telemetry run
-crontab -l | grep loopflow:infrastructure
+scripts/bootstrap-cron-host.sh infrastructure  # preflight, schedules, one telemetry run
+launchctl list | grep loopflow.cron            # macOS: LaunchAgents; Linux: crontab -l
 ```
 
 ```bash

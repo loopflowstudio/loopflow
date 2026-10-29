@@ -51,11 +51,14 @@ pub(crate) async fn ensure(
 /// A Task's primary is one of its own conversations: the one already chosen,
 /// else its sole unfinished interactive one, else the most recently used.
 /// Only a Task with none gets a new one, in its checkout. The others stay open.
+/// `request` is what a person typed to start the Task; a new conversation
+/// takes it as its first turn.
 pub(crate) async fn ensure_task(
     store: &SharedStore,
     repo: &Path,
     task: &str,
     fresh: bool,
+    request: Option<String>,
 ) -> Result<SessionRecord> {
     let selected = crate::ops::run::select_work(
         store,
@@ -100,6 +103,7 @@ pub(crate) async fn ensure_task(
             task_id: Some(task.id.clone()),
             wave_id: task.wave_id.clone(),
             work_source: Some(WorkSource::Declared),
+            request,
             ..conversation(cwd, task.agent.as_deref(), "task/session", task.title)?
         };
         store

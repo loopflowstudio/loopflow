@@ -214,6 +214,7 @@ jobs:
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
+      - run: uv sync
       - uses: taiki-e/install-action@nextest
       - uses: actions/download-artifact@v8
         with:

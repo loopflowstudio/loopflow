@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-669 concept review: slice 3</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fbfbf8; --muted:#666; --rule:#ddd; --new:#2f6f3e; --old:#9a3b2b; --code:#f0efe9; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8e6e1; --bg:#161615; --muted:#9a978f; --rule:#333; --new:#7fc493; --old:#e08b7a; --code:#22221f; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Iowan Old Style", Georgia, serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
+  header p { color:var(--muted); font-size:.9rem; margin:.2rem 0; }
+  h1 { font-size:1.6rem; margin:0 0 .5rem; }
+  h2 { font-size:1.15rem; margin:2.5rem 0 .6rem; }
+  pre { background:var(--code); padding:.9rem 1rem; overflow-x:auto; font:13px/1.5 ui-monospace, Menlo, monospace; border-radius:4px; }
+  code { font-family:ui-monospace, Menlo, monospace; font-size:.9em; }
+  .old { border-left:3px solid var(--old); }
+  .new { border-left:3px solid var(--new); }
+  .tag { font-size:.85rem; color:var(--muted); margin:.8rem 0 .2rem; }
+  ol li { margin:.4rem 0; }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Streams belong in <code>lf release status</code></h1>
+  <p>LOO-669 · concept-review after slice 3 (<code>regressed_in</code>) · 2026-10-29</p>
+  <p>Built from <code>scratch/release-streams.md</code>, <code>release/README.md</code>, <code>rust/loopflow/src/ops/release.rs</code>, <code>rust/loopflow/src/lf/commands/ops/mod.rs</code></p>
+</header>
+
+<p>Run headless, so no decision is requested. The accepted stream names settle the one change. The review sent it back to implement.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<pre>mark a regression     lf task create|edit --regressed-in v0.15.3   Task.regressed_in
+daily release run     lf release run                                advance_stable → stable_advance
+see where things are  lf release status                             ReleaseStatusResult</pre>
+<p>The first two hold up. A regression is one Task field. The fix boundary is the Task's completion, which in the work model is "fix shipped". The third action doesn't show any stream.</p>
+
+<h2>The mismatch</h2>
+<p class="tag">Existing behavior</p>
+<pre class="old">$ lf release status
+Target: lf
+Latest tag: v0.16.2
+Workflow: completed / success</pre>
+<p>"Latest" here means the newest tag, which is <code>preview</code>. Since slice 2, GitHub's Latest marker means <code>stable</code>. Why stable hasn't moved shows up only in the cron host's log.</p>
+
+<p class="tag">Proposed (next implement)</p>
+<pre class="new">$ lf release status
+Target: lf
+Preview: v0.16.2 (published 2026-10-29)
+Stable:  v0.15.4
+  v0.16.2 soaks until 2026-11-05
+  LOO-12 holds v0.16.0, v0.16.1
+Workflow: completed / success</pre>
+<p>One function builds this view, and <code>advance_stable</code> logs from it, so the log and status can't disagree. <code>latest_tag</code> becomes <code>preview_tag</code>. It is not a wire DTO.</p>
+
+<h2>Kept as is</h2>
+<ol>
+  <li>Completion time as the fix boundary. It's conservative when a release lands between merge and completion. A release cut before the fix but published after completion is still the narrow case <code>scratch/questions.md</code> records.</li>
+  <li>Linear label mapping for <code>regressed_in</code>. Still open, and nothing here depends on it. Git planning exchange carries the mark to the release host once that host's lf has the field.</li>
+</ol>
+
+<h2>Questions</h2>
+<ol>
+  <li>Should status also list <code>dev</code> (newest green main build)? a) yes, b) no, because dev belongs to <code>lf install</code> (slice 4).</li>
+</ol>
+</main>
+</body>
+</html>

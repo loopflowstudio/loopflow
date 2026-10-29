@@ -26,3 +26,6 @@
   release, or after the release host's lf includes this field.
 - **`--regressed-in` sets or replaces the mark; nothing clears it.** Complete or
   abandon the Task instead. Add `--not-regressed` if a mistaken mark needs undoing.
+- **`lf release status` shows preview and stable, not dev (concept review, 2026-10-29).**
+  dev is the newest green main build, and `lf install` (slice 4) owns it. Status
+  stays about releases. Add a `Dev:` line if the release view feels incomplete without it.

@@ -18,6 +18,7 @@ pub mod machine;
 mod machine_credentials;
 pub mod monitor;
 pub mod open;
+pub mod operation;
 pub mod ops;
 pub mod people;
 pub mod planning;

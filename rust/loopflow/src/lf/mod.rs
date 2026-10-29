@@ -1036,6 +1036,317 @@ impl DesktopCommand {
     }
 }
 
+// ── Which commands change state ─────────────────────────────────────────────
+// Only a command that changes state records a Process. A read (status, list,
+// show, diff, file, every `--watch` reader) records none, so it never wakes a
+// Work reader or joins a Task's work. Every match below is exhaustive: a new
+// command chooses here.
+
+impl Commands {
+    /// Whether running this command changes state, and so records a Process.
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Task { cmd } => cmd.changes_state(),
+            Self::Wave { cmd } => cmd.changes_state(),
+            Self::Session { cmd } => cmd.changes_state(),
+            Self::Graph { cmd } => cmd.changes_state(),
+            Self::Skill { cmd } => cmd.changes_state(),
+            Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_state()),
+            Self::Desktop { cmd } => cmd.changes_state(),
+            Self::Monitor { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_state()),
+            Self::Ops { cmd } => cmd.changes_state(),
+            Self::Config { cmd } => cmd.changes_state(),
+            Self::Self_ { cmd } => cmd.changes_state(),
+            Self::Clone { cmd } => cmd.changes_state(),
+            Self::Portfolio { cmd, .. } => cmd.is_some(),
+            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
+            Self::Ship { .. }
+            | Self::Open(_)
+            | Self::Inline { .. }
+            | Self::Set { .. }
+            | Self::Unset { .. }
+            | Self::Scratch { .. }
+            | Self::Discord { .. }
+            | Self::ContextBlock { .. }
+            | Self::External(_) => true,
+        }
+    }
+}
+
+impl TaskCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::List { .. }
+            | Self::Location { .. }
+            | Self::WatchFiles { .. }
+            | Self::Status { .. }
+            | Self::Diff { .. }
+            | Self::Files { .. }
+            | Self::File { .. }
+            | Self::Wait { .. } => false,
+            Self::Comment { message, .. } => message.is_some(),
+            Self::Sweep { apply, .. } => *apply,
+            Self::Defer { .. }
+            | Self::Resume { .. }
+            | Self::Sync { .. }
+            | Self::Checkout { .. }
+            | Self::Run { .. }
+            | Self::Complete { .. }
+            | Self::Reopen { .. }
+            | Self::Create { .. }
+            | Self::Claim { .. }
+            | Self::Unclaim { .. }
+            | Self::Shell { .. }
+            | Self::Save { .. }
+            | Self::Abandon { .. }
+            | Self::Delete { .. }
+            | Self::Edit { .. }
+            | Self::Move { .. }
+            | Self::Interrupt { .. } => true,
+        }
+    }
+}
+
+impl WaveCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Show { .. } | Self::Graph { .. } | Self::List { .. } => false,
+            Self::Status { sync, .. } => *sync,
+            Self::EditPlan { .. }
+            | Self::NewChapter { .. }
+            | Self::Ensure { .. }
+            | Self::BindProject { .. }
+            | Self::Rename { .. }
+            | Self::UpdatePlan { .. }
+            | Self::Connect { .. }
+            | Self::Reteam { .. } => true,
+        }
+    }
+}
+
+impl SessionCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
+            Self::Steers { retry, .. } => retry.is_some(),
+            Self::Serve { .. }
+            | Self::Attach { .. }
+            | Self::Steer { .. }
+            | Self::Connect { .. }
+            | Self::Rename { .. }
+            | Self::Bind { .. }
+            | Self::Send { .. }
+            | Self::Receive { .. } => true,
+        }
+    }
+}
+
+impl GraphCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::List { .. } | Self::Show { .. } => false,
+            Self::Customize { .. } | Self::Run { .. } | Self::External(_) => true,
+        }
+    }
+}
+
+impl SkillCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Customize { .. } | Self::External(_) => true,
+        }
+    }
+}
+
+impl DesktopCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::View { .. }
+            | Self::Plans { .. }
+            | Self::Plan { .. }
+            | Self::Done { .. }
+            | Self::Wave { .. }
+            | Self::Sessions { .. }
+            | Self::Task { .. }
+            | Self::Ls { .. }
+            | Self::State { .. }
+            | Self::Actions { .. }
+            | Self::Events { .. }
+            | Self::Wait { .. }
+            | Self::Capture { .. } => false,
+            Self::Layout { save, .. } => *save,
+            Self::Query { .. }
+            | Self::Pin { .. }
+            | Self::Unpin { .. }
+            | Self::Rename { .. }
+            | Self::Back { .. }
+            | Self::Forward { .. }
+            | Self::Goto { .. }
+            | Self::Next { .. }
+            | Self::Previous { .. }
+            | Self::WorkingTasks { .. }
+            | Self::Enter { .. }
+            | Self::Do { .. }
+            | Self::Send { .. }
+            | Self::SendKey { .. }
+            | Self::Run { .. }
+            | Self::Zoom { .. }
+            | Self::Focus { .. }
+            | Self::Hide { .. }
+            | Self::Show { .. }
+            | Self::Close { .. }
+            | Self::Reopen { .. }
+            | Self::Move { .. }
+            | Self::Resize { .. }
+            | Self::Files { .. }
+            | Self::GraphLog { .. }
+            | Self::Browse { .. }
+            | Self::PageBack { .. }
+            | Self::PageForward { .. }
+            | Self::Reload { .. }
+            | Self::Switch { .. } => true,
+        }
+    }
+}
+
+impl OpsCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Pr { cmd } => pr_changes_state(cmd.as_ref()),
+            Self::Release { cmd } => cmd.changes_state(),
+            Self::Wt { cmd } => cmd.changes_state(),
+            Self::Machine { cmd } => cmd.changes_state(),
+            Self::Account { cmd, cached, .. } => account_changes_state(cmd.as_ref(), *cached),
+            Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
+            Self::Commit { .. } | Self::Sync(_) => true,
+        }
+    }
+}
+
+/// Bare `lf pr` acts on the current branch's PR.
+fn pr_changes_state(cmd: Option<&PrCommand>) -> bool {
+    match cmd {
+        None => true,
+        Some(PrCommand::Checks { .. } | PrCommand::Reviews { .. }) => false,
+        Some(
+            PrCommand::Reconcile
+            | PrCommand::RequestReview { .. }
+            | PrCommand::Publish { .. }
+            | PrCommand::Open { .. }
+            | PrCommand::Submit { .. }
+            | PrCommand::Arm { .. }
+            | PrCommand::Land { .. }
+            | PrCommand::Abandon { .. },
+        ) => true,
+    }
+}
+
+/// Bare `lf account` refreshes access and capacity unless it reads the cache.
+fn account_changes_state(cmd: Option<&AccountCommand>, cached: bool) -> bool {
+    match cmd {
+        None => !cached,
+        Some(AccountCommand::Route { .. }) => false,
+        Some(
+            AccountCommand::Disconnect { .. }
+            | AccountCommand::Connect { .. }
+            | AccountCommand::Set { .. }
+            | AccountCommand::Token { .. }
+            | AccountCommand::RedeemReset { .. }
+            | AccountCommand::Use { .. },
+        ) => true,
+    }
+}
+
+impl ReleaseCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Check { .. } | Self::Status { .. } => false,
+            Self::Run { .. }
+            | Self::Notes { .. }
+            | Self::Bump { .. }
+            | Self::Tag { .. }
+            | Self::Publish { .. } => true,
+        }
+    }
+}
+
+impl WtCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Switch { .. } | Self::List { .. } | Self::Timing { .. } => false,
+            Self::Prune { dry_run, .. } => !dry_run,
+            Self::Create { .. } | Self::Delete { .. } => true,
+        }
+    }
+}
+
+impl MachineCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
+            Self::Credentials { cmd } => match cmd {
+                MachineCredentialCommand::Inspect { .. } => false,
+                MachineCredentialCommand::Receive => true,
+            },
+            Self::Pool { cmd } => match cmd {
+                PoolCommand::List { .. } => false,
+                PoolCommand::Add { .. }
+                | PoolCommand::Off { .. }
+                | PoolCommand::On { .. }
+                | PoolCommand::Remove { .. } => true,
+            },
+            Self::Ondemand { cmd } => match cmd {
+                OndemandCommand::List { .. } => false,
+                OndemandCommand::Add { .. }
+                | OndemandCommand::Max { .. }
+                | OndemandCommand::Rent { .. }
+                | OndemandCommand::Remove { .. } => true,
+            },
+            Self::Connect { .. }
+            | Self::Public { .. }
+            | Self::Add { .. }
+            | Self::Rename { .. }
+            | Self::Remove { .. }
+            | Self::End { .. } => true,
+        }
+    }
+}
+
+impl ConfigCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::User { .. } => false,
+            Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
+            Self::Planning { cmd } => match cmd {
+                PlanningCommand::Key { new, recover } => *new || recover.is_some(),
+                // A watch keeps the repository's planning exchanged.
+                PlanningCommand::Status { watch, .. } => *watch,
+                PlanningCommand::Journal { .. } => false,
+            },
+        }
+    }
+}
+
+impl SelfCommand {
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Doctor { .. } => false,
+            Self::Install { cmd } => match cmd {
+                Some(InstallCommand::Preflight { .. }) => false,
+                None
+                | Some(
+                    InstallCommand::Schedule { .. }
+                    | InstallCommand::RecoverSwitch { .. }
+                    | InstallCommand::AdvanceSwitch { .. }
+                    | InstallCommand::Promote { .. }
+                    | InstallCommand::Rollback { .. },
+                ) => true,
+            },
+            Self::SyncSkills { .. } => true,
+        }
+    }
+}
+
 /// Which part of the view on screen a command acts on. `-p` is a path: a view part
 /// (`board`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
 /// `browser`, `shell:2`), a Dashboard or Wave view tile (`3`, `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a

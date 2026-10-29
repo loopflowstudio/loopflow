@@ -341,8 +341,10 @@ completion are distinct: subsequent command work may fail after the agent succee
 
 ### Process lifetime and causality
 
-One actual lf process gets one LfProcess, including nested direct and agent-issued
-commands. In-process wrappers reuse it and cannot settle it early; each Graph
+One actual lf process that changes state gets one LfProcess, including nested
+direct and agent-issued commands. A read (status, list, show, diff, file, every
+`--watch` reader) records none, so it never wakes a Work reader or joins a Task's
+work. `Commands::changes_state` classifies every command once, exhaustively. In-process wrappers reuse it and cannot settle it early; each Graph
 step is a child process with its own Process.
 The incoming `via_agent` bit describes the caller, not whether the command later
 launches an agent. Agent-issued children resolve stable Session/AgentProcess
@@ -353,7 +355,7 @@ Process outcomes are succeeded, failed or interrupted when observed. Unobserved
 completion, exit code and signal stay unknown. The outer command owns terminal
 settlement, including interruption. Bootstrap/installation logging must not open
 or migrate an incompatible installed store before its authority preflight.
-Help, parser errors and installation entry paths append process evidence
+Parser errors, `--version` and installation entry paths append process evidence
 only to an existing compatible ledger, without creating a Machine, seeding branch
 data or applying migrations. An attached ledger stays pinned through command
 completion. Missing or incompatible storage leaves an explicit recording gap;

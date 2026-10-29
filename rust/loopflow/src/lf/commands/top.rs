@@ -139,11 +139,12 @@ pub fn run_top() -> Result<()> {
 
 /// Stream the call trees: Process rows change with the store, liveness and
 /// activity state only on the clock.
-pub fn watch_ps() -> Result<()> {
-    super::watch::run(
+pub fn watch_ps(transport: super::watch::Transport) -> Result<Option<super::watch::Subscription>> {
+    super::watch::start(
         (),
         super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
         |_, ()| async { load_snapshot() },
+        transport,
     )
 }
 

@@ -1491,6 +1491,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "loopflow-ffi"
+version = "0.15.0"
+dependencies = [
+ "loopflow",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "loopflow-test-support"
 version = "0.15.0"
 dependencies = [

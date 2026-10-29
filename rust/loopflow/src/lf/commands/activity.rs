@@ -57,14 +57,51 @@ pub enum WorkActivityFact {
 
 /// What `lf history` reads; the flags of the same name, which a `--watch`
 /// request can replace.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct HistoryWindow {
-    since: String,
-    limit: usize,
-    wave: Option<String>,
-    project: Option<String>,
-    task: Option<String>,
+pub struct HistoryWindow {
+    pub since: String,
+    pub limit: usize,
+    pub wave: Option<String>,
+    pub project: Option<String>,
+    pub task: Option<String>,
+}
+
+impl HistoryWindow {
+    /// The `lf history` flags that read this window.
+    pub(crate) fn argv(&self) -> Vec<String> {
+        let mut argv = vec![
+            "history".into(),
+            "--since".into(),
+            self.since.clone(),
+            "--limit".into(),
+            self.limit.to_string(),
+        ];
+        for (flag, value) in [
+            ("--wave", &self.wave),
+            ("--project", &self.project),
+            ("--task", &self.task),
+        ] {
+            if let Some(value) = value {
+                argv.extend([flag.into(), value.clone()]);
+            }
+        }
+        argv
+    }
+}
+
+/// `lf history --watch`. History is committed facts only; the clock just ages
+/// the window.
+pub(crate) fn watch(
+    window: HistoryWindow,
+    transport: super::watch::Transport,
+) -> Result<Option<super::watch::Subscription>> {
+    super::watch::start(
+        window,
+        super::watch::Watched::every(super::watch::PLANNING_CLOCK),
+        |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
+        transport,
+    )
 }
 
 pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
@@ -76,12 +113,7 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
         task: options.task.clone(),
     };
     if options.watch {
-        // History is committed facts only; the clock just ages the window.
-        return super::watch::run(
-            window,
-            super::watch::Watched::every(super::watch::PLANNING_CLOCK),
-            |store, window| async move { read(store.as_ref().map(|store| &store.sqlite), &window) },
-        );
+        return watch(window, super::watch::Transport::Stdio).map(drop);
     }
     let path = crate::store::database_path_from_env()?;
     let store = path.exists().then(|| SqliteStore::new(&path)).transpose()?;

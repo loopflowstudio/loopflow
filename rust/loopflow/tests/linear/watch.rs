@@ -743,3 +743,106 @@ fn planning_asks_git_once_per_live_checkout() {
         "one checkout: {one:#?}\nfour checkouts: {four:#?}"
     );
 }
+
+/// Remove the fields that restate when a result was read.
+fn without_reading_time(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            fields.remove("generated_at");
+            fields.remove("evidence_age_secs");
+            if let Some(serde_json::Value::Object(condition)) = fields.get_mut("condition") {
+                condition.remove("observed_at");
+            }
+            fields.values_mut().for_each(without_reading_time);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(without_reading_time),
+        _ => {}
+    }
+}
+
+#[test]
+fn an_operation_served_in_process_reads_what_its_lf_command_prints() {
+    use loopflow::lf::commands::activity::HistoryWindow;
+    use loopflow::lf::commands::operation::Operation;
+
+    let home = Machine::new();
+    home.plan(2);
+    let history = Operation::History(HistoryWindow {
+        since: "7d".into(),
+        limit: 50,
+        wave: None,
+        project: None,
+        task: None,
+    });
+    // A new Operation fails to compile here until it is compared too.
+    let operations = match history {
+        Operation::History(_) | Operation::MonitorPs | Operation::DesktopPlan => {
+            [history, Operation::MonitorPs, Operation::DesktopPlan]
+        }
+    };
+    let _env = loopflow_test_support::env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let saved = std::env::var_os("LF_HOME");
+    std::env::set_var("LF_HOME", home.path());
+    for operation in operations {
+        let argv = operation.argv();
+        let (sender, wakes) = mpsc::channel();
+        let sender = std::sync::Mutex::new(sender);
+        let subscription = operation
+            .subscribe(move || {
+                let _ = sender.lock().unwrap().send(());
+            })
+            .unwrap();
+        // The app pulls on its own thread after a data-free wakeup.
+        wakes.recv_timeout(Duration::from_secs(30)).unwrap();
+        let mut served: serde_json::Value =
+            serde_json::from_slice(&subscription.pull().expect("a first frame")).unwrap();
+        drop(subscription);
+        assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
+
+        let mut args: Vec<&str> = argv.iter().map(String::as_str).collect();
+        args.push("--json");
+        let output = lf(home.path(), &args).output().unwrap();
+        assert!(output.status.success(), "{argv:?} failed");
+        let mut printed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+
+        without_reading_time(&mut served["body"]);
+        without_reading_time(&mut printed);
+        assert_eq!(served["body"], printed, "{argv:?}");
+    }
+    match saved {
+        Some(saved) => std::env::set_var("LF_HOME", saved),
+        None => std::env::remove_var("LF_HOME"),
+    }
+}
+
+/// The `processes` revision every Work reader wakes on.
+fn processes_revision(home: &Path) -> i64 {
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT COALESCE((SELECT revision FROM store_revisions WHERE domain = 'processes'), 0)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn reads_record_no_process_and_wake_no_reader() {
+    let home = Machine::new();
+    home.plan(1);
+    let before = processes_revision(home.path());
+    for args in [
+        &["history", "--json"][..],
+        &["monitor", "ps", "--json"],
+        &["wave", "list", "--all", "--json"],
+        &["desktop", "plan", "--all", "--json"],
+        &["history", "list", "--json", "--all"],
+    ] {
+        let output = lf(home.path(), args).output().unwrap();
+        assert!(output.status.success(), "{args:?} failed");
+    }
+    assert_eq!(processes_revision(home.path()), before);
+}

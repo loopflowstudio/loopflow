@@ -913,7 +913,14 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             ..
         } => {
             return if *watch {
-                super::waves::watch_show(wave.clone(), task.clone(), *all, Shape::Desktop)
+                super::waves::watch_show(
+                    wave.clone(),
+                    task.clone(),
+                    *all,
+                    Shape::Desktop,
+                    super::watch::Transport::Stdio,
+                )
+                .map(drop)
             } else {
                 super::waves::show(wave.as_deref(), task.as_deref(), true, *all, Shape::Desktop)
             };

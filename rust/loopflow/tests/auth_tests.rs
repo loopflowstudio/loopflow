@@ -78,8 +78,8 @@ fn account_status_preserves_local_evidence_without_provider_executables() {
         .unwrap();
     assert_eq!(
         (commands, completed),
-        (3, 3),
-        "each actual auth process remains a process"
+        (1, 1),
+        "the verifying refresh is a process; cached reads record none"
     );
     let fixture = loopflow_test_support::TestRepo::new();
     let repository = child()

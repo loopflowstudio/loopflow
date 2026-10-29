@@ -742,11 +742,12 @@ pub fn watch_show(
     task: Option<String>,
     all: bool,
     shape: Shape,
-) -> Result<()> {
-    super::watch::run(
+    transport: super::watch::Transport,
+) -> Result<Option<super::watch::Subscription>> {
+    super::watch::start(
         (),
         super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
-        |store, ()| {
+        move |store, ()| {
             let (wave, task) = (wave.clone(), task.clone());
             async move {
                 let roadmap =
@@ -757,6 +758,7 @@ pub fn watch_show(
                     .await
             }
         },
+        transport,
     )
 }
 

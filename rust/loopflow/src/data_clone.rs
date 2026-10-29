@@ -43,6 +43,16 @@ pub enum CloneCommand {
     Dispose { directory: PathBuf },
 }
 
+impl CloneCommand {
+    /// Whether this command changes state, and so records a Process.
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Self::Show { .. } => false,
+            Self::Create { .. } | Self::Run { .. } | Self::Dispose { .. } => true,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct CloneManifest {
     version: u32,

@@ -290,8 +290,8 @@ fn repository_errors_do_not_prevent_home_command_admission() {
         )
         .unwrap();
     assert_eq!(
-        commands, 2,
-        "the failed sync and Machine read each own a process"
+        commands, 1,
+        "the failed sync owns a process; the Machine read records none"
     );
     let output = command(
         home.path(),

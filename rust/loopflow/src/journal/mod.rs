@@ -119,6 +119,25 @@ pub fn mark_effect_free_read() {
     EFFECT_FREE_READ.store(true, Ordering::Relaxed);
 }
 
+static READ: AtomicBool = AtomicBool::new(false);
+
+/// Set by a Graph on the step it starts, and only on that child.
+pub const GRAPH_STEP_ENV: &str = "LF_GRAPH_STEP";
+
+/// Whether a Graph started this process as its step. Clears the mark, so the
+/// step's own children are not steps.
+pub fn take_graph_step() -> bool {
+    let step = std::env::var_os(GRAPH_STEP_ENV).is_some();
+    std::env::remove_var(GRAPH_STEP_ENV);
+    step
+}
+
+/// A command that changes no state records no Process. Admission still
+/// prepares the store it reads, so a read works on a fresh Machine.
+pub fn mark_read() {
+    READ.store(true, Ordering::Relaxed);
+}
+
 /// The harness issued this command: a provider hook inherits the agent's caller
 /// and the launching lf's Process, but neither the model nor that lf ran it.
 /// Call before admission.
@@ -328,6 +347,7 @@ pub fn observe_process(command: &[String]) {
     static ATTEMPTED: AtomicBool = AtomicBool::new(false);
     if current_context().is_some()
         || EFFECT_FREE_READ.load(Ordering::Relaxed)
+        || READ.load(Ordering::Relaxed)
         || ATTEMPTED.swap(true, Ordering::Relaxed)
     {
         return;
@@ -383,6 +403,12 @@ pub fn with_runtime<T>(
 /// Attach ordinary command observation after installation/data selection.
 pub fn admit_process(repo_root: &Path, command: &[String]) {
     if EFFECT_FREE_READ.load(Ordering::Relaxed) {
+        return;
+    }
+    if READ.load(Ordering::Relaxed) {
+        if let Err(error) = open_ledger() {
+            debug!(%error, "store unavailable for a read");
+        }
         return;
     }
     let started = Instant::now();

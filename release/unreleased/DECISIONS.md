@@ -14,7 +14,7 @@
 
 **Decision:** Jack Heart chose two pointers over one build line (LOO-669), with new installs defaulting to `stable`. Publishing now passes `--latest=false`. The daily release run moves Latest to the newest release published at least 7 days ago, forward only, after the publisher points `Loopflow-latest.dmg` at it. `preview` is the newest published release; `dev` is green main. Each release also ships `reader-catalog.txt`, the reader floors it opens, beside `SHA256SUMS`.
 
-**Implications:** A release reaches new installs a week after it ships. Until `--preview` and `--stable` exist, getting a fresh release sooner means `lf install --main` or a pinned `install.sh --version`.
+**Implications:** A release reaches new installs a week after it ships; `lf install --preview` gets it at once.
 
 ## 2026-10-29 — Regressions hold stable, Rust-style
 

@@ -18,4 +18,4 @@ Open assumptions stay in `scratch/questions.md` (Linear mapping for `regressed_i
 
 ## Next
 
-Publish slice 3 (gate → PR), then slice 4 (`lf install` follows a stream) per Build order.
+Slices 3–8 ship as one PR (Jack Heart, 2026-10-29); slice 4 is built, slice 5 next per Build order.

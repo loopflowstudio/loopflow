@@ -166,6 +166,8 @@ commit it, and do not land; publish and land once, after slice 8.
    before downloading; a store it can't open keeps the installed lf and exits 0.
    `install.sh --channel stable|preview` (recorded only when passed; a rerun reads it;
    `dev` refused with a pointer to `lf install --dev`).
+   Compress: the stream record and portfolio share `config::update_global_config_at`
+   (one locked read-modify-write of `~/.lf/config.yaml`), so neither drops the other's change.
    `--lib install::published::` 8, `install_exposes_refresh` 1, `store::migrations::` 121,
    `frontier_tests` 10, `documented_commands` 4, `test_shell_installer.py` 16, clippy: pass.
 5. **One lf, linked.** `~/.local/bin/lf` links into Loopflow.app or a versions
@@ -176,6 +178,9 @@ commit it, and do not land; publish and land once, after slice 8.
    slice 5; it doesn't affect slices 2–4.
 6. **Self-update.** Daily scheduled `lf install` on the recorded stream (Linux,
    headless); the in-place promotion entry point for an app updated in place.
+   The schedule already follows the recorded stream (slice 4) and already offers
+   `InstallFrequency::Daily`; what remains is making daily the default and the
+   promotion entry point (see Open, "Migration after a Sparkle update").
 7. **Sparkle, one appcast per stream**, EdDSA key in Doppler, Developer ID
    signing of dev builds in CI; the delegate vetoes updates that fail `can_open`.
 8. **Learn from the best write-up** (task brief): what to adopt from Codex, opencode,

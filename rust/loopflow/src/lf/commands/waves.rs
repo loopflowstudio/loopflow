@@ -851,7 +851,7 @@ pub struct TaskListArgs {
     pub wave: Option<String>,
     /// Project ID, provider ID, slug or name.
     pub project: Option<String>,
-    /// An open `TaskState` label: deferred, unstarted, idle, active, moving or shipping.
+    /// An open `TaskState` label: unstarted, idle, active, moving or shipping.
     pub state: Option<String>,
 }
 
@@ -1416,7 +1416,7 @@ fn task_section(
     // is offered; an active one keeps its place and shows the conflict.
     let withdrawn = matches!(runtime.status, TaskState::Unstarted)
         && crate::linear::terminal_reason(state).is_some();
-    if runtime.status.is_terminal() || runtime.status == TaskState::Deferred || withdrawn {
+    if runtime.status.is_terminal() || unassigned(runtime) || withdrawn {
         return RoadmapSection::Later;
     }
     match next_move.owner {
@@ -1845,9 +1845,7 @@ async fn snapshot_task_detail(
         .ok_or_else(|| anyhow!("Task {} has no planning acquisition", task.id))?;
     let latest_event = facts.latest_events.get(&task.id);
     let worktree_blocker = crate::ops::task::task_worktree_blocker_after(task, latest_event)?;
-    let launch_refusal = if runtime.status == TaskState::Deferred {
-        Some("Task is deferred; resume it before running a Graph".to_string())
-    } else if worktree_blocker.is_none() {
+    let launch_refusal = if worktree_blocker.is_none() {
         crate::ops::task::task_process_refusal_after(task, wave, personal, latest_event).or_else(
             || {
                 matches!(
@@ -1863,10 +1861,10 @@ async fn snapshot_task_detail(
     } else {
         None
     };
-    let next_move = if runtime.status == TaskState::Deferred {
+    let next_move = if unassigned(&runtime) {
         NextMove {
             owner: NextMoveOwner::User,
-            reason: "Deferred; resume explicitly when wanted".into(),
+            reason: "Unassigned; nothing moves it until `lf task claim` or `lf task run`".into(),
         }
     } else if execution.state != TaskExecutionState::Idle && !runtime.status.is_terminal() {
         NextMove {
@@ -2968,6 +2966,13 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
 }
 
 /// Who owns a Task, for text lists: their name, else their key, or "—".
+/// A started Task nobody owns: nothing moves it until someone claims it.
+fn unassigned(runtime: &TaskRuntimeSnapshot) -> bool {
+    runtime.owner.is_none()
+        && !runtime.status.is_terminal()
+        && runtime.status != TaskState::Unstarted
+}
+
 fn owner_text(runtime: Option<&TaskRuntimeSnapshot>) -> &str {
     match runtime.and_then(|runtime| runtime.owner.as_ref()) {
         Some(owner) => owner.who(),
@@ -4232,8 +4237,10 @@ mod tests {
             .replace("}]}','demo',3)", "}]}','end',3)");
         conn.execute_batch(&fixture).unwrap();
         crate::store::migrations::upgrade_from_draft(&conn, "task_paused");
-        conn.execute_batch("ALTER TABLE tasks DROP COLUMN paused")
-            .unwrap();
+        conn.execute_batch(
+            "DROP INDEX tasks_ship_process; ALTER TABLE tasks DROP COLUMN ship_lf_process_id",
+        )
+        .unwrap();
         let frontier = crate::store::migrations::latest_applied_version_sqlite(&conn).unwrap();
         let store: crate::store::SharedStore = Arc::new(crate::store::Store {
             sqlite: crate::store::sqlite::SqliteStore::open_read_only(&database).unwrap(),
@@ -4249,7 +4256,10 @@ mod tests {
                 roadmap.tasks
             );
         };
-        assert!(reason.contains("no such column: t.paused"), "{reason}");
+        assert!(
+            reason.contains("no such column: t.ship_lf_process_id"),
+            "{reason}"
+        );
         let graph = store.sqlite.task_overview(&task).unwrap().0.graph.unwrap();
         assert_eq!(graph.name, "feature");
         assert!(

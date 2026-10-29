@@ -50,7 +50,7 @@ pub fn resolve_child(
         let owner = match name {
             "resume" => Some("session"),
             "comment" => Some("task"),
-            // `lf release` stays the release command; `task release` lifts a hold.
+            // `lf release` stays the release command.
             "sync" | "release" => Some("ops"),
             _ => None,
         };

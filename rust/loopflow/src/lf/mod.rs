@@ -1567,7 +1567,7 @@ pub enum TaskCommand {
         #[arg(long, conflicts_with = "done")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "done", value_parser = ["deferred", "unstarted", "idle", "active", "moving", "shipping"])]
+        #[arg(long, conflicts_with = "done", value_parser = ["unstarted", "idle", "active", "moving", "shipping"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,
@@ -1588,10 +1588,6 @@ pub enum TaskCommand {
         watch: bool,
     },
 
-    /// Hold future Task execution without stopping live processes
-    Hold { issue: String },
-    /// Release a held Task without starting execution
-    Release { issue: String },
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
@@ -1702,8 +1698,9 @@ terminal instead."
         #[arg(long)]
         json: bool,
     },
-    /// Unclaim the Task; it is unowned again, with its history intact
-    Unclaim {
+    /// Unassign the Task: nobody owns it and Linear shows no assignee; nothing
+    /// moves it until someone claims or runs it. History stays intact
+    Unassign {
         issue: String,
         #[arg(long)]
         json: bool,
@@ -1818,10 +1815,8 @@ terminal instead."
         #[arg(long)]
         rank: Option<u32>,
         /// Assignee identity; provider user ID in connected plans
-        #[arg(long, conflicts_with = "unassign")]
-        assignee: Option<String>,
         #[arg(long)]
-        unassign: bool,
+        assignee: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
@@ -1888,12 +1883,10 @@ impl TaskCommand {
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
-            | Self::Unclaim { issue, .. }
+            | Self::Unassign { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Hold { issue }
-            | Self::Release { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -1918,12 +1911,10 @@ impl TaskCommand {
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
-            | Self::Unclaim { issue, .. }
+            | Self::Unassign { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Hold { issue }
-            | Self::Release { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -2716,15 +2707,12 @@ mod tests {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
         assert!(matches!(
-            Cli::try_parse_from(["lf", "task", "hold", "LOO-1"]).unwrap().command,
-            Some(Commands::Task { cmd: TaskCommand::Hold { issue } }) if issue == "LOO-1"
-        ));
-        assert!(matches!(
-            Cli::try_parse_from(["lf", "task", "release", "LOO-1"]).unwrap().command,
-            Some(Commands::Task { cmd: TaskCommand::Release { issue } }) if issue == "LOO-1"
+            Cli::try_parse_from(["lf", "task", "unassign", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Unassign { issue, .. } }) if issue == "LOO-1"
         ));
         for verb in [
-            "recover", "enable", "disable", "prepare", "advance", "defer", "resume",
+            "recover", "enable", "disable", "prepare", "advance", "defer", "resume", "hold",
+            "release", "unclaim",
         ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }

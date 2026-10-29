@@ -29,3 +29,13 @@
 - A Run is `!interactive`. An `interactive:` Graph step is a Session and stays resumable.
 - Desktop selecting a Run row now shows the refusal text (which names `lf resume --task`);
   no Swift change made for it.
+- Proposed Wave memory edit (read-only here): `.lf/wave/infrastructure/MEMORY.md:48` says
+  `task hold/release` replace `defer/resume`; it should say `task claim/unassign`, no deferred state.
+
+## Assignment (headless implement, 2026-10-29)
+
+- `lf ship` claims an unowned Task when it begins, like `lf task run`; only an unassign during
+  shipping stops it. A ship never refuses at start for being unassigned.
+- `task edit --assignee` stays: it assigns another person in Linear, which claim can't.
+- Started, unowned Tasks read as Later (Wave roadmap) / Backlog (Desktop standup). Tasks
+  started before the ownership log existed with no claim would also land there.

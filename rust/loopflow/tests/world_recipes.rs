@@ -185,7 +185,9 @@ fn lifecycle_world_reports_each_state() {
     ] {
         assert_eq!(task(name)["condition"]["state"], "clear", "{name}");
     }
-    assert_eq!(task("Deferred mid-flight")["runtime"]["status"], "deferred");
+    let unassigned = task("Unassigned mid-flight");
+    assert_eq!(unassigned["runtime"]["status"], "idle");
+    assert!(unassigned["runtime"]["owner"].is_null());
     assert_eq!(task("Abandoned attempt")["runtime"]["status"], "abandoned");
     let canceled = task("Canceled upstream");
     assert_eq!(canceled["task"]["state"], "canceled");
@@ -227,15 +229,14 @@ fn task_list_query_finds_open_tasks_only() {
         names(&["STANDALONE"]),
         ["Standalone fix", "Standalone idea"]
     );
-    assert_eq!(names(&["", "--state", "deferred"]), ["Deferred mid-flight"]);
-    let paused = &search(&["deferred mid"])[0];
-    assert_eq!(paused["state"], "deferred");
-    assert_eq!(
-        paused["next"],
-        format!("lf task release {}", paused["identifier"].as_str().unwrap())
-    );
-    let identifier = paused["identifier"].as_str().unwrap().to_lowercase();
-    assert_eq!(names(&[&identifier]), ["Deferred mid-flight"]);
+    let unassigned = &search(&["unassigned mid"])[0];
+    assert_eq!(unassigned["state"], "idle");
+    assert!(unassigned["reason"]
+        .as_str()
+        .unwrap()
+        .starts_with("Unassigned"));
+    let identifier = unassigned["identifier"].as_str().unwrap().to_lowercase();
+    assert_eq!(names(&[&identifier]), ["Unassigned mid-flight"]);
 }
 
 #[test]
@@ -283,9 +284,20 @@ fn task_list_watch_sends_a_frame_only_when_the_list_changes() {
         .recv_timeout(std::time::Duration::from_secs(3))
         .is_err());
 
-    success(built.command(&["task", "hold", &issue]).output().unwrap());
-    let deferred = next();
-    assert_eq!(state(&deferred), Some("deferred".into()), "{deferred}");
+    success(
+        built
+            .command(&["task", "edit", &issue, "--title", "Standalone fix, renamed"])
+            .output()
+            .unwrap(),
+    );
+    let renamed = next();
+    let title = renamed["body"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["identifier"] == issue.as_str())
+        .map(|row| row["title"].clone());
+    assert_eq!(title, Some("Standalone fix, renamed".into()), "{renamed}");
 
     // A request replaces the arguments and is always answered.
     let stdin = watch.stdin.as_mut().unwrap();

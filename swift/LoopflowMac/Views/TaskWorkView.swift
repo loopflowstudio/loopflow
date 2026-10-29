@@ -22,8 +22,8 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
                         .accessibilityIdentifier("task-lifecycle-status")
                 }
-                if task.runtime?.status == .deferred {
-                    Text("Deferred").foregroundStyle(palette.textSecondary)
+                if task.isUnassigned {
+                    Text("Unassigned").foregroundStyle(palette.textSecondary)
                 } else if task.task.terminalLabel == nil, let state = task.task.state {
                     Text(state.capitalized).foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-lifecycle-status")
@@ -82,11 +82,11 @@ struct TaskWorkflowHeader: View {
                     Button("Complete") { Task { await model.completeTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.status == .deferred ? "Release" : "Hold") {
-                        Task { await model.holdTask(task, held: task.runtime?.status != .deferred) }
+                    Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
+                        Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
                     }
                     .disabled(acting || readingUnavailable != nil)
-                    .accessibilityIdentifier("task-hold-release")
+                    .accessibilityIdentifier("task-claim-unassign")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-abandon")
@@ -273,15 +273,15 @@ struct TaskShipControl: View {
                 HStack(spacing: Spacing.sm) {
                     // Hovering Auto-Ship offers the other ways out of this Task.
                     if hovered {
-                        let held = task.runtime?.status == .deferred
-                        Button(held ? "Release" : "Hold") {
-                            Task { await model.holdTask(task, held: !held) }
+                        let owned = task.runtime?.owner != nil
+                        Button(owned ? "Unassign" : "Claim") {
+                            Task { await model.assignTask(task, claimed: !owned) }
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(acting || readingUnavailable != nil)
-                        .help(held ? "lf task release: let it run again"
-                                     : "lf task hold: hold it, keeping its checkout, PR and interactive step")
-                        .accessibilityIdentifier("task-hold")
+                        .help(owned ? "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay"
+                                    : "lf task claim: you own it on this Machine")
+                        .accessibilityIdentifier("task-unassign")
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))
                             .disabled(acting || readingUnavailable != nil)
@@ -542,7 +542,6 @@ struct TaskHeading: View {
     /// now reads in the Workflow bar.
     var state: String {
         switch task.runtime?.status {
-        case .deferred: return "Deferred"
         case .idle: return "Idle"
         case .active: return "Active"
         case .moving: return "Moving"
@@ -631,8 +630,8 @@ struct TaskActionItems: View {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
             Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
-            Button(task.runtime?.status == .deferred ? "Release Task" : "Hold Task") {
-                Task { await model.holdTask(task, held: task.runtime?.status != .deferred) }
+            Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
+                Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
             }.disabled(unavailable)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }

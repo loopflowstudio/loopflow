@@ -1094,17 +1094,6 @@ fn task_files_frames_preserve_checkout_identity_and_heartbeat() {
 }
 
 #[test]
-fn paused_task_state_is_unfinished() {
-    let state: TaskState = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/task_deferred.json"
-    ))
-    .unwrap();
-    assert_eq!(state, TaskState::Deferred);
-    assert!(!state.is_terminal());
-    assert_eq!(serde_json::to_string(&state).unwrap(), "\"deferred\"");
-}
-
-#[test]
 fn task_overview_excludes_diagnostic_process_history() {
     let input = include_str!("../../../tests/fixtures/dto/task_overview.json");
     let overview: loopflow::task_work::TaskOverview = serde_json::from_str(input).unwrap();

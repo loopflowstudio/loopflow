@@ -38,7 +38,7 @@ pub fn run(
         }) | Some(crate::lf::Commands::Task {
             cmd: crate::lf::TaskCommand::Location { .. }
                 | crate::lf::TaskCommand::Claim { .. }
-                | crate::lf::TaskCommand::Unclaim { .. }
+                | crate::lf::TaskCommand::Unassign { .. }
                 | crate::lf::TaskCommand::Shell { .. }
                 | crate::lf::TaskCommand::WatchFiles { .. }
                 | crate::lf::TaskCommand::Files { .. }

@@ -595,7 +595,7 @@ fn notify_superseded_in(
     };
     let text = format!(
         "Also claimed later by {later}. {owner} still owns this Task on this Machine and \
-         nothing was cancelled. Keep going, or run `lf task unclaim` or \
+         nothing was cancelled. Keep going, or run `lf task unassign` or \
          `lf task move <task> --machine <machine>` to end this claim."
     );
     let steer = super::steers::save_in(
@@ -739,8 +739,12 @@ impl SqliteStore {
         Ok(entry)
     }
 
-    /// Queue the claiming person as Linear assignee unless Linear already shows it.
-    pub(crate) fn assign_task_owner(&self, task: &TaskId, assignee: &str) -> StoreResult<()> {
+    /// Queue the claiming person, or nobody, as Linear assignee unless Linear already shows it.
+    pub(crate) fn assign_task_owner(
+        &self,
+        task: &TaskId,
+        assignee: Option<&str>,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current: Option<String> = tx.query_row(
@@ -748,12 +752,12 @@ impl SqliteStore {
             [task.as_str()],
             |row| row.get(0),
         )?;
-        if current.as_deref() != Some(assignee) {
+        if current.as_deref() != assignee {
             super::planning_changes::PlanningChanges::Task(task).save(
                 &tx,
-                &[crate::work::edit::WorkValue::TaskAssignee(Some(
-                    assignee.into(),
-                ))],
+                &[crate::work::edit::WorkValue::TaskAssignee(
+                    assignee.map(str::to_owned),
+                )],
             )?;
         }
         tx.commit()?;

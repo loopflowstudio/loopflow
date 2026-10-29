@@ -264,11 +264,6 @@ fn start_run_in(
     by: &LfProcessId,
     ships: bool,
 ) -> StoreResult<bool> {
-    if super::durable::task_state_in(tx, task)? == crate::durable::TaskState::Deferred {
-        return Err(crate::store::StoreError::InvalidAuthority(
-            "Task is deferred; resume it before running a Graph".into(),
-        ));
-    }
     let left = tx.execute(
         "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,updated_at=?4
          WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
@@ -950,23 +945,8 @@ mod tests {
         let before = store.task_graph(&task).unwrap().unwrap();
         let row = store.task_graph_row(&task).unwrap().unwrap();
         let start = crate::graph::runner::ExecutionCursor::default();
-        store.set_task_deferred(&task, true).unwrap();
-        store.set_task_deferred(&task, true).unwrap();
-        assert_eq!(
-            store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Deferred
-        );
-        assert!(store
-            .start_task_graph_run(&task, &row, &start, &LfProcessId::new(), true)
-            .is_err());
-        assert_eq!(store.task_graph(&task).unwrap().unwrap(), before);
         drop(store);
         let store = SqliteStore::open_ephemeral(&path).unwrap();
-        assert_eq!(
-            store.task_state(&task).unwrap(),
-            crate::durable::TaskState::Deferred
-        );
-        store.set_task_deferred(&task, false).unwrap();
         assert_eq!(
             store.task_state(&task).unwrap(),
             crate::durable::TaskState::Idle
@@ -1004,11 +984,6 @@ mod tests {
             store.local_shipping_tasks().unwrap(),
             [(task.clone(), shipping.clone())]
         );
-        // Defer holds shipping without ending it.
-        store.set_task_deferred(&task, true).unwrap();
-        assert_eq!(state(), crate::durable::TaskState::Deferred);
-        store.set_task_deferred(&task, false).unwrap();
-        assert_eq!(state(), crate::durable::TaskState::Shipping);
         // Shipping again keeps when it began.
         let again = store.ship_task(&task, &by, "again").unwrap();
         assert_eq!(again.shipped_at, shipping.shipped_at);

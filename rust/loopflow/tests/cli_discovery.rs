@@ -1325,9 +1325,9 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     conn.execute("UPDATE repository_plans SET repo=?1", [&path])
         .unwrap();
     conn.execute("UPDATE waves SET repo=?1", [&path]).unwrap();
-    // Resumed, FIX-1 joins FIX-2 in Working, so Working Tasks has two tiles to arrange.
+    // With a checkout, FIX-1 joins FIX-2 in Working, so Working Tasks has two tiles to arrange.
     conn.execute(
-        "UPDATE tasks SET paused=0 WHERE issue_identifier='FIX-1'",
+        "UPDATE tasks SET worktree='/repo/fix-1' WHERE issue_identifier='FIX-1'",
         [],
     )
     .unwrap();

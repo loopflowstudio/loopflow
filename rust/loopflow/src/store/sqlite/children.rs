@@ -360,28 +360,6 @@ impl SqliteStore {
         Ok(true)
     }
 
-    /// Change the explicit planning hold, never execution or Workflow position.
-    pub(crate) fn set_task_deferred(&self, id: &TaskId, deferred: bool) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        require_task_not_deleted(&tx, &task)?;
-        if super::durable::task_state_in(&tx, id)?.is_terminal() {
-            return Err(StoreError::InvalidAuthority(
-                "Reopen the Task before deferring or resuming it".into(),
-            ));
-        }
-        super::planning_write::local(
-            &tx,
-            &crate::work::edit::WorkEdit::for_target(
-                id.as_str(),
-                &[crate::work::edit::WorkValue::TaskDeferred(deferred)],
-            ),
-        )?;
-        tx.commit()?;
-        Ok(())
-    }
-
     /// Reopen planning without touching Workflow, placement, PR or Process history.
     pub(crate) fn reopen_task(&self, id: &TaskId, note: Option<&str>) -> StoreResult<Task> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1259,11 +1237,11 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
     Ok(())
 }
 
-/// Open, not deferred, and past its Graph's `start`.
+/// Open and past its Graph's `start`.
 fn under_way(conn: &Connection, task: &Task) -> StoreResult<bool> {
     Ok(!matches!(
         super::durable::task_state_in(conn, &task.id)?,
-        TaskState::Deferred | TaskState::Done | TaskState::Abandoned
+        TaskState::Done | TaskState::Abandoned
     ) && conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM task_graphs WHERE task_id=?1 \
              AND NOT (step='start' AND lf_process_id IS NULL))",

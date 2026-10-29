@@ -291,10 +291,10 @@ fn admit_ci_fix(
             return Ok(());
         }
         if let Some(task_id) = &landing.task_id {
-            if store.sqlite.task_state(task_id).map_err(repair_error)?
-                == crate::durable::TaskState::Deferred
-            {
-                return Err(repair_error("Task is deferred; CI repair is held"));
+            if !store.sqlite.task_owned(task_id).map_err(repair_error)? {
+                return Err(repair_error(
+                    "Task is unassigned; CI repair waits for `lf task claim`",
+                ));
             }
             let local = store.local_machine().await.map_err(repair_error)?;
             let machine = store

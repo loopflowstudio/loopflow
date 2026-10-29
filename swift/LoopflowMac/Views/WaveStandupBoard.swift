@@ -72,7 +72,7 @@ struct WaveStandup: Equatable {
         }.sorted { ($0.task.completedAt ?? "") > ($1.task.completedAt ?? "") }
             .map { Row(task: $0, person: person($0), note: nil, session: nil) }
         func started(_ states: Set<TaskState>) -> [Row] {
-            ranked.filter { states.contains(Self.state($0)) }.map { task in
+            ranked.filter { states.contains(Self.state($0)) && !$0.isUnassigned }.map { task in
                 let note = task.pr?.phase == .merged ? "merged" : task.nextMove.reason
                 return Row(task: task, person: person(task), note: note.isEmpty ? nil : note,
                            session: sessions[task.id])
@@ -80,7 +80,7 @@ struct WaveStandup: Equatable {
         }
         working = started([.idle, .active, .moving])
         autonomous = started([.shipping])
-        backlog = ranked.filter { [.unstarted, .deferred].contains(Self.state($0)) }
+        backlog = ranked.filter { Self.state($0) == .unstarted || $0.isUnassigned }
             .map { Row(task: $0, person: nil, note: nil, session: nil) }
         showsPeople = Set((working + autonomous + done).compactMap { $0.person?.key }).count >= 2
     }

@@ -85,7 +85,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 ```bash
 lf task claim LOO-123               # you, on this Machine
 lf task move LOO-123 --machine mini # same person, mini's Machine
-lf task unclaim LOO-123             # unowned, history intact
+lf task unassign LOO-123             # unowned, history intact
 lf desktop task LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 

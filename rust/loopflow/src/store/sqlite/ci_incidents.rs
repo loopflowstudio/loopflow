@@ -389,9 +389,9 @@ impl super::SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if let Some(task) = task {
-            if super::durable::task_state_in(&tx, task)? == crate::durable::TaskState::Deferred {
+            if !super::task_ownership::owned_in(&tx, task)? {
                 return Err(StoreError::InvalidAuthority(
-                    "Task is deferred; CI repair is held".into(),
+                    "Task is unassigned; CI repair waits for `lf task claim`".into(),
                 ));
             }
         }

@@ -120,7 +120,7 @@ Every Task read prints the same Task row, each fact once:
  "pr": {"number": 1719, "url": "…", "phase": "open"}, "next": "lf task run LOO-12"}
 ```
 
-`state` is one of `deferred`, `unstarted`, `idle`, `active`, `moving`,
+`state` is one of `unstarted`, `idle`, `active`, `moving`,
 `shipping`, `done` or `abandoned`; `next` is the command that moves the Task
 on, `null` while it moves by itself.
 

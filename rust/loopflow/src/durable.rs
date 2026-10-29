@@ -377,13 +377,12 @@ impl std::fmt::Display for WorkStatus {
 }
 
 /// A Task's state, derived from its checkout, Graph position, whether a
-/// Graph runs for it and the Auto-Ship approval. Completion, abandonment and
-/// defer are durable; the open states follow what the Task is doing now.
+/// Graph runs for it and the Auto-Ship approval. Completion and abandonment
+/// are durable; the open states follow what the Task is doing now. Whether
+/// anyone owns it is ownership, not state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
-    /// Explicit hold; history, Graph position and shipping are retained.
-    Deferred,
     /// No checkout yet.
     Unstarted,
     /// A checkout, no Graph running and not at an interactive step: before its first run,
@@ -404,7 +403,6 @@ pub enum TaskState {
 impl TaskState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
-            Self::Deferred => "deferred",
             Self::Unstarted => "unstarted",
             Self::Idle => "idle",
             Self::Active => "active",
@@ -417,7 +415,6 @@ impl TaskState {
 
     pub(crate) fn parse(label: &str) -> Option<Self> {
         [
-            Self::Deferred,
             Self::Unstarted,
             Self::Idle,
             Self::Active,

@@ -407,8 +407,9 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    public func holdTask(issue: String, held: Bool, cwd: String?) async throws {
-        _ = try await run(["task", held ? "hold" : "release", issue], cwd)
+    /// `lf task claim` or `lf task unassign`.
+    public func assignTask(issue: String, claimed: Bool, cwd: String?) async throws {
+        _ = try await run(["task", claimed ? "claim" : "unassign", issue], cwd)
     }
 
     public func completeTask(issue: String, cwd: String?) async throws {

@@ -67,14 +67,6 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: "Task was deleted; retained history is read-only".into(),
         }
-    } else if status == crate::durable::TaskState::Deferred {
-        TaskActionModel {
-            recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
-            reason: format!(
-                "Task is deferred; `lf task release {}` clears the hold without starting execution",
-                task.identifier
-            ),
-        }
     } else {
         let predecessor_phase = match task.parent_pr_id.as_ref() {
             Some(parent_id) => store

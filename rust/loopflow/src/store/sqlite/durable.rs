@@ -433,7 +433,7 @@ fn map_machine_row(row: &rusqlite::Row<'_>) -> StoreResult<Machine> {
     })
 }
 
-/// Completion, abandonment and defer are durable. An open Task's state follows
+/// Completion and abandonment are durable. An open Task's state follows
 /// what it is doing: a Graph runs for it while its Task run or ship process
 /// has not exited, and the Auto-Ship approval (`shipped_at`) makes that run shipping.
 /// Approved with nothing running, it is idle until recovery restarts its ship process.
@@ -441,7 +441,6 @@ pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
-         WHEN {t}.paused=1 THEN 'deferred' \
          WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id={t}.ship_lf_process_id \
              OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
          THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \

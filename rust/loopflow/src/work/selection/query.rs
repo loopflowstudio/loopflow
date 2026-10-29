@@ -388,7 +388,6 @@ impl Parser {
                 "active" => SelectionState::Active,
                 "moving" => SelectionState::Moving,
                 "shipping" => SelectionState::Shipping,
-                "deferred" => SelectionState::Deferred,
                 "backlog" => SelectionState::Backlog,
                 "done" => SelectionState::Done,
                 _ => return Err(invalid(format!("unknown state {value}"))),

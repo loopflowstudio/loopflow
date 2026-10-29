@@ -84,11 +84,11 @@ repairs its PR.
 
 `lf ci` reads the local record, not GitHub: how much of CI repair happened without you.
 
-Hold repair for one Task, or cap startup retries within one repair:
+Stop repair for one Task, or cap startup retries within one repair:
 
 ```bash
-lf task hold LOO-12            # hold future runs and repair; running work continues
-lf task release LOO-12         # let it run again
+lf task unassign LOO-12        # nobody owns it, so nothing repairs it; running work continues
+lf task claim LOO-12           # yours again
 ```
 
 ```yaml

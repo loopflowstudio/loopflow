@@ -1,4 +1,4 @@
-//! Claim, hand off and unclaim a Task. Commands already run on the Task's
+//! Claim, hand off and unassign a Task. Commands already run on the Task's
 //! writer: entry dispatch forwards them over `lf --machine` before they arrive.
 use std::path::Path;
 
@@ -11,7 +11,8 @@ pub enum OwnershipChange {
     Claim,
     /// A registered Machine label or a Machine id.
     Handoff(String),
-    Unclaim,
+    /// Nobody owns it, and Linear shows no assignee.
+    Unassign,
 }
 
 fn message(error: impl std::fmt::Display) -> OpsError {
@@ -53,8 +54,12 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                     .handoff_task(&task.id, &target)
                     .map_err(message)?;
             }
-            OwnershipChange::Unclaim => {
+            OwnershipChange::Unassign => {
                 store.sqlite.unclaim_task(&task.id).map_err(message)?;
+                store
+                    .sqlite
+                    .assign_task_owner(&task.id, None)
+                    .map_err(message)?;
             }
         }
         let repository = super::task::repository_for_task(&store, &task)?;
@@ -85,7 +90,7 @@ pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task
     };
     match viewer {
         Ok(viewer) => {
-            if let Err(error) = store.assign_task_owner(task, &viewer) {
+            if let Err(error) = store.assign_task_owner(task, Some(viewer.as_str())) {
                 tracing::warn!(%task, %error, "Linear assignee was not queued");
             }
         }

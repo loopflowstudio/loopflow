@@ -131,7 +131,6 @@ fn work_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<Sele
             TaskState::Active => SelectionState::Active,
             TaskState::Moving => SelectionState::Moving,
             TaskState::Shipping => SelectionState::Shipping,
-            TaskState::Deferred => SelectionState::Deferred,
             TaskState::Done | TaskState::Abandoned => SelectionState::Done,
         });
         if !started && !state.is_terminal() {
@@ -931,9 +930,15 @@ mod tests {
             "task_22222222222222222222222222222222",
             "task_33333333333333333333333333333333",
         );
-        // Deferred Tasks aren't Working; resumed, FIX-1 is idle in its checkout.
+        // With a checkout, FIX-1 is idle and Working.
         store
-            .set_task_deferred(&crate::durable::TaskId::parse(one).unwrap(), false)
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET worktree='/repo/fix-1' WHERE issue_identifier='FIX-1'",
+                [],
+            )
             .unwrap();
         assert_eq!(
             store.view_plan(&repo, None).unwrap().resolution.task_ids(),
@@ -1912,7 +1917,7 @@ mod tests {
         let id = DashboardId::new();
         let result = store.resolve_selection(&repo, &selection).unwrap();
         assert!(result.unavailable.is_empty());
-        assert_eq!(result.members.len(), 3); // Two Waves and the idle Task; deferred isn't Working.
+        assert_eq!(result.members.len(), 3); // Two Waves and the idle Task; FIX-1 has no checkout.
         assert_eq!(
             result
                 .members

@@ -19,7 +19,8 @@ Accepted by Jack Heart, 2026-10-26 (LOO-610 review, D2). Task definition is the 
 - `lf session new [ID] [--task|--wave] [--prepare --json]`: a fresh provider thread on the
   scope's same Session, seeded with the handoff; old thread stays in history. `-a` switches
   harness. Replaces `--fresh` (which created a successor Session).
-- `lf task hold|release` replace `task defer|resume`. State name `deferred` unchanged.
+- `lf task claim|unassign` replace `task defer|resume` (and this branch's `hold|release`);
+  no `deferred` state (see Task assignment).
 - Desktop: every preparation is `session resume <id> --prepare --json`; selection
   decides attach/elsewhere/pending from `state`/`actions`, not from a second command.
 
@@ -30,7 +31,12 @@ Accepted by Jack Heart, 2026-10-26 (LOO-610 review, D2). Task definition is the 
 - `--fresh` and the `fresh` parameter through `select_connection`/`primary::ensure*`/`explain_connect`
 - Primary successor admission (`replacing` in `ensure_primary_session`) — only `--fresh` used it
 - `require_session_action` refusal (`OpenMode::Refuse`); `session_actions` stays for Desktop display
-- `TaskCommand::Defer`/`Resume` names
+- `TaskCommand::Defer`/`Resume` names, then `Hold`/`Release`; `Unclaim` → `Unassign`
+- `TaskState::Deferred`, `SelectionState::Deferred`, `ShippingState::Deferred`, `set_task_deferred`,
+  `task_defer`, `task edit --unassign`, `tests/fixtures/dto/task_deferred.json`, Swift `.deferred`
+  and `holdTask`; `WorkValue::TaskDeferred` → `HistoricalTaskPaused` (released peers still send
+  `task_paused`; nothing reads it). `tasks.paused` column is unread; dropping it is a later staged change.
+- `transition_headless_to_native` and the dead-headless native resume
 - Swift: `prepareSessionAttachment`, `SessionOpenMode`, `--try/--takeover/--fresh` args
 
 ## Resume explanation (concept review 2026-10-28, implemented)
@@ -43,12 +49,6 @@ conversation reports `new_thread`. Desktop perf keys `connect_prepare_*` stay: b
 reads them. Desktop's `Preparation {attach, open, moveHere}` is local pane intent over the one
 `resume --prepare` shape; Move here stays explicit.
 
-## Desktop Task hold (concept review 2026-10-28, implemented in b75b9a0cf)
-
-Desktop says Hold/Release (`holdTask(_:held:)`, ids `task-hold-release`/`task-hold`) so "Resume"
-means only a conversation. The status label stays "Deferred": AGENTS.md names that Task state;
-this Task renames the verbs only.
-
 ## Concept review (2026-10-28, headless, after Desktop hold)
 
 Nothing to change. Clap surface matches the accepted shape (`Resume {id, --fork, --all}`,
@@ -59,7 +59,7 @@ takes over by default; the state label stays Deferred; Desktop has no Fork actio
 doesn't require one). Note for gate: `target/debug/lf help …` printed the installed app's
 old help even with `LF_*` unset, so check help through `cli_discovery`, not by hand.
 
-## Takeover scope (Jack Heart, 2026-10-29, accepted; next implement)
+## Takeover scope (Jack Heart, 2026-10-29, implemented 2026-10-29)
 
 Jack Heart decided (concept review answers 1a, 2, 3a):
 
@@ -78,7 +78,7 @@ Jack Heart decided (concept review answers 1a, 2, 3a):
 - `lf --explain resume <run>` reports the same refusal.
 - Interactive takeover is unchanged: same provider process, control moves, turn finishes here.
 
-## Task assignment replaces hold (Jack Heart, 2026-10-29, accepted; this PR; next implement)
+## Task assignment replaces hold (Jack Heart, 2026-10-29, implemented 2026-10-29)
 
 Jack Heart decided (answers 4a, 5a): a Task is assigned or not; there is no deferred state.
 
@@ -104,19 +104,18 @@ takeover (old terminal names the new one), a Run's id refused with the Task poin
 
 ## Remaining
 
-- Checks (2026-10-28): lib `human_session:: lf::`, integration `session_cli_tests:: work_open_tests::
-  cli_discovery:: context_launch_tests:: machine_commands::`, `session_launch_contract`,
-  `transport_tests`, `global_commands`, `golden_prompt`, fmt, clippy — pass (two load-timing
-  flakes in untouched fixture code pass in isolation).
-- Compress (2026-10-28): `new_thread` owns its launch; unused Swift `prepareSession(fork:)` removed.
-  `human_session::` lib, `session_cli_tests::`, clippy — pass (two load flakes pass alone).
-- Realign (2026-10-28, after merging main #1761 New Task): no new callers of removed
-  verbs; `cargo check -p loopflow --all-targets` — pass. Swift untested against #1761.
-- Implement + compress (2026-10-28, concept review): `dto_fixtures::`, `global_commands
-  session_resume_explain`, lib `human_session::`, `session_cli_tests::`, fmt, clippy — pass (one load flake passes alone).
-- Realign (2026-10-28, after main #1764): the concept-review items are committed in 8c45266af
-  (`git grep SessionConnect|explain_connect|ConnectOrResume` → only `SessionConnectionArgs`,
-  the shared `resume`/`session new` Clap args, which stay). #1764 touches CI jobs only; no rerun.
-- Implement (2026-10-28, Desktop hold): `scripts/test_desktop.sh --filter 'WorkModelTests|DesktopHeadlessTests'` — pass.
-- Publish (2026-10-28): `scripts/test_desktop.sh --filter 'SessionsStoreTests|WorkDestinationTests|WorkModelTests|RegistryQueryTests'` — Swift build against main + 129 tests pass. `session_lifecycle_tests` left to CI.
+- Implementation notes (2026-10-29): "unassigned" = no owner in the ownership log
+  (`task_owned`); a started unowned Task goes to Later/Backlog with next move User. `lf ship`
+  claims an unowned Task on start (as `task run` does) and stops when it is unassigned
+  mid-ship (`ShipStep::Unassigned`); no integration test covers the mid-ship stop yet.
+  Desktop reads `runtime.owner` for Claim/Unassign (`RoadmapTask.isUnassigned`).
+- Demo (answer 6) not run yet: agent-run in a throwaway `LF_HOME` with real Claude.
+- Not yet tested: the mid-ship unassign stop end to end, and the Linear assignee clear on
+  `task unassign` (only the queued planning change is wired).
+- Checks (2026-10-29): lib `human_session:: ops::task::ship store::sqlite::{task_work,selections,
+  planning_write,task_ownership,ci_incidents} work::selection lf::tests lf::commands::waves
+  task_graph_launch_tests::task_ship`, integration `world_recipes:: dto_fixtures:: cli_discovery::
+  machine_commands::task_ownership`, `two_people`, `transport_tests` Graph-step refusal,
+  `session_lifecycle_tests` structured correction, Swift `WorkModel|WaveStandup|DTOFixture|
+  RegistryQuery|SessionsStore` (126), fmt, clippy all-targets — pass.
 - Assumptions: `scratch/questions.md`.

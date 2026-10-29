@@ -2438,15 +2438,8 @@ fn task_ship_stands_in_at_the_step_the_task_waits_at() {
 }
 
 #[test]
-fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
+fn task_ship_defers_to_a_live_ship() {
     let task = shipping_task();
-    task.ok(&["task", "hold", "INF-123"]);
-    let deferred = task.run(&["-b", "--task", "INF-123", "ship"]);
-    assert!(deferred.status.success());
-    assert!(String::from_utf8_lossy(&deferred.stdout).contains("INF-123 is deferred"));
-    assert!(task.graph().is_null());
-    task.ok(&["task", "resume", "INF-123"]);
-
     // The first ship holds at its stand-in; a second one finds it live.
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(

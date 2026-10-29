@@ -52,7 +52,7 @@ pub const RECIPES: &[Recipe] = &[
     Recipe {
         name: "lifecycle",
         rung: Rung::Artifacts,
-        demos: "Task history: deferred, abandoned, canceled, standalone and weeks of completions",
+        demos: "Task history: unassigned, abandoned, canceled, standalone and weeks of completions",
         build: lifecycle,
     },
     Recipe {
@@ -287,14 +287,14 @@ fn lifecycle(world: &World) -> Result<()> {
     let quarter = world.task(wave, "Shipped last quarter", "Sign the macOS build in CI.")?;
     world.complete(&quarter, "Landed", 40.0)?;
 
-    let deferred = world.task(
+    let unassigned = world.task(
         wave,
-        "Deferred mid-flight",
+        "Unassigned mid-flight",
         "Move the changelog into the release workflow.",
     )?;
-    let deferred = world.checkout(&deferred)?;
+    let unassigned = world.checkout(&unassigned)?;
     world.session(
-        Some(&deferred),
+        Some(&unassigned),
         "Changelog workflow",
         &[
             "Generate the changelog in the release workflow.",
@@ -302,8 +302,8 @@ fn lifecycle(world: &World) -> Result<()> {
         ],
         2.0,
     )?;
-    world.task_run(&deferred, "pursue", 1.8, 20, Outcome::Succeeded)?;
-    world.defer(&deferred)?;
+    world.task_run(&unassigned, "pursue", 1.8, 20, Outcome::Succeeded)?;
+    world.unassign(&unassigned)?;
 
     let abandoned = world.task(
         wave,

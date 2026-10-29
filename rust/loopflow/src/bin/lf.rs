@@ -947,11 +947,11 @@ fn read_task_draft() -> anyhow::Result<String> {
 
 fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Result<()> {
     match command {
-        TaskCommand::Claim { issue, json } | TaskCommand::Unclaim { issue, json } => {
+        TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
             use loopflow::ops::task_ownership::{change, render, OwnershipChange};
             let requested = match command {
                 TaskCommand::Claim { .. } => OwnershipChange::Claim,
-                _ => OwnershipChange::Unclaim,
+                _ => OwnershipChange::Unassign,
             };
             let ownership = change(repo, issue, requested)?;
             if *json {
@@ -1016,15 +1016,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             }
         }
         TaskCommand::Run { .. } => unreachable!("task run dispatches as an ordinary run"),
-        TaskCommand::Hold { issue } | TaskCommand::Release { issue } => {
-            let held = matches!(command, TaskCommand::Hold { .. });
-            loopflow::ops::task::task_defer(issue, held)?;
-            println!(
-                "{issue}: {}; execution unchanged",
-                if held { "held" } else { "released" }
-            );
-            Ok(())
-        }
         TaskCommand::Reopen { issue, reason } => {
             loopflow::ops::task::task_reopen(issue, reason.as_deref())?;
             println!("{issue}: reopened; its Graph unchanged");
@@ -1314,14 +1305,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             notes,
             rank,
             assignee,
-            unassign,
             wave,
         } => {
             let result = loopflow::ops::task::task_edit(
                 repo,
                 issue,
                 wave.as_deref(),
-                task_edit_update(title, notes, *rank, assignee, *unassign),
+                task_edit_update(title, notes, *rank, assignee),
             )?;
             println!("{}: updated", result.id);
             print_planning_sync(&result.sync);
@@ -1422,17 +1412,12 @@ fn task_edit_update(
     notes: &Option<String>,
     rank: Option<u32>,
     assignee: &Option<String>,
-    unassign: bool,
 ) -> loopflow::work::task::TaskUpdate {
     loopflow::work::task::TaskUpdate {
         title: title.clone(),
         description: notes.clone(),
         rank,
-        assignee: if unassign {
-            Some(None)
-        } else {
-            assignee.clone().map(Some)
-        },
+        assignee: assignee.clone().map(Some),
     }
 }
 
@@ -2049,14 +2034,13 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     notes,
                     rank,
                     assignee,
-                    unassign,
                     wave,
                     ..
                 },
         }) => Some((
             wave.as_deref().or(cli.wave.as_deref()),
             loopflow::ops::task::TaskPlanningRequest::Edit(task_edit_update(
-                title, notes, *rank, assignee, *unassign,
+                title, notes, *rank, assignee,
             )),
         )),
         Some(Commands::Task {

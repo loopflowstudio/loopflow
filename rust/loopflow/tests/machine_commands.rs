@@ -1471,7 +1471,7 @@ fn task_ownership_follows_claim_handoff_and_unclaim_through_the_writer() {
         "--repository",
         plan.repository.as_str(),
         "task",
-        "unclaim",
+        "unassign",
         task.as_str(),
         "--json",
     ]);

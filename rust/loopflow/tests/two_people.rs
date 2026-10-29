@@ -238,10 +238,10 @@ fn two_people_share_one_repository() {
         .find(|line| line.contains("Nameless"))
         .unwrap_or_else(|| panic!("{show}"));
     assert!(row.contains("maya@example.com"), "{row}");
-    let refused = pair.run(Lee, &["task", "unclaim", &nameless]);
+    let refused = pair.run(Lee, &["task", "unassign", &nameless]);
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("claimed by someone else"));
-    pair.ok(Maya, &["task", "unclaim", &nameless]);
+    pair.ok(Maya, &["task", "unassign", &nameless]);
 
     // 2. Lee takes the Task over on Maya's branch, so it keeps one PR.
     pair.ok(Lee, &["task", "claim", &task]);

@@ -147,8 +147,8 @@ choose again. Connecting logins and setting routes: [Ops](ops.md).
 
 **Session selectors.** `resume`, `rename` and `bind` take a Session ID or a
 provider conversation ID; `resume` also takes a Task identifier, which opens
-that Task's conversation. `lf task hold` and `lf task release` are about the
-Task's runs, not its conversation.
+that Task's conversation. `lf task claim` and `lf task unassign` are about who
+owns the Task, not its conversation.
 
 **One primary per scope.** A Task keeps its selected primary conversation;
 opening or forking another Session doesn't change it.

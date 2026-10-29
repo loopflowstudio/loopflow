@@ -1349,7 +1349,10 @@ fn headless_graph(resume: bool) {
         let output = fixture.command(&["resume", &session]).output().unwrap();
         assert!(!output.status.success());
         let error = String::from_utf8_lossy(&output.stderr);
-        assert!(error.contains("is a Run (proof · probe · running)"), "{error}");
+        assert!(
+            error.contains("is a Run (proof · probe · running)"),
+            "{error}"
+        );
     }
     std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);

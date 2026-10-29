@@ -28,7 +28,7 @@ memory and KRs.
 lf comment LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
 lf comment LOO-12                                 # read the thread: yours, teammates', the agents'
 lf interrupt LOO-12                               # stop its running Graph
-lf task hold LOO-12                               # hold future runs and CI repair; live processes finish
+lf task unassign LOO-12                           # nobody owns it: ship and CI repair stop; live processes finish
 ```
 
 A comment saves locally first, then reaches every Session working on the Task at
@@ -36,8 +36,8 @@ its next supported boundary: before a Graph step or after an agent turn. Idle
 Sessions stay idle; nothing is replayed into them. Comments from teammates, in
 Loopflow or in your tracker, arrive the same way.
 
-`lf task release LOO-12` lifts the hold without starting anything. To reopen a
-conversation, use `lf resume` ([Sessions](sessions.md)).
+`lf task claim LOO-12` takes it back without starting anything; `lf task run`
+claims and runs. To reopen a conversation, use `lf resume` ([Sessions](sessions.md)).
 
 ## See where it stands
 
@@ -88,7 +88,7 @@ until you complete it. Publishing, landing and CI repair are covered in [Ops](op
 ```bash
 lf planning status                 # which plan this repository reads, and what's pending
 lf task claim LOO-12               # take it; the earlier owner's Sessions are told
-lf task unclaim LOO-12             # hand it back, history intact
+lf task unassign LOO-12            # nobody owns it; Linear shows no assignee; history intact
 ```
 
 Tasks, comments and status sync through your Git remote by default, as a ref

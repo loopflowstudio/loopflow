@@ -221,8 +221,14 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
                 if let Some(cause) = repeated {
-                    let run = run.to_string();
-                    return Err(RepeatedRunFailure { run, cause }.into());
+                    // Render it here: a detached run's log closes when this
+                    // process records its exit, before `main` prints errors.
+                    let repeated = RepeatedRunFailure {
+                        run: run.to_string(),
+                        cause,
+                    };
+                    eprintln!("{repeated}");
+                    return Err(anyhow::Error::new(exit_of(status)).context(repeated));
                 }
                 eprintln!("The run of {run} failed {attempt} times; this Task run stops here.");
             }

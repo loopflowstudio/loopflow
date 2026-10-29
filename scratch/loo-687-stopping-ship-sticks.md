@@ -106,7 +106,10 @@ starter.
   `<!-- loopflow-session:… -->` round-trips through Linear. Steer text reads
   `Comment X by Session <id> for Jack Heart`. The persisted `durable::Author`
   stays `Named(requester)`: adding a variant is a reader-compat change that
-  belongs in its own Task. Swift model/view and DTO fixtures are updated.
+  belongs in its own Task. For the same reason the store and peer edits keep a
+  Session's comment author as `person` (its requester). The body's Session marker
+  carries the Session, and reads (`TaskCommentAuthor::read`, local and Linear
+  alike) turn it back into the Session author (gate, 2026-10-29). Swift model/view and DTO fixtures are updated.
 - Desktop: Swift `TaskExecution` decodes `lf task status`'s `execution`
   (work + `started_by`, `ship_approval`, `ship_stop`, explicit Optionals) and
   replaces the `{work}`-only reading (`WorkModel.taskDiagnostics` →
@@ -186,3 +189,5 @@ Status and Desktop name who approved, who stopped, and who started each run.
 Agent-written reasons show the Session as author and Jack as the requester.
 
 Check: `task_graph_launch_tests::task_ship_stop` (3), `store::sqlite::task_work::`, `ops::task::ship::`, `task_graph::tests::`, `process_starter_names`, `--test integration dto_fixtures::`, `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|DTOFixtureTests|LocalWaveAgentLauncherTests'`, clippy → pass (compress `ship` filter: 2 `planning_lookup_tests` flaked under load, pass alone).
+
+Gate (2026-10-29): `scripts/test.py --reuse-passing --rust-filter '<task_graph_launch_tests, task_work, task_comments, processes, ops::task, task_graph, linear, graph runner, comment, dto_fixtures, ship>'` with `LF_*` unset → PASS (architecture, rust 294 tests + fmt + clippy, website, swift 659 tests); e2e/`--loopflow` left to CI.

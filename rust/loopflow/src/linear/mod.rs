@@ -382,26 +382,18 @@ pub(crate) struct LinearComment {
 
 impl From<&LinearComment> for TaskComment {
     fn from(comment: &LinearComment) -> Self {
-        let steer = crate::ops::linear_observe::is_steer(&comment.body);
-        let requester = || {
-            crate::ops::linear_observe::comment_requester(
-                &comment.body,
-                comment.author_name.as_deref(),
-            )
-        };
-        let session = steer
-            .then(|| crate::work::task::comment::comment_session(&comment.body))
-            .flatten();
-        let author = match session {
-            Some(session_id) => TaskCommentAuthor::Session {
-                session_id,
-                requester: requester(),
-            },
-            None if comment.author_id.is_some() || steer => {
-                TaskCommentAuthor::Person { name: requester() }
-            }
-            None => TaskCommentAuthor::Integration,
-        };
+        let author =
+            if comment.author_id.is_some() || crate::ops::linear_observe::is_steer(&comment.body) {
+                TaskCommentAuthor::Person {
+                    name: crate::ops::linear_observe::comment_requester(
+                        &comment.body,
+                        comment.author_name.as_deref(),
+                    ),
+                }
+                .read(&comment.body)
+            } else {
+                TaskCommentAuthor::Integration
+            };
         Self {
             id: comment.id.clone(),
             body: comment.body.clone(),

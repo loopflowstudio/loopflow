@@ -43,11 +43,37 @@ impl std::fmt::Display for TaskCommentAuthor {
     }
 }
 
+impl TaskCommentAuthor {
+    /// The author as the store and peer edits keep it. Released readers know
+    /// no Session author, so a Session's comment keeps its requester as the
+    /// person, and its body's Session marker names the Session.
+    pub fn stored(&self) -> Self {
+        match self {
+            Self::Session { requester, .. } => Self::Person {
+                name: requester.clone(),
+            },
+            author => author.clone(),
+        }
+    }
+
+    /// A stored author read with its comment: a person's comment whose body
+    /// names a Session is that Session's, written for the person.
+    pub fn read(self, body: &str) -> Self {
+        match (self, comment_session(body)) {
+            (Self::Person { name }, Some(session_id)) => Self::Session {
+                session_id,
+                requester: name,
+            },
+            (author, _) => author,
+        }
+    }
+}
+
 /// The marker naming the Session that wrote a steer, so providers round-trip it.
 pub const SESSION_MARKER: &str = "<!-- loopflow-session:";
 
 /// The Session a steer's body names as its author.
-pub fn comment_session(body: &str) -> Option<String> {
+fn comment_session(body: &str) -> Option<String> {
     body.split_once(SESSION_MARKER)
         .and_then(|(_, rest)| rest.split_once(" -->"))
         .map(|(id, _)| id.trim().to_owned())

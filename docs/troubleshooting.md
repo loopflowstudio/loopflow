@@ -175,21 +175,23 @@ each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
 ## Stale worktrees and branches
 
 ```bash
-lf wt prune --dry-run              # finished worktrees
-lf wt prune                        # remove them and their branches
+lf wt prune --dry-run              # every checkout, removed or kept, with the reason
+lf wt prune                        # remove the finished ones and their branches
+lf wt prune --all                  # remove every checkout no unfinished Task or process holds
 lf wt prune --branches --dry-run   # finished branches on origin and locally, with reasons
 ```
 
-Worktree pruning requires a merged or closed PR at the exact local head.
-Unpublished commits survive even when their remote branch is absent or their
-checkout has been idle for weeks. It removes only clean, unprotected checkouts
-and their local branch refs.
+A checkout goes when its PR merged or closed, its Task is done or abandoned,
+or it has no Task or PR and HEAD has not moved for a week. Changes under
+`scratch/` and `.lf/` never keep it; other uncommitted changes, an open PR and
+recent activity do, until `--all`. Unfinished Tasks' checkouts, persistent
+checkouts and any a running process holds are always kept. Unpushed commits
+and source changes are saved as `refs/lf/pruned/<branch>/<commit>` first.
 
 With `--branches`, a branch goes only with evidence at its exact head: a merged or closed PR, a
 finished Task already in the default branch, or a release candidate whose tag
-exists. An open PR, a worktree or an unfinished Task always keeps it. Prune
-always preserves uncommitted files; `lf wt delete <name> --force` is for when
-you mean to discard one.
+exists. An open PR, a worktree or an unfinished Task always keeps it. `lf wt delete <name> --force`
+discards a checkout without saving anything.
 
 A branch behind `main`:
 

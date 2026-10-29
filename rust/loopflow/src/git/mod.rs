@@ -774,6 +774,44 @@ pub fn commit(repo: &Path, message: &str, inherit: &impl Fn(&mut Command)) -> Re
     Ok(())
 }
 
+/// Agent notes and Loopflow state; changes here are never a checkout's source work.
+pub(crate) const NON_SOURCE_PATHSPECS: [&str; 2] = [":(exclude)scratch", ":(exclude).lf"];
+
+/// Commit a checkout's source changes, untracked included, onto HEAD without
+/// touching its index, worktree or branch. Returns the commit.
+pub(crate) fn snapshot_source_changes(path: &Path) -> Result<String, GitError> {
+    let scratch = tempfile::tempdir()?;
+    let index = scratch.path().join("index");
+    let current = git_stdout(
+        path,
+        &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+    )?;
+    if fs::copy(current.trim(), &index).is_err() {
+        git_stdout_inheriting(path, &["read-tree", "HEAD"], &|command: &mut Command| {
+            command.env("GIT_INDEX_FILE", &index);
+        })?;
+    }
+    let with_index = |command: &mut Command| {
+        command.env("GIT_INDEX_FILE", &index);
+    };
+    let mut add = vec!["add", "-A", "--", "."];
+    add.extend(NON_SOURCE_PATHSPECS);
+    git_stdout_inheriting(path, &add, &with_index)?;
+    let tree = git_stdout_inheriting(path, &["write-tree"], &with_index)?;
+    let message = format!("lf wt prune: source changes in {}", path.display());
+    let commit_tree = ["commit-tree", tree.trim(), "-p", "HEAD", "-m", &message];
+    let commit = if has_git_identity(path) {
+        git_stdout(path, &commit_tree)?
+    } else {
+        let name = format!("user.name={FALLBACK_COMMITTER_NAME}");
+        let email = format!("user.email={FALLBACK_COMMITTER_EMAIL}");
+        let mut args = vec!["-c", &name, "-c", &email];
+        args.extend(commit_tree);
+        git_stdout(path, &args)?
+    };
+    Ok(commit.trim().to_string())
+}
+
 pub fn pr_exists(repo: &Path) -> Result<bool, GitError> {
     let output = run_gh(repo, &["pr", "view", "--json", "state", "-q", ".state"])?;
     if !output.status.success() {

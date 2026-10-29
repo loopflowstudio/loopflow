@@ -317,7 +317,10 @@ interpose __attribute__((section("__DATA,__interpose"))) = {
             _git(path, "commit", "-am", "follow-up", env=env)
         if branch == "dirty":
             (path / "notes.txt").write_text("unfinished notes")
-        if branch in {"merged", "closed"}:
+        if branch == "old-unpushed":
+            # No Task or PR and idle for years: removed, its commit saved first.
+            saved = (branch, _git(path, "rev-parse", "HEAD", env=env))
+        if branch in {"merged", "closed", "old-unpushed"}:
             finished.append((branch, path))
         else:
             kept[branch] = (
@@ -376,5 +379,9 @@ else:
         assert _git(path, "rev-parse", "HEAD", env=env) == head, out
         assert _git(repo, "rev-parse", branch, env=env) == head, out
     assert (kept["dirty"][0] / "notes.txt").read_text() == "unfinished notes"
+    saved_refs = _git(
+        repo, "for-each-ref", "--format=%(objectname)", f"refs/lf/pruned/{saved[0]}", env=env
+    )
+    assert saved_refs == saved[1], out
     again = _run(tmp_path, {"lf": lf})
-    assert "No prunable worktrees" in again, again
+    assert "0 removed," in again, again

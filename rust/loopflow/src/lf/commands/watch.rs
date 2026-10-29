@@ -114,6 +114,16 @@ struct Mailbox<A> {
     look: bool,
     closed: bool,
     error: Option<String>,
+    /// When an in-process puller should step next; `None` while its wakeup
+    /// waits for a pull.
+    pull_at: Option<Instant>,
+}
+
+impl<A> Mailbox<A> {
+    /// Whether the watch should step before its clock says.
+    fn asked(&self) -> bool {
+        self.look || !self.requests.is_empty() || self.error.is_some()
+    }
 }
 
 type Shared<A> = Arc<(Mutex<Mailbox<A>>, Condvar)>;
@@ -270,59 +280,46 @@ where
     let shared = mailbox();
     let inbox: Arc<dyn Inbox> = shared.clone();
     let mut reader = Reader::new(shared.clone(), None, args, watched, read)?;
-    // When the puller should read next; `None` once it was woken for it.
-    let due: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(Some(Instant::now())));
-    let waker = (shared.clone(), due.clone());
+    lock(&shared).pull_at = Some(Instant::now());
+    let waker = shared.clone();
     std::thread::spawn(move || {
-        let (shared, due) = waker;
-        loop {
-            let mailbox = lock(&shared);
-            if mailbox.closed {
-                return;
-            }
-            let wake_at = *due.lock().expect("watch deadline poisoned");
-            let Some(wake_at) = wake_at else {
-                // Woken already: wait for its pull, or for the watch to close.
-                drop(
-                    shared
+        let mut mailbox = lock(&waker);
+        while !mailbox.closed {
+            mailbox = match mailbox.pull_at {
+                Some(at) if mailbox.asked() || Instant::now() >= at => {
+                    mailbox.pull_at = None;
+                    drop(mailbox);
+                    wake();
+                    lock(&waker)
+                }
+                Some(at) => {
+                    let wait = at.saturating_duration_since(Instant::now());
+                    waker
                         .1
-                        .wait_timeout(mailbox, CHECK)
-                        .expect("watch mailbox poisoned"),
-                );
-                continue;
+                        .wait_timeout(mailbox, wait)
+                        .expect("watch mailbox poisoned")
+                        .0
+                }
+                None => waker.1.wait(mailbox).expect("watch mailbox poisoned"),
             };
-            let asked = mailbox.look || !mailbox.requests.is_empty() || mailbox.error.is_some();
-            if asked || Instant::now() >= wake_at {
-                drop(mailbox);
-                *due.lock().expect("watch deadline poisoned") = None;
-                wake();
-                continue;
-            }
-            let wait = wake_at.saturating_duration_since(Instant::now()).min(CHECK);
-            drop(
-                shared
-                    .1
-                    .wait_timeout(mailbox, wait)
-                    .expect("watch mailbox poisoned"),
-            );
         }
     });
-    let mut ended = false;
+    let mut failed = false;
     let pull = move || -> Option<Vec<u8>> {
-        if ended {
+        if failed {
             return None;
         }
         let stepped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.step()));
         let error = match stepped {
             Ok(Ok(step)) => {
-                *due.lock().expect("watch deadline poisoned") = Some(step.wake);
-                ended = step.closing;
+                lock(&shared).pull_at = Some(step.wake);
+                shared.1.notify_all();
                 return step.frame;
             }
             Ok(Err(error)) => format!("{error:#}"),
             Err(panic) => format!("watch panicked: {}", panic_message(&panic)),
         };
-        ended = true;
+        failed = true;
         encode(&WatchFrame::<()> {
             answers: None,
             unavailable: Some(error),
@@ -352,6 +349,7 @@ fn mailbox<A>() -> Shared<A> {
             look: false,
             closed: false,
             error: None,
+            pull_at: None,
         }),
         Condvar::new(),
     ))
@@ -364,12 +362,7 @@ fn wait<A>(shared: &Shared<A>, wake: Instant) {
     drop(
         shared
             .1
-            .wait_timeout_while(mailbox, wait, |mailbox| {
-                !mailbox.look
-                    && mailbox.requests.is_empty()
-                    && !mailbox.closed
-                    && mailbox.error.is_none()
-            })
+            .wait_timeout_while(mailbox, wait, |mailbox| !mailbox.asked() && !mailbox.closed)
             .expect("watch mailbox poisoned"),
     );
 }

@@ -30,3 +30,5 @@ Check: `uv run pytest python/tests/test_release_automation.py -k cron` — 8 pas
 - Observed: `uv run pytest python/tests/test_release_automation.py -k cron` — 8 passed, including the stopped-`crontab -` case (no agent loaded, Wave's cron lines kept). The branch diff moves the crontab removal ahead of `agent 9`/`agent 10`. PR #1768 open, checks green.
 - Machine unchanged: both `# loopflow:infrastructure:` cron lines remain, no `loopflow.cron.*` agent loaded — consistent with the stopped headless bootstrap.
 - Not proven here: installed acceptance needs a logged-in Terminal to approve macOS's crontab prompt (see Remains). That is Jack's action after merge, not a repairable code gap, so it does not justify another implement pass.
+
+Gate (2026-10-28): `uv run python scripts/test.py --reuse-passing` — PASS (architecture, python/test_release_automation.py); Rust/Swift/website untouched; `bash -n` clean, shellcheck shows only the pre-existing intentional SC2016 (CI runs no shellcheck). PR #1768 checks green.

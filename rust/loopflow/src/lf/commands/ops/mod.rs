@@ -1079,30 +1079,23 @@ fn release_status_cmd(target_name: Option<&str>) -> Result<()> {
     let status = release_status(&repo_root, target_name)?;
     println!("Target: {}", status.target);
     let preview = status.preview_tag.as_deref().unwrap_or("(none)");
-    let streams = status.streams.as_ref();
-    match streams
-        .and_then(|streams| streams.preview.as_ref())
-        .filter(|release| status.preview_tag.as_deref() == Some(release.tag.as_str()))
-    {
-        Some(release) => println!(
-            "Preview: {preview} (published {})",
-            release.published_at.format("%Y-%m-%d")
-        ),
+    match status.preview_published_at {
+        Some(at) => println!("Preview: {preview} (published {})", at.format("%Y-%m-%d")),
         None => println!("Preview: {preview}"),
     }
-    if let Some(streams) = streams {
-        let stable = streams
-            .stable
+    if let Some(stable) = &status.stable {
+        let current = stable
+            .current
             .as_ref()
             .map_or("(none)", |release| release.tag.as_str());
-        match streams.next_stable.as_ref() {
+        match &stable.next {
             Some(next) => println!(
-                "Stable: {stable} (moves to {} on the next release run)",
+                "Stable: {current} (moves to {} on the next release run)",
                 next.tag
             ),
-            None => println!("Stable: {stable}"),
+            None => println!("Stable: {current}"),
         }
-        for hold in &streams.holds {
+        for hold in &stable.holds {
             println!("  {hold}");
         }
     }

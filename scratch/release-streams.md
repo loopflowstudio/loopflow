@@ -141,17 +141,19 @@ tested before the next starts.
    Compress: `planning_write::read` takes optional Task columns through one helper.
    `cargo test --lib ops::release:: store::sqlite::planning` + `--test release_tests stable regression`: pass.
    **Streams in `lf release status` (slice 3 concept review, 2026-10-29) — built.**
-   `release_streams` (from `published_releases`, `regressions`, `stable_advance`) returns
-   `ReleaseStreams { preview, stable, next_stable, holds }`; `StableHold` prints
+   `stable_stream` (from `published_releases`, `regressions`, `stable_advance`) returns
+   `StableStream { current, next, holds }`; `StableHold` prints
    `v0.16.2 soaks until 2026-11-05` / `LOO-12 holds v0.16.0, v0.16.1` for every release
    newer than where stable is or is about to be. `advance_stable` logs those holds and
-   moves to `next_stable`, so the cron log and status read one view.
+   moves to `next`, so the cron log and status read one view.
    `ReleaseStatusResult.latest_tag` became `preview_tag` (newest tag, published or
-   completing) plus `streams` for `github-release` targets; the CLI prints
+   completing) with `preview_published_at` and `stable` for `github-release` targets; the CLI prints
    `Preview: <tag> (published <date>)`, `Stable: <tag>` (with `moves to <tag> on the next
    release run` when pending) and the holds indented under it.
+   Compress: preview lives only in `preview_tag` (its date looked up beside it), so the view no
+   longer carries a second preview that could name a different release than the tag.
    `ReleaseRunOutcome::NoChanges.latest_tag` keeps its name: it is the notes baseline, not a stream.
-   `cargo test --lib ops::release::` 48 + `--test release_tests -- stable status regression` 9: pass.
+   `cargo test --lib ops::release::` 48 + `--test release_tests -- stable status regression` 9 + clippy: pass after compress.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default
    stable; switching slower runs `can_open` first. `install.sh --channel`.

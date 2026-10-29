@@ -212,8 +212,10 @@ pub struct ReleaseStatusResult {
     pub target: String,
     /// The newest release tag, published or still completing.
     pub preview_tag: Option<String>,
-    /// Where `preview` and `stable` point, for `completion: github-release` targets.
-    pub streams: Option<ReleaseStreams>,
+    /// When `preview_tag` was published, for `completion: github-release` targets.
+    pub preview_published_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Where `stable` points and what holds it back, for `completion: github-release` targets.
+    pub stable: Option<StableStream>,
     pub notes_status: Option<ReleaseNotesStatus>,
     pub workflow_status: Option<String>,
     pub workflow_conclusion: Option<String>,
@@ -412,20 +414,28 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
         }
         None => (None, None, false),
     };
-    let streams = if target.completion == ReleaseCompletion::GithubRelease {
-        Some(release_streams(
-            &published_releases(&main_repo, &target)?,
-            &regressions(&main_repo)?,
-            chrono::Utc::now(),
-        ))
+    let (preview_published_at, stable) = if target.completion == ReleaseCompletion::GithubRelease {
+        let releases = published_releases(&main_repo, &target)?;
+        (
+            releases
+                .iter()
+                .find(|release| preview_tag.as_deref() == Some(release.tag.as_str()))
+                .map(|release| release.published_at),
+            Some(stable_stream(
+                &releases,
+                &regressions(&main_repo)?,
+                chrono::Utc::now(),
+            )),
+        )
     } else {
-        None
+        (None, None)
     };
 
     Ok(ReleaseStatusResult {
         target: target.name,
         preview_tag,
-        streams,
+        preview_published_at,
+        stable,
         notes_status,
         workflow_status: workflow.as_ref().map(|run| run.status.clone()),
         workflow_conclusion: workflow.as_ref().and_then(|run| run.conclusion.clone()),
@@ -4354,7 +4364,7 @@ fn stable_advance<'a>(
         .filter(|candidate| current.is_none_or(|current| candidate.version > current))
 }
 
-/// One release as a stream names it.
+/// One release as the stable stream names it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StreamRelease {
     pub tag: String,
@@ -4397,30 +4407,29 @@ impl std::fmt::Display for StableHold {
     }
 }
 
-/// Where `preview` and `stable` point, where the next release run moves
-/// `stable`, and what holds every newer release back.
+/// Where `stable` points, where the next release run moves it, and what holds
+/// every newer release back.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ReleaseStreams {
-    pub preview: Option<StreamRelease>,
-    pub stable: Option<StreamRelease>,
-    pub next_stable: Option<StreamRelease>,
+pub struct StableStream {
+    pub current: Option<StreamRelease>,
+    pub next: Option<StreamRelease>,
     pub holds: Vec<StableHold>,
 }
 
-fn release_streams(
+fn stable_stream(
     releases: &[PublishedRelease],
     regressions: &[Regression],
     now: chrono::DateTime<chrono::Utc>,
-) -> ReleaseStreams {
-    let stable = releases.iter().find(|release| release.is_latest);
-    let next_stable = stable_advance(releases, regressions, now);
-    let floor = next_stable.or(stable).map(|release| release.version);
+) -> StableStream {
+    let current = releases.iter().find(|release| release.is_latest);
+    let next = stable_advance(releases, regressions, now);
+    let floor = next.or(current).map(|release| release.version);
     let mut newer: Vec<&PublishedRelease> = releases
         .iter()
         .filter(|release| floor.is_none_or(|floor| release.version > floor))
         .collect();
     newer.sort_by_key(|release| std::cmp::Reverse(release.version));
-    // Every newer release is held: one soaked and uncovered would be `next_stable`.
+    // Every newer release is held: one soaked and uncovered would be `next`.
     let mut holds: Vec<StableHold> = regressions
         .iter()
         .filter_map(|regression| {
@@ -4448,13 +4457,9 @@ fn release_streams(
                 until: release.published_at + STABLE_SOAK,
             }),
     );
-    ReleaseStreams {
-        preview: releases
-            .iter()
-            .max_by_key(|release| release.version)
-            .map(StreamRelease::from),
-        stable: stable.map(StreamRelease::from),
-        next_stable: next_stable.map(StreamRelease::from),
+    StableStream {
+        current: current.map(StreamRelease::from),
+        next: next.map(StreamRelease::from),
         holds,
     }
 }
@@ -4468,15 +4473,15 @@ fn advance_stable(
     progress: &impl Progress,
     lock: &ReleaseLock,
 ) -> OpsResult<()> {
-    let streams = release_streams(
+    let stable = stable_stream(
         &published_releases(repo, target)?,
         &regressions(repo)?,
         chrono::Utc::now(),
     );
-    for hold in &streams.holds {
+    for hold in &stable.holds {
         progress.status(&hold.to_string());
     }
-    let Some(next) = streams.next_stable else {
+    let Some(next) = stable.next else {
         return Ok(());
     };
     progress.status(&format!(
@@ -4662,7 +4667,7 @@ mod tests {
     }
 
     #[test]
-    fn streams_name_what_holds_each_release_newer_than_stable() {
+    fn stable_stream_names_what_holds_each_newer_release() {
         let now = chrono::Utc::now();
         let releases = [
             published("v0.16.2", 2, false),
@@ -4671,15 +4676,14 @@ mod tests {
             published("v0.15.9", 20, false),
             published("v0.15.2", 30, true),
         ];
-        let streams = release_streams(&releases, &[regression("v0.16.0", None)], now);
+        let stable = stable_stream(&releases, &[regression("v0.16.0", None)], now);
 
-        assert_eq!(streams.preview.unwrap().tag, "v0.16.2");
-        assert_eq!(streams.stable.unwrap().tag, "v0.15.2");
-        assert_eq!(streams.next_stable.unwrap().tag, "v0.15.9");
-        let holds: Vec<String> = streams.holds.iter().map(ToString::to_string).collect();
+        assert_eq!(stable.current.unwrap().tag, "v0.15.2");
+        assert_eq!(stable.next.unwrap().tag, "v0.15.9");
+        let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
         assert_eq!(holds, ["LOO-1 holds v0.16.2, v0.16.1, v0.16.0"]);
 
-        let soaking = release_streams(&releases[..1], &[], now);
+        let soaking = stable_stream(&releases[..1], &[], now);
         assert_eq!(
             soaking.holds,
             [StableHold::Soaking {

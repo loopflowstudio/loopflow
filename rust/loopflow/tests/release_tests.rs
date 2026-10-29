@@ -1508,12 +1508,14 @@ fn release_status_names_the_task_holding_stable() {
         Some("0.9.3"),
     );
 
-    let streams = release_status(repo.path(), None).unwrap().streams.unwrap();
+    let status = release_status(repo.path(), None).unwrap();
 
-    assert_eq!(streams.preview.unwrap().tag, "v0.9.3");
-    assert_eq!(streams.stable.unwrap().tag, "v0.9.1");
-    assert_eq!(streams.next_stable, None);
-    let holds: Vec<String> = streams.holds.iter().map(ToString::to_string).collect();
+    assert_eq!(status.preview_tag.as_deref(), Some("v0.9.3"));
+    assert!(status.preview_published_at.is_some());
+    let stable = status.stable.unwrap();
+    assert_eq!(stable.current.unwrap().tag, "v0.9.1");
+    assert_eq!(stable.next, None);
+    let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
     assert_eq!(holds.len(), 2);
     assert!(holds[0].ends_with(" holds v0.9.3"), "{holds:?}");
     assert!(holds[1].starts_with("v0.9.2 soaks until "), "{holds:?}");

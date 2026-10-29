@@ -91,9 +91,11 @@ is `release run patch`. The release command's exit status is the job's; an
 agent's successful report cannot turn a blocked release into success. Rerun the
 bootstrap to rewrite the wrappers after the host path or checkout moves.
 
-One scheduler runs each job. On macOS the bootstrap replaces any loaded agent of
-the same label and removes the Wave's `# loopflow:<wave>:` crontab lines,
-leaving other entries alone:
+One scheduler runs each job. On macOS the bootstrap first removes the Wave's
+`# loopflow:<wave>:` crontab lines, leaving other entries alone, then replaces
+any loaded agent of the same label. macOS may ask permission for that crontab
+write, so run the bootstrap from a logged-in Terminal; a bootstrap stopped at
+the prompt has loaded no agent beside the old lines.
 
 ```bash
 launchctl print gui/$(id -u)/loopflow.cron.infrastructure.release-run | grep -E 'state|last exit'

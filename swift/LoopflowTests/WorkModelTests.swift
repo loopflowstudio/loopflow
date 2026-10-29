@@ -658,35 +658,6 @@ struct WorkModelStreamTests {
         #expect(model.sessions.value == nil)
     }
 
-    @Test("A preview copy is marked in the breadcrumbs and is its own data identity")
-    func previewCopyIsMarked() async throws {
-        let fixture = try WorkTestFixture.load()
-        let feed = WorkFeed()
-        let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
-        let keeping = Task { await model.keepWorkCurrent() }
-        defer { keeping.cancel() }
-        let crumbs = WorkBreadcrumbs(model: model)
-
-        try await feed.opened(1)
-        let scope = try await feed.request(1)
-        await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
-        try await eventually { model.task(id: "issue-now") != nil }
-        #expect(throws: (any Error).self) { try crumbs.inspect().find(viewWithAccessibilityIdentifier: "preview-copy") }
-
-        model.select(.task(id: "issue-now"))
-        // A draft-carrying build replaces the reader; its observation names the copy.
-        await feed.serve(copy: NSHomeDirectory() + "/.lf/copies/3f2a9c1b")
-        await feed.fail(RegistryQueryError("lf replaced"))
-        try await feed.opened(2, within: .seconds(5))
-        let reopened = try await feed.request(2)
-        await feed.send(try fixture.planningFrame(sequence: 1, answers: reopened.id, renaming: "On the copy"))
-        try await eventually { model.task(id: "issue-now")?.task.task.name == "On the copy" }
-        // The copy holds different data than the shared store it came from.
-        #expect(model.selection == nil)
-        let marker = try crumbs.inspect().find(viewWithAccessibilityIdentifier: "preview-copy")
-        #expect(try marker.help().string() == "Preview copy: ~/.lf/copies/3f2a9c1b — work here is not in the shared store")
-    }
-
     @Test("A Task completed elsewhere leaves the working set and stays under Completed")
     func completedTaskLeavesWorkingSet() async throws {
         let fixture = try WorkTestFixture.load()
@@ -1038,22 +1009,17 @@ private actor Flag {
 private actor WorkFeed {
     private var continuations: [AsyncThrowingStream<WorkFrame, any Error>.Continuation] = []
     private var requests: [WorkRequest] = []
-    /// The preview copy the next reader's build works on.
-    private var copy: String?
 
     nonisolated func open() async -> WorkObservation {
         let (stream, continuation) = AsyncThrowingStream<WorkFrame, any Error>.makeStream()
-        let copy = await add(continuation)
+        await add(continuation)
         return WorkObservation(frames: stream, request: { request in
             Task { await self.record(request) }
-        }, cancel: { continuation.finish() }, copy: copy)
+        }, cancel: { continuation.finish() })
     }
 
-    func serve(copy: String?) { self.copy = copy }
-
-    private func add(_ continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) -> String? {
+    private func add(_ continuation: AsyncThrowingStream<WorkFrame, any Error>.Continuation) {
         continuations.append(continuation)
-        return copy
     }
 
     private func record(_ request: WorkRequest) { requests.append(request) }

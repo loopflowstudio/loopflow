@@ -339,7 +339,9 @@ final class WorkModel {
             navigation.content = .terminals
         }
         let key = workspaceKey(for: .task(id: task.id), repository: workspaceRepository ?? "")
-        let workspace = opensConversation && isLocalRepository ? workspaceRegistry?.retained(key) : nil
+        // The Task's workspace carries the opening's spinner and error, retained or not.
+        let workspace = opensConversation && isLocalRepository
+            ? workspaceRegistry?.workspace(for: key, title: task.task.name, location: nil) : nil
         let request = UUID()
         workspace?.conversationRequest = request
         workspace?.conversationError = nil
@@ -358,6 +360,8 @@ final class WorkModel {
         var task = task
         if let openRepository, repoPath?.normalizedFilePath != task.task.repo.normalizedFilePath {
             openRepository(task.task.repo, taskLink.map(LinkedWork.task))
+            // The receiving window owns the opening now.
+            taskOpening = nil
             return
         }
         var location: TaskLocationObservation?
@@ -626,6 +630,7 @@ final class WorkModel {
     private func openTaskDestination(wave: WaveRoadmap?, task: RoadmapTask, preservingOpening: Bool) {
         if let openRepository, repoPath?.normalizedFilePath != task.task.repo.normalizedFilePath {
             openRepository(task.task.repo, .task(TaskLink(issue: task.task.identifier, repo: task.task.repo)))
+            taskOpening = nil
             return
         }
         setRepoPath(task.task.repo, preservingOpening: preservingOpening)
@@ -653,18 +658,23 @@ final class WorkModel {
             return
         }
         let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo, conversation: true)
-        let key = workspaceKey(for: .task(id: id), repository: workspaceRepository ?? "")
-        let retainedConversation = workspaceRegistry?.retained(key)?.multiplexer.layout.allPanes.contains {
-            $0.sessionId != nil
-        } ?? false
-        if !retainedConversation, taskOpening?.status == .opening,
-           taskLinkExpectedID == found.task.id, taskLinkConversation { return }
+        let retainedConversation = showsTaskConversation(found.task)
         Perf.agentInput("workspace_selected", task: id, detail: "retained=\(retainedConversation)")
         openTaskDestination(wave: found.wave, task: found.task)
         navigation.content = .terminals
         if !retainedConversation {
             await openTaskLink(link, expectedTaskID: found.task.id)
         }
+    }
+
+    /// Whether the Task's retained workspace shows a Session, as its pane would.
+    private func showsTaskConversation(_ task: RoadmapTask) -> Bool {
+        guard let registry = workspaceRegistry, let repository = workspaceRepository, let repoPath,
+              repoPath.normalizedFilePath == task.task.repo.normalizedFilePath,
+              let workspace = registry.retained(workspaceKey(for: .task(id: task.id), repository: repository))
+        else { return false }
+        let held = Set(registry.sessionStore(repository: repository, repoPath: repoPath, query: query).sessions.map(\.id))
+        return workspace.showsConversation(held: held)
     }
 
     /// Attach a Task's primary conversation in its retained workspace without
@@ -1101,8 +1111,6 @@ final class WorkModel {
     @ObservationIgnored private var workObservation: WorkObservation?
     private var workMachine: String?
     private var workDataDirectory: String?
-    /// The preview copy the local lf reads, when this build carries unreleased drafts.
-    private(set) var previewCopy: String?
     @ObservationIgnored private var workOpened = ContinuousClock.now
     @ObservationIgnored private var nextRequestId = 0
     @ObservationIgnored private var sentScope: WorkScope?
@@ -1314,14 +1322,8 @@ final class WorkModel {
                 guard !Task.isCancelled else { await opened.cancel(); return }
                 // A new reader numbers its frames from one and reads the store
                 // as it is now, which includes every local write so far.
-                // The store is the data identity: a preview copy, else the shared one.
-                let dataDirectory = opened.copy ?? ""
-                if let workDataDirectory, workDataDirectory != dataDirectory {
-                    dropMachineContent()
-                    finishCheckpoints(through: .max, reason: "Machine changed before the update was confirmed")
-                }
-                workDataDirectory = dataDirectory
-                if previewCopy != opened.copy { previewCopy = opened.copy }
+                // Every reader reads the Machine's one store.
+                workDataDirectory = ""
                 workObservation = opened
                 workOpened = .now
                 appliedSequence = [:]

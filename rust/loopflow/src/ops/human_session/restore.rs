@@ -52,7 +52,7 @@ async fn interrupted(store: &SharedStore) -> Result<Vec<crate::session::LfSessio
             Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
             None => false,
         };
-        if history && crate::data_clone::session_unavailable(&session.id)?.is_none() {
+        if history {
             sessions.push(session);
         }
     }

@@ -269,17 +269,7 @@ enum LocalWorkObservation {
         process: @escaping @Sendable ([String], String?) throws -> Process,
         configurationChanged: @escaping @Sendable () throws -> Bool
     ) throws -> WorkObservation {
-        // Which store this build reads: `lf --version` names a preview copy.
-        let version = try process(["--version"], nil)
-        let output = Pipe()
-        version.standardInput = FileHandle.nullDevice
-        version.standardOutput = output
-        version.standardError = FileHandle.nullDevice
-        try version.run()
-        let printed = output.fileHandleForReading.readDataToEndOfFile()
-        version.waitUntilExit()
-        let copy = WorkObservation.copy(fromVersion: String(decoding: printed, as: UTF8.self))
-        return try WorkWatches.observe(copy: copy) { args, cwd in
+        try WorkWatches.observe { args, cwd in
             let reader = try LocalLineObservation<Data>.start(
                 name: args.prefix(2).joined(separator: " "), process: try process(args, cwd),
                 frameLimit: 64 * 1024 * 1024, silence: nil,

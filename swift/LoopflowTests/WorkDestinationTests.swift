@@ -310,6 +310,59 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.status == .opening) // Native mount/input is separate.
     }
 
+    @Test("Open conversation opens whatever the pane names, held or not, even while native mount is pending")
+    func openConversationReplacesAPaneTheStoreDoesNotHold() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        var record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        var wire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
+        wire["actions"] = sessionActionFixture(state: "closed")
+        record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": "machine-local", "worktree": "/src/task", "task_id": task.runtime?.workId ?? task.id
+        ]))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let prepares = DestinationReadCounter()
+        let query = RegistryQuery { args, _ in
+            if args.contains("connect") { _ = await prepares.next(); return encoded }
+            if args.starts(with: ["desktop", "plan"]) { return data }
+            throw RegistryQueryError("Unexpected opening operation")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        // A saved layout restores a headless Run the window's Session inventory excludes.
+        let workspace = registry.workspace(for: model.workspaceKey(for: .task(id: task.id), repository: "repo"),
+            title: task.task.name, location: nil)
+        workspace.multiplexer.load(sessionId: "headless-run")
+
+        await model.openTaskConversation(task.id)
+        #expect(workspace.multiplexer.sessionPane?.sessionId == record.id)
+        #expect(model.taskOpening?.status == .opening)
+
+        workspace.multiplexer.load(sessionId: "headless-run")
+        await model.openTaskConversation(task.id)
+        #expect(workspace.multiplexer.sessionPane?.sessionId == record.id)
+        #expect(await prepares.next() == 3)
+    }
+
+    @Test func conversationHandedToAnotherRepositoryLeavesNoOpeningHere() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("The receiving window opens the conversation") }
+        let (model, _) = destinationModel(query: query, repoPath: "/origin")
+        var requests: [(String, LinkedWork?)] = []
+        model.openRepository = { requests.append(($0, $1)) }
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+
+        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, conversation: true),
+            expectedTaskID: task.id)
+        #expect(model.taskOpening == nil)
+        #expect(requests.last?.1 == .task(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, conversation: true)))
+    }
+
     @Test(arguments: ["valid", "updated-inventory", "unavailable-inventory", "foreign-session", "missing-task", "unavailable-plan"])
     func ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome: String) async throws {
         let data = try fixture()

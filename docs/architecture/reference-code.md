@@ -18,7 +18,7 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migration runner, durable rows, outer command receipts |
 | Provider authority | `provider_auth/`, `provider_account/` | 7,500 | Login, encrypted tokens, account homes, routes and leases |
 | Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifact switching, repository identity, subscriptions |
-| Released and draft SQL | `store/migrations/**/*.sql` | 4,900 | Immutable schema history and current draft frontier |
+| Migration SQL | `store/migrations/*.sql` | 4,900 | Immutable released batches and merged slug migrations, plus a branch's unmerged one |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | Shared DTOs/services and macOS UI |
 | External Rust/Python/Swift tests | `rust/loopflow/tests/`, `python/tests/`, `swift/LoopflowTests/` | 27,100 | Cross-module, wire, migration, CLI, and app proofs |
 
@@ -58,7 +58,7 @@ kernel locks                 live local exclusion authority
 | Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `graphs`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: usage moves only `usage`, and every other Session history row moves `sessions`. GraphProcess rows move `graphs`, a Task's graph and step `planning`, and a Session's stream reading `sessions` when availability or reported detail could change; quiet arriving is the reader's clock, not a write. Every `--watch` read compares it to decide whether to read again |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |
 
-Released migration files remain immutable. Three direct draft groups establish
+Migration files on origin/main remain immutable. Three direct draft groups establish
 the final Process, Project-status and Session schema. Current Work, links, accounts,
 routes and resumable conversations survive the cutover. Migration rehearsal uses
 a disposable copy and leaves the installed Machine unchanged.

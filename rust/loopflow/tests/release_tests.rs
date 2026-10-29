@@ -997,7 +997,7 @@ printf '# v0.10.0\n\nCycle highlights.\n' > "$LF_RELEASE_NOTES_OUTPUT"
     repo.stage_all();
     repo.commit("Early improvement");
     git(&repo, &["tag", "v0.9.1"]);
-    repo.create_file("late.txt", "closing patch improvement");
+    repo.create_file("late.txt", "late improvement");
     repo.stage_all();
     repo.commit("Late improvement");
     let original = "# v0.9.1\n\nExisting release notes.\n";
@@ -1226,13 +1226,17 @@ printf '# v%s\n\nRelease highlights.\n' "$version" > "$LF_RELEASE_NOTES_OUTPUT"
 fn prepare_minor_cycle(repo: &TestRepo, outstanding: bool) {
     repo.create_file(".gitignore", ".lf/releases/\n");
     repo.create_file(
+        ".lf/config.yaml",
+        "release:\n  targets:\n    default:\n      prepare:\n      - printf {version} > prepared.txt\n",
+    );
+    repo.create_file(
         "Cargo.toml",
         "[package]\nname = \"demo\"\nversion = \"0.9.0\"\n",
     );
     repo.stage_all();
     repo.commit("Start cycle");
     git(repo, &["tag", "v0.9.0"]);
-    repo.create_file("feature.txt", "same product in patch and minor\n");
+    repo.create_file("feature.txt", "shipped in a patch\n");
     repo.create_file(
         "Cargo.toml",
         "[package]\nname = \"demo\"\nversion = \"0.9.1\"\n",
@@ -1241,9 +1245,13 @@ fn prepare_minor_cycle(repo: &TestRepo, outstanding: bool) {
     repo.commit("Ship cycle improvement");
     git(repo, &["tag", "v0.9.1"]);
     if outstanding {
-        repo.create_file("fix.txt", "closing patch fix\n");
+        repo.create_file(
+            "migrations/wave_setup.sql",
+            "CREATE TABLE wave_setup (id TEXT);\n",
+        );
+        repo.create_file("fix.txt", "merged after the last patch\n");
         repo.stage_all();
-        repo.commit("Closing fix");
+        repo.commit("Merge after the last patch");
     }
     git(repo, &["push", "origin", "main", "--tags"]);
 }
@@ -1302,7 +1310,6 @@ fn first_release_cli_needs_no_baseline_and_retries_without_another_release() {
             .contains("Release highlights.")
     );
     assert_eq!(git_output_bare(&repo, &["tag", "--list"]), "v0.1.0");
-    assert!(!repo.path().join(".lf/releases/minor-default.json").exists());
 
     let output = run();
     assert!(
@@ -1318,7 +1325,7 @@ fn first_release_cli_needs_no_baseline_and_retries_without_another_release() {
 }
 
 #[test]
-fn minor_release_closes_outstanding_changes_with_a_patch() {
+fn minor_release_cuts_from_main_past_the_last_patch() {
     let repo = TestRepo::new();
     prepare_minor_cycle(&repo, true);
     let state = tempfile::tempdir().unwrap();
@@ -1331,33 +1338,33 @@ fn minor_release_closes_outstanding_changes_with_a_patch() {
     assert_eq!(receipt.tag, "v0.10.0");
     assert_eq!(
         git_output(&repo, &["tag", "--list"]),
-        "v0.10.0\nv0.9.0\nv0.9.1\nv0.9.2"
+        "v0.10.0\nv0.9.0\nv0.9.1"
     );
-    assert_eq!(
-        git_output(
-            &repo,
-            &["diff", "v0.9.2", "v0.10.0", "--", "feature.txt", "fix.txt"]
-        ),
-        ""
+    assert!(git_output(&repo, &["show", "v0.10.0:fix.txt"]).contains("merged after"));
+    assert!(
+        git_output(&repo, &["show", "v0.10.0:migrations/wave_setup.sql"]).contains("wave_setup")
     );
     assert!(git_output(&repo, &["show", "v0.10.0:Cargo.toml"]).contains("0.10.0"));
-    let patch: serde_json::Value =
-        serde_json::from_slice(&fs::read(state.path().join("context-0.9.2.json")).unwrap())
-            .unwrap();
+    assert_eq!(
+        git_output(&repo, &["show", "v0.10.0:prepared.txt"]),
+        "0.10.0"
+    );
     let minor: serde_json::Value =
         serde_json::from_slice(&fs::read(state.path().join("context-0.10.0.json")).unwrap())
             .unwrap();
-    assert_eq!(patch["prev_tag"], "v0.9.1");
     assert_eq!(minor["prev_tag"], "v0.9.0");
-    assert!(minor["commits"]
+    let titles: Vec<_> = minor["commits"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|commit| commit["title"] == "Ship cycle improvement"));
+        .map(|commit| commit["title"].as_str().unwrap())
+        .collect();
+    assert!(titles.contains(&"Ship cycle improvement"), "{titles:?}");
+    assert!(titles.contains(&"Merge after the last patch"), "{titles:?}");
 }
 
 #[test]
-fn minor_release_reuses_the_latest_patch_without_an_empty_patch() {
+fn minor_release_right_after_a_patch_covers_the_cycle() {
     let repo = TestRepo::new();
     prepare_minor_cycle(&repo, false);
     let state = tempfile::tempdir().unwrap();
@@ -1372,10 +1379,6 @@ fn minor_release_reuses_the_latest_patch_without_an_empty_patch() {
         git_output(&repo, &["tag", "--list"]),
         "v0.10.0\nv0.9.0\nv0.9.1"
     );
-    assert_eq!(
-        git_output(&repo, &["diff", "v0.9.1", "v0.10.0", "--", "feature.txt"]),
-        ""
-    );
     assert!(matches!(
         release_run(repo.path(), "minor", None, &NullProgress).unwrap(),
         ReleaseRunOutcome::NoChanges { .. }
@@ -1383,7 +1386,7 @@ fn minor_release_reuses_the_latest_patch_without_an_empty_patch() {
 }
 
 #[test]
-fn interrupted_minor_reuses_its_published_patch() {
+fn interrupted_minor_retries_without_a_patch() {
     let repo = TestRepo::new();
     prepare_minor_cycle(&repo, true);
     let state = tempfile::tempdir().unwrap();
@@ -1395,75 +1398,30 @@ fn interrupted_minor_reuses_its_published_patch() {
         error.to_string().contains("interrupted minor notes"),
         "{error}"
     );
-    let patch = git_output(&repo, &["rev-parse", "v0.9.2"]);
     assert_eq!(git_output(&repo, &["tag", "--list", "v0.10.0"]), "");
     fs::remove_file(state.path().join("interrupt")).unwrap();
     let result = release_run(repo.path(), "minor", None, &NullProgress).unwrap();
     let ReleaseRunOutcome::Released(receipt) = result else {
-        panic!("expected resumed pair to finish")
+        panic!("expected the retried minor to finish")
     };
     assert_eq!(receipt.tag, "v0.10.0");
-    assert_eq!(git_output(&repo, &["rev-parse", "v0.9.2"]), patch);
-    assert_eq!(git_output(&repo, &["tag", "--list", "v0.9.3"]), "");
-
-    // Publication succeeded but the controller died before recording completion.
-    let receipt_path = repo.path().join(".lf/releases/minor-default.json");
-    let mut receipt: serde_json::Value =
-        serde_json::from_slice(&fs::read(&receipt_path).unwrap()).unwrap();
-    receipt["completed"] = false.into();
-    fs::write(receipt_path, serde_json::to_vec(&receipt).unwrap()).unwrap();
-    let result = release_run(repo.path(), "minor", None, &NullProgress).unwrap();
-    let ReleaseRunOutcome::Resumed(receipt) = result else {
-        panic!("expected the already-published minor to resume")
-    };
-    assert_eq!(receipt.tag, "v0.10.0");
-    assert_eq!(git_output(&repo, &["tag", "--list", "v0.11.0"]), "");
+    assert_eq!(git_output(&repo, &["tag", "--list", "v0.9.2"]), "");
 }
 
 #[test]
-fn interrupted_minor_adopts_a_completed_successor_patch() {
-    let repo = TestRepo::new();
-    prepare_minor_cycle(&repo, false);
-    let state = tempfile::tempdir().unwrap();
-    let receipt_path = repo.path().join(".lf/releases/minor-default.json");
-    fs::create_dir_all(receipt_path.parent().unwrap()).unwrap();
-    fs::write(
-        &receipt_path,
-        r#"{
-        "version":"0.10.0", "patch_version":"0.9.0", "notes_base":"v0.9.0",
-        "patch_commit":null, "prepared_tree":null, "completed":false
-    }"#,
-    )
-    .unwrap();
-    let (gh, lf) = release_cycle_scripts(state.path());
-    let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
-
-    let result = release_run(repo.path(), "minor", None, &NullProgress).unwrap();
-    let ReleaseRunOutcome::Released(receipt) = result else {
-        panic!("expected minor from the completed successor patch")
-    };
-    assert_eq!(receipt.tag, "v0.10.0");
-    let pair: serde_json::Value = serde_json::from_slice(&fs::read(receipt_path).unwrap()).unwrap();
-    assert_eq!(pair["patch_version"], "0.9.1");
-    assert_eq!(
-        pair["patch_commit"],
-        git_output(&repo, &["rev-parse", "v0.9.1"])
-    );
-    assert!(git_output(&repo, &["tag", "--list", "v0.9.2"]).is_empty());
-}
-
-#[test]
-fn minor_release_does_not_tag_a_merge_that_changed_its_patch_snapshot() {
+fn minor_release_ships_fixes_merged_with_its_pr() {
     let repo = TestRepo::new();
     prepare_minor_cycle(&repo, false);
     let state = tempfile::tempdir().unwrap();
     fs::write(state.path().join("advance-main"), "").unwrap();
     let (gh, lf) = release_cycle_scripts(state.path());
     let _env = EnvGuard::new(&[("gh", &gh), ("lf", &lf)]);
-    let error = release_run(repo.path(), "minor", None, &NullProgress).unwrap_err();
-    assert!(error.to_string().contains("late.txt"), "{error}");
-    assert_eq!(git_output(&repo, &["tag", "--list", "v0.10.0"]), "");
-    assert_eq!(git_output_bare(&repo, &["tag", "--list", "v0.10.0"]), "");
+    let result = release_run(repo.path(), "minor", None, &NullProgress).unwrap();
+    let ReleaseRunOutcome::Released(receipt) = result else {
+        panic!("expected minor release")
+    };
+    assert_eq!(receipt.tag, "v0.10.0");
+    assert!(git_output_bare(&repo, &["show", "v0.10.0:late.txt"]).contains("late feature"));
 }
 
 #[test]
@@ -1575,116 +1533,6 @@ fn release_run_builds_fixes_merged_after_the_release_pr() {
 }
 
 #[test]
-fn release_run_replaces_a_merged_candidate_with_unprepared_migrations() {
-    prove_unprepared_candidate_recovery(false, false, "0.9.2");
-}
-
-#[test]
-fn release_run_preserves_an_invalid_tag_without_skipping_its_version() {
-    prove_unprepared_candidate_recovery(true, false, "0.9.2");
-}
-
-#[test]
-fn release_run_preserves_partially_published_invalid_candidates() {
-    prove_unprepared_candidate_recovery(true, true, "0.9.2");
-}
-
-#[test]
-fn patch_release_repairs_the_pending_version_after_late_migrations() {
-    prove_unprepared_candidate_recovery(false, false, "patch");
-}
-
-fn prove_unprepared_candidate_recovery(
-    tagged: bool,
-    partially_published: bool,
-    version_input: &str,
-) {
-    let repo = TestRepo::new();
-    let state = tempfile::tempdir().unwrap();
-    let fixture = configure_candidate_publisher(&repo, state.path());
-    let publisher = repo.path().join("publisher.sh");
-    let publications = if partially_published {
-        r#"["crates.io"]"#
-    } else {
-        "[]"
-    };
-    let inspection = format!(
-        r#"inspect)
-    if git cat-file -e "$3:pending.sql" 2>/dev/null; then
-      echo '{{"preparation_required":["pending.sql"],"publications":{publications}}}'
-    else
-      echo '{{"preparation_required":[],"publications":[]}}'
-    fi
-    exit 0 ;;"#
-    );
-    let script = fs::read_to_string(&publisher).unwrap().replace(
-        r#"inspect) echo '{"preparation_required":[],"publications":[]}'; exit 0 ;;"#,
-        &inspection,
-    );
-    fs::write(&publisher, script).unwrap();
-    fs::write(repo.path().join("pending.sql"), "SELECT 1;\n").unwrap();
-    git(&repo, &["add", "."]);
-    git(
-        &repo,
-        &[
-            "commit",
-            "-m",
-            "Merge a migration after release preparation",
-        ],
-    );
-    let invalid = git_output(&repo, &["rev-parse", "HEAD"]);
-    if tagged {
-        git(&repo, &["tag", "v0.9.2"]);
-        git(&repo, &["push", "origin", "v0.9.2"]);
-    }
-    fs::rename(
-        repo.path().join("pending.sql"),
-        repo.path().join("canonical.sql"),
-    )
-    .unwrap();
-    git(&repo, &["add", "."]);
-    git(
-        &repo,
-        &["commit", "-m", "Prepare the corrected closing patch"],
-    );
-    git(&repo, &["push", "origin", "HEAD"]);
-    let corrected = git_output(&repo, &["rev-parse", "HEAD"]);
-    let gh = fixture.gh_script
-        .replace(r#"head="$(git rev-parse HEAD)""#, &format!(
-            "head=\"$(git rev-parse HEAD)\"\ncase \"$*\" in *release-default-v0-9-2-retry-*) ;; *release-default-v0-9-2*) head={invalid} ;; esac"
-        ));
-    let _env = EnvGuard::new(&[("gh", &gh)]);
-    let outcome = release_run(repo.path(), version_input, None, &NullProgress);
-    if partially_published {
-        assert!(outcome.unwrap_err().to_string().contains("crates.io"));
-        assert!(git_output(&repo, &["tag", "--list", "v0.9.3"]).is_empty());
-    } else if tagged {
-        assert!(outcome
-            .unwrap_err()
-            .to_string()
-            .contains("recover that version"));
-        assert!(git_output(&repo, &["tag", "--list", "v0.9.3"]).is_empty());
-    } else {
-        let ReleaseRunOutcome::Released(receipt) = outcome.unwrap() else {
-            panic!("expected the corrected candidate to publish")
-        };
-        assert_eq!(receipt.tag, "v0.9.2");
-        assert_eq!(receipt.commit, corrected);
-        assert_eq!(
-            git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
-            corrected
-        );
-    }
-    if tagged {
-        assert_eq!(
-            git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
-            invalid
-        );
-    }
-    assert!(git_output(&repo, &["tag", "--list", "v0.9.3"]).is_empty());
-}
-
-#[test]
 fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
     let repo = TestRepo::new();
     prepare_candidate_release_repo(&repo);
@@ -1698,7 +1546,6 @@ fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
-  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     if git ls-remote --tags origin refs/tags/v0.9.2 | grep -q .; then
       echo 'version tag existed before publisher preparation' >&2
@@ -2834,13 +2681,13 @@ fn release_run_fails_closed_when_the_publisher_role_is_missing() {
 
 #[test]
 fn release_run_refuses_to_skip_an_incomplete_tag() {
-    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script()), ("publisher", "#!/bin/sh\n[ \"$1\" = check ] && exit 0\n[ \"$1\" = inspect ] || exit 91\necho '{\"preparation_required\":[],\"publications\":null}'\n")]);
+    let _env = EnvGuard::new(&[("gh", write_gh_incomplete_release_script())]);
 
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"-c\", \"echo '{\\\"preparation_required\\\":[],\\\"publications\\\":[]}'\"]\n",
+        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
     )
     .expect("write config");
     git(&repo, &["tag", "v0.9.1"]);
@@ -2853,13 +2700,13 @@ fn release_run_refuses_to_skip_an_incomplete_tag() {
 
 #[test]
 fn release_run_keeps_a_failed_tag_pending_without_skipping_its_version() {
-    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script()), ("publisher", "#!/bin/sh\n[ \"$1\" = check ] && exit 0\n[ \"$1\" = inspect ] || exit 91\necho '{\"preparation_required\":[],\"publications\":null}'\n")]);
+    let _env = EnvGuard::new(&[("gh", write_gh_failed_release_script())]);
 
     let repo = TestRepo::new();
     fs::create_dir_all(repo.path().join(".lf")).expect("create config dir");
     fs::write(
         repo.path().join(".lf/config.yaml"),
-        "release:\n  targets:\n    default:\n      publisher: [\"sh\", \"-c\", \"echo '{\\\"preparation_required\\\":[],\\\"publications\\\":[]}'\"]\n",
+        "release:\n  targets:\n    default:\n      publisher: [\"true\"]\n",
     )
     .expect("write config");
     git(&repo, &["tag", "v0.9.1"]);
@@ -2888,7 +2735,6 @@ fn active_tagged_publisher_blocks_concurrent_cleanup_until_exit() {
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
-  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -3069,7 +2915,6 @@ fn configure_candidate_publisher(
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
-  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do
@@ -3207,7 +3052,6 @@ fn configure_same_tag_publisher(repo: &TestRepo, state: &std::path::Path) -> Str
             r#"#!/bin/sh
 case "$1" in
   check) exit 0 ;;
-  inspect) echo '{{"preparation_required":[],"publications":[]}}'; exit 0 ;;
   prepare)
     shift
     while [ "$#" -gt 0 ]; do

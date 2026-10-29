@@ -172,6 +172,7 @@ fn installation_uses_candidate_authority_from_any_checkout() {
         "install-task",
         &repo.head_sha(),
     );
+    let target = home.path().join("bin/lf");
     for (cwd, declaration) in [
         (repo.path(), None),
         (home.path(), Some(format!("task:{}", task.task.id))),
@@ -180,18 +181,19 @@ fn installation_uses_candidate_authority_from_any_checkout() {
         let mut cmd = command(
             home.path(),
             cwd,
-            &["self", "install", "promote", "--cli-target", "/unused/lf"],
+            &[
+                "self",
+                "install",
+                "promote",
+                "--cli-target",
+                target.to_str().unwrap(),
+            ],
         );
         if let Some(value) = declaration {
             cmd.env("LF_AS", value);
         }
-        let output = cmd.output().unwrap();
-        assert!(!output.status.success());
-        let error = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            error.contains("only a published release may advance"),
-            "{error}"
-        );
+        success(cmd.output().unwrap());
+        assert!(fs::symlink_metadata(&target).unwrap().is_symlink());
     }
 }
 
@@ -217,14 +219,12 @@ fn installation_reaches_candidate_verdict_with_an_unreadable_task_registry() {
     )
     .output()
     .unwrap();
-    assert!(!output.status.success());
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("every target is unchanged"), "{error}");
+    success(output);
     assert_eq!(
         fs::read(database).unwrap(),
         b"not a compatible Task registry"
     );
-    assert!(!target.exists());
+    assert!(fs::symlink_metadata(&target).unwrap().is_symlink());
 }
 
 #[test]

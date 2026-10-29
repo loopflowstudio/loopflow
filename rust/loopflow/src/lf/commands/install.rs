@@ -33,11 +33,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::build_info::{self, MigrationAuthority};
+use crate::build_info;
 use crate::store::migrations;
 
 mod published;
-pub use published::{latest, schedule};
+pub use published::{latest, main_build, schedule};
 
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
@@ -45,10 +45,9 @@ pub use published::{latest, schedule};
 pub struct CandidateIdentity {
     pub source_revision: String,
     pub source_identity: String,
-    pub authority: MigrationAuthority,
     pub package_version: String,
     pub build_version: Option<String>,
-    /// An unreleased build's provenance, e.g. `hotfix e9b2c2eac on v0.14.16`.
+    /// An unreleased build's provenance, e.g. `build e9b2c2eac on v0.14.16`.
     pub build_label: Option<String>,
     pub latest_known_migration: String,
 }
@@ -58,7 +57,6 @@ impl CandidateIdentity {
         Self {
             source_revision: build_info::source_revision().to_string(),
             source_identity: build_info::source_identity(),
-            authority: build_info::migration_authority(),
             package_version: env!("CARGO_PKG_VERSION").to_string(),
             build_version: Some(build_info::BUILD_VERSION.to_string()),
             build_label: build_info::label().map(str::to_string),
@@ -84,15 +82,18 @@ pub enum Compatibility {
     /// migration: it recognizes the store exactly, with nothing to apply.
     Exact { frontier: String },
     /// The candidate knows migrations the store has not applied. Safe to
-    /// advance only for a published authority.
+    /// advance when origin/main carries every one of them.
     AheadPending {
         applied_frontier: String,
         latest_known: String,
-        /// The reader floor the pending migrations raise the store to; lf below
-        /// it can no longer open the store. `None` when no reader is locked out.
+        /// The newest pending migration older builds cannot read past; builds
+        /// that do not know it can no longer open the store. `None` when no
+        /// reader is locked out.
         raised_reader_floor: Option<String>,
+        /// Pending migrations origin/main has not added.
+        unmerged: Vec<String>,
     },
-    /// A newer release migrated the store, and its reader floor still admits the
+    /// A newer build migrated the store, and its reader floor still admits the
     /// candidate. Selecting it applies nothing, so rollback stays possible.
     Behind {
         applied_frontier: String,
@@ -175,30 +176,18 @@ pub struct PromotionArtifacts<'a> {
     pub legacy_app_target: Option<&'a Path>,
 }
 
-/// The pure promotion decision. Given the candidate's authority, its
-/// compatibility with the store, decide whether the global command may be
-/// replaced. Pure over its inputs — no I/O — so every branch is unit-tested
-/// below.
+/// The pure promotion decision. Given the candidate's compatibility with the
+/// store, decide whether the global command may be replaced. Pure over its
+/// inputs — no I/O — so every branch is unit-tested below.
 ///
-/// Authority matters only where the store would change. An unreleased build
-/// without drafts that knows the store's frontier exactly migrates nothing, so
-/// it promotes as a hotfix; changing or passing the frontier stays published-only.
+/// Trust comes from where the build came from: any build may select a store it
+/// reads, and advances it only with migrations origin/main carries.
 pub fn decide(
-    authority: MigrationAuthority,
-    pending_migration_drafts: &[&str],
     compatibility: &Compatibility,
     executable_compatibility: &ExecutableCompatibility,
 ) -> Verdict {
     let mut reasons = Vec::new();
     let mut migrate = false;
-
-    if !pending_migration_drafts.is_empty() {
-        reasons.push(format!(
-            "candidate build does not embed its complete schema; pending draft migrations: {}; \
-             cut a release before promoting it",
-            pending_migration_drafts.join(", ")
-        ));
-    }
 
     match compatibility {
         Compatibility::Unreadable { reason } => reasons.push(format!(
@@ -207,26 +196,14 @@ pub fn decide(
         Compatibility::Incompatible { reason } => reasons.push(format!(
             "candidate cannot operate the shared store: {reason}"
         )),
-        Compatibility::Exact { .. } => {}
-        Compatibility::Behind {
-            applied_frontier, ..
-        } => {
-            if authority == MigrationAuthority::ValidationOnly {
-                reasons.push(format!(
-                    "a newer release migrated the store to {applied_frontier}; an unreleased build promotes only onto the frontier it knows exactly"
-                ));
-            }
+        Compatibility::Exact { .. } | Compatibility::Behind { .. } => {}
+        Compatibility::AheadPending { unmerged, .. } if !unmerged.is_empty() => {
+            reasons.push(format!(
+                "candidate carries migrations origin/main has not added ({}); the shared store applies only merged migrations — install a main build with `lf self install --main`",
+                unmerged.join(", ")
+            ))
         }
-        Compatibility::AheadPending {
-            applied_frontier,
-            latest_known,
-            ..
-        } => match authority {
-            MigrationAuthority::Published => migrate = true,
-            MigrationAuthority::ValidationOnly => reasons.push(format!(
-                "only a published release may advance the store from {applied_frontier} to {latest_known}; an unreleased build promotes only onto the frontier it knows exactly"
-            )),
-        },
+        Compatibility::AheadPending { .. } => migrate = true,
     }
 
     match executable_compatibility {
@@ -298,8 +275,10 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
             }
         }
     }
-    match migrations::raised_reader_floor(conn) {
-        Ok(raised_reader_floor) => {
+    match migrations::raised_reader_floor(conn).and_then(|raised_reader_floor| {
+        Ok((raised_reader_floor, migrations::pending_unmerged(conn)?))
+    }) {
+        Ok((raised_reader_floor, unmerged)) => {
             let latest_known = migrations::latest_known_version();
             match frontier {
                 Some(frontier) if frontier == latest_known => Compatibility::Exact { frontier },
@@ -307,14 +286,15 @@ fn classify_compatibility(conn: &rusqlite::Connection) -> Compatibility {
                     applied_frontier,
                     latest_known,
                     raised_reader_floor,
+                    unmerged,
                 },
-                // `validate_sqlite` refuses an empty store ("a validation-only
-                // lf cannot initialize the release database"), so `Ok` with no
+                // `validate_sqlite` refuses an empty store, so `Ok` with no
                 // frontier is unreachable in practice; treat it as ahead-of-empty.
                 None => Compatibility::AheadPending {
                     applied_frontier: "(uninitialized)".to_string(),
                     latest_known,
                     raised_reader_floor: None,
+                    unmerged,
                 },
             }
         }
@@ -332,6 +312,10 @@ fn read_store_evidence(store_path: &Path) -> Compatibility {
             applied_frontier: "(uninitialized)".to_string(),
             latest_known: migrations::latest_known_version(),
             raised_reader_floor: None,
+            unmerged: migrations::unmerged_migrations()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
         };
     }
     let conn = match rusqlite::Connection::open_with_flags(
@@ -519,13 +503,7 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
     let database_path = store_path.display().to_string();
     let compatibility = read_store_evidence(store_path);
     let executable_compatibility = _read_executable_compatibility(store_path, &compatibility);
-    let pending_migration_drafts = build_info::pending_migration_drafts();
-    let verdict = decide(
-        candidate.authority,
-        &pending_migration_drafts,
-        &compatibility,
-        &executable_compatibility,
-    );
+    let verdict = decide(&compatibility, &executable_compatibility);
     PromotionPreview {
         candidate,
         database_path,
@@ -538,9 +516,8 @@ pub fn build_preview(store_path: &Path) -> PromotionPreview {
 fn render_human(preview: &PromotionPreview) {
     let candidate = &preview.candidate;
     println!(
-        "Promotion preflight (candidate {}, {})",
-        candidate.display_version(),
-        serde_authority(candidate.authority),
+        "Promotion preflight (candidate {})",
+        candidate.display_version()
     );
     println!("  shared store   {}", preview.database_path);
     println!(
@@ -555,12 +532,16 @@ fn render_human(preview: &PromotionPreview) {
             applied_frontier,
             latest_known,
             raised_reader_floor,
+            unmerged,
         } => {
             println!(
                 "  store frontier {applied_frontier}; candidate is ahead through {latest_known}"
             );
             if let Some(floor) = raised_reader_floor {
-                println!("  lf < {floor} can no longer open the store");
+                println!("  lf builds without {floor} can no longer open the store");
+            }
+            if !unmerged.is_empty() {
+                println!("  unmerged       {}", unmerged.join(", "));
             }
         }
         Compatibility::Behind {
@@ -611,13 +592,6 @@ fn render_human(preview: &PromotionPreview) {
     }
 }
 
-fn serde_authority(authority: MigrationAuthority) -> &'static str {
-    match authority {
-        MigrationAuthority::Published => "published",
-        MigrationAuthority::ValidationOnly => "validation-only",
-    }
-}
-
 /// Validate through a read-only preview. The CLI may append its Process to an
 /// existing compatible process ledger, but observation never initializes or
 /// migrates it. A frontier-incompatible candidate still reaches this refusal.
@@ -648,7 +622,6 @@ mod compatibility_tests {
         build_preview, decide, promotion_preview_json, read_store_evidence, store_is_exact,
         Compatibility, ExecutableCompatibility, Verdict,
     };
-    use crate::build_info::MigrationAuthority::{Published, ValidationOnly};
 
     fn executable() -> ExecutableCompatibility {
         ExecutableCompatibility::Compatible { references: 0 }
@@ -668,43 +641,34 @@ mod compatibility_tests {
     }
 
     #[test]
-    fn published_candidate_advances_only_a_known_pending_frontier() {
-        let compatibility = Compatibility::AheadPending {
+    fn a_candidate_advances_the_store_only_with_merged_migrations() {
+        let pending = |unmerged: &[&str]| Compatibility::AheadPending {
             applied_frontier: "older".to_string(),
             latest_known: "current".to_string(),
             raised_reader_floor: None,
+            unmerged: unmerged.iter().map(|name| name.to_string()).collect(),
         };
         assert_eq!(
-            decide(Published, &[], &compatibility, &executable()),
+            decide(&pending(&[]), &executable()),
             Verdict::PromoteAndMigrate
         );
         assert!(matches!(
-            decide(ValidationOnly, &[], &compatibility, &executable()),
-            Verdict::Reject { .. }
+            decide(&pending(&["wave_colour"]), &executable()),
+            Verdict::Reject { reasons } if reasons.len() == 1 && reasons[0].contains("wave_colour")
         ));
     }
 
     #[test]
-    fn an_unreleased_build_without_drafts_promotes_onto_its_exact_frontier() {
+    fn any_build_promotes_onto_a_store_it_reads() {
         let exact = Compatibility::Exact {
             frontier: "current".to_string(),
         };
-        assert_eq!(
-            decide(ValidationOnly, &[], &exact, &executable()),
-            Verdict::Promote
-        );
-        assert!(matches!(
-            decide(ValidationOnly, &["0.14.018_draft"], &exact, &executable()),
-            Verdict::Reject { reasons } if reasons.len() == 1 && reasons[0].contains("0.14.018_draft")
-        ));
+        assert_eq!(decide(&exact, &executable()), Verdict::Promote);
         let behind = Compatibility::Behind {
             applied_frontier: "newer".to_string(),
             reader_floor: "older".to_string(),
         };
-        assert!(matches!(
-            decide(ValidationOnly, &[], &behind, &executable()),
-            Verdict::Reject { reasons } if reasons[0].contains("knows exactly")
-        ));
+        assert_eq!(decide(&behind, &executable()), Verdict::Promote);
     }
 
     #[test]
@@ -791,7 +755,7 @@ mod compatibility_tests {
         let additive = directory.path().join("additive.db");
         let connection = rusqlite::Connection::open(&additive).unwrap();
         crate::store::migrations::apply_sqlite(&connection).unwrap();
-        crate::store::migrations::apply_newer_release(
+        crate::store::migrations::apply_newer_migration(
             &connection,
             "ALTER TABLE waves ADD COLUMN colour TEXT;",
             true,
@@ -803,15 +767,12 @@ mod compatibility_tests {
             "{compatibility:?}"
         );
         let executable = super::_read_executable_compatibility(&additive, &compatibility);
-        assert_eq!(
-            decide(Published, &[], &compatibility, &executable),
-            Verdict::Promote
-        );
+        assert_eq!(decide(&compatibility, &executable), Verdict::Promote);
 
         let breaking = directory.path().join("breaking.db");
         let connection = rusqlite::Connection::open(&breaking).unwrap();
         crate::store::migrations::apply_sqlite(&connection).unwrap();
-        let release = crate::store::migrations::apply_newer_release(
+        let newer = crate::store::migrations::apply_newer_migration(
             &connection,
             "ALTER TABLE waves ADD COLUMN colour TEXT;",
             false,
@@ -820,7 +781,7 @@ mod compatibility_tests {
         assert!(matches!(
             read_store_evidence(&breaking),
             Compatibility::Incompatible { reason }
-                if reason.contains(&format!("this store needs lf {release} or newer (it has "))
+                if reason.contains(&format!("this store needs an lf that knows {newer} (it has "))
         ));
     }
 
@@ -1854,11 +1815,6 @@ fn bootstrap_published_install(
         .ok_or_else(|| anyhow!("the published CLI fallback is missing; {repair}"))?;
     let preflight = read_binary_preflight(&cli)
         .with_context(|| format!("validate published CLI fallback; {repair}"))?;
-    if preflight.candidate.authority != MigrationAuthority::Published {
-        return Err(anyhow!(
-            "the installed fallback is not a published build; {repair}"
-        ));
-    }
     validate_rollback_verdict(&preflight.verdict).with_context(|| {
         format!("the published fallback does not recognize its store; {repair}")
     })?;
@@ -2166,12 +2122,6 @@ pub fn advance_switch(switch_id: &str) -> Result<()> {
             return Err(anyhow!("development installations are retired; install a published release with `lf install`"));
         }
         crate::installation::InstallSource::Published => {
-            if candidate.authority != MigrationAuthority::Published {
-                return Err(anyhow!(
-                    "install switch {} published target lacks published candidate authority",
-                    receipt.id
-                ));
-            }
             crate::store::sqlite::SqliteStore::open_as_promotion_boundary(&receipt.target.store)
                 .map_err(|error| anyhow!("advance reliable published store: {error}"))?;
         }

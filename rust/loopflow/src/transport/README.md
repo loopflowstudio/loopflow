@@ -25,12 +25,15 @@ interrupted turn is flagged, not replayed. It reports each Session it resumes or
 skips. Desktop runs it at launch.
 
 A Session nobody views ends after `session.end_detached_after` (default `24h`,
-`off` disables it), counted from when its last viewer left. Owners from builds
-that never recorded that time end 48 hours after they started. A viewer, a turn
-in progress, or a Graph step keeps its owner running; headless Runs are never
-ended. Every owner judges all owners on the Machine every few minutes and ends
-one by signaling it, which stops its agent and records its exit. `lf resume`
-reopens the conversation from provider history; `lf resume --all` skips it.
+`off` disables it), counted from when its last viewer left. A Session whose lf
+executable is removed or replaced (a deleted worktree, a relinked build, a rebuilt
+Dev.app) ends within seconds, viewed or not, and logs the path to `logs/lf.log`;
+an attached viewer prints why and the `lf resume <session>` that reopens it.
+A turn in progress or a Graph step keeps its owner running until it settles; a
+viewer keeps it only from the detached limit; headless Runs are never ended. Each
+owner judges only itself and ends by signaling itself, which stops its agent and
+records its exit. `lf resume` reopens the conversation from provider history under
+whichever lf runs it; `lf resume --all` skips it.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the

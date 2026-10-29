@@ -339,7 +339,7 @@ private final class ScriptedReader {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in self.answer(request) }
-        }, cancel: { continuation.finish() }, copy: nil)
+        }, cancel: { continuation.finish() })
     }
 
     /// `lf session resume --task --prepare`: the Task gets one conversation, its primary.

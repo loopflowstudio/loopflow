@@ -7,13 +7,10 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app's main-Machine commands forward to the installed CLI.
-Select a private `LF_HOME` to use this checkout's bundled CLI with separate data.
-For populated data, use [offline data clones](../docs/data-clones.md):
-`lf clone run` selects the clone's pinned helper, confines Desktop and its embedded
-terminals, preserves source checkouts read-only, and reports copied Sessions'
-continuation limits. A bare SQLite copy provides no filesystem, provider or client
-isolation.
+The development app runs its bundled CLI on the main Machine's store, which it
+reads but never migrates. Only an install advances the store's schema:
+`lf self install --main` for a green main build, `lf install` for a release.
+With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -24,10 +21,8 @@ opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
 **Couldn't update** line. Repeated identical Session errors leave the displayed
 reading unchanged; failed per-Wave or truncated replacements keep previously readable planning,
-including its saved copy. A new error or recovery updates it.
-The bundled helper cannot migrate the installed store: schema changes require a
-published release installed through `lf install`. Delete the file to start
-from **Loading workspace…**.
+including its saved copy. A new error or recovery updates it. Delete the file to start from
+**Loading workspace…**.
 
 ```sh
 uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took
@@ -673,7 +668,7 @@ xcodebuild -project LoopflowSwift.xcodeproj \
   build
 ```
 
-The generated app target builds a validation-only `lf` helper from
+The generated app target builds an `lf` helper from
 the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app never
 borrows a different `lf` from PATH.
 
@@ -743,9 +738,7 @@ the checkpoint follows once all have, even when nothing visibly changed. Session
 commands confirm only the Sessions watch. Explicit Retry and recovery after sleep
 ask every watch to read again. If a watch ends, the window reopens all of them;
 the last readings stay on screen marked unavailable until new ones arrive. Every
-frame names its Loopflow home, and a build with unreleased migration drafts names
-its preview copy; the breadcrumbs then end with a **Preview** chip whose tooltip
-gives the path.
+frame names its Loopflow home.
 
 Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never

@@ -717,7 +717,6 @@ pub(crate) async fn open(
     resume: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
-    crate::data_clone::require_writable_session(session_id)?;
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
     let target = match find_session(store, session_id, true).await? {
         Some(target) => target,
@@ -727,7 +726,6 @@ pub(crate) async fn open(
             .ok_or_else(|| session_not_found(session_id))?,
     };
     let session = &target;
-    crate::data_clone::require_writable_session(&session.id)?;
     if let Some(refusal) = run_refusal(&store.sqlite, session)? {
         bail!(refusal);
     }
@@ -1108,15 +1106,8 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         )?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
-    let mut actions = session_actions(state);
-    let open_argv = if let Some(reason) = crate::data_clone::session_unavailable(&session.id)? {
-        for action in &mut actions {
-            action.unavailable_reason = Some(reason.clone());
-        }
-        Vec::new()
-    } else {
-        human_session_argv(&session.id)?
-    };
+    let actions = session_actions(state);
+    let open_argv = human_session_argv(&session.id)?;
     let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
         (None, _) if metadata.independent => SessionGraphMembership::Independent,
         (None, _) => SessionGraphMembership::Unknown {
@@ -1378,7 +1369,6 @@ pub(crate) fn resume_native_session(
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
     };
-    crate::data_clone::require_writable_session(&session.id)?;
     if session.artifact_key.as_ref() != Some(artifact_key) {
         bail!("Session {} changed its input before resume", session.id);
     }
@@ -1416,7 +1406,6 @@ pub(crate) fn resume_native_session(
 
 /// The `lf session resume` command that opens this Session in a new terminal.
 pub(crate) fn human_session_argv(id: &str) -> Result<Vec<String>> {
-    crate::data_clone::require_writable_session(id)?;
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry its Machine and stable entry so opening picks up the current install.

@@ -138,18 +138,10 @@ jobs:
       - name: Build the macOS process tests
         run: |
           /usr/bin/time -l cargo test -p loopflow --lib app_process_tests --no-run
-          /usr/bin/time -l cargo test -p loopflow --test integration data_clones:: --no-run
       - name: Test macOS installation process discovery
         run: uv run python scripts/test_network.py cargo test --offline -p loopflow --lib app_process_tests
-      - name: Test isolated data clones and native process identity
+      - name: Test native process identity
         run: |
-          # These fixtures install their own inherited sandbox; the outer runner
-          # permits an unsandboxed system ps and cannot be nested with this policy.
-          if [ "${{ matrix.os }}" = macos-26 ]; then
-            cargo test --offline -p loopflow --test integration data_clones:: < /dev/null
-          else
-            cargo test --offline -p loopflow --test integration data_clones::clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source < /dev/null
-          fi
           uv run python scripts/test_network.py cargo test --offline -p loopflow --lib journal::os_process::
 
   loopflow-ui-test:

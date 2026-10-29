@@ -1864,12 +1864,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("db");
         let conn = rusqlite::Connection::open(&path).unwrap();
-        crate::store::migrations::apply_before_current_draft(&conn, "saved_selections");
+        crate::store::migrations::apply_before_migration(&conn, "saved_selections");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/saved_selection_work.sql"
         ))
         .unwrap();
-        crate::store::migrations::upgrade_from_draft(&conn, "saved_selections");
+        crate::store::migrations::upgrade_from_migration(&conn, "saved_selections");
         // The idle Task has a checkout; the deferred one isn't Working.
         conn.execute(
             "UPDATE tasks SET worktree='/repo/fix-2' WHERE issue_identifier='FIX-2'",

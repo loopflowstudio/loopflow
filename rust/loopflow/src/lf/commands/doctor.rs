@@ -253,7 +253,7 @@ fn check_binary_freshness() -> Check {
                 FRESHNESS,
                 format!(
                     "running lf is built from {} and is {} merged commit(s) behind cached {UPSTREAM} (not refreshed); \
-                     latest merged changes: {commits}. Run `lf install` to install the latest published release",
+                     latest merged changes: {commits}. Run `lf install` to install the stable release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),

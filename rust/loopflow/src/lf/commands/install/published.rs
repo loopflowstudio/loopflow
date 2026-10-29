@@ -22,7 +22,7 @@ pub fn latest() -> Result<()> {
     let response = client
         .head(format!("{RELEASES}/latest"))
         .send()
-        .context("look up the latest published Loopflow release")?
+        .context("look up the stable Loopflow release")?
         .error_for_status()?;
     let tag = release_tag(response.url().path())?;
     let directory = install_dir()?;

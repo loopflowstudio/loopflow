@@ -122,7 +122,19 @@ starter.
 
 ## Remaining
 
-- Demo on a real Task (see Demo).
+- Jack's interactive demo on a real Task (see Demo). Not run headless: on a
+  real Task the `land` step merges a real PR, and no person was present to
+  approve that.
+
+Headless demo (2026-10-29, standing in for Jack): the real `lf` binary on a
+fixture repo with fake gh — `lf ship --stop`, `lf task run INF-123 landing`,
+`lf -b task run --from proof`, then a plain `lf task run`. Observed: each run
+prints `Waiting at pr land: not approved to merge`, the Task stays out of
+`shipping`, gh sees no merge or auto-merge, status JSON names the person in
+`ship_stop.by` and `started_by`, and text status shows `Not shipping: …`.
+`cargo test -p loopflow --lib task_graph_launch_tests::task_ship_stop` → 3
+pass. Decision: advance; the Session-starter rendering and Desktop lines rest
+on unit/Swift tests from implement, not on this demo.
 
 Concept review (2026-10-29, headless): no change. The one remaining mismatch is
 that global `-b` means "headless" but on `task run` also approves Auto-Ship; Jack

@@ -18,3 +18,10 @@ Check: `uv run pytest python/tests/test_release_automation.py -k cron` — 8 pas
 ## Verify pass 1 decision (2026-10-28): iterate
 - Evidence: a one-shot gui-domain LaunchAgent probe (RunAtLoad, no schedule, booted out after) in ~/src/loopflow got exit 0 from `doppler secrets --only-names` and from the Claude Keychain item lookup (read only; telemetry's failure was a write). The LaunchAgent design reaches the keyring cron could not.
 - Removing the cron lines first loses nothing (they already fail on Keychain); a headless `crontab -` hang now leaves at most the old broken schedule.
+
+## Concept review (2026-10-28): nothing to change
+- One action, few concepts: run the bootstrap once on the placed Machine; each job is one generated wrapper around a plain `lf --wave … --batch graph <job>` command, run by the platform scheduler (gui-domain LaunchAgent on macOS, crontab on Linux). Matches the accepted "Loopflow keeps no scheduler" contract in docs/ops.md and docs/work.md.
+- Failure/recovery path holds: a stopped bootstrap leaves at most the old (already Keychain-broken) cron lines and no agent, so release-run never has two schedulers; rerunning converges.
+- Implied follow-up, not now: on macOS the crontab-removal branch exists only to retire this Mac's pre-#1764 lines. Once installed acceptance passes, it is a migration leftover; realign may delete it (and its test) then. Deleting it before acceptance would strand the old lines.
+- Left alone as cosmetic: "cron" naming (`loopflow.cron.*` labels, `.lf/cron/`, `bootstrap-cron-host.sh`) on a platform that uses launchd. Renaming labels would need its own bootout migration for no user benefit.
+- No open product choice.

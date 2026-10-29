@@ -456,7 +456,7 @@ struct DesktopHeadlessTests {
             work: .available(TaskOverview(sessions: [], graphProcesses: [], graph: nil)))
         if state == "unstarted" {
             _ = try view.inspect().find(button: "Complete")
-            _ = try view.inspect().find(button: "Defer")
+            _ = try view.inspect().find(button: "Hold")
             _ = try view.inspect().find(button: "Abandon…")
         } else {
             _ = try view.inspect().find(button: "Reopen")

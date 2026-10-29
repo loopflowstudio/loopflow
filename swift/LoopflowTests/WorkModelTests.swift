@@ -839,7 +839,7 @@ struct WorkModelStreamTests {
         try await eventually { model.roadmap.value != nil }
         let found = try #require(model.task(id: "issue-now"))
         let owner = model.navigation
-        let action = Task { await model.deferTask(found.task, deferred: true) }
+        let action = Task { await model.holdTask(found.task, held: true) }
         let request = try await feed.request(2)
         #expect(request == .checkpoint(id: request.id, replay: []))
         await feed.send(try fixture.planningFrame(sequence: 2, answers: request.id, renaming: "Committed"))

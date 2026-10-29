@@ -82,11 +82,11 @@ struct TaskWorkflowHeader: View {
                     Button("Complete") { Task { await model.completeTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.status == .deferred ? "Resume" : "Defer") {
-                        Task { await model.deferTask(task, deferred: task.runtime?.status != .deferred) }
+                    Button(task.runtime?.status == .deferred ? "Release" : "Hold") {
+                        Task { await model.holdTask(task, held: task.runtime?.status != .deferred) }
                     }
                     .disabled(acting || readingUnavailable != nil)
-                    .accessibilityIdentifier("task-defer-resume")
+                    .accessibilityIdentifier("task-hold-release")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-abandon")
@@ -166,7 +166,7 @@ struct TaskWorkflowHeader: View {
                 Task { await model.abandonTask(task) }
             }
         } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Defer instead to keep its work for later.")
+            Text("Cancels the Task, closes its PRs and deletes its branches. Hold it instead to keep its work for later.")
         }
         .font(Typography.body(12))
         .padding(.horizontal, 14)
@@ -273,15 +273,15 @@ struct TaskShipControl: View {
                 HStack(spacing: Spacing.sm) {
                     // Hovering Auto-Ship offers the other ways out of this Task.
                     if hovered {
-                        let deferred = task.runtime?.status == .deferred
-                        Button(deferred ? "Resume" : "Defer") {
-                            Task { await model.deferTask(task, deferred: !deferred) }
+                        let held = task.runtime?.status == .deferred
+                        Button(held ? "Release" : "Hold") {
+                            Task { await model.holdTask(task, held: !held) }
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(acting || readingUnavailable != nil)
-                        .help(deferred ? "lf task release: let it run again"
+                        .help(held ? "lf task release: let it run again"
                                      : "lf task hold: hold it, keeping its checkout, PR and interactive step")
-                        .accessibilityIdentifier("task-defer")
+                        .accessibilityIdentifier("task-hold")
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))
                             .disabled(acting || readingUnavailable != nil)
@@ -302,7 +302,7 @@ struct TaskShipControl: View {
                 Task { await model.abandonTask(task) }
             }
         } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Defer instead to keep its work for later.")
+            Text("Cancels the Task, closes its PRs and deletes its branches. Hold it instead to keep its work for later.")
         }
     }
 }
@@ -631,8 +631,8 @@ struct TaskActionItems: View {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
             Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
-            Button(task.runtime?.status == .deferred ? "Resume Task" : "Defer Task") {
-                Task { await model.deferTask(task, deferred: task.runtime?.status != .deferred) }
+            Button(task.runtime?.status == .deferred ? "Release Task" : "Hold Task") {
+                Task { await model.holdTask(task, held: task.runtime?.status != .deferred) }
             }.disabled(unavailable)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }

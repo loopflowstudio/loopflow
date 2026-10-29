@@ -42,6 +42,20 @@ conversation reports `new_thread`. Desktop perf keys `connect_prepare_*` stay: b
 reads them. Desktop's `Preparation {attach, open, moveHere}` is local pane intent over the one
 `resume --prepare` shape; Move here stays explicit.
 
+## Desktop Task hold (concept review 2026-10-28, implemented)
+
+The rename exists so "Resume" means only a conversation. Desktop's Task header, Auto-Ship
+hover row and Task context menu now say Hold/Release, next to the Session pane's own Resume
+button. Settled by the accepted `hold/release` decision:
+
+- Buttons `Hold`/`Release`, menu `Hold Task`/`Release Task`; abandon copy "Hold it instead to
+  keep its work for later." (`:169,:305`).
+- `WorkModel.deferTask(_:deferred:)` / `RegistryQuery.deferTask` → `holdTask(_:held:)`; accessibility
+  ids `task-defer-resume`/`task-defer` → `task-hold-release`/`task-hold`; update
+  `DesktopHeadlessTests.swift:459` and `WorkModelTests.swift:842`.
+- The status label stays "Deferred": `deferred` is the Task state AGENTS.md names, and this Task
+  renames the verbs only.
+
 ## Remaining
 
 - Checks (2026-10-28): lib `human_session:: lf::`, integration `session_cli_tests:: work_open_tests::
@@ -54,5 +68,9 @@ reads them. Desktop's `Preparation {attach, open, moveHere}` is local pane inten
   verbs; `cargo check -p loopflow --all-targets` — pass. Swift untested against #1761.
 - Implement + compress (2026-10-28, concept review): `dto_fixtures::`, `global_commands
   session_resume_explain`, lib `human_session::`, `session_cli_tests::`, fmt, clippy — pass (one load flake passes alone).
+- Realign (2026-10-28, after main #1764): the concept-review items are committed in 8c45266af
+  (`git grep SessionConnect|explain_connect|ConnectOrResume` → only `SessionConnectionArgs`,
+  the shared `resume`/`session new` Clap args, which stay). #1764 touches CI jobs only; no rerun.
+- Implement (2026-10-28, Desktop hold): `scripts/test_desktop.sh --filter 'WorkModelTests|DesktopHeadlessTests'` — pass.
 - Gate: Swift build (incl. #1761's NewTaskSheet/`prepareTaskSession` path) + Sessions/WorkDestination tests; `session_lifecycle_tests` (CI-only).
 - Assumptions: `scratch/questions.md`.

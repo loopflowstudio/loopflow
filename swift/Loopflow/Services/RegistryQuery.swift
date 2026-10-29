@@ -135,17 +135,7 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
 
     /// The directory `argv` reads from; Rust's `--cwd`.
     public var cwd: String? {
-        switch self {
-        case .repositoryIdentity(let directory), .paneLayout(let directory, _),
-             .people(let directory), .graphs(let directory), .viewPlan(let directory, _),
-             .graphProcesses(let directory, _, _), .waveDetail(let directory, _),
-             .closedTasks(let directory, _, _), .roadmap(let directory, _, _, _),
-             .planningStatus(let directory), .workLink(let directory, _),
-             .waveGraph(let directory, _), .sessionPage(let directory, _, _),
-             .tokens(let directory, _):
-            return directory
-        default: return nil
-        }
+        tagged.fields.first { $0.key == "directory" }?.value as? String
     }
 
     public var input: String? {
@@ -153,120 +143,89 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
         return nil
     }
 
-    private enum Key: String, CodingKey {
-        case query, issue, base, path, draft, directory, work, expression, task, after, id, wave
-        case days, project, since, limit, all, url, headless
+    private var tagged: TaggedFields {
+        switch self {
+        case .taskChanges(let issue, let base):
+            TaggedFields("task_changes", ["issue": issue, "base": base])
+        case .taskDiff(let issue, let path, let base, let draft):
+            TaggedFields("task_diff", ["issue": issue, "path": path, "base": base, "draft": draft])
+        case .taskFile(let issue, let path):
+            TaggedFields("task_file", ["issue": issue, "path": path])
+        case .repositoryIdentity(let directory):
+            TaggedFields("repository_identity", ["directory": directory])
+        case .waves: TaggedFields("waves")
+        case .machineId: TaggedFields("machine_id")
+        case .portfolio: TaggedFields("portfolio")
+        case .paneLayout(let directory, let work):
+            TaggedFields("pane_layout", ["directory": directory, "work": work])
+        case .people(let directory): TaggedFields("people", ["directory": directory])
+        case .graphs(let directory): TaggedFields("graphs", ["directory": directory])
+        case .viewPlan(let directory, let expression):
+            TaggedFields("view_plan", ["directory": directory, "expression": expression])
+        case .graphProcesses(let directory, let task, let after):
+            TaggedFields("graph_processes", ["directory": directory, "task": task, "after": after])
+        case .graphProcess(let id): TaggedFields("graph_process", ["id": id])
+        case .usage(let days, let wave, let project, let task):
+            TaggedFields("usage", ["days": days, "wave": wave, "project": project, "task": task])
+        case .taskContext(let task): TaggedFields("task_context", ["task": task])
+        case .waveDetail(let directory, let wave):
+            TaggedFields("wave_detail", ["directory": directory, "wave": wave])
+        case .closedTasks(let directory, let wave, let after):
+            TaggedFields("closed_tasks", ["directory": directory, "wave": wave, "after": after])
+        case .machines: TaggedFields("machines")
+        case .history(let since, let limit, let wave, let project, let task):
+            TaggedFields("history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
+        case .roadmap(let directory, let wave, let task, let all):
+            TaggedFields("roadmap", ["directory": directory, "wave": wave, "task": task, "all": all])
+        case .planningStatus(let directory): TaggedFields("planning_status", ["directory": directory])
+        case .workLink(let directory, let url):
+            TaggedFields("work_link", ["directory": directory, "url": url])
+        case .repositoryPath(let id): TaggedFields("repository_path", ["id": id])
+        case .waveGraph(let directory, let wave):
+            TaggedFields("wave_graph", ["directory": directory, "wave": wave])
+        case .sessionPage(let directory, let headless, let after):
+            TaggedFields("session_page", ["directory": directory, "headless": headless, "after": after])
+        case .tokens(let directory, let days):
+            TaggedFields("tokens", ["directory": directory, "days": days])
+        case .retention: TaggedFields("retention")
+        case .doctor: TaggedFields("doctor")
+        }
     }
 
     public func encode(to encoder: any Encoder) throws {
+        try tagged.encode(to: encoder, tag: "query")
+    }
+}
+
+/// One variant of a Rust enum serde tags internally: its name beside its
+/// fields, `null` for an absent one.
+struct TaggedFields {
+    let name: String
+    let fields: KeyValuePairs<String, (any Encodable)?>
+
+    init(_ name: String, _ fields: KeyValuePairs<String, (any Encodable)?> = [:]) {
+        self.name = name
+        self.fields = fields
+    }
+
+    func encode(to encoder: any Encoder, tag: String) throws {
         var container = encoder.container(keyedBy: Key.self)
-        switch self {
-        case .taskChanges(let issue, let base):
-            try container.encode("task_changes", forKey: .query)
-            try container.encode(issue, forKey: .issue)
-            try container.encode(base, forKey: .base)
-        case .taskDiff(let issue, let path, let base, let draft):
-            try container.encode("task_diff", forKey: .query)
-            try container.encode(issue, forKey: .issue)
-            try container.encode(path, forKey: .path)
-            try container.encode(base, forKey: .base)
-            try container.encode(draft, forKey: .draft)
-        case .taskFile(let issue, let path):
-            try container.encode("task_file", forKey: .query)
-            try container.encode(issue, forKey: .issue)
-            try container.encode(path, forKey: .path)
-        case .repositoryIdentity(let directory):
-            try container.encode("repository_identity", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-        case .waves:
-            try container.encode("waves", forKey: .query)
-        case .machineId:
-            try container.encode("machine_id", forKey: .query)
-        case .portfolio:
-            try container.encode("portfolio", forKey: .query)
-        case .paneLayout(let directory, let work):
-            try container.encode("pane_layout", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(work, forKey: .work)
-        case .people(let directory):
-            try container.encode("people", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-        case .graphs(let directory):
-            try container.encode("graphs", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-        case .viewPlan(let directory, let expression):
-            try container.encode("view_plan", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(expression, forKey: .expression)
-        case .graphProcesses(let directory, let task, let after):
-            try container.encode("graph_processes", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(task, forKey: .task)
-            try container.encode(after, forKey: .after)
-        case .graphProcess(let id):
-            try container.encode("graph_process", forKey: .query)
-            try container.encode(id, forKey: .id)
-        case .usage(let days, let wave, let project, let task):
-            try container.encode("usage", forKey: .query)
-            try container.encode(days, forKey: .days)
-            try container.encode(wave, forKey: .wave)
-            try container.encode(project, forKey: .project)
-            try container.encode(task, forKey: .task)
-        case .taskContext(let task):
-            try container.encode("task_context", forKey: .query)
-            try container.encode(task, forKey: .task)
-        case .waveDetail(let directory, let wave):
-            try container.encode("wave_detail", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(wave, forKey: .wave)
-        case .closedTasks(let directory, let wave, let after):
-            try container.encode("closed_tasks", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(wave, forKey: .wave)
-            try container.encode(after, forKey: .after)
-        case .machines:
-            try container.encode("machines", forKey: .query)
-        case .history(let since, let limit, let wave, let project, let task):
-            try container.encode("history", forKey: .query)
-            try container.encode(since, forKey: .since)
-            try container.encode(limit, forKey: .limit)
-            try container.encode(wave, forKey: .wave)
-            try container.encode(project, forKey: .project)
-            try container.encode(task, forKey: .task)
-        case .roadmap(let directory, let wave, let task, let all):
-            try container.encode("roadmap", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(wave, forKey: .wave)
-            try container.encode(task, forKey: .task)
-            try container.encode(all, forKey: .all)
-        case .planningStatus(let directory):
-            try container.encode("planning_status", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-        case .workLink(let directory, let url):
-            try container.encode("work_link", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(url, forKey: .url)
-        case .repositoryPath(let id):
-            try container.encode("repository_path", forKey: .query)
-            try container.encode(id, forKey: .id)
-        case .waveGraph(let directory, let wave):
-            try container.encode("wave_graph", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(wave, forKey: .wave)
-        case .sessionPage(let directory, let headless, let after):
-            try container.encode("session_page", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(headless, forKey: .headless)
-            try container.encode(after, forKey: .after)
-        case .tokens(let directory, let days):
-            try container.encode("tokens", forKey: .query)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(days, forKey: .days)
-        case .retention:
-            try container.encode("retention", forKey: .query)
-        case .doctor:
-            try container.encode("doctor", forKey: .query)
+        try container.encode(name, forKey: Key(tag))
+        for (key, value) in fields {
+            if let value {
+                try container.encode(value, forKey: Key(key))
+            } else {
+                try container.encodeNil(forKey: Key(key))
+            }
         }
+    }
+
+    private struct Key: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ string: String) { stringValue = string }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
     }
 }
 

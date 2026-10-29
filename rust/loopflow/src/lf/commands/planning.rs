@@ -142,26 +142,47 @@ pub(crate) fn watch_status(
             let _ = &exchange;
             let repo_key = repo_key.clone();
             async move {
-                let config =
-                    crate::config::load_config(Some(Path::new(&repo_key)))?.unwrap_or_default();
-                if let Some(provider) = config.planning_transport().remote_name() {
-                    return Ok(remote_status(provider));
-                }
-                let destinations = match store {
-                    Some(store) => {
-                        crate::ops::planning_sync::peer_status(&store, &repo_key).await?
-                    }
-                    None => Vec::new(),
+                let status = match remote_transport(&repo_key)? {
+                    Some(provider) => Status::Remote(provider),
+                    None => Status::Git(match store {
+                        Some(store) => {
+                            crate::ops::planning_sync::peer_status(&store, &repo_key).await?
+                        }
+                        None => Vec::new(),
+                    }),
                 };
-                Ok(serde_json::json!({"transport": "git", "destinations": destinations}))
+                Ok(status.to_json())
             }
         },
         transport,
     )
 }
 
-fn remote_status(provider: &str) -> serde_json::Value {
-    serde_json::json!({"transport": provider.to_ascii_lowercase(), "destinations": []})
+/// Where a repository's planning is exchanged.
+enum Status {
+    /// The tracker its config names; local saves wait while it is unavailable.
+    Remote(&'static str),
+    Git(Vec<crate::store::PeerPlanningStatus>),
+}
+
+impl Status {
+    /// What `lf planning status --json` prints.
+    fn to_json(&self) -> serde_json::Value {
+        match self {
+            Self::Remote(provider) => serde_json::json!({
+                "transport": provider.to_ascii_lowercase(),
+                "destinations": [],
+            }),
+            Self::Git(destinations) => {
+                serde_json::json!({"transport": "git", "destinations": destinations})
+            }
+        }
+    }
+}
+
+fn remote_transport(repo: &str) -> Result<Option<&'static str>> {
+    let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
+    Ok(config.planning_transport().remote_name())
 }
 
 /// What `lf --cwd <directory> config planning status --json` prints.
@@ -170,33 +191,34 @@ pub(crate) fn status_json(directory: &Path) -> Result<String> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
         Ok(serde_json::to_string(
-            &status(&store, &repo.to_string_lossy()).await?,
+            &status(&store, &repo.to_string_lossy()).await?.to_json(),
         )?)
     })
 }
 
-async fn status(store: &Store, repo: &str) -> Result<serde_json::Value> {
-    let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
-    if let Some(provider) = config.planning_transport().remote_name() {
-        return Ok(remote_status(provider));
+async fn status(store: &Store, repo: &str) -> Result<Status> {
+    if let Some(provider) = remote_transport(repo)? {
+        return Ok(Status::Remote(provider));
     }
     crate::ops::planning_sync::configured_destination(store, repo).await?;
-    let destinations = crate::ops::planning_sync::peer_status(store, repo).await?;
-    Ok(serde_json::json!({"transport": "git", "destinations": destinations}))
+    Ok(Status::Git(
+        crate::ops::planning_sync::peer_status(store, repo).await?,
+    ))
 }
 
 async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
+    let status = status(store, repo).await?;
     if json {
-        println!("{}", serde_json::to_string(&status(store, repo).await?)?);
+        println!("{}", serde_json::to_string(&status.to_json())?);
         return Ok(());
     }
-    let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
-    if let Some(provider) = config.planning_transport().remote_name() {
-        println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
-        return Ok(());
-    }
-    crate::ops::planning_sync::configured_destination(store, repo).await?;
-    let destinations = crate::ops::planning_sync::peer_status(store, repo).await?;
+    let destinations = match status {
+        Status::Remote(provider) => {
+            println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
+            return Ok(());
+        }
+        Status::Git(destinations) => destinations,
+    };
     if !destinations.iter().any(|d| d.active) {
         println!("Planning: Git (configured remote; local saves wait when unavailable)");
     }

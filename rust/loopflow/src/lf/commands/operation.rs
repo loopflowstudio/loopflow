@@ -29,6 +29,13 @@ fn words(words: &[&str]) -> Vec<String> {
     words.iter().map(|word| word.to_string()).collect()
 }
 
+/// `[flag, value]`, or nothing without a value.
+fn optional(flag: &str, value: Option<impl ToString>) -> Vec<String> {
+    value
+        .map(|value| vec![flag.to_owned(), value.to_string()])
+        .unwrap_or_default()
+}
+
 /// `command` as `lf --cwd <directory> …` runs it.
 fn at(directory: &Path, command: &[&str]) -> Vec<String> {
     let mut argv = vec!["--cwd".to_owned(), directory.display().to_string()];
@@ -146,9 +153,7 @@ fn page_flags(headless: bool, after: Option<&str>) -> Vec<String> {
     let mut flags = words(&["--json", "--page"]);
     flags.extend(session_flags(headless).iter().map(|flag| flag.to_string()));
     flags.extend(words(&["--limit", "100"]));
-    if let Some(after) = after {
-        flags.extend(words(&["--after", after]));
-    }
+    flags.extend(optional("--after", after));
     flags
 }
 
@@ -315,9 +320,7 @@ impl Query {
                     directory,
                     &["graph", "list", "--processes", "--for-task", task],
                 );
-                if let Some(after) = after {
-                    argv.extend(words(&["--after", after]));
-                }
+                argv.extend(optional("--after", after.as_ref()));
                 argv.push("--json".into());
                 argv
             }
@@ -329,11 +332,9 @@ impl Query {
                 task,
             } => {
                 let mut argv = words(&["usage", "--days", &days.to_string()]);
-                for (flag, value) in [("--wave", wave), ("--project", project), ("--task", task)] {
-                    if let Some(value) = value {
-                        argv.extend(words(&[flag, value]));
-                    }
-                }
+                argv.extend(optional("--wave", wave.as_ref()));
+                argv.extend(optional("--project", project.as_ref()));
+                argv.extend(optional("--task", task.as_ref()));
                 argv.push("--json".into());
                 argv
             }
@@ -355,9 +356,7 @@ impl Query {
                 after,
             } => {
                 let mut argv = at(directory, &["desktop", "done", "--wave", wave, "--json"]);
-                if let Some(after) = after {
-                    argv.extend(words(&["--after", after]));
-                }
+                argv.extend(optional("--after", after.as_ref()));
                 argv
             }
             Self::Machines => words(&["machine", "list", "--json"]),
@@ -374,9 +373,7 @@ impl Query {
             } => {
                 let mut argv = at(directory, &["desktop", "plan"]);
                 argv.extend(wave.clone());
-                if let Some(task) = task {
-                    argv.extend(words(&["--task", task]));
-                }
+                argv.extend(optional("--task", task.as_ref()));
                 if *all {
                     argv.push("--all".into());
                 }
@@ -411,9 +408,7 @@ impl Query {
             }
             Self::Tokens { directory, days } => {
                 let mut argv = at(directory, &["ops", "tokens", "--json"]);
-                if let Some(days) = days {
-                    argv.extend(words(&["--days", &days.to_string()]));
-                }
+                argv.extend(optional("--days", *days));
                 argv
             }
             Self::Retention => words(&["history", "retention", "--json"]),
@@ -445,10 +440,10 @@ impl Query {
                 pretty(&identity)
             }
             Self::Waves => {
-                let waves = tokio::runtime::Runtime::new()?.block_on(list_waves(true, true))?;
+                let waves = block_on(list_waves(true, true))??;
                 pretty(&waves.unwrap_or_default())
             }
-            Self::MachineId => pretty(&tokio::runtime::Runtime::new()?.block_on(local_machine())?),
+            Self::MachineId => pretty(&block_on(local_machine())??),
             Self::Portfolio => pretty(&crate::portfolio::read()?),
             Self::PaneLayout { directory, work } => {
                 super::desktop::saved_layout(None, directory, work)
@@ -496,7 +491,14 @@ impl Query {
                 },
                 None,
             )?),
-            Self::TaskContext { task } => pretty(&usage::context_report(&task_usage(task)?)?),
+            Self::TaskContext { task } => {
+                let filter = super::WorkFilter {
+                    wave: None,
+                    project: None,
+                    task: Some(task),
+                };
+                pretty(&usage::context_report(&usage::sessions(0, filter, None)?)?)
+            }
             Self::WaveDetail { directory, wave } => {
                 pretty(&super::waves::desktop_status(directory, wave)?)
             }
@@ -509,7 +511,7 @@ impl Query {
                 wave,
                 after.as_deref(),
             )?),
-            Self::Machines => pretty(&tokio::runtime::Runtime::new()?.block_on(machines())?),
+            Self::Machines => pretty(&block_on(machines())??),
             Self::History(window) => pretty(&super::activity::snapshot(window)?),
             Self::Roadmap {
                 directory,
@@ -535,9 +537,11 @@ impl Query {
             }
             Self::WaveGraph { directory, wave } => {
                 let repo = crate::repo::working_directory_in(directory)?;
-                pretty(&tokio::runtime::Runtime::new()?.block_on(
-                    crate::ops::project::wave_graph(&repo, wave.as_deref(), wave.is_some()),
-                )?)
+                pretty(&block_on(crate::ops::project::wave_graph(
+                    &repo,
+                    wave.as_deref(),
+                    wave.is_some(),
+                ))??)
             }
             Self::SessionPage {
                 directory,
@@ -558,13 +562,9 @@ impl Query {
     }
 }
 
-fn task_usage(task: &str) -> anyhow::Result<Vec<crate::session_record::SessionHistory>> {
-    let filter = super::WorkFilter {
-        wave: None,
-        project: None,
-        task: Some(task),
-    };
-    usage::sessions(0, filter, None)
+/// `future` run to completion on a runtime of its own, as its command does.
+fn block_on<F: std::future::Future>(future: F) -> anyhow::Result<F::Output> {
+    Ok(tokio::runtime::Runtime::new()?.block_on(future))
 }
 
 fn pretty(value: &impl Serialize) -> anyhow::Result<String> {

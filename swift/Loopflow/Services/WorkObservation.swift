@@ -84,39 +84,20 @@ public enum WorkOperation: Equatable, Sendable, Encodable {
     /// `lf --cwd <directory> desktop task <issue>`
     case desktopTask(directory: String, issue: String)
 
-    private enum Key: String, CodingKey {
-        case operation, since, limit, wave, project, task, directory, headless, issue
-    }
-
     public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: Key.self)
-        switch self {
+        let tagged = switch self {
         case .history(let since, let limit, let wave, let project, let task):
-            try container.encode("history", forKey: .operation)
-            try container.encode(since, forKey: .since)
-            try container.encode(limit, forKey: .limit)
-            try container.encode(wave, forKey: .wave)
-            try container.encode(project, forKey: .project)
-            try container.encode(task, forKey: .task)
-        case .monitorPs:
-            try container.encode("monitor_ps", forKey: .operation)
-        case .desktopPlan:
-            try container.encode("desktop_plan", forKey: .operation)
-        case .desktopPlans(let directory):
-            try container.encode("desktop_plans", forKey: .operation)
-            try container.encode(directory, forKey: .directory)
+            TaggedFields("history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
+        case .monitorPs: TaggedFields("monitor_ps")
+        case .desktopPlan: TaggedFields("desktop_plan")
+        case .desktopPlans(let directory): TaggedFields("desktop_plans", ["directory": directory])
         case .desktopSessions(let directory, let headless):
-            try container.encode("desktop_sessions", forKey: .operation)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(headless, forKey: .headless)
-        case .planningStatus(let directory):
-            try container.encode("planning_status", forKey: .operation)
-            try container.encode(directory, forKey: .directory)
+            TaggedFields("desktop_sessions", ["directory": directory, "headless": headless])
+        case .planningStatus(let directory): TaggedFields("planning_status", ["directory": directory])
         case .desktopTask(let directory, let issue):
-            try container.encode("desktop_task", forKey: .operation)
-            try container.encode(directory, forKey: .directory)
-            try container.encode(issue, forKey: .issue)
+            TaggedFields("desktop_task", ["directory": directory, "issue": issue])
         }
+        try tagged.encode(to: encoder, tag: "operation")
     }
 }
 

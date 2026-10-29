@@ -28,6 +28,27 @@ struct RegistryQueryTests {
         #expect(graphs == [expected])
     }
 
+    /// The JSON `operation::tests::desktop_encodings_name_their_reads` decodes in Rust.
+    @Test("Served reads encode as Rust's Operation and Query")
+    func servedReadEncodings() throws {
+        func object(_ value: some Encodable) throws -> NSDictionary {
+            try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? NSDictionary)
+        }
+        func object(_ json: String) throws -> NSDictionary {
+            try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
+        }
+        #expect(try object(WorkOperation.history(since: "7d", limit: 50, wave: nil, project: "p", task: nil))
+            == object(#"{"operation":"history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#))
+        #expect(try object(WorkOperation.desktopSessions(directory: "/r", headless: true))
+            == object(#"{"operation":"desktop_sessions","directory":"/r","headless":true}"#))
+        #expect(try object(ServedQuery.taskDiff(issue: "FIX-1", path: nil, base: "parent", draft: nil))
+            == object(#"{"query":"task_diff","issue":"FIX-1","path":null,"base":"parent","draft":null}"#))
+        let view = ServedQuery.viewPlan(directory: "/r", expression: "state:backlog")
+        #expect(try object(view) == object(#"{"query":"view_plan","directory":"/r","expression":"state:backlog"}"#))
+        #expect(view.cwd == "/r")
+        #expect(ServedQuery.waves.cwd == nil)
+    }
+
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
     func recordingRemoteQuery(recordFirst: Bool) async throws {
         let json = #"{"id":"peer"}"#

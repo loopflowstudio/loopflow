@@ -29,8 +29,6 @@
 - A Run is `!interactive`. An `interactive:` Graph step is a Session and stays resumable.
 - Desktop selecting a Run row now shows the refusal text (which names `lf resume --task`);
   no Swift change made for it.
-- Proposed Wave memory edit (read-only here): `.lf/wave/infrastructure/MEMORY.md:48` says
-  `task hold/release` replace `defer/resume`; it should say `task claim/unassign`, no deferred state.
 
 ## Assignment (headless implement, 2026-10-29)
 

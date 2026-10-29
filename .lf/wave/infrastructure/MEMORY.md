@@ -44,9 +44,10 @@ this heading. Remaining gate/demo boundaries stay in the Task plan.
 
 Jack Heart decided (2026-10-26) that `lf resume` always gets you back: it takes
 over from whatever holds the conversation, `--fork` leaves the holder running,
-`lf session new [-a]` restarts on a fresh thread seeded from the conversation log,
-`task hold/release` replace `defer/resume`. `connect`, `attach` and the open-mode
-flags are gone. Scope still comes from physical checkout or an explicit target, never
+`lf session new [-a]` restarts on a fresh thread seeded from the conversation log.
+`connect`, `attach` and the open-mode flags are gone. On 2026-10-29 he narrowed it:
+resume takes only Sessions (a Run's id points to `lf resume --task`), and a Task is
+assigned or not (`task claim/unassign`, no deferred state). Scope still comes from physical checkout or an explicit target, never
 recency; preparation launches no provider. LOO-499 history:
 `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, its heading.
 

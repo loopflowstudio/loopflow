@@ -562,11 +562,11 @@ pub struct RoadmapTask {
 /// Keep only Waves whose repository matches the current working directory,
 /// collapsing worktrees to their main checkout. `all` (or a cwd outside any git
 /// repo, where there is nothing to scope to) returns every Wave unchanged.
-fn scope_waves_to_repo(waves: Vec<Wave>, all: bool) -> Result<Vec<Wave>> {
+fn scope_waves_to_repo(waves: Vec<Wave>, directory: &Path, all: bool) -> Result<Vec<Wave>> {
     if all {
         return Ok(waves);
     }
-    let Some(scope) = crate::repository::CanonicalRepo::current()? else {
+    let Some(scope) = crate::repository::CanonicalRepo::containing(directory)? else {
         return Ok(waves);
     };
     Ok(waves
@@ -608,7 +608,7 @@ pub(crate) async fn wave_snapshots(
         .list_waves(None)
         .await
         .map_err(|err| anyhow!("failed to read wave registry: {err}"))?;
-    let waves = scope_waves_to_repo(waves, all)?;
+    let waves = scope_waves_to_repo(waves, &std::env::current_dir()?, all)?;
     let mut snapshots = Vec::with_capacity(waves.len());
     let mut checkouts = Checkouts::default();
     for wave in waves {
@@ -772,19 +772,36 @@ pub fn show(
     all: bool,
     shape: Shape,
 ) -> Result<()> {
+    let directory = std::env::current_dir()?;
+    if json {
+        println!("{}", show_json(&directory, wave, task, all, shape)?);
+        return Ok(());
+    }
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let roadmap = show_roadmap(store.as_ref(), wave, task, all, true).await?;
-        if json {
-            let roadmap = shape
-                .print(store.as_ref(), roadmap, RoadmapSnapshot::rows)
-                .await?;
-            println!("{}", serde_json::to_string(&roadmap)?);
-        } else {
-            print_roadmap(&roadmap);
-        }
+        let roadmap = show_roadmap(store.as_ref(), &directory, wave, task, all, true).await?;
+        print_roadmap(&roadmap);
         Ok(())
+    })
+}
+
+/// What `lf wave show --json` prints in `directory`, after asking the
+/// tracker about each repository it reads.
+pub(crate) fn show_json(
+    directory: &Path,
+    wave: Option<&str>,
+    task: Option<&str>,
+    all: bool,
+    shape: Shape,
+) -> Result<String> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
+        let roadmap = show_roadmap(store.as_ref(), directory, wave, task, all, true).await?;
+        let roadmap = shape
+            .print(store.as_ref(), roadmap, RoadmapSnapshot::rows)
+            .await?;
+        Ok(serde_json::to_string(&roadmap)?)
     })
 }
 
@@ -797,15 +814,22 @@ pub fn watch_show(
     shape: Shape,
     transport: super::watch::Transport,
 ) -> Result<Option<super::watch::Subscription>> {
+    let directory = std::env::current_dir()?;
     super::watch::start(
         (),
         super::watch::Watched::following_checkouts(super::watch::PLANNING_CLOCK),
         move |store, ()| {
-            let (wave, task) = (wave.clone(), task.clone());
+            let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
             async move {
-                let roadmap =
-                    show_roadmap(store.as_ref(), wave.as_deref(), task.as_deref(), all, false)
-                        .await?;
+                let roadmap = show_roadmap(
+                    store.as_ref(),
+                    &directory,
+                    wave.as_deref(),
+                    task.as_deref(),
+                    all,
+                    false,
+                )
+                .await?;
                 shape
                     .print(store.as_ref(), roadmap, RoadmapSnapshot::rows)
                     .await
@@ -819,6 +843,7 @@ pub fn watch_show(
 /// repository read.
 async fn show_roadmap(
     store: Option<&SharedStore>,
+    directory: &Path,
     wave: Option<&str>,
     task: Option<&str>,
     all: bool,
@@ -844,11 +869,10 @@ async fn show_roadmap(
     } else {
         std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok()
     };
-    let repo = crate::repo::find_repo_root().ok().or_else(|| {
-        (task.is_some() && !all)
-            .then(|| std::env::current_dir().ok())
-            .flatten()
-    });
+    let repo = crate::repo::discover_repo_root(directory)
+        .ok()
+        .flatten()
+        .or_else(|| (task.is_some() && !all).then(|| directory.to_owned()));
     let waves = match crate::work::wave::context::resolve_managed_wave(
         Some(&**store),
         repo.as_deref(),
@@ -866,13 +890,13 @@ async fn show_roadmap(
             if task.is_some() && !all {
                 // Exact destinations carry a repository even when only its
                 // cached registration survives, without Git metadata.
-                let scope = crate::repository::CanonicalRepo::discover(&std::env::current_dir()?)?;
+                let scope = crate::repository::CanonicalRepo::discover(directory)?;
                 waves
                     .into_iter()
                     .filter(|wave| scope.contains(Path::new(wave.repo())))
                     .collect()
             } else {
-                scope_waves_to_repo(waves, all)?
+                scope_waves_to_repo(waves, directory, all)?
             }
         }
         Err(other) => return Err(anyhow!(other)),
@@ -4310,7 +4334,14 @@ mod tests {
         });
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let roadmap = runtime
-            .block_on(super::show_roadmap(Some(&store), None, None, true, false))
+            .block_on(super::show_roadmap(
+                Some(&store),
+                std::path::Path::new("/"),
+                None,
+                None,
+                true,
+                false,
+            ))
             .unwrap();
         assert_eq!(roadmap.waves.len(), 1);
         let super::Evidence::Unavailable { reason } = roadmap.tasks else {

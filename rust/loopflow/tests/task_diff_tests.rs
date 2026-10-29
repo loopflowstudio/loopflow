@@ -9,7 +9,9 @@ use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
 
-fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> Value {
+/// What `lf <args>` prints. `doctor` prints its report before exiting 1 on a
+/// failed check, so only empty output is a failed read.
+fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> String {
     let mut child = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
         .env("HOME", home)
@@ -32,11 +34,11 @@ fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> Value {
     }
     let output = child.wait_with_output().unwrap();
     assert!(
-        output.status.success(),
+        output.status.success() || (args == ["doctor", "--json"] && !output.stdout.is_empty()),
         "{args:?}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    serde_json::from_slice(&output.stdout).unwrap()
+    String::from_utf8(output.stdout).unwrap()
 }
 
 #[test]
@@ -62,7 +64,9 @@ fn diff_files_preserves_comparison_identity_and_draft_editing() {
     repo.stage_all();
     repo.create_file("edit.txt", "working\n");
     repo.create_file("untracked.txt", "untracked\n");
-    let query = |args: &[&str], input| read(repo.path(), home.path(), args, input);
+    let query = |args: &[&str], input| -> Value {
+        serde_json::from_str(&read(repo.path(), home.path(), args, input)).unwrap()
+    };
 
     let files = query(&["task", "diff", "INF-123", "--files", "--json"], None);
     assert_eq!(files["task_id"], task.task.id.as_str());
@@ -144,12 +148,14 @@ fn diff_files_preserves_comparison_identity_and_draft_editing() {
 
 #[test]
 fn a_query_served_in_process_reads_what_its_lf_command_prints() {
+    use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::operation::Query;
 
     let home = tempfile::tempdir().unwrap();
     // Same HOME as `read`'s children: `portfolio` scans `$HOME/src`.
     let _env = EnvGuard::with_home(&[], Some(home.path()));
-    std::env::set_var("LF_HOME", home.path());
+    // As the children resolve it: `doctor` prints the store's path.
+    std::env::set_var("LF_HOME", home.path().canonicalize().unwrap());
     let repo = TestRepo::new();
     repo.create_file("edit.txt", "before\n");
     repo.stage_all();
@@ -166,6 +172,15 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
         draft: draft.map(str::to_owned),
     };
     // A new Query fails to compile here until it is compared too.
+    let repository: Value = serde_json::from_str(
+        &Query::RepositoryIdentity {
+            directory: repo.path().to_owned(),
+        }
+        .read()
+        .unwrap(),
+    )
+    .unwrap();
+    let folder = repo.path().file_name().unwrap().to_str().unwrap();
     let queries = match task_diff(None, None) {
         Query::TaskChanges { .. }
         | Query::TaskDiff { .. }
@@ -180,11 +195,21 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
         | Query::ViewPlan { .. }
         | Query::GraphProcesses { .. }
         | Query::GraphProcess { .. }
-        | Query::TaskUsage { .. }
+        | Query::Usage { .. }
         | Query::TaskContext { .. }
         | Query::WaveDetail { .. }
         | Query::ClosedTasks { .. }
-        | Query::Machines => [
+        | Query::Machines
+        | Query::History(_)
+        | Query::Roadmap { .. }
+        | Query::PlanningStatus { .. }
+        | Query::WorkLink { .. }
+        | Query::RepositoryPath { .. }
+        | Query::WaveGraph { .. }
+        | Query::SessionPage { .. }
+        | Query::Tokens { .. }
+        | Query::Retention
+        | Query::Doctor => [
             Query::TaskChanges {
                 issue: "INF-123".into(),
                 base: "parent".into(),
@@ -226,8 +251,17 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
                 after: None,
             },
             Query::GraphProcess { id: graph },
-            Query::TaskUsage {
-                task: "INF-123".into(),
+            Query::Usage {
+                days: 0,
+                wave: None,
+                project: None,
+                task: Some("INF-123".into()),
+            },
+            Query::Usage {
+                days: 30,
+                wave: Some("task-pr-tests".into()),
+                project: None,
+                task: None,
             },
             Query::TaskContext {
                 task: "INF-123".into(),
@@ -242,13 +276,71 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
                 after: None,
             },
             Query::Machines,
+            Query::History(HistoryWindow {
+                since: "7d".into(),
+                limit: 50,
+                wave: None,
+                project: None,
+                task: Some("INF-123".into()),
+            }),
+            Query::Roadmap {
+                directory: "/".into(),
+                wave: None,
+                task: None,
+                all: true,
+            },
+            Query::Roadmap {
+                directory: repo.path().to_owned(),
+                wave: None,
+                task: Some("INF-123".into()),
+                all: false,
+            },
+            Query::PlanningStatus {
+                directory: repo.path().to_owned(),
+            },
+            Query::WorkLink {
+                directory: "/".into(),
+                url: format!("loopflow://{folder}/task/INF-123"),
+            },
+            Query::RepositoryPath {
+                id: serde_json::from_value(repository["id"].clone()).unwrap(),
+            },
+            Query::WaveGraph {
+                directory: repo.path().to_owned(),
+                wave: Some("task-pr-tests".into()),
+            },
+            Query::WaveGraph {
+                directory: repo.path().to_owned(),
+                wave: None,
+            },
+            Query::SessionPage {
+                directory: repo.path().to_owned(),
+                headless: true,
+                after: None,
+            },
+            Query::Tokens {
+                directory: repo.path().to_owned(),
+                days: None,
+            },
+            Query::Tokens {
+                directory: repo.path().to_owned(),
+                days: Some(1),
+            },
+            Query::Retention,
+            Query::Doctor,
         ],
     };
     for query in queries {
         let owned = query.argv();
         let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
         let printed = read(repo.path(), home.path(), &argv, query.input());
-        let served: Value = serde_json::from_str(&query.read().unwrap()).unwrap();
+        let served = query.read().unwrap();
+        let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
+            // `config repository --path` prints a path, not JSON.
+            assert_eq!(served.trim(), printed.trim(), "{argv:?}");
+            continue;
+        };
+        let served: Value = serde_json::from_str(&served).unwrap();
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
 }
@@ -258,7 +350,9 @@ fn without_clock(mut value: Value) -> Value {
     match &mut value {
         Value::Object(fields) => {
             fields.retain(|key, field| {
-                !(key == "evidence_age_secs" || (key == "observed_at" && field.is_string()))
+                !(key == "evidence_age_secs"
+                    || key == "generated_at"
+                    || (key == "observed_at" && field.is_string()))
             });
             for field in fields.values_mut() {
                 *field = without_clock(field.take());

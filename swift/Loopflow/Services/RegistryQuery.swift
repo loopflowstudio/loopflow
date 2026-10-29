@@ -46,11 +46,21 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
     case viewPlan(directory: String, expression: String?)
     case graphProcesses(directory: String, task: String, after: String?)
     case graphProcess(id: String)
-    case taskUsage(task: String)
+    case usage(days: Int, wave: String?, project: String?, task: String?)
     case taskContext(task: String)
     case waveDetail(directory: String, wave: String)
     case closedTasks(directory: String, wave: String, after: String?)
     case machines
+    case history(since: String, limit: Int, wave: String?, project: String?, task: String?)
+    case roadmap(directory: String, wave: String?, task: String?, all: Bool)
+    case planningStatus(directory: String)
+    case workLink(directory: String, url: String)
+    case repositoryPath(id: String)
+    case waveGraph(directory: String, wave: String?)
+    case sessionPage(directory: String, headless: Bool, after: String?)
+    case tokens(directory: String, days: Int?)
+    case retention
+    case doctor
 
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
@@ -82,8 +92,8 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
             return ["graph", "list", "--processes", "--for-task", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
         case .graphProcess(let id):
             return ["graph", "show", id, "--processes", "--json"]
-        case .taskUsage(let task):
-            return ["usage", "--days", "0", "--task", task, "--json"]
+        case .usage(let days, let wave, let project, let task):
+            return ["usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .taskContext(let task):
             return ["usage", "--days", "0", "--task", task, "--context", "--json"]
         case .waveDetail(_, let wave):
@@ -92,7 +102,35 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
             return ["desktop", "done", "--wave", wave, "--json"] + (after.map { ["--after", $0] } ?? [])
         case .machines:
             return ["machine", "list", "--json"]
+        case .history(let since, let limit, let wave, let project, let task):
+            return ["history", "--since", since, "--limit", String(limit)]
+                + Self.work(wave: wave, project: project, task: task) + ["--json"]
+        case .roadmap(_, let wave, let task, let all):
+            return ["desktop", "plan"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
+                + (all ? ["--all"] : []) + ["--json"]
+        case .planningStatus:
+            return ["config", "planning", "status", "--json"]
+        case .workLink(_, let url):
+            return ["open", url, "--link", "--json"]
+        case .repositoryPath(let id):
+            return ["--repository", id, "config", "repository", "--path"]
+        case .waveGraph(_, let wave):
+            return ["wave", "graph", "show", wave ?? "--no-wave", "--json"]
+        case .sessionPage(_, let headless, let after):
+            return ["desktop", "sessions", "--json", "--page"] + (headless ? ["--interactive", "all"] : [])
+                + ["--limit", "100"] + (after.map { ["--after", $0] } ?? [])
+        case .tokens(_, let days):
+            return ["ops", "tokens", "--json"] + (days.map { ["--days", String($0)] } ?? [])
+        case .retention:
+            return ["history", "retention", "--json"]
+        case .doctor:
+            return ["doctor", "--json"]
         }
+    }
+
+    private static func work(wave: String?, project: String?, task: String?) -> [String] {
+        (wave.map { ["--wave", $0] } ?? []) + (project.map { ["--project", $0] } ?? [])
+            + (task.map { ["--task", $0] } ?? [])
     }
 
     /// The directory `argv` reads from; Rust's `--cwd`.
@@ -101,7 +139,10 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
         case .repositoryIdentity(let directory), .paneLayout(let directory, _),
              .people(let directory), .graphs(let directory), .viewPlan(let directory, _),
              .graphProcesses(let directory, _, _), .waveDetail(let directory, _),
-             .closedTasks(let directory, _, _):
+             .closedTasks(let directory, _, _), .roadmap(let directory, _, _, _),
+             .planningStatus(let directory), .workLink(let directory, _),
+             .waveGraph(let directory, _), .sessionPage(let directory, _, _),
+             .tokens(let directory, _):
             return directory
         default: return nil
         }
@@ -112,7 +153,10 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
         return nil
     }
 
-    private enum Key: String, CodingKey { case query, issue, base, path, draft, directory, work, expression, task, after, id, wave }
+    private enum Key: String, CodingKey {
+        case query, issue, base, path, draft, directory, work, expression, task, after, id, wave
+        case days, project, since, limit, all, url, headless
+    }
 
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: Key.self)
@@ -162,8 +206,11 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
         case .graphProcess(let id):
             try container.encode("graph_process", forKey: .query)
             try container.encode(id, forKey: .id)
-        case .taskUsage(let task):
-            try container.encode("task_usage", forKey: .query)
+        case .usage(let days, let wave, let project, let task):
+            try container.encode("usage", forKey: .query)
+            try container.encode(days, forKey: .days)
+            try container.encode(wave, forKey: .wave)
+            try container.encode(project, forKey: .project)
             try container.encode(task, forKey: .task)
         case .taskContext(let task):
             try container.encode("task_context", forKey: .query)
@@ -179,6 +226,46 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
             try container.encode(after, forKey: .after)
         case .machines:
             try container.encode("machines", forKey: .query)
+        case .history(let since, let limit, let wave, let project, let task):
+            try container.encode("history", forKey: .query)
+            try container.encode(since, forKey: .since)
+            try container.encode(limit, forKey: .limit)
+            try container.encode(wave, forKey: .wave)
+            try container.encode(project, forKey: .project)
+            try container.encode(task, forKey: .task)
+        case .roadmap(let directory, let wave, let task, let all):
+            try container.encode("roadmap", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(wave, forKey: .wave)
+            try container.encode(task, forKey: .task)
+            try container.encode(all, forKey: .all)
+        case .planningStatus(let directory):
+            try container.encode("planning_status", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+        case .workLink(let directory, let url):
+            try container.encode("work_link", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(url, forKey: .url)
+        case .repositoryPath(let id):
+            try container.encode("repository_path", forKey: .query)
+            try container.encode(id, forKey: .id)
+        case .waveGraph(let directory, let wave):
+            try container.encode("wave_graph", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(wave, forKey: .wave)
+        case .sessionPage(let directory, let headless, let after):
+            try container.encode("session_page", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(headless, forKey: .headless)
+            try container.encode(after, forKey: .after)
+        case .tokens(let directory, let days):
+            try container.encode("tokens", forKey: .query)
+            try container.encode(directory, forKey: .directory)
+            try container.encode(days, forKey: .days)
+        case .retention:
+            try container.encode("retention", forKey: .query)
+        case .doctor:
+            try container.encode("doctor", forKey: .query)
         }
     }
 }
@@ -360,8 +447,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func repositoryPath(id: String) async throws -> String {
-        try await run(["--repository", id, "config", "repository", "--path"], nil)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try await serve(.repositoryPath(id: id)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Current Waves across the machine. The shared
@@ -399,36 +485,29 @@ public struct RegistryQuery: Sendable {
     }
 
     public func roadmap(wave: String? = nil) async throws -> RoadmapSnapshot {
-        var args = ["desktop", "plan"]
-        if let wave {
-            args.append(wave)
-        } else {
-            args.append("--all")
-        }
-        args.append("--json")
-        let stdout = try await run(args, nil)
-        return try Self.decode(RoadmapSnapshot.self, from: stdout)
+        try Self.decode(RoadmapSnapshot.self, from: await serve(
+            .roadmap(directory: "/", wave: wave, task: nil, all: wave == nil)))
     }
 
     /// Resolve a public Work address through Rust's repository and Work owners.
     /// Reads only: no checkout, Session or window is prepared.
     public func workLink(_ url: URL) async throws -> WorkLink {
-        let links = try Self.decode([WorkLink].self, from: await run(["open", url.absoluteString, "--link", "--json"], nil))
+        let links = try Self.decode([WorkLink].self, from: await serve(.workLink(directory: "/", url: url.absoluteString)))
         guard let link = links.first, links.count == 1 else {
             throw RegistryQueryError("The Work link did not resolve to one destination.")
         }
         return link
     }
 
+    /// Without a repository the Task resolves across every repository.
     public func taskDestination(issue: String, repo: String?) async throws -> RoadmapSnapshot {
-        var args = ["desktop", "plan", "--task", issue, "--json"]
-        if repo == nil { args.append("--all") }
-        return try Self.decode(RoadmapSnapshot.self, from: await run(args, repo))
+        try Self.decode(RoadmapSnapshot.self, from: await serve(
+            .roadmap(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)))
     }
 
     public func peerPlanningStatus(cwd: String) async throws -> [PeerPlanningStatus] {
         struct Status: Decodable { let destinations: [PeerPlanningStatus] }
-        return try Self.decode(Status.self, from: await run(["config", "planning", "status", "--json"], cwd)).destinations
+        return try Self.decode(Status.self, from: await serve(.planningStatus(directory: cwd))).destinations
     }
 
     public func localMachineId() async throws -> String {
@@ -456,13 +535,8 @@ public struct RegistryQuery: Sendable {
         project: String? = nil,
         task: String? = nil
     ) async throws -> WorkActivitySnapshot {
-        var args = ["history", "--since", since, "--limit", String(limit)]
-        if let wave { args.append(contentsOf: ["--wave", wave]) }
-        if let project { args.append(contentsOf: ["--project", project]) }
-        if let task { args.append(contentsOf: ["--task", task]) }
-        args.append("--json")
-        let stdout = try await run(args, nil)
-        return try Self.decode(WorkActivitySnapshot.self, from: stdout)
+        try Self.decode(WorkActivitySnapshot.self, from: await serve(
+            .history(since: since, limit: limit, wave: wave, project: project, task: task)))
     }
 
     // Task content reads and saves address the Task by issue and run outside its
@@ -537,8 +611,7 @@ public struct RegistryQuery: Sendable {
 
     /// The graph a new Task in `wave`, or the repository when nil, would take up.
     public func waveGraph(wave: String?, cwd: String?) async throws -> WaveGraph {
-        let args = ["wave", "graph", "show"] + (wave.map { [$0] } ?? ["--no-wave"]) + ["--json"]
-        return try Self.decode(WaveGraph.self, from: await run(args, cwd))
+        try Self.decode(WaveGraph.self, from: await serve(.waveGraph(directory: cwd ?? "/", wave: wave)))
     }
 
     /// Ship the Task: run the rest of its graph to the end headless, standing
@@ -597,8 +670,7 @@ public struct RegistryQuery: Sendable {
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.
     public func taskHistory(task: String) async throws -> [SessionHistory] {
-        let stdout = try await serve(.taskUsage(task: task))
-        return try Self.decode([SessionHistory].self, from: stdout)
+        try await usage(days: 0, task: task)
     }
 
     /// What each recorded step's submitted input was made of, oldest first,
@@ -643,12 +715,8 @@ public struct RegistryQuery: Sendable {
     /// One bounded page, ordered by stable Session identity.
     public func sessionPage(includingHeadless: Bool = false, after: String? = nil,
                             cwd: String? = nil) async throws -> SessionPage {
-        var args = ["desktop", "sessions", "--json", "--page"]
-        if includingHeadless { args += ["--interactive", "all"] }
-        args += ["--limit", "100"]
-        if let after { args += ["--after", after] }
-        let stdout = try await run(args, cwd)
-        return try Self.decode(SessionPage.self, from: stdout)
+        try Self.decode(SessionPage.self, from: await serve(
+            .sessionPage(directory: cwd ?? "/", headless: includingHeadless, after: after)))
     }
 
     /// The repository or Wave's retained conversation; explicit opening only.
@@ -734,41 +802,33 @@ public struct RegistryQuery: Sendable {
         project: String? = nil,
         task: String? = nil
     ) async throws -> [SessionHistory] {
-        var arguments = ["usage", "--days", String(days), "--json"]
-        if let wave { arguments += ["--wave", wave] }
-        if let project { arguments += ["--project", project] }
-        if let task { arguments += ["--task", task] }
-        let stdout = try await run(arguments, nil)
-        return try Self.decode([SessionHistory].self, from: stdout)
+        try Self.decode([SessionHistory].self, from: await serve(
+            .usage(days: days, wave: wave, project: project, task: task)))
     }
 
     /// The codebase on disk, as a tree of directories weighted by tokens.
     /// Mirrors Rust `CodeNode`. Runs in `repoPath` — `lf tokens` measures the
     /// repo it is invoked in.
     public func codebase(repoPath: String) async throws -> CodeNode {
-        let stdout = try await run(["ops", "tokens", "--json"], repoPath)
-        return try Self.decode(CodeNode.self, from: stdout)
+        try Self.decode(CodeNode.self, from: await serve(.tokens(directory: repoPath, days: nil)))
     }
 
     /// How big the codebase was on each day it changed. Mirrors Rust
     /// `CodeSnapshot`. Blob counts are cached by sha, so only the first walk of
     /// a window pays to tokenize.
     public func codebaseHistory(repoPath: String, days: Int = 30) async throws -> [CodeSnapshot] {
-        let stdout = try await run(["ops", "tokens", "--json", "--days", String(days)], repoPath)
-        return try Self.decode([CodeSnapshot].self, from: stdout)
+        try Self.decode([CodeSnapshot].self, from: await serve(.tokens(directory: repoPath, days: days)))
     }
 
     /// How much Session history providers still keep, and what they remove next.
     /// Mirrors Rust `RetentionSummary`.
     public func retention() async throws -> RetentionSummary {
-        let stdout = try await run(["history", "retention", "--json"], nil)
-        return try Self.decode(RetentionSummary.self, from: stdout)
+        try Self.decode(RetentionSummary.self, from: await serve(.retention))
     }
 
     /// The ledger's self-audit, including continuity and lineage tripwires.
     public func doctor() async throws -> DoctorReport {
-        let stdout = try await run(["doctor", "--json"], nil)
-        return try Self.decode(DoctorReport.self, from: stdout)
+        try Self.decode(DoctorReport.self, from: await serve(.doctor))
     }
 
     /// Decode retained wire text through the decoder live reads use.

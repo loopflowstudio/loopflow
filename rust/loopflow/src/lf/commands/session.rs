@@ -451,6 +451,17 @@ pub(crate) fn watch_list(
     )
 }
 
+/// What `lf session list --json` prints for `filter` in `shape`.
+pub(crate) fn read_once(
+    filter: &crate::session::SessionFilter,
+    shape: Shape,
+) -> anyhow::Result<serde_json::Value> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_shared_store().await?;
+        read_list(&store, filter, shape).await
+    })
+}
+
 /// What `lf session list --json` prints: a page with `--page`, else every row.
 async fn read_list(
     store: &Arc<Store>,

@@ -301,7 +301,7 @@ struct RegistryQueryTests {
     func roadmapUsesOneMachineQuery() async throws {
         let query = RegistryQuery { args, cwd in
             #expect(args == ["desktop", "plan", "product", "--json"])
-            #expect(cwd == nil)
+            #expect(cwd == "/")
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
 
@@ -314,7 +314,7 @@ struct RegistryQueryTests {
     func roadmapRequestsAllRepositories() async throws {
         let query = RegistryQuery { args, cwd in
             #expect(args == ["desktop", "plan", "--all", "--json"])
-            #expect(cwd == nil)
+            #expect(cwd == "/")
             return #"{"generated_at":"2026-07-15T00:00:00Z","waves":[],"tasks":{"state":"ok","items":[],"truncated":false}}"#
         }
 
@@ -517,8 +517,8 @@ struct RegistryQueryTests {
 """
         let query = RegistryQuery { args, _ in
             #expect(args == [
-                "usage", "--days", "7", "--json",
-                "--wave", "product", "--project", "sessions", "--task", "LOO-265",
+                "usage", "--days", "7",
+                "--wave", "product", "--project", "sessions", "--task", "LOO-265", "--json",
             ])
             return json
         }

@@ -21,6 +21,7 @@ use super::usage;
 use super::watch::{Subscription, Transport};
 use super::waves::{list as list_waves, Shape};
 use super::work_route::repository_identity;
+use crate::durable::RepositoryId;
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
 
@@ -129,11 +130,26 @@ fn session_flags(headless: bool) -> &'static [&'static str] {
 
 /// `lf desktop sessions`' arguments as its flags parse, defaults included.
 fn session_args(headless: bool) -> anyhow::Result<SessionListArgs> {
+    parse_session_args(session_flags(headless).iter().map(|flag| flag.to_string()))
+}
+
+fn parse_session_args(flags: impl IntoIterator<Item = String>) -> anyhow::Result<SessionListArgs> {
     let command = SessionListArgs::augment_args(clap::Command::new("sessions"));
-    let flags = std::iter::once("sessions").chain(session_flags(headless).iter().copied());
+    let flags = std::iter::once("sessions".to_owned()).chain(flags);
     Ok(SessionListArgs::from_arg_matches(
         &command.try_get_matches_from(flags)?,
     )?)
+}
+
+/// The flags of one page of Desktop's Session inventory.
+fn page_flags(headless: bool, after: Option<&str>) -> Vec<String> {
+    let mut flags = words(&["--json", "--page"]);
+    flags.extend(session_flags(headless).iter().map(|flag| flag.to_string()));
+    flags.extend(words(&["--limit", "100"]));
+    if let Some(after) = after {
+        flags.extend(words(&["--after", after]));
+    }
+    flags
 }
 
 /// A one-shot read an app serves inside its own process.
@@ -183,8 +199,14 @@ pub enum Query {
     },
     /// `lf graph show <id> --processes`: one Graph that ran, with its steps.
     GraphProcess { id: String },
-    /// `lf usage --days 0 --task <task>`: every Session input a Task recorded.
-    TaskUsage { task: String },
+    /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
+    /// inputs recorded in that window, by Work.
+    Usage {
+        days: u32,
+        wave: Option<String>,
+        project: Option<String>,
+        task: Option<String>,
+    },
     /// `lf usage --days 0 --task <task> --context`: what each of those
     /// inputs was made of.
     TaskContext { task: String },
@@ -200,6 +222,46 @@ pub enum Query {
     },
     /// `lf machine list`: your registered Machines.
     Machines,
+    /// `lf history`, once: what Sessions did, by Work.
+    History(HistoryWindow),
+    /// `lf --cwd <directory> desktop plan [wave] [--task <task>] [--all]`:
+    /// Waves and Tasks, after asking the tracker about each repository read.
+    Roadmap {
+        directory: PathBuf,
+        wave: Option<String>,
+        task: Option<String>,
+        all: bool,
+    },
+    /// `lf --cwd <directory> config planning status`: where the repository's
+    /// planning is exchanged.
+    PlanningStatus { directory: PathBuf },
+    /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
+    WorkLink { directory: PathBuf, url: String },
+    /// `lf --repository <id> config repository --path`: a repository plan's
+    /// checkout on this Machine.
+    RepositoryPath { id: RepositoryId },
+    /// `lf --cwd <directory> wave graph show <wave>|--no-wave`: the graph a
+    /// new Task there would take up.
+    WaveGraph {
+        directory: PathBuf,
+        wave: Option<String>,
+    },
+    /// `lf --cwd <directory> desktop sessions --page --limit 100 [--after …]`,
+    /// with `--interactive all` when `headless` Sessions are shown too.
+    SessionPage {
+        directory: PathBuf,
+        headless: bool,
+        after: Option<String>,
+    },
+    /// `lf --cwd <directory> ops tokens [--days <days>]`: the codebase's size.
+    Tokens {
+        directory: PathBuf,
+        days: Option<u32>,
+    },
+    /// `lf history retention`: how much Session history providers keep.
+    Retention,
+    /// `lf doctor`: the ledger's self-audit.
+    Doctor,
 }
 
 impl Query {
@@ -260,7 +322,21 @@ impl Query {
                 argv
             }
             Self::GraphProcess { id } => words(&["graph", "show", id, "--processes", "--json"]),
-            Self::TaskUsage { task } => words(&["usage", "--days", "0", "--task", task, "--json"]),
+            Self::Usage {
+                days,
+                wave,
+                project,
+                task,
+            } => {
+                let mut argv = words(&["usage", "--days", &days.to_string()]);
+                for (flag, value) in [("--wave", wave), ("--project", project), ("--task", task)] {
+                    if let Some(value) = value {
+                        argv.extend(words(&[flag, value]));
+                    }
+                }
+                argv.push("--json".into());
+                argv
+            }
             Self::TaskContext { task } => words(&[
                 "usage",
                 "--days",
@@ -285,6 +361,63 @@ impl Query {
                 argv
             }
             Self::Machines => words(&["machine", "list", "--json"]),
+            Self::History(window) => {
+                let mut argv = window.argv();
+                argv.push("--json".into());
+                argv
+            }
+            Self::Roadmap {
+                directory,
+                wave,
+                task,
+                all,
+            } => {
+                let mut argv = at(directory, &["desktop", "plan"]);
+                argv.extend(wave.clone());
+                if let Some(task) = task {
+                    argv.extend(words(&["--task", task]));
+                }
+                if *all {
+                    argv.push("--all".into());
+                }
+                argv.push("--json".into());
+                argv
+            }
+            Self::PlanningStatus { directory } => {
+                at(directory, &["config", "planning", "status", "--json"])
+            }
+            Self::WorkLink { directory, url } => at(directory, &["open", url, "--link", "--json"]),
+            Self::RepositoryPath { id } => words(&[
+                "--repository",
+                &id.to_string(),
+                "config",
+                "repository",
+                "--path",
+            ]),
+            Self::WaveGraph { directory, wave } => {
+                let mut argv = at(directory, &["wave", "graph", "show"]);
+                argv.push(wave.clone().unwrap_or_else(|| "--no-wave".into()));
+                argv.push("--json".into());
+                argv
+            }
+            Self::SessionPage {
+                directory,
+                headless,
+                after,
+            } => {
+                let mut argv = at(directory, &["desktop", "sessions"]);
+                argv.extend(page_flags(*headless, after.as_deref()));
+                argv
+            }
+            Self::Tokens { directory, days } => {
+                let mut argv = at(directory, &["ops", "tokens", "--json"]);
+                if let Some(days) = days {
+                    argv.extend(words(&["--days", &days.to_string()]));
+                }
+                argv
+            }
+            Self::Retention => words(&["history", "retention", "--json"]),
+            Self::Doctor => words(&["doctor", "--json"]),
         }
     }
 
@@ -349,7 +482,20 @@ impl Query {
                 },
             )?),
             Self::GraphProcess { id } => pretty(&graph_inventory::detail(id)?),
-            Self::TaskUsage { task } => pretty(&task_usage(task)?),
+            Self::Usage {
+                days,
+                wave,
+                project,
+                task,
+            } => pretty(&usage::sessions(
+                *days,
+                super::WorkFilter {
+                    wave: wave.as_deref(),
+                    project: project.as_deref(),
+                    task: task.as_deref(),
+                },
+                None,
+            )?),
             Self::TaskContext { task } => pretty(&usage::context_report(&task_usage(task)?)?),
             Self::WaveDetail { directory, wave } => {
                 pretty(&super::waves::desktop_status(directory, wave)?)
@@ -364,6 +510,50 @@ impl Query {
                 after.as_deref(),
             )?),
             Self::Machines => pretty(&tokio::runtime::Runtime::new()?.block_on(machines())?),
+            Self::History(window) => pretty(&super::activity::snapshot(window)?),
+            Self::Roadmap {
+                directory,
+                wave,
+                task,
+                all,
+            } => super::waves::show_json(
+                directory,
+                wave.as_deref(),
+                task.as_deref(),
+                *all,
+                Shape::Desktop,
+            ),
+            Self::PlanningStatus { directory } => super::planning::status_json(directory),
+            Self::WorkLink { directory, url } => pretty(&super::open::url_links(directory, url)?),
+            // The command prints the path alone.
+            Self::RepositoryPath { id } => {
+                Ok(
+                    repository_identity(&super::work_route::repository_path(id)?, None, None)?
+                        .0
+                        .to_string(),
+                )
+            }
+            Self::WaveGraph { directory, wave } => {
+                let repo = crate::repo::working_directory_in(directory)?;
+                pretty(&tokio::runtime::Runtime::new()?.block_on(
+                    crate::ops::project::wave_graph(&repo, wave.as_deref(), wave.is_some()),
+                )?)
+            }
+            Self::SessionPage {
+                directory,
+                headless,
+                after,
+            } => {
+                let args = parse_session_args(page_flags(*headless, after.as_deref()))?;
+                let filter = super::session::list_filter(&args, directory)?;
+                pretty(&super::session::read_once(&filter, Shape::Desktop)?)
+            }
+            Self::Tokens { directory, days } => super::tokens::codebase(directory, *days),
+            Self::Retention => pretty(
+                &super::history_transcript::retention_summary()?
+                    .ok_or_else(|| anyhow::anyhow!("No Sessions recorded."))?,
+            ),
+            Self::Doctor => pretty(&super::doctor::report()?),
         }
     }
 }

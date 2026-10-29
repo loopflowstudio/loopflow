@@ -164,28 +164,39 @@ fn remote_status(provider: &str) -> serde_json::Value {
     serde_json::json!({"transport": provider.to_ascii_lowercase(), "destinations": []})
 }
 
-async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
+/// What `lf --cwd <directory> config planning status --json` prints.
+pub(crate) fn status_json(directory: &Path) -> Result<String> {
+    let repo = status_repository(directory)?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_store().await?;
+        Ok(serde_json::to_string(
+            &status(&store, &repo.to_string_lossy()).await?,
+        )?)
+    })
+}
+
+async fn status(store: &Store, repo: &str) -> Result<serde_json::Value> {
     let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
     if let Some(provider) = config.planning_transport().remote_name() {
-        if json {
-            println!("{}", remote_status(provider));
-        } else {
-            println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
-        }
+        return Ok(remote_status(provider));
+    }
+    crate::ops::planning_sync::configured_destination(store, repo).await?;
+    let destinations = crate::ops::planning_sync::peer_status(store, repo).await?;
+    Ok(serde_json::json!({"transport": "git", "destinations": destinations}))
+}
+
+async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string(&status(store, repo).await?)?);
+        return Ok(());
+    }
+    let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
+    if let Some(provider) = config.planning_transport().remote_name() {
+        println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
         return Ok(());
     }
     crate::ops::planning_sync::configured_destination(store, repo).await?;
     let destinations = crate::ops::planning_sync::peer_status(store, repo).await?;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string(&serde_json::json!({
-                "transport":"git",
-                "destinations": destinations,
-            }))?
-        );
-        return Ok(());
-    }
     if !destinations.iter().any(|d| d.active) {
         println!("Planning: Git (configured remote; local saves wait when unavailable)");
     }

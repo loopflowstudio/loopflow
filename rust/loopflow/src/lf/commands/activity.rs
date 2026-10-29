@@ -115,15 +115,20 @@ pub fn run(options: &super::history::HistoryFeed) -> Result<()> {
     if options.watch {
         return watch(window, super::watch::Transport::Stdio).map(drop);
     }
-    let path = crate::store::database_path_from_env()?;
-    let store = path.exists().then(|| SqliteStore::new(&path)).transpose()?;
-    let snapshot = read(store.as_ref(), &window)?;
+    let snapshot = snapshot(&window)?;
     if options.json {
         println!("{}", serde_json::to_string(&snapshot)?);
     } else {
         print_snapshot(&snapshot);
     }
     Ok(())
+}
+
+/// What `lf history --json` prints for `window`.
+pub(crate) fn snapshot(window: &HistoryWindow) -> Result<WorkActivitySnapshot> {
+    let path = crate::store::database_path_from_env()?;
+    let store = path.exists().then(|| SqliteStore::new(&path)).transpose()?;
+    read(store.as_ref(), window)
 }
 
 fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActivitySnapshot> {

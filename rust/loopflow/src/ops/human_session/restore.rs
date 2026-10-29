@@ -110,7 +110,7 @@ async fn start(
     let argv = [
         binary.to_string_lossy().into_owned(),
         "session".into(),
-        "connect".into(),
+        "resume".into(),
         session.id.as_str().to_owned(),
     ];
     let owner = crate::transport::start(&argv, true, &session.cwd, &|_| {})

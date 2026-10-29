@@ -291,10 +291,10 @@ fn admit_ci_fix(
             return Ok(());
         }
         if let Some(task_id) = &landing.task_id {
-            if store.sqlite.task_state(task_id).map_err(repair_error)?
-                == crate::durable::TaskState::Deferred
-            {
-                return Err(repair_error("Task is deferred; CI repair is held"));
+            if !store.sqlite.task_owned(task_id).map_err(repair_error)? {
+                return Err(repair_error(
+                    "Task is unassigned; CI repair waits for `lf task claim`",
+                ));
             }
             let local = store.local_machine().await.map_err(repair_error)?;
             let machine = store
@@ -1308,7 +1308,7 @@ pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsRes
 
 /// Check every 15 s until the PR merges or closes. A blocked check is a
 /// recorded state, not an answer: the next check acts on fresh evidence, and
-/// only Defer holds it. No elapsed time ends the wait.
+/// only unassigning the Task holds its repair. No elapsed time ends the wait.
 async fn wait_for_landing(
     store: &SharedStore,
     id: &crate::pr_landing::PrLandingId,

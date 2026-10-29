@@ -35,27 +35,21 @@ before_agent_start, so context projects at the model-request boundary. Native
 assistant checkpoints retain partial usage without completing the turn. Public
 steers use shared callback receipts; queued or emitted is not model incorporation.
 
-Six real-Pi/local-model probes cover failure, empty answers, overflow refresh,
-native resume, Unicode PTY input and public steering; Task/Flow fixtures cover JSON
-routing and nested Work/cwd. Neither proves authenticated execution or visuals. Direct Pi account access passed separately;
-account preference grants no product restriction. Remaining gate/demo boundaries
-stay in the Task plan. Release's entry-point lesson applies.
+Real-Pi/local-model probes and Task/Flow fixtures prove behavior, not
+authenticated execution or visuals; direct Pi account access passed separately and
+grants no product restriction. Probe list: `acd37dde71:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Remaining gate/demo boundaries stay in the Task plan.
 
-## Opening work conversations (LOO-499, 2026-10-17)
+## Opening work conversations (LOO-499 → LOO-618, 2026-10-28)
 
-Jack Heart selected `resume` as an exact `connect` alias, matching scope/session
-skills on first creation, and case-insensitive Task tickets everywhere; he
-authorized pursue while retaining demo and merge review. The working diff uses
-physical checkout scope or an explicit target, never global recency. Ordinary
-skills claim no primary. Fresh selects a successor without stopping the previous
-client; ordinary connect recovers it after an uncertain reply. Preparation launches
-no provider; explanation admits nothing.
-
-Clap aliases canonicalize before routing. Desktop reset preserves concurrent
-updates without restoring predecessor snapshots. Store/stand-in proofs establish
-no installed continuity for CLI, Desktop or remote callers; LOO-475 retains
-installed acceptance and LOO-415's transport and attachment fences stay intact.
-Publication and the full affected gate remain unproved.
+Jack Heart decided (2026-10-26) that `lf resume` always gets you back: it takes
+over from whatever holds the conversation, `--fork` leaves the holder running,
+`lf session new [-a]` restarts on a fresh thread seeded from the conversation log.
+`connect`, `attach` and the open-mode flags are gone. On 2026-10-29 he narrowed it:
+resume takes only Sessions (a Run's id points to `lf resume --task`), and a Task is
+assigned or not (`task claim/unassign`, no deferred state). Scope still comes from physical checkout or an explicit target, never
+recency; preparation launches no provider. LOO-499 history:
+`acd37dde71:.lf/wave/infrastructure/MEMORY.md`, its heading.
 
 ## Waited landing (LOO-503, 2026-10-17)
 
@@ -76,32 +70,20 @@ Merge cannot invent completion intent. Release's entry-point lesson still applie
 configured GitHub delivery and installed upgrade remain unproved. Native repair
 startup also waits without a cutoff; viewer and release publication policies stay separate.
 
-## Native terminal diagnostics (LOO-501/508, 2026-10-18)
+## Native terminal diagnostics (LOO-501/508/516, 2026-10-18)
 
-Jack Heart authorized repair/delivery preserving editing, diagnostics and history;
-account changes remain outside scope. LOO-501 evidence:
-`036008ec26:.lf/wave/infrastructure/MEMORY.md`, this heading.
+Jack Heart authorized repair preserving editing, diagnostics and history; accounts
+stay out of scope. Merged #1595 (`e204ce6072`) scopes parent output to announced
+private Process logs; transport keeps native descriptors, OpenCode its stderr log.
+Installed repair, macOS pending-request and title/reconnect startup remain unproved.
 
-LOO-508 reproduced raw Loopflow output across a Codex draft, not destroyed input.
-Tracing alone misses direct writes, inherited helpers and waiting launchers.
-Merged #1595 (`e204ce6072`) scopes parent output to announced private Process logs;
-transport retains native descriptors and OpenCode its provider stderr log.
-Codex/local-model PTY evidence covers launch/reconnect, warning, Unicode editing,
-submission, resize, history and cleanup; Claude/OpenCode coverage
-uses stand-ins. Linux's 39 checks and Clippy passed; macOS pending-request and
-title/reconnect startup remained unresolved in branch evidence. Installed repair
-and account access remain unproved.
-
-LOO-516 (2026-10-18): Jack Heart requested durable private relay-failure evidence,
-not attribution of an unobserved cause. The working change retains bounded
-observed Session events with the original AgentProcess, operation and direction;
-unexpected renderer resets remain evidence even when disconnect handling returns
-success. Explicit client close stays quiet. Observations neither claim attachment
-nor settle turns; store failure must not end reconnect or reach the renderer.
-Keep observed-event identity independent of a native started turn: startup may
-fail before one exists. Real-Codex disposable startup faults and history reads
-prove retention, not the original installed reset's cause. Gate, CI and delivery
-remain open; Release's entry-point lesson applies.
+LOO-516: Jack Heart requested durable private relay-failure evidence, not
+attribution of an unobserved cause. Retain bounded observed Session events with
+the original AgentProcess, operation and direction, independent of a started
+native turn. Unexpected renderer resets stay evidence; explicit close stays quiet.
+Observations claim no attachment and settle no turns; store failure must not end
+reconnect. Gate, CI and delivery remain open. Detail and probe evidence:
+`acd37dde71:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
@@ -278,8 +260,8 @@ Jack Heart accepted per-Session lf owners (per-shell PTY owners for shells),
 shared Work-keyed lfdb presentation intent, and uniform repository/Wave/Task
 creation and lifecycle, including nested CLI callers without Desktop. No shared
 daemon, automatic turn replay or selected eager-start policy. LOO-415 owns
-transport; PR #1581 supplies the independent owner and attach-only path, with
-terminal restoration limits still explicit. LOO-497 owns the shared layout API;
+transport; PR #1581 supplies the independent owner (LOO-618 folded its attach-only
+path into `lf resume`), with terminal restoration limits still explicit. LOO-497 owns the shared layout API;
 LOO-489 integrates it.
 
 Application retention now keeps repository registries across window closure;

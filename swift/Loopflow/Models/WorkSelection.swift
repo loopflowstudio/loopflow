@@ -74,7 +74,7 @@ public struct WorkSelection: Codable, Equatable, Sendable {
 }
 
 public enum WorkSelectionState: String, Codable, Sendable {
-    case open, available, busy, blocked, unstarted, idle, active, moving, shipping, deferred, backlog, done
+    case open, available, busy, blocked, unstarted, idle, active, moving, shipping, backlog, done
 }
 
 public struct WorkMemberRef: Codable, Hashable, Sendable {

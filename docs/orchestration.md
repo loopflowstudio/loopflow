@@ -166,7 +166,7 @@ withdraws it too, recording the error in the Task's history; `lf ship` resumes.
 | `active` | at an interactive step, in its Task Session |
 | `moving` | a run carries it, with an interactive step ahead |
 | `shipping` | a run carries it and nothing ahead stops it |
-| `deferred` · `done` · `abandoned` | held, completed, dropped |
+| `done` · `abandoned` | completed, dropped |
 
 Builtins are `feature` (explore, demo, deliver, verify), `code` (demo, deliver,
 verify), `auto` (pursue then deliver, no interactive step: request to merged PR

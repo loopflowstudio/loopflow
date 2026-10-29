@@ -93,8 +93,8 @@ work_values! {
     (TaskDescription, "task_description", Option<String>),
     (TaskRank, "task_rank", u32),
     (TaskAssignee, "task_assignee", Option<String>),
-    // Released peers and stored edits name it `task_paused`.
-    (TaskDeferred, "task_paused", bool),
+    // Released peers recorded a Task hold here; nothing reads it.
+    (HistoricalTaskPaused, "task_paused", bool),
     (TaskShippedAt, "task_shipped_at", Option<i64>),
     (TaskDueDate, "task_due_date", Option<String>),
     (TaskDeletedAt, "task_deleted_at", Option<i64>),

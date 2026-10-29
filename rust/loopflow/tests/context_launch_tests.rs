@@ -107,7 +107,7 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             .unwrap();
         fs::remove_file(home.path().join(failure)).unwrap();
         let output =
-            native_codex_command(repo.path(), home.path(), &["session", "connect", &session])
+            native_codex_command(repo.path(), home.path(), &["session", "resume", &session])
                 .output()
                 .unwrap();
         assert!(
@@ -215,7 +215,7 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
     // request as unsent. A genuine terminal failure must still fail.
     for marker in ["close-terminal", "fail-terminal"] {
         fs::write(home.path().join(marker), "").unwrap();
-        let output = command(&["session", "connect", &session]).output().unwrap();
+        let output = command(&["session", "resume", &session]).output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
             output.status.success(),
@@ -226,7 +226,7 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         assert_eq!(read("native-turns.json").as_array().unwrap().len(), 1);
         fs::remove_file(home.path().join(marker)).unwrap();
     }
-    let output = command(&["session", "connect", &session]).output().unwrap();
+    let output = command(&["session", "resume", &session]).output().unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -1054,7 +1054,7 @@ fn explicit_documents_native_reconnect_supplies_only_the_new_selection() {
             .success());
     }
     let command = |args: &[&str]| native_codex_command(&checkout, home.path(), args);
-    let prepared = command(&["connect", "--fresh", "--prepare", "--json"])
+    let prepared = command(&["resume", "--prepare", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -1072,7 +1072,7 @@ fn explicit_documents_native_reconnect_supplies_only_the_new_selection() {
         "codex",
         "--docs",
         first_path.to_str().unwrap(),
-        "connect",
+        "resume",
         session,
         "--message",
         "FIRST-REQUEST-662",
@@ -1089,7 +1089,7 @@ fn explicit_documents_native_reconnect_supplies_only_the_new_selection() {
         "-b",
         "--docs",
         next_path.to_str().unwrap(),
-        "connect",
+        "resume",
         session,
         "--message",
         "Read the new document.",

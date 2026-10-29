@@ -33,7 +33,7 @@
       "LF_HOME=/private/tmp/.tmp346qSS",
       "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
       "session",
-      "connect",
+      "resume",
       "cc797f6de1e54aa4a1888591b7da9743"
     ],
     "primary_scope": "repository",
@@ -82,7 +82,7 @@
       "LF_HOME=/private/tmp/.tmp346qSS",
       "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
       "session",
-      "connect",
+      "resume",
       "cc797f6de1e54aa4a1888591b7da9743"
     ],
     "primary_scope": "repository",
@@ -295,7 +295,7 @@
         "LF_HOME=/private/tmp/.tmp346qSS",
         "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
         "session",
-        "connect",
+        "resume",
         "cc797f6de1e54aa4a1888591b7da9743"
       ],
       "primary_scope": "repository",
@@ -344,7 +344,7 @@
         "LF_HOME=/private/tmp/.tmp346qSS",
         "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
         "session",
-        "connect",
+        "resume",
         "480d8ca67cdb41ffa963f79fdb34637c"
       ],
       "primary_scope": null,
@@ -397,7 +397,7 @@
         "LF_HOME=/private/tmp/.tmp346qSS",
         "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
         "session",
-        "connect",
+        "resume",
         "session_bf12c20b53be450998e36bf24a58b56f"
       ],
       "primary_scope": null,
@@ -447,7 +447,7 @@
       "LF_HOME=/private/tmp/.tmp346qSS",
       "/Users/jack/src/loopflow.make-loopflow-a-work-first/target/debug/lf",
       "session",
-      "connect",
+      "resume",
       "480d8ca67cdb41ffa963f79fdb34637c"
     ],
     "primary_scope": null,

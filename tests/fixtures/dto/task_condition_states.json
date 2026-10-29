@@ -418,7 +418,7 @@
     },
     "section": "waiting",
     "actions": {
-      "recommended": "resume",
+      "recommended": "run",
       "reason": "resume the parked Task"
     },
     "condition": {
@@ -678,7 +678,7 @@
     },
     "section": "waiting",
     "actions": {
-      "recommended": "resume",
+      "recommended": "run",
       "reason": "resume the parked Task"
     },
     "condition": {
@@ -1035,7 +1035,7 @@
     },
     "section": "waiting",
     "actions": {
-      "recommended": "resume",
+      "recommended": "run",
       "reason": "resume the parked Task"
     },
     "condition": {

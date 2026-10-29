@@ -653,12 +653,6 @@ pub(crate) fn select_task_run(
 ) -> OpsResult<TaskRunSelection> {
     use crate::task_graph::{END, START};
     let issue = &task.identifier;
-    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Deferred
-    {
-        return Err(task_error(format!(
-            "Task is deferred; use `lf task resume {issue}` before running a Graph"
-        )));
-    }
     let current = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;
     let (graph, row) = match (current, requested) {
         (Some(row), None) => (row.graph.clone(), Some(row)),
@@ -1921,24 +1915,6 @@ pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<
     })
 }
 
-pub fn task_defer(issue: &str, deferred: bool) -> OpsResult<()> {
-    block_on_task(async {
-        let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        store
-            .sqlite
-            .set_task_deferred(&task.id, deferred)
-            .map_err(task_error)?;
-        let repo = repository_for_task(&store, &task)?;
-        super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
-        Ok(())
-    })
-}
-
 pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;
@@ -2243,10 +2219,6 @@ pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
-    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Deferred
-    {
-        return Ok(());
-    }
     match task_work_status(store, task).await? {
         WorkStatus::Done => {
             return Ok(());
@@ -2274,7 +2246,7 @@ pub struct TaskEdit {
 pub(crate) fn validate_task_edit_input(update: &crate::work::task::TaskUpdate) -> OpsResult<()> {
     if *update == crate::work::task::TaskUpdate::default() {
         return Err(task_error(
-            "task edit requires --title, --notes, --rank, --assignee, --unassign or --regressed-in",
+            "task edit requires --title, --notes, --rank, --assignee or --regressed-in",
         ));
     }
     if update

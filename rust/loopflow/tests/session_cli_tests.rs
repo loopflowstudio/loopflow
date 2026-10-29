@@ -72,7 +72,10 @@ fn session_cli_uses_one_truthful_resolution_contract() {
     assert!(!help.contains("iterate"));
     assert!(!help.contains("complete"));
     assert!(!help.contains("ready"));
-    assert!(help.contains("connect"));
+    assert!(help.contains("resume"));
+    assert!(help.contains("new"));
+    assert!(!help.contains("connect"));
+    assert!(!help.contains("attach"));
     assert!(!help.contains("accept"));
     assert!(!help.contains("decline"));
     assert!(!help.contains("send-back"));
@@ -90,7 +93,8 @@ fn session_cli_uses_one_truthful_resolution_contract() {
         &["session", "stop-client", "missing-input"],
         &["session", "serve-graph"],
         &["session", "ensure"],
-        &["session", "new", "missing-session"],
+        &["session", "connect", "missing-session"],
+        &["session", "attach", "missing-session"],
     ] {
         let output = run(home.path(), args);
         assert!(!output.status.success());
@@ -100,7 +104,7 @@ fn session_cli_uses_one_truthful_resolution_contract() {
         home.path(),
         &[
             "session",
-            "connect",
+            "resume",
             "missing-session",
             "--prepare",
             "--json",
@@ -156,7 +160,7 @@ fn development_session_handoff_keeps_its_binary_and_home() {
         command
     };
     let prepared = command(env!("CARGO_BIN_EXE_lf"))
-        .args(["session", "connect", &id, "--prepare", "--json"])
+        .args(["session", "resume", &id, "--prepare", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -208,7 +212,7 @@ fn prepared_conversation_keeps_captured_input_without_a_run_before_provider_star
     assert_eq!(manifest["caller_artifact_key"], CALLER);
     let opened = run(
         home.path(),
-        &["session", "connect", &id, "--prepare", "--json"],
+        &["session", "resume", &id, "--prepare", "--json"],
     );
     assert!(
         opened.status.success(),
@@ -316,7 +320,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             )
             .unwrap();
             std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let failed = command(home.path(), &["session", "connect", id])
+            let failed = command(home.path(), &["session", "resume", id])
                 .env("LF_BIN", &rejected)
                 .output()
                 .unwrap();
@@ -333,7 +337,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             assert!(!error.contains("Local proof"), "prompt leaked: {error}");
         }
         let evidence = home.path().join("resumed");
-        let mut first = command(home.path(), &["session", "connect", id])
+        let mut first = command(home.path(), &["session", "resume", id])
             .env(
                 "PATH",
                 format!(
@@ -369,14 +373,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let metadata_stderr = home.path().join("metadata-stderr");
         let mut second = command(
             home.path(),
-            &[
-                "session",
-                "connect",
-                selector,
-                "--try",
-                "--prepare",
-                "--json",
-            ],
+            &["session", "resume", selector, "--prepare", "--json"],
         )
         .stdout(Stdio::from(
             std::fs::File::create(&metadata_stdout).unwrap(),
@@ -573,7 +570,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
             &[
                 "--batch",
                 "session",
-                "connect",
+                "resume",
                 &id,
                 "--message",
                 "another instruction",
@@ -681,14 +678,7 @@ for line in sys.stdin:
     .unwrap();
     let output = command(
         home.path(),
-        &[
-            "-b",
-            "session",
-            "connect",
-            &id,
-            "--message",
-            "Continue here",
-        ],
+        &["-b", "session", "resume", &id, "--message", "Continue here"],
     )
     .current_dir(&caller)
     .env("PATH", path)
@@ -871,7 +861,7 @@ fn session_names_are_shared_and_human_names_win() {
     assert_eq!(readback["title_source"], "human");
     let reopened = run(
         home.path(),
-        &["session", "connect", id, "--prepare", "--json"],
+        &["session", "resume", id, "--prepare", "--json"],
     );
     let reopened: serde_json::Value = serde_json::from_slice(&reopened.stdout).unwrap();
     assert_eq!(reopened["title"], "Launch notes");
@@ -1021,7 +1011,7 @@ exit 2
                     "Plan store migration for archived tasks",
                 ])
             } else {
-                isolated_command(&["session", "connect", &id])
+                isolated_command(&["session", "resume", &id])
             };
             launch
                 .env("TITLE_HOST", host)
@@ -1179,7 +1169,7 @@ fn session_names_survive_capture_replacement() {
     .unwrap();
     std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
     let evidence = home.path().join("resume-proof");
-    let mut opened = command(home.path(), &["session", "connect", id])
+    let mut opened = command(home.path(), &["session", "resume", id])
         .env(
             "PATH",
             format!(
@@ -1339,7 +1329,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     // The private server exits before reporting readiness. OpenCode reports
     // that failure; retry must still reach the provider in the same Session.
     write_provider("#!/bin/sh\nexit 0\n");
-    let first = open(&["session", "connect", &id]);
+    let first = open(&["session", "resume", &id]);
     assert!(!first.status.success());
     assert!(String::from_utf8_lossy(&first.stderr).contains("private server failed to start"));
     write_provider(&include_str!("support/opencode_server.py").replace("__WAIT__", "False"));
@@ -1351,14 +1341,11 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
         "#!{}\n",
         home.path().join("missing-interpreter").display()
     ));
-    let failed = open(&["session", "connect", &id, "--takeover"]);
+    let failed = open(&["session", "resume", &id]);
     assert!(!failed.status.success());
     write_provider(&include_str!("support/opencode_server.py").replace("__WAIT__", "False"));
-    for args in [
-        vec!["session", "resume", &id],
-        vec!["session", "connect", &id, "--takeover"],
-    ] {
-        let result = open(&args);
+    for _ in 0..2 {
+        let result = open(&["session", "resume", &id]);
         assert!(result.status.success(), "{result:?}");
     }
     let store =
@@ -1410,7 +1397,7 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
     let before = store.session(&id).unwrap().unwrap();
     let history = store.session_history(&id, 0, 1000).unwrap();
     let connect = |prepare: bool| {
-        let mut args = vec!["session", "connect", &id, "--takeover", "--agent", "codex"];
+        let mut args = vec!["session", "resume", &id, "--agent", "codex"];
         if prepare {
             args.extend(["--prepare", "--json"]);
         }
@@ -1482,6 +1469,85 @@ fn provider_switch_without_transcript_preserves_conversation_and_retries() {
     assert!(store.session_history(&id, 0, 1000).unwrap().len() > history.len());
 }
 
+/// A Claude conversation with a saved native thread and transcript.
+fn claude_conversation_with_transcript(home: &std::path::Path) -> (String, String) {
+    let (id, input, _) = prepare_conversation(home, home, "claude", "Keep this conversation");
+    let native = uuid::Uuid::new_v4().to_string();
+    record_native(home, &id, &input, &native);
+    let transcripts = home.join("claude/projects/fixture");
+    std::fs::create_dir_all(&transcripts).unwrap();
+    std::fs::write(
+        transcripts.join(format!("{native}.jsonl")),
+        r#"{"type":"user","userType":"external","message":{"content":"Keep the original request"}}"#,
+    )
+    .unwrap();
+    (id, input)
+}
+
+fn prepared(home: &std::path::Path, args: &[&str]) -> serde_json::Value {
+    let output = command(home, args)
+        .env("CLAUDE_CONFIG_DIR", home.join("claude"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn session_new_restarts_the_same_conversation_on_a_seeded_thread() {
+    let home = tempfile::tempdir().unwrap();
+    let (id, input) = claude_conversation_with_transcript(home.path());
+    let record = prepared(home.path(), &["session", "new", &id, "--prepare", "--json"]);
+    assert_eq!(record["id"], id.as_str());
+    let argv = record["open_argv"].as_array().unwrap();
+    assert_eq!(argv[argv.len() - 3..], ["session", "resume", id.as_str()]);
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let restarted = store.session(&id).unwrap().unwrap();
+    assert_eq!(restarted.title, "Keep this conversation");
+    assert_eq!(restarted.provider.as_deref(), Some("claude"));
+    assert_ne!(restarted.artifact_key.as_ref(), Some(&input));
+    assert!(restarted
+        .request
+        .unwrap()
+        .contains("Keep the original request"));
+    // The old thread stays in the conversation's history.
+    assert!(store
+        .session_history(&id, 0, 1000)
+        .unwrap()
+        .iter()
+        .any(|event| event.payload["input_id"] == input.as_str()));
+}
+
+#[cfg(unix)]
+#[test]
+fn resume_fork_continues_in_a_new_conversation_and_leaves_the_original() {
+    let home = tempfile::tempdir().unwrap();
+    let (id, input) = claude_conversation_with_transcript(home.path());
+    let forked = prepared(
+        home.path(),
+        &["session", "resume", &id, "--fork", "--prepare", "--json"],
+    );
+    let fork = forked["id"].as_str().unwrap();
+    assert_ne!(fork, id);
+    let argv = forked["open_argv"].as_array().unwrap();
+    assert_eq!(argv[argv.len() - 3..], ["session", "resume", fork]);
+    let store =
+        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
+    let original = store.session(&id).unwrap().unwrap();
+    assert_eq!(original.artifact_key.as_ref(), Some(&input));
+    assert!(original.completed_at.is_none());
+    let fork = store.session(fork).unwrap().unwrap();
+    assert_eq!(fork.provider.as_deref(), Some("claude"));
+    assert_eq!(fork.cwd, original.cwd);
+    assert!(fork.request.unwrap().contains("Keep the original request"));
+}
+
 #[cfg(unix)]
 #[test]
 fn provider_switch_stops_startup_output_before_codex_opens() {
@@ -1535,7 +1601,7 @@ fn provider_switch_stops_startup_output_before_codex_opens() {
     let mut master = unsafe { fs::File::from_raw_fd(master) };
     // SAFETY: the fresh slave descriptor is owned only by this File.
     let slave = unsafe { fs::File::from_raw_fd(slave) };
-    let mut launch = command(home.path(), &["session", "connect", &id, "-a", "codex"]);
+    let mut launch = command(home.path(), &["session", "resume", &id, "-a", "codex"]);
     launch
         .process_group(0)
         .env_clear()
@@ -1603,7 +1669,7 @@ fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
 
 #[cfg(unix)]
 #[test]
-fn connect_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
+fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
     use std::os::unix::fs::PermissionsExt;
     for provider in ["claude", "codex"] {
         let home = tempfile::tempdir().unwrap();
@@ -1648,8 +1714,8 @@ fn connect_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
                 .unwrap()
         };
         for args in [
-            vec!["connect", id.as_str()],
-            vec!["session", "connect", id.as_str()],
+            vec!["resume", id.as_str()],
+            vec!["session", "resume", id.as_str()],
         ] {
             let output = resume(&args);
             assert!(output.status.success(), "{provider}: {output:?}");
@@ -1674,7 +1740,7 @@ fn connect_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             std::fs::write(file, "{}").unwrap();
         }
-        let output = resume(&["connect", &ambiguous]);
+        let output = resume(&["resume", &ambiguous]);
         assert!(!output.status.success());
         assert!(
             String::from_utf8_lossy(&output.stderr).contains("ambiguous"),

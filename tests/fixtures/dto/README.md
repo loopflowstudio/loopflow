@@ -28,7 +28,7 @@ optional Task snapshot (`execution.execution`).
 This CLI-only contract is tested in Rust. The Mac app receives its derived
 condition, reason, and actions through the existing Wave Task row.
 
-`session.json` pins `lf connect --prepare --json`: one unresolved Task GraphStep
+`session.json` pins `lf resume --prepare --json`: one unresolved Task GraphStep
 session, its explicit readiness state, and its exact Machine-local attach route.
 
 `session_memberships.json` pins each Session's required `graph_membership`:
@@ -94,8 +94,9 @@ readiness proof.
 `task_run_explanations.json` covers edge take-up, no-Graph completion, ad-hoc Graph
 selection and unavailable execution evidence. Explanation never claims ownership.
 
-`session_connect_explanations.json` preserves connection intent, preparation versus
-takeover, shared legal actions and unavailable evidence without client acquisition.
+`session_resume_explanations.json` preserves resume intent (start, resume, take over,
+new thread on another agent), the selected agent, preparation versus takeover,
+shared legal actions and unavailable evidence without client acquisition.
 
 `repository_identity.json` carries the selected plan and retained Machine-local locators.
 

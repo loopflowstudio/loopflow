@@ -206,7 +206,7 @@
         },
         "section": "now",
         "actions": {
-          "recommended": "resume",
+          "recommended": "run",
           "reason": "resume the parked Task"
         },
         "condition": {

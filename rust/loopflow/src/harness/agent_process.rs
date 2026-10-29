@@ -900,8 +900,12 @@ mod tests {
         )
         .unwrap();
         child.wait().unwrap();
-        super::stop_session_agent(&store, &session.id, crate::process::Departure::Terminal)
-            .unwrap();
+        super::stop_session_agent(
+            &store,
+            &session.id,
+            crate::process::Departure::Terminal { to: None },
+        )
+        .unwrap();
         let process = store
             .process(&attachment.agent_process_id)
             .unwrap()
@@ -928,7 +932,9 @@ mod tests {
         )
         .unwrap();
         let departures = [
-            Departure::Terminal,
+            Departure::Terminal {
+                to: Some("Desktop".into()),
+            },
             Departure::Account {
                 account: crate::store::ProviderAccountId::parse("other").unwrap(),
             },
@@ -1001,7 +1007,7 @@ mod tests {
         assert!(super::stop_session_agent(
             &store,
             &session.id,
-            crate::process::Departure::Terminal
+            crate::process::Departure::Terminal { to: None }
         )
         .is_err());
         assert_eq!(
@@ -1048,8 +1054,11 @@ mod tests {
                 .as_deref(),
             Some("second-pane")
         );
-        let stopped =
-            super::stop_session_agent(&store, &session.id, crate::process::Departure::Terminal);
+        let stopped = super::stop_session_agent(
+            &store,
+            &session.id,
+            crate::process::Departure::Terminal { to: None },
+        );
         // Always reap only this fixture's child, including when the assertion fails.
         let _ = child.kill();
         child.wait().unwrap();

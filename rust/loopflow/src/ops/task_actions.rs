@@ -10,7 +10,7 @@ use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrP
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TaskAction {
-    Resume,
+    Run,
     OpenPr,
     NoAction,
 }
@@ -18,7 +18,7 @@ pub enum TaskAction {
 impl TaskAction {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Resume => "resume",
+            Self::Run => "run",
             Self::OpenPr => "open_pr",
             Self::NoAction => "no_action",
         }
@@ -39,7 +39,7 @@ pub struct TaskActionEvidence<'a> {
     pub latest_pr_merge_request: Option<&'a PrMergeRequest>,
     pub latest_pr_presentation_current: Option<bool>,
     pub completion_refusal: Option<&'a str>,
-    pub resume_refusal: Option<&'a str>,
+    pub run_refusal: Option<&'a str>,
     pub ci: Option<&'a CiObservation>,
     pub predecessor_phase: Option<PrPhase>,
     pub launch_refusal: Option<&'a str>,
@@ -62,21 +62,21 @@ pub fn derive_task_actions(evidence: &TaskActionEvidence) -> TaskActionModel {
     }
     let model = phase_action(evidence);
     let model = apply_predecessor(model, evidence.predecessor_phase);
-    apply_resume_refusal(model, evidence.resume_refusal)
+    apply_run_refusal(model, evidence.run_refusal)
 }
 
 fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
     match evidence.latest_pr_phase {
         Some(PrPhase::Open) if evidence.latest_pr_presentation_current == Some(false) => action(
-            TaskAction::Resume,
+            TaskAction::Run,
             "refresh the reviewer-facing PR title and body for the current head, then settle it with `lf land`",
         ),
         Some(PrPhase::Open) => match evidence.ci {
             Some(ci) if ci.state == CiState::Failing => {
-                action(TaskAction::Resume, ci_failure_reason(ci))
+                action(TaskAction::Run, ci_failure_reason(ci))
             }
             _ if evidence.latest_pr_merge_request.is_none() => action(
-                TaskAction::Resume,
+                TaskAction::Run,
                 "PR is published but settlement is not armed; run `lf land`",
             ),
             Some(ci) if ci.state == CiState::Passing => {
@@ -100,13 +100,13 @@ fn phase_action(evidence: &TaskActionEvidence) -> TaskActionModel {
                 "required checks have not been observed",
             ),
         },
-        Some(PrPhase::Publishing) => action(TaskAction::Resume, "retry publication"),
+        Some(PrPhase::Publishing) => action(TaskAction::Run, "retry publication"),
         Some(PrPhase::Merged) => merged_action(evidence),
         Some(PrPhase::Abandoned) => {
             action(TaskAction::NoAction, "PR closed without merge; reopen the same PR or abandon the Task")
         }
         Some(PrPhase::Working) | None => action(
-            TaskAction::Resume,
+            TaskAction::Run,
             "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
         ),
     }
@@ -122,15 +122,15 @@ fn merged_action(evidence: &TaskActionEvidence) -> TaskActionModel {
 fn apply_predecessor(model: TaskActionModel, predecessor: Option<PrPhase>) -> TaskActionModel {
     match predecessor {
         Some(PrPhase::Abandoned) => action(
-            TaskAction::Resume,
+            TaskAction::Run,
             "parent PR was abandoned; sync or abandon this stack",
         ),
         _ => model,
     }
 }
 
-fn apply_resume_refusal(model: TaskActionModel, refusal: Option<&str>) -> TaskActionModel {
-    if !matches!(model.recommended, Some(TaskAction::Resume)) {
+fn apply_run_refusal(model: TaskActionModel, refusal: Option<&str>) -> TaskActionModel {
+    if !matches!(model.recommended, Some(TaskAction::Run)) {
         return model;
     }
     match refusal {
@@ -176,7 +176,7 @@ mod tests {
             latest_pr_merge_request: None,
             latest_pr_presentation_current: Some(true),
             completion_refusal: None,
-            resume_refusal: None,
+            run_refusal: None,
             ci,
             predecessor_phase: None,
             launch_refusal: None,
@@ -251,7 +251,7 @@ mod tests {
 
         let model = derive_task_actions(&evidence);
 
-        assert_eq!(model.recommended, Some(TaskAction::Resume));
+        assert_eq!(model.recommended, Some(TaskAction::Run));
         assert_eq!(
             model.reason,
             "PR is published but settlement is not armed; run `lf land`"
@@ -265,14 +265,14 @@ mod tests {
 
         let model = derive_task_actions(&evidence);
 
-        assert_eq!(model.recommended, Some(TaskAction::Resume));
+        assert_eq!(model.recommended, Some(TaskAction::Run));
         assert!(model.reason.contains("reviewer-facing PR title and body"));
     }
 
     #[test]
-    fn resume_refusal_suppresses_resume_during_a_working_pr() {
+    fn run_refusal_suppresses_run_during_a_working_pr() {
         let mut evidence = evidence(PrPhase::Working, None);
-        evidence.resume_refusal = Some("Task worktree is still initializing");
+        evidence.run_refusal = Some("Task worktree is still initializing");
 
         let model = derive_task_actions(&evidence);
 
@@ -345,6 +345,6 @@ mod tests {
 
         let model = derive_task_actions(&evidence);
 
-        assert_eq!(model.recommended, Some(TaskAction::Resume));
+        assert_eq!(model.recommended, Some(TaskAction::Run));
     }
 }

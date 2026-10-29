@@ -1,7 +1,7 @@
 use crate::error::GitError;
 use crate::git::worktree_name::WorktreeName;
 use crate::git::{
-    acquire_worktree_lease, current_branch, delete_local_branch_at, get_default_branch,
+    acquire_worktree_lease, current_branch, delete_local_branch_at, get_default_branch, git_stdout,
     has_commits_beyond, is_clean, rev_parse, stash_including_untracked, stash_pop, worktree_add,
     worktree_add_inheriting, worktree_remove, worktree_remove_owned, WorktreeBranch,
 };
@@ -86,41 +86,141 @@ pub enum PullRequestState {
     Merged,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
+/// Why prune removes a checkout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "reason", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum WorktreePruneReason {
     Merged,
     ClosedPullRequest,
+    /// A Done or Abandoned Task owns the checkout or its branch.
+    FinishedTask {
+        task: Option<String>,
+    },
+    /// No Task, no PR, and nothing has moved HEAD for this many days.
+    Stale {
+        days: u64,
+    },
+    /// `--all`: no unfinished Task or running process holds it.
+    Unowned,
 }
 
-impl WorktreePruneReason {
-    pub fn as_str(self) -> &'static str {
+impl std::fmt::Display for WorktreePruneReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Merged => "merged",
-            Self::ClosedPullRequest => "closed-pr",
+            Self::Merged => write!(f, "PR merged"),
+            Self::ClosedPullRequest => write!(f, "PR closed"),
+            Self::FinishedTask { task: Some(task) } => write!(f, "Task {task} finished"),
+            Self::FinishedTask { task: None } => write!(f, "branch of a finished Task"),
+            Self::Stale { days } => write!(f, "no Task or PR, untouched for {days} days"),
+            Self::Unowned => write!(f, "no unfinished Task"),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreePruneTarget {
-    pub head: String,
-    pub branch: String,
-    pub path: PathBuf,
-    pub reason: WorktreePruneReason,
+/// Why prune keeps a checkout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "reason", rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum WorktreeKeepReason {
+    /// The checkout running prune.
+    Current,
+    DefaultBranch,
+    Persistent,
+    UnfinishedTask {
+        task: Option<String>,
+    },
+    UnfinishedTaskBranch,
+    /// A running process has a file or directory open inside it.
+    InUse,
+    /// Changes outside `scratch/` and `.lf/`.
+    Dirty {
+        files: usize,
+    },
+    OpenPullRequest,
+    Detached,
+    /// No Task or PR evidence, and HEAD moved within the stale window.
+    Recent {
+        days: u64,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl WorktreeKeepReason {
+    /// Kept by default, removed by `--all`.
+    pub fn releasable(&self) -> bool {
+        matches!(
+            self,
+            Self::Dirty { .. } | Self::OpenPullRequest | Self::Detached | Self::Recent { .. }
+        )
+    }
+}
+
+impl std::fmt::Display for WorktreeKeepReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Current => write!(f, "current checkout"),
+            Self::DefaultBranch => write!(f, "default branch"),
+            Self::Persistent => write!(f, "persistent"),
+            Self::UnfinishedTask { task: Some(task) } => write!(f, "Task {task} is unfinished"),
+            Self::UnfinishedTask { task: None } => write!(f, "an unfinished Task's checkout"),
+            Self::UnfinishedTaskBranch => write!(f, "branch of an unfinished Task"),
+            Self::InUse => write!(f, "in use by a running process"),
+            Self::Dirty { files: 1 } => write!(f, "dirty: 1 source change"),
+            Self::Dirty { files } => write!(f, "dirty: {files} source changes"),
+            Self::OpenPullRequest => write!(f, "open PR"),
+            Self::Detached => write!(f, "detached HEAD"),
+            Self::Recent { days } => write!(f, "no Task or PR, touched {days} days ago"),
+        }
+    }
+}
+
+/// What this machine's Task registries and processes hold.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorktreeOwnership {
+    /// Unfinished Tasks' checkouts, with the Task's identifier when known.
+    pub unfinished_checkouts: HashMap<PathBuf, Option<String>>,
+    /// Done or Abandoned Tasks' checkouts, with the Task's identifier.
+    pub finished_checkouts: HashMap<PathBuf, String>,
+    /// Branches named by an unfinished Task.
+    pub live_branches: HashSet<String>,
+    /// Branches named only by Done or Abandoned Tasks.
+    pub finished_branches: HashSet<String>,
+    /// Paths a running process holds open.
+    pub process_paths: HashSet<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorktreePruneTarget {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+    pub head: String,
+    #[serde(flatten)]
+    pub reason: WorktreePruneReason,
+    /// Changes outside `scratch/` and `.lf/` when listed; only `--all` removes them.
+    pub source_changes: usize,
+    /// The ref recording unpushed commits or source changes, once removed.
+    pub saved_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct WorktreePruneRetained {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+    #[serde(flatten)]
+    pub reason: WorktreeKeepReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorktreePruneFailure {
     pub target: WorktreePruneTarget,
     pub error: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct WorktreePruneReport {
     pub candidates: Vec<WorktreePruneTarget>,
     pub removed: Vec<WorktreePruneTarget>,
-    pub retained_dirty: Vec<PathBuf>,
+    pub retained: Vec<WorktreePruneRetained>,
     pub failed: Vec<WorktreePruneFailure>,
 }
 
@@ -1272,7 +1372,6 @@ pub fn list_worktrees_timed(repo: &Path) -> Result<Listing, GitError> {
     Ok(Listing {
         default_branch,
         worktrees,
-        branches,
         local_git,
         remote: remote_time,
         remote_outcome: remote.outcome,
@@ -1285,8 +1384,6 @@ pub struct Listing {
     /// The branch every worktree was compared against.
     pub default_branch: String,
     pub worktrees: Vec<WorktreeState>,
-    // The same heads used to match remote PR evidence, retained for removal.
-    branches: HashMap<String, LocalBranch>,
     /// Wall time of the local Git reads, which run beside the remote.
     pub local_git: Duration,
     /// Wall time until the remote answered, failed, or was stopped.
@@ -1314,82 +1411,237 @@ fn prune_stale_worktree_metadata(repo: &Path) -> Result<(), GitError> {
     })
 }
 
-fn remove_worktree_target(repo: &Path, target: &WorktreePruneTarget) -> Result<(), GitError> {
+/// Days without HEAD moving after which a checkout no Task or PR explains is stale.
+const STALE_DAYS: u64 = 7;
+
+fn source_changes(path: &Path) -> Result<usize, GitError> {
+    let mut args = vec!["status", "--porcelain", "-z", "--no-renames", "--", "."];
+    args.extend(crate::git::NON_SOURCE_PATHSPECS);
+    let status = git_stdout(path, &args)?;
+    Ok(status.split('\0').filter(|entry| !entry.is_empty()).count())
+}
+
+/// When HEAD last moved in this checkout: its reflog, else the commit date.
+fn days_since_head_moved(path: &Path) -> Result<u64, GitError> {
+    let moved = git_stdout(
+        path,
+        &["log", "-g", "-1", "--date=unix", "--format=%gd", "HEAD"],
+    )
+    .ok()
+    .and_then(|entry| {
+        entry
+            .trim()
+            .strip_prefix("HEAD@{")?
+            .strip_suffix('}')?
+            .parse::<u64>()
+            .ok()
+    });
+    let moved = match moved {
+        Some(seconds) => seconds,
+        None => {
+            let committed = git_stdout(path, &["show", "-s", "--format=%ct", "HEAD"])?;
+            committed
+                .trim()
+                .parse()
+                .map_err(|_| GitError::CommandFailed {
+                    command: "git show -s --format=%ct HEAD".to_string(),
+                    stderr: format!("unreadable commit time {committed:?}"),
+                })?
+        }
+    };
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs());
+    Ok(now.saturating_sub(moved) / (24 * 60 * 60))
+}
+
+/// Whether any remote-tracking ref already contains `commit`.
+fn is_published(repo: &Path, commit: &str) -> Result<bool, GitError> {
+    let containing = git_stdout(
+        repo,
+        &[
+            "for-each-ref",
+            "--count=1",
+            "--format=%(refname)",
+            "--contains",
+            commit,
+            "refs/remotes",
+        ],
+    )?;
+    Ok(!containing.trim().is_empty())
+}
+
+/// Record what removal would otherwise lose, source changes or a head no remote
+/// has, as `refs/lf/pruned/<branch>/<commit>`.
+fn save_unpublished(repo: &Path, target: &WorktreePruneTarget) -> Result<Option<String>, GitError> {
+    let commit = if target.source_changes > 0 {
+        crate::git::snapshot_source_changes(&target.path)?
+    } else if is_published(repo, &target.head)? {
+        return Ok(None);
+    } else {
+        target.head.clone()
+    };
+    // A branch is already a valid ref name; a directory may not be.
+    let name = target.branch.clone().unwrap_or_else(|| {
+        let directory = target
+            .path
+            .file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+        crate::naming::sanitize_for_branch(directory.trim_start_matches('.'))
+    });
+    let short = &commit[..commit.len().min(12)];
+    let reference = format!("refs/lf/pruned/{name}/{short}");
+    git_stdout(repo, &["update-ref", &reference, &commit])?;
+    Ok(Some(reference))
+}
+
+/// Remove the checkout and its branch, returning the ref that saved its work.
+fn remove_worktree_target(
+    repo: &Path,
+    target: &WorktreePruneTarget,
+) -> Result<Option<String>, GitError> {
     let lease = acquire_worktree_lease(repo, &target.path, "worktree pruning")?;
-    if current_branch(&target.path)?.as_deref() != Some(target.branch.as_str())
+    if current_branch(&target.path)? != target.branch
         || rev_parse(&target.path, "HEAD")? != target.head
-        || !is_clean(&target.path)?
+        || source_changes(&target.path)? != target.source_changes
     {
         return Err(GitError::CommandFailed {
             command: "prune worktree".to_string(),
             stderr: format!("{} changed since listing; retained", target.path.display()),
         });
     }
-    worktree_remove_owned(repo, &target.path, false, &lease, &|_| {})?;
-    delete_local_branch_at(repo, &target.branch, &target.head)
+    let saved_ref = save_unpublished(repo, target)?;
+    // Only notes, Loopflow state and ignored output remain, or `--all` saved them.
+    worktree_remove_owned(repo, &target.path, true, &lease, &|_| {})?;
+    if let Some(branch) = &target.branch {
+        delete_local_branch_at(repo, branch, &target.head)?;
+    }
+    Ok(saved_ref)
 }
 
-fn path_is_protected(path: &Path, protected_paths: &HashSet<PathBuf>) -> bool {
+/// The first holder of `path` or of a path inside it.
+fn held_by<'a, V>(path: &Path, holders: impl IntoIterator<Item = (&'a PathBuf, V)>) -> Option<V> {
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    protected_paths
-        .iter()
-        .map(|protected| {
-            protected
-                .canonicalize()
-                .unwrap_or_else(|_| protected.clone())
-        })
-        .any(|protected| protected == path || protected.starts_with(&path))
+    holders.into_iter().find_map(|(held, value)| {
+        let held = held.canonicalize().unwrap_or_else(|_| held.clone());
+        (held == path || held.starts_with(&path)).then_some(value)
+    })
 }
 
-/// Remove clean worktrees whose exact heads have merged or closed PRs.
+#[derive(Debug)]
+enum PruneVerdict {
+    Keep(WorktreeKeepReason),
+    Remove(WorktreePruneTarget),
+}
+
+fn classify(
+    state: &WorktreeState,
+    current_path: &Path,
+    default_branch: &str,
+    ownership: &WorktreeOwnership,
+    all: bool,
+) -> Result<PruneVerdict, GitError> {
+    use WorktreeKeepReason as Keep;
+    let branch = state.branch.as_deref();
+    let held = if state.path == current_path {
+        Some(Keep::Current)
+    } else if branch == Some(default_branch) {
+        Some(Keep::DefaultBranch)
+    } else if is_persistent_worktree(&state.path)? {
+        Some(Keep::Persistent)
+    } else if let Some(task) = held_by(&state.path, &ownership.unfinished_checkouts) {
+        Some(Keep::UnfinishedTask { task: task.clone() })
+    } else if branch.is_some_and(|branch| ownership.live_branches.contains(branch)) {
+        Some(Keep::UnfinishedTaskBranch)
+    } else if held_by(
+        &state.path,
+        ownership.process_paths.iter().map(|path| (path, ())),
+    )
+    .is_some()
+    {
+        Some(Keep::InUse)
+    } else {
+        None
+    };
+    if let Some(reason) = held {
+        return Ok(PruneVerdict::Keep(reason));
+    }
+
+    let source_changes = source_changes(&state.path)?;
+    let finished_task = held_by(&state.path, &ownership.finished_checkouts).cloned();
+    let finished = finished_task.is_some()
+        || branch.is_some_and(|branch| ownership.finished_branches.contains(branch));
+    let verdict = if source_changes > 0 {
+        Err(Keep::Dirty {
+            files: source_changes,
+        })
+    } else if branch.is_none() {
+        Err(Keep::Detached)
+    } else if state.pull_request == Some(PullRequestState::Merged) {
+        Ok(WorktreePruneReason::Merged)
+    } else if state.pull_request == Some(PullRequestState::Closed) {
+        Ok(WorktreePruneReason::ClosedPullRequest)
+    } else if finished {
+        Ok(WorktreePruneReason::FinishedTask {
+            task: finished_task,
+        })
+    } else if state.pull_request == Some(PullRequestState::Open) {
+        Err(Keep::OpenPullRequest)
+    } else {
+        match days_since_head_moved(&state.path)? {
+            days if days >= STALE_DAYS => Ok(WorktreePruneReason::Stale { days }),
+            days => Err(Keep::Recent { days }),
+        }
+    };
+    let reason = match verdict {
+        Ok(reason) => reason,
+        Err(_) if all => WorktreePruneReason::Unowned,
+        Err(reason) => return Ok(PruneVerdict::Keep(reason)),
+    };
+    Ok(PruneVerdict::Remove(WorktreePruneTarget {
+        path: state.path.clone(),
+        branch: state.branch.clone(),
+        head: rev_parse(&state.path, "HEAD")?,
+        reason,
+        source_changes,
+        saved_ref: None,
+    }))
+}
+
+/// Remove checkouts no unfinished Task, running process or open work explains.
 ///
-/// Missing remote branches, old activity and local tree equivalence do not
-/// establish completion. Explicit `wt delete --force` remains deliberate disposal.
+/// A checkout is removed when its PR merged or closed, its Task finished, or,
+/// with no Task or PR, HEAD has not moved for [`STALE_DAYS`]. Changes under
+/// `scratch/` and `.lf/` never retain it; other changes do. `all` removes every
+/// checkout except the current one, the default branch, persistent checkouts,
+/// unfinished Tasks' and those a running process holds. Unpushed commits and
+/// source changes are saved under `refs/lf/pruned/` before removal.
 pub fn prune_worktrees(
     repo: &Path,
     current_path: &Path,
-    protected_paths: &HashSet<PathBuf>,
+    ownership: &WorktreeOwnership,
+    all: bool,
     dry_run: bool,
 ) -> Result<WorktreePruneReport, GitError> {
     prune_stale_worktree_metadata(repo)?;
     let Listing {
         default_branch,
         worktrees: states,
-        branches,
         ..
     } = list_worktrees_timed(repo)?;
+    let verdicts = concurrently(&states, |state| {
+        classify(state, current_path, &default_branch, ownership, all)
+    });
     let mut report = WorktreePruneReport::default();
-
-    for state in states {
-        if state.path == current_path
-            || state.branch.as_deref() == Some(&default_branch)
-            || path_is_protected(&state.path, protected_paths)
-            || is_persistent_worktree(&state.path)?
-        {
-            continue;
+    for (state, verdict) in states.into_iter().zip(verdicts) {
+        match verdict? {
+            PruneVerdict::Keep(reason) => report.retained.push(WorktreePruneRetained {
+                path: state.path,
+                branch: state.branch,
+                reason,
+            }),
+            PruneVerdict::Remove(target) => report.candidates.push(target),
         }
-        if state.dirty {
-            report.retained_dirty.push(state.path.clone());
-            continue;
-        }
-        let reason = match state.pull_request {
-            Some(PullRequestState::Merged) => WorktreePruneReason::Merged,
-            Some(PullRequestState::Closed) => WorktreePruneReason::ClosedPullRequest,
-            _ => continue,
-        };
-        let Some((name, branch)) = state
-            .branch
-            .as_ref()
-            .and_then(|name| branches.get_key_value(name))
-        else {
-            continue;
-        };
-        report.candidates.push(WorktreePruneTarget {
-            head: branch.head.clone(),
-            branch: name.clone(),
-            path: state.path,
-            reason,
-        });
     }
 
     if dry_run {
@@ -1398,7 +1650,10 @@ pub fn prune_worktrees(
 
     for target in report.candidates.clone() {
         match remove_worktree_target(repo, &target) {
-            Ok(()) => report.removed.push(target),
+            Ok(saved_ref) => report.removed.push(WorktreePruneTarget {
+                saved_ref,
+                ..target
+            }),
             Err(error) => report.failed.push(WorktreePruneFailure {
                 target,
                 error: error.to_string(),
@@ -2301,10 +2556,12 @@ mod tests {
             git(&path, &["add", "."]);
             git(&path, &["commit", "-qm", "delivered"]);
             let target = super::WorktreePruneTarget {
-                branch: "finished".to_string(),
+                branch: Some("finished".to_string()),
                 head: crate::git::rev_parse(&path, "HEAD").unwrap(),
                 path: path.clone(),
                 reason: WorktreePruneReason::Merged,
+                source_changes: 0,
+                saved_ref: None,
             };
             match change {
                 "commit" => git(&path, &["commit", "--allow-empty", "-qm", "more work"]),
@@ -2333,15 +2590,15 @@ mod tests {
         let path = fixture.create_named_worktree("protected");
         // Path protection also includes a process holding a nested directory.
         fs::create_dir(path.join("nested")).unwrap();
-        assert!(super::path_is_protected(
-            &path,
-            &HashSet::from([path.join("nested")])
-        ));
+        let nested = path.join("nested");
+        assert!(super::held_by(&path, [(&nested, ())]).is_some());
         let target = super::WorktreePruneTarget {
-            branch: "protected".to_string(),
+            branch: Some("protected".to_string()),
             head: crate::git::rev_parse(&path, "HEAD").unwrap(),
             path: path.clone(),
             reason: WorktreePruneReason::Merged,
+            source_changes: 0,
+            saved_ref: None,
         };
         let _lease =
             crate::git::acquire_worktree_lease(fixture.path(), &path, "live operation").unwrap();

@@ -120,7 +120,6 @@ pub enum SelectionState {
     Active,
     Moving,
     Shipping,
-    Deferred,
     Backlog,
     Done,
 }

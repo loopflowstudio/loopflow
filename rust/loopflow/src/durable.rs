@@ -201,7 +201,9 @@ pub enum OwnershipKind {
     Claim,
     /// Moves the claim to `machine_id`, keeping the person.
     Handoff,
-    Unclaim,
+    /// Stored and sent as `unclaim`, its released spelling.
+    #[serde(rename = "unclaim")]
+    Unassign,
     /// What a Machine knew before ownership existed; never delivered.
     Recorded,
 }
@@ -211,8 +213,16 @@ impl OwnershipKind {
         match self {
             Self::Claim => "claim",
             Self::Handoff => "handoff",
-            Self::Unclaim => "unclaim",
+            Self::Unassign => "unclaim",
             Self::Recorded => "recorded",
+        }
+    }
+
+    /// The command that wrote it, as history shows it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unassign => "unassign",
+            kind => kind.as_str(),
         }
     }
 }
@@ -377,13 +387,12 @@ impl std::fmt::Display for WorkStatus {
 }
 
 /// A Task's state, derived from its checkout, Graph position, whether a
-/// Graph runs for it and the Auto-Ship approval. Completion, abandonment and
-/// defer are durable; the open states follow what the Task is doing now.
+/// Graph runs for it and the Auto-Ship approval. Completion and abandonment
+/// are durable; the open states follow what the Task is doing now. Whether
+/// anyone owns it is ownership, not state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
-    /// Explicit hold; history, Graph position and shipping are retained.
-    Deferred,
     /// No checkout yet.
     Unstarted,
     /// A checkout, no Graph running and not at an interactive step: before its first run,
@@ -404,7 +413,6 @@ pub enum TaskState {
 impl TaskState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
-            Self::Deferred => "deferred",
             Self::Unstarted => "unstarted",
             Self::Idle => "idle",
             Self::Active => "active",
@@ -417,7 +425,6 @@ impl TaskState {
 
     pub(crate) fn parse(label: &str) -> Option<Self> {
         [
-            Self::Deferred,
             Self::Unstarted,
             Self::Idle,
             Self::Active,

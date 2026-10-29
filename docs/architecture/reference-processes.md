@@ -131,7 +131,7 @@ person's other added Machines over `lf --machine`; an unreachable Machine gets a
 warning and a later rerun. Resolution for an unowned Task walks its Wave, its parent
 Waves, its repository, then this Machine, so single-Machine use needs no setup. A scope's Session Machine is a separate setting with the same
 resolution (`--session`; `--tasks` sets only the Tasks'). Setting it moves the
-Wave primary Session to the new Machine with its native provider history. `lf session connect --wave <w>`, bare connects that
+Wave primary Session to the new Machine with its native provider history. `lf resume --wave <w>`, bare resumes that
 resolve to a Wave or the repository, and Desktop's Wave Session route to the Session
 Machine. A Task's Machine is captured in its claim: changing the Wave Machine moves
 no existing Task, and `lf task move <task> --machine <machine>` moves one: its Graph stops,
@@ -141,7 +141,7 @@ its worktree is committed and pushed, and its Workflow position and primary Sess
 lf machine add jack@mini.local --label mini
 lf task claim LOO-523
 lf task move LOO-523 --machine mini
-lf task unclaim LOO-523
+lf task unassign LOO-523
 ```
 
 A Task is owned by (person, Machine) or unowned. Its `task_ownership` log holds
@@ -157,7 +157,7 @@ Wave Machine; a Task someone else owns gets the caller's claim on their own Wave
 Machine, and the later claim wins. Nothing routes to another person's Machine, and
 nobody hands off or unclaims another person's claim; cross-person handoff is
 deferred. The Machine in a claim comment is informational only.
-`lf task claim|handoff|unclaim`, `lf task run` and `lf task checkout` route to
+`lf task claim|handoff|unassign`, `lf task run` and `lf task checkout` route to
 that writer over `lf --machine` and re-check inside one IMMEDIATE transaction.
 `task_execution_route` returns the claim's Machine (source `owner`) or the Wave
 Machine (`owning_machine:wave:<name>`, `owning_machine:this_machine`). `lf task location --peers` observes other

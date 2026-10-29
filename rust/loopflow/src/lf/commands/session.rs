@@ -8,7 +8,7 @@ use super::waves::Shape;
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
-use crate::ops::human_session::{OpenMode, SessionRecord, SessionState};
+use crate::ops::human_session::{SessionRecord, SessionState};
 use crate::session_record::SessionTitleSource;
 use crate::store::{open_store, storage_config_from_env, Store};
 
@@ -22,7 +22,10 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
     let runtime = tokio::runtime::Runtime::new()?;
     if matches!(
         command,
-        SessionCommand::Connect {
+        SessionCommand::Resume {
+            connection: SessionConnectionArgs { prepare: false, .. },
+            ..
+        } | SessionCommand::New {
             connection: SessionConnectionArgs { prepare: false, .. },
             ..
         }
@@ -38,44 +41,6 @@ pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()>
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
     match command {
         SessionCommand::Serve { .. } => unreachable!("serve owns its process before any runtime"),
-        SessionCommand::Attach {
-            id,
-            observe,
-            if_free,
-            prepare,
-            json,
-        } => {
-            let store = open_shared_store().await?;
-            let session = crate::ops::human_session::session_by_id(&store, id)
-                .await?
-                .context("Session not found")?;
-            if *prepare {
-                let record = crate::ops::human_session::prepare_attachment(
-                    &store, &session, *observe, *if_free,
-                )
-                .await?;
-                if *json {
-                    println!("{}", serde_json::to_string_pretty(&record)?);
-                } else {
-                    let record = record.with_context(|| {
-                        format!(
-                            "Nothing is running to attach to; `lf resume {}` reopens its history",
-                            session.id
-                        )
-                    })?;
-                    println!(
-                        "{}",
-                        shlex::try_join(record.open_argv.iter().map(String::as_str))?
-                    );
-                }
-                return Ok(());
-            }
-            let owner = store
-                .sqlite
-                .session_transport(&session.id)?
-                .context("Session has no retained execution")?;
-            crate::transport::attach(&owner, *observe, !*if_free)
-        }
         SessionCommand::Steer { id, message } => {
             let store = open_shared_store().await?;
             let author = crate::config::participant_name()?
@@ -190,7 +155,7 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             Ok(())
         }
         SessionCommand::List(_) => unreachable!("lists return before any runtime"),
-        SessionCommand::Connect {
+        SessionCommand::Resume {
             all: true,
             connection,
             ..
@@ -204,20 +169,22 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::Connect {
+        SessionCommand::Resume {
             id,
             connection,
-            takeover,
-            try_open,
+            fork,
             all: false,
         } => {
-            connect(
+            resume(
                 cli,
                 connection,
                 connection.target(cli, id.as_deref())?,
-                OpenMode::from_flags(*takeover, *try_open),
+                *fork,
             )
             .await
+        }
+        SessionCommand::New { id, connection } => {
+            new_thread(cli, connection, connection.target(cli, id.as_deref())?).await
         }
         SessionCommand::Rename {
             id,
@@ -410,7 +377,7 @@ struct SessionWatchArgs {
     repo: Option<String>,
     task: Option<String>,
     search: Option<String>,
-    /// `null` selects interactive and headless Sessions.
+    /// `null` selects both Sessions and Runs.
     interactive: Option<bool>,
 }
 
@@ -588,17 +555,14 @@ fn copied_sessions(
         .copied_sessions(task.as_ref(), repository.as_ref())?)
 }
 
-async fn connect(
+async fn resume(
     cli: &crate::lf::Cli,
     connection: &SessionConnectionArgs,
     target: crate::ops::human_session::SessionTarget<'_>,
-    mode: OpenMode,
+    fork: bool,
 ) -> anyhow::Result<()> {
     let SessionConnectionArgs {
-        message,
-        prepare,
-        json,
-        ..
+        message, prepare, ..
     } = connection;
     anyhow::ensure!(
         !*prepare || message.is_none(),
@@ -614,18 +578,18 @@ async fn connect(
     );
     anyhow::ensure!(
         *prepare || cli.batch || cli.output_schema.is_none(),
-        "response schemas require a headless Session (-b)"
+        "response schemas require a headless Run (-b)"
     );
     let progress = crate::startup::Startup::new("Finding conversation");
     let store = open_shared_store().await?;
-    let id = crate::ops::human_session::select_connection(
-        &store,
-        &std::env::current_dir()?,
-        target,
-        connection.fresh,
-    )
-    .await?;
+    let selected =
+        crate::ops::human_session::select_connection(&store, &std::env::current_dir()?, target)
+            .await?;
     drop(progress);
+    if selected.started {
+        eprintln!("Nothing to resume here; starting a new conversation.");
+    }
+    let id = selected.id;
     if let Some(message) = message {
         let session = crate::ops::human_session::session_by_id(&store, &id)
             .await?
@@ -634,10 +598,63 @@ async fn connect(
         let id = session.id;
         return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
     }
-    let session = crate::ops::human_session::open(&store, &id, mode, !*prepare).await?;
-    if *json || cli.json {
-        println!("{}", serde_json::to_string_pretty(&session)?);
-    } else if *prepare {
+    let session = crate::ops::human_session::open(&store, &id, fork, !*prepare).await?;
+    print_opened(cli, connection, &session)
+}
+
+/// `lf session new`: the scope's conversation continues on a fresh provider
+/// thread, seeded with what the last thread knew. `--prepare` records the new
+/// thread and returns the command that launches it.
+async fn new_thread(
+    cli: &crate::lf::Cli,
+    connection: &SessionConnectionArgs,
+    target: crate::ops::human_session::SessionTarget<'_>,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        connection.message.is_none(),
+        "`lf session new` starts an interactive thread; continue it with `lf -b resume --message`"
+    );
+    let store = open_shared_store().await?;
+    let selected =
+        crate::ops::human_session::select_connection(&store, &std::env::current_dir()?, target)
+            .await?;
+    let session = crate::ops::human_session::session_by_id(&store, &selected.id)
+        .await?
+        .context("Session not found")?;
+    let threaded = match session.artifact_key.as_deref() {
+        Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
+        None => false,
+    };
+    if !threaded {
+        // No earlier thread to hand off from: opening starts the first one.
+        if selected.started {
+            eprintln!("Nothing to restart here; starting a new conversation.");
+        }
+        let record =
+            crate::ops::human_session::open(&store, &selected.id, false, !connection.prepare)
+                .await?;
+        return print_opened(cli, connection, &record);
+    }
+    let agent = crate::config::agent_override();
+    let next = crate::ops::human_session::new_thread(
+        &store,
+        &selected.id,
+        agent.as_deref(),
+        !connection.prepare,
+    )
+    .await?;
+    let record = crate::ops::human_session::surface(&store, &next).await?;
+    print_opened(cli, connection, &record)
+}
+
+fn print_opened(
+    cli: &crate::lf::Cli,
+    connection: &SessionConnectionArgs,
+    session: &SessionRecord,
+) -> anyhow::Result<()> {
+    if connection.json || cli.json {
+        println!("{}", serde_json::to_string_pretty(session)?);
+    } else if connection.prepare {
         println!(
             "{}",
             shlex::try_join(session.open_argv.iter().map(String::as_str))?

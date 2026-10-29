@@ -4,7 +4,8 @@ use crate::git::worktree_name::WorktreeName;
 use crate::git::worktrees::{
     create_from_placement_plan, diff_shortstats, list_worktrees, list_worktrees_timed,
     main_repo_root, plan_placement, prune_worktrees, sibling_worktree_name,
-    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreeSegment,
+    sibling_worktree_name_with_main, PlacementStrategy, PullRequestState, WorktreeOwnership,
+    WorktreePruneReport, WorktreeSegment,
 };
 use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
@@ -33,7 +34,6 @@ use crate::skills::sync_skills;
 use crate::skills::SkillSyncOptions;
 use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
-use std::collections::HashSet;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1159,6 +1159,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
         WtCommand::Timing { json } => wt_timing(*json),
         WtCommand::Delete { name, force } => wt_delete(name, *force),
         WtCommand::Prune {
+            all,
             dry_run,
             builds,
             branches,
@@ -1178,7 +1179,7 @@ pub fn run_wt(cmd: &WtCommand) -> Result<()> {
             } else if *branches {
                 wt_prune_branches(*dry_run)
             } else {
-                wt_prune(*dry_run)
+                wt_prune(*all, *dry_run, *json)
             }
         }
     }
@@ -1617,56 +1618,34 @@ pub(crate) fn build_cleanup_registries() -> Vec<PathBuf> {
     registries
 }
 
-/// Remove clean worktrees with exact-head merged or closed PR evidence,
-/// retaining every unfinished Task's checkout and any process's cwd.
+/// Remove worktrees no unfinished Task, running process or open work explains.
 pub(crate) fn prune_repo_worktrees(
     main_repo: &Path,
     current: &Path,
+    all: bool,
     dry_run: bool,
-) -> Result<crate::git::worktrees::WorktreePruneReport> {
+) -> Result<WorktreePruneReport> {
     if !dry_run {
         crate::ops::checkout::refresh_main(main_repo, &CliProgress)?;
     }
-    let protected_paths = task_ownership()?.paths;
     Ok(prune_worktrees(
         main_repo,
         current,
-        &protected_paths,
+        &task_ownership()?,
+        all,
         dry_run,
     )?)
 }
 
-fn wt_prune(dry_run: bool) -> Result<()> {
+fn wt_prune(all: bool, dry_run: bool, json: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
     let main_repo = main_repo_root(&repo_root)?;
-    let report = prune_repo_worktrees(&main_repo, &repo_root, dry_run)?;
+    let report = prune_repo_worktrees(&main_repo, &repo_root, all, dry_run)?;
 
-    if report.candidates.is_empty() {
-        println!("No prunable worktrees.");
-        return Ok(());
-    }
-
-    if dry_run {
-        for target in &report.candidates {
-            println!(
-                "  {} ({reason})  {}",
-                target.branch,
-                target.path.display(),
-                reason = target.reason.as_str(),
-            );
-        }
-        return Ok(());
-    }
-
-    for target in &report.removed {
-        println!("Removed {}", target.path.display());
-    }
-    for failure in &report.failed {
-        eprintln!(
-            "Failed to remove {}: {}",
-            failure.target.path.display(),
-            failure.error
-        );
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
+    } else {
+        print_prune_report(&report, all, dry_run);
     }
     if !report.failed.is_empty() {
         return Err(anyhow!(
@@ -1677,9 +1656,72 @@ fn wt_prune(dry_run: bool) -> Result<()> {
     Ok(())
 }
 
+fn print_prune_report(report: &WorktreePruneReport, all: bool, dry_run: bool) {
+    let label = |path: &Path, branch: &Option<String>| match branch {
+        Some(branch) => format!("{branch}  {}", path.display()),
+        None => path.display().to_string(),
+    };
+    let with_saved = |target: &crate::git::worktrees::WorktreePruneTarget| {
+        let mut detail = target.reason.to_string();
+        if target.source_changes > 0 {
+            detail.push_str(&format!("; {} source changes", target.source_changes));
+        }
+        if let Some(saved) = &target.saved_ref {
+            detail.push_str(&format!("; saved to {saved}"));
+        }
+        detail
+    };
+    for retained in &report.retained {
+        println!(
+            "keep    {}  ({})",
+            label(&retained.path, &retained.branch),
+            retained.reason
+        );
+    }
+    let (verb, summary, removing) = if dry_run {
+        ("remove", "to remove", &report.candidates)
+    } else {
+        ("removed", "removed", &report.removed)
+    };
+    for target in removing {
+        println!(
+            "{verb:<7} {}  ({})",
+            label(&target.path, &target.branch),
+            with_saved(target)
+        );
+    }
+    for failure in &report.failed {
+        eprintln!(
+            "failed  {}: {}",
+            label(&failure.target.path, &failure.target.branch),
+            failure.error
+        );
+    }
+    println!(
+        "{} {summary}, {} kept.",
+        removing.len(),
+        report.retained.len()
+    );
+    let releasable = report
+        .retained
+        .iter()
+        .filter(|retained| retained.reason.releasable())
+        .count();
+    if !all && releasable > 0 {
+        println!(
+            "{releasable} kept only for local changes, open PRs or recent activity; \
+             `lf wt prune --all` removes them and saves unpushed work under refs/lf/pruned/."
+        );
+    }
+}
+
 fn wt_prune_branches(dry_run: bool) -> Result<()> {
     let repo_root = find_repo_root()?;
-    let tasks = task_ownership()?.branches;
+    let ownership = task_ownership()?;
+    let tasks = TaskBranches {
+        live: ownership.live_branches,
+        finished: ownership.finished_branches,
+    };
     let report = prune_branches(&repo_root, tasks, dry_run).map_err(|stop| {
         record_ops_metric(
             &repo_root,
@@ -1717,18 +1759,14 @@ fn wt_prune_branches(dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-/// What this machine's Task registries say about checkouts and branches.
-struct TaskOwnership {
-    /// Checkouts of unfinished Tasks.
-    paths: HashSet<PathBuf>,
-    branches: TaskBranches,
-}
-
 /// Read Task ownership from the selected registry and, without migrations,
-/// the release registry. Pruning mutates machine-wide state, so an
-/// unreadable registry stops it.
-fn task_ownership() -> Result<TaskOwnership> {
-    let mut paths = crate::git::build_cleanup::running_paths()?;
+/// the release registry, plus the paths running processes hold. Pruning
+/// mutates machine-wide state, so an unreadable registry stops it.
+fn task_ownership() -> Result<WorktreeOwnership> {
+    let mut ownership = WorktreeOwnership {
+        process_paths: crate::git::build_cleanup::running_paths()?,
+        ..WorktreeOwnership::default()
+    };
     let mut named = Vec::new();
     let runtime = tokio::runtime::Runtime::new()?;
     match runtime.block_on(crate::store::open_registry_for_authority()) {
@@ -1752,8 +1790,16 @@ fn task_ownership() -> Result<TaskOwnership> {
                     .map_err(|error| anyhow!("cannot read Task PRs: {error}"))?;
                 named.push((task.branch, open));
                 named.extend(prs.into_iter().map(|pr| (pr.branch, open)));
-                if open {
-                    paths.extend(task.worktree);
+                if let Some(worktree) = task.worktree {
+                    if open {
+                        ownership
+                            .unfinished_checkouts
+                            .insert(worktree, Some(task.identifier));
+                    } else {
+                        ownership
+                            .finished_checkouts
+                            .insert(worktree, task.identifier);
+                    }
                 }
             }
         }
@@ -1782,15 +1828,18 @@ fn task_ownership() -> Result<TaskOwnership> {
                 production.display()
             )
         };
-        paths.extend(
-            crate::store::read_nonterminal_task_worktrees(&production).map_err(unreadable)?,
-        );
+        for path in
+            crate::store::read_nonterminal_task_worktrees(&production).map_err(unreadable)?
+        {
+            ownership.finished_checkouts.remove(&path);
+            ownership.unfinished_checkouts.entry(path).or_insert(None);
+        }
         named.extend(crate::store::read_task_branches(&production).map_err(unreadable)?);
     }
-    Ok(TaskOwnership {
-        paths,
-        branches: named.into_iter().collect(),
-    })
+    let TaskBranches { live, finished } = named.into_iter().collect();
+    ownership.live_branches = live;
+    ownership.finished_branches = finished;
+    Ok(ownership)
 }
 
 fn pr_checks(watch: bool, logs: bool, required: bool) -> Result<()> {

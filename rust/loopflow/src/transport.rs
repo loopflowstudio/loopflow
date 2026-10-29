@@ -1,7 +1,7 @@
 //! A detached terminal owns an execution, including its capture and native client.
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
-mod idle;
+mod lifetime;
 mod native;
 mod output;
 mod terminal;
@@ -482,7 +482,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
-    let viewing = idle::spawn(id.clone());
+    let (viewing, ending) = lifetime::spawn(id.clone());
     let mut viewed = None;
     loop {
         while let Ok((socket, _)) = listener.accept() {
@@ -655,6 +655,15 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         || v.queue(&Response::InputHint { hint: hint.clone() }).is_ok()
                 });
             }
+        }
+        if let Ok(hint) = ending.try_recv() {
+            for viewer in viewers.iter_mut().filter(|v| v.attached) {
+                if let Some(hint) = &hint {
+                    let _ = viewer.queue(&Response::InputHint { hint: hint.clone() });
+                }
+                let _ = viewer.flush();
+            }
+            crate::platform::kill_process(std::process::id());
         }
         let now_viewed = viewers.iter().any(|v| v.attached);
         if viewed != Some(now_viewed) {

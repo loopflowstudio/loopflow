@@ -134,7 +134,6 @@ def _development_build_env() -> dict[str, str]:
     return {
         **os.environ,
         "LOOPFLOW_BUILD_PROVENANCE": "development",
-        "LOOPFLOW_MIGRATION_AUTHORITY": "validation_only",
     }
 
 
@@ -429,7 +428,7 @@ def local(
         [], "--skip", help=f"Skip a build stage ({'|'.join(BUILD_STAGES)}); repeatable"
     ),
 ) -> None:
-    """Build this worktree into local-bin/ with validation-only authority."""
+    """Build this worktree into local-bin/."""
     skip_set = set(skip)
     unknown = skip_set - set(BUILD_STAGES)
     if unknown:
@@ -450,7 +449,7 @@ def local(
             typer.echo(f"  Contents/MacOS/: {executable_names}")
         else:
             typer.echo(f"Would stage lf into {LOCAL_BIN}")
-        typer.echo("Would keep the validation-only build under local-bin/")
+        typer.echo("Would keep the build under local-bin/")
         return
 
     total_start = time.monotonic()

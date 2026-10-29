@@ -7,7 +7,7 @@
 # Tasks' build output (`lf wt prune --builds`), merged branches
 # (`lf wt prune --branches`) and build output in every checkout once nothing
 # has written to it for 4 hours.
-# Home (~/.lf): captures, logs, draft store copies and all but the newest backup
+# Home (~/.lf): captures, logs, retired draft store copies and all but the newest backup
 # per database, once untouched for a week. Machine caches: uv, unavailable
 # simulators, idle ~/Library/Caches entries and old Trash.
 #
@@ -173,7 +173,7 @@ home_units() {
   for unit in "$lf_home"/logs "$lf_home"/log; do
     [ -d "$unit" ] && find "$unit" -type f | sed 's/^/logs\t/'
   done
-  # Snapshot staging directories (.tmp*) too: a week-old one was abandoned.
+  # Draft builds no longer make store copies; reclaim the ones they left.
   for unit in "$lf_home"/copies/*/ "$lf_home"/copies/.tmp*/; do
     [ -d "$unit" ] && printf 'copies\t%s\n' "${unit%/}"
   done

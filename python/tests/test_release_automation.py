@@ -12,23 +12,27 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_nightly_packages_workflow_builds_and_smokes_without_deploying():
-    nightly = yaml.load(
-        (ROOT / ".github/workflows/nightly-packages.yml").read_text(), Loader=yaml.BaseLoader
+def test_main_packages_build_every_green_main_commit_without_deploying():
+    main = yaml.load(
+        (ROOT / ".github/workflows/main-packages.yml").read_text(), Loader=yaml.BaseLoader
     )
     workflow = yaml.load(
         (ROOT / ".github/workflows/package-build.yml").read_text(), Loader=yaml.BaseLoader
     )
 
-    assert nightly["name"] == "Packages (nightly)"
-    assert nightly["on"]["schedule"] == [{"cron": "0 9 * * *"}]
-    assert nightly["jobs"] == {"packages": {"uses": "./.github/workflows/package-build.yml"}}
+    assert main["name"] == "Packages (main)"
+    assert main["on"]["workflow_run"]["workflows"] == ["CI"]
+    assert main["on"]["workflow_run"]["branches"] == ["main"]
+    packages = main["jobs"]["packages"]
+    assert packages["uses"] == "./.github/workflows/package-build.yml"
+    assert "workflow_run.conclusion == 'success'" in packages["if"]
+    assert "head_sha" in packages["with"]["revision"]
     assert workflow["name"] == "Package build"
     assert set(workflow["on"]) == {"workflow_call"}
     assert "inputs.release_tag" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
     assert "development" in workflow["env"]["LOOPFLOW_BUILD_PROVENANCE"]
-    assert "published" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
-    assert "validation_only" in workflow["env"]["LOOPFLOW_MIGRATION_AUTHORITY"]
+    checkout = workflow["jobs"]["native-packages"]["steps"][0]
+    assert checkout["with"]["fetch-depth"] == "0"
     assert workflow["env"]["LOOPFLOW_RELEASE_TAG"] == "${{ inputs.release_tag }}"
 
     native = workflow["jobs"]["native-packages"]
@@ -453,21 +457,6 @@ def test_loopflow_ui_gate_keeps_mac_test_runners_signed():
     assert "-disableAutomaticPackageResolution" in ci_build
 
 
-def test_rust_ci_materializes_drafts_before_building_tests():
-    ci = yaml.load((ROOT / ".github/workflows/ci.yml").read_text(), Loader=yaml.BaseLoader)
-    steps = ci["jobs"]["rust-build"]["steps"]
-    names = [step.get("name") for step in steps]
-
-    materialize = names.index("Materialize draft migrations for tests")
-    test = names.index("Build and archive Rust tests")
-    command = steps[materialize]["run"]
-
-    assert materialize < test
-    assert "scripts/canonicalize_migrations.py" in command
-    assert "--materialize-for-tests" in command
-    assert '["workspace"]["package"]["version"]' in command
-
-
 def test_changed_aware_runner_includes_ci_static_checks():
     result = subprocess.run(
         [
@@ -487,8 +476,7 @@ def test_changed_aware_runner_includes_ci_static_checks():
 
     assert "cargo fmt --all -- --check" in result.stdout
     assert "cargo clippy --all-targets --jobs 4 -- -D warnings" in result.stdout
-    assert "scripts/materialize_rust_tests.py" in result.stdout
-    assert "--prepare-cli" in result.stdout
+    assert "LOOPFLOW_TEST_LF=" in result.stdout
     assert "nextest run --all" in result.stdout or "test --all" in result.stdout
     assert "uv run python scripts/check_swift_multiplatform_boundaries.py" in result.stdout
 

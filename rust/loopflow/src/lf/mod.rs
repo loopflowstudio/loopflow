@@ -549,11 +549,6 @@ pub enum Commands {
         #[arg(long)]
         task: Option<String>,
     },
-    /// Create and use an offline, isolated development data clone (macOS)
-    Clone {
-        #[command(subcommand)]
-        cmd: crate::data_clone::CloneCommand,
-    },
     /// Select repositories for the Machine-local portfolio
     Portfolio {
         #[command(subcommand)]
@@ -1974,6 +1969,9 @@ pub enum InstallCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Print the reader floors this build knows, one per line.
+    #[command(hide = true)]
+    ReaderCatalog,
     /// Advance the receipt-selected store with this exact candidate's registry.
     #[command(hide = true)]
     AdvanceSwitch {
@@ -2160,6 +2158,9 @@ pub enum SelfCommand {
     },
     /// Install the latest published Loopflow release from any directory
     Install {
+        /// Install the newest green main build instead (needs `gh` auth)
+        #[arg(long)]
+        main: bool,
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
@@ -2762,13 +2763,27 @@ mod tests {
                 .unwrap()
                 .command,
             Some(Commands::Self_ {
-                cmd: crate::lf::SelfCommand::Install { cmd: None }
+                cmd: crate::lf::SelfCommand::Install {
+                    main: false,
+                    cmd: None
+                }
             })
         ));
         assert!(Cli::try_parse_from(["lf", "ops", "machine", "install"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "schedule"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "self", "install", "status"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "preflight"]).is_ok());
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "self", "install", "--main"])
+                .unwrap()
+                .command,
+            Some(Commands::Self_ {
+                cmd: crate::lf::SelfCommand::Install {
+                    main: true,
+                    cmd: None
+                }
+            })
+        ));
     }
 
     #[test]

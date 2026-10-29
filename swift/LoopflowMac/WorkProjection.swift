@@ -195,6 +195,10 @@ struct TaskRunDraft: Equatable {
 enum WaveViewPart: String, CaseIterable, Hashable {
     case board, session, tiles
 
+    /// The Tasks strip distracts more than it helps for now (Jack Heart, LOO-673);
+    /// Show… or `lf desktop show -p tiles` brings it back.
+    static let hiddenByDefault: Set<Self> = [.tiles]
+
     /// How the view's `Show…` menu names it.
     var title: String {
         switch self {

@@ -1121,7 +1121,7 @@ private final class PerformanceReader {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in await self.answer(request) }
-        }, cancel: { continuation.finish() }, copy: nil)
+        }, cancel: { continuation.finish() })
     }
 
     private func answer(_ request: WorkRequest) async {

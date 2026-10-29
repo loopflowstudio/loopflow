@@ -163,4 +163,4 @@ package-smoke/lf --help
 package-smoke/lf list
 ```
 
-`lf self install --main` installs the newest one with `gh`. The artifacts expire after 14 days; releases stay the durable channel.
+`lf install --dev` installs the newest one with `gh`. The artifacts expire after 14 days; releases stay the durable channel.

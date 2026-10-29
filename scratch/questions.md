@@ -29,3 +29,13 @@
 - **`lf release status` shows preview and stable, not dev (concept review, 2026-10-29).**
   dev is the newest green main build, and `lf install` (slice 4) owns it. Status
   stays about releases. Add a `Dev:` line if the release view feels incomplete without it.
+- **Slice 4 checks `can_open` on every release install, not only on slower switches.** Cheaper to
+  reason about and covers the scheduled run after a switch. The stream is recorded before the
+  download, so a failed download retries on the new stream. Releases without `reader-catalog.txt`
+  (v0.15.0 and earlier) skip the check; promotion still refuses an incompatible build.
+- **An explicit switch may downgrade** (preview v0.16.2 → stable v0.16.0) when the store allows
+  it; the schedule never moves stable backwards. Revisit if "switches only move forward" should
+  mean "stay put until the slower stream passes the installed version".
+- **`install.sh latest` (positional) is no longer special**; channels replace it.
+- **Proposed Wave memory edit (not made; `.lf/wave/` read-only here):** infrastructure MEMORY.md
+  line ~663 says `lf self install --main`; it is now `lf install --dev`.

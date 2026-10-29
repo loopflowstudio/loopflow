@@ -1,4 +1,5 @@
-//! Published updates, green main builds, and the optional machine-local schedule.
+//! Stream installs (green main builds and published releases) and the optional
+//! machine-local schedule that follows the recorded stream.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -16,26 +17,94 @@ const REPOSITORY: &str = "loopflowstudio/loopflow";
 const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
 /// Packages every green main commit (`.github/workflows/main-packages.yml`).
 const MAIN_PACKAGES: &str = "main-packages.yml";
+/// The reader floors a release's build opens (`lf self install reader-catalog`).
+const READER_CATALOG: &str = "reader-catalog.txt";
 
-pub fn latest() -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
-    let response = client
-        .head(format!("{RELEASES}/latest"))
-        .send()
-        .context("look up the stable Loopflow release")?
-        .error_for_status()?;
-    let tag = release_tag(response.url().path())?;
+/// The build line an install follows (`release/README.md`, Streams).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stream {
+    /// The newest green main build.
+    Dev,
+    /// The newest release.
+    Preview,
+    /// GitHub's Latest release: the newest one soaked with no open regression.
+    Stable,
+}
+
+impl Stream {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Preview => "preview",
+            Self::Stable => "stable",
+        }
+    }
+
+    fn parse(name: &str) -> Option<Self> {
+        [Self::Dev, Self::Preview, Self::Stable]
+            .into_iter()
+            .find(|stream| stream.as_str() == name)
+    }
+}
+
+/// Install the newest build on `switch`, recording it as this Machine's
+/// stream, or on the recorded stream (`stable` when none is recorded).
+pub fn install(switch: Option<Stream>) -> Result<()> {
+    let config = crate::installation::account_home()?.join(".lf/config.yaml");
+    let stream = match switch {
+        Some(stream) => {
+            record_stream(&config, stream)?;
+            println!(
+                "stream: {} (recorded in {})",
+                stream.as_str(),
+                config.display()
+            );
+            stream
+        }
+        None => recorded_stream(&config)?.unwrap_or(Stream::Stable),
+    };
+    let client = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent(concat!("lf/", env!("CARGO_PKG_VERSION")))
+        .build()?;
+    let tag = match stream {
+        Stream::Dev => return main_build(),
+        Stream::Preview => newest_release(
+            &client
+                .get(format!(
+                    "https://api.github.com/repos/{REPOSITORY}/releases?per_page=20"
+                ))
+                .send()
+                .context("look up the newest Loopflow release")?
+                .error_for_status()?
+                .text()?,
+        )?,
+        Stream::Stable => release_tag(
+            client
+                .head(format!("{RELEASES}/latest"))
+                .send()
+                .context("look up the stable Loopflow release")?
+                .error_for_status()?
+                .url()
+                .path(),
+        )?,
+    };
+    install_release(&client, stream, &tag)
+}
+
+fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
     let directory = install_dir()?;
     let applications = std::env::var_os("LF_APPLICATIONS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/Applications"));
     let cli_only = std::env::var("LF_INSTALL_CLI_ONLY").as_deref() == Ok("1");
+    let stream = stream.as_str();
     if is_current(
         &directory,
-        &tag,
+        tag,
         (cfg!(target_os = "macos") && !cli_only).then_some(applications.as_path()),
     ) {
-        println!("Published release {tag} is already installed.");
+        println!("{stream} {tag} is already installed.");
         return Ok(());
     }
     let temporary = tempfile::tempdir()?;
@@ -45,22 +114,111 @@ pub fn latest() -> Result<()> {
         .send()?
         .error_for_status()?
         .text()?;
+    // Releases before v0.16 publish no catalog; promotion still refuses them.
+    if manifest_digest(&manifest, READER_CATALOG).is_some() {
+        let catalog = client
+            .get(format!("{base}/{READER_CATALOG}"))
+            .send()?
+            .error_for_status()?
+            .bytes()?;
+        verify_asset(&manifest, READER_CATALOG, &catalog)?;
+        if !opens_store(
+            &crate::store::production_database_path(),
+            &String::from_utf8_lossy(&catalog),
+        )? {
+            println!(
+                "{stream} is at {tag}, which cannot open this Machine's store: a newer lf migrated it. \
+                 Keeping the installed lf; `lf install` moves to {stream} once it reaches a build that opens the store."
+            );
+            return Ok(());
+        }
+    }
     let installer = client
         .get(format!("{base}/install.sh"))
         .send()?
         .error_for_status()?
         .bytes()?;
-    run_verified_installer(&directory, temporary.path(), &tag, &manifest, &installer)?;
+    run_verified_installer(&directory, temporary.path(), tag, &manifest, &installer)?;
     println!(
-        "release: {tag}\ninstalled: {}",
+        "{stream}: {tag}\ninstalled: {}",
         directory.join("lf").display()
     );
     Ok(())
 }
 
+/// The newest published release in the GitHub releases list, which is newest first.
+fn newest_release(json: &str) -> Result<String> {
+    #[derive(serde::Deserialize)]
+    struct Release {
+        tag_name: String,
+        draft: bool,
+        prerelease: bool,
+    }
+    let releases: Vec<Release> = serde_json::from_str(json).context("read the release list")?;
+    releases
+        .into_iter()
+        .find(|release| !release.draft && !release.prerelease)
+        .map(|release| release.tag_name)
+        .ok_or_else(|| anyhow!("no published Loopflow release"))
+}
+
+/// Whether a build with this reader catalog opens the store. An absent store opens.
+fn opens_store(store: &Path, catalog: &str) -> Result<bool> {
+    if !store.exists() {
+        return Ok(true);
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        store,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let catalog: Vec<String> = catalog
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    Ok(crate::store::migrations::can_open(&conn, &catalog)?)
+}
+
+fn recorded_stream(config: &Path) -> Result<Option<Stream>> {
+    let Some(name) = read_config(config)?
+        .get("stream")
+        .and_then(|value| value.as_str().map(str::to_string))
+    else {
+        return Ok(None);
+    };
+    Stream::parse(&name).map(Some).ok_or_else(|| {
+        anyhow!(
+            "{}: unknown stream `{name}`; choose one with `lf install --dev`, `--preview` or `--stable`",
+            config.display()
+        )
+    })
+}
+
+fn record_stream(config: &Path, stream: Stream) -> Result<()> {
+    fs::create_dir_all(config.parent().expect("config path has a parent"))?;
+    let mut value = read_config(config)?;
+    value["stream"] = stream.as_str().into();
+    crate::config::write_global_config_at(config, &value)
+}
+
+fn read_config(path: &Path) -> Result<serde_yaml_ng::Value> {
+    match fs::read_to_string(path) {
+        Ok(text) => match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text)? {
+            serde_yaml_ng::Value::Null => Ok(serde_yaml_ng::Value::Mapping(Default::default())),
+            value if value.is_mapping() => Ok(value),
+            _ => bail!("{} must contain a configuration mapping", path.display()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(serde_yaml_ng::Value::Mapping(Default::default()))
+        }
+        Err(error) => Err(error).with_context(|| format!("read {}", path.display())),
+    }
+}
+
 /// Install the package CI built for the newest green main commit. GitHub keeps
 /// those artifacts behind authentication, so this uses the `gh` login.
-pub fn main_build() -> Result<()> {
+fn main_build() -> Result<()> {
     let target =
         package_target().ok_or_else(|| anyhow!("no main package is built for this platform"))?;
     let runs = gh(&[
@@ -112,7 +270,7 @@ pub fn main_build() -> Result<()> {
         .status()
         .context("start the main build's promotion")?;
     if !status.success() {
-        bail!("installing main {revision} failed ({status}); fix the error above and rerun `lf self install --main`");
+        bail!("installing main {revision} failed ({status}); fix the error above and rerun `lf install --dev`");
     }
     println!(
         "main: {revision}\ninstalled: {}",
@@ -149,7 +307,7 @@ fn newest_run(json: &str) -> Result<(u64, String)> {
 
 fn gh(args: &[&str]) -> Result<String> {
     let output = Command::new("gh").args(args).output().context(
-        "`lf self install --main` downloads CI packages with `gh`; install it and run `gh auth login`",
+        "`lf install --dev` downloads CI packages with `gh`; install it and run `gh auth login`",
     )?;
     if !output.status.success() {
         bail!(
@@ -250,6 +408,24 @@ fn has_release_app(applications: &Path, version: &str) -> bool {
     })
 }
 
+fn manifest_digest<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
+    manifest.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let digest = fields.next()?;
+        (fields.next()?.trim_start_matches('*') == name).then_some(digest)
+    })
+}
+
+fn verify_asset(manifest: &str, name: &str, bytes: &[u8]) -> Result<()> {
+    let expected = manifest_digest(manifest, name)
+        .with_context(|| format!("published SHA256SUMS does not name {name}"))?;
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if actual != expected {
+        bail!("digest mismatch for {name}: expected {expected}, downloaded {actual}");
+    }
+    Ok(())
+}
+
 fn run_verified_installer(
     directory: &Path,
     temporary: &Path,
@@ -257,18 +433,7 @@ fn run_verified_installer(
     manifest: &str,
     installer: &[u8],
 ) -> Result<()> {
-    let expected = manifest
-        .lines()
-        .find_map(|line| {
-            let mut fields = line.split_whitespace();
-            let digest = fields.next()?;
-            (fields.next()?.trim_start_matches('*') == "install.sh").then_some(digest)
-        })
-        .context("published SHA256SUMS does not name install.sh")?;
-    let actual = format!("{:x}", Sha256::digest(installer));
-    if actual != expected {
-        bail!("digest mismatch for install.sh: expected {expected}, downloaded {actual}");
-    }
+    verify_asset(manifest, "install.sh", installer)?;
     let path = temporary.join("install.sh");
     fs::write(&path, installer)?;
     let status = Command::new("/bin/sh")
@@ -385,7 +550,10 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 
 #[cfg(test)]
 mod tests {
-    use super::{is_current, newest_run, package_target, release_tag, run_verified_installer};
+    use super::{
+        is_current, newest_release, newest_run, opens_store, package_target, record_stream,
+        recorded_stream, release_tag, run_verified_installer, Stream,
+    };
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -445,6 +613,56 @@ mod tests {
             .to_string()
             .contains("no green main build"));
         assert!(package_target().is_some_and(|target| target.contains(std::env::consts::ARCH)));
+    }
+
+    #[test]
+    fn a_switch_is_recorded_beside_other_machine_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = temp.path().join(".lf/config.yaml");
+        assert_eq!(recorded_stream(&config).unwrap(), None);
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, "repo_root: /src\n").unwrap();
+        record_stream(&config, Stream::Preview).unwrap();
+        assert_eq!(recorded_stream(&config).unwrap(), Some(Stream::Preview));
+        record_stream(&config, Stream::Dev).unwrap();
+        assert_eq!(recorded_stream(&config).unwrap(), Some(Stream::Dev));
+        assert!(fs::read_to_string(&config)
+            .unwrap()
+            .contains("repo_root: /src"));
+        fs::write(&config, "stream: nightly\n").unwrap();
+        assert!(recorded_stream(&config)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown stream `nightly`"));
+    }
+
+    #[test]
+    fn preview_is_the_newest_published_release() {
+        let releases = r#"[
+            {"tag_name":"v0.17.0-rc.1","draft":false,"prerelease":true},
+            {"tag_name":"v0.16.2","draft":false,"prerelease":false},
+            {"tag_name":"v0.16.1","draft":false,"prerelease":false}
+        ]"#;
+        assert_eq!(newest_release(releases).unwrap(), "v0.16.2");
+        assert!(newest_release("[]").is_err());
+    }
+
+    #[test]
+    fn a_build_whose_catalog_lacks_the_stores_floor_cannot_open_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = temp.path().join("loopflow.db");
+        assert!(opens_store(&store, "").unwrap());
+        let connection = rusqlite::Connection::open(&store).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        drop(connection);
+        let current = crate::store::migrations::reader_catalog().join("\n");
+        assert!(opens_store(&store, &current).unwrap());
+        let older = crate::store::migrations::reader_catalog()
+            .split_last()
+            .unwrap()
+            .1
+            .join("\n");
+        assert!(!opens_store(&store, &older).unwrap());
     }
 
     #[test]

@@ -16,8 +16,8 @@ launchctl list | grep loopflow.cron            # macOS: LaunchAgents; Linux: cro
 ```
 
 ```bash
-lf install                                   # install the stable release
-lf install --main                            # install the newest green main build
+lf install                                   # your stream's newest build (stable by default)
+lf install --preview                         # switch to every release as it ships
 uv run python scripts/install.py local        # build only under local-bin/
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable experiment
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
@@ -91,7 +91,7 @@ version as `lf --version` — no separate manifest to bump or drift.
 
 | Stream | What it is | How it moves |
 |--------|------------|--------------|
-| `dev` | Newest green main build | Every green main (`lf install --main`) |
+| `dev` | Newest green main build | Every green main |
 | `preview` | Newest published release | Every release |
 | `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago that no regression covers |
 
@@ -102,8 +102,23 @@ moves it back: a Latest set ahead by hand stays until a newer release soaks.
 Before moving the marker it runs the publisher's `promote --tag <tag>`, which
 points `Loopflow-latest.dmg` at that release's DMG after checking it against
 `SHA256SUMS`. A failed promotion leaves the marker for the next run.
-`releases/latest`, `install.sh`, `lf install` and the website's download link
-all serve `stable`.
+`releases/latest` and the website's download link serve `stable`.
+
+```bash
+lf install --dev        # follow green main (needs gh auth)
+lf install --preview    # follow every release
+lf install --stable     # back to the default
+curl -fsSL https://loopflow.studio/install.sh | sh -s -- --channel preview
+```
+
+A Machine follows one stream, recorded as `stream:` in `~/.lf/config.yaml`.
+A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
+`install.sh` follow it, `stable` when none is recorded. `install.sh` installs
+`stable` or `preview`; `dev` comes from CI artifacts through `lf install --dev`.
+Before downloading a release, `lf install` checks the release's
+`reader-catalog.txt` against this Machine's store. When a newer lf migrated the
+store past what that build reads, it keeps the installed lf and says so; the
+next run installs once the stream reaches a build that opens the store.
 
 ```bash
 lf task create --title "Sessions lose their name" --regressed-in v0.15.3
@@ -120,7 +135,7 @@ in between still carry the bug and stay skipped. The run logs which Task holds
 
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
-| Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version` | `lf self install --main` installs it; artifacts expire after 14 days |
+| Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version` | `lf install --dev` installs it; artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` crontab line | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
 | Local | `scripts/install.py local` | Build `lf` and `Loopflow.app` into `local-bin/` | No |

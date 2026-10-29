@@ -9,7 +9,7 @@ uv run python scripts/loopflow-dev.py test         # run Swift tests
 
 The development app runs its bundled CLI on the main Machine's store, which it
 reads but never migrates. Only an install advances the store's schema:
-`lf self install --main` for a green main build, `lf install` for a release.
+`lf install --dev` for a green main build, `lf install` for your stream's release.
 With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.

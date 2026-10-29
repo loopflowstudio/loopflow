@@ -23,3 +23,11 @@
 **Decision:** Jack Heart chose Rust's model (LOO-669): a regression is an ordinary bug Task marked with the release it regressed in, an explicit `regressed_in` field set with `lf task create --regressed-in v0.15.3` or `lf task edit`. The daily run skips every release the mark covers: from that version on while the Task is open, and up to the first release published after it completes. Status and Desktop show the mark.
 
 **Implications:** Landing a fix releases `stable` a week after the fix ships. The field has no Linear mapping yet, so the release Machine reads only Tasks it holds locally.
+
+## 2026-10-29 — Each Machine follows one stream
+
+**Context:** With `stable` a week behind, installs needed a way to choose `preview` or `dev` and keep following it, rather than pinning a version.
+
+**Decision:** Jack Heart chose stream flags (LOO-669): `lf install --dev|--preview|--stable` switches the Machine's stream and records it in `~/.lf/config.yaml`; `lf install` with no flag, the install schedule and `install.sh` follow it, `stable` by default. `--main` became `--dev`. `install.sh --channel stable|preview` does the same for a fresh install. A release whose reader catalog cannot open the store is skipped, not forced.
+
+**Implications:** Switching to a slower stream after a newer lf migrated the store keeps the current lf until the slower stream catches up; no command deletes or downgrades the store.

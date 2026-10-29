@@ -1952,7 +1952,7 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
-    /// Install the latest Loopflow at login and weekly by default (macOS launchd)
+    /// Run `lf install` on your stream at login and weekly by default (macOS launchd)
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time)
         #[arg(value_enum, default_value = "weekly")]
@@ -2162,11 +2162,22 @@ pub enum SelfCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Install the stable Loopflow release from any directory
+    /// Install the newest Loopflow on your stream from any directory
+    #[command(
+        after_help = "Without a stream flag, follows the stream recorded in ~/.lf/config.yaml \
+(`stable` when none is recorded). A flag switches the stream and records it. \
+A stream whose build cannot open this Machine's store keeps the installed lf until it can."
+    )]
     Install {
-        /// Install the newest green main build instead (needs `gh` auth)
-        #[arg(long)]
-        main: bool,
+        /// Follow the newest green main build (needs `gh` auth)
+        #[arg(long, group = "stream")]
+        dev: bool,
+        /// Follow the newest release
+        #[arg(long, group = "stream")]
+        preview: bool,
+        /// Follow the newest release soaked 7 days with no open regression
+        #[arg(long, group = "stream")]
+        stable: bool,
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
@@ -2770,7 +2781,9 @@ mod tests {
                 .command,
             Some(Commands::Self_ {
                 cmd: crate::lf::SelfCommand::Install {
-                    main: false,
+                    dev: false,
+                    preview: false,
+                    stable: false,
                     cmd: None
                 }
             })
@@ -2780,16 +2793,20 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "self", "install", "status"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "preflight"]).is_ok());
         assert!(matches!(
-            Cli::try_parse_from(["lf", "self", "install", "--main"])
+            Cli::try_parse_from(["lf", "self", "install", "--preview"])
                 .unwrap()
                 .command,
             Some(Commands::Self_ {
                 cmd: crate::lf::SelfCommand::Install {
-                    main: true,
+                    dev: false,
+                    preview: true,
+                    stable: false,
                     cmd: None
                 }
             })
         ));
+        assert!(Cli::try_parse_from(["lf", "self", "install", "--dev", "--stable"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "--main"]).is_err());
     }
 
     #[test]

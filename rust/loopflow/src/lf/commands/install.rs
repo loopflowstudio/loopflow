@@ -37,7 +37,7 @@ use crate::build_info;
 use crate::store::migrations;
 
 mod published;
-pub use published::{latest, main_build, schedule};
+pub use published::{install, schedule, Stream};
 
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
@@ -199,7 +199,7 @@ pub fn decide(
         Compatibility::Exact { .. } | Compatibility::Behind { .. } => {}
         Compatibility::AheadPending { unmerged, .. } if !unmerged.is_empty() => {
             reasons.push(format!(
-                "candidate carries migrations origin/main has not added ({}); the shared store applies only merged migrations — install a main build with `lf self install --main`",
+                "candidate carries migrations origin/main has not added ({}); the shared store applies only merged migrations — install a main build with `lf install --dev`",
                 unmerged.join(", ")
             ))
         }

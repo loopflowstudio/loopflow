@@ -156,9 +156,18 @@ commit it, and do not land; publish and land once, after slice 8.
    longer carries a second preview that could name a different release than the tag.
    `ReleaseRunOutcome::NoChanges.latest_tag` keeps its name: it is the notes baseline, not a stream.
    `cargo test --lib ops::release::` 48 + `--test release_tests -- stable status regression` 9 + clippy: pass after compress.
-4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
-   (rename #1755's `--main`), no flag = current stream from Home config, default
-   stable; switching slower runs `can_open` first. `install.sh --channel`.
+4. **Stream flags and the recorded stream — built 2026-10-29, unpublished.**
+   `lf install --dev|--preview|--stable` (one Clap group; `--main` gone, every refusal
+   now names `lf install --dev`) records `stream:` in `~/.lf/config.yaml`; no flag reads
+   it, default stable; the launchd schedule runs plain `lf install`, so it follows.
+   `published::install(Option<Stream>)` resolves preview from the GitHub releases API
+   (first non-draft, non-prerelease) and stable from `releases/latest`. Every release
+   install checks the release's `reader-catalog.txt` (digest-verified) with `can_open`
+   before downloading; a store it can't open keeps the installed lf and exits 0.
+   `install.sh --channel stable|preview` (recorded only when passed; a rerun reads it;
+   `dev` refused with a pointer to `lf install --dev`).
+   `--lib install::published::` 8, `install_exposes_refresh` 1, `store::migrations::` 121,
+   `frontier_tests` 10, `documented_commands` 4, `test_shell_installer.py` 16, clippy: pass.
 5. **One lf, linked.** `~/.local/bin/lf` links into Loopflow.app or a versions
    directory; `lf install` on a Mac with the app updates the app. How it does
    that is still open (see Open): the Decided section has Sparkle as the only

@@ -44,14 +44,37 @@ detect_target() {
   esac
 }
 
+# The stream `lf install` follows, recorded in the Machine's ~/.lf/config.yaml.
+STREAM_CONFIG="$HOME/.lf/config.yaml"
+
+recorded_stream() {
+  if [ -f "$STREAM_CONFIG" ]; then
+    sed -n 's/^stream:[[:space:]]*\([a-z]*\).*/\1/p' "$STREAM_CONFIG" | head -n 1
+  fi
+}
+
+record_stream() {
+  mkdir -p "$(dirname "$STREAM_CONFIG")"
+  if [ -f "$STREAM_CONFIG" ] && grep -q '^stream:' "$STREAM_CONFIG"; then
+    sed "s/^stream:.*/stream: $1/" "$STREAM_CONFIG" > "$STREAM_CONFIG.tmp"
+    mv "$STREAM_CONFIG.tmp" "$STREAM_CONFIG"
+  else
+    if [ -s "$STREAM_CONFIG" ] && [ -n "$(tail -c 1 "$STREAM_CONFIG")" ]; then
+      echo >> "$STREAM_CONFIG"
+    fi
+    echo "stream: $1" >> "$STREAM_CONFIG"
+  fi
+}
+
 main() {
   target=$(detect_target)
   install_dir="$(resolve_install_dir)"
-  version="latest"
+  version=""
+  channel=""
   cli_only="${LF_INSTALL_CLI_ONLY:-0}"
 
   usage() {
-    echo "Usage: install.sh [--version <X>] [--cli-only] [VERSION]" >&2
+    echo "Usage: install.sh [--channel stable|preview] [--version <X>] [--cli-only] [VERSION]" >&2
   }
 
   while [ $# -gt 0 ]; do
@@ -71,24 +94,74 @@ main() {
         exit 1
         ;;
       --version=*) version="${1#--version=}"; shift ;;
+      --channel)
+        if [ $# -lt 2 ]; then
+          echo "--channel requires a value" >&2
+          usage
+          exit 1
+        fi
+        channel="$2"
+        shift 2
+        ;;
+      --channel=*) channel="${1#--channel=}"; shift ;;
       --cli-only) cli_only="1"; shift ;;
       -*) echo "Unknown option: $1" >&2; usage; exit 1 ;;
       *) version="$1"; shift ;;
     esac
   done
 
-  if [ "$version" = "latest" ]; then
-    # Asset downloads end at a CDN URL that no longer contains the release tag.
-    if ! release_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest"); then
-      echo "Download failed: latest release lookup" >&2
-      exit 1
-    fi
-    case "$release_url" in
-      "https://github.com/$REPO/releases/tag/v"*)
-        tag="${release_url##*/}"
+  if [ -n "$version" ] && [ -n "$channel" ]; then
+    echo "Pass --channel or --version, not both" >&2
+    usage
+    exit 1
+  fi
+  stream="$channel"
+  if [ -z "$version" ] && [ -z "$stream" ]; then
+    stream="$(recorded_stream)"
+    stream="${stream:-stable}"
+  fi
+
+  if [ -z "$version" ]; then
+    case "$stream" in
+      stable)
+        # Asset downloads end at a CDN URL that no longer contains the release tag.
+        if ! release_url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest"); then
+          echo "Download failed: stable release lookup" >&2
+          exit 1
+        fi
+        case "$release_url" in
+          "https://github.com/$REPO/releases/tag/v"*)
+            tag="${release_url##*/}"
+            ;;
+          *)
+            echo "Stable release did not resolve to a pinned tag" >&2
+            exit 1
+            ;;
+        esac
+        ;;
+      preview)
+        # The releases list is newest first; prereleases are not a stream.
+        if ! releases=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=20"); then
+          echo "Download failed: preview release lookup" >&2
+          exit 1
+        fi
+        tag=$(printf '%s\n' "$releases" | tr ',' '\n' | awk '
+          /"tag_name":/ { gsub(/.*"tag_name":[[:space:]]*"|".*/, ""); candidate = $0 }
+          /"prerelease":[[:space:]]*false/ { if (candidate != "") { print candidate; exit } }
+          /"prerelease":[[:space:]]*true/ { candidate = "" }
+        ')
+        if [ -z "$tag" ]; then
+          echo "No published release found for the preview stream" >&2
+          exit 1
+        fi
+        ;;
+      dev)
+        echo "dev builds come from CI and need gh auth; install a release, then run \`lf install --dev\`" >&2
+        exit 1
         ;;
       *)
-        echo "Latest release did not resolve to a pinned tag" >&2
+        echo "Unknown channel: $stream (choose stable or preview)" >&2
+        usage
         exit 1
         ;;
     esac
@@ -194,6 +267,10 @@ main() {
       --sync-skills
   fi
 
+  if [ -n "$channel" ]; then
+    record_stream "$channel"
+    echo "Following $channel (recorded in $STREAM_CONFIG)"
+  fi
   echo "Installed to $install_dir/lf"
 
   case ":$PATH:" in

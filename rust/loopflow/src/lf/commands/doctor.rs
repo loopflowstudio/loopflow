@@ -305,7 +305,7 @@ fn inspect_store(path: &Path) -> StoreReport {
                 let validation = crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
                     match crate::store::migrations::pending_shared_migration(&connection)? {
                         Some(pending) if !custom => Err(crate::store::StoreError::InvalidData(format!(
-                            "selected database is missing {pending}; install a build that carries it with `lf self install --main`"
+                            "selected database is missing {pending}; install a build that carries it with `lf install --dev`"
                         ))),
                         _ => Ok(()),
                     }

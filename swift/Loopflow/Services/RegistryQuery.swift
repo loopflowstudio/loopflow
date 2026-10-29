@@ -61,6 +61,7 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
     case tokens(directory: String, days: Int?)
     case retention
     case doctor
+    case bindPreview(session: String, task: String)
 
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
@@ -125,6 +126,8 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
             return ["history", "retention", "--json"]
         case .doctor:
             return ["doctor", "--json"]
+        case .bindPreview(let session, let task):
+            return ["session", "bind", "--dry-run", "--json", "--task", task, "--", session]
         }
     }
 
@@ -189,6 +192,8 @@ public enum ServedQuery: Equatable, Sendable, Encodable {
             TaggedFields("tokens", ["directory": directory, "days": days])
         case .retention: TaggedFields("retention")
         case .doctor: TaggedFields("doctor")
+        case .bindPreview(let session, let task):
+            TaggedFields("bind_preview", ["session": session, "task": task])
         }
     }
 
@@ -742,9 +747,8 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }
 
-    public func previewSessionBinding(id: String, task: String, cwd: String?) async throws -> SessionBindingPreview {
-        let stdout = try await run(["session", "bind", "--dry-run", "--json", "--task", task, "--", id], cwd)
-        return try Self.decode(SessionBindingPreview.self, from: stdout)
+    public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {
+        try Self.decode(SessionBindingPreview.self, from: await serve(.bindPreview(session: id, task: task)))
     }
 
     public func bindSession(id: String, taskId: String, cwd: String?) async throws -> SessionRecord {

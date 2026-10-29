@@ -1123,12 +1123,12 @@ impl SessionCommand {
         match self {
             Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
             Self::Steers { retry, .. } => retry.is_some(),
+            Self::Bind { dry_run, .. } => !dry_run,
             Self::Serve { .. }
             | Self::Attach { .. }
             | Self::Steer { .. }
             | Self::Connect { .. }
             | Self::Rename { .. }
-            | Self::Bind { .. }
             | Self::Send { .. }
             | Self::Receive { .. } => true,
         }

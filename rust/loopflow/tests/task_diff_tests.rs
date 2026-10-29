@@ -180,6 +180,14 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
         .unwrap(),
     )
     .unwrap();
+    // Prepared, not started: a Session a bind preview can name.
+    let session: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &["session", "connect", "--prepare", "--json", "--try"],
+        None,
+    ))
+    .unwrap();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     let queries = match task_diff(None, None) {
         Query::TaskChanges { .. }
@@ -209,7 +217,8 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
         | Query::SessionPage { .. }
         | Query::Tokens { .. }
         | Query::Retention
-        | Query::Doctor => [
+        | Query::Doctor
+        | Query::BindPreview { .. } => [
             Query::TaskChanges {
                 issue: "INF-123".into(),
                 base: "parent".into(),
@@ -328,6 +337,10 @@ fn a_query_served_in_process_reads_what_its_lf_command_prints() {
             },
             Query::Retention,
             Query::Doctor,
+            Query::BindPreview {
+                session: session["id"].as_str().unwrap().into(),
+                task: "INF-123".into(),
+            },
         ],
     };
     for query in queries {

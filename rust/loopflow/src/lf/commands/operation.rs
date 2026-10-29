@@ -267,6 +267,9 @@ pub enum Query {
     Retention,
     /// `lf doctor`: the ledger's self-audit.
     Doctor,
+    /// `lf session bind --dry-run --task <task> -- <session>`: the Task a
+    /// bind would assign, without assigning it.
+    BindPreview { session: String, task: String },
 }
 
 impl Query {
@@ -413,6 +416,16 @@ impl Query {
             }
             Self::Retention => words(&["history", "retention", "--json"]),
             Self::Doctor => words(&["doctor", "--json"]),
+            Self::BindPreview { session, task } => words(&[
+                "session",
+                "bind",
+                "--dry-run",
+                "--json",
+                "--task",
+                task,
+                "--",
+                session,
+            ]),
         }
     }
 
@@ -558,6 +571,9 @@ impl Query {
                     .ok_or_else(|| anyhow::anyhow!("No Sessions recorded."))?,
             ),
             Self::Doctor => pretty(&super::doctor::report()?),
+            Self::BindPreview { session, task } => {
+                pretty(&super::session::binding_preview(session, task)?)
+            }
         }
     }
 }

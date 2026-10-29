@@ -2334,13 +2334,13 @@ final class WorkModel {
     }
 
     func previewSessionBinding() async {
-        guard let repo = repoPath, let draft = navigation.binding, !draft.submitting else { return }
+        guard repoPath != nil, let draft = navigation.binding, !draft.submitting else { return }
         let owner = navigation
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
             let preview = try await query.previewSessionBinding(
-                id: draft.sessionId, task: draft.selector.trimmingCharacters(in: .whitespacesAndNewlines), cwd: repo)
+                id: draft.sessionId, task: draft.selector.trimmingCharacters(in: .whitespacesAndNewlines))
             guard owner.binding?.id == draft.id else { return }
             owner.binding?.preview = preview
             owner.binding?.submitting = false

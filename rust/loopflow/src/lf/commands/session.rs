@@ -451,6 +451,17 @@ pub(crate) fn watch_list(
     )
 }
 
+/// What `lf session bind <id> --task <task> --dry-run --json` prints.
+pub(crate) fn binding_preview(
+    id: &str,
+    task: &str,
+) -> anyhow::Result<crate::ops::human_session::SessionBindingPreview> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_shared_store().await?;
+        crate::ops::human_session::preview_binding(&store, id, task).await
+    })
+}
+
 /// What `lf session list --json` prints for `filter` in `shape`.
 pub(crate) fn read_once(
     filter: &crate::session::SessionFilter,

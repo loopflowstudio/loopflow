@@ -25,6 +25,7 @@ dependencies = ["typer>=0.9", "pyyaml>=6.0"]
 [dependency-groups]
 dev = [
     "boto3",
+    "cryptography>=47.0.0",
     "pyte>=0.8.2",
     "pytest>=8.0",
     "ruff>=0.8",

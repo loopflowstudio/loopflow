@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import email.utils
 import fcntl
 import hashlib
 import json
@@ -21,6 +23,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import boto3
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 CONTROL_ROOT = Path(__file__).resolve().parent.parent
 ROOT = Path(os.environ.get("LF_RELEASE_SOURCE_REPO", CONTROL_ROOT))
@@ -39,6 +42,7 @@ REQUIRED_SECRETS = (
     "R2_ACCESS_KEY_ID",
     "R2_ACCOUNT_ID",
     "R2_SECRET_ACCESS_KEY",
+    "SPARKLE_ED_PRIVATE_KEY",
 )
 READER_CATALOG = "reader-catalog.txt"
 # Every GitHub Release carries exactly these assets.
@@ -51,7 +55,10 @@ RELEASE_ASSETS = frozenset(
         "SHA256SUMS",
     }
 )
-LATEST_DMG_URL = "https://downloads.loopflow.studio/Loopflow-latest.dmg"
+DOWNLOADS_URL = "https://downloads.loopflow.studio"
+LATEST_DMG_URL = f"{DOWNLOADS_URL}/Loopflow-latest.dmg"
+# Loopflow.app's updater reads appcast-<stream>.xml for the stream ~/.lf/config.yaml names.
+SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 CANDIDATE_STAGES = (
     "artifacts_verified",
     "installer_verified",
@@ -285,6 +292,48 @@ def _upload_dmg(dmg: Path, key: str, cache_control: str) -> None:
     )
 
 
+def _appcast(stream: str, tag: str, dmg: Path) -> str:
+    """A one-item Sparkle feed offering `dmg`, signed with the publisher's EdDSA key."""
+    seed = base64.b64decode(os.environ["SPARKLE_ED_PRIVATE_KEY"].strip())
+    signature = base64.b64encode(
+        Ed25519PrivateKey.from_private_bytes(seed[:32]).sign(dmg.read_bytes())
+    ).decode()
+    version = tag.removeprefix("v")
+    published = email.utils.formatdate(usegmt=True)
+    enclosure = (
+        f'url="{DOWNLOADS_URL}/Loopflow-{version}.dmg" length="{dmg.stat().st_size}" '
+        f'type="application/octet-stream" sparkle:edSignature="{signature}"'
+    )
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="{SPARKLE_NAMESPACE}">
+<channel>
+<title>Loopflow {stream}</title>
+<item>
+<title>Loopflow {version}</title>
+<pubDate>{published}</pubDate>
+<sparkle:version>{version}</sparkle:version>
+<sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+<sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+<sparkle:releaseNotesLink>https://github.com/loopflowstudio/loopflow/releases/tag/{tag}</sparkle:releaseNotesLink>
+<enclosure {enclosure}/>
+</item>
+</channel>
+</rss>
+"""
+
+
+def _upload_appcast(stream: str, appcast: str) -> None:
+    key = f"appcast-{stream}.xml"
+    print(f"Uploading {key} to R2", flush=True)
+    _r2_client().put_object(
+        Bucket="downloads",
+        Key=key,
+        Body=appcast.encode(),
+        ContentType="application/rss+xml",
+        CacheControl="public, max-age=60",
+    )
+
+
 def _write_receipt(receipt: ArtifactReceipt, suffix: str = "") -> None:
     main_repo = Path(os.environ.get("LF_RELEASE_MAIN_REPO", ROOT))
     log_dir = main_repo / ".lf" / "logs"
@@ -459,6 +508,8 @@ def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     version = tag.removeprefix("v")
     _upload_dmg(dmg, f"Loopflow-{version}.dmg", "public, max-age=31536000, immutable")
     stages.append("versioned_dmg_uploaded")
+    _upload_appcast("preview", _appcast("preview", tag, dmg))
+    stages.append("preview_appcast_uploaded")
 
     _deploy_website(tag)
     stages.append("website_deployed")
@@ -741,7 +792,7 @@ def _newest_tag() -> str:
 
 
 def promote_release(tag: str) -> None:
-    """Point Loopflow-latest.dmg at a published release, before it becomes stable."""
+    """Point Loopflow-latest.dmg and the stable appcast at a release, before it becomes stable."""
     release = json.loads(
         _run(
             ["gh", "release", "view", tag, "--json", "tagName,isDraft,assets"], capture=True
@@ -771,7 +822,10 @@ def promote_release(tag: str) -> None:
         _download(LATEST_DMG_URL, latest)
         if _sha256(latest) != sums["Loopflow.dmg"]:
             raise RuntimeError(f"Loopflow-latest.dmg did not read back as {tag}")
-    print(f"Loopflow-latest.dmg now serves {tag}", file=sys.stderr, flush=True)
+        _upload_appcast("stable", _appcast("stable", tag, dmg))
+    print(
+        f"Loopflow-latest.dmg and the stable appcast now serve {tag}", file=sys.stderr, flush=True
+    )
 
 
 def main() -> None:

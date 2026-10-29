@@ -15,6 +15,9 @@ packages:
   ViewInspector:
     url: https://github.com/nalexn/ViewInspector.git
     from: 0.10.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.7.0
 
 targets:
   Loopflow:
@@ -54,6 +57,7 @@ targets:
         type: folder
     dependencies:
       - target: Loopflow
+      - package: Sparkle
     postBuildScripts:
       - name: Bundle Loopflow control tools
         script: |

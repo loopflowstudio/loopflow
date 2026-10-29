@@ -37,7 +37,7 @@ use crate::build_info;
 use crate::store::migrations;
 
 mod published;
-pub use published::{adopt, install, schedule, Stream};
+pub use published::{adopt, can_open, install, schedule, Stream};
 
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.

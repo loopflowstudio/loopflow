@@ -70,10 +70,7 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
     if stream == Stream::Dev {
         return main_build();
     }
-    let client = Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent(concat!("lf/", env!("CARGO_PKG_VERSION")))
-        .build()?;
+    let client = http_client()?;
     let tag = if stream == Stream::Preview {
         newest_release(
             &client
@@ -119,24 +116,12 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
         .send()?
         .error_for_status()?
         .text()?;
-    // Releases before v0.16 publish no catalog; promotion still refuses them.
-    if manifest_digest(&manifest, READER_CATALOG).is_some() {
-        let catalog = client
-            .get(format!("{base}/{READER_CATALOG}"))
-            .send()?
-            .error_for_status()?
-            .bytes()?;
-        verify_asset(&manifest, READER_CATALOG, &catalog)?;
-        if !opens_store(
-            &crate::store::production_database_path(),
-            &String::from_utf8_lossy(&catalog),
-        )? {
-            println!(
-                "{stream} is at {tag}, which cannot open this Machine's store: a newer lf migrated it. \
-                 Keeping the installed lf; `lf install` moves to {stream} once it reaches a build that opens the store."
-            );
-            return Ok(());
-        }
+    if !release_opens_store(client, &base, &manifest)? {
+        println!(
+            "{stream} is at {tag}, which cannot open this Machine's store: a newer lf migrated it. \
+             Keeping the installed lf; `lf install` moves to {stream} once it reaches a build that opens the store."
+        );
+        return Ok(());
     }
     let app = applications.join("Loopflow.app");
     if cfg!(target_os = "macos") && !cli_only && updates_itself(&app) && app_is_running(&app)? {
@@ -199,6 +184,51 @@ fn applications_dir() -> PathBuf {
     std::env::var_os("LF_APPLICATIONS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/Applications"))
+}
+
+/// Succeed only when release `tag` can open this Machine's store; Loopflow.app's
+/// updater asks before installing a release.
+pub fn can_open(tag: &str) -> Result<()> {
+    let client = http_client()?;
+    let base = format!("{RELEASES}/download/{tag}");
+    let manifest = client
+        .get(format!("{base}/SHA256SUMS"))
+        .send()?
+        .error_for_status()?
+        .text()?;
+    if !release_opens_store(&client, &base, &manifest)? {
+        bail!(
+            "{tag} cannot open this Machine's store: a newer lf migrated it. \
+             Loopflow stays on this build until its stream reaches one that opens the store."
+        );
+    }
+    println!("{tag} opens this Machine's store");
+    Ok(())
+}
+
+fn http_client() -> Result<Client> {
+    Ok(Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent(concat!("lf/", env!("CARGO_PKG_VERSION")))
+        .build()?)
+}
+
+/// Whether the release at `base` opens the store, from its digest-checked reader catalog.
+fn release_opens_store(client: &Client, base: &str, manifest: &str) -> Result<bool> {
+    // Releases before v0.16 publish no catalog; promotion still refuses them.
+    if manifest_digest(manifest, READER_CATALOG).is_none() {
+        return Ok(true);
+    }
+    let catalog = client
+        .get(format!("{base}/{READER_CATALOG}"))
+        .send()?
+        .error_for_status()?
+        .bytes()?;
+    verify_asset(manifest, READER_CATALOG, &catalog)?;
+    opens_store(
+        &crate::store::production_database_path(),
+        &String::from_utf8_lossy(&catalog),
+    )
 }
 
 /// The newest published release in the GitHub releases list, which is newest first.

@@ -1843,6 +1843,7 @@ fn run() -> anyhow::Result<()> {
                 loopflow::lf::commands::install::schedule(*frequency)
             }
             Some(InstallCommand::Adopt) => loopflow::lf::commands::install::adopt(),
+            Some(InstallCommand::CanOpen { tag }) => loopflow::lf::commands::install::can_open(tag),
             Some(InstallCommand::RecoverSwitch { switch }) => {
                 loopflow::lf::commands::install::recover_switch(switch)
             }

@@ -657,6 +657,11 @@ launching. This checks repository registration, not all Desktop actions. Schema
 compatibility is checked by the store; ordinary commands cannot migrate the main
 database. Private `LF_HOME` experiments remain disposable and explicit.
 
+Only `/Applications/Loopflow.app` updates itself (`AppUpdater`, Sparkle): it
+reads its stream from `~/.lf/config.yaml`, asks its bundled
+`lf install can-open` before installing, and runs `lf install adopt` on the first
+launch of a new version. Dev builds never check for updates.
+
 | Command | What it does |
 | --- | --- |
 | `uv run python scripts/loopflow-dev.py run` | Build and launch |

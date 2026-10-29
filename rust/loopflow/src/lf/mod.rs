@@ -1963,6 +1963,9 @@ pub enum InstallCommand {
     /// store and link `lf` into it. Moves no files.
     #[command(hide = true)]
     Adopt,
+    /// Exit 0 only when release TAG's build can open this Machine's store.
+    #[command(hide = true)]
+    CanOpen { tag: String },
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {

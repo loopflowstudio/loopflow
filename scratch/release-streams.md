@@ -194,14 +194,25 @@ commit it, and do not land; publish and land once, after slice 8.
    `--lib lf::commands::install::` 28, `install_exposes_refresh` 1, `documented_commands` 4,
    `test_shell_installer.py` 16, clippy: pass. `adopt` itself needs the real account home
    (like every promote test); left to demo / `scripts/test_task_installation.py`.
-7. **Sparkle, one appcast per stream**, EdDSA key in Doppler, Developer ID
-   signing of dev builds in CI; the delegate vetoes updates that fail `can_open`.
-8. **Learn from the best write-up** (task brief): what to adopt from Codex, opencode,
-   Docker, Superlogical, Ghostty and other desktop apps on channels, cadence,
-   versioning, notes, signing, auto-update, rollback and hotfixes. The research
-   exists (`scratch/release-research.md`, cleared; `git show e03537f7ca:scratch/release-research.md`)
-   but nothing durable records the adopt list yet; it needs a home that survives
-   `lf scratch clear` (e.g. a section of `release/README.md`) before the Task completes.
+7. **Sparkle — built 2026-10-29, unpublished.** Sparkle 2.10.1 (SwiftPM and
+   project.yml); `AppUpdater` starts only in the installed bundle
+   (`/Applications/Loopflow.app` or `LF_APPLICATIONS_DIR`), feeds from
+   `appcast-<stream>.xml` per `~/.lf/config.yaml` (dev follows preview), vetoes a release
+   whose `lf install can-open v<version>` fails, and handles `loopflow://update`. First
+   launch of a new `CFBundleVersion` runs `lf install adopt`. `Info.plist` carries
+   `SUPublicEDKey` (automatic daily checks and installs); the private half is Doppler
+   `SPARKLE_ED_PRIVATE_KEY` (generated 2026-10-29, never printed), now a required publisher
+   secret. The publisher signs `appcast-preview.xml` at publish and `appcast-stable.xml`
+   at promote; `release-loopflow.py` embeds `Sparkle.framework` with an
+   `@executable_path/../Frameworks` rpath, and its packaged-app launch check would catch a
+   missing framework before publishing.
+   `swift build --product LoopflowMac`, `swift test --filter AppUpdatesTests` 3,
+   `test_release_publisher.py`+`test_release_automation.py` 55, `test_release_loopflow.py` 14,
+   `--lib lf::commands::install::` 29, clippy, `third_party.py refresh`: pass.
+   **Remaining:** Developer ID signing of dev builds in CI (dev stays CLI-only), and a
+   live check that a notarized release launches and updates (demo).
+8. **Learn from the best write-up** (task brief): adopt list in a durable home
+   (`release/README.md`); research at `git show e03537f7ca:scratch/release-research.md`.
 
 Check (slice 2 gate, 2026-10-29, tree ae4b265b8a): architecture pass, `cargo fmt --check` pass, publisher/automation pytest 55 pass; `--lib ops::release::` 45 and `release_tests daily_run_moves_stable minor notes` 22 passed on this code at compress; gate's nextest and clippy refused by the disk reserve (5.2 GiB free, other Tasks' builds retained), deferred to PR CI.
 

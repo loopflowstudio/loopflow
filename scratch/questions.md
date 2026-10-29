@@ -47,3 +47,11 @@
   signed app (slice 7).
 - **`install.sh` run by hand with the app running** still quits, replaces and reopens it;
   only `lf install` hands off to the app's updater.
+- **The publisher host must inject `SPARKLE_ED_PRIVATE_KEY`.** It is now a required secret;
+  if `loopflow-release-publisher` passes a fixed list of names, add it there or the release
+  check fails closed naming it.
+- **Sparkle's `--deep` signing** re-signs its XPC services without their entitlements; the
+  app isn't sandboxed, so the installer doesn't use them. Sign Sparkle's helpers separately if
+  notarization or install complains.
+- **Sparkle's veto runs `lf install can-open` on the main thread** (≤ 30 s network timeout),
+  only when an update is found.

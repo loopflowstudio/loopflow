@@ -29,6 +29,14 @@
             </array>
         </dict>
     </array>
+    <key>SUPublicEDKey</key>
+    <string>kl9uAEsSsx1UZCIhgpzRGF8YjpVn4LEgcLomExIX6Ko=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
     <key>NSHighResolutionCapable</key>

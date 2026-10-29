@@ -83,6 +83,7 @@ the app is not a side artifact.
 | `lf-<target>.tar.gz` | GitHub Release | `Cargo.toml` |
 | `Loopflow-<version>.dmg` | R2 `downloads/` + GitHub Release | tag |
 | `Loopflow-latest.dmg` | R2 `downloads/` | the `stable` release |
+| `appcast-preview.xml`, `appcast-stable.xml` | R2 `downloads/` | that stream's release, EdDSA-signed |
 | `reader-catalog.txt` | GitHub Release | the reader floors this build opens |
 | `SHA256SUMS` | GitHub Release | release artifact bytes |
 | `loopflow` crate | crates.io | `Cargo.toml` |
@@ -123,6 +124,17 @@ Before downloading a release, `lf install` checks the release's
 `reader-catalog.txt` against this Machine's store. When a newer lf migrated the
 store past what that build reads, it keeps the installed lf and says so; the
 next run installs once the stream reaches a build that opens the store.
+Every install schedules `lf install` daily (launchd, or cron on Linux) unless a
+cadence is already installed, so a Machine stays on its stream unasked.
+
+The installed Loopflow.app updates itself through Sparkle from its stream's
+appcast (`dev` follows preview's). Publishing writes `appcast-preview.xml`;
+`promote` writes `appcast-stable.xml`, both signed with the publisher's
+`SPARKLE_ED_PRIVATE_KEY` (Doppler) against the `SUPublicEDKey` in
+`swift/LoopflowMac/Info.plist`. Before installing, the app asks its bundled
+`lf install can-open <tag>` and skips a release that can't open the store. Its
+first launch after an update runs `lf install adopt`, which migrates the store
+and links `lf` into the new bundle without moving files.
 
 ```bash
 lf task create --title "Sessions lose their name" --regressed-in v0.15.3

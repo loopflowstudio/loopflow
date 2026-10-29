@@ -36,6 +36,7 @@ struct LoopflowApp: App {
             LaunchJournal.home.begin()
             LaunchJournal.recordExits()
             DesktopVitals.home.start()
+            AppUpdates.adoptIfUpdated()
         }
         bootstrapLoopflowApp()
         _workspaces = State(initialValue: RepositoryWorkspaces(
@@ -59,6 +60,7 @@ struct LoopflowApp: App {
         _appearance = State(initialValue: AppearanceStore.shared)
         if AppTestMode.current() == nil {
             _desktopServer = State(initialValue: DesktopServer.start())
+            AppUpdater.shared.start()
         }
     }
 
@@ -234,6 +236,8 @@ struct LoopflowApp: App {
             openWindow(id: "portfolio")
         case "sessions" where url.path.isEmpty:
             NotificationCenter.default.post(name: .openSessions, object: nil)
+        case "update" where url.path.isEmpty:
+            AppUpdater.shared.checkForUpdates()
         default:
             taskLinks.receiveAddress { isLatest in
                 do {

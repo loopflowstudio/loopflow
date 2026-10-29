@@ -189,13 +189,12 @@ def test_host_publisher_owns_credentialed_release_steps():
         "_publish_crate()",
         '"versioned_dmg_uploaded"',
         '"scripts/deploy_website.py"',
-        '"latest_dmg_uploaded"',
         '"--finalize"',
+        "def promote_release(",
     ):
         assert proof in publisher
 
     assert publisher.index('"website_deployed"') < publisher.index('"--finalize"')
-    assert publisher.index('"latest_dmg_uploaded"') < publisher.index('"--finalize"')
 
 
 def test_release_cron_keeps_its_machine_scope_and_runs_after_telemetry():

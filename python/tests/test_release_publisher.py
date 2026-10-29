@@ -21,6 +21,7 @@ def _native_artifacts(directory: Path) -> None:
         package_dir.mkdir()
         with tarfile.open(package_dir / f"lf-{target}.tar.gz", "w:gz") as package:
             package.add(binary, arcname="lf")
+        (package_dir / "reader-catalog.txt").write_text("v0.14.0\nwave_setup\n")
 
 
 def test_publisher_requires_the_complete_native_matrix(tmp_path: Path):
@@ -197,13 +198,13 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         "crate_published",
         "versioned_dmg_uploaded",
         "website_deployed",
-        "latest_dmg_uploaded",
         "github_release_published",
     )
     assert set(receipt.artifact_sha256) == {
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
+        "reader-catalog.txt",
         "SHA256SUMS",
     }
     checksum_lines = (prepared_dir / "SHA256SUMS").read_text().splitlines()
@@ -211,7 +212,10 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
+        "reader-catalog.txt",
     }
+    assert (prepared_dir / "reader-catalog.txt").read_text() == "v0.14.0\nwave_setup\n"
+
     retained = json.loads((tmp_path / ".lf/logs/release.v1.2.3.json").read_text())
     assert retained["artifact_sha256"] == receipt.artifact_sha256
     prepared = json.loads((tmp_path / ".lf/logs/release.v1.2.3.candidate.json").read_text())
@@ -224,11 +228,20 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     assert deploy[-2:] == ["--repo", str(tmp_path)]
 
 
+def test_publisher_refuses_targets_that_disagree_on_the_reader_catalog(tmp_path: Path):
+    _native_artifacts(tmp_path)
+    (tmp_path / publish_release.TARGETS[0] / "reader-catalog.txt").write_text("v0.14.0\n")
+
+    with pytest.raises(RuntimeError, match="disagree"):
+        publish_release._find_reader_catalog(tmp_path)
+
+
 def test_public_artifact_hashes_reject_modified_and_missing_assets(tmp_path: Path):
     names = {
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
+        "reader-catalog.txt",
         "SHA256SUMS",
     }
     for name in names:
@@ -263,6 +276,7 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             package.addfile(info, io.BytesIO(body))
     (artifacts / "Loopflow.dmg").write_bytes(b"notarized artifact")
     (artifacts / "install.sh").write_text("#!/bin/sh\nexit 1\n")
+    (artifacts / "reader-catalog.txt").write_text("v0.14.0\n")
     publish_release._write_checksums(tuple(artifacts.iterdir()), artifacts / "SHA256SUMS")
     hashes = {p.name: publish_release._sha256(p) for p in artifacts.iterdir()}
     monkeypatch.setenv("LF_RELEASE_MAIN_REPO", str(tmp_path))
@@ -282,6 +296,7 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "https://loopflow.studio/healthz": b'{"status":"ok","release":"v1.2.3"}',
             "https://crates.io/api/v1/crates/loopflow/1.2.3": b'{"version":{"num":"1.2.3"}}',
             "github-latest": b"v1.2.3",
+            "github-newest": b"v1.2.3",
         }
     )
     run = publish_release._run
@@ -294,6 +309,10 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         if command == ["gh", "release", "view", "--json", "tagName"]:
             return subprocess.CompletedProcess(
                 command, 0, json.dumps({"tagName": remote["github-latest"].decode()}), ""
+            )
+        if command[:3] == ["gh", "release", "list"]:
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps([{"tagName": remote["github-newest"].decode()}]), ""
             )
         if command[:3] == ["gh", "release", "view"]:
             return subprocess.CompletedProcess(
@@ -377,6 +396,33 @@ def test_public_proof_requires_latest_dmg(tmp_path: Path, public_release, latest
     )
 
 
+def test_preview_release_proof_leaves_the_stable_dmg_alone(tmp_path: Path, public_release):
+    remote, _ = public_release
+    remote["github-latest"] = b"v1.2.2"
+    remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"] = b"stable release"
+    before = dict(remote)
+    result = publish_release.verify_release("v1.2.3", repair=True)
+    assert remote == before
+    assert "latest_dmg_verified" not in result.completed_stages
+    assert "website_release_verified" in result.completed_stages
+
+
+def test_promote_points_the_stable_dmg_at_the_published_release(public_release):
+    remote, _ = public_release
+    remote[publish_release.LATEST_DMG_URL] = b"stable release"
+    publish_release.promote_release("v1.2.3")
+    assert remote[publish_release.LATEST_DMG_URL] == b"notarized artifact"
+
+
+def test_promote_refuses_a_dmg_that_differs_from_its_checksums(public_release):
+    remote, _ = public_release
+    remote[publish_release.LATEST_DMG_URL] = b"stable release"
+    remote["https://public/Loopflow.dmg"] = b"substituted"
+    with pytest.raises(RuntimeError, match="differs from SHA256SUMS"):
+        publish_release.promote_release("v1.2.3")
+    assert remote[publish_release.LATEST_DMG_URL] == b"stable release"
+
+
 def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(
     tmp_path: Path, public_release
 ):
@@ -407,8 +453,9 @@ def test_reconcile_preserves_publication_when_repair_is_unsafe(
     remote, _ = public_release
     del remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"]
     if damage == "newer_release":
-        remote["github-latest"] = b"v1.2.4"
-        expected_error = "latest release is v1.2.4"
+        remote["github-newest"] = b"v1.2.4"
+        remote["https://loopflow.studio/healthz"] = b'{"status":"ok","release":"v1.2.4"}'
+        expected_error = "newest release is v1.2.4"
     elif damage == "immutable_conflict":
         remote["https://downloads.loopflow.studio/Loopflow-1.2.3.dmg"] = b"conflict"
         expected_error = "versioned public DMG differs"

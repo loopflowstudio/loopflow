@@ -38,3 +38,22 @@ deterministic refusal surfaces in Task history as "Stopped shipping: Loopflow:
 <cause>", and `lf ship` resumes it. Jack's Task brief already settles that a
 repeated identical refusal stops the run; the outage trade-off stays in
 `scratch/questions.md`.
+
+## Demo (2026-10-29, headless, standing in for Jack Heart)
+
+Reviewed through real git fixtures, not the installed lf: a child stacked on a
+parent that squash-merged, with later main commits, syncs onto main and keeps
+only `child.txt` in its diff (`stacked_child_rebased_onto_main_syncs_from_its_parents_merge`);
+a child holding neither base still refuses (`stacked_sync_refuses_when_base_is_not_an_ancestor`).
+`lf ship` withdraws Auto-Ship after three identical failures
+(`task_ship_stops_shipping_when_its_run_fails_the_same_way_every_attempt`).
+Result: 5/5 `sync_tests::stacked*` ok, 1/1 ship-stop ok. No human feedback; the
+LOO-669 shape is reproduced and healed. Not proven: installed acceptance on a
+live stacked Task — belongs to verify after land. Next: gate.
+
+## Gate (2026-10-29)
+
+Review: no code changes; `docs/orchestration.md` now says a ship whose run fails
+identically every attempt withdraws Auto-Ship and `lf ship` resumes it.
+`scripts/test.py --reuse-passing --rust-filter 'test(sync_tests::) | test(task_graph_launch_tests::) | test(ops::task::) | binary(task_pr_range_tests) | binary(task_pr_authority_tests) | …'`: FAIL at resource preflight (9.4 GiB free < 32 GiB reserve; `resource_envelope.py --recover` freed nothing, all large builds belong to other Tasks or are recent) — Rust tests, clippy and the website suite (docs edit) deferred to CI.
+`cargo fmt --check`, `check_architecture.py`, `check_rust_test_inventory.py`: pass.

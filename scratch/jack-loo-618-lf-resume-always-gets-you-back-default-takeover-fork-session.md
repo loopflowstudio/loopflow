@@ -80,7 +80,10 @@ Jack Heart decided (answers 4a, 5a): a Task is assigned or not; there is no defe
 
 - `lf task claim <task>`: you own it on this Machine; Linear assignee = you. Unchanged.
 - `lf task unassign <task>` (renames `task unclaim`): nobody owns it; **clears the Linear
-  assignee** (today unclaim leaves it); nothing moves it. History intact.
+  assignee** (today unclaim leaves it); nothing moves it. History intact. On a Task nobody
+  owns it writes no ownership entry and still clears the assignee (decided in the second
+  headless concept review from 5a and AGENTS.md Flexibility); someone else's claim refuses
+  ("claimed by X; claim it to take it over"), and handoff of an unowned Task refuses.
 - `lf task run` claims an unowned Task and runs (unchanged); it no longer refuses a held Task.
 - Unassigned replaces deferred everywhere it was read: ship stops, CI repair skips, Wave
   operators skip (they already leave unowned backlog alone).
@@ -104,15 +107,6 @@ Implementation matches Jack Heart's 2026-10-29 decisions; no product choice open
 Graph correction exception in `run::resume` (a Graph continuing its own step's Run). Moving
 it off `resume` needs a hidden command or in-process input capture, more machinery than the
 one-line ancestry check it replaces; it is invisible to people.
-
-## Concept review (headless, 2026-10-29, second pass)
-
-Decided by Jack Heart's decision 5a ("unassign: nobody owns it; clears the Linear assignee")
-and AGENTS.md Flexibility, implemented 2026-10-29: `lf task unassign` on a Task nobody owns
-writes no ownership entry (`unclaim_task` returns `None`) and still clears the Linear
-assignee. Someone else's claim still refuses ("claimed by X; claim it to take it over");
-handoff of an unowned Task still refuses. Proof:
-`local_planning::task_unassign_clears_the_assignee_of_an_unowned_task`.
 
 ## Remaining
 

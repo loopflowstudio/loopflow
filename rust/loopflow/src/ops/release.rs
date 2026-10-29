@@ -4353,14 +4353,16 @@ fn advance_stable(
     let releases = published_releases(repo, target)?;
     let regressions = regressions(repo)?;
     for regression in &regressions {
-        if let Some(release) = releases.iter().find(|release| regression.covers(release)) {
+        let skipped: Vec<&str> = releases
+            .iter()
+            .filter(|release| regression.covers(release))
+            .map(|release| release.tag.as_str())
+            .collect();
+        if !skipped.is_empty() {
             progress.status(&format!(
-                "{} holds stable below {} (regressed in v{}.{}.{})",
+                "{} keeps stable off {}",
                 regression.task,
-                release.tag,
-                regression.version.0,
-                regression.version.1,
-                regression.version.2
+                skipped.join(", ")
             ));
         }
     }

@@ -159,50 +159,43 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         }),
         _ => Err(StoreError::InvalidData("unknown Work table".into())),
     }?;
-    // Historical migrations seed their journal before the `paused` column exists.
-    if table == "tasks"
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='paused')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
-        values.push(WorkValue::TaskDeferred(conn.query_row(
-            "SELECT paused FROM tasks WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )?));
-    }
-    if table == "tasks"
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='shipped_at')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
-        values.push(WorkValue::TaskShippedAt(conn.query_row(
-            "SELECT shipped_at FROM tasks WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )?));
-    }
-    if table == "tasks"
-        && conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name='regressed_in')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )?
-    {
-        values.push(WorkValue::TaskRegressedIn(conn.query_row(
-            "SELECT regressed_in FROM tasks WHERE id=?1",
-            [id],
-            |row| row.get(0),
-        )?));
+    // Historical migrations seed their journal before later Task columns exist.
+    if table == "tasks" {
+        if let Some(paused) = optional_task_column(conn, id, "paused")? {
+            values.push(WorkValue::TaskDeferred(paused));
+        }
+        if let Some(shipped_at) = optional_task_column(conn, id, "shipped_at")? {
+            values.push(WorkValue::TaskShippedAt(shipped_at));
+        }
+        if let Some(regressed_in) = optional_task_column(conn, id, "regressed_in")? {
+            values.push(WorkValue::TaskRegressedIn(regressed_in));
+        }
     }
     for value in &values {
         value.validate()?;
     }
     Ok(values)
+}
+
+/// A `tasks` column's value, or `None` before the migration that adds it.
+fn optional_task_column<T: rusqlite::types::FromSql>(
+    conn: &Connection,
+    id: &str,
+    column: &str,
+) -> StoreResult<Option<T>> {
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name=?1)",
+        [column],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Ok(None);
+    }
+    Ok(Some(conn.query_row(
+        &format!("SELECT {column} FROM tasks WHERE id=?1"),
+        [id],
+        |row| row.get(0),
+    )?))
 }
 
 fn read_record(

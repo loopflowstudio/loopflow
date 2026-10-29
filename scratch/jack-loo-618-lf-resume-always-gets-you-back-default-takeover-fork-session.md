@@ -133,10 +133,10 @@ Fixed (implement, 2026-10-29):
 4. `OwnershipKind::Unclaim` → `Unassign`: stored/sent as `unclaim` (released CHECK and peer
    markers), history label `unassign`, comment "unassigned this".
 
-Demo to re-run for case 1 (old terminal prints the notice and returns to its shell).
-
 ## Remaining
 
+- Demo re-run of fix 1: in-terminal takeover; the old terminal prints where the conversation
+  went and returns to its shell. Code and `transport_tests` cover it; the live re-run hasn't happened yet.
 - Implementation notes (2026-10-29): "unassigned" = no owner in the ownership log
   (`task_owned`); a started unowned Task goes to Later/Backlog with next move User. `lf ship`
   claims an unowned Task on start (as `task run` does) and stops when it is unassigned

@@ -1724,6 +1724,51 @@ mod discovery_tests {
     }
 
     #[test]
+    fn process_starter_names_the_nearest_session_else_the_root_person() {
+        use crate::process::Starter;
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let root = insert_process(&store, 1, 1);
+        let agent = insert_process(&store, 2, 2);
+        let step = insert_process(&store, 3, 3);
+        let orphan = insert_process(&store, 4, 4);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE processes SET parent_lf_process_id=?2,caller_session_id='session-a' WHERE id=?1",
+                params![agent, root],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE processes SET parent_lf_process_id=?2 WHERE id=?1",
+                params![step, agent],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE processes SET parent_lf_process_id='00000000-0000-0000-0000-0000000000ff' WHERE id=?1",
+                [&orphan],
+            )
+            .unwrap();
+        }
+        let starter = |id| store.process_starter(id, Some("Jack Heart")).unwrap();
+        assert_eq!(
+            starter(&step),
+            Starter::Session {
+                id: "session-a".into(),
+                name: None,
+                requester: Some("Jack Heart".into()),
+            }
+        );
+        assert_eq!(
+            starter(&root),
+            Starter::Person {
+                name: Some("Jack Heart".into())
+            }
+        );
+        assert_eq!(starter(&orphan), Starter::Person { name: None });
+    }
+
+    #[test]
     fn process_discovery_separates_literal_search_from_identity_resolution() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();

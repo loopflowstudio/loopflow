@@ -1,7 +1,7 @@
 # LOO-687 · Stopping ship sticks
 
-Status: accepted (Jack asked to launch, 2026-10-29); implemented except the
-remaining work below. Assumptions made while implementing are in
+Status: accepted (Jack asked to launch, 2026-10-29); implemented except
+Remaining. Assumptions made while implementing are in
 `scratch/questions.md`.
 
 ## Problem
@@ -44,13 +44,14 @@ it:
   Only an explicit `lf ship` (the Desktop Auto-Ship button runs it) clears the
   stop and approves again. This is not a second grant: the approval stays the
   one `shipped_at`, and the stop only blocks implicit re-approval.
-- **An unapproved run never lands.** `land` is the real merge authority: it is
-  a graph step, not `shipped_at`. Before #1741 every run that reached `land` was
-  approved by construction. A stop breaks that, so the runner checks approval
-  when it reaches a landing step. Without approval, the run stops there, and the
-  Task waits at that step the way it waits at an interactive one. `lf ship`
-  continues from it. The check is made when the step is reached, not at
-  launch, so it also covers a stop made mid-run.
+- **A stopped Task's run never lands.** `land` is the real merge authority: it
+  is a graph step, not `shipped_at`. The runner checks for a standing stop when
+  it reaches a merging step (`lf land`, `lf pr arm`, skill `pr-land`), not at
+  launch, so a stop made mid-run counts too. While a stop stands, the run stops
+  there and the Task waits at that step, the way it waits at an interactive one.
+  `lf ship` continues from it. The gate is the stop, not "unapproved": an
+  unapproved `code` run never reaches `end` after demo, so it would park at
+  `land` every time (assumed, reversible; see questions).
 - `ship_halt` (Loopflow withdrawing after identical repeated failures) does not
   record a stop. Its cause was the failure, and a relaunch that fixes it may
   approve again by reaching `end`.
@@ -62,77 +63,62 @@ because the graph's `land` step merges whether or not the Task is shipping.
 
 ## Source of truth
 
-`tasks` row: `shipped_at` (approval, existing), plus new
-`ship_stopped_at INTEGER`, `ship_stopped_lf_process_id TEXT`,
-`ship_approved_lf_process_id TEXT`. Approval and stop are mutually exclusive:
-`ship_in(explicit)` clears the stop, and `stop_shipping` sets it while clearing
-`shipped_at`. Both are written through `planning_write::local` WorkEdits
-(`TaskShipStoppedAt`, as `TaskShippedAt` is), so a Task move carries them.
+`tasks` row: `shipped_at` (approval, existing), plus migration `ship_stop.sql`:
+`ship_approved_lf_process_id`, `ship_stopped_at`, `ship_stopped_lf_process_id`
+(plain columns, no FK; prune keeps the rows). Approval and stop are mutually
+exclusive: `ship_in(.., Approval::Explicit)` clears the stop, and
+`stop_shipping` sets it, even when the Task isn't shipping, while clearing
+`shipped_at`. `Approval::Route` (`start_run_in`, `arrive_in`, `end_task_graph`)
+writes nothing while a stop stands. The stop columns are local, not a WorkEdit:
+a new `WorkValue` variant would change the peer edit format that released peers
+parse, so a Machine move doesn't carry a stop. The move already clears
+`shipped_at`.
+
 Who started what is **derived** from `processes`, never stored as names:
+`SqliteStore::process_starter -> Starter { Person { name } | Session { id, name, requester } }`.
+Walk the chain self → `parent_lf_process_id`. The first process with a
+`caller_session_id` gives the Session. Otherwise the starter is the person: the
+participant, or `attribution unresolved` when there is no name or the chain is
+broken. There is no Loopflow variant, because ancestry can't tell `restart_ships`
+children from a person's chain. A restarted ship inherits the reading process's
+starter.
 
-`process_starter(process) -> Starter { Person(name) | Session { id, name, requester } | Loopflow { command } }`.
-Walk self → `parent_lf_process_id`. The first process with `caller_session_id`
-gives the Session. A root with no Session is the person: the participant name,
-or `attribution unresolved`. A process with a parent but no Session anywhere in
-its chain was started by Loopflow. For example, `restart_ships` from
-`lf task status` inherits `LF_PROCESS_ID`.
+## Implemented (2026-10-29)
 
-## Changes
+- Jack's steer, first slice: task_operate, task_session, launch-plan,
+  repo/wave session, wave_operate, the `task_graph.rs` guidance hint and
+  `lf task run`/`lf ship` help say `lf task run` launches, and that `-b`/`lf ship`
+  approve Auto-Ship, which runs only on an explicit ask to ship or land.
+  Splitting `-b` from approval in code is a separate decision, left for later.
+- Landing boundary: `task_graph::landing_name` (Clap `Cli::merges`, any
+  spelling). A stopped Task's run returns `SkillOutcome::Unapproved` → arrives
+  at the step and prints
+  `Waiting at <step>: not approved to merge (<by> stopped shipping). lf ship lands it.`.
+  `select_task_run` starts at a landing step the Task waits at.
+- Status: `TaskSnapshot.started_by`, `ship_approval` and `ship_stop`
+  (`ShipMark { at, by: Starter }`, explicit Optional DTO fields with fixtures).
+  Text `lf task status` prints them, including
+  `Not shipping: <by> stopped it <time> · lf ship <id> approves it again`. That
+  line is derived. No Progress event is recorded per skipped approval.
+  `ShippingSnapshot` is unchanged, which keeps the roadmap fixtures stable.
+- Attribution: agent-provenance steers get
+  `TaskCommentAuthor::Session { session_id, requester }`, and
+  `<!-- loopflow-session:… -->` round-trips through Linear. Steer text reads
+  `Comment X by Session <id> for Jack Heart`. The persisted `durable::Author`
+  stays `Named(requester)`: adding a variant is a reader-compat change that
+  belongs in its own Task. Swift model/view and DTO fixtures are updated.
+- Docs: AGENTS.md quick reference, `docs/orchestration.md`, `ship.rs` doc.
+- Deleted: `participant_or`; the unconditional route `ship_in` calls; the
+  `Person { name }` steer branch for agent comments; the comment list's
+  "unnamed person" label.
 
-1. **Migration** `uv run python scripts/new_migration.py ship_stop`: the three
-   columns. Add a `store_revision_tasks_update` coverage check if the trigger
-   lists columns.
-2. **Store** (`store/sqlite/task_work.rs`): `ship_in` takes
-   `Approval::{Explicit, Route}`. A `Route` approval writes nothing and returns
-   `None` when `ship_stopped_at` is set. The first time a given run is skipped,
-   record one Progress event: `Not shipping: <starter> stopped it`. `Explicit`
-   clears the stop. `stop_shipping` records the stop with the stopping process.
-   The callers are `start_run_in`, `arrive_in`, `end_task_graph` (Route) and
-   `ship_task` (Explicit). `TaskShipping` gains `approved_by: Option<LfProcessId>`;
-   new `task_ship_stop(task) -> Option<(i64, Option<LfProcessId>)>`.
-3. **Landing boundary** (`task_graph.rs`, `lf/commands/graph.rs` runner):
-   `CapturedGraph::is_landing(place)` is true for a Command step resolving to
-   `lf land`/`lf pr land` through the shared Clap navigation, or for skill
-   `pr-land`. Before running a landing step for a Task, the runner reads
-   `task_shipping`. If the Task is not approved, it arrives at that step's
-   name and exits 0 with
-   `Waiting at land: not approved to merge (Jack Heart stopped shipping). lf ship LOO-x lands it.`.
-   `select_task_run` accepts `At { step }` naming a landing step: start *at* it.
-   `TaskGraphPosition::At` docs and `ship::next_step` follow.
-4. **Attribution** (`ops/task.rs::append_task_comment`): if the comment has
-   agent provenance, a steer gets author
-   `TaskCommentAuthor::Session { session_id, requester }`. The body carries
-   `<!-- loopflow-session:<id> -->` beside the requester marker, so Linear
-   round-trips it (`linear/mod.rs` `From<&LinearComment>`). `comment_steer_in`
-   maps it to new `durable::Author::Session(LfSessionId)`, whose text is
-   `Comment X by Session "<name>" for Jack Heart`. Swift
-   `TaskCommentAuthor.session(id:requester:)`, `TaskCommentsView`, the
-   `bin/lf.rs` comment list, and DTO fixtures all change too. `ship_begin`'s
-   handoff note and `ship_stop`'s note use `process_starter` instead of
-   `participant_or`.
-5. **Status**: text `lf task status` prints `started by …` on each Graph and
-   run line, `Auto-Ship approved by … <time>`, and the standing stop line.
-   JSON: Graph inventory entry gains `started_by: Starter`. `ShippingSnapshot`
-   gains `approved_by: Starter`. The Task detail gains
-   `ship_stop: Option<ShipStop { at, by: Starter }>`. These are DTOs: required or
-   explicit Optional fields, with Rust and Swift fixtures. Desktop's
-   TaskWorkView shows the stop line where the shipping reason goes, plus
-   `started by` on the run row.
-6. **Skills/docs**: `task_session.md` and `repo_session.md` say a relaunch
-   continues the work and never re-ships a Task someone stopped; run `lf ship`
-   only when that person asks. Update the AGENTS.md quick-reference ship
-   sentence, the `ship.rs` module doc, and `docs/orchestration.md` /
-   `docs/architecture-reference.md` wherever they state the approval rule.
-   Leave released notes alone.
+## Remaining
 
-## Delete — do not maintain
-
-- `participant_or` in `ops/task/ship.rs`: `process_starter` replaces it.
-- The `ships` → unconditional `ship_in` path in `start_run_in`, and the
-  unconditional `ship_in` calls in `arrive_in`/`end_task_graph`. They are
-  reshaped into `Approval::Route`, not kept beside it.
-- The `Person { name }` steer branch for agent-provenance comments in
-  `append_task_comment`.
+- Desktop TaskWorkView: show `ship_stop` where the shipping reason goes, and
+  `started_by` on the run row (Swift `Starter`/`ShipMark` decoding + fixture
+  tests). Status reads them today; Desktop doesn't yet.
+- Swift build/tests of the comment author change run at gate (`scripts/test.py`).
+- Demo on a real Task (see Demo).
 
 ## Forbidden outcomes
 
@@ -145,10 +131,9 @@ its chain was started by Loopflow. For example, `restart_ships` from
 
 ## Absent / error states
 
-- No participant name: the starter renders `attribution unresolved`, never "someone".
-- A Process row missing from the chain (pruned history): `Starter::Loopflow { command: None }`
-  for a non-root, and the person for a root.
-- Approval read fails at a landing step: the step fails (no merge). Unknown is
+- No participant name, or a Process row missing from the chain: the starter
+  renders `attribution unresolved`, never "someone".
+- The stop read fails at a landing step: the step fails (no merge). Unknown is
   never read as approved.
 
 ## Exclusions
@@ -165,43 +150,13 @@ passes, including the new
 `lf task run --from <first step>` on an all-headless graph ending in
 `cmd: pr land` (fake gh). Expected: state ≠ shipping, the graph is
 `At { step: "pr land" }`, fake gh saw no merge/auto-merge, the status JSON has
-`ship_stop.by` = the participant, and `started_by` is the person. A
-caller-session env variant shows `Session`. Then `lf ship` reaches `end`.
+`ship_stop.by` = the participant, and `started_by` is the person. The
+`Session` starter is covered by the unit test
+`process_starter_names_the_nearest_session_else_the_root_person`, not by an
+integration variant. Then `lf ship` reaches `end`.
 Also run `cargo test -p loopflow --lib store::sqlite::task_work::` (Route
 approval is skipped under a stop; Explicit clears it) and the Swift
 `TaskComments` / DTO fixture tests through `scripts/test.py`.
-
-## Implemented (2026-10-29)
-
-- Jack's steer, first slice: task_operate, task_session, launch-plan,
-  repo/wave session, wave_operate, the `task_graph.rs` guidance hint and
-  `lf task run`/`lf ship` help say `lf task run` launches and `-b`/`lf ship`
-  approve Auto-Ship, only on an explicit ask to ship or land. Splitting `-b`
-  from approval in code stays a separate decision.
-- Migration `ship_stop.sql`: `ship_approved_lf_process_id`, `ship_stopped_at`,
-  `ship_stopped_lf_process_id` (plain columns, no FK; prune keeps the rows).
-- `ship_in(.., Approval::{Explicit, Route})`; `stop_shipping(.., stopped_by)`
-  records a stop even when not shipping; `ship_halt` records none.
-- Landing boundary: `task_graph::landing_name` (Clap `Cli::merges`: `pr land`,
-  `pr arm`, any spelling; skill `pr-land`). A Task run reaching one while a stop
-  stands returns `SkillOutcome::Unapproved` → arrives at that step;
-  `select_task_run` starts at a landing step it waits at.
-- `Starter { Person | Session }` from `SqliteStore::process_starter`;
-  `TaskSnapshot.started_by/ship_approval/ship_stop` (`ShipMark { at, by }`),
-  printed by text `lf task status`.
-- `TaskCommentAuthor::Session { session_id, requester }` for agent steers,
-  `<!-- loopflow-session:… -->` round-trips through Linear; steer text
-  `Comment X by Session <id> for Jack Heart`. Swift model/view and DTO fixtures.
-- Deleted: `participant_or`; unconditional route `ship_in` calls; the
-  `lf task comment` list's "unnamed person" label (it prints the author's
-  Display, "attribution unresolved").
-
-## Remaining
-
-- Desktop TaskWorkView: show `ship_stop` where the shipping reason goes and
-  `started_by` on the run row (Swift `Starter`/`ShipMark` decoding, fixtures).
-- Swift build/tests of the comment author change run at gate (`scripts/test.py`).
-- Demo on a real Task (see Demo).
 
 ## Done when
 
@@ -210,4 +165,4 @@ recovery makes the Task shipping or merges its PR until someone runs `lf ship`.
 Status and Desktop name who approved, who stopped, and who started each run.
 Agent-written reasons show the Session as author and Jack as the requester.
 
-Check: `cargo test -p loopflow --lib task_graph_launch_tests::task_ship_stop` (3) + `store::sqlite::task_work:: ops::task::ship::` + `task_graph::tests::` + `--test integration dto_fixtures::` + clippy → pass; Swift deferred to gate.
+Check: implement pass ran `task_graph_launch_tests::task_ship_stop` (3) + `store::sqlite::task_work:: ops::task::ship::` + `task_graph::tests::` + `--test integration dto_fixtures::` + clippy → pass; realign `cargo test -p loopflow --lib process_starter_names` → pass; Swift deferred to gate.

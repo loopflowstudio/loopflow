@@ -22,22 +22,7 @@ every `shipped_at` reader for history this Task doesn't need.
 
 ## Implement pass (2026-10-29, headless)
 
-- **Landing gate narrowed (assumed, reversible):** a Task run waits at a merging
-  step only while a person's stop stands, not whenever unapproved. "Whenever
-  unapproved" would park every `code` run at `land` after demo, since that run
-  never reaches `end` with no interactive step left. The stop is the case
-  LOO-687 needs.
-- **Stop columns are local, not a WorkEdit:** adding a `WorkValue` variant
-  changes the peer-replicated edit format released peers parse. A Machine move
-  therefore does not carry a stop (`shipped_at` is already cleared by it).
-- **No "Not shipping" Progress event** on a skipped route approval; status
-  derives the standing stop line instead, so no per-run dedup state.
-- **Starter has no Loopflow variant:** ancestry cannot tell `restart_ships`
-  children from a person's chain (Graph children of `lf task run` also have
-  parents). A broken chain reads "attribution unresolved". A restarted ship
-  inherits the reading process's starter.
-- **Steer `durable::Author` unchanged:** a Session steer keeps
-  `Author::Named(requester)`; the steer text names the Session. Adding a
-  variant to a persisted enum is a reader-compat change worth its own Task.
-- **`ShippingSnapshot.approved_by` not added:** `TaskSnapshot.ship_approval`
-  carries it, keeping roadmap fixtures unchanged.
+The assumptions made while implementing are now in the plan: the landing gate
+covers only a standing stop, stop columns are local rather than a WorkEdit, no
+"Not shipping" event, no Loopflow starter, `durable::Author` unchanged, and no
+`ShippingSnapshot.approved_by`. Each one is reversible, and Jack decides.

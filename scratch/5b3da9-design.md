@@ -22,6 +22,16 @@ Jack Heart's direction, October 28, 2026: Desktop reads Loopflow through the Rus
 - Each operation is one Rust function returning one DTO, called by both the `lf` command and the app binding.
 - A test fails when an app operation has no `lf` equivalent or the two outputs differ.
 
+## Concept review with Jack Heart (October 29, 2026), accepted
+
+Jack Heart's rule (comment 628f4502, refined October 29): a Process records a change a person would call work, such as adding, completing or renaming a Task. Linear sync is follow-through on an earlier write, so whether it records doesn't matter. The implementation records one whenever a command changes *any* state (`Commands::changes_state`). So these also record Processes, advance the `processes` revision and wake every Work reader:
+- `lf desktop focus|zoom|resize|move|hide|show|close|reopen|page-back|page-forward|reload|switch|browse|files`: terminal and window actions, mostly run by agents.
+- `lf desktop layout --save` and the dashboard edits (`pin`, `rename`, `tile`, `slots`, `reorder`): arrangement metadata Desktop saves through an `lf` process on each change.
+
+Accepted (Jack Heart, October 29, 2026, answers 1a and, by default, 2a): the classification asks "is this a Work change?" Work means Tasks, Waves, Projects, Sessions, Graphs, PRs and planning. UI actions and arrangement metadata record no Process and don't wake Work readers. Arrangement writes still persist and stay `lf` commands; the library remains read-only. `Commands::changes_state` is renamed `changes_work`. In Desktop, navigation, panes, Dashboard query/pin/layout and Dashboard renames record nothing; Task renames, `send`, `send-key`, `run`, `close`, `reopen` and `do` record.
+
+Counterexample to check: an agent that drives Desktop (`lf desktop send` into a terminal) is doing work. `send`/`send-key`/`run` deliver input to a Session, so they stay recorded.
+
 ## Measurements
 
 October 28, 2026, installed 0.14.19 on Jack Heart's live store, one-shot `--json` reads (process start and store open included):

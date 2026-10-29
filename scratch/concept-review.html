@@ -3,62 +3,91 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5b3da9 concept review: nothing to change</title>
+<title>What a Process records</title>
 <style>
-  :root { --fg:#1d1d1f; --muted:#6e6e73; --bg:#fdfdfc; --rule:#e3e3e0; --code:#f2f2ef; --accent:#b4441c; }
-  @media (prefers-color-scheme: dark) {
-    :root { --fg:#e8e8e6; --muted:#9a9a9f; --bg:#161617; --rule:#2e2e30; --code:#222224; --accent:#f08a5d; }
-  }
-  body { background:var(--bg); color:var(--fg); font:17px/1.6 -apple-system, "Helvetica Neue", sans-serif; margin:0; }
-  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
-  header p { color:var(--muted); font-size:.9rem; margin:.2rem 0; }
-  h1 { font-size:1.6rem; line-height:1.25; margin:1.5rem 0 1rem; }
-  h2 { font-size:1.15rem; margin:2.6rem 0 .8rem; }
-  code { font:.86em/1.5 ui-monospace, Menlo, monospace; background:var(--code); border-radius:4px; padding:.05em .3em; }
-  table { border-collapse:collapse; width:100%; font-size:.92rem; margin:1rem 0; }
-  th, td { text-align:left; vertical-align:top; padding:.5rem .6rem .5rem 0; border-bottom:1px solid var(--rule); }
-  th { color:var(--muted); font-weight:500; }
-  .mismatch { border-left:3px solid var(--accent); padding:.2rem 0 .2rem 1rem; margin:1.5rem 0; }
-  @media (max-width:520px) { table, tbody, tr, td, th { display:block; } thead { display:none; } td { border:0; padding:.15rem 0; } tr { border-bottom:1px solid var(--rule); padding:.5rem 0; } }
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--muted:#6b675f;--rule:#e2ded5;--code:#f1eee7;--now:#8a3b12;--prop:#1f5e3a;--propbg:#e9f3ec;--nowbg:#f8ece4}
+@media (prefers-color-scheme:dark){:root{--bg:#171614;--fg:#e9e6df;--muted:#a19c91;--rule:#34312c;--code:#24221f;--now:#f0a77a;--prop:#8fd3a8;--propbg:#1d2a22;--nowbg:#2c211b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 ui-serif,Georgia,serif}
+main{max-width:46rem;margin:0 auto;padding:2.5rem 16px 4rem}
+header p{margin:.2rem 0;color:var(--muted);font:14px/1.5 ui-sans-serif,system-ui,sans-serif}
+h1{font-size:1.7rem;line-height:1.25;margin:0 0 .6rem}
+h2{font-size:1.15rem;margin:2.6rem 0 .6rem}
+code{font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:.05em .3em;border-radius:3px}
+.lead{font-size:1.1rem}
+table{width:100%;border-collapse:collapse;font:14px/1.45 ui-sans-serif,system-ui,sans-serif;margin:.8rem 0}
+th,td{text-align:left;vertical-align:top;padding:.55rem .5rem;border-bottom:1px solid var(--rule)}
+th{font-weight:600;color:var(--muted)}
+.now{color:var(--now)}
+.prop{color:var(--prop)}
+.box{border-left:3px solid var(--prop);background:var(--propbg);padding:.8rem 1rem;margin:1rem 0}
+.box.now{border-color:var(--now);background:var(--nowbg);color:var(--fg)}
+.box p{margin:.3rem 0}
+.tag{font:600 12px ui-sans-serif,system-ui,sans-serif}
+ol li{margin:.7rem 0}
+ol ol{list-style:lower-alpha;margin-top:.3rem}
+.wrap{overflow-x:auto}
 </style>
 </head>
 <body>
 <main>
 <header>
-  <p>Task 5b3da9 · concept-review step · October 29, 2026</p>
-  <p>Built from <code>scratch/5b3da9-design.md</code>, <code>scratch/questions.md</code>, <code>rust/loopflow/src/store/sqlite.rs</code>, <code>rust/loopflow/src/journal/mod.rs</code></p>
+<h1>What a Process records</h1>
+<p>Task LOO-675 (5b3da9) · concept review with Jack Heart · October 29, 2026</p>
+<p>Built from <code>scratch/5b3da9-design.md</code>, <code>rust/loopflow/src/lf/mod.rs</code> (<code>Commands::changes_state</code>), <code>swift/Loopflow/Services/RegistryQuery.swift</code>, <code>swift/LoopflowMac/Views/SessionsView.swift</code>, PR #1773</p>
 </header>
 
-<h1>No decision needed. The implemented change matches what Jack decided.</h1>
+<p class="lead"><strong>Decided October 29:</strong> Jack Heart chose 1a, and 2a by default. Applied in <code>Commands::changes_work</code>.</p>
+<p>One decision: <strong>does a Process record any change to the store, or only a change to Work?</strong> You said the second. PR #1773 does the first.</p>
 
-<p>Last review asked whether an in-app read may write the store. Jack answered (b), final in comment 53f77781: the library only reads; writes are <code>lf</code> commands. The code now does exactly that.</p>
+<h2>Your rule</h2>
+<p>“Only things that actually change state (which could include editing a task name) should get process rows.” Then: adding or completing Tasks should be tracked, and Linear sync “is just followthrough on a previous write.”</p>
 
-<h2>What you do → what runs → what it writes</h2>
+<h2>What you do → what records a Process</h2>
+<div class="wrap">
 <table>
-  <thead><tr><th>You</th><th>Runs</th><th>Writes</th></tr></thead>
-  <tbody>
-    <tr><td>Open Desktop on a repository</td><td><code>lf config repository --json</code>, once</td><td>store created or migrated, repository registered; Process row</td></tr>
-    <tr><td>Look at Waves, Tasks, files, diffs, history</td><td>a <code>Read</code> in the app (<code>lf_read</code>, <code>lf_subscribe</code>/<code>lf_pull</code>)</td><td>nothing; the store opens read-only</td></tr>
-    <tr><td>Leave Desktop open, or select a Wave</td><td><code>lf wave status &lt;wave&gt; --sync --json</code> every 5 min, 30 s while a change is pending, backing off from 30 s to 5 min after failures</td><td>planning exchange with Linear or Git peers</td></tr>
-    <tr><td>Rename, add or complete a Task</td><td>the <code>lf</code> command for it</td><td>the change and its Process row</td></tr>
-    <tr><td>Run any <code>lf</code> read yourself</td><td>the same function the app calls</td><td>no Process row</td></tr>
-  </tbody>
+<tr><th>You, or an agent</th><th>Command</th><th class="now">Today in #1773</th><th class="prop">Proposed</th></tr>
+<tr><td>Look at anything</td><td><code>lf task status</code>, <code>lf wave status</code>, in-app reads</td><td>no Process</td><td>no Process</td></tr>
+<tr><td>Add, rename, complete or run a Task</td><td><code>lf task create|edit|complete|run</code></td><td>Process</td><td>Process</td></tr>
+<tr><td>Type into a Session’s terminal</td><td><code>lf desktop send|send-key|run</code></td><td>Process</td><td>Process (input to a Session is work)</td></tr>
+<tr><td>Refresh planning from Linear</td><td><code>lf wave status --sync</code>, every 5 min</td><td>Process</td><td>either, whichever is simpler</td></tr>
+<tr><td>Focus, zoom, resize or move a pane</td><td><code>lf desktop focus|zoom|resize|move|hide|show</code></td><td class="now">Process, wakes every Work reader</td><td class="prop">no Process</td></tr>
+<tr><td>Go back, reload or browse in a pane</td><td><code>lf desktop page-back|reload|browse|files</code></td><td class="now">Process, wakes every Work reader</td><td class="prop">no Process</td></tr>
+<tr><td>Rearrange panes or a dashboard</td><td><code>lf desktop layout --save</code>, dashboard pin, tile, reorder</td><td class="now">an <code>lf</code> process and a Process row on each change</td><td class="prop">saved, no Process</td></tr>
 </table>
-
-<div class="mismatch">
-  <p><strong>The one loose end, now closed.</strong> Jack's decision moved "history's settling of dead Process rows" to a write path. There is nothing to move: a dead Process is derived on every read from its receipt and OS identity (<code>journal::recorded_process_evidence</code>) and never written back. If some read did write, the read-only store would refuse it, so the failure would be loud.</p>
 </div>
 
-<h2>Left for later steps, not product choices</h2>
-<ul>
-  <li>Installed-build CPU for idle and busy readers (gate).</li>
-  <li>Idle Desktop starts no <code>lf</code>; a started Task reaches Working Tasks within a second (demo).</li>
-  <li>Several Waves in one Git-planned repository each run their own refresh per tick. Efficiency, tracked in <code>scratch/questions.md</code>.</li>
-</ul>
+<div class="box now">
+<p><span class="tag">Mismatch</span></p>
+<p><code>changes_state</code> asks “does this command change anything?” A window focus counts, because Desktop’s terminal state changes. So an agent driving panes, or you dragging a pane, writes Process rows. Each one advances the <code>processes</code> revision and wakes every Work reader. That is the same wake-up cost this Task set out to remove, now coming from UI actions instead of reads.</p>
+</div>
+
+<div class="box">
+<p><span class="tag">Proposed</span></p>
+<p>The question becomes “is this a change to Work?” Work means Tasks, Waves, Projects, Sessions, Graphs, PRs and planning. UI actions and arrangement are not Work: they record no Process and wake no Work reader. Arrangement is still saved.</p>
+<p>APIs: rename <code>changes_state</code> to <code>changes_work</code> and flip about 20 <code>DesktopCommand</code> arms. No new commands. The equivalence test is unchanged.</p>
+</div>
+
+<h2>Normal path, failure, recovery</h2>
+<p><strong>Normal:</strong> an agent focuses a pane and types into it. The focus records nothing. The <code>send</code> records a Process attached to the Session. The sidebar wakes once, for the send.</p>
+<p><strong>Failure:</strong> a layout save fails halfway. Today the failed <code>lf</code> process leaves a failed Process row in the Task’s work. Proposed, the save reports its error to Desktop and the Task’s history stays clean. Nothing about Work was lost.</p>
+<p><strong>What survives either way:</strong> every Task, Session and Graph change and its record, Linear delivery and its retry, and saved layouts.</p>
+
+<h2>One follow-on</h2>
+<p>Under (b) the library never writes, so a pane drag still starts an <code>lf</code> process just to save the layout, even when it records no Process. Arrangement is metadata only Desktop reads. It could be the single kind of write the library owns. You said you weren’t worried about metadata writes, but you chose (b).</p>
 
 <h2>Questions</h2>
 <ol>
-  <li>None open. Reply with a correction if the table above reads wrong.</li>
+<li>What should record a Process?
+  <ol>
+  <li>Only changes to Work. UI actions and arrangement record nothing. (proposed)</li>
+  <li>Any change, including UI actions, as #1773 does today.</li>
+  </ol></li>
+<li>Where do layout and dashboard arrangement saves run?
+  <ol>
+  <li>Still an <code>lf</code> process, with no Process row. The library stays read-only.</li>
+  <li>The library writes them in-process, as the one exception to (b).</li>
+  </ol></li>
 </ol>
 </main>
 </body>

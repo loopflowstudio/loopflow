@@ -2,7 +2,7 @@
 
 - `lf history --watch` now waits up to 5 minutes before an entry ages out of `--since`. New activity is still read as soon as it is committed.
 - The Working Tasks sidebar gap (a started Task missing while `lf desktop view --plan --json` returned it) can't be checked headless. Desktop's `planning` part (`lf desktop plan --all --watch`) is the reader to check during demo.
-- Read/write classification judgment calls (`Commands::changes_state`): Desktop UI actions (focus, send, zoom) record a Process, since they act on terminals; `lf wt switch` and `lf ci` record none; bare `lf pr` and `release notes` record. Each is one match arm to flip.
+- Classification judgment calls (`Commands::changes_work`): `lf wt switch` and `lf ci` record none; bare `lf pr`, `release notes` and `lf desktop do` (an action named at runtime) record. Each is one match arm to flip.
 - The app's own environment reaches in-app reads. Desktop's `lf` children dropped Work-process variables (`LF_TASK…`, `LF_PROCESS_ID`, see `GUIProcessEnvironment.enriched`); the library reads the app's environment as it is. Reads record no Process, so attribution should not matter; clearing those variables from the app at launch is the simple fix if one does.
 - Cargo's C objects in `libloopflow_ffi.a` target the SDK's macOS (26.2) while the app targets 26.0, so the app link prints deployment-version warnings. `MACOSX_DEPLOYMENT_TARGET=26.0` on the `loopflow-ffi` builds would quiet them.
 - SwiftPM does not relink when only `libloopflow_ffi.a` changes. CI's restored SwiftPM cache can link a stale library into `swift-test` when a PR changes Rust but no Swift; `swift_cache.py`'s key could include `loopflow-ffi` and `read.rs`.

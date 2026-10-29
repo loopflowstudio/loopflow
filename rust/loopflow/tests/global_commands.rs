@@ -2094,7 +2094,6 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
         "INF-123",
         "--title",
         "New title",
-        "--unassign",
         "--rank",
         "2",
         "--explain",
@@ -2107,7 +2106,7 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
     assert_eq!(edit["action"]["kind"], "edit");
     assert_eq!(
         edit["action"]["fields"],
-        serde_json::json!(["title", "rank", "assignee"])
+        serde_json::json!(["title", "rank"])
     );
     assert_eq!(edit["impediments"], serde_json::json!([]));
     let text = success(

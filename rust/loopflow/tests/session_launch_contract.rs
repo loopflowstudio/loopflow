@@ -433,7 +433,7 @@ fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
 }
 
 #[test]
-fn headless_continuation_and_graph_keep_current_options_without_repeating_the_skill() {
+fn headless_launch_and_graph_keep_current_options() {
     let fixture = Fixture::new("claude:sonnet");
     fixture
         .repo
@@ -453,22 +453,7 @@ fn headless_continuation_and_graph_keep_current_options_without_repeating_the_sk
     pair(&first, "--json-schema", r#"{"type":"object"}"#);
     assert!(args(&first).contains(&"--chrome"));
     assert!(first["input"].to_string().contains("INITIAL_SKILL_ONLY"));
-    let session = fixture.session();
     fixture.settings("claude:haiku", false, false);
-    let resumed = fixture.run(&[
-        "-b",
-        "session",
-        "resume",
-        &session,
-        "--message",
-        "second turn",
-    ]);
-    pair(&resumed, "--resume", "stream-fixture");
-    pair(&resumed, "--model", "haiku");
-    assert!(args(&resumed).contains(&"--no-chrome"));
-    assert!(!args(&resumed).contains(&"--json-schema"));
-    assert!(!resumed["input"].to_string().contains("INITIAL_SKILL_ONLY"));
-    assert!(resumed["input"].to_string().contains("second turn"));
     fixture
         .repo
         .create_file(".lf/graphs/launch-probe.yaml", "- probe\n");
@@ -913,7 +898,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
 }
 
 #[test]
-fn codex_headless_start_and_resume_receive_current_policy_on_the_wire() {
+fn codex_headless_start_receives_current_policy_on_the_wire() {
     let fixture = Fixture::new("codex:first-model");
     let machine = fixture.home.path().join("machine");
     support::register_codex_account(&machine);
@@ -933,33 +918,24 @@ fn codex_headless_start_and_resume_receive_current_policy_on_the_wire() {
         .as_str()
         .unwrap()
         .contains("<lf:user>"));
-    let session = fixture.session();
-    fixture.settings("codex:current-model", false, false);
-    let resumed = fixture.run(&[
-        "-b",
-        "session",
-        "resume",
-        &session,
-        "--message",
-        "next turn",
-    ]);
-    assert_eq!(resumed["method"], "thread/resume");
-    assert_eq!(resumed["params"]["threadId"], "thread-test");
-    assert_eq!(resumed["params"]["model"], "current-model");
-    assert_eq!(resumed["params"]["sandbox"], "workspace-write");
-    assert_eq!(resumed["params"]["approvalPolicy"], "never");
 }
 
 #[test]
-fn headless_provider_switch_imports_history_with_current_policy() {
+fn provider_switch_imports_session_history_with_current_policy() {
     let fixture = Fixture::new("claude");
     fixture.create_wave();
-    fixture.run(&["-b", "--wave", "fixture", ":", "original request"]);
+    let first = fixture.run(&["-i", "--wave", "fixture", ":", "original request"]);
+    let native = args(&first)[args(&first)
+        .iter()
+        .position(|arg| *arg == "--session-id")
+        .unwrap()
+        + 1]
+    .to_owned();
     let session = fixture.session();
     let transcript = fixture
         .home
         .path()
-        .join(".claude/projects/fixture/stream-fixture.jsonl");
+        .join(format!(".claude/projects/fixture/{native}.jsonl"));
     fs::create_dir_all(transcript.parent().unwrap()).unwrap();
     fs::write(
         &transcript,
@@ -1004,7 +980,7 @@ fn headless_provider_switch_imports_history_with_current_policy() {
 }
 
 #[test]
-fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
+fn opencode_headless_start_selects_the_model_and_permissions() {
     let fixture = Fixture::new("opencode:opencode/first-model");
     fixture.create_wave();
     let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
@@ -1022,29 +998,6 @@ fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
         "first-model"
     );
     assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
-    let session = fixture.session();
-    fixture.settings("opencode:opencode/current-model", false, false);
-    let resumed = fixture.run(&[
-        "-b",
-        "session",
-        "resume",
-        &session,
-        "--message",
-        "next turn",
-    ]);
-    assert_eq!(resumed["session"], first["session"]);
-    assert_eq!(
-        serde_json::from_slice::<Value>(
-            &fs::read(fixture.home.path().join("native-model.json")).unwrap()
-        )
-        .unwrap()["id"],
-        "current-model"
-    );
-    assert!(resumed["config"]["permissions"].is_null());
-    assert!(!resumed["request"]["text"]
-        .to_string()
-        .contains("first turn"));
-    assert!(resumed["request"]["text"].to_string().contains("next turn"));
 }
 
 #[test]
@@ -1444,7 +1397,7 @@ fn pi_fixture() -> Fixture {
 }
 
 #[test]
-fn pi_public_headless_skill_delivers_context_and_resumes_exact_history() {
+fn pi_public_headless_skill_delivers_context() {
     let fixture = pi_fixture();
     fixture.create_wave();
     fixture.repo.create_file(
@@ -1493,33 +1446,6 @@ fn pi_public_headless_skill_delivers_context_and_resumes_exact_history() {
         .contains("Pi context sentinel"));
     assert_eq!(received["caller"]["session_id"], fixture.session());
     assert_eq!(received["lf_bin"], env!("CARGO_BIN_EXE_lf"));
-    let token = fixture
-        .repo
-        .path()
-        .canonicalize()
-        .unwrap()
-        .join("pi-conversation.jsonl");
-    let output = fixture
-        .command()
-        .env(
-            "PI_FIXTURE_RECORD",
-            fixture.home.path().join("received.json"),
-        )
-        .args([
-            "-b",
-            "resume",
-            &fixture.session(),
-            "--message",
-            "Second Pi turn",
-        ])
-        .output()
-        .unwrap();
-    success(&output);
-    let received = fixture.received();
-    assert!(args(&received)
-        .windows(2)
-        .any(|a| a == ["--session", token.to_str().unwrap()]));
-    assert_eq!(fs::read_to_string(token).unwrap().lines().count(), 3);
 }
 
 #[test]

@@ -88,31 +88,19 @@ with open(lock, 'r+') as fence:
     arguments = shlex.split(hook)
     adapter = json.loads(os.environ['LF_PROVIDER_CONTEXT'])
     assert adapter['agent_process_id'] == caller['agent_process_id']
-    previous = home / 'previous-provider'
-    if '--resume' in sys.argv:
-        assert sys.argv[sys.argv.index('--resume') + 1] == 'startup-native'
-        assert previous.read_text() != adapter['agent_process_id'], 'replacement reused old capability'
-    previous.write_text(adapter['agent_process_id'])
     output = subprocess.check_output(hook, shell=True, input=json.dumps({'session_id': 'startup-native', 'hook_event_name': 'SessionStart', 'source': 'startup'}).encode())
     context_text = json.loads(output)['hookSpecificOutput']['additionalContext']
     assert len(context_text.encode()) <= 10000
-    if '--resume' in sys.argv:
-        assert 'STARTUP_DIRECTION' not in context_text, 'resume replayed consumed direction'
-    else:
-        assert 'STARTUP_DIRECTION' in context_text
-        assert '[excerpt; full source above]' in context_text
+    assert 'STARTUP_DIRECTION' in context_text
+    assert '[excerpt; full source above]' in context_text
     (home / 'startup-complete').touch()
-if '--resume' in sys.argv:
-    query = json.loads(sys.stdin.readline())
-    assert 'RESUME_END' in query['message']['content'][0]['text']
-else:
-    context = json.loads(sys.stdin.readline())
-    query = json.loads(sys.stdin.readline())
-    assert context['shouldQuery'] is False
-    expected = (home / 'clipboard').read_text()
-    assert expected in context['message']['content'], 'incomplete non-query context'
-    assert query['message']['content'][0]['text'].endswith('QUERY_END'), 'incomplete query'
-    assert len(json.dumps(context).encode()) > 131133
+context = json.loads(sys.stdin.readline())
+query = json.loads(sys.stdin.readline())
+assert context['shouldQuery'] is False
+expected = (home / 'clipboard').read_text()
+assert expected in context['message']['content'], 'incomplete non-query context'
+assert query['message']['content'][0]['text'].endswith('QUERY_END'), 'incomplete query'
+assert len(json.dumps(context).encode()) > 131133
 assert query['uuid']
 query['session_id'] = 'startup-native'
 print(json.dumps(query), flush=True)
@@ -181,37 +169,6 @@ sys.stdin.read()
             .text,
         steer.text
     );
-    let resumed = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .env_clear()
-        .env("HOME", home.path())
-        .env("LF_HOME", home.path())
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-        .current_dir(repo.path())
-        .args([
-            "-b",
-            "--isolate",
-            "session",
-            "resume",
-            &session,
-            "--message",
-            "RESUME_END",
-        ])
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    assert!(
-        resumed.status.success(),
-        "{}\n{}",
-        String::from_utf8_lossy(&resumed.stderr),
-        fs::read_to_string(home.path().join("provider-errors")).unwrap_or_default()
-    );
-    let answers: i64 = db.query_row("SELECT count(DISTINCT provider_turn) FROM session_events WHERE session_id=?1 AND kind='output' AND json_extract(payload,'$.text')='CORRELATED_STARTUP_ANSWER'", [&session], |r| r.get(0)).unwrap();
-    assert_eq!(
-        answers, 2,
-        "replacement preserves separate native answer correlation"
-    );
 }
 
 #[test]
@@ -232,15 +189,6 @@ if '--version' in sys.argv:
     sys.exit(0)
 home = pathlib.Path(os.environ['LF_HOME'])
 message = json.loads(sys.stdin.readline())
-if '--resume' in sys.argv:
-    native = sys.argv[sys.argv.index('--resume') + 1]
-    (home / 'resumed').write_text(native)
-    message['session_id'] = native
-    print(json.dumps(message), flush=True)
-    print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': native}), flush=True)
-    print(json.dumps({'type': 'result', 'uuid': 'resumed-answer', 'session_id': native, 'subtype': 'success', 'is_error': False, 'result': 'RESUMED'}), flush=True)
-    sys.stdin.read()
-    sys.exit(0)
 message['session_id'] = 'handoff-native'
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'handoff-native'}), flush=True)
@@ -535,29 +483,6 @@ assert.equal(output.messages.length,0); // stored/native conversation remains un
         assert!(Instant::now() < deadline, "provider group outlived its run");
         std::thread::sleep(Duration::from_millis(25));
     }
-    let resumed = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .env_clear()
-        .env("HOME", home.path())
-        .env("LF_HOME", home.path())
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
-        .env("PATH", format!("{}:/usr/bin:/bin", home.path().display()))
-        .current_dir(repo.path())
-        .args(["-b", "session", "resume", session, "--message", "AFTER"])
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    assert_eq!(
-        fs::read_to_string(home.path().join("resumed")).unwrap_or_else(|_| panic!(
-            "connect did not resume: {}",
-            String::from_utf8_lossy(&resumed.stderr)
-        )),
-        "cleared-native"
-    );
-    let stale = hook(serde_json::json!({"session_id":"cleared-native",
-        "hook_event_name":"SessionStart","source":"clear"}));
-    assert!(!stale.status.success());
-    assert!(stale.stdout.is_empty());
 }
 
 #[test]

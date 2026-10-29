@@ -542,10 +542,11 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
     let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert_eq!(status["project"]["summary"], fields["summary"]);
     assert_eq!(status["project"]["name"], "Current");
+    lf(repo.path(), home.path(), &["task", "unassign", id]);
     lf(
         repo.path(),
         home.path(),
-        &["task", "edit", id, "--unassign", "--notes", ""],
+        &["task", "edit", id, "--notes", ""],
     );
     let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
     assert!(status["task"]["assignee"].is_null());
@@ -2108,11 +2109,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 .unwrap();
             assert_eq!(store.pending_task_changes(&second).unwrap(), changes);
         }
-        lf(
-            repo.path(),
-            home.path(),
-            &["task", "edit", selector, "--unassign"],
-        );
+        lf(repo.path(), home.path(), &["task", "unassign", selector]);
         let reopened = loopflow::store::sqlite::SqliteStore::new(&path).unwrap();
         assert!(reopened.task(&second).unwrap().unwrap().assignee.is_none());
         assert_eq!(reopened.task(&second).unwrap().unwrap().id, second);

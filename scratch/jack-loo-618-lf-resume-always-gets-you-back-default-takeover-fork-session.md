@@ -166,3 +166,22 @@ Fixed (implement, 2026-10-29):
   `RoadmapView|DTOFixture|RegistryQuery`, fmt, clippy all-targets — pass.
 - Compress (2026-10-29): lib `ops::task_ownership::`, `transport_tests zero_viewers|automatic_attachment`, fmt, clippy all-targets — pass. Kept transport's `replace`/`Busy`: no production client sends `replace=false` now, but a busy owner from the previous build still requires the field.
 - Assumptions: `scratch/questions.md`.
+- Gate (2026-10-29): the broad pass (lib modules this diff reaches plus its changed integration
+  binaries, 996 tests) found tests that still continued a finished Run or used removed spellings.
+  Repaired: `task edit --unassign` → `task unassign` (`local_planning`); `session new` classified
+  with `session resume` (`wave_resolution_matrix`); `WorkDestinationTests` stub routed on
+  `connect` (from main #1769); `WorkNavigationTests` give shipping `issue-now` its claim, since
+  unowned Tasks are backlog. Run continuation removed from tests, since it's now refused:
+  `session_launch_contract` (codex/opencode/pi headless resume halves; provider switch now
+  starts from an interactive Session), `session_steers` (resume halves),
+  `auth_tests::codex_same_login_recovery_status_launch_and_reset`, and the Claude→Codex handoff
+  section of `task_graph_launch_tests::explicit_launch_policy_…`. Lost on purpose: the handoff's
+  crash-then-retry and tool-line log checks lived only there; Session handoff stays covered in
+  `provider_switch_imports_session_history_with_current_policy`.
+  Final: `scripts/test.py --reuse-passing` with those tests: architecture, python, rust (fmt,
+  nextest, clippy), website, swift pass. The runner's resource pre-check timed out measuring
+  `~/.cache/uv` (load average 50–110 from other work); not a product check. Load flakes seen and
+  passing alone/on rerun, untouched by this diff: `test_checkout_refresh::test_worktree_background_push_survives_cli_exit`,
+  `test_swift_test_limit::test_hung_test_is_named_and_stops_the_run`. Machine: Homebrew `node`
+  25.8.0 had lost `libllhttp.9.3`; upgraded to 26.13.0 (brew also upgraded opencode, neonctl).
+

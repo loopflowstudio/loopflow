@@ -326,7 +326,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let prepares = DestinationReadCounter()
         let query = RegistryQuery { args, _ in
-            if args.contains("connect") { _ = await prepares.next(); return encoded }
+            if args.contains("resume") { _ = await prepares.next(); return encoded }
             if args.starts(with: ["desktop", "plan"]) { return data }
             throw RegistryQueryError("Unexpected opening operation")
         }

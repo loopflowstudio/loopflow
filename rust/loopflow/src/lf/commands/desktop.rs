@@ -858,24 +858,50 @@ pub fn saved_layout(
     })
 }
 
-fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
+/// `lf desktop query|pin|unpin|rename|layout --save` and a saved tile's
+/// `hide|show|move|resize -p <board>/<tile>`: save the arrangement in
+/// `selected` or the repository containing `directory`, reading a layout from
+/// `input`, and return what the command prints. Renaming a Task is a Work
+/// change; the rest are arrangement and record no Process.
+pub fn save_arrangement(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    command: &crate::lf::DesktopCommand,
+    input: &mut dyn std::io::Read,
+) -> Result<String> {
+    use crate::lf::DesktopCommand;
+    if let DesktopCommand::Query { .. }
+    | DesktopCommand::Pin { .. }
+    | DesktopCommand::Unpin { .. }
+    | DesktopCommand::Rename { .. }
+    | DesktopCommand::Layout { save: true, .. } = command
+    {
+        return saved_intent(selected, directory, command, input);
+    }
+    let verb = Verb::parse(command)?;
+    if let VerbKind::Action { name, args } = &verb.kind {
+        if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
+            return edit_saved_tile(selected, directory, board, tile, name, args);
+        }
+    }
+    bail!("not a saved arrangement: name a tile as -p <board>/<tile>")
+}
+
+fn saved_intent(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    command: &crate::lf::DesktopCommand,
+    input: &mut dyn std::io::Read,
+) -> Result<String> {
     use crate::lf::DesktopCommand;
     use crate::work::selection::{DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
         crate::work::selection::Selection::parse(expression, None)?;
     }
-    if let DesktopCommand::Layout {
-        work, save: false, ..
-    } = command
-    {
-        let record = saved_layout(cli.repository.as_ref(), &std::env::current_dir()?, work)?;
-        println!("{record}");
-        return Ok(());
-    }
     let reader = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
-    let repository = selection_repository(cli, &reader.sqlite)?;
+    let repository = repository_in(selected, directory, &reader.sqlite)?;
     drop(reader);
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let dashboard_id = |id: &str| DashboardId(id.strip_prefix("query:").unwrap_or(id).into());
@@ -952,7 +978,7 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
                 )
             })?;
             let slots: Option<crate::work::selection::SlotLayout> =
-                serde_json::from_reader(std::io::stdin().lock())?;
+                serde_json::from_reader(&mut *input)?;
             serde_json::to_value(store.set_dashboard_slots(
                 &repository,
                 &dashboard_id(work),
@@ -963,7 +989,7 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
         DesktopCommand::Layout {
             work, save: true, ..
         } => {
-            let layout: WorkPaneLayout = serde_json::from_reader(std::io::stdin().lock())?;
+            let layout: WorkPaneLayout = serde_json::from_reader(&mut *input)?;
             if layout.work != work_key(&repository, work)? {
                 bail!("layout belongs to different Work");
             }
@@ -971,8 +997,7 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
         }
         _ => unreachable!("saved intent command"),
     };
-    println!("{}", serde_json::to_string(&result)?);
-    Ok(())
+    Ok(serde_json::to_string(&result)?)
 }
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
@@ -982,11 +1007,27 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     match command {
+        DesktopCommand::Layout {
+            work, save: false, ..
+        } => {
+            let record = saved_layout(cli.repository.as_ref(), &std::env::current_dir()?, work)?;
+            println!("{record}");
+            return Ok(());
+        }
         DesktopCommand::Query { .. }
         | DesktopCommand::Pin { .. }
         | DesktopCommand::Unpin { .. }
         | DesktopCommand::Rename { .. }
-        | DesktopCommand::Layout { .. } => return saved_intent(cli, command),
+        | DesktopCommand::Layout { .. } => {
+            let saved = save_arrangement(
+                cli.repository.as_ref(),
+                &std::env::current_dir()?,
+                command,
+                &mut std::io::stdin().lock(),
+            )?;
+            println!("{saved}");
+            return Ok(());
+        }
         DesktopCommand::View {
             expression,
             plan,
@@ -1044,7 +1085,16 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     let verb = Verb::parse(command)?;
     if let VerbKind::Action { name, args } = &verb.kind {
         if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
-            return edit_saved_tile(cli, board, tile, name, args);
+            let record = edit_saved_tile(
+                cli.repository.as_ref(),
+                &std::env::current_dir()?,
+                board,
+                tile,
+                name,
+                args,
+            )?;
+            println!("{record}");
+            return Ok(());
         }
     }
     require_supported()?;
@@ -1691,17 +1741,18 @@ fn saved_tile<'p>(name: &str, path: Option<&'p str>) -> Option<(TileBoard, &'p s
 }
 
 fn edit_saved_tile(
-    cli: &crate::lf::Cli,
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
     board: TileBoard,
     tile: &str,
     name: &str,
     args: &std::collections::BTreeMap<String, String>,
-) -> Result<()> {
+) -> Result<String> {
     let repository = {
         let reader = crate::store::read_existing_registry()?
             .ok_or(crate::store::StoreError::NotFound)
             .context("Work registry is unavailable")?;
-        selection_repository(cli, &reader.sqlite)?
+        repository_in(selected, directory, &reader.sqlite)?
     };
     let key = |selector: &str| work_key(&repository, selector);
     let request = TileRequest {
@@ -1710,11 +1761,7 @@ fn edit_saved_tile(
         edit: TileEdit::parse(name, args, key)?,
     };
     let record = edit_tiles(&repository, &request)?;
-    println!(
-        "{}",
-        serde_json::to_string(&DesktopTileOutput::Record(&record))?
-    );
-    Ok(())
+    Ok(serde_json::to_string(&DesktopTileOutput::Record(&record))?)
 }
 
 fn edit_shown_tile(

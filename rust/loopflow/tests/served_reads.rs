@@ -74,6 +74,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         None,
     ))
     .unwrap();
+    let unpublished_id = unpublished["id"].as_str().unwrap().to_owned();
     let unpublished = unpublished["identifier"].as_str().unwrap().to_owned();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     // Planning status also serves a Work folder without Git.
@@ -352,8 +353,43 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
             .unwrap(),
         )
     };
+    let repository_id = repository["id"].as_str().unwrap().to_owned();
+    let task_id = unpublished_id.clone();
+    // A saved record as the app reads it, and the revision a write names.
+    let layout = |work: &str| -> Value {
+        serde_json::from_str(
+            &Read::PaneLayout {
+                directory: directory.clone(),
+                work: work.into(),
+            }
+            .read()
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let revision = |work: &str| layout(work)["revision"].as_i64().unwrap();
+    let dashboard = || without_revision(layout("query:served"));
+    let pane = |revision: i64| Write::PaneLayout {
+        directory: directory.clone(),
+        work: "repository".into(),
+        layout: serde_json::json!({
+            "work": {"repository": repository_id, "kind": "repository", "id": repository_id},
+            "revision": revision,
+            "tree": {"kind": "pane", "id": "session",
+                     "content": {"kind": "session", "session_id": null, "location": null}},
+            "focused": null,
+            "zoomed": null,
+            "hidden": [],
+            "drafts": []
+        })
+        .to_string(),
+    };
+    let pane_revision = || {
+        let saved = layout("repository");
+        saved["revision"].as_i64().unwrap_or(0)
+    };
     // A new Write fails to compile here until it is compared too.
-    let writes = match (Write::TaskReopen {
+    let (writes, arrangement) = match (Write::TaskReopen {
         directory: directory.clone(),
         issue: "INF-123".into(),
     }) {
@@ -364,57 +400,111 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Write::TaskMove { .. }
         | Write::TaskSave { .. }
         | Write::SessionRename { .. }
-        | Write::SessionBind { .. } => [
-            Write::TaskDefer {
-                directory: directory.clone(),
-                issue: "INF-123".into(),
-                deferred: true,
-            },
-            Write::TaskDefer {
-                directory: directory.clone(),
-                issue: "INF-123".into(),
-                deferred: false,
-            },
-            Write::TaskNotes {
-                directory: directory.clone(),
-                issue: "INF-123".into(),
-                notes: "Served from the app".into(),
-            },
-            Write::TaskMove {
-                directory: directory.clone(),
-                issue: "INF-123".into(),
-                wave: None,
-            },
-            Write::SessionRename {
-                directory: directory.clone(),
-                id: session.clone(),
-                name: "Served name".into(),
-            },
-            Write::SessionBind {
-                directory: directory.clone(),
-                id: session.clone(),
-                task: "INF-123".into(),
-            },
-            Write::TaskComplete {
-                directory: directory.clone(),
-                issue: unpublished.clone(),
-            },
-            Write::TaskReopen {
-                directory: directory.clone(),
-                issue: unpublished.clone(),
-            },
-        ],
+        | Write::SessionBind { .. }
+        | Write::WaveEnsure { .. }
+        | Write::PlanningRefresh { .. }
+        | Write::DashboardQuery { .. }
+        | Write::DashboardPin { .. }
+        | Write::DashboardRename { .. }
+        | Write::DashboardTile { .. }
+        | Write::DashboardSlots { .. }
+        | Write::TileMove { .. }
+        | Write::PaneLayout { .. } => (
+            [
+                Write::TaskDefer {
+                    directory: directory.clone(),
+                    issue: "INF-123".into(),
+                    deferred: true,
+                },
+                Write::TaskDefer {
+                    directory: directory.clone(),
+                    issue: "INF-123".into(),
+                    deferred: false,
+                },
+                Write::TaskNotes {
+                    directory: directory.clone(),
+                    issue: "INF-123".into(),
+                    notes: "Served from the app".into(),
+                },
+                Write::TaskMove {
+                    directory: directory.clone(),
+                    issue: "INF-123".into(),
+                    wave: None,
+                },
+                Write::SessionRename {
+                    directory: directory.clone(),
+                    id: session.clone(),
+                    name: "Served name".into(),
+                },
+                Write::SessionBind {
+                    directory: directory.clone(),
+                    id: session.clone(),
+                    task: "INF-123".into(),
+                },
+                Write::TaskComplete {
+                    directory: directory.clone(),
+                    issue: unpublished.clone(),
+                },
+                Write::TaskReopen {
+                    directory: directory.clone(),
+                    issue: unpublished.clone(),
+                },
+                Write::WaveEnsure {
+                    directory: directory.clone(),
+                    wave: "task-pr-tests".into(),
+                },
+                Write::PlanningRefresh {
+                    directory: directory.clone(),
+                    wave: "task-pr-tests".into(),
+                },
+            ],
+            // Each names the revision its last write left, so it is built again
+            // before `lf` repeats it.
+            [
+                Box::new(|| Write::DashboardPin {
+                    directory: directory.clone(),
+                    id: "served".into(),
+                    pinned: true,
+                    revision: revision("query:served"),
+                }) as Box<dyn Fn() -> Write>,
+                Box::new(|| Write::DashboardRename {
+                    directory: directory.clone(),
+                    id: "served".into(),
+                    name: "Served board".into(),
+                    revision: revision("query:served"),
+                }),
+                // A hidden tile is no longer one to hide: show it before each hide.
+                Box::new(|| {
+                    let tile = |hidden| Write::DashboardTile {
+                        directory: directory.clone(),
+                        id: "served".into(),
+                        member: format!("task:{task_id}"),
+                        hidden,
+                    };
+                    let _ = tile(false).write();
+                    tile(true)
+                }),
+                Box::new(|| Write::DashboardSlots {
+                    directory: directory.clone(),
+                    id: "served".into(),
+                    revision: revision("query:served"),
+                    slots: "null".into(),
+                }),
+                Box::new(|| Write::DashboardQuery {
+                    directory: directory.clone(),
+                    id: "served".into(),
+                    expression: "state:backlog".into(),
+                    revision: Some(revision("query:served")),
+                }),
+                Box::new(|| pane(pane_revision())),
+            ],
+        ),
     };
     // The same write in the app, then through `lf`: each prints the same,
     // leaves the same Work and records a Process the same way. A finished
     // Process nothing references is forgotten as it exits; its revision stays.
-    let compare = |served: Write, again: &dyn Fn() -> Write| {
+    let compare = |served: Write, again: &dyn Fn() -> Write, effect: &dyn Fn() -> Value| {
         let argv = served.argv();
-        let issue = match &served {
-            Write::TaskComplete { issue, .. } | Write::TaskReopen { issue, .. } => issue.clone(),
-            _ => "INF-123".to_owned(),
-        };
-        let effect = || effect(&issue);
         let before = processes(&database);
         let written = served.write().unwrap();
         let recorded = processes(&database) - before;
@@ -424,7 +514,6 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let before = processes(&database);
         let printed = read(repo.path(), home.path(), &args, again.input());
-        assert!(recorded > 0, "{argv:?} recorded no Process");
         assert_eq!(processes(&database) - before, recorded, "{argv:?}");
         assert_eq!(effect(), effected, "{argv:?}");
         match (
@@ -432,18 +521,56 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
             serde_json::from_str::<Value>(&printed),
         ) {
             (Ok(written), Ok(printed)) => assert_eq!(
-                without_save_time(without_clock(written)),
-                without_save_time(without_clock(printed)),
+                without_revision(without_save_time(without_clock(written))),
+                without_revision(without_save_time(without_clock(printed))),
                 "{argv:?}"
             ),
             _ => assert_eq!(written, printed, "{argv:?}"),
         }
+        recorded
     };
     for write in writes {
-        compare(write.clone(), &|| write.clone());
+        let issue = match &write {
+            Write::TaskComplete { issue, .. } | Write::TaskReopen { issue, .. } => issue.clone(),
+            _ => "INF-123".to_owned(),
+        };
+        let recorded = compare(write.clone(), &|| write.clone(), &|| effect(&issue));
+        assert!(recorded > 0, "{:?} recorded no Process", write.argv());
     }
     // A save names the revision it replaces, which the first save changed.
-    compare(save(file_revision()), &|| save(file_revision()));
+    compare(save(file_revision()), &|| save(file_revision()), &|| {
+        effect("INF-123")
+    });
+    // Arrangement persists without a Process, in the app as through `lf`.
+    let create = Write::DashboardQuery {
+        directory: directory.clone(),
+        id: "served".into(),
+        expression: format!("task:{task_id}"),
+        revision: None,
+    };
+    let created = create.write().unwrap();
+    assert_eq!(layout("query:served")["id"], "served", "{created}");
+    // The fixture's Working Tasks hold no Task; the shared order moves
+    // through the same tile writer as a Dashboard's.
+    let order = || Write::TileMove {
+        directory: directory.clone(),
+        board: "query:served".into(),
+        member: format!("task:{task_id}"),
+        destination: format!("task:{task_id}"),
+    };
+    assert_eq!(compare(order(), &order, &dashboard), 0);
+    for write in arrangement {
+        let recorded = compare(write(), &*write, &dashboard);
+        assert_eq!(recorded, 0, "{:?} recorded a Process", write().argv());
+    }
+}
+
+/// A saved record without its revision, which each save advances.
+fn without_revision(mut value: Value) -> Value {
+    if let Some(fields) = value.as_object_mut() {
+        fields.remove("revision");
+    }
+    value
 }
 
 /// Each Work domain's revision and the Processes recorded.

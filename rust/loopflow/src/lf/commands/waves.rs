@@ -641,26 +641,51 @@ pub async fn save_steer(
 
 /// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
 pub fn status(wave: Option<&str>, json: bool, shape: Shape) -> Result<()> {
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
+    let directory = std::env::current_dir()?;
+    if json {
+        println!("{}", status_json(&directory, wave, shape)?);
+        return Ok(());
+    }
+    tokio::runtime::Runtime::new()?.block_on(async {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
-            return no_registry(json, "null");
+            return no_registry(false, "null");
         };
-        let wave = resolve_wave_in(&store, &std::env::current_dir()?, wave).await?;
+        let wave = resolve_wave_in(&store, &directory, wave).await?;
         if shape == Shape::Tasks {
             crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
         }
-        let status = wave_detail(&store, &wave).await?;
-        if json {
-            let status = shape
-                .print(Some(&store), status, WaveDetailSnapshot::rows)
-                .await?;
-            println!("{}", serde_json::to_string(&status)?);
-        } else {
-            print_status(&status);
-        }
+        print_status(&wave_detail(&store, &wave).await?);
         Ok(())
     })
+}
+
+/// What `lf --cwd <directory> wave status [<wave>] --json` prints.
+pub fn status_json(directory: &Path, wave: Option<&str>, shape: Shape) -> Result<String> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+            return Ok("null".to_owned());
+        };
+        let wave = resolve_wave_in(&store, directory, wave).await?;
+        if shape == Shape::Tasks {
+            crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+        }
+        let status = shape
+            .print(
+                Some(&store),
+                wave_detail(&store, &wave).await?,
+                WaveDetailSnapshot::rows,
+            )
+            .await?;
+        Ok(serde_json::to_string(&status)?)
+    })
+}
+
+/// `lf --cwd <directory> wave status <wave> --sync --json`: refresh the
+/// Wave's planning from its provider (Linear, or the repository's Git
+/// planning ref), then print its status. Desktop's planning clock runs it.
+pub fn refreshed_status(directory: &Path, wave: Option<&str>) -> Result<String> {
+    let refreshed = super::ops::refresh_status(directory, wave)?;
+    status_json(directory, refreshed.as_deref().or(wave), Shape::Tasks)
 }
 
 /// `lf --cwd <directory> desktop wave <wave>`: one Wave's stored plan; None

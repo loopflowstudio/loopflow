@@ -69,6 +69,14 @@ struct RegistryQueryTests {
         #expect(try object(save) == object(
             #"{"write":"task_save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
         #expect(save.input == "text")
+        let pin = ServedWrite.dashboardPin(directory: "/r", id: "picked", pinned: false, revision: 3)
+        #expect(try object(pin) == object(
+            #"{"write":"dashboard_pin","directory":"/r","id":"picked","pinned":false,"revision":3}"#))
+        #expect(pin.argv == ["desktop", "unpin", "--revision=3", "--", "picked"])
+        let query = ServedWrite.dashboardQuery(directory: "/r", id: "picked", expression: "-state:done", revision: nil)
+        #expect(try object(query) == object(
+            #"{"write":"dashboard_query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#))
+        #expect(query.argv == ["desktop", "query", "--", "picked", "-state:done"])
     }
 
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])

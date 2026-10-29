@@ -741,9 +741,12 @@ file and diff reads, the Wave list, this Machine's identity, the portfolio, a
 Work's saved panes, Task owners and the Graph catalog are `ServedRead`s too,
 read once and served the same way, so opening a window starts no `lf`.
 Completing, reopening, deferring, moving and editing a Task, saving a Task
-file, and renaming or binding a Session are `ServedWrite`s: the library calls
-the function their `lf` command calls and records the same Process. Other
-commands still run the bundled `lf`. The parts: the plan, the repository's Dashboard plans
+file, renaming or binding a Session, ensuring a Wave's Project, the planning
+refresh, and Dashboard, Task-order and pane arrangement are `ServedWrite`s: the
+library calls the function their `lf` command calls and records the same
+Process; arrangement records none, as its command does. Commands that start
+work (`task create --run`, `task run`, `ship`, `resume`, `session connect`)
+and other Machines' reads still run the bundled `lf`. The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window

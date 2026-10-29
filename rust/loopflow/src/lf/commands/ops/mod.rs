@@ -852,8 +852,8 @@ pub fn sync_planning(
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
 /// Linear, or the repository's Git planning ref, whose exchange is per repository.
 /// Returns the Wave a Linear refresh resolved.
-pub fn refresh_status(wave: Option<&str>) -> Result<Option<String>> {
-    let repo = crate::repo::working_directory()?;
+pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<Option<String>> {
+    let repo = crate::repo::working_directory_in(directory)?;
     if crate::lf::commands::planning::plans_through_git(&repo)? {
         crate::lf::commands::planning::refresh(&repo)?;
         return Ok(None);

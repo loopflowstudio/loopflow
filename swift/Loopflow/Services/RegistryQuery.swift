@@ -232,6 +232,15 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
     case sessionRename(directory: String, id: String, name: String)
     case sessionBind(directory: String, id: String, task: String)
+    case waveEnsure(directory: String, wave: String)
+    case planningRefresh(directory: String, wave: String)
+    case dashboardQuery(directory: String, id: String, expression: String, revision: Int64?)
+    case dashboardPin(directory: String, id: String, pinned: Bool, revision: Int64)
+    case dashboardRename(directory: String, id: String, name: String, revision: Int64)
+    case dashboardTile(directory: String, id: String, member: String, hidden: Bool)
+    case dashboardSlots(directory: String, id: String, revision: Int64, slots: String)
+    case tileMove(directory: String, board: String, member: String, destination: String)
+    case paneLayout(directory: String, work: String, layout: String)
 
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
@@ -246,6 +255,21 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
         case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
+        case .waveEnsure(_, let wave): ["wave", "ensure", wave, "--json"]
+        case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
+        case .dashboardQuery(_, let id, let expression, let revision):
+            ["desktop", "query"] + (revision.map { ["--revision=\($0)"] } ?? []) + ["--", id, expression]
+        case .dashboardPin(_, let id, let pinned, let revision):
+            ["desktop", pinned ? "pin" : "unpin", "--revision=\(revision)", "--", id]
+        case .dashboardRename(_, let id, let name, let revision):
+            ["desktop", "rename", "--revision=\(revision)", "--", "query:" + id, name]
+        case .dashboardTile(_, let id, let member, let hidden):
+            ["desktop", hidden ? "hide" : "show", "-p", "query:\(id)/\(member)"]
+        case .dashboardSlots(_, let id, let revision, _):
+            ["desktop", "layout", "query:" + id, "--save", "--revision=\(revision)"]
+        case .tileMove(_, let board, let member, let destination):
+            ["desktop", "move", "-p", "\(board)/\(member)", "--destination", destination]
+        case .paneLayout(_, let work, _): ["desktop", "layout", work, "--save"]
         }
     }
 
@@ -255,8 +279,12 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     }
 
     public var input: String? {
-        if case .taskSave(_, _, _, _, let content) = self { return content }
-        return nil
+        switch self {
+        case .taskSave(_, _, _, _, let content): content
+        case .dashboardSlots(_, _, _, let slots): slots
+        case .paneLayout(_, _, let layout): layout
+        default: nil
+        }
     }
 
     private var tagged: TaggedFields {
@@ -278,6 +306,26 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("session_rename", ["directory": directory, "id": id, "name": name])
         case .sessionBind(let directory, let id, let task):
             TaggedFields("session_bind", ["directory": directory, "id": id, "task": task])
+        case .waveEnsure(let directory, let wave):
+            TaggedFields("wave_ensure", ["directory": directory, "wave": wave])
+        case .planningRefresh(let directory, let wave):
+            TaggedFields("planning_refresh", ["directory": directory, "wave": wave])
+        case .dashboardQuery(let directory, let id, let expression, let revision):
+            TaggedFields("dashboard_query", ["directory": directory, "id": id, "expression": expression,
+                                             "revision": revision])
+        case .dashboardPin(let directory, let id, let pinned, let revision):
+            TaggedFields("dashboard_pin", ["directory": directory, "id": id, "pinned": pinned, "revision": revision])
+        case .dashboardRename(let directory, let id, let name, let revision):
+            TaggedFields("dashboard_rename", ["directory": directory, "id": id, "name": name, "revision": revision])
+        case .dashboardTile(let directory, let id, let member, let hidden):
+            TaggedFields("dashboard_tile", ["directory": directory, "id": id, "member": member, "hidden": hidden])
+        case .dashboardSlots(let directory, let id, let revision, let slots):
+            TaggedFields("dashboard_slots", ["directory": directory, "id": id, "revision": revision, "slots": slots])
+        case .tileMove(let directory, let board, let member, let destination):
+            TaggedFields("tile_move", ["directory": directory, "board": board, "member": member,
+                                       "destination": destination])
+        case .paneLayout(let directory, let work, let layout):
+            TaggedFields("pane_layout", ["directory": directory, "work": work, "layout": layout])
         }
     }
 
@@ -360,40 +408,44 @@ public struct RegistryQuery: Sendable {
     }
 
     public func editDashboardQuery(id: String, expression: String, revision: Int64?, repoPath: String) async throws -> Dashboard {
-        let args = ["desktop", "query", id, expression] + (revision.map { ["--revision", String($0)] } ?? [])
-        return try Self.decode(Dashboard.self, from: await run(args, repoPath))
+        try Self.decode(Dashboard.self, from: await write(
+            .dashboardQuery(directory: repoPath, id: id, expression: expression, revision: revision)))
     }
 
     public func pinDashboard(id: String, pinned: Bool, revision: Int64, repoPath: String) async throws -> Dashboard {
-        try Self.decode(Dashboard.self, from: await run(["desktop", pinned ? "pin" : "unpin", id, "--revision", String(revision)], repoPath))
+        try Self.decode(Dashboard.self, from: await write(
+            .dashboardPin(directory: repoPath, id: id, pinned: pinned, revision: revision)))
     }
 
     public func renameDashboard(id: String, name: String, revision: Int64, repoPath: String) async throws -> Dashboard {
-        try Self.decode(Dashboard.self, from: await run(["desktop", "rename", "query:" + id, name, "--revision", String(revision)], repoPath))
+        try Self.decode(Dashboard.self, from: await write(
+            .dashboardRename(directory: repoPath, id: id, name: name, revision: revision)))
     }
 
     /// Hide or show a Dashboard tile in its shared record; hiding keeps its place and mode.
     public func setDashboardTile(id: String, member: WorkWorkspaceKey, hidden: Bool, repoPath: String) async throws -> Dashboard {
-        try Self.decode(Dashboard.self, from: await run(["desktop", hidden ? "hide" : "show", "-p", "query:\(id)/\(member.selector)"], repoPath))
+        try Self.decode(Dashboard.self, from: await write(
+            .dashboardTile(directory: repoPath, id: id, member: member.selector, hidden: hidden)))
     }
 
     /// Nil restores the default slot layout.
     public func saveDashboardSlots(id: String, slots: DashboardSlotLayout?, revision: Int64, repoPath: String) async throws -> Dashboard {
         let input = String(decoding: try JSONEncoder().encode(slots), as: UTF8.self)
-        return try Self.decode(Dashboard.self, from: await runWithInput(["desktop", "layout", "query:" + id, "--save", "--revision", String(revision)], repoPath, input))
+        return try Self.decode(Dashboard.self, from: await write(
+            .dashboardSlots(directory: repoPath, id: id, revision: revision, slots: input)))
     }
 
     /// Move `member`'s tile into `target`'s place in a Dashboard's order, as the
     /// repository order's drop does; Rust applies the move and decides the mode.
     public func reorderDashboard(id: String, member: WorkWorkspaceKey, to target: WorkWorkspaceKey, repoPath: String) async throws -> Dashboard {
-        try Self.decode(Dashboard.self, from: await run(["desktop", "move", "-p", "query:\(id)/\(member.selector)",
-            "--destination", target.selector], repoPath))
+        try Self.decode(Dashboard.self, from: await write(
+            .tileMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector)))
     }
 
     /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
-        try Self.decode([String].self, from: await run(["desktop", "move", "-p", "working-tasks/task:" + task,
-            "--destination", "task:" + target], repoPath))
+        try Self.decode([String].self, from: await write(
+            .tileMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))
     }
 
     public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
@@ -402,7 +454,8 @@ public struct RegistryQuery: Sendable {
 
     public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
         let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
-        return try Self.decode(WorkPaneLayout.self, from: await runWithInput(["desktop", "layout", layout.work.selector, "--save"], repoPath, input))
+        return try Self.decode(WorkPaneLayout.self, from: await write(
+            .paneLayout(directory: repoPath, work: layout.work.selector, layout: input)))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
@@ -542,15 +595,14 @@ public struct RegistryQuery: Sendable {
 
 
     /// Refresh one Wave's planning from its provider (Linear, or the
-    /// repository's Git planning ref): a recorded `lf` write, since the app's
-    /// library only reads.
+    /// repository's Git planning ref), retrying pending deliveries.
     public func syncPlanning(wave: String, cwd: String) async throws {
-        _ = try await run(["wave", "status", wave, "--sync", "--json"], cwd)
+        _ = try await write(.planningRefresh(directory: cwd, wave: wave))
     }
 
     /// Explicit opening/retry operation. Periodic status reads remain observational.
     public func ensureProject(wave: String, cwd: String) async throws {
-        _ = try await run(["wave", "ensure", wave, "--json"], cwd)
+        _ = try await write(.waveEnsure(directory: cwd, wave: wave))
     }
 
     public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {

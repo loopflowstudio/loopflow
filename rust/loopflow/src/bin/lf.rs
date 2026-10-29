@@ -2675,9 +2675,23 @@ fn execute_command(
             cmd: WaveCommand::Status {
                 wave, json, sync, ..
             },
+        }) if *sync && *json => {
+            let directory = std::env::current_dir()?;
+            let status =
+                loopflow::lf::commands::waves::refreshed_status(&directory, wave.as_deref())?;
+            println!("{status}");
+            Ok(())
+        }
+        Some(Commands::Wave {
+            cmd: WaveCommand::Status {
+                wave, json, sync, ..
+            },
         }) => {
             let refreshed = if *sync {
-                loopflow::lf::commands::ops::refresh_status(wave.as_deref())?
+                loopflow::lf::commands::ops::refresh_status(
+                    &std::env::current_dir()?,
+                    wave.as_deref(),
+                )?
             } else {
                 None
             };

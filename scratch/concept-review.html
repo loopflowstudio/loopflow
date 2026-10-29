@@ -29,9 +29,9 @@ ol li{margin-bottom:12px}
 <p class="meta">LOO-618 · concept-review step (headless, second pass) · 2026-10-29<br>
 Built from <code>scratch/jack-loo-618-…md</code>, <code>scratch/questions.md</code>, <code>ops/task_ownership.rs:43–68</code>, <code>store/sqlite/task_ownership.rs:347–363</code>, PR #1767.</p>
 
-<p><strong>Direction recorded:</strong> <code>lf task unassign</code> on a Task nobody owns stops refusing and still clears the Linear assignee. Jack Heart's decision 5a already says what unassign means; the code only reaches that state when you held the claim.</p>
+<p><strong>Implemented (2026-10-29):</strong> <code>lf task unassign</code> on a Task nobody owns no longer refuses and still clears the Linear assignee, from Jack Heart's decision 5a. Below, “Before” is the code as this review found it.</p>
 
-<p class="legend"><span class="now">Amber</span> = on this branch (PR #1767). <span class="prop">Blue</span> = next implement direction. <span class="gone">Struck</span> = deleted.</p>
+<p class="legend"><span class="now">Amber</span> = on this branch (PR #1767). <span class="prop">Blue</span> = implemented after this review. <span class="gone">Struck</span> = deleted.</p>
 
 <h2>Actions → concepts → commands</h2>
 <div class="tbl"><table>
@@ -53,16 +53,16 @@ error: Task task_… is unowned</pre>
 </div>
 
 <div class="tbl"><table>
-<tr><th>Who owns it</th><th>Today</th><th>Direction</th></tr>
+<tr><th>Who owns it</th><th>Before</th><th>Now</th></tr>
 <tr><td>You</td><td class="now">ends claim, clears assignee</td><td>unchanged</td></tr>
-<tr><td>Nobody</td><td class="bad">refused; assignee kept</td><td class="prop">no ownership write; clears assignee; says “Unowned”</td></tr>
+<tr><td>Nobody</td><td class="bad">refused; assignee kept</td><td class="prop">no ownership write; clears assignee</td></tr>
 <tr><td>Someone else</td><td class="now">refused: “claim it to take it over”</td><td>unchanged — real authority, not a guard</td></tr>
 </table></div>
 
-<p>Proof for implement: a <code>local_planning</code> test with an unowned, Linear-assigned Task; <code>lf task unassign</code> succeeds and the assignee clears.</p>
+<p>Proof: <code>local_planning::task_unassign_clears_the_assignee_of_an_unowned_task</code>, a test with an unowned, Linear-assigned Task; <code>lf task unassign</code> succeeds and the assignee clears.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Unassign on an unowned Task: (a) clear the Linear assignee and succeed, as recorded; (b) keep refusing.</li>
+<li>Unassign on an unowned Task: (a) clear the Linear assignee and succeed; (b) keep refusing. Settled as (a) from decision 5a; reversible.</li>
 </ol>
 </main></body></html>

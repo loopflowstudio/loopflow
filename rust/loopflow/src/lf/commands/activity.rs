@@ -154,6 +154,9 @@ fn read(store: Option<&SqliteStore>, window: &HistoryWindow) -> Result<WorkActiv
     }
 }
 
+/// The `limit` newest entries since `since`. Inputs decode newest bound
+/// first, and reading stops once `limit + 1` entries are newer than every
+/// input not yet read: nothing left could enter the result or untruncate it.
 pub(crate) fn build_snapshot(
     store: &SqliteStore,
     since: i64,
@@ -161,19 +164,31 @@ pub(crate) fn build_snapshot(
     filter: WorkFilter<'_>,
 ) -> Result<WorkActivitySnapshot> {
     let catalog = WorkCatalog::new(store.work_identities()?)?;
+    let mut pending = store.pending_conversation_history(
+        filter.wave,
+        filter.project,
+        filter.task,
+        since,
+        true,
+    )?;
+    pending
+        .inputs
+        .sort_by_key(|input| std::cmp::Reverse(input.latest));
 
     let mut entries = Vec::new();
-
-    let history =
-        store.conversation_history(filter.wave, filter.project, filter.task, None, since, true)?;
-    for snapshot in history {
+    for input in &pending.inputs {
+        if settled(&entries, limit, input.latest) {
+            break;
+        }
+        let snapshot = store.decode_history(&pending, input)?;
+        let mut found = Vec::new();
         let work = snapshot
             .task_id
             .clone()
             .map(WorkRef::Task)
             .or_else(|| snapshot.wave_id.clone().map(WorkRef::Wave));
         if let Some(work) = work.and_then(|work| catalog.owners.get(&work)) {
-            entries.extend(input_entries(&snapshot, work, since));
+            found.extend(input_entries(&snapshot, work, since));
         }
         for provider in &snapshot.providers {
             let work = provider
@@ -191,7 +206,7 @@ pub(crate) fn build_snapshot(
                 let Some(at) = at.filter(|at| *at >= since) else {
                     continue;
                 };
-                entries.push(activity_entry(
+                found.push(activity_entry(
                     format!(
                         "session:{}:{}:{phase}",
                         snapshot.session_id,
@@ -214,9 +229,29 @@ pub(crate) fn build_snapshot(
                 ));
             }
         }
+        entries.extend(found.into_iter().filter(|entry| {
+            catalog
+                .owners
+                .get(&entry.work)
+                .is_some_and(|owner| owner.matches(filter))
+        }));
     }
 
     Ok(finalize_snapshot(entries, limit, &catalog, filter))
+}
+
+/// Whether `limit + 1` entries are newer than `bound`, the latest time any
+/// unread input can report.
+fn settled(entries: &[WorkActivityEntry], limit: usize, bound: i64) -> bool {
+    if entries.len() <= limit {
+        return false;
+    }
+    let mut times: Vec<i64> = entries
+        .iter()
+        .map(|entry| entry.recorded_at.unix_timestamp())
+        .collect();
+    let (_, kth, _) = times.select_nth_unstable_by(limit, |left, right| right.cmp(left));
+    *kth > bound
 }
 
 fn activity_entry(
@@ -434,6 +469,21 @@ mod tests {
                 .map(|item| item.id.as_str())
                 .collect::<Vec<_>>(),
             ["b", "a"]
+        );
+    }
+
+    #[test]
+    fn reading_settles_once_enough_entries_follow_every_unread_bound() {
+        let owner = task_owner("W2-1", "control", "live");
+        let entries = [entry("a", 30, &owner), entry("b", 20, &owner)];
+        assert!(
+            !settled(&entries[..1], 1, 10),
+            "truncation is still unknown"
+        );
+        assert!(settled(&entries, 1, 19));
+        assert!(
+            !settled(&entries, 1, 20),
+            "an unread entry could tie and win"
         );
     }
 

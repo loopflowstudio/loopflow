@@ -63,6 +63,8 @@ async fn serve(
 #[derive(Default)]
 pub(crate) struct PlanningState {
     pub(crate) requests: usize,
+    /// TeamChanges deltas among `requests`.
+    pub(crate) team_changes: usize,
     rate_limit_query: Option<&'static str>,
     wave_summary: String,
     reject_wave_update: bool,
@@ -143,6 +145,13 @@ async fn planning_graphql(
     {
         let mut provider = state.lock().await;
         provider.requests += 1;
+        if request["query"]
+            .as_str()
+            .unwrap()
+            .contains("query TeamChanges")
+        {
+            provider.team_changes += 1;
+        }
         if provider
             .rate_limit_query
             .is_some_and(|query| request["query"].as_str().unwrap().contains(query))
@@ -1643,7 +1652,8 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
             std::fs::write(&stop, "stop").unwrap();
             assert_eq!(running.await.unwrap().unwrap().exit_code, 0);
             observed.unwrap();
-            assert_eq!(state.lock().await.requests, 1);
+            // The turn's delta, then the Project its changed issue names.
+            assert_eq!(state.lock().await.requests, 2);
             assert_eq!(
                 fixture
                     .store
@@ -4719,7 +4729,8 @@ fn linear_on_demand_shares_checks_and_excludes_finished_tasks() {
             for result in results {
                 result.unwrap();
             }
-            assert_eq!(state.lock().await.requests, 1);
+            // One shared delta, then one read of the Project its changed issue names.
+            assert_eq!(state.lock().await.requests, 2);
             conn.execute(
                 "UPDATE tasks SET abandoned_at=?1 WHERE id=?2",
                 rusqlite::params![now(), task.id.as_str()],
@@ -4733,7 +4744,7 @@ fn linear_on_demand_shares_checks_and_excludes_finished_tasks() {
             .unwrap());
             assert_eq!(
                 state.lock().await.requests,
-                1,
+                2,
                 "a team without live Tasks is not checked"
             );
         });
@@ -5623,7 +5634,8 @@ fn linear_on_demand_native_hooks_share_freshness_across_processes() {
             String::from_utf8_lossy(&output.stderr)
         );
         runtime.block_on(async {
-            assert_eq!(state.lock().await.requests, 1);
+            // One delta and its changed Project across every process.
+            assert_eq!(state.lock().await.requests, 2);
             assert_eq!(
                 fixture
                     .store

@@ -10,6 +10,7 @@ impl SqliteStore {
         &self,
         team: &str,
         now: i64,
+        fresh_for: i64,
     ) -> StoreResult<Option<Option<String>>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -20,7 +21,10 @@ impl SqliteStore {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        if saved.as_ref().is_some_and(|(last, _)| now - last < 10) {
+        if saved
+            .as_ref()
+            .is_some_and(|(last, _)| now - last < fresh_for)
+        {
             return Ok(None);
         }
         tx.execute(
@@ -30,6 +34,34 @@ impl SqliteStore {
         )?;
         tx.commit()?;
         Ok(Some(saved.and_then(|(_, through)| through)))
+    }
+
+    /// Whether the team's last finished delta read Linear within `fresh_for`
+    /// seconds of `now`, so its local state answers reads in place of Linear.
+    pub(crate) fn linear_team_current(
+        &self,
+        team: &str,
+        now: i64,
+        fresh_for: i64,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let through: Option<String> = conn
+            .query_row(
+                "SELECT synced_through FROM linear_team_checks WHERE team_id=?1",
+                [team],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        Ok(through
+            .and_then(|through| {
+                time::OffsetDateTime::parse(
+                    &through,
+                    &time::format_description::well_known::Rfc3339,
+                )
+                .ok()
+            })
+            .is_some_and(|through| now - through.unix_timestamp() < fresh_for))
     }
 
     pub(crate) fn finish_linear_team_check(&self, team: &str, through: &str) -> StoreResult<()> {
@@ -44,6 +76,35 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::store::sqlite::SqliteStore;
+
+    #[test]
+    fn finished_team_delta_answers_reads_inside_its_window() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        // 2026-10-29T00:00:00Z
+        let start = 1_793_232_000;
+        assert_eq!(
+            store.begin_linear_team_check("team", start, 10).unwrap(),
+            Some(None)
+        );
+        // Begun but unfinished: nothing local answers yet.
+        assert!(!store.linear_team_current("team", start, 10).unwrap());
+        store
+            .finish_linear_team_check("team", "2026-10-29T00:00:00Z")
+            .unwrap();
+        assert!(store.linear_team_current("team", start + 9, 10).unwrap());
+        assert!(!store.linear_team_current("team", start + 10, 10).unwrap());
+        // A tighter budget stretches the window over the same delta.
+        assert!(store.linear_team_current("team", start + 90, 100).unwrap());
+        assert_eq!(
+            store
+                .begin_linear_team_check("team", start + 90, 100)
+                .unwrap(),
+            None
+        );
+    }
+
     #[test]
     fn linear_on_demand_migration_retains_released_work() {
         use crate::store::migrations::{apply_before_migration, migration_section_sql};

@@ -1064,6 +1064,11 @@ pub fn has_caller() -> bool {
     })
 }
 
+/// This process's argv as JSON, as recorded when it started.
+pub(crate) fn current_command() -> Option<String> {
+    current_context().and_then(|context| context.command)
+}
+
 pub(crate) fn current_lf_process_id() -> Option<LfProcessId> {
     current_context().map(|context| context.lf_process_id)
 }

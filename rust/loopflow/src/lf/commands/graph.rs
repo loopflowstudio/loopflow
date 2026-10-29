@@ -1155,7 +1155,8 @@ mod tests {
                     }
                     .unwrap();
                     assert_eq!(outcome, SkillOutcome::Completed);
-                    assert_eq!(state.lock().await.requests, 1);
+                    // One delta, then the Project its changed issue names.
+                    assert_eq!(state.lock().await.requests, 2);
                 }
             });
         });

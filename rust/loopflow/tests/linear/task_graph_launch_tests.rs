@@ -2501,6 +2501,24 @@ fn task_ship_stop_withdraws_the_approval_and_ends_its_ship() {
 }
 
 #[test]
+fn task_ship_stops_shipping_when_its_run_fails_the_same_way_every_attempt() {
+    let task = shipping_task();
+    // `gate` refuses identically until the repository defines `late`.
+    let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "gate"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("failed 3 times with the same error"),
+        "{stderr}"
+    );
+    // The approval is withdrawn, so no restart repeats the refusal.
+    assert_ne!(task.state(), "shipping");
+    let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let again = String::from_utf8_lossy(&again.stdout);
+    assert!(again.contains("INF-123 is not shipping"), "{again}");
+}
+
+#[test]
 fn task_ship_completes_when_its_pr_merges_mid_ship() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();

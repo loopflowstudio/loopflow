@@ -156,7 +156,8 @@ there. After the last step the Task reaches `end`, which requests completion.
 `lf ship` or any run into `end` hands the Task to Auto-Ship, which may land its
 PR. Other Graphs in the Task's worktree never move it. There is no approve command: give feedback in the
 Task's conversation, which knows its step and how to go on. `lf ship --stop`
-withdraws Auto-Ship.
+withdraws Auto-Ship. A ship whose run fails the same way on every attempt
+withdraws it too, recording the error in the Task's history; `lf ship` resumes.
 
 | Task state | When |
 |---|---|

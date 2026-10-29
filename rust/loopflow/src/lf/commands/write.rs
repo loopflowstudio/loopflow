@@ -306,8 +306,8 @@ impl Write {
         }
     }
 
-    /// Where `lf` records the write's Process: a Task command runs from the
-    /// Task's repository, a Wave command from the repository it is in.
+    /// Where the write runs and `lf` records its Process: a Task command runs
+    /// from the Task's repository, a Wave command from the repository it is in.
     fn repo(&self) -> anyhow::Result<PathBuf> {
         let directory = self.directory();
         match self {
@@ -334,11 +334,11 @@ impl Write {
         let command = Cli::try_parse_from(&argv)?
             .command
             .context("a write names its command")?;
+        let repo = self.repo()?;
         if !command.changes_work() {
-            return self.perform(self.directory(), command);
+            return self.perform(&repo, command);
         }
         let _writing = WRITING.lock().unwrap_or_else(|poison| poison.into_inner());
-        let repo = self.repo()?;
         crate::journal::with_runtime(&repo, &argv, || self.perform(&repo, command))
     }
 
@@ -401,20 +401,15 @@ impl Write {
                 plan,
                 preview,
                 ..
-            } => {
-                // A preview records nothing, so it names no repository first.
-                let repo = crate::repo::require_repo_root(repo, "this command")?;
-                pretty(&crate::ops::chapter::new_chapter(
-                    &repo,
-                    name,
-                    plan.as_bytes(),
-                    None,
-                    *preview,
-                )?)?
-            }
-            Self::GraphCustomize { directory, name } => {
-                let repo = crate::repo::working_directory_in(directory)?;
-                format!("{}\n", crate::graph::customize(name, &repo)?.display())
+            } => pretty(&crate::ops::chapter::new_chapter(
+                repo,
+                name,
+                plan.as_bytes(),
+                None,
+                *preview,
+            )?)?,
+            Self::GraphCustomize { name, .. } => {
+                format!("{}\n", crate::graph::customize(name, repo)?.display())
             }
             Self::Portfolio { .. } => {
                 let Commands::Portfolio { cmd: Some(cmd), .. } = command else {

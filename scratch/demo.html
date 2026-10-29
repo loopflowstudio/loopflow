@@ -1,0 +1,13 @@
+<!doctype html><html><head><meta charset="utf-8"><title>LOO-669 slice 2 demo</title>
+<style>body{font:16px/1.6 system-ui;max-width:42rem;margin:2rem auto;padding:0 1rem}
+@media(prefers-color-scheme:dark){body{background:#111;color:#ddd}}pre{overflow-x:auto;background:#8882;padding:.6rem}</style></head><body>
+<h1>LOO-669 slice 2: stable as a published pointer</h1>
+<p>Step: demo (headless stand-in) · 2026-10-29 · from scratch/demo-release-streams-slice2.md, scratch/release-streams.md</p>
+<h2>Decision needed</h2><p>Release v0.16.0 before or after this PR merges? (Asked in the PR description of #1772.)</p>
+<h2>Runbook</h2>
+<ol><li><pre>cargo test -p loopflow --test release_tests daily_run_moves_stable</pre>
+Expected: the effects log shows <code>publisher promote --tag v0.9.2</code>, then <code>gh release edit v0.9.2 --latest</code>. Seen: 1 passed.</li>
+<li><pre>uv run pytest python/tests/test_release_publisher.py python/tests/test_release_automation.py</pre>Expected and seen: 55 passed.</li>
+<li><pre>gh release list --json tagName,isLatest,publishedAt</pre>Expected: stable holds at v0.15.0, because v0.14.14, the newest soaked release, is older. Seen: as expected.</li></ol>
+<h2>Questions</h2><ol><li>v0.16.0: (a) before slice 2 merges or (b) after?</li></ol>
+</body></html>

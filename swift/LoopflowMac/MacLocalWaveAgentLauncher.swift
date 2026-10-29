@@ -64,7 +64,15 @@ enum LocalWaveAgentLauncher {
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) async throws -> String {
         let lfPath = try controlLfPath()
-        let result = try await run([lfPath] + subargs, cwd: cwd, input: input)
+        let result: (status: Int32, stdout: String, stderr: String)
+        do {
+            result = try await run([lfPath] + subargs, cwd: cwd, input: input)
+        } catch let error as LocalLfError {
+            // A spawn failure or the 30 s deadline; cancellation is counted as a kill.
+            DesktopLog.home.warn("lf read failed", ["verb": LaunchJournal.verb(subargs),
+                                                    "error": error.errorDescription ?? "unknown"])
+            throw error
+        }
         // `lf doctor --json` exits 1 when a check fails, but its stdout is the
         // report the telemetry dashboard must show. A red monitor cannot hide
         // itself behind the query runner's generic non-zero handling.
@@ -73,6 +81,10 @@ enum LocalWaveAgentLauncher {
         }
         guard result.status == 0 else {
             let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            DesktopLog.home.warn("lf read failed", [
+                "verb": LaunchJournal.verb(subargs), "status": String(result.status),
+                "stderr": String((detail.split(separator: "\n").first ?? "").prefix(200)),
+            ])
             let message = detail.isEmpty
                 ? "lf \(subargs.joined(separator: " ")) failed (\(result.status))"
                 : detail
@@ -147,6 +159,9 @@ enum LocalWaveAgentLauncher {
             // Kill only the child we launched. A Session owner is independent;
             // closing a query must not signal a provider or a process group.
             if process.isRunning {
+                if let lf = args.first, lf == "lf" || lf.hasSuffix("/lf") {
+                    LaunchJournal.home.killed(Array(args.dropFirst()))
+                }
                 _ = Darwin.kill(process.processIdentifier, SIGKILL)
                 // Not waitUntilExit: it parks this cooperative thread's run
                 // loop, which nothing wakes once the task has hopped threads.

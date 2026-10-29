@@ -26,14 +26,14 @@ pub struct Check {
 }
 
 impl Check {
-    fn ok(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn ok(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: Status::Ok,
             detail: detail.into(),
         }
     }
-    fn warn(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn warn(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: Status::Warn,
@@ -111,6 +111,7 @@ pub fn run(json: bool) -> Result<()> {
         &crate::diagnostic_log::log_path(),
         time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
+    checks.push(crate::desktop_exits::check());
     if json {
         println!(
             "{}",

@@ -32,6 +32,22 @@ Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
 
+```sh
+lf doctor                  # desktop-exit: how each bundle's last launch ended
+```
+
+When Desktop goes away, its launch journal says how: a quit and who asked, an
+`exit()` and the frame that called it, a signal, or an uncaught exception. A
+launch with no record ended by SIGKILL, a crash the handlers missed, or power
+loss; doctor then asks the system log over the window since Desktop's last
+5-minute heartbeat. Stacks, vitals, hangs, memory pressure and failed `lf` reads
+go to `~/.lf/logs/lf.log` (`LF_HOME` selects another). To search the system log
+yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
+
+```sh
+/usr/bin/log show --last 1h --predicate 'process == "runningboardd" AND eventMessage CONTAINS "loopflow" AND eventMessage CONTAINS "termination reported by launchd"'
+```
+
 Working Tasks lists every started, uncompleted Task, on any Machine this store
 records, in the repository plan's order (waiting first, then rank). It is the
 repository's built-in query, so opening a Task neither adds nor reorders it.

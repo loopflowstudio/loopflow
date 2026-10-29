@@ -223,6 +223,9 @@ final class LocalLineObservation<Frame: Sendable>: @unchecked Sendable {
 
     private func fail(_ error: any Error) {
         guard stoppingAt == nil else { return }
+        let detail = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+        DesktopLog.home.warn("lf watch ended", ["watch": name,
+                                               "error": String((detail.split(separator: "\n").first ?? "").prefix(200))])
         continuation.finish(throwing: error)
         stop()
     }

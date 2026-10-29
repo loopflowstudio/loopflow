@@ -25,7 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from bundle_version import read_release_version, stamp_bundle_version
+from bundle_version import read_release_version, read_source_revision, stamp_bundle_version
 
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -395,7 +395,7 @@ def release() -> int:
     info_plist = SWIFT_DIR / "LoopflowMac" / "Info.plist"
     _copy_app_executable(build_dir, info_plist, app_dir / "MacOS")
     shutil.copy(info_plist, app_dir)
-    stamp_bundle_version(app_dir / "Info.plist", version)
+    stamp_bundle_version(app_dir / "Info.plist", version, read_source_revision(REPO_ROOT))
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
     (app_dir / "PkgInfo").write_text("APPL????")

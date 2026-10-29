@@ -44,37 +44,17 @@ stay in the Task plan. Release's entry-point lesson applies.
 ## Opening work conversations (LOO-499, 2026-10-17)
 
 Jack Heart selected `resume` as an exact `connect` alias, matching scope/session
-skills on first creation, and case-insensitive Task tickets everywhere; he
-authorized pursue while retaining demo and merge review. The working diff uses
-physical checkout scope or an explicit target, never global recency. Ordinary
-skills claim no primary. Fresh selects a successor without stopping the previous
-client; ordinary connect recovers it after an uncertain reply. Preparation launches
-no provider; explanation admits nothing.
-
-Clap aliases canonicalize before routing. Desktop reset preserves concurrent
-updates without restoring predecessor snapshots. Store/stand-in proofs establish
-no installed continuity for CLI, Desktop or remote callers; LOO-475 retains
-installed acceptance and LOO-415's transport and attachment fences stay intact.
-Publication and the full affected gate remain unproved.
+skills on first creation and case-insensitive Task tickets. Preparation launches
+no provider; installed continuity, publication and the full gate remain unproved.
+Evidence: `419025e6f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Waited landing (LOO-503, 2026-10-17)
 
 Jack Heart requires no elapsed-time termination or synthetic reruns in
-wait-and-fix supervision/repair; source removes outer, operation, admission and
-check-page cutoffs and pending-CI timeouts. Preserve real provider
-failures, explicit cancellation, exact-head intent and incident reservations.
-A repair can expose its new head before exiting; landing-wide worker liveness
-prevents duplicate admission and a false checkout-busy exit.
-
-Required failures outrank pending required checks; optional failures alone do
-not override a pending required aggregate. LOO-415's later failure snapshot
-cannot establish what was observable when its waiter exited.
-One paused-clock waiter now proves long-pending → repair → merge → requested
-Task completion with provider doubles. CLI/Flow fixtures separately publish a
-real Git head, retain review and complete at `end` before any status command.
-Merge cannot invent completion intent. Release's entry-point lesson still applies:
-configured GitHub delivery and installed upgrade remain unproved. Native repair
-startup also waits without a cutoff; viewer and release publication policies stay separate.
+wait-and-fix supervision/repair. Preserve real provider failures, explicit
+cancellation, exact-head intent and incident reservations; required failures
+outrank pending required checks. Configured GitHub delivery and installed upgrade
+remain unproved. Evidence: `419025e6f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Native terminal diagnostics (LOO-501/508, 2026-10-18)
 
@@ -106,16 +86,10 @@ remain open; Release's entry-point lesson applies.
 ## OpenCode protocol evidence (LOO-504, 2026-10-17)
 
 Jack Heart selected OpenCode 2 repair/delivery; automatic crash continuation is
-deferred. Candidate deterministic-native tool/context/Flow and configured-account
-launch/tool/resume passed; PR #1590 records verification and remaining acceptance.
-
-No parent IDs or replayable events; steer/queue share idle.
-Readmission can emit empty success; managed recovery injects synthetic guidance
-with unaccepted at-least-once semantics. Native stability proves neither
-attribution nor deduplication. Preserve frozen capture/Process/Work,
-independent steers, separate queued results and LOO-415's owner. Release's lesson:
-candidate proof cannot bypass supported installation. Gate, broader native
-acceptance and delivery remain open.
+deferred. PR #1590 records verification and remaining acceptance. OpenCode has no
+parent IDs or replayable events; readmission can emit empty success, and managed
+recovery's at-least-once guidance is unaccepted. Preserve frozen capture/Process/Work,
+independent steers and LOO-415's owner. Gate, native acceptance and delivery remain open.
 
 ## Test maintenance reduction (lf-6d3ff35, 2026-10-13)
 
@@ -126,14 +100,8 @@ Jack Heart authorized selective cleanup without retries or a five-minute CI clai
 ## Global agent override (LOO-440, curated 2026-10-11)
 
 Jack Heart selected global `-a`/`--agent` over Task, Flow, step, skill and child
-choices; omission preserves defaults. October 10 approval authorizes landing and
-completion after verified merge. No logins, credential reads or real-provider tests.
-Six fixture Sessions prove Claude across child overrides; replay/native history
-retain their provider. Conflicting resume explains starting anew.
-
-October 11 gate passed override checks; release-lock failure's cause remains
-unknown. Remote/live/installed acceptance, landing and completion remain unproved.
-Evidence: `6935bfbadb:wave/infrastructure/MEMORY.md`, this heading.
+choices; omission preserves defaults. Remote/live/installed acceptance remain
+unproved. Evidence: `419025e6f:.lf/wave/infrastructure/MEMORY.md`, this heading.
 
 ## Plan ownership (LOO-406, revised 2026-10-08)
 

@@ -1,7 +1,7 @@
 //! A detached terminal owns an execution, including its capture and native client.
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
-mod idle;
+mod lifetime;
 mod native;
 mod output;
 mod terminal;
@@ -482,7 +482,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
-    let viewing = idle::spawn(id.clone());
+    let viewing = lifetime::spawn(id.clone());
     let mut viewed = None;
     loop {
         while let Ok((socket, _)) = listener.accept() {

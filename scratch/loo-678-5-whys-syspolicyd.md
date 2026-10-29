@@ -216,3 +216,5 @@ so Dev.app rebuilds keep conversations open. Excluded from this PR.
 - Jack's live acceptance above (post-merge verify).
 
 Check results: `cargo test -p loopflow --test transport_tests sessions_end_when_their_lf_executable_goes < /dev/null` pass (viewer hint asserted), `cargo clippy -p loopflow --all-targets -- -D warnings` clean (2026-10-28). Gate owns affected suites.
+
+Gate (2026-10-28): `scripts/test.py --reuse-passing --rust-filter 'binary(transport_tests) | test(transport::) | test(os_process::) | test(platform::) | test(agent::)'` PASS — architecture, inventory, fmt, 96 tests (focused test 41 s), clippy `--all-targets -D warnings`; no `Command::new("kill")` left. Live syspolicyd acceptance stays with Jack post-merge.

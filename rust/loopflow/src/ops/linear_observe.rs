@@ -714,7 +714,7 @@ mod tests {
                 .unwrap();
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute("DELETE FROM linear_team_checks", []).unwrap();
-            runtime.block_on(async { state.lock().await.requests = 0 });
+            runtime.block_on(async { state.lock().await.team_changes = 0 });
             let (sender, sleeps) = std::sync::mpsc::channel();
             let subscriber = tracing_subscriber::registry().with(Sleeps(sender));
             let _trace = tracing::subscriber::set_default(subscriber);
@@ -732,7 +732,7 @@ mod tests {
                             tokio::time::advance(std::time::Duration::from_secs(previous - 1))
                                 .await;
                             tokio::task::yield_now().await;
-                            assert_eq!(state.lock().await.requests, index);
+                            assert_eq!(state.lock().await.team_changes, index);
                             // SQLite freshness uses wall time; advance its attempt too.
                             conn.execute("UPDATE linear_team_checks SET attempted_at=0", [])
                                 .unwrap();
@@ -758,7 +758,7 @@ mod tests {
                             tokio::task::yield_now().await;
                         };
                         assert_eq!(delay, expected);
-                        assert_eq!(state.lock().await.requests, index + 1);
+                        assert_eq!(state.lock().await.team_changes, index + 1);
                         previous = delay;
                     }
                     assert_eq!(
@@ -778,7 +778,7 @@ mod tests {
                 }
                 drop(watch);
                 tokio::time::advance(std::time::Duration::from_secs(600)).await;
-                assert_eq!(state.lock().await.requests, 7);
+                assert_eq!(state.lock().await.team_changes, 7);
             });
         });
     }

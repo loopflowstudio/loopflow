@@ -50,4 +50,4 @@ Nothing replaced: the cooldown stays the pause authority; the budget extends it.
 
 ## Checks
 
-- `cargo test -p loopflow --lib -- linear::cooldown linear::request_log linear::team_changes linear_team_checks`: 11 passed.
+- `cargo test -p loopflow --lib -- linear::cooldown linear::request_log linear::team_changes linear_team_checks linear_on_demand native_runner_is_quiet attach_task_github_pr task_comment`: 30 passed after two count assertions were moved to the delta's extra `ProjectOwnership` read; clippy clean. Wider suites: gate.

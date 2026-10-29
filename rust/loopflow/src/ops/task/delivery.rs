@@ -920,7 +920,7 @@ pub(crate) fn attach_task_github_pr(
         }
         // Linear linkage is idempotent. A failed or interrupted writeback cannot
         // erase the GitHub identity already committed above.
-        if !(linked_open && pr.phase() == PrPhase::Open) {
+        if !linked_open {
             link_pr_to_planning(&store, &task, &mut pr).await;
         }
         pr.updated_at = time::OffsetDateTime::now_utc();

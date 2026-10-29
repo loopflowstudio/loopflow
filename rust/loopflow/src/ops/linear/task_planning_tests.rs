@@ -63,6 +63,8 @@ async fn serve(
 #[derive(Default)]
 pub(crate) struct PlanningState {
     pub(crate) requests: usize,
+    /// TeamChanges deltas among `requests`.
+    pub(crate) team_changes: usize,
     rate_limit_query: Option<&'static str>,
     wave_summary: String,
     reject_wave_update: bool,
@@ -143,6 +145,13 @@ async fn planning_graphql(
     {
         let mut provider = state.lock().await;
         provider.requests += 1;
+        if request["query"]
+            .as_str()
+            .unwrap()
+            .contains("query TeamChanges")
+        {
+            provider.team_changes += 1;
+        }
         if provider
             .rate_limit_query
             .is_some_and(|query| request["query"].as_str().unwrap().contains(query))

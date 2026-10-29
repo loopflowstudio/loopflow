@@ -3,84 +3,62 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5b3da9 concept review: may an in-app read write?</title>
+<title>5b3da9 concept review: nothing to change</title>
 <style>
-  :root { --fg:#1d1d1f; --muted:#6e6e73; --bg:#fdfdfc; --rule:#e3e3e0; --code:#f2f2ef; --accent:#b4441c; --new:#1f6f43; }
+  :root { --fg:#1d1d1f; --muted:#6e6e73; --bg:#fdfdfc; --rule:#e3e3e0; --code:#f2f2ef; --accent:#b4441c; }
   @media (prefers-color-scheme: dark) {
-    :root { --fg:#e8e8e6; --muted:#9a9a9f; --bg:#161617; --rule:#2e2e30; --code:#222224; --accent:#f08a5d; --new:#6fd09a; }
+    :root { --fg:#e8e8e6; --muted:#9a9a9f; --bg:#161617; --rule:#2e2e30; --code:#222224; --accent:#f08a5d; }
   }
   body { background:var(--bg); color:var(--fg); font:17px/1.6 -apple-system, "Helvetica Neue", sans-serif; margin:0; }
   main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
   header p { color:var(--muted); font-size:.9rem; margin:.2rem 0; }
   h1 { font-size:1.6rem; line-height:1.25; margin:1.5rem 0 1rem; }
-  h2 { font-size:1.15rem; margin:2.8rem 0 .8rem; }
-  code, pre { font:.86em/1.5 ui-monospace, Menlo, monospace; background:var(--code); border-radius:4px; }
-  code { padding:.05em .3em; }
-  pre { padding:.9rem 1rem; overflow-x:auto; }
+  h2 { font-size:1.15rem; margin:2.6rem 0 .8rem; }
+  code { font:.86em/1.5 ui-monospace, Menlo, monospace; background:var(--code); border-radius:4px; padding:.05em .3em; }
   table { border-collapse:collapse; width:100%; font-size:.92rem; margin:1rem 0; }
   th, td { text-align:left; vertical-align:top; padding:.5rem .6rem .5rem 0; border-bottom:1px solid var(--rule); }
   th { color:var(--muted); font-weight:500; }
   .mismatch { border-left:3px solid var(--accent); padding:.2rem 0 .2rem 1rem; margin:1.5rem 0; }
-  .proposed { border-left:3px solid var(--new); padding:.2rem 0 .2rem 1rem; }
-  .tag-p { color:var(--new); font-weight:600; }
-  .tag-x { color:var(--accent); font-weight:600; }
-  ol.q > li { margin:1.2rem 0; }
-  ol.q ol { list-style:lower-alpha; }
-  ol.q ol li { margin:.4rem 0; }
+  @media (max-width:520px) { table, tbody, tr, td, th { display:block; } thead { display:none; } td { border:0; padding:.15rem 0; } tr { border-bottom:1px solid var(--rule); padding:.5rem 0; } }
 </style>
 </head>
 <body>
 <main>
 <header>
-  <p>Task 5b3da9 · concept-review step · October 28, 2026</p>
-  <p>Built from <code>scratch/5b3da9-design.md</code>, <code>rust/loopflow/src/lf/commands/operation.rs</code>, <code>rust/loopflow/src/lf/mod.rs</code> (<code>changes_state</code>), <code>rust/loopflow-ffi/src/lib.rs</code></p>
+  <p>Task 5b3da9 · concept-review step · October 29, 2026</p>
+  <p>Built from <code>scratch/5b3da9-design.md</code>, <code>scratch/questions.md</code>, <code>rust/loopflow/src/store/sqlite.rs</code>, <code>rust/loopflow/src/journal/mod.rs</code></p>
 </header>
 
-<h1>Decision needed: may a read Desktop serves inside the app write the store?</h1>
+<h1>No decision needed. The implemented change matches what Jack decided.</h1>
 
-<p>Jack decided (comment 628f4502) that a read is a command whose <code>changes_state()</code> is false. A read records no Process and never wakes Work readers. Desktop now serves its reads in-process. Five of them write anyway, so the app has become a store writer without that being decided. The design still lists that as open: the app and CLI <code>lf</code> both writing, with migrations and version skew.</p>
+<p>Last review asked whether an in-app read may write the store. Jack answered (b), final in comment 53f77781: the library only reads; writes are <code>lf</code> commands. The code now does exactly that.</p>
 
 <h2>What you do → what runs → what it writes</h2>
 <table>
-  <tr><th>Desktop action</th><th>Served as</th><th>Classified</th><th>Writes</th></tr>
-  <tr><td>Desktop stays open</td><td><code>Operation::PlanningStatus</code></td><td>write (<code>planning status --watch</code>)</td><td class="tag-x">planning exchange, in-app, no Process</td></tr>
-  <tr><td>Open Wave detail</td><td><code>Query::WaveDetail</code></td><td>read</td><td class="tag-x">tracker sync over network</td></tr>
-  <tr><td>Task destinations / roadmap</td><td><code>Query::Roadmap</code></td><td>read</td><td class="tag-x">tracker sync per repository</td></tr>
-  <tr><td>Open a window on a folder</td><td><code>Query::RepositoryIdentity</code></td><td>read</td><td class="tag-x">registers the repository</td></tr>
-  <tr><td>Any served read</td><td><code>journal::mark_read</code></td><td>read</td><td class="tag-x">creates or migrates the store</td></tr>
-  <tr><td>Files pane, sessions, history, ps…</td><td>other <code>Query</code>/<code>Operation</code></td><td>read</td><td>nothing</td></tr>
+  <thead><tr><th>You</th><th>Runs</th><th>Writes</th></tr></thead>
+  <tbody>
+    <tr><td>Open Desktop on a repository</td><td><code>lf config repository --json</code>, once</td><td>store created or migrated, repository registered; Process row</td></tr>
+    <tr><td>Look at Waves, Tasks, files, diffs, history</td><td>a <code>Read</code> in the app (<code>lf_read</code>, <code>lf_subscribe</code>/<code>lf_pull</code>)</td><td>nothing; the store opens read-only</td></tr>
+    <tr><td>Leave Desktop open, or select a Wave</td><td><code>lf wave status &lt;wave&gt; --sync --json</code> every 5 min, 30 s while a change is pending, backing off from 30 s to 5 min after failures</td><td>planning exchange with Linear or Git peers</td></tr>
+    <tr><td>Rename, add or complete a Task</td><td>the <code>lf</code> command for it</td><td>the change and its Process row</td></tr>
+    <tr><td>Run any <code>lf</code> read yourself</td><td>the same function the app calls</td><td>no Process row</td></tr>
+  </tbody>
 </table>
 
 <div class="mismatch">
-<p><strong>The mismatch.</strong> Two of the done-whens conflict here. "Idle Desktop starts no <code>lf</code> and writes no Process rows" keeps the planning exchange inside the app. "Reads first" keeps the app out of writing. Migration is the sharpest case. A Desktop build whose catalog is newer than the installed <code>lf</code> migrates the store, and that installed <code>lf</code> also reads it.</p>
+  <p><strong>The one loose end, now closed.</strong> Jack's decision moved "history's settling of dead Process rows" to a write path. There is nothing to move: a dead Process is derived on every read from its receipt and OS identity (<code>journal::recorded_process_evidence</code>) and never written back. If some read did write, the read-only store would refuse it, so the failure would be loud.</p>
 </div>
 
-<h2>Settled without you (next implement step)</h2>
-<div class="proposed">
-<p><span class="tag-p">Proposed</span> One read concept. <code>Operation</code> (watched) and <code>Query</code> (one-shot) are the same thing: an <code>lf</code> read command, with or without <code>--watch</code>. <code>History</code> and <code>PlanningStatus</code> already appear in both. "Operation" also collides with "every app operation has an <code>lf</code> equivalent", which covers writes too.</p>
-<pre>enum Read { TaskDiff{…}, History(HistoryWindow), MonitorPs, DesktopSessions{…}, … }
-Read::argv()       // lf &lt;argv&gt; --json
-Read::read()       // one-shot, what that prints
-Read::subscribe()  // only where the command takes --watch
-Swift: WorkOperation + ServedQuery → ServedRead</pre>
-<p>Product behavior stays the same. This leaves one equivalence test and one JSON shape on both C entry points.</p>
-</div>
+<h2>Left for later steps, not product choices</h2>
+<ul>
+  <li>Installed-build CPU for idle and busy readers (gate).</li>
+  <li>Idle Desktop starts no <code>lf</code>; a started Task reaches Working Tasks within a second (demo).</li>
+  <li>Several Waves in one Git-planned repository each run their own refresh per tick. Efficiency, tracked in <code>scratch/questions.md</code>.</li>
+</ul>
 
 <h2>Questions</h2>
-<ol class="q">
-  <li>What may a served read write?
-    <ol>
-      <li><strong>Reads may write.</strong> The app becomes a store writer, with the exchanges in-process. This also needs an answer on migration: the app opens only stores at or below its catalog, or the app migrates them.</li>
-      <li><strong>Reads stay pure; Desktop launches writes.</strong> Served reads open the store read-only. Freshness comes from <code>lf</code> writes Desktop starts on a clock (<code>planning status --watch</code>, <code>wave status --sync</code>). Those are recorded Processes, so idle Desktop is no longer process-free.</li>
-      <li><strong>Reads stay pure; Desktop doesn't sync.</strong> Wave detail, the roadmap and planning are only as fresh as other <code>lf</code> writers leave them.</li>
-    </ol>
-  </li>
-  <li>Do writes (<code>task run</code>, <code>ship</code>) move in-process in this Task?
-    <ol>
-      <li>Yes, if 1a.</li>
-      <li>Later, in a separate Task.</li>
-    </ol>
-  </li>
+<ol>
+  <li>None open. Reply with a correction if the table above reads wrong.</li>
 </ol>
 </main>
 </body>

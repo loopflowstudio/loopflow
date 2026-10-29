@@ -7,6 +7,9 @@
 //! A read the command scopes by its working directory names that directory
 //! instead: `--cwd <directory>` in its argv, and the same path in-process,
 //! where every subscription shares one working directory.
+//!
+//! Reads only read: an app serving them opens the store read-only (see
+//! [`crate::store::serve_reads_only`]), and its writes are `lf` commands.
 
 use std::path::{Path, PathBuf};
 
@@ -19,7 +22,6 @@ use super::machine::{local_machine, machines};
 use super::usage;
 use super::watch::{Subscription, Transport};
 use super::waves::{list as list_waves, Shape};
-use super::work_route::repository_identity;
 use crate::durable::RepositoryId;
 use crate::lf::SessionListArgs;
 use crate::ops::task::{task_changes, task_diff, task_file};
@@ -69,9 +71,6 @@ pub enum Read {
     },
     /// `lf task file <issue> <path>`: one file of a Task's checkout.
     TaskFile { issue: String, path: String },
-    /// `lf --cwd <directory> config repository`: the repository's planning
-    /// identity, registered on first sight.
-    RepositoryIdentity { directory: PathBuf },
     /// `lf wave list --all --current`: every current Wave on this Machine.
     Waves,
     /// `lf machine id`: this Machine's identity.
@@ -205,9 +204,6 @@ impl Read {
                 argv
             }
             Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
-            Self::RepositoryIdentity { directory } => {
-                at(directory, &["config", "repository", "--json"])
-            }
             Self::Waves => words(&["wave", "list", "--all", "--current", "--json"]),
             Self::MachineId => words(&["machine", "id", "--json"]),
             Self::Portfolio => words(&["portfolio", "--json"]),
@@ -373,10 +369,6 @@ impl Read {
                 draft,
             } => pretty(&task_diff(issue, path.as_deref(), base, draft.as_deref())?),
             Self::TaskFile { issue, path } => pretty(&task_file(issue, path, false)?),
-            Self::RepositoryIdentity { directory } => {
-                let (_, identity) = repository_identity(directory, None, None)?;
-                pretty(&identity)
-            }
             Self::Waves => {
                 let waves = block_on(list_waves(true, true))??;
                 pretty(&waves.unwrap_or_default())
@@ -466,13 +458,11 @@ impl Read {
             Self::PlanningStatus { directory } => super::planning::status_json(directory),
             Self::WorkLink { directory, url } => pretty(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
-            Self::RepositoryPath { id } => {
-                Ok(
-                    repository_identity(&super::work_route::repository_path(id)?, None, None)?
-                        .0
-                        .to_string(),
-                )
-            }
+            Self::RepositoryPath { id } => Ok(crate::repository::CanonicalRepo::containing(
+                &super::work_route::repository_path(id)?,
+            )?
+            .ok_or_else(|| anyhow::anyhow!("repository plan {id} has no local checkout"))?
+            .to_string()),
             Self::WaveGraph { directory, wave } => {
                 let repo = crate::repo::working_directory_in(directory)?;
                 pretty(&block_on(crate::ops::project::wave_graph(

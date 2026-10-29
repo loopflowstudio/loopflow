@@ -589,7 +589,33 @@ impl SqliteStore {
     }
 
     fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+        if super::serves_reads_only() {
+            return Self::open_served(path);
+        }
         Self::open_with(path, &super::machine_home_dir(), advance)
+    }
+
+    /// An app's in-process reads: the store `lf` prepared, at this build's
+    /// schema, opened so that nothing can write it.
+    fn open_served(path: &Path) -> StoreResult<Self> {
+        if !std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0) {
+            return Err(StoreError::InvalidData(format!(
+                "store {} is not prepared; run `lf` once to create it",
+                path.display()
+            )));
+        }
+        let store = Self::open_read_only(path)?;
+        {
+            let conn = store.conn.lock().expect("store mutex poisoned");
+            super::migrations::validate_sqlite_schema(&conn)?;
+            if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
+                return Err(StoreError::InvalidData(format!(
+                    "store {} does not have migration {pending} yet; run `lf` once to migrate it",
+                    path.display()
+                )));
+            }
+        }
+        Ok(store)
     }
 
     /// Open resolving the migration decision against an explicit machine home.

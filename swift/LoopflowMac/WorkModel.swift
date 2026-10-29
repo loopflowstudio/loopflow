@@ -1294,6 +1294,41 @@ final class WorkModel {
         }
     }
 
+    /// Desktop's planning clock. The app's library only reads, so each shown
+    /// Wave's planning is refreshed through `lf wave status --sync` every five
+    /// minutes, every 30 seconds while a saved change waits for delivery, and
+    /// after a failure (a provider rate limit, say) from 30 seconds doubling
+    /// to five minutes. The Work observation shows what each refresh wrote.
+    func keepPlanningCurrent() async {
+        guard !usesFixedFixture, query.streamsWork else { return }
+        var failures = 0
+        while !Task.isCancelled {
+            failures = await syncPlanning() ? 0 : failures + 1
+            let delay: Duration = failures > 0
+                ? min(.seconds(15) * (1 << min(failures, 5)), .seconds(300))
+                : planningPending ? .seconds(30) : .seconds(300)
+            do { try await Task.sleep(for: delay) } catch { return }
+        }
+    }
+
+    /// Sync each shown Wave's planning once; true when every refresh succeeded.
+    private func syncPlanning(_ waves: [WaveSnapshot]? = nil) async -> Bool {
+        var succeeded = true
+        for wave in waves ?? visibleRoadmaps.map(\.wave) {
+            guard !Task.isCancelled else { break }
+            do { try await query.syncPlanning(wave: wave.name, cwd: wave.repo) } catch { succeeded = false }
+        }
+        return succeeded
+    }
+
+    /// A saved Project or Task change has not reached its planning provider.
+    private var planningPending: Bool {
+        visibleRoadmaps.contains { roadmap in
+            roadmap.projects.items.contains { $0.sync.changes.contains { $0.state == .pending } }
+                || roadmap.tasks.items.contains { $0.task.sync.changes.contains { $0.state == .pending } }
+        }
+    }
+
     /// The window's one refresh owner: one reader process whose frames say
     /// what changed. Runs until cancelled, reopening the reader when it ends.
     func keepWorkCurrent() async {
@@ -1944,7 +1979,14 @@ final class WorkModel {
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
         if selection == nil { navigation.sidebarWaveID = nil }
-        if let selection, selection.kind == .wave { navigation.sidebarWaveID = selection.id }
+        if let selection, selection.kind == .wave {
+            navigation.sidebarWaveID = selection.id
+            // Opening a Wave refreshes its planning now, not at the next tick.
+            if !usesFixedFixture, query.streamsWork,
+               let wave = roadmap.value?.waves.first(where: { $0.wave.id == selection.id })?.wave {
+                Task { _ = await syncPlanning([wave]) }
+            }
+        }
         clearSelectionIfOutsideScope()
         openSelectedWorkspace()
     }

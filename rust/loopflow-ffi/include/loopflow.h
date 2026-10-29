@@ -6,7 +6,8 @@
 // the app data from its own threads: it calls `wakeup` when the result may have
 // changed, and the app calls `lf_pull` on its own queue, which reads there and
 // returns the frame line that command would print next, or nothing. A burst of
-// changes coalesces into one frame.
+// changes coalesces into one frame. The library only reads: it opens the store
+// `lf` prepared read-only and writes nothing; the app's writes are `lf` commands.
 #ifndef LOOPFLOW_H
 #define LOOPFLOW_H
 

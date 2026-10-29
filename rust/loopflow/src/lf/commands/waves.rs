@@ -395,7 +395,9 @@ pub struct WaveRoadmap {
 pub enum Shape {
     /// Ordinary reads: one row per Task (`TaskRow`) or Session (`SessionRow`).
     Tasks,
-    /// `lf desktop`: Desktop's presentation of each record.
+    /// `lf desktop`: Desktop's presentation of each record. Desktop reads
+    /// stored planning and refreshes it with `lf wave status --sync`, so these
+    /// reads never ask the tracker.
     Desktop,
 }
 
@@ -644,7 +646,11 @@ pub fn status(wave: Option<&str>, json: bool, shape: Shape) -> Result<()> {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
             return no_registry(json, "null");
         };
-        let status = synced_status(&store, &std::env::current_dir()?, wave).await?;
+        let wave = resolve_wave_in(&store, &std::env::current_dir()?, wave).await?;
+        if shape == Shape::Tasks {
+            crate::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+        }
+        let status = wave_detail(&store, &wave).await?;
         if json {
             let status = shape
                 .print(Some(&store), status, WaveDetailSnapshot::rows)
@@ -657,26 +663,15 @@ pub fn status(wave: Option<&str>, json: bool, shape: Shape) -> Result<()> {
     })
 }
 
-/// `lf wave status`' reading from `directory`, after syncing the Wave's
-/// repository with its tracker.
-async fn synced_status(
-    store: &SharedStore,
-    directory: &Path,
-    wave: Option<&str>,
-) -> Result<WaveDetailSnapshot> {
-    let wave = resolve_wave_in(store, directory, wave).await?;
-    crate::ops::linear_observe::sync_repository(store, wave.repo()).await;
-    wave_detail(store, &wave).await
-}
-
-/// `lf --cwd <directory> desktop wave <wave>`: one Wave's plan; None
-/// without a registry.
+/// `lf --cwd <directory> desktop wave <wave>`: one Wave's stored plan; None
+/// without a registry. Desktop refreshes planning through `lf wave status --sync`.
 pub fn desktop_status(directory: &Path, wave: &str) -> Result<Option<WaveDetailSnapshot>> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
             return Ok(None);
         };
-        Ok(Some(synced_status(&store, directory, Some(wave)).await?))
+        let wave = resolve_wave_in(&store, directory, Some(wave)).await?;
+        Ok(Some(wave_detail(&store, &wave).await?))
     })
 }
 
@@ -780,14 +775,14 @@ pub fn show(
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let roadmap = show_roadmap(store.as_ref(), &directory, wave, task, all, true).await?;
+        let observe = shape == Shape::Tasks;
+        let roadmap = show_roadmap(store.as_ref(), &directory, wave, task, all, observe).await?;
         print_roadmap(&roadmap);
         Ok(())
     })
 }
 
-/// What `lf wave show --json` prints in `directory`, after asking the
-/// tracker about each repository it reads.
+/// What `lf wave show --json` prints in `directory`.
 pub(crate) fn show_json(
     directory: &Path,
     wave: Option<&str>,
@@ -797,7 +792,8 @@ pub(crate) fn show_json(
 ) -> Result<String> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?.map(std::sync::Arc::new);
-        let roadmap = show_roadmap(store.as_ref(), directory, wave, task, all, true).await?;
+        let observe = shape == Shape::Tasks;
+        let roadmap = show_roadmap(store.as_ref(), directory, wave, task, all, observe).await?;
         let roadmap = shape
             .print(store.as_ref(), roadmap, RoadmapSnapshot::rows)
             .await?;

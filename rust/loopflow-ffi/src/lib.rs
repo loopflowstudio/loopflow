@@ -4,6 +4,8 @@
 //! wakeup from any thread, and the app pulls the frames that command prints on
 //! its own queue. Results are the DTOs Swift already decodes. Every entry point
 //! catches panics, so a Rust panic reaches the app as an error, never a crash.
+//! The library only reads: it opens the store `lf` prepared read-only, and the
+//! `lf` commands the app runs own every write.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -91,6 +93,7 @@ unsafe fn serve<T, E: std::fmt::Display>(
     serve: impl FnOnce(Read) -> Result<T, E>,
 ) -> Option<T> {
     let served = catch_unwind(AssertUnwindSafe(|| {
+        loopflow::store::serve_reads_only();
         // SAFETY: the caller passes a NUL-terminated string.
         let read = unsafe { CStr::from_ptr(read) };
         let read = serde_json::from_slice(read.to_bytes())

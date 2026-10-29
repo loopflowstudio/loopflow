@@ -41,7 +41,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case taskChanges(issue: String, base: String)
     case taskDiff(issue: String, path: String?, base: String, draft: String?)
     case taskFile(issue: String, path: String)
-    case repositoryIdentity(directory: String)
     case waves
     case machineId
     case portfolio
@@ -89,8 +88,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
                 + (draft == nil ? [] : ["--draft"])
         case .taskFile(let issue, let path):
             return ["task", "file", issue, path, "--json"]
-        case .repositoryIdentity:
-            return ["config", "repository", "--json"]
         case .waves:
             return ["wave", "list", "--all", "--current", "--json"]
         case .machineId:
@@ -176,8 +173,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("task_diff", ["issue": issue, "path": path, "base": base, "draft": draft])
         case .taskFile(let issue, let path):
             TaggedFields("task_file", ["issue": issue, "path": path])
-        case .repositoryIdentity(let directory):
-            TaggedFields("repository_identity", ["directory": directory])
         case .waves: TaggedFields("waves")
         case .machineId: TaggedFields("machine_id")
         case .portfolio: TaggedFields("portfolio")
@@ -428,8 +423,9 @@ public struct RegistryQuery: Sendable {
     }
 
     /// Explicit workspace opening binds a plain repository to its local plan.
+    /// Registration writes the store, so `lf` runs it, not the app's library.
     public func repositoryIdentity(cwd: String) async throws -> RepositoryIdentity {
-        try Self.decode(RepositoryIdentity.self, from: await serve(.repositoryIdentity(directory: cwd)))
+        try Self.decode(RepositoryIdentity.self, from: await run(["config", "repository", "--json"], cwd))
     }
 
     public func repositoryPath(id: String) async throws -> String {
@@ -458,6 +454,13 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
+
+    /// Refresh one Wave's planning from its provider (Linear, or the
+    /// repository's Git planning ref): a recorded `lf` write, since the app's
+    /// library only reads.
+    public func syncPlanning(wave: String, cwd: String) async throws {
+        _ = try await run(["wave", "status", wave, "--sync", "--json"], cwd)
+    }
 
     /// Explicit opening/retry operation. Periodic status reads remain observational.
     public func ensureProject(wave: String, cwd: String) async throws {

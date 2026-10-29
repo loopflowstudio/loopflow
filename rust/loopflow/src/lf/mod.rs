@@ -1313,9 +1313,7 @@ impl ConfigCommand {
             Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
             Self::Planning { cmd } => match cmd {
                 PlanningCommand::Key { new, recover } => *new || recover.is_some(),
-                // A watch keeps the repository's planning exchanged.
-                PlanningCommand::Status { watch, .. } => *watch,
-                PlanningCommand::Journal { .. } => false,
+                PlanningCommand::Status { .. } | PlanningCommand::Journal { .. } => false,
             },
         }
     }
@@ -2443,7 +2441,7 @@ pub enum PlanningCommand {
     Status {
         #[arg(long)]
         json: bool,
-        /// Keep the repository's planning exchanged, printing a JSON line now and each time the status changes, until stdin closes
+        /// Print a JSON line now and each time the status changes, until stdin closes
         #[arg(long, requires = "json")]
         watch: bool,
     },

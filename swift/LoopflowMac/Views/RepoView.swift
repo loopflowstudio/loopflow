@@ -118,6 +118,7 @@ struct RepoView: View {
             await model.applyPortfolio(portfolioService.repos, initialRepoPath: initialRepoPath)
         }
         .task { await model.keepWorkCurrent() }
+        .task { await model.keepPlanningCurrent() }
         .onChange(of: taskLinks?.repositoryPath(repository ?? ""), initial: true) { _, path in
             if let path { model.relocateRepository(to: path) }
         }

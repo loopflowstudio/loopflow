@@ -16,6 +16,7 @@ mod documented_commands;
 mod dto_fixtures;
 mod git_tests;
 mod graph_discovery_tests;
+mod isolated_lf;
 mod land_tests;
 mod local_promotion;
 mod machine_commands;

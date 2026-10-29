@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use crate::planning_exchange::PlanningSnapshot;
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
-use crate::store::{open_store, sqlite::SqliteStore, SharedStore, StorageConfig, Store};
+use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
 
 use super::{OpsError, OpsResult};
 
@@ -366,7 +366,7 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
         })
 }
 
-/// Foreground Git exchange, or on-demand Linear checks while watching.
+/// Foreground Git exchange while a provider runs.
 /// Dropping the connection cancels requests; durable identities survive cancellation.
 #[derive(Debug)]
 pub(crate) struct PlanningSync {
@@ -376,35 +376,19 @@ pub(crate) struct PlanningSync {
 
 impl PlanningSync {
     /// Repository planning follows every foreground provider, not Task attribution.
+    /// One thread owns initialization and exchange. Callers may already be inside
+    /// an async runtime; startup errors still return before the provider launches.
     pub(crate) fn start_for_directory(directory: &Path) -> OpsResult<Self> {
         let repo = crate::repository::CanonicalRepo::discover(directory)
             .map_err(message)?
             .to_string();
-        let config = storage_config_from_env()?;
-        Self::connect(repo, false, async move {
-            open_planning_store(&config).await.map(Arc::new)
-        })
-    }
-
-    /// Watchers keep the selected transport active; providers only keep Git active.
-    pub(crate) fn start_watch(store: SharedStore, repo: String) -> OpsResult<Self> {
-        Self::connect(repo, true, async move { Ok(store) })
-    }
-
-    // One thread owns initialization and exchange. Callers may already be inside
-    // an async runtime; startup errors still return before the provider launches.
-    fn connect(
-        repo: String,
-        watching: bool,
-        open: impl Future<Output = OpsResult<SharedStore>> + Send + 'static,
-    ) -> OpsResult<Self> {
-        let remote = super::planning_client::connected(&repo);
-        if remote && !watching {
+        if super::planning_client::connected(&repo) {
             return Ok(Self {
                 stop: None,
                 thread: None,
             });
         }
+        let config = storage_config_from_env()?;
         let (ready, started) = std::sync::mpsc::sync_channel(1);
         let (stop, stopped) = tokio::sync::oneshot::channel();
         #[cfg(test)]
@@ -425,7 +409,7 @@ impl PlanningSync {
                     }
                 };
                 let drive = async {
-                    let store = match open.await {
+                    let store = match open_planning_store(&config).await.map(Arc::new) {
                         Ok(store) => store,
                         Err(error) => {
                             let _ = ready.send(Err(error));
@@ -437,13 +421,12 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
-                        _ = super::linear_observe::watch_repository(&store, &repo), if remote => {},
                         _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
                             acquire_repository(&store, &repo)
-                        }), if !remote => {},
+                        }) => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
-                        }), if !remote => {},
+                        }) => {},
                     }
                 };
                 #[cfg(test)]

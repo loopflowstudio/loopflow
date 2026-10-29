@@ -95,9 +95,9 @@ Evidence: `scratch/release-research.md`, `scratch/explore.html` (cleared; in git
 
 ## Build order (stacked on LOO-656's #1755, Jack Heart, 2026-10-28)
 
-Jack: "we can stack on the migrations branch if necessary." This branch sits on
-#1755's head; `lf sync` follows it through its squash merge. Each slice lands
-working and tested before the next starts.
+Jack: "we can stack on the migrations branch if necessary." #1755 merged before
+slice 1 landed; slice 2 onward sits on origin/main. Each slice lands working and
+tested before the next starts.
 
 1. **Minors from main — merged as #1763 (`efe7e9106`), 2026-10-28.** `release.rs` drops
    `MinorRelease`, the closing patch, `prepared_tree`, the minor-pair refusal
@@ -106,13 +106,7 @@ working and tested before the next starts.
    bases a minor's notes (and its no-changes check) on the previous `.0`.
    Compress folded `is_minor_version`/`minor_notes_base` into `notes_base` and
    inlined `release_run_inner` (one caller left).
-   Tests: `minor_release_cuts_from_main_past_the_last_patch` (main moved past
-   v0.9.1 with a migration file; prepare hook ran), `…right_after_a_patch…`,
-   `interrupted_minor_retries_without_a_patch`, `…ships_fixes_merged_with_its_pr`.
-   Docs: `release/README.md`, `release-run.md`, `release/unreleased/DECISIONS.md`.
-   Check (after compress): `cargo test -p loopflow --test release_tests` 71 pass
-   (`active_candidate_preparation…` needs >20s on a cold binary, passes warm);
-   `--lib ops::release::` 44 pass.
+   All #1763 CI checks passed; no live minor yet (v0.16.0 will be the first).
 2. **Streams as published pointers — built 2026-10-29.** `release_publish
    --finalize` passes `--latest=false`; `release_run` wraps `release_version`
    and, for `completion: github-release` targets, calls `advance_stable` after
@@ -128,9 +122,7 @@ working and tested before the next starts.
    Slice 3 adds the regression filter inside `stable_advance`.
    Compress: one `parse_version` now serves `bump_version`, `notes_base` and
    `published_releases`; the promote test split into success and tampered cases.
-   Check (after compress): `--lib ops::release::` 45 pass; `--test release_tests
-   daily_run_moves_stable minor notes` 22 pass; `pytest test_release_publisher.py
-   test_release_automation.py` 55 pass; clippy `--lib` clean.
+   Not yet published; full nextest and `clippy --all-targets` are left to gate/CI.
 3. **`regressed_in` Task field** and the stable rule reading it.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default
@@ -146,7 +138,7 @@ working and tested before the next starts.
 7. **Sparkle, one appcast per stream**, EdDSA key in Doppler, Developer ID
    signing of dev builds in CI; the delegate vetoes updates that fail `can_open`.
 
-Do not run a release while #1755 is unmerged.
+Check (slice 2, 2026-10-29): `--lib ops::release::` 45 pass, `release_tests daily_run_moves_stable minor notes` 22 pass, publisher/automation pytest 55 pass; clippy `--all-targets` and nextest deferred to gate/CI.
 
 ## Neighbouring Tasks
 
@@ -189,13 +181,19 @@ lands and nothing ties it to stable's lag:
   migration catalog next to `SHA256SUMS` per release and pointer; Desktop on
   every stream, including Developer ID signing of dev builds in CI (today
   `release-loopflow.py` signs from the local keychain); minors from main; notes and docs.
-- **Order**: LOO-656 (PR #1755) lands first. It already deletes
+- **Order**: LOO-656 (PR #1755) landed first. It deleted
   `canonicalize_migrations.py`, the prepare hook, BREAKING.md generation and
   release-run's inspect/repair loop (about 663 lines of `ops/release.rs`). LOO-669 redid
   only the minor-pairing removal on top (slice 1). An ordinary release must follow LOO-656's merge right away,
   so the bundled Desktop reader admits slug rows.
 
 ## Open
+
+- **v0.16.0 before or after slice 2 merges.** Released from today's main, v0.16.0
+  becomes Latest at once, so installs get the reader that admits #1755's slug rows
+  immediately. Released after slice 2, Latest stays on v0.15.x until v0.16.0 is
+  7 days old, and only dev/preview get it. Both are consistent with the design;
+  the choice is Jack's.
 
 - **Migration after a Sparkle update (LOO-669 builds this, on top of #1755).**
   The only code that migrates `~/.lf` is `SqliteStore::open_as_promotion_boundary`,

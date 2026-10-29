@@ -108,6 +108,11 @@ Graph correction exception in `run::resume` (a Graph continuing its own step's R
 it off `resume` needs a hidden command or in-process input capture, more machinery than the
 one-line ancestry check it replaces; it is invisible to people.
 
+Re-run after the unowned-unassign change: still no product choice open. No removed spelling
+(`session attach/connect`, `--takeover/--try/--if-free/--fresh`, `task hold/release/unclaim`,
+`Deferred` Task state) survives outside the parse-rejection test; the remaining "headless
+Session" text is a maintainer comment (`harness/claude.rs`).
+
 ## Remaining
 
 - Implementation notes (2026-10-29): "unassigned" = no owner in the ownership log

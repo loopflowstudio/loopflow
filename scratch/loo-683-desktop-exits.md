@@ -285,4 +285,11 @@ end, no 15-minute refusal, lifetime and vitals, the system record's own time) ar
 folded into the Rust approach above. The read-storm follow-up stays an exclusion;
 filing it is Jack's call (questions.md).
 
-Check (implement, 2026-10-29): `cargo test -p loopflow --lib desktop_exits::` 12 passed; fmt and clippy clean.
+A fourth headless pass (2026-10-29) checked the code against the design and found
+nothing to change. The journal has one exit line per launch, deduped by a single
+flag across quit, `atexit`, signals and exceptions. Doctor reads the system
+record's own time from `--style ndjson`. Store frontier is read when doctor runs
+(an assumption in questions.md). The design raises no open product choice. Filing
+the read-storm follow-up is a separate Task and doesn't block this one.
+
+Check (realign, 2026-10-29): `cargo test -p loopflow --lib desktop_exits::` 12 passed; fmt and `clippy --all-targets -D warnings` clean.

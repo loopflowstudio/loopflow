@@ -5,58 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LOO-683 concept review — Desktop exits</title>
 <style>
-  :root { --fg:#1d1d1f; --bg:#fbfbf9; --muted:#6b6b70; --rule:#e2e2dc; --code:#f1f0ea; --new:#2f6f3e; --old:#9a3b2f; }
-  @media (prefers-color-scheme: dark) {
-    :root { --fg:#e8e8e3; --bg:#17171a; --muted:#9a9aa2; --rule:#2c2c31; --code:#222227; --new:#7fc492; --old:#e08b7c; }
-  }
-  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Iowan Old Style", Georgia, serif; }
+  :root { --fg:#1d1d1f; --bg:#fbfbf9; --muted:#6b6b70; --rule:#e2e2dc; --code:#f1f0ea; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8e8e3; --bg:#17171a; --muted:#9a9aa2; --rule:#2c2c31; --code:#222227; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, Georgia, serif; }
   main { max-width: 44rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
   h1 { font-size: 1.6rem; line-height:1.25; margin:0 0 .4rem; }
-  h2 { font-size: 1.15rem; margin: 2.6rem 0 .6rem; }
+  h2 { font-size: 1.15rem; margin: 2.4rem 0 .6rem; }
   .meta { color: var(--muted); font-size: .9rem; }
   pre, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .84rem; }
-  pre { background: var(--code); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; white-space: pre; }
-  .was { border-left: 3px solid var(--old); }
-  .proposed { border-left: 3px solid var(--new); }
-  .tag { font-style: italic; color: var(--muted); }
+  pre { background: var(--code); padding: .9rem 1rem; border-radius: 6px; overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; font-size: .92rem; }
   td, th { text-align: left; vertical-align: top; padding: .45rem .5rem; border-bottom: 1px solid var(--rule); }
-  ol li { margin-bottom: .6rem; }
 </style>
 </head>
 <body>
 <main>
-<h1>Doctor should say when the system ended Desktop, not when its search stopped</h1>
-<p class="meta">LOO-683 · concept-review, third pass (headless) · 2026-10-29 · built from scratch/loo-683-desktop-exits.md, rust/loopflow/src/desktop_exits.rs, and a live <code>/usr/bin/log show</code> on Jack's Mac</p>
+<h1>No change: the code matches the model</h1>
+<p class="meta">LOO-683 · concept-review, fourth pass (headless) · 2026-10-29 · built from scratch/loo-683-desktop-exits.md, scratch/questions.md, rust/loopflow/src/desktop_exits.rs, swift/LoopflowMac/Services/LaunchJournal.swift</p>
 
-<p>Most of the model holds. The journal holds exit facts. <code>lf.log</code> holds diagnostics. <code>lf doctor</code> is the one reader. One mismatch remains, and it lands on the exit the live acceptance produces: a Force Quit, which nothing in the app can record.</p>
+<p>The third pass proposed giving each termination its own time. That shipped: doctor queries <code>log show --style ndjson</code> and prints the time runningboardd logged.</p>
 
-<h2>What Jack does</h2>
-<p>Force Quits Loopflow, relaunches it, and runs <code>lf doctor</code>.</p>
-
-<h2>What doctor prints</h2>
-<pre class="was">Loopflow 0.15.1 (pid 9446) was killed by SIGKILL (Force Quit, kill -9, or the system) before 09:16:00, 1h18m after launch; last vitals 09:10: 412 MB, 61 lf reads/5 min</pre>
-<p class="tag">Existing behavior: the time is the end of the search window, up to 6 minutes late, and the lifetime is measured to it.</p>
-
-<pre class="proposed">Loopflow 0.15.1 (pid 9446) was killed 09:14:02 by SIGKILL (Force Quit, kill -9, or the system), 1h12m after launch; last vitals 09:10: 412 MB, 61 lf reads/5 min</pre>
-<p class="tag">Proposed, and this is the Demo line already accepted.</p>
-
-<h2>Why it is available</h2>
-<pre>2026-10-29 07:27:25.606 Df runningboardd[401:bc6806b] … :52901] termination reported by launchd (0, 0, 256)</pre>
-<p>Doctor already reads this line. It parses the tuple and drops the timestamp. That time is local, with no offset, so the query should use <code>--style ndjson</code> or <code>--timezone UTC</code>.</p>
-
-<h2>Concepts → APIs</h2>
+<h2>What Jack does → what holds it → who reads it</h2>
 <table>
-<tr><th>Concept</th><th>Now</th><th>Proposed</th></tr>
-<tr><td>Termination</td><td>namespace, code, status</td><td>+ <code>at</code></td></tr>
-<tr><td>describe (unrecorded)</td><td><code>&lt;how&gt; before &lt;window end&gt;</code></td><td><code>&lt;how&gt; &lt;at&gt;</code>; window end only when the time does not parse</td></tr>
-<tr><td>lived</td><td>to the window end</td><td>to <code>at</code></td></tr>
+<tr><th>Action</th><th>Concept</th><th>API</th></tr>
+<tr><td>⌘Q, a quit from the Dock or AppleScript</td><td>exit <code>quit</code> + sender</td><td><code>LaunchJournal.recordExit</code> via willTerminate</td></tr>
+<tr><td>something calls <code>exit()</code></td><td>exit <code>exit</code> + caller</td><td><code>atexit</code> → <code>exitCaller</code>; stack to lf.log</td></tr>
+<tr><td>Force Quit / SIGKILL</td><td>no line; system record</td><td><code>lf doctor</code> → runningboardd tuple</td></tr>
+<tr><td>runs <code>lf doctor</code></td><td><code>desktop-exit</code> check</td><td><code>desktop_exits::report</code></td></tr>
 </table>
+
+<pre>⚠ desktop-exit  Loopflow 0.15.1 (pid 9446) was killed 09:14:02 by SIGKILL (Force Quit, kill -9, or the system), 1h12m after launch; last vitals 09:10: 412 MB, 61 lf reads/5 min
+                Loopflow 0.15.1 (pid 8811) quit 09:01:40: Quit requested by Dock (pid 612)</pre>
 
 <h2>Questions</h2>
 <ol>
-<li>No product choice is open in this pass. The change follows from the accepted Demo line.</li>
-<li>Still yours: should the read-storm feedback loop become its own Task? a) file it, b) leave it.</li>
+<li>No product choice is open in this Task.</li>
+<li>Still yours, separately: should the read-storm feedback loop become its own Task? a) file it, b) leave it.</li>
 </ol>
 </main>
 </body>

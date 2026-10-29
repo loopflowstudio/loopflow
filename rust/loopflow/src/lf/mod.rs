@@ -2566,7 +2566,17 @@ pub enum WtCommand {
         json: bool,
     },
     /// Prune worktrees, completed build output, or finished branches
+    #[command(
+        after_help = "Removes checkouts whose PR merged or closed, whose Task finished, or that \
+                      have no Task or PR and sat untouched for a week, and names why each other \
+                      checkout is kept. Changes under scratch/ and .lf/ never keep a checkout. \
+                      Unpushed commits and source changes are saved under \
+                      refs/lf/pruned/<branch>/ before removal."
+    )]
     Prune {
+        /// Remove every checkout no unfinished Task or running process holds
+        #[arg(long, conflicts_with_all = ["builds", "branches"])]
+        all: bool,
         /// Show what would be pruned without removing anything
         #[arg(long)]
         dry_run: bool,
@@ -2577,8 +2587,8 @@ pub enum WtCommand {
         /// finished Tasks, or published release candidates
         #[arg(long, conflicts_with = "builds")]
         branches: bool,
-        /// Emit cleanup entries and allocated-byte receipts
-        #[arg(long, requires = "builds")]
+        /// Emit every checkout's verdict, or build cleanup receipts
+        #[arg(long, conflicts_with = "branches")]
         json: bool,
         /// Keep output modified within this many hours
         #[arg(long, requires = "builds", default_value_t = 24)]

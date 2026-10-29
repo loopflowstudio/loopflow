@@ -518,9 +518,14 @@ impl World {
         Ok(task)
     }
 
-    /// Defer a Task the way `lf task defer` does.
-    pub fn defer(&self, task: &Task) -> Result<()> {
-        Ok(crate::ops::task::task_defer(&task.identifier, true)?)
+    /// Unassign a Task the way `lf task unassign` does.
+    pub fn unassign(&self, task: &Task) -> Result<()> {
+        crate::ops::task_ownership::change(
+            &self.repo,
+            &task.identifier,
+            crate::ops::task_ownership::OwnershipChange::Unassign,
+        )?;
+        Ok(())
     }
 
     /// Abandon a Task the way `lf task abandon` does, removing its checkout.
@@ -804,8 +809,8 @@ impl World {
                 &store,
                 &self.repo,
                 Some(wave),
-                false,
-            ))?;
+            ))?
+            .0;
         let session = self
             .runtime
             .block_on(store.session(record.id.as_str()))?

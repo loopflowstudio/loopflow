@@ -19,7 +19,7 @@
   "task": {
     "actions": {
       "reason": "run the next work with `lf task run`; inspect earlier Graphs and independent Sessions first",
-      "recommended": "resume"
+      "recommended": "run"
     },
     "condition": {
       "evidence_age_secs": 0,

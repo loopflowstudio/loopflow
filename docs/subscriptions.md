@@ -349,16 +349,16 @@ the mode it was launched with.
 Codex's own conversation ID works wherever a Session ID does:
 
 ```bash
-lf session connect 0199a213-81c0-7800-8aa1-bbab2a035a53   # the ID `codex resume` takes
+lf resume 0199a213-81c0-7800-8aa1-bbab2a035a53           # the ID `codex resume` takes
 lf session history 0199a213-81c0-7800-8aa1-bbab2a035a53
 ```
 
-Connecting to a conversation plain Codex started brings it in as a Session with
+Resuming a conversation plain Codex started brings it in as a Session with
 no Task. Normal batch completion and closing the current connected interface
 close its Codex process, leaving saved history available to plain `codex resume`.
-`lf session connect` takes over a running conversation without restarting it;
+`lf resume` takes over a running conversation without restarting it;
 the old attachment's exit cannot close the new owner's Codex process. Codex allows one
-writer per conversation, so use `lf session connect` while it is still running.
+writer per conversation, so use `lf resume` while it is still running.
 
 `lf account route --json` reports `isolated` and `active_account` per provider.
 

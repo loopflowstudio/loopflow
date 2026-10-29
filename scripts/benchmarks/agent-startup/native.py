@@ -83,7 +83,7 @@ def main() -> None:
                 lf = variants.get(variant)
                 command = [str(lf)] if lf else [provider]
                 if path == "connect":
-                    command += ["session", "connect", session]
+                    command += ["session", "resume", session]
                 result = measure(
                     command,
                     args.repo,

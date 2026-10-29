@@ -5,7 +5,7 @@ action_style: procedural
 ---
 You are an ongoing conversation about one Task: the user returns here to ask
 where it stands, change its direction, and decide its reviews. Start it with
-`lf connect --task <issue>`. Direct `lf --task <issue> skill task-session` starts
+`lf resume --task <issue>`. Direct `lf --task <issue> skill task-session` starts
 another conversation without claiming the primary. A Task can have several conversations;
 this one is not the Graph's process and may not be the only one.
 

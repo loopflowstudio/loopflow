@@ -227,7 +227,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskComplete(directory: String, issue: String)
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
-    case taskDefer(directory: String, issue: String, deferred: Bool)
     case taskNotes(directory: String, issue: String, notes: String)
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
@@ -253,7 +252,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskComplete(_, let issue): ["task", "complete", issue]
         case .taskReopen(_, let issue): ["task", "reopen", issue]
         case .taskAbandon(_, let issue): ["task", "abandon", issue]
-        case .taskDefer(_, let issue, let deferred): ["task", deferred ? "defer" : "resume", issue]
         case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)"]
         case .taskMove(_, let issue, let wave):
             ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
@@ -306,8 +304,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task_reopen", ["directory": directory, "issue": issue])
         case .taskAbandon(let directory, let issue):
             TaggedFields("task_abandon", ["directory": directory, "issue": issue])
-        case .taskDefer(let directory, let issue, let deferred):
-            TaggedFields("task_defer", ["directory": directory, "issue": issue, "deferred": deferred])
         case .taskNotes(let directory, let issue, let notes):
             TaggedFields("task_notes", ["directory": directory, "issue": issue, "notes": notes])
         case .taskMove(let directory, let issue, let wave):
@@ -796,8 +792,9 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    public func deferTask(issue: String, deferred: Bool, cwd: String?) async throws {
-        _ = try await write(.taskDefer(directory: cwd ?? "/", issue: issue, deferred: deferred))
+    /// `lf task claim` or `lf task unassign`.
+    public func assignTask(issue: String, claimed: Bool, cwd: String?) async throws {
+        _ = try await run(["task", claimed ? "claim" : "unassign", issue], cwd)
     }
 
     public func completeTask(issue: String, cwd: String?) async throws {
@@ -865,7 +862,7 @@ public struct RegistryQuery: Sendable {
 
     /// The repository or Wave's retained conversation; explicit opening only.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
-        var args = ["session", "connect", "--prepare", "--json"]
+        var args = ["session", "resume", "--prepare", "--json"]
         if wave == nil { args = ["--repo", cwd] + args }
         if let wave { args += ["--wave", wave] }
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
@@ -876,25 +873,18 @@ public struct RegistryQuery: Sendable {
     /// choice is remembered as the Task's primary. External ownership is returned
     /// as a Move here action without transferring control.
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json", "--try"], cwd)
+        let stdout = try await run(["session", "resume", "--task", issue, "--prepare", "--json"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Reattach only; neither preparation nor the returned command can resume execution.
-    /// Nil when nothing is running to attach to.
-    public func prepareSessionAttachment(id: String, cwd: String? = nil) async throws -> SessionRecord? {
-        try Self.decode(SessionRecord?.self, from: await run(
-            ["session", "attach", id, "--if-free", "--prepare", "--json"], cwd))
-    }
-
-    /// Prepare one Session’s terminal command without starting its provider.
+    /// Prepare one Session’s terminal command without starting its provider. The
+    /// command takes the conversation over from whatever holds it.
     public func prepareSession(
         id: String,
-        takeover: Bool = false,
         agent: String? = nil,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        let args = ["session", "connect", id, "--prepare", "--json", takeover ? "--takeover" : "--try"]
+        let args = ["session", "resume", id, "--prepare", "--json"]
             + (agent.map { ["--agent", $0] } ?? [])
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
@@ -911,18 +901,10 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Replace the primary conversation with fresh Work context; retain its history.
+    /// Restart the conversation on a fresh provider thread seeded with what the
+    /// last thread knew; the same Session keeps its history.
     public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?) async throws -> SessionRecord {
-        var args = ["session", "connect", "--fresh", "--prepare", "--json"]
-        if session.taskPrimary, session.taskIds.count == 1, let task = session.taskIds.first {
-            args += ["--task", task]
-        } else if session.primaryScope == "wave", let wave = session.waveId {
-            args += ["--wave", wave]
-        } else if session.primaryScope == "repository" {
-            args = ["--repo", session.cwd] + args
-        } else {
-            throw RegistryQueryError("Session is not a primary conversation.")
-        }
+        var args = ["session", "new", session.id, "--prepare", "--json"]
         if let agent { args += ["--agent", agent] }
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }

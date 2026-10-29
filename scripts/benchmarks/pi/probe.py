@@ -240,7 +240,7 @@ def _scenario(fixture: Fixture, mode: str) -> dict:
     first = (
         ["-i", ":", "FIRST_INPUT 雪"]
         if native
-        else ["-b", "connect", "--fresh", "--message", "FIRST_INPUT 雪"]
+        else ["-b", "resume", "--message", "FIRST_INPUT 雪"]
     )
     if mode in ("overflow", "threshold"):
         first[-1] += " prior context 雪" * 2000
@@ -306,7 +306,7 @@ def _steer_scenario(fixture: Fixture) -> dict:
     binary = fixture.binary
     model.hold = True
     process = subprocess.Popen(
-        [str(binary), "-b", "connect", "--fresh", "--message", "FIRST_INPUT"],
+        [str(binary), "-b", "resume", "--message", "FIRST_INPUT"],
         cwd=fixture.repo,
         env=fixture.env,
         stdin=subprocess.DEVNULL,
@@ -374,7 +374,7 @@ def _tools_scenario(fixture: Fixture) -> dict:
         args = (
             ["-b", "resume", session, "--message", "RUN_TOOL"]
             if session
-            else ["-b", "connect", "--fresh", "--message", "RUN_TOOL"]
+            else ["-b", "resume", "--message", "RUN_TOOL"]
         )
         fixture.run(args)
         session, _ = fixture.identity()
@@ -477,7 +477,7 @@ def _crash_scenario(fixture: Fixture, *, native: bool = False) -> dict:
         f"mv {shlex.quote(str(ready))}.tmp {shlex.quote(str(ready))}; wait"
     )
     args = (
-        ["-i", ":", "RUN_TOOL"] if native else ["-b", "connect", "--fresh", "--message", "RUN_TOOL"]
+        ["-i", ":", "RUN_TOOL"] if native else ["-b", "resume", "--message", "RUN_TOOL"]
     )
     process = subprocess.Popen(
         [str(fixture.binary), *args],

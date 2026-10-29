@@ -35,7 +35,7 @@ def measure(
     env["GIT_TRACE2_EVENT"] = str(output / "git.private")
     command = [str(shim / "lf")]
     if session:
-        command.extend(["session", "connect", session])
+        command.extend(["session", "resume", session])
     start = time.monotonic()
     with (output / "stderr.private").open("wb") as error:
         child = subprocess.Popen(

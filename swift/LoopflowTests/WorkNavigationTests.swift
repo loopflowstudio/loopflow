@@ -212,7 +212,7 @@ struct WorkNavigationTests {
 
     @Test("A Wave row counts its working and autonomous Tasks, not backlog or done")
     func waveRowCountsStartedTasks() throws {
-        let model = try dashboardModel()
+        let model = try dashboardModel(claimed: true)
         // wave-1: shipping issue-now counts; unstarted, never-started and completed Tasks don't.
         #expect(model.startedTaskCount(try #require(model.visibleRoadmaps.first { $0.wave.id == "wave-1" })) == 1)
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
@@ -224,7 +224,7 @@ struct WorkNavigationTests {
           arguments: [ColorScheme.light, .dark])
     func autonomousSectionListsShippingTasks(scheme: ColorScheme) throws {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
-        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        model.applyFixture(roadmap: .available(try claimedRoadmap()), waves: .available([]), workActivity: .loading, repos: [])
         // Rust's Working Tasks leave shipping issue-now out; the board's Autonomous rule finds it.
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
             members: [fixtureViewContent(work: .init(repository: "repo", kind: .task, id: "issue-review"), title: "issue-review")])],
@@ -368,8 +368,8 @@ struct WorkNavigationTests {
         let key = WorkWorkspaceKey(repository: "repo", kind: .repository, id: "repo")
         let entry = registry.open(key, title: "Repository", location: record.workspace?.identity)
         let store = entry.sessionStore(repoPath: "/src/loopflow", query: RegistryQuery { args, _ in
-            // Gate the conversation's preparation; showing it then attaches at once.
-            if args.contains("--prepare"), !args.contains("attach") { await gate.wait() }
+            // Gate the repository conversation's preparation; showing it then attaches at once.
+            if args.first == "--repo" { await gate.wait() }
             return json
         })
         let first = Task { await entry.openPrimaryConversation(store: store, registry: registry) }
@@ -1080,9 +1080,9 @@ struct WorkNavigationTests {
         return WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
     }
     /// Working Tasks [review, now]; wave-1 [now]; Dashboard "Review" [now, later, review] and wave-1.
-    private func dashboardModel() throws -> WorkModel {
+    private func dashboardModel(claimed: Bool = false) throws -> WorkModel {
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Viewing must not execute") }, repoPath: "/src/loopflow")
-        model.applyFixture(roadmap: .available(try roadmap()), waves: .available([]), workActivity: .loading, repos: [])
+        model.applyFixture(roadmap: .available(try claimed ? claimedRoadmap() : roadmap()), waves: .available([]), workActivity: .loading, repos: [])
         model.bindWorkspaces(SessionsWorkspaceRegistry(localMachineId: fixtureMachineId), repository: "repo")
         func content(_ kind: WorkWorkspaceKey.Kind, _ id: String) -> WorkViewPlan.Content {
             fixtureViewContent(work: .init(repository: "repo", kind: kind, id: id), title: id)
@@ -1109,6 +1109,20 @@ struct WorkNavigationTests {
     private func roadmap() throws -> RoadmapSnapshot {
         try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
     }
+    /// The fixture with shipping issue-now claimed, as `lf ship` leaves it; unowned Tasks are backlog.
+    private func claimedRoadmap() throws -> RoadmapSnapshot {
+        var planning = try #require(JSONSerialization.jsonObject(with: Data(roadmapJSON().utf8)) as? [String: Any])
+        var inventory = try #require(planning["tasks"] as? [String: Any])
+        var tasks = try #require(inventory["items"] as? [[String: Any]])
+        let index = try #require(tasks.firstIndex { ($0["task"] as? [String: Any])?["id"] as? String == "issue-now" })
+        var runtime = try #require(tasks[index]["runtime"] as? [String: Any])
+        runtime["owner"] = ["person": "Jack Heart", "person_key": "jack@loopflow.studio",
+                            "machine": ["id": "home_7a3f0c2e9b1d4e5f8a6b0c1d2e3f4a5b", "label": "mini"]]
+        tasks[index]["runtime"] = runtime
+        inventory["items"] = tasks
+        planning["tasks"] = inventory
+        return try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: planning))
+    }
     private func roadmapJSON() throws -> String {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -1130,7 +1144,7 @@ struct WorkNavigationTests {
          "workspace":{"machine_id":"local","worktree":"/src/loopflow","task_id":\(taskJSON),"unavailable":null},
          "detail":"codex","cwd":"/src/loopflow","state":"\(state.rawValue)",
          "wave_id":\(waveJSON),"work_path":null,"actions":\(sessionActionFixtureJSON(state: state.rawValue)),
-         "ready_summary":null,"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","connect","\(id)"]}
+         "ready_summary":null,"title_source":"generated","task_primary":false, "graph_membership":{"kind":"independent"},"task_ids": \(taskIdsJSON), "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids":[],"open_argv":["lf","session","resume","\(id)"]}
         """.utf8))
     }
 }

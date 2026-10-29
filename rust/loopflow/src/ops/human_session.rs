@@ -1,7 +1,7 @@
 pub(crate) use primary::admit_workspace;
-mod connection;
-pub(crate) use connection::explain_connect;
-pub use connection::{SessionConnectAction, SessionConnectExplanation, SessionConnectIntent};
+mod resume_explanation;
+pub(crate) use resume_explanation::explain_resume;
+pub use resume_explanation::{SessionResumeAction, SessionResumeExplanation, SessionResumeIntent};
 
 mod workspace;
 pub use workspace::SessionWorkspace;
@@ -41,33 +41,6 @@ const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) enum HumanSessionToken {
     /// A conversation; no caller or Graph waits on it.
     Primary { id: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OpenMode {
-    Refuse,
-    Takeover,
-    Try,
-}
-
-impl OpenMode {
-    pub(crate) fn from_flags(takeover: bool, try_open: bool) -> Self {
-        if takeover {
-            Self::Takeover
-        } else if try_open {
-            Self::Try
-        } else {
-            Self::Refuse
-        }
-    }
-
-    fn require_action(self, state: SessionState) -> Result<()> {
-        if self == Self::Refuse {
-            require_session_action(state, SessionActionKind::Open)?;
-        }
-        Ok(())
-    }
 }
 
 /// An exact conversation or the scope whose primary conversation should open.
@@ -141,8 +114,8 @@ pub(super) async fn checkout_conversation(
 
 pub(super) fn unassociated_checkout(cwd: &Path) -> Result<anyhow::Error> {
     let path = crate::repository::CanonicalRepo::discover(cwd)?.to_string();
-    let command = shlex::try_join(["lf", "--repo", path.as_str(), "connect"])?;
-    Ok(anyhow!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  {command}  Open the repository's ongoing conversation\n  lf connect SESSION         Continue a particular conversation"))
+    let command = shlex::try_join(["lf", "--repo", path.as_str(), "resume"])?;
+    Ok(anyhow!("This worktree has no associated work conversation.\n  lf                         Start a new conversation in this worktree\n  {command}  Open the repository's ongoing conversation\n  lf resume SESSION          Continue a particular conversation"))
 }
 
 /// The scope that owns this checkout, or `None` for an unassociated linked one.
@@ -209,35 +182,39 @@ pub(super) async fn checkout_scope(
     Ok(None)
 }
 
+/// The conversation `lf resume` selected, and whether selecting it started one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Selected {
+    pub id: String,
+    pub started: bool,
+}
+
 pub(crate) async fn select_connection(
     store: &SharedStore,
     cwd: &Path,
     target: SessionTarget<'_>,
-    fresh: bool,
-) -> Result<String> {
+) -> Result<Selected> {
     use crate::session::PrimaryScope;
     let target = resolve_target(store, target).await?;
+    let existing = |id: String| Selected { id, started: false };
     if let SessionTarget::Session(id) = target {
-        return Ok(id.to_owned());
+        return Ok(existing(id.to_owned()));
     }
     let Some(scope) = checkout_scope(store, cwd, target).await? else {
-        if !fresh {
-            if let Some(id) = checkout_conversation(store, cwd).await? {
-                return Ok(id);
-            }
+        if let Some(id) = checkout_conversation(store, cwd).await? {
+            return Ok(existing(id));
         }
         return Err(unassociated_checkout(cwd)?);
     };
-    let session = match scope {
-        PrimaryScope::Repository(repo) => {
-            primary::ensure(store, repo.as_path(), None, fresh).await?
-        }
-        PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str()), fresh).await?,
-        PrimaryScope::Task(task) => {
-            primary::ensure_task(store, cwd, task.as_str(), fresh, None).await?
-        }
+    let (session, started) = match scope {
+        PrimaryScope::Repository(repo) => primary::ensure(store, repo.as_path(), None).await?,
+        PrimaryScope::Wave(wave) => primary::ensure(store, cwd, Some(wave.as_str())).await?,
+        PrimaryScope::Task(task) => primary::ensure_task(store, cwd, task.as_str(), None).await?,
     };
-    Ok(session.id.into())
+    Ok(Selected {
+        id: session.id.into(),
+        started,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -266,8 +243,12 @@ pub struct SessionAction {
     pub unavailable_reason: Option<String>,
 }
 
-pub(crate) fn session_actions(state: SessionState) -> Vec<SessionAction> {
+/// A Run opens nowhere: `lf resume` takes only Sessions.
+pub(crate) fn session_actions(state: SessionState, interactive: bool) -> Vec<SessionAction> {
     use SessionActionKind::{MoveHere, Open};
+    if !interactive {
+        return Vec::new();
+    }
     let active_client = state == SessionState::Active;
     let (label, help) = match state {
         SessionState::Detached => ("Reconnect", "Show the running Session in this terminal"),
@@ -297,17 +278,6 @@ pub(crate) fn session_actions(state: SessionState) -> Vec<SessionAction> {
             unavailable_reason: reason.map(str::to_string),
         })
         .collect()
-}
-
-fn require_session_action(state: SessionState, action: SessionActionKind) -> Result<()> {
-    let projected = session_actions(state)
-        .into_iter()
-        .find(|item| item.kind == action)
-        .ok_or_else(|| anyhow!("This action does not apply to this Session"))?;
-    if let Some(reason) = projected.unavailable_reason {
-        bail!("{reason}");
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -559,8 +529,8 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         },
     };
     let state = session_state(session);
-    let mut actions = session_actions(state);
-    let open_argv = match human_session_argv(&session.id, "connect") {
+    let mut actions = session_actions(state, session.interactive);
+    let open_argv = match human_session_argv(&session.id) {
         Ok(argv) => argv,
         Err(error) => {
             let reason = format!("Session connection unavailable: {error}");
@@ -740,10 +710,14 @@ pub(crate) fn prepared_artifact_key() -> Result<Option<String>> {
     )?))
 }
 
+/// Get back to a Session. Whatever holds it gives it up: a terminal showing
+/// it hands over control, a provider client lf started stops. With `fork`,
+/// the holder keeps it and a new Session continues from its log. A Run is
+/// refused; it is never taken over or resumed.
 pub(crate) async fn open(
     store: &SharedStore,
     session_id: &str,
-    mode: OpenMode,
+    fork: bool,
     resume: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
@@ -756,30 +730,28 @@ pub(crate) async fn open(
             .ok_or_else(|| session_not_found(session_id))?,
     };
     let session = &target;
+    if let Some(refusal) = run_refusal(&store.sqlite, session)? {
+        bail!(refusal);
+    }
+    if fork {
+        drop(progress);
+        return self::fork(store, session, resume).await;
+    }
     let provider_session = match session.artifact_key.as_deref() {
         Some(key) => store.sqlite.input_provider_session(key)?,
         None => None,
     };
-    if provider_session.is_some() {
-        if let Some(provider) = session.provider.as_deref() {
-            if let crate::config::Resume::Import { agent } = crate::config::resume_choice(
-                provider,
-                session.model.as_deref(),
-                crate::config::agent_override().as_deref(),
-            ) {
-                if !resume {
-                    conversation_log::read(&store.sqlite, session)?;
-                } else {
-                    mode.require_action(surface(store, session).await?.state)?;
-                    drop(progress);
-                    import(store, &session.id, &agent).await?;
-                    let session = store
-                        .session(&session.id)
-                        .await?
-                        .ok_or_else(|| session_not_found(&session.id))?;
-                    return surface(store, &session).await;
-                }
-            }
+    if let Some(agent) = provider_session.as_ref().and(handoff_agent(session)) {
+        if !resume {
+            conversation_log::read(&store.sqlite, session)?;
+        } else {
+            drop(progress);
+            new_thread(store, &session.id, Some(&agent), true).await?;
+            let session = store
+                .session(&session.id)
+                .await?
+                .ok_or_else(|| session_not_found(&session.id))?;
+            return surface(store, &session).await;
         }
     }
     let admitted;
@@ -847,7 +819,12 @@ pub(crate) async fn open(
                                 .as_deref(),
                         )?;
                     }
-                    crate::transport::attach(&owner, false, true)?;
+                    let moved = crate::lf::commands::util::departure_notice(
+                        &store.sqlite,
+                        &session.id,
+                        departure_here(),
+                    )?;
+                    crate::transport::attach(&owner, Some(moved))?;
                     return surface(store, session).await;
                 }
             }
@@ -865,7 +842,6 @@ pub(crate) async fn open(
     let native = NativeSession::of(session)?;
     if resume {
         crate::lf::commands::util::require_provider_session_process(&native.dir)?;
-        transition_headless_to_native(store, session, provider_session.as_ref()).await?;
     }
     let Some(provider_session) = provider_session else {
         let surface = surface(store, session).await?;
@@ -874,100 +850,113 @@ pub(crate) async fn open(
         }
         return Ok(surface);
     };
-    if resume && mode == OpenMode::Takeover {
-        crate::harness::agent_process::stop_session_agent(
-            &store.sqlite,
-            &session.id,
-            crate::process::Departure::Terminal,
-        )?;
-    }
-    let mut result = surface(store, session).await?;
+    let result = surface(store, session).await?;
     if resume {
-        mode.require_action(result.state)?;
-        crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
-    } else {
-        match mode {
-            OpenMode::Takeover => result.open_argv.push("--takeover".to_string()),
-            OpenMode::Try => result.open_argv.push("--try".to_string()),
-            OpenMode::Refuse => {}
+        if running()? {
+            crate::harness::agent_process::stop_session_agent(
+                &store.sqlite,
+                &session.id,
+                departure_here(),
+            )?;
+            eprintln!(
+                "Stopped the {} client that had this conversation; continuing here.",
+                session.provider.as_deref().unwrap_or("provider")
+            );
         }
+        crate::lf::commands::util::resume_session(session.input_key()?, &provider_session)?;
     }
     Ok(result)
 }
 
-/// Explicit resume retires a structured Run before opening its native history.
-/// Require native identity before stopping useful work; viewer attachment never enters here.
-async fn transition_headless_to_native(
-    store: &SharedStore,
-    session: &LfSession,
-    provider: Option<&crate::session_record::ProviderSessionRef>,
-) -> Result<()> {
-    let Some(expected) = store.sqlite.session_attachment(&session.id)? else {
-        return Ok(());
+/// A new conversation in the same Work, seeded with `source`'s log. The
+/// source and whatever holds it are left alone.
+async fn fork(store: &SharedStore, source: &LfSession, launch: bool) -> Result<SessionRecord> {
+    let request = conversation_log::continuation(&store.sqlite, source)?;
+    let (provider, model) = match crate::config::agent_override() {
+        Some(agent) => {
+            let (provider, model) = crate::config::parse_agent(&agent);
+            (Some(provider), model)
+        }
+        None => (source.provider.clone(), source.model.clone()),
     };
-    let Some(agent) = store
-        .sqlite
-        .agent_processes()?
-        .into_iter()
-        .find(|agent| agent.process.id == expected.agent_process_id)
-    else {
-        return Ok(());
-    };
-    if agent.interactive || agent.process.completed_at.is_some() {
-        return Ok(());
-    }
-    // A private server can die before creating a native conversation. Retire
-    // its stale attachment so the prepared input can start normally.
-    if crate::journal::process_evidence(&store.sqlite, &agent.process.id)
-        == crate::journal::ProcessIdentityEvidence::Dead
-    {
-        anyhow::ensure!(
-            store.sqlite.settle_agent_process(&agent, || {
-                if crate::journal::process_evidence(&store.sqlite, &agent.process.id)
-                    != crate::journal::ProcessIdentityEvidence::Dead
-                {
-                    return Err(crate::store::StoreError::InvalidAuthority(
-                        "AgentProcess death changed".into(),
-                    ));
-                }
-                Ok(())
-            })?,
-            "Session attachment changed before observing death"
-        );
-        return Ok(());
-    }
-    let provider = provider.ok_or_else(|| {
-        anyhow!(
-            "Native conversation identity is unavailable; cannot stop and resume this headless run"
-        )
-    })?;
-    if let Some(thread) = store.sqlite.session_thread(&session.id)? {
-        anyhow::ensure!(
-            thread == provider.agent_session,
-            "Recorded conversation differs from the headless conversation"
-        );
-    }
-    let process = crate::journal::current_lf_process_id()
-        .ok_or_else(|| anyhow!("Connecting requires the current lf Process"))?;
-    let sqlite = store.sqlite.clone();
-    let id = session.id.clone();
-    tokio::task::spawn_blocking(move || {
-        let attachment = sqlite.claim_session_attachment(&id, Some(&expected), &process, false)?;
-        sqlite.finish_session_attachment(&id, &attachment, "interrupted", None, || {
-            if !crate::harness::agent_process::close_session_agent_process(&sqlite, &id)? {
-                return Err(crate::store::StoreError::InvalidAuthority(
-                    "Headless AgentProcess identity is unavailable".into(),
-                ));
-            }
-            Ok(true)
+    let next = store
+        .create_session(LfSession {
+            id: uuid::Uuid::new_v4().simple().to_string().into(),
+            captured: None,
+            artifact_key: Some(crate::session_record::new_artifact_key()),
+            caller_artifact_key: None,
+            input_published: false,
+            skill: None,
+            provider,
+            model,
+            node: None,
+            iterations: None,
+            graph_lf_process_id: None,
+            interactive: true,
+            title: format!("{} (fork)", source.title),
+            title_source: crate::session::TitleSource::Generated,
+            request: Some(request),
+            ready_summary: None,
+            completed_at: None,
+            created_at: crate::store::rows::now_unix(),
+            ..source.clone()
         })
-    })
-    .await??;
+        .await?;
+    let next = publish_prepared_input(
+        &store.sqlite,
+        &next,
+        crate::session_record::SessionGraphMembership::Independent,
+    )?;
     eprintln!(
-        "Stopped headless {}; resuming the same native conversation (not live takeover).",
-        session.provider.as_deref().unwrap_or("provider")
+        "Forked {} into {}; the original keeps running.",
+        source.id, next.id
     );
-    Ok(())
+    let record = surface(store, &next).await?;
+    if launch {
+        let id = next.id.to_string();
+        let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
+        serve_locked(store, &next, launch_lock).await?;
+    }
+    Ok(record)
+}
+
+/// Why `lf resume` refuses a Run (a headless conversation, alone or a Graph
+/// step), running or finished: it takes only Sessions. None for a Session.
+pub(crate) fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<String>> {
+    if session.interactive {
+        return Ok(None);
+    }
+    let summary = store
+        .session_summary(&session.id, crate::store::rows::now_unix())?
+        .ok_or_else(|| session_not_found(&session.id))?;
+    let running = summary.completed_at.is_none()
+        && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
+    let mut what: Vec<&str> = Vec::new();
+    what.extend(summary.task_identifier.as_deref());
+    what.extend(summary.graph.as_ref().map(|graph| graph.name.as_str()));
+    what.extend(summary.skill.as_deref());
+    what.push(if running { "running" } else { "finished" });
+    let pointer = match &summary.task_identifier {
+        Some(task) => format!("`lf resume --task {task}` opens its Task's Session"),
+        None => "`lf resume` opens this checkout's Session".to_string(),
+    };
+    Ok(Some(format!(
+        "{} is a Run ({}); `lf resume` takes only Sessions. {pointer}.",
+        session.id,
+        what.join(" · ")
+    )))
+}
+
+/// The terminal this process runs in, named for the one a move leaves.
+fn departure_here() -> crate::process::Departure {
+    let to = if crate::session_record::current_terminal_id().is_some() {
+        Some("Desktop".to_string())
+    } else if let Some(placement) = crate::lf::commands::open::host_placement() {
+        Some(placement.replacen(':', " ", 1))
+    } else {
+        crate::session_record::stdin_tty().map(|tty| tty.trim_start_matches("/dev/").to_string())
+    };
+    crate::process::Departure::Terminal { to }
 }
 
 /// Open a conversation: resume its native history, else
@@ -1018,9 +1007,29 @@ async fn open_waiting(store: &SharedStore, id: &str) -> Result<()> {
     .await
 }
 
-/// Continue a conversation on another provider. The Session keeps its name,
-/// Work and feedback; a fresh AgentSession starts from a log of the current one.
-async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
+/// The other harness the invocation selected for a recorded conversation; it
+/// starts a new thread from the log rather than resuming native history.
+pub(super) fn handoff_agent(session: &LfSession) -> Option<String> {
+    match crate::config::resume_choice(
+        session.provider.as_deref()?,
+        session.model.as_deref(),
+        crate::config::agent_override().as_deref(),
+    ) {
+        crate::config::Resume::Import { agent } => Some(agent),
+        crate::config::Resume::Native(_) => None,
+    }
+}
+
+/// Start a fresh provider thread on the same Session, on `agent` or its
+/// current provider, seeded with a log of the current thread. The Session
+/// keeps its name, Work and feedback; the old thread stays in its history.
+/// Without `launch`, the new input waits for its first open.
+pub(crate) async fn new_thread(
+    store: &SharedStore,
+    id: &str,
+    agent: Option<&str>,
+    launch: bool,
+) -> Result<LfSession> {
     let lock_id = id.to_string();
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
     let session = store
@@ -1028,22 +1037,36 @@ async fn import(store: &SharedStore, id: &str, agent: &str) -> Result<()> {
         .await?
         .ok_or_else(|| session_not_found(id))?;
     let session = primary::admit_workspace(store, session).await?;
+    let from = session.provider.clone().unwrap_or_default();
+    if let Some(refusal) = run_refusal(&store.sqlite, &session)? {
+        bail!(refusal);
+    }
     let request = conversation_log::continuation(&store.sqlite, &session)?;
     crate::harness::agent_process::stop_session_agent(
         &store.sqlite,
         &session.id,
-        crate::process::Departure::Terminal,
+        departure_here(),
     )?;
     let mut next = session;
-    let (provider, model) = crate::config::parse_agent(agent);
-    next.provider = Some(provider);
-    next.model = model;
+    if let Some(agent) = agent {
+        let (provider, model) = crate::config::parse_agent(agent);
+        next.provider = Some(provider);
+        next.model = model;
+    }
     // The skill ran in the earlier conversation and is in its log. The
     // continuation is stored so a relaunch after a failed start still carries it.
     next.skill = None;
     next.request = Some(request);
     let next = append_input(store, next).await?;
-    serve_locked(store, &next, launch_lock).await
+    eprintln!(
+        "Started a new {} thread for {}, seeded with what the {from} thread knew.",
+        next.provider.as_deref().unwrap_or("provider"),
+        next.title
+    );
+    if launch {
+        serve_locked(store, &next, launch_lock).await?;
+    }
+    Ok(next)
 }
 
 /// Append a fresh, published input to the Session; earlier inputs stay in its history.
@@ -1065,31 +1088,6 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).context("resolve prepared Session input"),
     }
-}
-
-/// Read an existing execution without preparing input or resuming provider history.
-/// None when nothing is running to attach to; only an explicit resume reopens history.
-pub(crate) async fn prepare_attachment(
-    store: &SharedStore,
-    session: &LfSession,
-    observe: bool,
-    if_free: bool,
-) -> Result<Option<SessionRecord>> {
-    let Some(owner) = store.sqlite.session_transport(&session.id)? else {
-        return Ok(None);
-    };
-    if !owner_running(&store.sqlite, &owner)? {
-        return Ok(None);
-    }
-    let mut record = surface(store, session).await?;
-    record.open_argv = human_session_argv(&session.id, "attach")?;
-    if observe {
-        record.open_argv.push("--observe".into());
-    }
-    if if_free {
-        record.open_argv.push("--if-free".into());
-    }
-    Ok(Some(record))
 }
 
 /// An execution owner runs until it records its exit or the OS shows it gone,
@@ -1117,8 +1115,8 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         )?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
-    let actions = session_actions(state);
-    let open_argv = human_session_argv(&session.id, "connect")?;
+    let actions = session_actions(state, session.interactive);
+    let open_argv = human_session_argv(&session.id)?;
     let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
         (None, _) if metadata.independent => SessionGraphMembership::Independent,
         (None, _) => SessionGraphMembership::Unknown {
@@ -1401,7 +1399,7 @@ pub(crate) fn resume_native_session(
     crate::harness::agent_process::stop_session_agent(
         &store.sqlite,
         &session.id,
-        crate::process::Departure::Terminal,
+        departure_here(),
     )?;
     let environment =
         BTreeMap::from([(HUMAN_SESSION_ENV.to_string(), serde_json::to_string(token)?)]);
@@ -1415,7 +1413,8 @@ pub(crate) fn resume_native_session(
     Ok(true)
 }
 
-pub(crate) fn human_session_argv(id: &str, command: &str) -> Result<Vec<String>> {
+/// The `lf session resume` command that opens this Session in a new terminal.
+pub(crate) fn human_session_argv(id: &str) -> Result<Vec<String>> {
     let context = crate::os_process::execution_context()?;
     // A fresh terminal does not inherit the listing process's data selection.
     // Carry its Machine and stable entry so opening picks up the current install.
@@ -1425,7 +1424,7 @@ pub(crate) fn human_session_argv(id: &str, command: &str) -> Result<Vec<String>>
         format!("LF_HOME={}", context.lf_home.display()),
         context.lf_bin.display().to_string(),
         "session".to_string(),
-        command.to_string(),
+        "resume".to_string(),
         id.to_string(),
     ])
 }

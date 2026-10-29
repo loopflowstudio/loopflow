@@ -399,7 +399,7 @@ fn worktree_prune_requires_terminal_evidence_at_the_current_head() {
     assert!(fresh.exists());
     let again = run_lf(&repo, &gh, &["wt", "prune"]);
     assert!(again.status.success());
-    assert!(String::from_utf8_lossy(&again.stdout).contains("No prunable worktrees"));
+    assert!(String::from_utf8_lossy(&again.stdout).contains("0 removed,"));
 }
 
 #[test]

@@ -84,7 +84,7 @@ impl Fixture {
     fn start(&self, argv: &[&str]) -> String {
         self.owner(self.serve(true, argv))
     }
-    /// A Session row naming `owner`, so the public attach command resolves it.
+    /// A Session row naming `owner`, so `lf session resume` attaches to it.
     fn session(&self, owner: &str) -> String {
         let session = "session_5e55105e000040008000000000000001";
         let sql = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
@@ -131,6 +131,12 @@ impl Fixture {
         ))
     }
     fn viewer(&self, id: &str, control: bool) -> Viewer {
+        self.attach(
+            id,
+            json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}),
+        )
+    }
+    fn attach(&self, id: &str, request: Value) -> Viewer {
         let socket = UnixStream::connect(self.endpoint(id)).unwrap_or_else(|e| {
             panic!(
                 "{}: {e}; home {}",
@@ -145,7 +151,7 @@ impl Fixture {
             socket: BufReader::new(socket),
             token: None,
         };
-        viewer.send(json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}));
+        viewer.send(request);
         let attached = viewer.read();
         assert_eq!(attached["kind"], "attached");
         viewer.token = attached["token"].as_str().map(str::to_owned);
@@ -319,21 +325,22 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     let pid = fixture.wait_file("pid");
     assert_eq!(fixture.wait_file("job"), "detached");
     let mut first = fixture.viewer(&owner, true);
-    let second = fixture.viewer(&owner, true);
-    first.input("stale\n");
+    let second = fixture.attach(
+        &owner,
+        json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80,
+            "moved":"This conversation moved to tmux %4: lf resume s1"}),
+    );
+    // The replaced viewer is told where the conversation went, then let go.
+    let moved = read_until(&mut first, "moved");
+    assert_eq!(
+        moved.last().unwrap()["notice"],
+        "This conversation moved to tmux %4: lf resume s1"
+    );
+    let mut rest = String::new();
+    assert_eq!(first.socket.read_line(&mut rest).unwrap(), 0);
     let mut observer = fixture.viewer(&owner, false);
     assert!(observer.token.is_none());
     observer.send(json!({"kind":"input","token":second.token,"bytes":b"passive\n"}));
-    let old = first.token.clone();
-    first.send(json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80}));
-    let claimed = loop {
-        let frame = first.read();
-        if frame["kind"] == "attached" {
-            break frame;
-        }
-    };
-    assert_ne!(claimed["token"].as_str(), old.as_deref());
-    first.input("stale-after-reclaim\n");
     drop(observer);
     drop(first);
     drop(second); // zero viewers while the same read remains pending
@@ -483,7 +490,7 @@ fn pipe_eof_delivers_all_input_before_the_command_exits() {
     let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", "cat; printf final >&2"]));
     let session = fixture.session(&owner);
     let mut viewer = fixture
-        .command(&["session", "attach", &session])
+        .command(&["session", "resume", &session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -577,7 +584,7 @@ enum SilentOwner {
 }
 
 #[test]
-fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
+fn acknowledged_viewer_remains_attached_past_handshake_deadline() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(
         false,
@@ -589,12 +596,9 @@ fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
     ));
     let session = fixture.session(&owner);
     let mut viewers = Vec::new();
-    for observe in [false, true] {
-        let mut command = fixture.command(&["session", "attach", &session]);
-        if observe {
-            command.arg("--observe");
-        }
-        let mut viewer = command
+    {
+        let mut viewer = fixture
+            .command(&["session", "resume", &session])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -610,8 +614,8 @@ fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
         assert_eq!(&ready, b"ready");
         viewers.push(viewer);
     }
-    // Both the controller and a nonterminal observer (no input token) have
-    // acknowledged. Only the handshake is bounded, not their connection.
+    // The controller has acknowledged. Only the handshake is bounded, not
+    // its connection.
     std::thread::sleep(Duration::from_secs(6));
     for viewer in &mut viewers {
         assert!(viewer.try_wait().unwrap().is_none());
@@ -651,7 +655,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     let listener = UnixListener::bind(&endpoint).unwrap();
     listener.set_nonblocking(true).unwrap();
     let mut viewer = fixture
-        .command(&["session", "attach", session])
+        .command(&["session", "resume", session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -777,27 +781,15 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
         .unwrap();
     let attachment: (String, String) = sql.query_row("SELECT id,attachment_token FROM processes WHERE agent_session_id=?1 AND kind='agent' AND completed_at IS NULL", [&session], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     let prepared = fixture
-        .command(&[
-            "session",
-            "attach",
-            &session,
-            "--if-free",
-            "--prepare",
-            "--json",
-        ])
+        .command(&["session", "resume", &session, "--prepare", "--json"])
         .output()
         .unwrap();
     assert!(prepared.status.success(), "{prepared:?}");
     let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
     let argv = prepared["open_argv"].as_array().unwrap();
     assert_eq!(
-        &argv[argv.len() - 4..],
-        &[
-            json!("session"),
-            json!("attach"),
-            json!(session),
-            json!("--if-free")
-        ]
+        &argv[argv.len() - 3..],
+        &[json!("session"), json!("resume"), json!(session)]
     );
     assert_eq!(fixture.wait_file("launches"), launched);
     let first = fixture.viewer(&owner, true);
@@ -815,7 +807,7 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     assert!(!fixture.home.path().join("answer").exists());
     // The public Session operation resolves exactly the same retained owner.
     let mut replacement = fixture
-        .command(&["session", "attach", &session])
+        .command(&["session", "resume", &session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1109,7 +1101,7 @@ fn detached_sessions_end_after_their_limit() {
     // `lf resume` reopens the ended conversation from its saved history.
     let mut reopen = fixture.serve(
         true,
-        &[env!("CARGO_BIN_EXE_lf"), "session", "connect", &idle],
+        &[env!("CARGO_BIN_EXE_lf"), "session", "resume", &idle],
     );
     reopen.env("PATH", &path);
     let reopened = fixture.owner(reopen);
@@ -1395,7 +1387,7 @@ fn headless_graph_settles_its_original_step_after_creator_teardown() {
 }
 
 #[test]
-fn explicit_native_resume_interrupts_original_graph_without_replay() {
+fn resume_refuses_a_graph_step_and_leaves_it_running() {
     headless_graph(true);
 }
 
@@ -1443,39 +1435,16 @@ fn headless_graph(resume: bool) {
         .unwrap();
     assert!(outcome.is_none(), "viewer death settled the execution");
     if resume {
-        // Replace only the next native executable, leaving the running server intact.
-        std::fs::copy(&provider, bin.join("opencode-server.py")).unwrap();
-        std::fs::write(
-            &provider,
-            "#!/bin/sh\nif [ \"$1\" = serve ]; then exec python3 \"$(dirname \"$0\")/opencode-server.py\" \"$@\"; fi\nprintf '%s\\n' \"$@\" > \"$HOME/resumed-args\"\n",
-        )
-        .unwrap();
-        let output = fixture
-            .command(&["connect", &session, "--try"])
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    bin.display(),
-                    std::env::var("PATH").unwrap_or_default()
-                ),
-            )
-            .output()
-            .unwrap();
+        // A Run is never resumed or taken over: the step keeps its turn.
+        let output = fixture.command(&["resume", &session]).output().unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
         assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
+            error.contains("is a Run (proof · probe · running)"),
+            "{error}"
         );
-        let args = fixture.wait_file("resumed-args");
-        assert!(args.contains("--session\n"), "{args}");
-        assert!(
-            !args.contains("Do the fixture work."),
-            "input replayed: {args}"
-        );
-    } else {
-        std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
     }
+    std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let outcome: Option<String> = sql
@@ -1484,7 +1453,7 @@ fn headless_graph(resume: bool) {
             })
             .unwrap();
         if let Some(outcome) = outcome {
-            assert_eq!(outcome, if resume { "failed" } else { "succeeded" });
+            assert_eq!(outcome, "succeeded");
             break;
         }
         assert!(Instant::now() < deadline, "step did not settle");
@@ -1504,31 +1473,11 @@ fn headless_graph(resume: bool) {
             })
             .unwrap();
         if let Some(outcome) = outcome {
-            assert_eq!(outcome, if resume { "failed" } else { "succeeded" });
+            assert_eq!(outcome, "succeeded");
             break;
         }
         assert!(Instant::now() < deadline, "Graph did not settle");
         std::thread::sleep(Duration::from_millis(20));
-    }
-    if resume {
-        let step_code: i32 = sql
-            .query_row(
-                "SELECT exit_code FROM processes WHERE id=?1",
-                [&step],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let graph_code: i32 = sql
-            .query_row(
-                "SELECT exit_code FROM processes WHERE id=?1",
-                [&graph],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(step_code, 130);
-        assert_eq!(graph_code, 3, "held Graph must not request a retry");
-        let interrupted: i64 = sql.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%' AND payload LIKE '%interrupted%'", [&session], |r| r.get(0)).unwrap();
-        assert_eq!(interrupted, 1);
     }
     let captures: i64 = sql
         .query_row(

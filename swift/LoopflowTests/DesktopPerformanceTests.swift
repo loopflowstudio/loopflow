@@ -1462,7 +1462,7 @@ actor SnapshotReads {
         defer { active -= 1 }
         do {
             let verb = args.prefix(2).joined(separator: " ")
-            if let fixture, verb == "session connect" || verb == "session attach" || verb == "machine id"
+            if let fixture, verb == "session resume" || verb == "machine id"
                 || args.contains(fixture.issue) || args.contains(fixture.taskId) {
                 return .success(try await fixture.read(args))
             }

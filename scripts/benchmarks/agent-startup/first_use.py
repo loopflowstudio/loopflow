@@ -80,7 +80,7 @@ def main() -> None:
                     lf, home, args.repo, args.output / f"prepare-{i}-{variant}", args.provider
                 )
             result = measure(
-                [str(lf), "session", "connect", session],
+                [str(lf), "session", "resume", session],
                 args.repo,
                 build_environment(home, lf),
                 args.output / f"connect-{i}-{variant}",

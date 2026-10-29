@@ -225,7 +225,7 @@ fn same_named_repositories_need_a_qualifier_and_change_nothing() {
 }
 
 #[test]
-fn cmux_opens_the_task_conversation_through_session_connect() {
+fn cmux_opens_the_task_conversation_through_session_resume() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
@@ -258,7 +258,7 @@ fn cmux_opens_the_task_conversation_through_session_connect() {
         "{call}"
     );
     assert!(
-        call.contains(" session connect --task INF-123 --focus true"),
+        call.contains(" session resume --task INF-123 --focus true"),
         "{call}"
     );
     assert!(!call.contains("--fresh"), "{call}");
@@ -302,7 +302,7 @@ fn herdr_types_connect_into_a_newly_created_pane() {
     );
     assert!(calls[1].starts_with("pane run w9:p1 "), "{calls:?}");
     assert!(
-        calls[1].ends_with(" session connect --task INF-123"),
+        calls[1].ends_with(" session resume --task INF-123"),
         "{calls:?}"
     );
 }
@@ -334,7 +334,7 @@ fn tmux_opens_a_named_window_after_the_callers() {
         "{call}"
     );
     assert!(
-        call.trim_end().ends_with(" session connect --task INF-123"),
+        call.trim_end().ends_with(" session resume --task INF-123"),
         "{call}"
     );
 }
@@ -614,7 +614,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
     assert_eq!(side["label"], "Side question");
     assert_eq!(
         side["fallback_argv"],
-        serde_json::json!(["lf", "session", "connect", secondary])
+        serde_json::json!(["lf", "session", "resume", secondary])
     );
 
     let log = host(bin.path(), "cmux", "OK workspace:1", 0);
@@ -908,14 +908,14 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
         home.path(),
         repo.path(),
         None,
-        &["session", "connect", "INF-123", "--prepare", "--json"],
+        &["session", "resume", "INF-123", "--prepare", "--json"],
     ));
     assert_eq!(opened["id"], primary.as_str());
     let missing = lf(
         home.path(),
         repo.path(),
         None,
-        &["session", "connect", "NOPE-185", "--prepare"],
+        &["session", "resume", "NOPE-185", "--prepare"],
     );
     assert!(!missing.status.success());
     assert!(String::from_utf8_lossy(&missing.stderr).contains("Session NOPE-185 was not found"));

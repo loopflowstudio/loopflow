@@ -116,7 +116,7 @@ pub(super) fn owners_in(
 
 /// Who holds a Task after an entry, with the Machine label as written.
 fn holder_after(entry: &TaskOwnershipEntry) -> Option<TaskOwner> {
-    (entry.kind != OwnershipKind::Unclaim).then(|| entry.owner())
+    (entry.kind != OwnershipKind::Unassign).then(|| entry.owner())
 }
 
 /// This Machine's reading of the ordered log.
@@ -143,7 +143,7 @@ fn read_log(rows: &[Row], local: &MachineId) -> Reading {
         } else if row.written_here
             && matches!(
                 row.entry.kind,
-                OwnershipKind::Unclaim | OwnershipKind::Handoff
+                OwnershipKind::Unassign | OwnershipKind::Handoff
             )
         {
             local_claim = None;
@@ -345,20 +345,19 @@ fn require_writer_in(conn: &Connection, task: &TaskId) -> StoreResult<MachineId>
 }
 
 /// Handoff and unclaim end your own claim; someone else's stays theirs.
-fn require_my_claim_in(conn: &Connection, task: &TaskId) -> StoreResult<(MachineId, TaskOwner)> {
+/// `None` when nobody owns the Task.
+fn my_claim_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<(MachineId, TaskOwner)>> {
     let local = require_writer_in(conn, task)?;
     let (_, reading) = reading_in(conn, task)?;
     match reading.owner {
-        None => Err(StoreError::InvalidAuthority(format!(
-            "Task {task} is unowned"
-        ))),
+        None => Ok(None),
         Some(holder) if !is_mine_in(conn, task, &holder)? => {
             Err(StoreError::InvalidAuthority(format!(
                 "Task {task} is claimed by {}; claim it to take it over",
                 holder.person.as_deref().unwrap_or("someone else")
             )))
         }
-        Some(holder) => Ok((local, holder)),
+        Some(holder) => Ok(Some((local, holder))),
     }
 }
 
@@ -378,7 +377,7 @@ fn describe(entry: &TaskOwnershipEntry) -> String {
     match entry.kind {
         OwnershipKind::Claim => format!("{who} claimed this on {place}"),
         OwnershipKind::Handoff => format!("{who} handed this off to {place}"),
-        OwnershipKind::Unclaim => format!("{who} unclaimed this on {place}"),
+        OwnershipKind::Unassign => format!("{who} unassigned this on {place}"),
         OwnershipKind::Recorded => format!("{who} was recorded on {place}"),
     }
 }
@@ -480,7 +479,7 @@ fn append_in(
                     super::task_state_delivery::queue_in(conn, task, "started")?;
                 }
             }
-            OwnershipKind::Unclaim => {
+            OwnershipKind::Unassign => {
                 super::planning_changes::PlanningChanges::Task(task)
                     .save(conn, &[crate::work::edit::WorkValue::TaskAssignee(None)])?;
             }
@@ -595,7 +594,7 @@ fn notify_superseded_in(
     };
     let text = format!(
         "Also claimed later by {later}. {owner} still owns this Task on this Machine and \
-         nothing was cancelled. Keep going, or run `lf task unclaim` or \
+         nothing was cancelled. Keep going, or run `lf task unassign` or \
          `lf task move <task> --machine <machine>` to end this claim."
     );
     let steer = super::steers::save_in(
@@ -698,7 +697,11 @@ impl SqliteStore {
     ) -> StoreResult<TaskOwnershipEntry> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (local, holder) = require_my_claim_in(&tx, task)?;
+        let Some((local, holder)) = my_claim_in(&tx, task)? else {
+            return Err(StoreError::InvalidAuthority(format!(
+                "Task {task} is unowned"
+            )));
+        };
         if *target == local {
             return Err(StoreError::InvalidData(format!(
                 "Task {task} is already owned on this Machine"
@@ -729,18 +732,25 @@ impl SqliteStore {
         Ok(inserted)
     }
 
-    pub fn unclaim_task(&self, task: &TaskId) -> StoreResult<TaskOwnershipEntry> {
+    /// End your claim. An unowned Task is already unclaimed and writes nothing.
+    pub fn unassign_task(&self, task: &TaskId) -> StoreResult<Option<TaskOwnershipEntry>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let (local, holder) = require_my_claim_in(&tx, task)?;
+        let Some((local, holder)) = my_claim_in(&tx, task)? else {
+            return Ok(None);
+        };
         let key = my_key_in(&tx, task)?.or(holder.person_key);
-        let entry = append_in(&tx, task, OwnershipKind::Unclaim, person()?, key, &local)?;
+        let entry = append_in(&tx, task, OwnershipKind::Unassign, person()?, key, &local)?;
         tx.commit()?;
-        Ok(entry)
+        Ok(Some(entry))
     }
 
-    /// Queue the claiming person as Linear assignee unless Linear already shows it.
-    pub(crate) fn assign_task_owner(&self, task: &TaskId, assignee: &str) -> StoreResult<()> {
+    /// Queue the claiming person, or nobody, as Linear assignee unless Linear already shows it.
+    pub(crate) fn assign_task_owner(
+        &self,
+        task: &TaskId,
+        assignee: Option<&str>,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current: Option<String> = tx.query_row(
@@ -748,12 +758,12 @@ impl SqliteStore {
             [task.as_str()],
             |row| row.get(0),
         )?;
-        if current.as_deref() != Some(assignee) {
+        if current.as_deref() != assignee {
             super::planning_changes::PlanningChanges::Task(task).save(
                 &tx,
-                &[crate::work::edit::WorkValue::TaskAssignee(Some(
-                    assignee.into(),
-                ))],
+                &[crate::work::edit::WorkValue::TaskAssignee(
+                    assignee.map(str::to_owned),
+                )],
             )?;
         }
         tx.commit()?;
@@ -851,14 +861,14 @@ mod tests {
         let (laptop, mini) = (MachineId::new(), MachineId::new());
         let mut rows = vec![
             row(OwnershipKind::Claim, "Jack", &laptop, true),
-            row(OwnershipKind::Unclaim, "Kim", &mini, false),
+            row(OwnershipKind::Unassign, "Kim", &mini, false),
         ];
         let reading = read_log(&rows, &laptop);
         assert_eq!(reading.owner, holder("Jack", &laptop));
         assert!(reading.reassert);
         rows.push(row(OwnershipKind::Handoff, "Jack", &mini, true));
         assert_eq!(read_log(&rows, &laptop).owner, holder("Jack", &mini));
-        rows.push(row(OwnershipKind::Unclaim, "Jack", &mini, false));
+        rows.push(row(OwnershipKind::Unassign, "Jack", &mini, false));
         assert_eq!(read_log(&rows, &laptop).owner, None);
     }
 
@@ -901,6 +911,13 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn unassigning_an_unowned_task_writes_nothing() {
+        let (_dir, store, task) = store_with_unowned_task();
+        assert_eq!(store.unassign_task(&task).unwrap(), None);
+        assert!(store.task_ownership(&task).unwrap().log.is_empty());
     }
 
     #[test]

@@ -411,7 +411,6 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         Write::TaskComplete { .. }
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }
-        | Write::TaskDefer { .. }
         | Write::TaskNotes { .. }
         | Write::TaskMove { .. }
         | Write::TaskSave { .. }
@@ -430,16 +429,6 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Write::TileMove { .. }
         | Write::PaneLayout { .. } => (
             [
-                Write::TaskDefer {
-                    directory: directory.clone(),
-                    issue: "INF-123".into(),
-                    deferred: true,
-                },
-                Write::TaskDefer {
-                    directory: directory.clone(),
-                    issue: "INF-123".into(),
-                    deferred: false,
-                },
                 Write::TaskNotes {
                     directory: directory.clone(),
                     issue: "INF-123".into(),

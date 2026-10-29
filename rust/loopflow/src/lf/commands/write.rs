@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lf::{Cli, Commands};
 use crate::ops::task::{
-    task_complete, task_defer, task_edit, task_move_membership, task_reopen, task_repository,
+    task_complete, task_edit, task_move_membership, task_reopen, task_repository,
     task_save,
 };
 use crate::work::task::TaskUpdate;
@@ -31,12 +31,6 @@ pub enum Write {
     TaskComplete { directory: PathBuf, issue: String },
     /// `lf task reopen <issue>`.
     TaskReopen { directory: PathBuf, issue: String },
-    /// `lf task defer <issue>`, or `lf task resume <issue>` when not `deferred`.
-    TaskDefer {
-        directory: PathBuf,
-        issue: String,
-        deferred: bool,
-    },
     /// `lf task edit <issue> --notes=<notes>`.
     TaskNotes {
         directory: PathBuf,
@@ -156,9 +150,6 @@ impl Write {
             Self::TaskComplete { issue, .. } => vec!["task", "complete", issue],
             Self::TaskReopen { issue, .. } => vec!["task", "reopen", issue],
             Self::TaskAbandon { issue, .. } => vec!["task", "abandon", issue],
-            Self::TaskDefer {
-                issue, deferred, ..
-            } => vec!["task", if *deferred { "defer" } else { "resume" }, issue],
             Self::TaskNotes { issue, notes, .. } => {
                 notes_flag = format!("--notes={notes}");
                 vec!["task", "edit", issue, &notes_flag]
@@ -285,7 +276,6 @@ impl Write {
             Self::TaskComplete { directory, .. }
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
-            | Self::TaskDefer { directory, .. }
             | Self::TaskNotes { directory, .. }
             | Self::TaskMove { directory, .. }
             | Self::TaskSave { directory, .. }
@@ -314,7 +304,6 @@ impl Write {
             Self::TaskComplete { issue, .. }
             | Self::TaskReopen { issue, .. }
             | Self::TaskAbandon { issue, .. }
-            | Self::TaskDefer { issue, .. }
             | Self::TaskNotes { issue, .. }
             | Self::TaskMove { issue, .. }
             | Self::TaskSave { issue, .. } => Ok(task_repository(directory, Some(issue))?),
@@ -355,13 +344,6 @@ impl Write {
             Self::TaskAbandon { issue, .. } => {
                 let identifier = crate::ops::task::task_abandon(repo, Some(issue), false)?;
                 format!("{identifier}: canceled; PRs and branches removed\n")
-            }
-            Self::TaskDefer {
-                issue, deferred, ..
-            } => {
-                task_defer(issue, *deferred)?;
-                let state = if *deferred { "deferred" } else { "resumed" };
-                format!("{issue}: {state}; execution unchanged\n")
             }
             Self::TaskNotes { issue, notes, .. } => {
                 let update = TaskUpdate {
@@ -458,10 +440,6 @@ mod tests {
             ["--cwd", "/r", "task", "move", "FIX-1", "--no-wave"]
         );
         assert_eq!(
-            write(r#"{"write":"task_defer","directory":"/r","issue":"FIX-1","deferred":false}"#),
-            ["--cwd", "/r", "task", "resume", "FIX-1"]
-        );
-        assert_eq!(
             write(
                 r#"{"write":"dashboard_pin","directory":"/r","id":"picked","pinned":false,"revision":3}"#
             ),
@@ -517,11 +495,6 @@ mod tests {
             Write::TaskReopen {
                 directory: directory.clone(),
                 issue: "FIX-1".into(),
-            },
-            Write::TaskDefer {
-                directory: directory.clone(),
-                issue: "FIX-1".into(),
-                deferred: false,
             },
             Write::TaskNotes {
                 directory: directory.clone(),

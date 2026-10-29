@@ -628,10 +628,14 @@ struct SessionItem: Identifiable, Equatable {
 
     mutating func adoptPreparation(_ record: SessionRecord, intent: Preparation) {
         self.record = record
-        // A prepared attachment can join a free viewer even while the provider
-        // is active. Only an explicit move may displace an existing viewer.
+        // Showing a pane reattaches only a conversation no terminal shows; an
+        // active one waits for Move here, an ended one for an explicit open.
         if intent == .attach {
-            state = .prepared
+            state = switch record.state {
+            case .detached: .prepared
+            case .active: .elsewhere
+            case .closed, .unknown: .pending
+            }
         } else if record.openArgv.isEmpty {
             // Nothing to start: retained work attaches when shown.
             state = record.action(.open)?.unavailableReason.map(State.failed) ?? .pending
@@ -644,8 +648,9 @@ struct SessionItem: Identifiable, Equatable {
     }
 }
 
-/// What a pane asked lf to prepare. Attaching never starts a provider; opening
-/// is `lf resume`, which attaches when it can and otherwise reopens history.
+/// What a pane asked for. Every preparation is `lf resume --prepare`; attaching
+/// launches it only for a detached conversation, so showing a pane never starts
+/// a provider or displaces another terminal.
 enum Preparation {
     case attach, open, moveHere
 }
@@ -759,19 +764,12 @@ final class SessionsStore {
             }
             let stage = intent == .attach ? "attach_prepare" : "connect_prepare"
             Perf.agentInput("\(stage)_begin", session: id)
-            let surface: SessionRecord? = try await intent == .attach
-                ? executionQuery.prepareSessionAttachment(id: id, cwd: repoPath)
-                : executionQuery.prepareSession(id: id, takeover: replacing, cwd: repoPath)
+            let surface = try await executionQuery.prepareSession(id: id, cwd: repoPath)
             try Task.checkCancellation()
             Perf.agentInput("\(stage)_returned", session: id)
             guard let latest = _index(id) else { return }
             if case .opening = sessions[latest].state {
-                if let surface {
-                    sessions[latest].adoptPreparation(surface, intent: intent)
-                } else {
-                    sessions[latest].state = sessions[latest].record.action(.moveHere) != nil
-                        ? .elsewhere : .pending
-                }
+                sessions[latest].adoptPreparation(surface, intent: intent)
             }
         } catch {
             guard let latest = _index(id) else { return }
@@ -817,7 +815,7 @@ final class SessionsStore {
         // Preparation checks the requested provider's continuation before releasing
         // the retained terminal. Failed reads leave current drafts and updates intact.
         let prepared = try await query(for: previous.record).prepareSession(
-            id: id, takeover: true, agent: agent, cwd: repoPath)
+            id: id, agent: agent, cwd: repoPath)
         if let reason = prepared.action(.moveHere)?.unavailableReason {
             throw RegistryQueryError(reason)
         }
@@ -832,13 +830,16 @@ final class SessionsStore {
 
     func reset(_ id: String) async throws -> SessionRecord {
         guard let index = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
-        let previous = sessions[index].record
-        let successor = try await query(for: previous).resetSession(
-            previous, agent: previous.provider, cwd: repoPath)
-        if let location = executionLocations[id] { retainLocation(location, for: successor) }
-        reconcile([successor])
-        adoptPreparation(successor)
-        return successor
+        let previous = sessions[index]
+        // The same Session continues on a new thread; its old terminal ends.
+        let restarted = try await query(for: previous.record).resetSession(
+            previous.record, agent: previous.record.provider, cwd: repoPath)
+        guard let current = _index(id) else { throw RegistryQueryError("Session is unavailable.") }
+        if let terminal = localTerminal(for: previous.record) { surfaces.release(terminal) }
+        sessions[current].record = restarted
+        sessions[current].launchId = UUID()
+        sessions[current].state = .prepared
+        return restarted
     }
 
     func beginPaneLoad(_ id: String) {

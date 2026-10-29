@@ -122,8 +122,9 @@ fn admit(
         } else {
             let request = request.map(str::to_owned);
             Some(
-                primary::ensure_task(&store, repo, &task.identifier, false, request)
+                primary::ensure_task(&store, repo, &task.identifier, request)
                     .await?
+                    .0
                     .id,
             )
         };

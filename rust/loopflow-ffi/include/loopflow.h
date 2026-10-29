@@ -7,7 +7,7 @@
 // changed, and the app calls `lf_pull` on its own queue, which reads there and
 // returns the frame line that command would print next, or nothing. A burst of
 // changes coalesces into one frame. `lf_write` takes a JSON `Write`
-// (`{"write":"task_defer","directory":"/repo","issue":"FIX-1","deferred":true}`)
+// (`{"write":"task_complete","directory":"/repo","issue":"FIX-1"}`)
 // and makes it as `lf <write>` would, recording a Process for a Work change.
 // The library opens only the store `lf` prepared; it never creates or migrates one.
 #ifndef LOOPFLOW_H

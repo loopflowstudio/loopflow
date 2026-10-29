@@ -31,3 +31,11 @@
 **Decision:** Jack Heart chose stream flags (LOO-669): `lf install --dev|--preview|--stable` switches the Machine's stream and records it in `~/.lf/config.yaml`; `lf install` with no flag, the install schedule and `install.sh` follow it, `stable` by default. `--main` became `--dev`. `install.sh --channel stable|preview` does the same for a fresh install. A release whose reader catalog cannot open the store is skipped, not forced.
 
 **Implications:** Switching to a slower stream after a newer lf migrated the store keeps the current lf until the slower stream catches up; no command deletes or downgrades the store.
+
+## 2026-10-29 — One lf per Mac, updating itself
+
+**Context:** Desktop and the installed `lf` could run different builds, and a Machine updated only when someone ran `lf install` or opted into a weekly schedule.
+
+**Decision:** Jack Heart chose one linked `lf` and automatic updates (LOO-669). With Loopflow.app installed, `~/.lf/bin`'s copy no longer fronts the terminal: `~/.local/bin/lf` links to the app's bundled `lf`. Every install schedules `lf install` daily on the recorded stream (launchd on a Mac, cron elsewhere), keeping a cadence someone already chose. `lf install` asks a running app that updates itself to install the update instead of replacing its bundle; with the app closed, it replaces the bundle and migrates the store.
+
+**Implications:** `lf install --dev` and `LF_INSTALL_CLI_ONLY=1` still link the CLI alone until dev packages include a signed app.

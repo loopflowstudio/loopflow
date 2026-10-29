@@ -11,6 +11,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
+use clap::ValueEnum;
+
 use crate::lf::InstallFrequency;
 
 const REPOSITORY: &str = "loopflowstudio/loopflow";
@@ -99,9 +101,7 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
 
 fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
     let directory = install_dir()?;
-    let applications = std::env::var_os("LF_APPLICATIONS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Applications"));
+    let applications = applications_dir();
     let cli_only = std::env::var("LF_INSTALL_CLI_ONLY").as_deref() == Ok("1");
     let stream = stream.as_str();
     if is_current(
@@ -167,6 +167,38 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
         directory.join("lf").display()
     );
     Ok(())
+}
+
+/// Record the installed Loopflow.app, which updated itself in place (Sparkle), as
+/// this Machine's install: migrate the store and link `lf` into it, moving no
+/// files. The app's first launch runs this through its own bundled `lf`.
+pub fn adopt() -> Result<()> {
+    let current = fs::canonicalize(std::env::current_exe()?)?;
+    let app = applications_dir().join("Loopflow.app");
+    if fs::canonicalize(app.join("Contents/MacOS/lf")).ok() != Some(current.clone()) {
+        println!(
+            "{} is not {}'s lf; nothing to adopt",
+            current.display(),
+            app.display()
+        );
+        return Ok(());
+    }
+    super::promote(
+        super::PromotionArtifacts {
+            cli_target: &install_dir()?.join("lf"),
+            app_source: Some(&app),
+            app_target: Some(&app),
+            legacy_app_target: None,
+        },
+        true,
+        false,
+    )
+}
+
+fn applications_dir() -> PathBuf {
+    std::env::var_os("LF_APPLICATIONS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/Applications"))
 }
 
 /// The newest published release in the GitHub releases list, which is newest first.
@@ -287,7 +319,7 @@ fn main_build() -> Result<()> {
         "main: {revision}\ninstalled: {}",
         directory.join("lf").display()
     );
-    Ok(())
+    schedule(None)
 }
 
 /// The package name CI gives this platform's `lf`.
@@ -477,17 +509,59 @@ fn run_verified_installer(
     Ok(())
 }
 
-pub fn schedule(frequency: InstallFrequency) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        bail!("automatic installation currently uses macOS launchd; run `lf install` to update manually");
-    }
+/// Run `lf install` on the recorded stream on a schedule: `frequency`, else the
+/// installed schedule's own, else daily. Every install sets it, so a Machine
+/// updates itself without being asked.
+pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     let home = dirs::home_dir().context("cannot determine the installation home")?;
+    // launchd and cron schedule for the whole account; a disposable HOME
+    // (release smoke tests) must not replace the account's job.
+    if home != crate::installation::account_home()? {
+        println!(
+            "Not scheduling installation: HOME {} is not this account's home",
+            home.display()
+        );
+        return Ok(());
+    }
     let binary = install_dir()?.join("lf");
     let logs = crate::store::lf_home_dir().join("logs");
-    let path = home.join("Library/LaunchAgents/com.loopflow.refresh.plist");
     fs::create_dir_all(&logs)?;
+    if cfg!(target_os = "macos") {
+        launchd_schedule(&home, &binary, &logs, frequency)
+    } else {
+        cron_schedule(&home, &binary, &logs, frequency)
+    }
+}
+
+fn cadence(frequency: InstallFrequency) -> &'static str {
+    match frequency {
+        InstallFrequency::Weekly => "weekly (Monday at 09:00 local time)",
+        InstallFrequency::Daily => "daily (09:00 local time)",
+        InstallFrequency::Hourly => "hourly",
+        InstallFrequency::FiveMinutes => "every five minutes",
+    }
+}
+
+fn launchd_schedule(
+    home: &Path,
+    binary: &Path,
+    logs: &Path,
+    frequency: Option<InstallFrequency>,
+) -> Result<()> {
+    let path = home.join("Library/LaunchAgents/com.loopflow.refresh.plist");
     fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;
-    let payload = schedule_plist(&home, &binary, &logs, frequency);
+    let current = fs::read_to_string(&path).ok();
+    let frequency = frequency
+        .or_else(|| {
+            InstallFrequency::value_variants()
+                .iter()
+                .copied()
+                .find(|frequency| {
+                    current.as_deref() == Some(&schedule_plist(home, binary, logs, *frequency))
+                })
+        })
+        .unwrap_or(InstallFrequency::Daily);
+    let payload = schedule_plist(home, binary, logs, frequency);
     let uid = Command::new("id")
         .arg("-u")
         .output()
@@ -502,7 +576,7 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
         .output()?
         .status
         .success();
-    if loaded && fs::read_to_string(&path).is_ok_and(|current| current == payload) {
+    if loaded && current.as_deref() == Some(payload.as_str()) {
         println!("Installation already scheduled: {}", path.display());
         return Ok(());
     }
@@ -523,18 +597,98 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
     {
         bail!("could not load the installation schedule; rerun `lf install schedule`");
     }
-    let cadence = match frequency {
-        InstallFrequency::Weekly => "weekly (Monday at 09:00 local time)",
-        InstallFrequency::Daily => "daily (09:00 local time)",
-        InstallFrequency::Hourly => "hourly",
-        InstallFrequency::FiveMinutes => "every five minutes",
-    };
     println!(
-        "Installation scheduled at login and {cadence}: {}; logs: {}",
+        "Installation scheduled at login and {}: {}; logs: {}",
+        cadence(frequency),
         path.display(),
         logs.join("refresh.log").display()
     );
     Ok(())
+}
+
+/// Marks the one crontab line `lf install schedule` owns.
+const CRON_MARKER: &str = "# loopflow install schedule";
+
+fn cron_schedule(
+    home: &Path,
+    binary: &Path,
+    logs: &Path,
+    frequency: Option<InstallFrequency>,
+) -> Result<()> {
+    let listed = Command::new("crontab").arg("-l").output().context(
+        "automatic installation uses cron; install it, or run `lf install` to update manually",
+    )?;
+    // `crontab -l` fails when the user has no crontab yet.
+    let current = if listed.status.success() {
+        String::from_utf8(listed.stdout)?
+    } else {
+        String::new()
+    };
+    let frequency = frequency
+        .or_else(|| {
+            InstallFrequency::value_variants()
+                .iter()
+                .copied()
+                .find(|frequency| {
+                    current
+                        .lines()
+                        .any(|line| line == cron_line(home, binary, logs, *frequency))
+                })
+        })
+        .unwrap_or(InstallFrequency::Daily);
+    let table = cron_table(&current, &cron_line(home, binary, logs, frequency));
+    if table == current {
+        println!("Installation already scheduled in your crontab");
+        return Ok(());
+    }
+    let mut child = Command::new("crontab")
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .context("start crontab")?;
+    std::io::Write::write_all(
+        child.stdin.as_mut().expect("crontab stdin is piped"),
+        table.as_bytes(),
+    )?;
+    if !child.wait()?.success() {
+        bail!("could not install the installation schedule; rerun `lf install schedule`");
+    }
+    println!(
+        "Installation scheduled {} in your crontab; logs: {}",
+        cadence(frequency),
+        logs.join("refresh.log").display()
+    );
+    Ok(())
+}
+
+fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
+    let when = match frequency {
+        InstallFrequency::Weekly => "0 9 * * 1",
+        InstallFrequency::Daily => "0 9 * * *",
+        InstallFrequency::Hourly => "0 * * * *",
+        InstallFrequency::FiveMinutes => "*/5 * * * *",
+    };
+    let bin = binary.parent().expect("installation binary has a parent");
+    format!(
+        "{when} LF_INSTALL_DIR='{}' PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' install >> '{}' 2>&1 {CRON_MARKER}",
+        bin.display(),
+        bin.display(),
+        home.display(),
+        binary.display(),
+        logs.join("refresh.log").display()
+    )
+}
+
+/// `current` with its Loopflow line replaced by `line`; other entries stay.
+fn cron_table(current: &str, line: &str) -> String {
+    let mut table: String = current
+        .lines()
+        .filter(|entry| !entry.ends_with(CRON_MARKER))
+        .map(|entry| format!("{entry}\n"))
+        .collect();
+    table.push_str(line);
+    table.push('\n');
+    table
 }
 
 fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
@@ -578,8 +732,9 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 #[cfg(test)]
 mod tests {
     use super::{
-        is_current, newest_release, newest_run, opens_store, package_target, record_stream,
-        recorded_stream, release_tag, run_verified_installer, updates_itself, Stream,
+        cron_table, is_current, newest_release, newest_run, opens_store, package_target,
+        record_stream, recorded_stream, release_tag, run_verified_installer, updates_itself,
+        Stream, CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -691,6 +846,18 @@ mod tests {
             .1
             .join("\n");
         assert!(!opens_store(&store, &older).unwrap());
+    }
+
+    #[test]
+    fn the_cron_schedule_replaces_only_its_own_line() {
+        let ours = format!("0 9 * * 1 lf install {CRON_MARKER}");
+        let current = format!("MAILTO=me\n*/10 * * * * backup\n{ours}\n");
+        let daily = format!("0 9 * * * lf install {CRON_MARKER}");
+        assert_eq!(
+            cron_table(&current, &daily),
+            format!("MAILTO=me\n*/10 * * * * backup\n{daily}\n")
+        );
+        assert_eq!(cron_table("", &daily), format!("{daily}\n"));
     }
 
     #[test]

@@ -182,11 +182,18 @@ commit it, and do not land; publish and land once, after slice 8.
    `SUPublicEDKey` opens `loopflow://update` and stops; slice 7 adds that route and
    the key. A running app without it is quit, replaced and reopened as before.
    `--lib lf::commands::install::` 27, clippy: pass.
-6. **Self-update.** Daily scheduled `lf install` on the recorded stream (Linux,
-   headless); the in-place promotion entry point for an app updated in place.
-   The schedule already follows the recorded stream (slice 4) and already offers
-   `InstallFrequency::Daily`; what remains is making daily the default and the
-   promotion entry point (see Open, "Migration after a Sparkle update").
+6. **Self-update — built 2026-10-29, unpublished.** `install.sh` and `lf install --dev`
+   end with `lf install schedule`; with no frequency it keeps the installed
+   schedule's cadence, else daily. Linux gets a marked crontab line (`cron_table`
+   replaces only its own). A HOME that isn't the account's (release smoke tests)
+   schedules nothing, since launchd and cron are per account. `lf install adopt`
+   (hidden) is the Sparkle entry point: run by the installed app's own `lf`, it
+   promotes with the app as both source and target, so `prepare_artifacts` stages no
+   bundle and nothing is quit; store migration, receipt and link go through the
+   ordinary switch. Slice 7 calls it at first launch.
+   `--lib lf::commands::install::` 28, `install_exposes_refresh` 1, `documented_commands` 4,
+   `test_shell_installer.py` 16, clippy: pass. `adopt` itself needs the real account home
+   (like every promote test); left to demo / `scripts/test_task_installation.py`.
 7. **Sparkle, one appcast per stream**, EdDSA key in Doppler, Developer ID
    signing of dev builds in CI; the delegate vetoes updates that fail `can_open`.
 8. **Learn from the best write-up** (task brief): what to adopt from Codex, opencode,
@@ -250,18 +257,6 @@ lands and nothing ties it to stable's lag:
 - **v0.16.0 timing settled as "after":** #1772 merged before any release, so v0.16.0
   reaches stable once it is 7 days old; dev and preview get it at once.
 
-- **Migration after a Sparkle update (LOO-669 builds this, on top of #1755).**
-  The only code that migrates `~/.lf` is `SqliteStore::open_as_promotion_boundary`,
-  reached through `lf self install promote` (#1755, `install.rs` ~2125/2405). It
-  takes the promotion lock, snapshots inside the transaction and refuses unmerged
-  migrations, and it doesn't check where the binary lives. Promote is shaped as
-  "switch to a staged candidate" (`validate_staged_app_helper`). Sparkle needs a
-  narrower entry point: the running bundle is its own candidate, so lock →
-  snapshot → migrate → record the receipt, with no file moves. The new app's first
-  launch calls it before anything reads the store. Until it exists, a
-  Sparkle-swapped app hits the ordinary-open refusal, which #1755 changes to name
-  the build to install.
-
 - **Contract via follow-up Tasks** — Jack Heart, 2026-10-28: "i think we can
   probably just do this with follow-up tasks (we can update loopflow to do tasks
   that automatically start at specific times or when other tasks land)". An expand
@@ -271,9 +266,6 @@ lands and nothing ties it to stable's lag:
   `interrupt` mentions "scheduled automation"). Filed as LOO-671 (Jack Heart,
   2026-10-28). Open: N (> stable lag, so 30 days still works).
 
-- Linux and headless Macs (no app, so no Sparkle): what drives automatic updates there?
-  Proposed: the existing launchd/cron schedule runs `lf install` on the
-  recorded stream, daily instead of weekly.
 - Sparkle needs an EdDSA key (Doppler), appcast hosting next to the DMGs, and
   Developer ID signing of dev builds in CI.
 - Linear mapping for `regressed_in` (proposed): Linear has no custom issue

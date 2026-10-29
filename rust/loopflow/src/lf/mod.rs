@@ -1952,12 +1952,17 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
-    /// Run `lf install` on your stream at login and weekly by default (macOS launchd)
+    /// Run `lf install` on your stream on a schedule (launchd at login, or cron)
     Schedule {
-        /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time)
-        #[arg(value_enum, default_value = "weekly")]
-        frequency: InstallFrequency,
+        /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
+        /// Defaults to the installed schedule's, else daily.
+        #[arg(value_enum)]
+        frequency: Option<InstallFrequency>,
     },
+    /// Record this Loopflow.app, updated in place, as the install: migrate the
+    /// store and link `lf` into it. Moves no files.
+    #[command(hide = true)]
+    Adopt,
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {

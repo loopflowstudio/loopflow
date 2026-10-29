@@ -271,6 +271,10 @@ main() {
     record_stream "$channel"
     echo "Following $channel (recorded in $STREAM_CONFIG)"
   fi
+  # lf keeps itself current on the recorded stream (daily unless rescheduled).
+  if ! LF_INSTALL_DIR="$install_dir" "$dst" install schedule; then
+    echo "warning: automatic updates are not scheduled; run \`lf install schedule\`" >&2
+  fi
   echo "Installed to $install_dir/lf"
 
   case ":$PATH:" in

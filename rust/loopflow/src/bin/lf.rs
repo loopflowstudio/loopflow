@@ -1842,6 +1842,7 @@ fn run() -> anyhow::Result<()> {
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
             }
+            Some(InstallCommand::Adopt) => loopflow::lf::commands::install::adopt(),
             Some(InstallCommand::RecoverSwitch { switch }) => {
                 loopflow::lf::commands::install::recover_switch(switch)
             }

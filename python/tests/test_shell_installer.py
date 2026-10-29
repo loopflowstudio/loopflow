@@ -179,14 +179,15 @@ def test_downloaded_candidate_owns_activation(
 ) -> None:
     result = _run(installer, [], env)
     assert result.returncode == 0, result.stderr
-    args = (tmp_path / "promote.log").read_text().split()
-    assert args[:4] == [
+    promote, schedule = (tmp_path / "promote.log").read_text().splitlines()
+    assert promote.split() == [
         "install",
         "promote",
         "--cli-target",
         str(tmp_path / "dest/lf"),
+        "--sync-skills",
     ]
-    assert args[4:] == ["--sync-skills"]
+    assert schedule == "install schedule"
 
 
 def test_latest_release_is_pinned_before_the_archive_download(
@@ -225,7 +226,7 @@ def test_macos_release_promotes_the_verified_app_with_the_control_plane(
     result = _run(installer, [], app_env)
 
     assert result.returncode == 0, result.stderr
-    args = (tmp_path / "promote.log").read_text().split()
+    args = (tmp_path / "promote.log").read_text().splitlines()[0].split()
     assert "--app-source" in args
     assert args[args.index("--app-target") + 1] == str(applications / "Loopflow.app")
     assert args[args.index("--legacy-app-target") + 1] == str(applications / "Concerto.app")

@@ -37,7 +37,7 @@ use crate::build_info;
 use crate::store::migrations;
 
 mod published;
-pub use published::{install, schedule, Stream};
+pub use published::{adopt, install, schedule, Stream};
 
 /// The candidate binary's identity. The process running `lf install` *is* the
 /// candidate, so every field comes from its own compiled-in build metadata.
@@ -902,6 +902,15 @@ fn prepare_artifacts(
         ));
     }
     let app_source = match (artifacts.app_source, artifacts.app_target) {
+        // A bundle already at its target (Sparkle updated it in place) is the candidate.
+        (Some(source), Some(target)) if source == target => {
+            validate_staged_app_helper(
+                target,
+                &preview.candidate,
+                app_verdict.unwrap_or(&preview.verdict),
+            )?;
+            None
+        }
         (Some(source), Some(target)) => Some(stage_app_bundle(&AppPromotion {
             source,
             target,
@@ -916,16 +925,19 @@ fn prepare_artifacts(
             ));
         }
     };
-    let app_superseded = artifacts.app_target.and_then(|target| {
-        if fs::symlink_metadata(target).is_err() {
-            return None;
-        }
-        let name = target
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Loopflow.app");
-        Some(target.with_file_name(format!(".{name}.superseded.{upgrade_id}")))
-    });
+    let app_superseded = artifacts
+        .app_target
+        .filter(|_| app_source.is_some())
+        .and_then(|target| {
+            if fs::symlink_metadata(target).is_err() {
+                return None;
+            }
+            let name = target
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Loopflow.app");
+            Some(target.with_file_name(format!(".{name}.superseded.{upgrade_id}")))
+        });
     Ok(PreparedArtifacts {
         cli_binary,
         cli_target: artifacts.cli_target.to_path_buf(),
@@ -2597,8 +2609,11 @@ fn promote_from_installation(
         disposable_store_owned: false,
     };
     crate::installation::write_switch(&root, &switch)?;
-    if let Err(error) = quiesce_switch_app(&root, &mut switch) {
-        return Err(restore_before_advance(&root, &switch, lock, error));
+    let in_place = artifacts.app_source.is_some() && artifacts.app_source == artifacts.app_target;
+    if !in_place {
+        if let Err(error) = quiesce_switch_app(&root, &mut switch) {
+            return Err(restore_before_advance(&root, &switch, lock, error));
+        }
     }
     switch.phase = crate::installation::SwitchPhase::Quiesced;
     if let Err(error) = crate::installation::write_switch(&root, &switch) {

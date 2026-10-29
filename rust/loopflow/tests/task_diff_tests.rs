@@ -141,3 +141,49 @@ fn diff_files_preserves_comparison_identity_and_draft_editing() {
     assert_eq!(saved["file"]["content"], "draft\n");
     assert_ne!(saved["file"]["revision"], file["revision"]);
 }
+
+#[test]
+fn a_query_served_in_process_reads_what_its_lf_command_prints() {
+    use loopflow::lf::commands::operation::Query;
+
+    let home = tempfile::tempdir().unwrap();
+    let _env = EnvGuard::with_lf_home(&[], home.path());
+    let repo = TestRepo::new();
+    repo.create_file("edit.txt", "before\n");
+    repo.stage_all();
+    repo.commit("Comparison base");
+    let base = repo.head_sha();
+    repo.create_branch("served-reads");
+    register_task_with_pr(home.path(), repo.path(), "served-reads", &base);
+    repo.create_file("edit.txt", "working\n");
+    let task_diff = |path: Option<&str>, draft: Option<&str>| Query::TaskDiff {
+        issue: "INF-123".into(),
+        path: path.map(str::to_owned),
+        base: "parent".into(),
+        draft: draft.map(str::to_owned),
+    };
+    // A new Query fails to compile here until it is compared too.
+    let queries = match task_diff(None, None) {
+        Query::TaskChanges { .. } | Query::TaskDiff { .. } | Query::TaskFile { .. } => [
+            Query::TaskChanges {
+                issue: "INF-123".into(),
+                base: "parent".into(),
+            },
+            task_diff(None, None),
+            task_diff(Some("edit.txt"), None),
+            task_diff(Some("edit.txt"), Some("draft\n")),
+            Query::TaskFile {
+                issue: "INF-123".into(),
+                path: "edit.txt".into(),
+            },
+        ],
+    };
+    for query in queries {
+        let owned = query.argv();
+        let mut argv: Vec<&str> = owned.iter().map(String::as_str).collect();
+        argv.push("--json");
+        let printed = read(repo.path(), home.path(), &argv, query.input());
+        let served: Value = serde_json::from_str(&query.read().unwrap()).unwrap();
+        assert_eq!(served, printed, "{argv:?}");
+    }
+}

@@ -1,11 +1,12 @@
 // RegistryQuery — typed `lf` reads over the machine registry.
 //
 // History and explicit lookups are one-shot queries. What a window shows is kept
-// current by the same reads run with `--watch`, one process per part.
+// current by the same reads `--watch` streams, one served watch per part.
 //
-// Reads run `lf` subprocesses and decode shared wire types into app models.
-// The injected runner on macOS launches the `lf` shipped inside the app. There is no
-// HTTP fallback; remote reads use the same CLI with explicit Machine selectors.
+// On macOS the Work watches and Task file reads run inside the app through
+// Loopflow's Rust library; other reads run the `lf` shipped inside the app.
+// Every read decodes shared wire types into app models. There is no HTTP
+// fallback; remote reads use the same CLI with explicit Machine selectors.
 
 import Foundation
 
@@ -29,10 +30,61 @@ public struct RegistryQueryError: LocalizedError, Sendable {
 /// wave); machine-wide reads such as `lf wave list` ignore it.
 public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?) async throws -> String
 
+/// A one-shot read Loopflow serves inside the app, encoded as its Rust
+/// `Query`: what `argv` prints, given `input` on stdin.
+public enum TaskQuery: Equatable, Sendable, Encodable {
+    case taskChanges(issue: String, base: String)
+    case taskDiff(issue: String, path: String?, base: String, draft: String?)
+    case taskFile(issue: String, path: String)
+
+    /// The equivalent `lf` command, `--json` included.
+    public var argv: [String] {
+        switch self {
+        case .taskChanges(let issue, let base):
+            return ["task", "diff", issue, "--files", "--base", base, "--json"]
+        case .taskDiff(let issue, let path, let base, let draft):
+            return ["task", "diff", issue] + (path.map { [$0] } ?? []) + ["--base", base, "--json"]
+                + (draft == nil ? [] : ["--draft"])
+        case .taskFile(let issue, let path):
+            return ["task", "file", issue, path, "--json"]
+        }
+    }
+
+    public var input: String? {
+        if case .taskDiff(_, _, _, let draft) = self { return draft }
+        return nil
+    }
+
+    private enum Key: String, CodingKey { case query, issue, base, path, draft }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: Key.self)
+        switch self {
+        case .taskChanges(let issue, let base):
+            try container.encode("task_changes", forKey: .query)
+            try container.encode(issue, forKey: .issue)
+            try container.encode(base, forKey: .base)
+        case .taskDiff(let issue, let path, let base, let draft):
+            try container.encode("task_diff", forKey: .query)
+            try container.encode(issue, forKey: .issue)
+            try container.encode(path, forKey: .path)
+            try container.encode(base, forKey: .base)
+            try container.encode(draft, forKey: .draft)
+        case .taskFile(let issue, let path):
+            try container.encode("task_file", forKey: .query)
+            try container.encode(issue, forKey: .issue)
+            try container.encode(path, forKey: .path)
+        }
+    }
+}
+
 public struct RegistryQuery: Sendable {
     public private(set) var remoteMachine: String?
     private var run: RegistryRunner
     private var runWithInput: @Sendable ([String], String?, String) async throws -> String
+    /// What a `TaskQuery`'s `argv` prints: served in the app when the
+    /// transport can, else run.
+    private var serve: @Sendable (TaskQuery) async throws -> String
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
@@ -40,11 +92,16 @@ public struct RegistryQuery: Sendable {
         runWithInput: @escaping @Sendable ([String], String?, String) async throws -> String = { _, _, _ in
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
+        serve: (@Sendable (TaskQuery) async throws -> String)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
         self.runWithInput = runWithInput
+        self.serve = serve ?? { query in
+            if let input = query.input { return try await runWithInput(query.argv, nil, input) }
+            return try await run(query.argv, nil)
+        }
         self.run = run
         self.observeFiles = watchFiles
         self.observeWork = watchWork
@@ -147,6 +204,12 @@ public struct RegistryQuery: Sendable {
         query.runWithInput = { [runWithInput] args, cwd, input in
             try await validate()
             let output = try await runWithInput(args, cwd, input)
+            try await validate()
+            return output
+        }
+        query.serve = { [serve] read in
+            try await validate()
+            let output = try await serve(read)
             try await validate()
             return output
         }
@@ -299,7 +362,7 @@ public struct RegistryQuery: Sendable {
     /// Files changed by one Task, classified across commits, index, worktree,
     /// and untracked state relative to the Task's recorded base.
     public func taskChanges(issue: String, base: String = "parent") async throws -> TaskChangesSnapshot {
-        let stdout = try await run(["task", "diff", issue, "--files", "--base", base, "--json"], nil)
+        let stdout = try await serve(.taskChanges(issue: issue, base: base))
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
@@ -450,16 +513,7 @@ public struct RegistryQuery: Sendable {
         base: String = "parent",
         draft: String? = nil
     ) async throws -> TaskDiffSnapshot {
-        var args = ["task", "diff", issue]
-        if let path { args.append(path) }
-        args.append(contentsOf: ["--base", base, "--json"])
-        let stdout: String
-        if let draft {
-            args.append("--draft")
-            stdout = try await runWithInput(args, nil, draft)
-        } else {
-            stdout = try await run(args, nil)
-        }
+        let stdout = try await serve(.taskDiff(issue: issue, path: path, base: base, draft: draft))
         return try Self.decode(TaskDiffSnapshot.self, from: stdout)
     }
 
@@ -468,7 +522,7 @@ public struct RegistryQuery: Sendable {
         issue: String,
         path: String
     ) async throws -> TaskFileSnapshot {
-        let stdout = try await run(["task", "file", issue, path, "--json"], nil)
+        let stdout = try await serve(.taskFile(issue: issue, path: path))
         return try Self.decode(TaskFileSnapshot.self, from: stdout)
     }
 

@@ -1,7 +1,9 @@
 //! The reads an app serves inside its own process. Each is an `lf` command:
 //! [`Operation::argv`] names it, and the command's `--watch` and
 //! [`Operation::subscribe`] go through the same function, so the app pulls
-//! exactly the frames `lf <argv> --json --watch` prints.
+//! exactly the frames `lf <argv> --json --watch` prints. A [`Query`] is a
+//! one-shot read the same way: [`Query::read`] returns what `lf <argv> --json`
+//! prints.
 //!
 //! A read the command scopes by its working directory names that directory
 //! instead: `--cwd <directory>` in its argv, and the same path in-process,
@@ -16,6 +18,7 @@ use super::activity::HistoryWindow;
 use super::watch::{Subscription, Transport};
 use super::waves::Shape;
 use crate::lf::SessionListArgs;
+use crate::ops::task::{task_changes, task_diff, task_file};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
@@ -122,4 +125,121 @@ fn session_args(headless: bool) -> anyhow::Result<SessionListArgs> {
     Ok(SessionListArgs::from_arg_matches(
         &command.try_get_matches_from(flags)?,
     )?)
+}
+
+/// A one-shot read an app serves inside its own process.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "query", rename_all = "snake_case", deny_unknown_fields)]
+// Exhaustive on purpose: the equivalence test matches every variant.
+pub enum Query {
+    /// `lf task diff <issue> --files --base <base>`: a Task's changed files.
+    TaskChanges { issue: String, base: String },
+    /// `lf task diff <issue> [path] --base <base>`, or with `--draft` and the
+    /// draft on stdin: one Task's patch.
+    TaskDiff {
+        issue: String,
+        path: Option<String>,
+        base: String,
+        draft: Option<String>,
+    },
+    /// `lf task file <issue> <path>`: one file of a Task's checkout.
+    TaskFile { issue: String, path: String },
+}
+
+impl Query {
+    /// The `lf` command that prints this read, without `--json`.
+    pub fn argv(&self) -> Vec<String> {
+        let words = |words: &[&str]| words.iter().map(|word| word.to_string()).collect();
+        match self {
+            Self::TaskChanges { issue, base } => {
+                words(&["task", "diff", issue, "--files", "--base", base])
+            }
+            Self::TaskDiff {
+                issue,
+                path,
+                base,
+                draft,
+            } => {
+                let mut argv: Vec<String> = words(&["task", "diff", issue]);
+                argv.extend(path.clone());
+                argv.extend(["--base".into(), base.clone()]);
+                if draft.is_some() {
+                    argv.push("--draft".into());
+                }
+                argv
+            }
+            Self::TaskFile { issue, path } => words(&["task", "file", issue, path]),
+        }
+    }
+
+    /// What the command reads from stdin.
+    pub fn input(&self) -> Option<&str> {
+        match self {
+            Self::TaskDiff { draft, .. } => draft.as_deref(),
+            Self::TaskChanges { .. } | Self::TaskFile { .. } => None,
+        }
+    }
+
+    /// What `lf <argv> --json` prints, read on the caller's thread.
+    pub fn read(&self) -> anyhow::Result<String> {
+        let json = match self {
+            Self::TaskChanges { issue, base } => {
+                serde_json::to_string_pretty(&task_changes(issue, base)?)
+            }
+            Self::TaskDiff {
+                issue,
+                path,
+                base,
+                draft,
+            } => serde_json::to_string_pretty(&task_diff(
+                issue,
+                path.as_deref(),
+                base,
+                draft.as_deref(),
+            )?),
+            Self::TaskFile { issue, path } => {
+                serde_json::to_string_pretty(&task_file(issue, path, false)?)
+            }
+        }?;
+        Ok(json)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Operation, Query};
+
+    /// The JSON Desktop's `WorkOperation` and `TaskQuery` encode.
+    #[test]
+    fn desktop_encodings_name_their_reads() {
+        let history: Operation = serde_json::from_str(
+            r#"{"operation":"history","since":"7d","limit":50,"wave":null,"project":"p","task":null}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            history.argv(),
+            [
+                "history",
+                "--since",
+                "7d",
+                "--limit",
+                "50",
+                "--project",
+                "p"
+            ]
+        );
+        let sessions: Operation = serde_json::from_str(
+            r#"{"operation":"desktop_sessions","directory":"/r","headless":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            sessions.argv(),
+            ["--cwd", "/r", "desktop", "sessions", "--interactive", "all"]
+        );
+        let diff: Query = serde_json::from_str(
+            r#"{"query":"task_diff","issue":"FIX-1","path":null,"base":"parent","draft":null}"#,
+        )
+        .unwrap();
+        assert_eq!(diff.argv(), ["task", "diff", "FIX-1", "--base", "parent"]);
+    }
 }

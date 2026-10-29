@@ -54,6 +54,15 @@ targets:
         type: folder
     dependencies:
       - target: Loopflow
+    preBuildScripts:
+      - name: Build Loopflow's Rust library
+        script: |
+          set -eu
+          export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          release=""
+          if [ "$CONFIGURATION" = "Release" ]; then release="--release"; fi
+          /usr/bin/python3 "$SRCROOT/../scripts/loopflow-dev.py" ffi $release
+        basedOnDependencyAnalysis: false
     postBuildScripts:
       - name: Bundle Loopflow control tools
         script: |
@@ -77,6 +86,19 @@ targets:
         # Keep the Swift module named after the target so `import Loopflow` (the
         # framework) isn't swallowed as a self-import when the product is Loopflow.
         PRODUCT_MODULE_NAME: LoopflowMac
+        # LoopflowFFI: Loopflow's Rust library, as Package.swift links it.
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/LoopflowFFI
+        LIBRARY_SEARCH_PATHS: $(SRCROOT)/../target/debug
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - -framework
+          - CoreServices
+          - -framework
+          - Security
+          - -framework
+          - SystemConfiguration
+          - -liconv
+          - -lproc
         INFOPLIST_FILE: LoopflowMac/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.mac
@@ -88,6 +110,9 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         DEVELOPMENT_TEAM: ""
+      configs:
+        Release:
+          LIBRARY_SEARCH_PATHS: $(SRCROOT)/../target/release
   LoopflowTests:
     type: bundle.unit-test
     platform: macOS

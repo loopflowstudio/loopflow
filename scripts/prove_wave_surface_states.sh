@@ -16,7 +16,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$REPO/swift/.build/debug/LoopflowMac"
 if [ ! -x "$BIN" ]; then
   echo "Building LoopflowMac…"
-  ( cd "$REPO/swift" && swift build --product LoopflowMac >/dev/null )
+  ( cd "$REPO" && cargo build -p loopflow-ffi --lib && cd swift && swift build --product LoopflowMac >/dev/null )
 fi
 
 OUT="$(mktemp -d -t wave_surface_states.XXXXXX)"

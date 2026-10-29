@@ -152,6 +152,13 @@ def _build_loopflow() -> None:
     if not swift_dir.exists():
         raise StageError(f"swift directory not found: {swift_dir}")
     typer.echo("Building Loopflow (swift release)...")
+    # The app links Loopflow's Rust library from target/release.
+    _run_or_raise(
+        ["cargo", "build", "-p", "loopflow-ffi", "--lib", "--release"],
+        "swift",
+        cwd=ROOT,
+        env=_development_build_env(),
+    )
     _run_or_raise(["swift", "build", "-c", "release"], "swift", cwd=swift_dir)
 
 

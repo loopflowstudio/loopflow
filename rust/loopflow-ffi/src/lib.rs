@@ -1,14 +1,15 @@
 //! The C ABI `include/loopflow.h` declares, in Ghostty's embedding shape. An
 //! app subscribes to an [`Operation`]; Loopflow calls a data-free wakeup from
 //! any thread, and the app pulls the JSON frames its `lf` command prints on its
-//! own queue. The frames are the DTOs Swift already decodes. Every entry point
+//! own queue. A one-shot [`Query`] returns what its `lf` command prints. The
+//! frames are the DTOs Swift already decodes. Every entry point
 //! catches panics, so a Rust panic reaches the app as an error, never a crash.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex};
 
-use loopflow::lf::commands::operation::Operation;
+use loopflow::lf::commands::operation::{Operation, Query};
 use loopflow::lf::commands::watch::{panic_message, Subscription};
 
 /// One served watch, owned by the app until `lf_unsubscribe`.
@@ -71,12 +72,46 @@ pub unsafe extern "C" fn lf_subscribe(
         Ok(Err(failure)) => failure,
         Err(panic) => format!("lf_subscribe panicked: {}", panic_message(&panic)),
     };
-    if !error.is_null() {
-        let message = CString::new(failure.replace('\0', " ")).expect("NUL bytes were replaced");
-        // SAFETY: the caller passes a writable pointer or null, checked above.
-        unsafe { *error = message.into_raw() };
-    }
+    // SAFETY: the caller passes a writable pointer or null.
+    unsafe { set_error(error, &failure) };
     std::ptr::null_mut()
+}
+
+/// Read `query` on this thread: the JSON its `lf` command prints, or null
+/// with `*error` set. Free either with `lf_string_free`.
+///
+/// # Safety
+/// `query` is a NUL-terminated string; `error` is null or writable.
+#[no_mangle]
+pub unsafe extern "C" fn lf_read(query: *const c_char, error: *mut *mut c_char) -> *mut c_char {
+    let read = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: the caller passes a NUL-terminated string.
+        let text = unsafe { CStr::from_ptr(query) };
+        let query: Query = serde_json::from_slice(text.to_bytes())
+            .map_err(|error| format!("invalid query: {error}"))?;
+        query.read().map_err(|error| format!("{error:#}"))
+    }));
+    let failure = match read {
+        Ok(Ok(json)) => return c_string(&json).into_raw(),
+        Ok(Err(failure)) => failure,
+        Err(panic) => format!("lf_read panicked: {}", panic_message(&panic)),
+    };
+    // SAFETY: the caller passes a writable pointer or null.
+    unsafe { set_error(error, &failure) };
+    std::ptr::null_mut()
+}
+
+fn c_string(text: &str) -> CString {
+    CString::new(text.replace('\0', " ")).expect("NUL bytes were replaced")
+}
+
+/// # Safety
+/// `error` is null or writable.
+unsafe fn set_error(error: *mut *mut c_char, message: &str) {
+    if !error.is_null() {
+        // SAFETY: checked non-null; the caller guarantees it is writable.
+        unsafe { *error = c_string(message).into_raw() };
+    }
 }
 
 /// Deliver one request line to the watch.
@@ -125,6 +160,16 @@ pub unsafe extern "C" fn lf_pull(subscription: *mut LfSubscription, length: *mut
     // SAFETY: the caller passes a writable length.
     unsafe { *length = frame.len() };
     Box::into_raw(frame).cast()
+}
+
+/// Whether the watch failed and its last frame was pulled; nothing follows.
+///
+/// # Safety
+/// `subscription` came from `lf_subscribe` and is not yet unsubscribed.
+#[no_mangle]
+pub unsafe extern "C" fn lf_ended(subscription: *mut LfSubscription) -> bool {
+    // SAFETY: the caller passes a live subscription or null.
+    unsafe { subscription.as_ref() }.is_none_or(|subscription| subscription.subscription.ended())
 }
 
 /// Free a frame `lf_pull` returned.
@@ -197,6 +242,17 @@ mod tests {
             .to_owned();
         unsafe { lf_string_free(error) };
         assert!(message.contains("invalid operation"), "{message}");
+    }
+
+    #[test]
+    fn a_failed_query_is_an_error_not_a_result() {
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let query = CString::new(r#"{"query":"task_file","issue":"NONE-1","path":"a"}"#).unwrap();
+        let mut error = std::ptr::null_mut();
+        assert!(unsafe { lf_read(query.as_ptr(), &mut error) }.is_null());
+        assert!(!error.is_null());
+        unsafe { lf_string_free(error) };
     }
 
     #[test]

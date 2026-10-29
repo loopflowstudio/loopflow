@@ -24,6 +24,7 @@ mod checkouts;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -213,6 +214,7 @@ where
 pub struct Subscription {
     inbox: Arc<dyn Inbox>,
     pull: Mutex<Box<dyn FnMut() -> Option<Vec<u8>> + Send>>,
+    ended: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for Subscription {
@@ -236,6 +238,12 @@ impl Subscription {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         (*pull)()
+    }
+
+    /// The watch failed and sent its error as a last frame; nothing follows,
+    /// as nothing follows the exit of `lf <read> --json --watch`.
+    pub fn ended(&self) -> bool {
+        self.ended.load(Ordering::Acquire)
     }
 }
 
@@ -314,9 +322,10 @@ where
             };
         }
     });
-    let mut failed = false;
+    let ended = Arc::new(AtomicBool::new(false));
+    let failed = ended.clone();
     let pull = move || -> Option<Vec<u8>> {
-        if failed {
+        if failed.load(Ordering::Acquire) {
             return None;
         }
         let stepped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.step()));
@@ -329,7 +338,7 @@ where
             Ok(Err(error)) => format!("{error:#}"),
             Err(panic) => format!("watch panicked: {}", panic_message(&panic)),
         };
-        failed = true;
+        failed.store(true, Ordering::Release);
         encode(&WatchFrame::<()> {
             answers: None,
             unavailable: Some(error),
@@ -340,6 +349,7 @@ where
     Ok(Subscription {
         inbox,
         pull: Mutex::new(Box::new(pull)),
+        ended,
     })
 }
 

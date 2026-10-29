@@ -1,8 +1,10 @@
 """Decide which macOS CI jobs a change can reach.
 
-Rust reaches the Swift app only through the `lf --json` wire, and Linux tests
-hold Rust and `tests/fixtures/dto/` in lockstep, so a wire change edits a
-fixture. Each macOS job therefore runs only for its own inputs. CI changes,
+Rust reaches the Swift app through the `lf --json` wire, which Linux tests hold
+in lockstep with `tests/fixtures/dto/`, and through the linked `loopflow-ffi`
+library, whose reads Rust tests compare with their `lf` commands. A wire
+change edits a fixture; a boundary change edits `loopflow-ffi` or the
+Operations it serves. Each macOS job therefore runs only for its own inputs. CI changes,
 this classifier, an unknown diff or a failed classifier run all of them.
 
     macos_inputs.py BASE_SHA [HEAD]   # writes one true|false output per job
@@ -32,6 +34,8 @@ _SWIFT_TEST_INPUTS = (
     "scripts/desktop_performance.py",
     "scripts/desktop-",
     "scripts/check_swift_multiplatform_boundaries.py",
+    "rust/loopflow-ffi/",
+    "rust/loopflow/src/lf/commands/operation.rs",
     # swift-test runs this check, and pytest loads any conftest beside it.
     "python/tests/test_desktop_performance.py",
     "python/tests/conftest.py",

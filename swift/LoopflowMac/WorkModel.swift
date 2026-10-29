@@ -1330,9 +1330,6 @@ final class WorkModel {
                     delay = .seconds(1)
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
-            } catch WorkObservationError.configurationChanged {
-                // The installed `lf` or its Machine selection was replaced.
-                delay = .milliseconds(100)
             } catch {
                 if !Task.isCancelled { workUnavailable(error.localizedDescription) }
             }

@@ -717,8 +717,12 @@ lf desktop sessions --json --watch         # the repository's Sessions as Deskto
 lf planning status --json --watch          # sync receipts; keeps planning exchanged
 ```
 
-A window runs `--watch` reads, one process per part, through
-`RegistryQuery.watchWork()`: the plan, the repository's Dashboard plans
+A window serves these `--watch` reads inside the app, one subscription per
+part, through `RegistryQuery.watchWork()` and Loopflow's Rust library
+(`rust/loopflow-ffi/include/loopflow.h`): no `lf` process runs. Each part names
+its `WorkOperation`, the `lf` command above that prints the same frames. Task
+file and diff reads (`TaskQuery`) are served the same way; other reads still run
+the bundled `lf`. The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window
@@ -934,6 +938,7 @@ for optional hosted execution and cleanup.
 
 ```bash
 cargo build -p loopflow --bin lf # Real CLI transport proofs
+uv run python scripts/loopflow-dev.py ffi # The Rust library the app links; test_desktop.sh builds it too
 scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered

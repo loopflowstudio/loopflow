@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Install the release jobs as ordinary crontab lines on the Wave's placed
-# Machine. Each line runs a generated wrapper around a plain lf command; cron
-# itself owns the schedule.
+# Install the release jobs on the Wave's placed Machine: gui-domain
+# LaunchAgents on macOS, so they reach the login Keychain, and crontab lines
+# elsewhere. Each schedule runs a generated wrapper around a plain lf command.
 #
 # Run this from the placed Machine after promoting a release `lf`. The script
 # reconstructs the unattended environment from non-secret host-local paths;
@@ -47,7 +47,7 @@ else
 fi
 
 lf_home="${LF_HOME:-$HOME/.lf}"
-# The checks below and both cron wrappers run in this one environment.
+# The checks below and both job wrappers run in this one environment.
 minimal_env=(
   env -i
   "HOME=$HOME"
@@ -87,56 +87,112 @@ step "configured publisher authority"
 
 step "install release schedules"
 log_dir="$repo_root/.lf/logs"
-# cron reads only 999 bytes of a command (Vixie MAX_COMMAND) and runs the cut
-# prefix; the host PATH alone can exceed that. Each line runs a wrapper that
-# holds the full command.
+# Each schedule runs a generated wrapper that holds the full command: cron
+# reads only 999 bytes of a command line, and the host PATH alone can exceed it.
 cron_dir="$repo_root/.lf/cron"
 mkdir -p "$log_dir" "$cron_dir"
 cron_env="$(printf '%q ' "${minimal_env[@]}")"
-job() {
-  local wrapper="$cron_dir/$wave.$2.sh" line bytes
+wrapper() {
+  local path="$cron_dir/$wave.$1.sh"
   printf '#!/bin/sh\ncd %q && exec %s%q --wave %q --batch graph %s >> %q 2>&1\n' \
-    "$repo_root" "$cron_env" "$lf_bin" "$wave" "$2" "$log_dir/$2.log" >"$wrapper"
-  chmod 0755 "$wrapper"
-  line="$(printf '%s /bin/sh %q # loopflow:%s:%s' "$1" "$wrapper" "$wave" "$2")"
-  bytes="$(printf '%s' "$line" | wc -c)"
-  if [ "$bytes" -ge 1000 ]; then
-    printf 'crontab line for %s is %d bytes; cron runs only the first 999\n' "$2" "$bytes" >&2
-    return 1
-  fi
-  printf '%s\n' "$line"
+    "$repo_root" "$cron_env" "$lf_bin" "$wave" "$1" "$log_dir/$1.log" >"$path"
+  chmod 0755 "$path"
+  printf '%s' "$path"
 }
-telemetry_line="$(job "0 9 * * *" telemetry-daily)"
-release_line="$(job "0 10 * * *" release-run)"
-{
-  crontab -l 2>/dev/null | grep -v "# loopflow:$wave:" || true
-  printf '%s\n' "$telemetry_line" "$release_line"
-} | crontab -
-installed="$(crontab -l | grep "# loopflow:$wave:")"
-printf '%s\n' "$installed"
-for name in telemetry-daily release-run; do
-  if ! grep -q "# loopflow:$wave:$name\$" <<<"$installed"; then
-    printf 'crontab is missing %s; launchd jobs left in place\n' "$name" >&2
-    exit 1
+
+if [ "$(uname -s)" = Darwin ]; then
+  # cron's jobs run outside the login session, where the login Keychain that
+  # holds provider and publisher credentials is out of reach. A LaunchAgent in
+  # the user's gui domain runs inside that session.
+  uid="$(id -u)"
+  agent_dir="$HOME/Library/LaunchAgents"
+  mkdir -p "$agent_dir"
+  xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
+  agent() {
+    local label="loopflow.cron.$wave.$2" path plist
+    path="$(wrapper "$2")"
+    plist="$agent_dir/$label.plist"
+    cat >"$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$label</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/sh</string><string>$(xml "$path")</string></array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>$1</integer><key>Minute</key><integer>0</integer></dict>
+  <key>ProcessType</key><string>Standard</string>
+  <key>AbandonProcessGroup</key><true/>
+</dict>
+</plist>
+PLIST
+    launchctl bootout "gui/$uid/$label" 2>/dev/null || true
+    if ! launchctl bootstrap "gui/$uid" "$plist"; then
+      printf 'could not load %s into gui/%s; log in to this Machine so its jobs reach the login Keychain\n' \
+        "$label" "$uid" >&2
+      return 1
+    fi
+    printf 'loaded %s: daily at %02d:00\n' "$label" "$1"
+  }
+  agent 9 telemetry-daily
+  agent 10 release-run
+  # Earlier bootstraps scheduled these jobs from crontab; one scheduler runs
+  # each job.
+  if crontab -l 2>/dev/null | grep -q "# loopflow:$wave:"; then
+    { crontab -l | grep -v "# loopflow:$wave:" || true; } | crontab -
+    printf 'removed crontab lines # loopflow:%s:\n' "$wave"
   fi
-done
+  run_telemetry() {
+    local label="gui/$uid/loopflow.cron.$wave.telemetry-daily" info code
+    # Started by launchd, the run has the same session a scheduled firing has.
+    launchctl kickstart -k "$label" || return 1
+    while :; do
+      info="$(launchctl print "$label")" || return 1
+      # The job's own fields carry one tab of indent; nested ones carry more.
+      code="$(sed -n 's/^[[:space:]]last exit code = \([0-9][0-9]*\)$/\1/p' <<<"$info")"
+      if ! grep -q '^[[:space:]]state = running' <<<"$info"; then
+        [ -n "$code" ] && return "$code"
+        # A job killed by a signal reports the signal instead of an exit code.
+        grep -q '^[[:space:]]last terminating signal' <<<"$info" && return 1
+      fi
+      sleep 5
+    done
+  }
+else
+  job() {
+    local path line bytes
+    path="$(wrapper "$2")"
+    line="$(printf '%s /bin/sh %q # loopflow:%s:%s' "$1" "$path" "$wave" "$2")"
+    bytes="$(printf '%s' "$line" | wc -c)"
+    if [ "$bytes" -ge 1000 ]; then
+      printf 'crontab line for %s is %d bytes; cron runs only the first 999\n' "$2" "$bytes" >&2
+      return 1
+    fi
+    printf '%s\n' "$line"
+  }
+  telemetry_line="$(job "0 9 * * *" telemetry-daily)"
+  release_line="$(job "0 10 * * *" release-run)"
+  {
+    crontab -l 2>/dev/null | grep -v "# loopflow:$wave:" || true
+    printf '%s\n' "$telemetry_line" "$release_line"
+  } | crontab -
+  installed="$(crontab -l | grep "# loopflow:$wave:")"
+  printf '%s\n' "$installed"
+  for name in telemetry-daily release-run; do
+    if ! grep -q "# loopflow:$wave:$name\$" <<<"$installed"; then
+      printf 'crontab is missing %s\n' "$name" >&2
+      exit 1
+    fi
+  done
+  run_telemetry() { /bin/sh "$cron_dir/$wave.telemetry-daily.sh"; }
+fi
 
-# Earlier lf scheduled these jobs as launchd agents; remove them only now
-# that the crontab replacement is confirmed.
-for plist in "$HOME"/Library/LaunchAgents/loopflow.cron."$wave".*.plist; do
-  [ -e "$plist" ] || continue
-  label="$(basename "$plist" .plist)"
-  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-  rm -f "$plist"
-  printf 'removed launchd job %s\n' "$label"
-done
-
-step "configured-path telemetry run"
-# Run the same wrapper cron runs.
-if ! /bin/sh "$cron_dir/$wave.telemetry-daily.sh"; then
+step "scheduled-path telemetry run"
+if ! run_telemetry; then
   tail -n 40 "$log_dir/telemetry-daily.log" >&2 || true
   printf '\nbootstrap installed the jobs, but the telemetry run is red; inspect the log above\n' >&2
   exit 1
 fi
 tail -n 20 "$log_dir/telemetry-daily.log"
-printf '\nbootstrap complete: this Machine runs Wave %s release jobs from crontab\n' "$wave"
+printf '\nbootstrap complete: this Machine runs Wave %s release jobs on schedule\n' "$wave"

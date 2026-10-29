@@ -451,6 +451,30 @@ pub(crate) fn watch_list(
     )
 }
 
+async fn rename_session(
+    id: &str,
+    name: &[String],
+    source: SessionTitleSource,
+) -> anyhow::Result<SessionRecord> {
+    let requested = required_text(name, "Session name")?;
+    let store = open_shared_store().await?;
+    crate::ops::human_session::rename(&store, id, &requested, source).await
+}
+
+/// The Session `lf session rename --json -- <id> <name>` prints.
+pub(crate) fn renamed(id: &str, name: &str) -> anyhow::Result<SessionRecord> {
+    let name = [name.to_owned()];
+    tokio::runtime::Runtime::new()?.block_on(rename_session(id, &name, SessionTitleSource::Human))
+}
+
+/// The Session `lf session bind --json --task <task> -- <id>` prints.
+pub(crate) fn bound(id: &str, task: &str) -> anyhow::Result<SessionRecord> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_shared_store().await?;
+        crate::ops::human_session::bind(&store, id, task).await
+    })
+}
+
 /// What `lf session bind <id> --task <task> --dry-run --json` prints.
 pub(crate) fn binding_preview(
     id: &str,
@@ -678,14 +702,12 @@ async fn connect(
 }
 
 async fn rename(id: &str, name: &[String], suggest: bool, json: bool) -> anyhow::Result<()> {
-    let requested = required_text(name, "Session name")?;
     let source = if suggest {
         SessionTitleSource::Generated
     } else {
         SessionTitleSource::Human
     };
-    let store = open_shared_store().await?;
-    let session = crate::ops::human_session::rename(&store, id, &requested, source).await?;
+    let session = rename_session(id, name, source).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&session)?);
     } else if suggest && session.title_source == SessionTitleSource::Human {

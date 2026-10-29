@@ -8,8 +8,8 @@
 //! instead: `--cwd <directory>` in its argv, and the same path in-process,
 //! where every subscription shares one working directory.
 //!
-//! Reads only read: an app serving them opens the store read-only (see
-//! [`crate::store::serve_reads_only`]), and its writes are `lf` commands.
+//! Reads only read: they record no Process and change no Work. The app's
+//! writes are [`super::write::Write`]s.
 
 use std::path::{Path, PathBuf};
 

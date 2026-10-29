@@ -6,8 +6,10 @@
 // the app data from its own threads: it calls `wakeup` when the result may have
 // changed, and the app calls `lf_pull` on its own queue, which reads there and
 // returns the frame line that command would print next, or nothing. A burst of
-// changes coalesces into one frame. The library only reads: it opens the store
-// `lf` prepared read-only and writes nothing; the app's writes are `lf` commands.
+// changes coalesces into one frame. `lf_write` takes a JSON `Write`
+// (`{"write":"task_defer","directory":"/repo","issue":"FIX-1","deferred":true}`)
+// and makes it as `lf <write>` would, recording a Process for a Work change.
+// The library opens only the store `lf` prepared; it never creates or migrates one.
 #ifndef LOOPFLOW_H
 #define LOOPFLOW_H
 
@@ -44,6 +46,11 @@ bool lf_ended(LfSubscription *subscription);
 // Read `read` on this thread. Returns what its `lf` command prints, or NULL
 // with `*error` set. Free either with `lf_string_free`.
 char *lf_read(const char *read, char **error);
+
+// Make `write` on this thread. Returns what its `lf` command prints, or NULL
+// with `*error` set. Free either with `lf_string_free`. Never call it on the
+// app's main thread: a write may wait on the store or the network.
+char *lf_write(const char *write, char **error);
 
 // End the watch; `wakeup` is not called after this returns.
 void lf_unsubscribe(LfSubscription *subscription);

@@ -1,6 +1,7 @@
-//! Every app read, served in-process as the app's library serves it, prints
-//! what its `lf` command prints. Its own binary: the library's read-only store
-//! mode is process-wide.
+//! Every app read and write, served in-process as the app's library serves
+//! it, prints what its `lf` command prints; every write has its command's
+//! effect and records the same Process. Its own binary: the library's in-app
+//! store mode is process-wide.
 
 mod isolated_lf;
 mod support;
@@ -17,9 +18,10 @@ use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
 
 #[test]
-fn a_read_served_in_process_prints_what_its_lf_command_prints() {
+fn what_an_app_serves_in_process_matches_its_lf_command() {
     use loopflow::lf::commands::activity::HistoryWindow;
     use loopflow::lf::commands::read::Read;
+    use loopflow::lf::commands::write::Write;
 
     let home = tempfile::tempdir().unwrap();
     // Same HOME as `read`'s children: `portfolio` scans `$HOME/src`.
@@ -57,6 +59,22 @@ fn a_read_served_in_process_prints_what_its_lf_command_prints() {
         None,
     ))
     .unwrap();
+    // Unpublished, so it can complete: `lf task complete` waits on a PR's merge.
+    let unpublished: Value = serde_json::from_str(&read(
+        repo.path(),
+        home.path(),
+        &[
+            "task",
+            "create",
+            "--no-wave",
+            "--title",
+            "Served writes",
+            "--json",
+        ],
+        None,
+    ))
+    .unwrap();
+    let unpublished = unpublished["identifier"].as_str().unwrap().to_owned();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     // Planning status also serves a Work folder without Git.
     let work_folder = home.path().join("folder");
@@ -249,19 +267,22 @@ fn a_read_served_in_process_prints_what_its_lf_command_prints() {
             ],
         ),
     };
-    // From here every store this process opens is read-only, as in the app:
-    // a read that writes fails.
-    loopflow::store::serve_reads_only();
-    let store =
-        loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    assert!(store
-        .provision_planning_user_key("00000000-0000-4000-8000-000000000000")
-        .is_err());
+    // From here this process opens stores as the app does.
+    loopflow::store::serve_in_app();
+    let database = home.path().join("loopflow.db");
+    // A read served in the app changes no Work and records no Process.
+    let unchanged = |argv: &[&str], serve: &mut dyn FnMut()| {
+        let before = changes(&database);
+        serve();
+        assert_eq!(changes(&database), before, "{argv:?} wrote");
+    };
     for served in reads {
         let owned = served.argv();
         let argv: Vec<&str> = owned.iter().map(String::as_str).collect();
         let printed = read(repo.path(), home.path(), &argv, served.input());
-        let served = served.read().unwrap();
+        let mut text = String::new();
+        unchanged(&argv, &mut || text = served.read().unwrap());
+        let served = text;
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
             // `config repository --path` prints a path, not JSON.
             assert_eq!(served.trim(), printed.trim(), "{argv:?}");
@@ -273,22 +294,194 @@ fn a_read_served_in_process_prints_what_its_lf_command_prints() {
     for served in watches {
         let mut argv = served.argv();
         argv.push("--watch".into());
-        let (sender, wakes) = mpsc::channel();
-        let sender = std::sync::Mutex::new(sender);
-        let subscription = served
-            .subscribe(move || {
-                let _ = sender.lock().unwrap().send(());
-            })
-            .unwrap();
-        // The app pulls on its own thread after a data-free wakeup.
-        wakes.recv_timeout(Duration::from_secs(30)).unwrap();
-        let served: Value =
-            serde_json::from_slice(&subscription.pull().expect("a first frame")).unwrap();
-        drop(subscription);
+        let mut frame = Vec::new();
+        let words: Vec<&str> = argv.iter().map(String::as_str).collect();
+        unchanged(&words, &mut || {
+            let (sender, wakes) = mpsc::channel();
+            let sender = std::sync::Mutex::new(sender);
+            let subscription = served
+                .clone()
+                .subscribe(move || {
+                    let _ = sender.lock().unwrap().send(());
+                })
+                .unwrap();
+            // The app pulls on its own thread after a data-free wakeup.
+            wakes.recv_timeout(Duration::from_secs(30)).unwrap();
+            frame = subscription.pull().expect("a first frame");
+        });
+        let served: Value = serde_json::from_slice(&frame).unwrap();
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
         let printed = first_frame(repo.path(), home.path(), &argv);
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }
+
+    let directory = repo.path().to_owned();
+    let file_revision = || {
+        let file: Value = serde_json::from_str(
+            &Read::TaskFile {
+                issue: "INF-123".into(),
+                path: "edit.txt".into(),
+            }
+            .read()
+            .unwrap(),
+        )
+        .unwrap();
+        file["revision"].as_str().unwrap().to_owned()
+    };
+    let save = |revision: String| Write::TaskSave {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+        path: "edit.txt".into(),
+        revision,
+        content: "saved\n".into(),
+    };
+    let session = session["id"].as_str().unwrap().to_owned();
+    // What a write changed, as the app reads it.
+    let effect = |issue: &str| {
+        without_clock(
+            serde_json::from_str(
+                &Read::Roadmap {
+                    directory: directory.clone(),
+                    wave: None,
+                    task: Some(issue.into()),
+                    all: false,
+                }
+                .read()
+                .unwrap(),
+            )
+            .unwrap(),
+        )
+    };
+    // A new Write fails to compile here until it is compared too.
+    let writes = match (Write::TaskReopen {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    }) {
+        Write::TaskComplete { .. }
+        | Write::TaskReopen { .. }
+        | Write::TaskDefer { .. }
+        | Write::TaskNotes { .. }
+        | Write::TaskMove { .. }
+        | Write::TaskSave { .. }
+        | Write::SessionRename { .. }
+        | Write::SessionBind { .. } => [
+            Write::TaskDefer {
+                directory: directory.clone(),
+                issue: "INF-123".into(),
+                deferred: true,
+            },
+            Write::TaskDefer {
+                directory: directory.clone(),
+                issue: "INF-123".into(),
+                deferred: false,
+            },
+            Write::TaskNotes {
+                directory: directory.clone(),
+                issue: "INF-123".into(),
+                notes: "Served from the app".into(),
+            },
+            Write::TaskMove {
+                directory: directory.clone(),
+                issue: "INF-123".into(),
+                wave: None,
+            },
+            Write::SessionRename {
+                directory: directory.clone(),
+                id: session.clone(),
+                name: "Served name".into(),
+            },
+            Write::SessionBind {
+                directory: directory.clone(),
+                id: session.clone(),
+                task: "INF-123".into(),
+            },
+            Write::TaskComplete {
+                directory: directory.clone(),
+                issue: unpublished.clone(),
+            },
+            Write::TaskReopen {
+                directory: directory.clone(),
+                issue: unpublished.clone(),
+            },
+        ],
+    };
+    // The same write in the app, then through `lf`: each prints the same,
+    // leaves the same Work and records a Process the same way. A finished
+    // Process nothing references is forgotten as it exits; its revision stays.
+    let compare = |served: Write, again: &dyn Fn() -> Write| {
+        let argv = served.argv();
+        let issue = match &served {
+            Write::TaskComplete { issue, .. } | Write::TaskReopen { issue, .. } => issue.clone(),
+            _ => "INF-123".to_owned(),
+        };
+        let effect = || effect(&issue);
+        let before = processes(&database);
+        let written = served.write().unwrap();
+        let recorded = processes(&database) - before;
+        let effected = effect();
+        let again = again();
+        let args = again.argv();
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let before = processes(&database);
+        let printed = read(repo.path(), home.path(), &args, again.input());
+        assert!(recorded > 0, "{argv:?} recorded no Process");
+        assert_eq!(processes(&database) - before, recorded, "{argv:?}");
+        assert_eq!(effect(), effected, "{argv:?}");
+        match (
+            serde_json::from_str::<Value>(&written),
+            serde_json::from_str::<Value>(&printed),
+        ) {
+            (Ok(written), Ok(printed)) => assert_eq!(
+                without_save_time(without_clock(written)),
+                without_save_time(without_clock(printed)),
+                "{argv:?}"
+            ),
+            _ => assert_eq!(written, printed, "{argv:?}"),
+        }
+    };
+    for write in writes {
+        compare(write.clone(), &|| write.clone());
+    }
+    // A save names the revision it replaces, which the first save changed.
+    compare(save(file_revision()), &|| save(file_revision()));
+}
+
+/// Each Work domain's revision and the Processes recorded.
+fn changes(database: &Path) -> (Vec<(String, i64)>, i64) {
+    let conn = rusqlite::Connection::open(database).unwrap();
+    let revisions = conn
+        .prepare("SELECT domain, revision FROM store_revisions ORDER BY domain")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let processes = conn
+        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+        .unwrap();
+    (revisions, processes)
+}
+
+/// A save without its recoveries' directories, which each save names by its time.
+fn without_save_time(mut value: Value) -> Value {
+    if let Some(recoveries) = value
+        .pointer_mut("/file/recoveries")
+        .and_then(Value::as_array_mut)
+    {
+        for recovery in recoveries {
+            recovery.as_object_mut().unwrap().remove("directory");
+        }
+    }
+    value
+}
+
+/// The `processes` revision: every Process recorded or forgotten moves it.
+fn processes(database: &Path) -> i64 {
+    let (revisions, _) = changes(database);
+    revisions
+        .into_iter()
+        .find_map(|(domain, revision)| (domain == "processes").then_some(revision))
+        .unwrap()
 }
 
 /// The first frame `lf <args>` prints, with its stdin held open as a watch's

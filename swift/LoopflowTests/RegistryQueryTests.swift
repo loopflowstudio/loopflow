@@ -50,6 +50,27 @@ struct RegistryQueryTests {
         #expect(ServedRead.waves.cwd == nil)
     }
 
+    /// The JSON `write::tests::desktop_encodings_name_their_writes` decodes in Rust.
+    @Test("Served writes encode as Rust's Write")
+    func servedWriteEncodings() throws {
+        func object(_ value: some Encodable) throws -> NSDictionary {
+            try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as? NSDictionary)
+        }
+        func object(_ json: String) throws -> NSDictionary {
+            try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? NSDictionary)
+        }
+        let move = ServedWrite.taskMove(directory: "/r", issue: "FIX-1", wave: nil)
+        #expect(try object(move) == object(#"{"write":"task_move","directory":"/r","issue":"FIX-1","wave":null}"#))
+        #expect(move.argv == ["task", "move", "FIX-1", "--no-wave"])
+        #expect(move.cwd == "/r")
+        #expect(try object(ServedWrite.taskDefer(directory: "/r", issue: "FIX-1", deferred: false))
+            == object(#"{"write":"task_defer","directory":"/r","issue":"FIX-1","deferred":false}"#))
+        let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
+        #expect(try object(save) == object(
+            #"{"write":"task_save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))
+        #expect(save.input == "text")
+    }
+
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])
     func recordingRemoteQuery(recordFirst: Bool) async throws {
         let json = #"{"id":"peer"}"#

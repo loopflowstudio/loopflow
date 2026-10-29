@@ -45,6 +45,7 @@ pub mod wave_rename;
 pub mod waves;
 pub(crate) mod work_catalog;
 pub mod work_route;
+pub mod write;
 
 /// One drill over the Wave → Project → Task Work hierarchy.
 #[derive(Debug, Clone, Copy, Default)]

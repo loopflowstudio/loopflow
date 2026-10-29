@@ -1,11 +1,12 @@
-//! The C ABI `include/loopflow.h` declares, in Ghostty's embedding shape. Both
-//! entry points take a JSON [`Read`]. `lf_read` returns what its `lf` command
-//! prints. `lf_subscribe` serves its `--watch`: Loopflow calls a data-free
-//! wakeup from any thread, and the app pulls the frames that command prints on
-//! its own queue. Results are the DTOs Swift already decodes. Every entry point
-//! catches panics, so a Rust panic reaches the app as an error, never a crash.
-//! The library only reads: it opens the store `lf` prepared read-only, and the
-//! `lf` commands the app runs own every write.
+//! The C ABI `include/loopflow.h` declares, in Ghostty's embedding shape.
+//! `lf_read` and `lf_subscribe` take a JSON [`Read`]: `lf_read` returns what
+//! its `lf` command prints, and `lf_subscribe` serves its `--watch`: Loopflow
+//! calls a data-free wakeup from any thread, and the app pulls the frames that
+//! command prints on its own queue. `lf_write` takes a JSON [`Write`] and
+//! returns what its `lf` command prints. Results are the DTOs Swift already
+//! decodes. Every entry point catches panics, so a Rust panic reaches the app
+//! as an error, never a crash. The library opens only the store `lf` prepared,
+//! and never creates or migrates one.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -13,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use loopflow::lf::commands::read::Read;
 use loopflow::lf::commands::watch::{panic_message, Subscription};
+use loopflow::lf::commands::write::Write;
 
 /// One served watch, owned by the app until `lf_unsubscribe`.
 #[derive(Debug)]
@@ -57,7 +59,7 @@ pub unsafe extern "C" fn lf_subscribe(
     let wake = target.clone();
     // SAFETY: the caller's guarantees, passed on.
     let subscription = unsafe {
-        serve("lf_subscribe", read, error, |read| {
+        serve("lf_subscribe", read, error, |read: Read| {
             read.subscribe(move || wake.call())
         })
     };
@@ -77,28 +79,40 @@ pub unsafe extern "C" fn lf_subscribe(
 #[no_mangle]
 pub unsafe extern "C" fn lf_read(read: *const c_char, error: *mut *mut c_char) -> *mut c_char {
     // SAFETY: the caller's guarantees, passed on.
-    unsafe { serve("lf_read", read, error, |read| read.read()) }
+    unsafe { serve("lf_read", read, error, |read: Read| read.read()) }
         .map_or(std::ptr::null_mut(), |json| c_string(&json).into_raw())
 }
 
-/// `serve` applied to the JSON `read`, or `None` with `*error` set when
-/// it is invalid, fails or panics.
+/// Make `write` on this thread: what its `lf` command prints, or null with
+/// `*error` set. Free either with `lf_string_free`.
 ///
 /// # Safety
-/// `read` is a NUL-terminated string; `error` is null or writable.
-unsafe fn serve<T, E: std::fmt::Display>(
+/// `write` is a NUL-terminated string; `error` is null or writable.
+#[no_mangle]
+pub unsafe extern "C" fn lf_write(write: *const c_char, error: *mut *mut c_char) -> *mut c_char {
+    // SAFETY: the caller's guarantees, passed on.
+    unsafe { serve("lf_write", write, error, |write: Write| write.write()) }
+        .map_or(std::ptr::null_mut(), |text| c_string(&text).into_raw())
+}
+
+/// `serve` applied to the JSON `request` (a `Read` or a `Write`), or `None`
+/// with `*error` set when it is invalid, fails or panics.
+///
+/// # Safety
+/// `request` is a NUL-terminated string; `error` is null or writable.
+unsafe fn serve<R: serde::de::DeserializeOwned, T, E: std::fmt::Display>(
     entry: &str,
-    read: *const c_char,
+    request: *const c_char,
     error: *mut *mut c_char,
-    serve: impl FnOnce(Read) -> Result<T, E>,
+    serve: impl FnOnce(R) -> Result<T, E>,
 ) -> Option<T> {
     let served = catch_unwind(AssertUnwindSafe(|| {
-        loopflow::store::serve_reads_only();
+        loopflow::store::serve_in_app();
         // SAFETY: the caller passes a NUL-terminated string.
-        let read = unsafe { CStr::from_ptr(read) };
-        let read = serde_json::from_slice(read.to_bytes())
-            .map_err(|error| format!("invalid read: {error}"))?;
-        serve(read).map_err(|error| format!("{error:#}"))
+        let request = unsafe { CStr::from_ptr(request) };
+        let request = serde_json::from_slice(request.to_bytes())
+            .map_err(|error| format!("invalid request: {error}"))?;
+        serve(request).map_err(|error| format!("{error:#}"))
     }));
     let failure = match served {
         Ok(Ok(value)) => return Some(value),
@@ -244,7 +258,7 @@ mod tests {
             .unwrap()
             .to_owned();
         unsafe { lf_string_free(error) };
-        assert!(message.contains("invalid read"), "{message}");
+        assert!(message.contains("invalid request"), "{message}");
     }
 
     #[test]

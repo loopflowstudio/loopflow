@@ -937,8 +937,12 @@ fn create_process_context(
         receipts: Arc::default(),
     };
     set_context(context.clone());
-    let interrupted = context.clone();
-    crate::agent::register_interrupt_cleanup(move || record_process_interruption(&interrupted));
+    // Only an `lf` executable exits on interrupt. An app recording its
+    // in-process writes would otherwise keep every write's context forever.
+    if is_cli_process() {
+        let interrupted = context.clone();
+        crate::agent::register_interrupt_cleanup(move || record_process_interruption(&interrupted));
+    }
     // Never write process-control receipts into a different inherited Machine.
     if same_store {
         if let Err(error) = write_process_receipt(&context) {

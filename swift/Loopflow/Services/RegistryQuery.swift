@@ -3,8 +3,9 @@
 // History and explicit lookups are one-shot queries. What a window shows is kept
 // current by the same reads `--watch` streams, one served watch per part.
 //
-// On macOS the Work watches and `ServedRead` reads run inside the app through
-// Loopflow's Rust library; other reads run the `lf` shipped inside the app.
+// On macOS the Work watches, `ServedRead` reads and `ServedWrite` writes run
+// inside the app through Loopflow's Rust library; other commands run the `lf`
+// shipped inside the app.
 // Every read decodes shared wire types into app models. There is no HTTP
 // fallback; remote reads use the same CLI with explicit Machine selectors.
 
@@ -219,6 +220,72 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     }
 }
 
+/// A write Loopflow makes inside the app, encoded as its Rust `Write`: what
+/// `argv` does in `cwd`, given `input` on stdin. A Work change records its
+/// Process as that `lf` command would.
+public enum ServedWrite: Equatable, Sendable, Encodable {
+    case taskComplete(directory: String, issue: String)
+    case taskReopen(directory: String, issue: String)
+    case taskDefer(directory: String, issue: String, deferred: Bool)
+    case taskNotes(directory: String, issue: String, notes: String)
+    case taskMove(directory: String, issue: String, wave: String?)
+    case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
+    case sessionRename(directory: String, id: String, name: String)
+    case sessionBind(directory: String, id: String, task: String)
+
+    /// The equivalent `lf` command, without its `--cwd`.
+    public var argv: [String] {
+        switch self {
+        case .taskComplete(_, let issue): ["task", "complete", issue]
+        case .taskReopen(_, let issue): ["task", "reopen", issue]
+        case .taskDefer(_, let issue, let deferred): ["task", deferred ? "defer" : "resume", issue]
+        case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)"]
+        case .taskMove(_, let issue, let wave):
+            ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
+        case .taskSave(_, let issue, let path, let revision, _):
+            ["task", "save", issue, path, "--revision", revision, "--json"]
+        case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
+        case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
+        }
+    }
+
+    /// The directory `argv` runs in; Rust's `--cwd`.
+    public var cwd: String {
+        tagged.fields.first { $0.key == "directory" }?.value as? String ?? "/"
+    }
+
+    public var input: String? {
+        if case .taskSave(_, _, _, _, let content) = self { return content }
+        return nil
+    }
+
+    private var tagged: TaggedFields {
+        switch self {
+        case .taskComplete(let directory, let issue):
+            TaggedFields("task_complete", ["directory": directory, "issue": issue])
+        case .taskReopen(let directory, let issue):
+            TaggedFields("task_reopen", ["directory": directory, "issue": issue])
+        case .taskDefer(let directory, let issue, let deferred):
+            TaggedFields("task_defer", ["directory": directory, "issue": issue, "deferred": deferred])
+        case .taskNotes(let directory, let issue, let notes):
+            TaggedFields("task_notes", ["directory": directory, "issue": issue, "notes": notes])
+        case .taskMove(let directory, let issue, let wave):
+            TaggedFields("task_move", ["directory": directory, "issue": issue, "wave": wave])
+        case .taskSave(let directory, let issue, let path, let revision, let content):
+            TaggedFields("task_save", ["directory": directory, "issue": issue, "path": path,
+                                       "revision": revision, "content": content])
+        case .sessionRename(let directory, let id, let name):
+            TaggedFields("session_rename", ["directory": directory, "id": id, "name": name])
+        case .sessionBind(let directory, let id, let task):
+            TaggedFields("session_bind", ["directory": directory, "id": id, "task": task])
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        try tagged.encode(to: encoder, tag: "write")
+    }
+}
+
 /// One variant of a Rust enum serde tags internally: its name beside its
 /// fields, `null` for an absent one.
 struct TaggedFields {
@@ -258,6 +325,9 @@ public struct RegistryQuery: Sendable {
     /// What a `ServedRead`'s `argv` prints: served in the app when the
     /// transport can, else run.
     private var serve: @Sendable (ServedRead) async throws -> String
+    /// What a `ServedWrite`'s `argv` prints: made in the app when the
+    /// transport can, else run.
+    private var write: @Sendable (ServedWrite) async throws -> String
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
@@ -266,6 +336,7 @@ public struct RegistryQuery: Sendable {
             throw RegistryQueryError("Draft comparison is unavailable on this transport")
         },
         serve: (@Sendable (ServedRead) async throws -> String)? = nil,
+        write: (@Sendable (ServedWrite) async throws -> String)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
@@ -274,6 +345,10 @@ public struct RegistryQuery: Sendable {
         self.serve = serve ?? { query in
             if let input = query.input { return try await runWithInput(query.argv, query.cwd, input) }
             return try await run(query.argv, query.cwd)
+        }
+        self.write = write ?? { change in
+            if let input = change.input { return try await runWithInput(change.argv, change.cwd, input) }
+            return try await run(change.argv, change.cwd)
         }
         self.run = run
         self.observeFiles = watchFiles
@@ -386,6 +461,12 @@ public struct RegistryQuery: Sendable {
             try await validate()
             return output
         }
+        query.write = { [write] change in
+            try await validate()
+            let output = try await write(change)
+            try await validate()
+            return output
+        }
         return query
     }
 
@@ -416,6 +497,11 @@ public struct RegistryQuery: Sendable {
         }
         query.serve = { [serve] read in
             let stdout = try await serve(read)
+            record(stdout)
+            return stdout
+        }
+        query.write = { [write] change in
+            let stdout = try await write(change)
             record(stdout)
             return stdout
         }
@@ -622,8 +708,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
-        let destination = wave.map { ["--wave", $0] } ?? ["--no-wave"]
-        _ = try await run(["task", "move", issue] + destination, cwd)
+        _ = try await write(.taskMove(directory: cwd ?? "/", issue: issue, wave: wave))
     }
 
     /// Your registered Machines. This Machine appears only when a default names it.
@@ -641,15 +726,15 @@ public struct RegistryQuery: Sendable {
     }
 
     public func deferTask(issue: String, deferred: Bool, cwd: String?) async throws {
-        _ = try await run(["task", deferred ? "defer" : "resume", issue], cwd)
+        _ = try await write(.taskDefer(directory: cwd ?? "/", issue: issue, deferred: deferred))
     }
 
     public func completeTask(issue: String, cwd: String?) async throws {
-        _ = try await run(["task", "complete", issue], cwd)
+        _ = try await write(.taskComplete(directory: cwd ?? "/", issue: issue))
     }
 
     public func reopenTask(issue: String, cwd: String?) async throws {
-        _ = try await run(["task", "reopen", issue], cwd)
+        _ = try await write(.taskReopen(directory: cwd ?? "/", issue: issue))
     }
 
     public func abandonTask(issue: String, cwd: String?) async throws {
@@ -670,9 +755,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func updateTaskDirective(id: String, text: String, cwd: String) async throws {
-        _ = try await run([
-            "task", "edit", id, "--notes=\(text)",
-        ], cwd)
+        _ = try await write(.taskNotes(directory: cwd, issue: id, notes: text))
     }
 
     /// One Task's complete patch, or the patch for a selected changed file.
@@ -697,7 +780,8 @@ public struct RegistryQuery: Sendable {
 
     public func saveTaskFile(issue: String, path: String, revision: String,
                              content: String) async throws -> TaskFileSave {
-        let stdout = try await runWithInput(["task", "save", issue, path, "--revision", revision, "--json"], nil, content)
+        let stdout = try await write(.taskSave(directory: "/", issue: issue, path: path,
+                                               revision: revision, content: content))
         return try Self.decode(TaskFileSave.self, from: stdout)
     }
 
@@ -752,7 +836,7 @@ public struct RegistryQuery: Sendable {
         name: String,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        let stdout = try await run(["session", "rename", "--json", "--", id, name], cwd)
+        let stdout = try await write(.sessionRename(directory: cwd ?? "/", id: id, name: name))
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
@@ -777,7 +861,7 @@ public struct RegistryQuery: Sendable {
     }
 
     public func bindSession(id: String, taskId: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "bind", "--json", "--task", taskId, "--", id], cwd)
+        let stdout = try await write(.sessionBind(directory: cwd ?? "/", id: id, task: taskId))
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 

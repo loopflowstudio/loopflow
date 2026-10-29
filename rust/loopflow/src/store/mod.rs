@@ -174,17 +174,18 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     Ok(default_db_path())
 }
 
-static SERVED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static IN_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// This process serves reads inside an app: every store it opens is read-only,
-/// and it never creates, migrates or registers anything. The `lf` commands the
-/// app runs own those writes. Set once by the app's library; never cleared.
-pub fn serve_reads_only() {
-    SERVED.store(true, std::sync::atomic::Ordering::Relaxed);
+/// This process is an app serving Loopflow through its library: it opens only
+/// the store `lf` prepared at this build's schema, and never creates or
+/// migrates one. `lf` owns that, run once when the app starts. Set once by the
+/// app's library; never cleared.
+pub fn serve_in_app() {
+    IN_APP.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-pub(crate) fn serves_reads_only() -> bool {
-    SERVED.load(std::sync::atomic::Ordering::Relaxed)
+pub(crate) fn serves_in_app() -> bool {
+    IN_APP.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Whether an open is the authorized owner of the shared migration frontier.

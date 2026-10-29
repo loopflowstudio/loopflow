@@ -3,8 +3,8 @@ import Foundation
 import Loopflow
 import LoopflowFFI
 
-/// Loopflow's reads served inside the app by its Rust library (`loopflow.h`),
-/// with no `lf` process. Each returns what its `lf` command prints.
+/// Loopflow's reads and writes served inside the app by its Rust library
+/// (`loopflow.h`), with no `lf` process. Each returns what its `lf` command prints.
 enum LoopflowLibrary {
     /// Serve `read` as `lf <read> --watch` streams it. Loopflow's
     /// wakeup only schedules a pull on this watch's own queue, where the
@@ -16,11 +16,24 @@ enum LoopflowLibrary {
 
     /// What `read.argv` prints, read off the caller's thread.
     static func read(_ read: ServedRead) async throws -> String {
-        let json = String(decoding: try JSONEncoder().encode(read), as: UTF8.self)
+        try await call(lf_read, try JSONEncoder().encode(read), failure: "read")
+    }
+
+    /// What `write.argv` prints, written off the caller's thread.
+    static func write(_ write: ServedWrite) async throws -> String {
+        try await call(lf_write, try JSONEncoder().encode(write), failure: "make")
+    }
+
+    private static func call(
+        _ entry: @escaping @Sendable (UnsafePointer<CChar>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> UnsafeMutablePointer<CChar>?,
+        _ request: Data,
+        failure: String
+    ) async throws -> String {
+        let json = String(decoding: request, as: UTF8.self)
         return try await Task.detached(priority: .userInitiated) {
             var error: UnsafeMutablePointer<CChar>?
-            guard let result = lf_read(json, &error) else {
-                throw RegistryQueryError(take(error) ?? "Loopflow could not read \(json)")
+            guard let result = entry(json, &error) else {
+                throw RegistryQueryError(take(error) ?? "Loopflow could not \(failure) \(json)")
             }
             return take(result) ?? ""
         }.value

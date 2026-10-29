@@ -99,6 +99,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28, 2026, inherited `LF_*` unset. Latest results per check:
+- October 29, compress of the second slice (one `wave status --sync` arm in `lf.rs`, the Task-order move folded into the arrangement list): `--test served_reads` 1/1, `--lib lf::commands::write::` 2/2, `--test integration planning_foreground_tests::` 6/6, clippy and fmt clean; Swift edits are comments and README only.
 - October 29, second write slice: `--test served_reads` 1/1 (adds the arrangement writes, `WaveEnsure` and `PlanningRefresh`, arrangement recording no Process), `--lib lf::commands::write::` 2/2, `-p loopflow-ffi` 3/3. `--test integration -- cli_discovery:: planning_foreground_tests::` 40/40, `test_desktop.sh` over `RegistryQueryTests|WorkModelTests|WorkSelectionTests|DashboardWorkspaceTests|WorkCLISubscriptionTests|WorkDestinationTests|NewTaskTests|DesktopHeadlessTests` 146/146, clippy (`-p loopflow -p loopflow-ffi --all-targets`) and fmt clean.
 - October 29, realign: plan only, no rerun.
 - October 29, compress of the write slice: `--test served_reads` 1/1, `--lib lf::commands::write::` 2/2, clippy and fmt clean.

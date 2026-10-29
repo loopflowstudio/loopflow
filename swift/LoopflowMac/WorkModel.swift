@@ -1305,9 +1305,10 @@ final class WorkModel {
     }
 
     /// Desktop's planning clock. Each shown Wave's planning is refreshed in the
-    /// app, as `lf wave status --sync` refreshes it, every five minutes, every 30 seconds while a saved change waits for delivery, and
-    /// after a failure (a provider rate limit, say) from 30 seconds doubling
-    /// to five minutes. The Work observation shows what each refresh wrote.
+    /// app, as `lf wave status --sync` refreshes it, every five minutes, every
+    /// 30 seconds while a saved change waits for delivery, and after a failure
+    /// (a provider rate limit, say) from 30 seconds doubling to five minutes.
+    /// The Work observation shows what each refresh wrote.
     func keepPlanningCurrent() async {
         guard !usesFixedFixture, query.streamsWork else { return }
         var failures = 0

@@ -74,7 +74,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         None,
     ))
     .unwrap();
-    let unpublished_id = unpublished["id"].as_str().unwrap().to_owned();
+    let task_id = unpublished["id"].as_str().unwrap().to_owned();
     let unpublished = unpublished["identifier"].as_str().unwrap().to_owned();
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     // Planning status also serves a Work folder without Git.
@@ -354,7 +354,6 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         )
     };
     let repository_id = repository["id"].as_str().unwrap().to_owned();
-    let task_id = unpublished_id.clone();
     // A saved record as the app reads it, and the revision a write names.
     let layout = |work: &str| -> Value {
         serde_json::from_str(
@@ -461,12 +460,20 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
             // Each names the revision its last write left, so it is built again
             // before `lf` repeats it.
             [
+                // The fixture's Working Tasks hold no Task; the shared order
+                // moves through the same tile writer as a Dashboard's.
+                Box::new(|| Write::TileMove {
+                    directory: directory.clone(),
+                    board: "query:served".into(),
+                    member: format!("task:{task_id}"),
+                    destination: format!("task:{task_id}"),
+                }) as Box<dyn Fn() -> Write>,
                 Box::new(|| Write::DashboardPin {
                     directory: directory.clone(),
                     id: "served".into(),
                     pinned: true,
                     revision: revision("query:served"),
-                }) as Box<dyn Fn() -> Write>,
+                }),
                 Box::new(|| Write::DashboardRename {
                     directory: directory.clone(),
                     id: "served".into(),
@@ -550,15 +557,6 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     };
     let created = create.write().unwrap();
     assert_eq!(layout("query:served")["id"], "served", "{created}");
-    // The fixture's Working Tasks hold no Task; the shared order moves
-    // through the same tile writer as a Dashboard's.
-    let order = || Write::TileMove {
-        directory: directory.clone(),
-        board: "query:served".into(),
-        member: format!("task:{task_id}"),
-        destination: format!("task:{task_id}"),
-    };
-    assert_eq!(compare(order(), &order, &dashboard), 0);
     for write in arrangement {
         let recorded = compare(write(), &*write, &dashboard);
         assert_eq!(recorded, 0, "{:?} recorded a Process", write().argv());

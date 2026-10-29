@@ -136,6 +136,13 @@ final class SessionsWorkspace {
         }
     }
 
+    /// Whether a pane shows a Session the store holds. A saved layout can name a
+    /// headless Run or an aged-out Session the store doesn't hold, and that pane
+    /// renders as "No Task conversation open".
+    func showsConversation(held: Set<String>) -> Bool {
+        multiplexer.layout.allPanes.contains { $0.sessionId.map(held.contains) == true }
+    }
+
     func toggleFocus(_ paneId: String) {
         Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
         multiplexer.toggleZoom(paneId)

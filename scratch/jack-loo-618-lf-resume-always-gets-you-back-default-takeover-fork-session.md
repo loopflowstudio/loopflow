@@ -49,15 +49,11 @@ conversation reports `new_thread`. Desktop perf keys `connect_prepare_*` stay: b
 reads them. Desktop's `Preparation {attach, open, moveHere}` is local pane intent over the one
 `resume --prepare` shape; Move here stays explicit.
 
-## Concept review (2026-10-28, headless, after Desktop hold)
+## Concept review (2026-10-28)
 
-Nothing to change. Clap surface matches the accepted shape (`Resume {id, --fork, --all}`,
-`New {id}`, `task hold|release`); no live caller of a deleted verb or flag outside shipped
-release notes and the parse-rejection test. Session skills say `lf session new` where they said
-`--fresh`. Settled, not reopened: Desktop's Open-vs-Move-here stays explicit while CLI resume
-takes over by default; the state label stays Deferred; Desktop has no Fork action (acceptance
-doesn't require one). Note for gate: `target/debug/lf help …` printed the installed app's
-old help even with `LF_*` unset, so check help through `cli_discovery`, not by hand.
+Settled, not reopened: Desktop's Open-vs-Move-here stays explicit while CLI resume takes over
+by default; Desktop has no Fork action. For gate: check help through `cli_discovery`;
+`target/debug/lf help …` printed the installed app's help even with `LF_*` unset.
 
 ## Takeover scope (Jack Heart, 2026-10-29, implemented 2026-10-29)
 

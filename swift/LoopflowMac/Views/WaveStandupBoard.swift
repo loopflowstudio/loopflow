@@ -5,8 +5,8 @@ import Loopflow
 import SwiftUI
 
 /// A Wave's Tasks bucketed for standup by Task state. The one bucketing rule; the
-/// board only renders it. Backlog holds unstarted and deferred Tasks; Working the
-/// idle, active and moving ones (the sidebar's Working Tasks); Autonomous the
+/// board only renders it. Backlog holds unstarted and unassigned Tasks; Working the
+/// assigned idle, active and moving ones (the sidebar's Working Tasks); Autonomous the
 /// shipping ones, a Graph running to merge that stops for no one; Done the Tasks
 /// completed in the last `doneDays` days (0 = all ages).
 struct WaveStandup: Equatable {

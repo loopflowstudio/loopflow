@@ -191,7 +191,7 @@ lf wave status billing                            # plan, Tasks, metrics and exe
 ```
 
 `wave-operate` gives every started Task you own a disposition: moving, acted on,
-waiting on a named person, deferred, or unknown. It leaves running Graphs alone,
+waiting on a named person, unassigned, or unknown. It leaves running Graphs alone,
 reruns what remains of a stopped one, and lists unstarted backlog for you to
 pick. It never edits the plan or files Tasks. Teammates' Tasks are listed and
 left alone.

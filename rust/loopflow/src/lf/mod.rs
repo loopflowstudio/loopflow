@@ -1052,7 +1052,6 @@ impl Commands {
             Self::Ops { cmd } => cmd.changes_state(),
             Self::Config { cmd } => cmd.changes_state(),
             Self::Self_ { cmd } => cmd.changes_state(),
-            Self::Clone { cmd } => cmd.changes_state(),
             Self::Portfolio { cmd, .. } => cmd.is_some(),
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
             Self::Ship { .. }
@@ -1326,8 +1325,8 @@ impl SelfCommand {
     pub fn changes_state(&self) -> bool {
         match self {
             Self::Doctor { .. } => false,
-            Self::Install { cmd } => match cmd {
-                Some(InstallCommand::Preflight { .. }) => false,
+            Self::Install { cmd, .. } => match cmd {
+                Some(InstallCommand::Preflight { .. } | InstallCommand::ReaderCatalog) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }

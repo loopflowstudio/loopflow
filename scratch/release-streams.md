@@ -96,8 +96,10 @@ Evidence: `scratch/release-research.md`, `scratch/explore.html` (cleared; in git
 ## Build order (stacked on LOO-656's #1755, Jack Heart, 2026-10-28)
 
 Jack: "we can stack on the migrations branch if necessary." #1755 merged before
-slice 1 landed; slice 2 onward sits on origin/main. Each slice lands working and
-tested before the next starts.
+slice 1 landed; slice 2 onward sits on origin/main. Slices 1 and 2 landed as
+their own PRs. **Slices 3–8 ship as one PR** (Jack Heart, 2026-10-29: asked
+"or one PR?", then "ok"): build each slice working and tested on this branch,
+commit it, and do not land; publish and land once, after slice 8.
 
 1. **Minors from main — merged as #1763 (`efe7e9106`), 2026-10-28.** `release.rs` drops
    `MinorRelease`, the closing patch, `prepared_tree`, the minor-pair refusal

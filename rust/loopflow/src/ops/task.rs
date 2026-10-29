@@ -366,6 +366,7 @@ async fn task_store() -> OpsResult<SharedStore> {
 /// Durable placement for a Task checkout forked from another Task's PR.
 #[derive(Debug, Clone)]
 pub struct StackedSync {
+    /// The recorded base, or the parent's merge commit once HEAD holds it.
     pub fork_base: String,
     pub child: Task,
     /// The live parent branch, or `None` once the parent has merged.
@@ -412,12 +413,24 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
                 parent.branch
             )));
         }
+        // A child rebased onto the default branch after its parent landed holds
+        // the parent's work through the merge commit, not the recorded parent
+        // tip. That commit is its base now; one missing both is refused later.
+        let fork_base = match parent.merge_commit.as_deref() {
+            Some(merge) if contains_commit(worktree, merge)? => merge.to_string(),
+            _ => task.base_commit.clone(),
+        };
         Ok(Some(StackedSync {
-            fork_base: task.base_commit.clone(),
+            fork_base,
             child: *task,
             parent_branch: (!merged).then_some(parent.branch),
         }))
     })
+}
+
+fn contains_commit(worktree: &Path, commit: &str) -> OpsResult<bool> {
+    Ok(crate::git::commit_exists(worktree, commit)?
+        && crate::git::is_ancestor(worktree, commit, "HEAD")?)
 }
 
 /// Return a stacked child only after its parent has merged. Landing before that

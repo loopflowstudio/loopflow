@@ -133,6 +133,15 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Graph before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
+/// A Task run whose every attempt failed with the same error. A shipped Task
+/// stops shipping on it rather than starting the run again later.
+#[derive(Debug, thiserror::Error)]
+#[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
+pub struct RepeatedRunFailure {
+    pub run: String,
+    pub cause: String,
+}
+
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
 /// start it again while a Graph process fails. Each attempt records its own
 /// GraphProcess beneath this process. A Graph held for a person or a watcher, an
@@ -156,6 +165,8 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
         release && !cli.batch && !cli.interactive && crate::transport::current().is_some();
     let mut released = false;
     let mut attempt = 1;
+    // The error every failed attempt so far shared, if they all shared one.
+    let mut repeated: Option<String> = None;
     loop {
         let mark = store.process_mark(&process)?;
         let mut log = letting_go
@@ -192,17 +203,27 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
             return Err(crate::process::CommandExit(130).into());
         }
         // Only a Graph process that failed is started again.
-        let failed = status.code() == Some(1) && attempt_graph(store, &process, mark)?.is_some();
-        if failed {
+        let graph = match status.code() {
+            Some(1) => attempt_graph(store, &process, mark)?,
+            _ => None,
+        };
+        let failed = graph.is_some();
+        if let Some(graph) = &graph {
             if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
                     "The run of {run} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
                 );
                 return Err(crate::process::CommandExit(1).into());
             }
+            let cause = store.failure_cause(graph)?.map(|(_, cause)| cause);
+            repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
+                if let Some(cause) = repeated {
+                    let run = run.to_string();
+                    return Err(RepeatedRunFailure { run, cause }.into());
+                }
                 eprintln!("The run of {run} failed {attempt} times; this Task run stops here.");
             }
             return Err(exit_of(status).into());

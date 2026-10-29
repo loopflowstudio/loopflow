@@ -137,7 +137,9 @@ tested before the next starts.
    `TaskDueDateView`) show it. `stable_advance` skips releases a `Regression`
    covers: ≥ `regressed_in` and, once the Task is done, published before it closed.
    `advance_stable` reads `SqliteStore::regression_tasks(repo)` and logs which Task
-   holds stable. Assumptions in `scratch/questions.md`; Linear label mapping stays Open.
+   keeps stable off which releases. Assumptions in `scratch/questions.md`; Linear label mapping stays Open.
+   Compress: `planning_write::read` takes optional Task columns through one helper.
+   `cargo test --lib ops::release:: store::sqlite::planning` + `--test release_tests stable regression`: pass.
 4. **Stream flags and the recorded stream.** `lf install --dev|--preview|--stable`
    (rename #1755's `--main`), no flag = current stream from Home config, default
    stable; switching slower runs `can_open` first. `install.sh --channel`.

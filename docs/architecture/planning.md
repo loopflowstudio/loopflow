@@ -217,7 +217,7 @@ mutation journal grows with every edit, so `lf planning journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
-error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
+error, rather than inventing an empty plan. Foreground CLI, headless Run and Desktop connections own Git exchange
 for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
 whole-store callback, scheduler or implicit turn/Graph replay is involved.
 

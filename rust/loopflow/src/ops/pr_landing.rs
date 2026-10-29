@@ -1308,7 +1308,7 @@ pub fn wait_for_merge(repo: &Path, options: &LandOptions, pr: &PrInfo) -> OpsRes
 
 /// Check every 15 s until the PR merges or closes. A blocked check is a
 /// recorded state, not an answer: the next check acts on fresh evidence, and
-/// only Defer holds it. No elapsed time ends the wait.
+/// only unassigning the Task holds its repair. No elapsed time ends the wait.
 async fn wait_for_landing(
     store: &SharedStore,
     id: &crate::pr_landing::PrLandingId,

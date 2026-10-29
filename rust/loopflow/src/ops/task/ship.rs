@@ -2,8 +2,8 @@
 //! `end` with no one at hand, as `lf -b task run` runs it: interactive steps
 //! headless, standing in for the person. The approval is stored; the Task reads
 //! shipping while this Machine's ship process carries it there, and idle when
-//! that process exited. Defer holds it, Stop withdraws the approval, and a ship
-//! process that died is started again.
+//! that process exited. Unassigning the Task stops the ship, Stop withdraws the
+//! approval, and a ship process that died is started again.
 
 use serde::{Deserialize, Serialize};
 

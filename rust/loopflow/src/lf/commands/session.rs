@@ -377,7 +377,7 @@ struct SessionWatchArgs {
     repo: Option<String>,
     task: Option<String>,
     search: Option<String>,
-    /// `null` selects interactive and headless Sessions.
+    /// `null` selects both Sessions and Runs.
     interactive: Option<bool>,
 }
 
@@ -578,7 +578,7 @@ async fn resume(
     );
     anyhow::ensure!(
         *prepare || cli.batch || cli.output_schema.is_none(),
-        "response schemas require a headless Session (-b)"
+        "response schemas require a headless Run (-b)"
     );
     let progress = crate::startup::Startup::new("Finding conversation");
     let store = open_shared_store().await?;

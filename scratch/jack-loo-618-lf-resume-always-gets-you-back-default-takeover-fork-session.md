@@ -98,20 +98,26 @@ Jack Heart won't run it live; the agent runs it in a throwaway `LF_HOME` with re
 takeover (old terminal names the new one), a Run's id refused with the Task pointer,
 `--fork`, dead process resumes, raw `claude` id, `session new -a`, `task claim/unassign`.
 
+## Concept review (headless, 2026-10-29)
+
+Implementation matches Jack Heart's 2026-10-29 decisions; no product choice open. Kept: the
+Graph correction exception in `run::resume` (a Graph continuing its own step's Run). Moving
+it off `resume` needs a hidden command or in-process input capture, more machinery than the
+one-line ancestry check it replaces; it is invisible to people.
+
 ## Remaining
 
 - Implementation notes (2026-10-29): "unassigned" = no owner in the ownership log
   (`task_owned`); a started unowned Task goes to Later/Backlog with next move User. `lf ship`
   claims an unowned Task on start (as `task run` does) and stops when it is unassigned
-  mid-ship (`ShipStep::Unassigned`); no integration test covers the mid-ship stop yet.
+  mid-ship (`ShipStep::Unassigned`); the step already running finishes.
   Desktop reads `runtime.owner` for Claim/Unassign (`RoadmapTask.isUnassigned`).
 - Demo (answer 6) not run yet: agent-run in a throwaway `LF_HOME` with real Claude.
-- Not yet tested: the mid-ship unassign stop end to end, and the Linear assignee clear on
-  `task unassign` (only the queued planning change is wired).
 - Checks (2026-10-29): lib `human_session:: ops::task::ship store::sqlite::{task_work,selections,
   planning_write,task_ownership,ci_incidents} work::selection lf::tests lf::commands::waves
-  task_graph_launch_tests::task_ship`, integration `world_recipes:: dto_fixtures:: cli_discovery::
-  machine_commands::task_ownership`, `two_people`, `transport_tests` Graph-step refusal,
-  `session_lifecycle_tests` structured correction, Swift `WorkModel|WaveStandup|DTOFixture|
-  RegistryQuery|SessionsStore` (126), fmt, clippy all-targets — pass.
+  agent::session:: task_graph_launch_tests::task_ship`, integration `world_recipes:: dto_fixtures::
+  cli_discovery:: machine_commands::task_ownership local_planning::task_unassign_clears_the_assignee`,
+  `two_people`, `transport_tests` Graph-step refusal, `session_lifecycle_tests` structured
+  correction, `session_launch_contract` schema refusal, Swift `WorkModel|WaveStandup|DTOFixture|
+  RegistryQuery|SessionsStore|DesktopHeadlessTests`, fmt, clippy all-targets — pass.
 - Assumptions: `scratch/questions.md`.

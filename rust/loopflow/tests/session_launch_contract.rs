@@ -494,7 +494,7 @@ fn previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupporte
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Session"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Run"));
     assert!(!fixture.home.path().join("received.json").exists());
 
     fixture.run(&["-i", ":", "create history"]);
@@ -506,7 +506,7 @@ fn previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupporte
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Session"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Run"));
     assert!(!fixture.home.path().join("received.json").exists());
     assert_eq!(fixture.session(), session);
 }

@@ -37,3 +37,8 @@
 - `task edit --assignee` stays: it assigns another person in Linear, which claim can't.
 - Started, unowned Tasks read as Later (Wave roadmap) / Backlog (Desktop standup). Tasks
   started before the ownership log existed with no claim would also land there.
+- `lf task unassign` on a Task nobody owns is refused ("is unowned") and leaves its Linear
+  assignee alone. Left as is (2026-10-29 leftovers pass); a flexible reading would treat it
+  as a no-op that still clears the assignee. Jack Heart to decide.
+- User-facing errors now say "headless Run (-b)" instead of "headless Session (-b)"
+  (`agent/session.rs`, `lf/commands/session.rs`); maintainer comments keep LfSession wording.

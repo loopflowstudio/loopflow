@@ -2574,6 +2574,40 @@ fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
     assert_eq!(handoffs(&task).len(), 1);
 }
 
+#[test]
+fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
+    let task = shipping_task();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "--task", "INF-123", "ship"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    task.ok(&["task", "unassign", "INF-123"]);
+    first.kill().unwrap();
+    first.wait().unwrap();
+    // Nobody owns it, so no read of this Machine's Tasks starts its ship again.
+    task.ok(&["task", "list"]);
+    let shown = task.run(&["wave", "show", "--json"]);
+    let shown = String::from_utf8_lossy(&shown.stdout);
+    assert!(
+        shown.contains("Unassigned; `lf task claim` and `lf ship` keep it shipping"),
+        "{shown}"
+    );
+    // Unassigning stops the ship, not the step already running.
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    wait_for("the running step to finish", || {
+        task.graph()["position"] == at("end")
+    });
+    assert_eq!(stand_ins(&task).len(), 1);
+}
+
 /// A Claude stand-in that records its first turn and fails at once, the way an
 /// expired login does.
 const FAILING_CLAUDE: &str = r#"#!/usr/bin/python3

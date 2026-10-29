@@ -456,7 +456,9 @@ struct DesktopHeadlessTests {
             work: .available(TaskOverview(sessions: [], graphProcesses: [], graph: nil)))
         if state == "unstarted" {
             _ = try view.inspect().find(button: "Complete")
-            _ = try view.inspect().find(button: "Hold")
+            // The fixture Task has no owner, so the assignment control offers Claim.
+            let assignment = try view.inspect().find(viewWithAccessibilityIdentifier: "task-claim-unassign")
+            #expect(try assignment.button().labelView().text().string() == "Claim")
             _ = try view.inspect().find(button: "Abandon…")
         } else {
             _ = try view.inspect().find(button: "Reopen")

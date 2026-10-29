@@ -1,5 +1,8 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LOO-618 concept review</title>
 <style>
 :root{color-scheme:light dark;--fg:#1d1d1f;--bg:#fdfdfc;--mute:#6b6b6b;--line:#e3e3e0;--new:#1f7a4d;--old:#a33}
@@ -12,34 +15,39 @@ code,pre{font:13.5px/1.5 ui-monospace,Menlo,monospace}
 pre{overflow-x:auto;padding:.9rem 1rem;border:1px solid var(--line);border-radius:6px}
 .old{color:var(--old)}.new{color:var(--new)}
 table{border-collapse:collapse;width:100%;font-size:14.5px}td,th{border-bottom:1px solid var(--line);padding:.45rem .4rem;text-align:left;vertical-align:top}
-</style></head><body><main>
+</style>
+</head>
+<body>
+<main>
 <header>
-<h1>LOO-618: does <code>--explain</code> say what <code>lf resume</code> will do?</h1>
-<p>Task LOO-618 · concept-review step · 2026-10-28 · headless, no decision requested</p>
-<p>Built from <code>ops/human_session/connection.rs</code>, <code>bin/lf.rs</code> (explain path), <code>ops/human_session.rs</code> (<code>new_thread</code>), <code>swift/Loopflow/Models/ContextExplanation.swift</code>, <code>SessionsView.swift</code></p>
+<h1>LOO-618: Desktop still says &ldquo;Resume&rdquo; for a held Task</h1>
+<p>Task LOO-618 &middot; concept-review step (second pass) &middot; 2026-10-28 &middot; headless, no decision requested</p>
+<p>Built from <code>lf/mod.rs</code> (Session/Task commands), <code>swift/Loopflow/Services/RegistryQuery.swift</code>, <code>swift/LoopflowMac/Views/TaskWorkView.swift</code>, <code>docs/work.md</code></p>
 </header>
 
 <h2>The mismatch</h2>
-<p>The command now has one verb. Its explanation still describes the old one, and misses the harness switch entirely.</p>
-<pre>$ lf --explain -a codex resume     <span class="old"># Claude conversation</span>
-<span class="old">Action: Resume saved provider history; take it over …</span>   ← existing
-$ lf -a codex resume
-Started a new codex thread for …, seeded with what the claude thread knew.</pre>
-<pre><span class="new">Action: Start a new codex thread seeded with what the claude thread knew; …</span>   ← proposed</pre>
+<p>The CLI renamed <code>task resume</code> to <code>task release</code> so &ldquo;resume&rdquo; would mean one thing: get back to a conversation. Desktop kept the old words on the Task, a few inches from the Session pane&rsquo;s own Resume button.</p>
+<pre>Task header        [Complete] <span class="old">[Resume]</span> [Abandon…]     ← existing (held Task)
+                   [Complete] <span class="new">[Release]</span> [Abandon…]    ← proposed
+Context menu       <span class="old">Defer Task / Resume Task</span>             ← existing
+                   <span class="new">Hold Task / Release Task</span>             ← proposed
+Session pane       [Resume]                             unchanged: that one is a conversation</pre>
 
-<h2>Actions → concepts → API</h2>
+<h2>Actions &rarr; concepts &rarr; API</h2>
 <table>
-<tr><th>Person does</th><th>Existing intent</th><th>Proposed intent</th></tr>
-<tr><td><code>lf resume</code>, nothing there</td><td><code>start</code></td><td><code>start</code></td></tr>
-<tr><td><code>lf resume</code>, dead client</td><td><code>resume</code></td><td><code>resume</code></td></tr>
-<tr><td><code>lf resume</code>, another terminal holds it</td><td class="old"><code>connect_or_resume</code> “…or explicitly transition…”</td><td class="new"><code>take_over</code></td></tr>
-<tr><td><code>lf resume -a codex</code> on Claude</td><td class="old">reported as <code>resume</code></td><td class="new"><code>new_thread</code></td></tr>
+<tr><th>Person does</th><th>CLI</th><th>Desktop</th></tr>
+<tr><td>Get back to a conversation</td><td><code>lf resume</code></td><td>Resume (one <code>resume --prepare</code> shape)</td></tr>
+<tr><td>Restart / switch harness</td><td><code>lf session new [-a]</code></td><td><code>session new &lt;id&gt; --prepare</code></td></tr>
+<tr><td>Stop future runs of a Task</td><td><code>lf task hold</code></td><td><span class="old">Defer</span> &rarr; <span class="new">Hold</span></td></tr>
+<tr><td>Let it run again</td><td><code>lf task release</code></td><td><span class="old">Resume</span> &rarr; <span class="new">Release</span></td></tr>
 </table>
-<p>Types follow: <code>SessionConnect{Explanation,Action,Intent}</code> → <code class="new">SessionResume*</code>, <code>explain_connect</code> → <code class="new">explain_resume</code>, DTO fixture renamed, Swift mirror renamed. Desktop perf keys stay.</p>
+<p>Swift follows the verbs: <code>deferTask(_:deferred:)</code> &rarr; <code>holdTask(_:held:)</code>, accessibility ids <code>task-hold-release</code>/<code>task-hold</code>. The status label stays &ldquo;Deferred&rdquo;: that is the Task state the governing style guide names, and this Task renames verbs only.</p>
 
 <h2>Checked, unchanged</h2>
-<p>Desktop's <code>attach / open / moveHere</code> are pane intents over the one <code>resume --prepare</code> shape. Showing a pane never takes over, so Move here stays explicit.</p>
+<p>No CLI or Desktop caller uses <code>session attach</code>, <code>connect</code>, <code>--takeover</code>, <code>--try</code>, <code>--if-free</code>, <code>--fresh</code> or <code>task pause/resume</code>. <code>resume</code> and <code>session new</code> help describe the accepted behavior. Release notes keep their shipped wording.</p>
 
 <h2>Questions</h2>
-<ol><li>None open. Recorded as next implement direction in the working design.</li></ol>
-</main></body></html>
+<ol><li>None open. Recorded as the next implement direction in the working design.</li></ol>
+</main>
+</body>
+</html>

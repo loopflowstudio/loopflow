@@ -178,6 +178,7 @@ impl HistoryCommand {
             | Self::Retention { .. }
             | Self::Search { .. }
             | Self::Usage { .. }
+            | Self::Linear { .. }
             | Self::Export { .. } => false,
             Self::Replay { .. } => true,
         }

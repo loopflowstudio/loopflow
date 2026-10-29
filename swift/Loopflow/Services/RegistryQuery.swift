@@ -407,8 +407,9 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    public func deferTask(issue: String, deferred: Bool, cwd: String?) async throws {
-        _ = try await run(["task", deferred ? "defer" : "resume", issue], cwd)
+    /// `lf task claim` or `lf task unassign`.
+    public func assignTask(issue: String, claimed: Bool, cwd: String?) async throws {
+        _ = try await run(["task", claimed ? "claim" : "unassign", issue], cwd)
     }
 
     public func completeTask(issue: String, cwd: String?) async throws {
@@ -491,7 +492,7 @@ public struct RegistryQuery: Sendable {
 
     /// The repository or Wave's retained conversation; explicit opening only.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
-        var args = ["session", "connect", "--prepare", "--json"]
+        var args = ["session", "resume", "--prepare", "--json"]
         if wave == nil { args = ["--repo", cwd] + args }
         if let wave { args += ["--wave", wave] }
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
@@ -502,25 +503,18 @@ public struct RegistryQuery: Sendable {
     /// choice is remembered as the Task's primary. External ownership is returned
     /// as a Move here action without transferring control.
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "connect", "--task", issue, "--prepare", "--json", "--try"], cwd)
+        let stdout = try await run(["session", "resume", "--task", issue, "--prepare", "--json"], cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Reattach only; neither preparation nor the returned command can resume execution.
-    /// Nil when nothing is running to attach to.
-    public func prepareSessionAttachment(id: String, cwd: String? = nil) async throws -> SessionRecord? {
-        try Self.decode(SessionRecord?.self, from: await run(
-            ["session", "attach", id, "--if-free", "--prepare", "--json"], cwd))
-    }
-
-    /// Prepare one Session’s terminal command without starting its provider.
+    /// Prepare one Session’s terminal command without starting its provider. The
+    /// command takes the conversation over from whatever holds it.
     public func prepareSession(
         id: String,
-        takeover: Bool = false,
         agent: String? = nil,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        let args = ["session", "connect", id, "--prepare", "--json", takeover ? "--takeover" : "--try"]
+        let args = ["session", "resume", id, "--prepare", "--json"]
             + (agent.map { ["--agent", $0] } ?? [])
         let stdout = try await run(args, cwd)
         return try Self.decode(SessionRecord.self, from: stdout)
@@ -537,18 +531,10 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(SessionRecord.self, from: stdout)
     }
 
-    /// Replace the primary conversation with fresh Work context; retain its history.
+    /// Restart the conversation on a fresh provider thread seeded with what the
+    /// last thread knew; the same Session keeps its history.
     public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?) async throws -> SessionRecord {
-        var args = ["session", "connect", "--fresh", "--prepare", "--json"]
-        if session.taskPrimary, session.taskIds.count == 1, let task = session.taskIds.first {
-            args += ["--task", task]
-        } else if session.primaryScope == "wave", let wave = session.waveId {
-            args += ["--wave", wave]
-        } else if session.primaryScope == "repository" {
-            args = ["--repo", session.cwd] + args
-        } else {
-            throw RegistryQueryError("Session is not a primary conversation.")
-        }
+        var args = ["session", "new", session.id, "--prepare", "--json"]
         if let agent { args += ["--agent", agent] }
         return try Self.decode(SessionRecord.self, from: await run(args, cwd))
     }

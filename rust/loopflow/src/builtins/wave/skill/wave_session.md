@@ -37,7 +37,7 @@ watch, check back or follow up later.
   Auto-Ship, which may merge its PR: run them only when the person asks to ship
   or land, and never to re-ship a Task someone stopped.
 - This conversation keeps the instructions it launched with.
-  `lf connect --wave <wave> --fresh` gives the Wave a fresh conversation after an install.
+  `lf session new --wave <wave>` restarts it on a fresh thread with current instructions, seeded with what this one knew.
 
 ## Begin work in a Wave
 

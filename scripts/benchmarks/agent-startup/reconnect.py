@@ -114,7 +114,7 @@ def main() -> None:
                 lf = variants[variant]
                 # Setup uses the same candidate each time, outside the measured interval.
                 setup = measure(
-                    [str(variants["candidate"]), "session", "connect", session],
+                    [str(variants["candidate"]), "session", "resume", session],
                     args.repo,
                     build_environment(args.home, variants["candidate"]),
                     args.output / f"crash-{index}-{size}-{variant}",
@@ -126,7 +126,7 @@ def main() -> None:
                 # The provider's existing lifeline watchdog gets its ordinary exit window.
                 time.sleep(3)
                 result = measure(
-                    [str(lf), "session", "connect", session],
+                    [str(lf), "session", "resume", session],
                     args.repo,
                     build_environment(args.home, lf),
                     args.output / f"reconnect-{index}-{size}-{variant}",

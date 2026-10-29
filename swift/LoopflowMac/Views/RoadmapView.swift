@@ -23,7 +23,7 @@ func roadmapTaskAction(_ task: RoadmapTask) -> RoadmapTaskAction? {
     let startable = task.runControl.unavailable == nil
     guard task.runtime != nil else { return startable ? .run : nil }
     switch task.actions.recommended {
-    case .resume:
+    case .run:
         // Continuing a Task is a fresh Graph launch; Rust's Start legality governs it.
         if startable { return .run }
     case .openPr:

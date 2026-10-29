@@ -67,7 +67,7 @@ the Task as unknown and do not act on it. Include Tasks status lists under
 | acted | This pass continued, recovered or delivered it through a supported control, then reread status and saw the effect. |
 | available | Work the person can take up now: a review, demo, concrete choice or merge click, with its conversation link or PR. Never completed or approved for them. |
 | dependency or capacity | The named Task, PR, running check, account or limit. |
-| deferred | The person's instruction to stop, or an explicit hold (`lf task defer <issue>`) on work nothing else is moving. |
+| unassigned | The person's instruction to stop, or a started Task nobody owns (`lf task unassign <issue>`); nothing moves it until someone claims it. |
 | unknown | The named read or liveness evidence that is missing. Unknown is not idle and never a reason to start a second Graph process. |
 
 “Ready”, “needs reconciliation” and “the Wave owns this” are not dispositions.
@@ -169,7 +169,7 @@ headings in this order, omitting an empty group:
 
 1. **Available** — each review, demo, choice or merge the person can take up, with its link.
 2. **Moving** — live work left alone, and what this pass acted on with its result.
-3. **Stuck** — a dependency or capacity, deferred, or unknown, with
+3. **Stuck** — a dependency or capacity, unassigned, or unknown, with
    the named cause or missing evidence.
 4. **Others' work** — each Task another person owns, with that person and
    Machine, “left alone”.

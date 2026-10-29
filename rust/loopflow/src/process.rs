@@ -179,8 +179,9 @@ impl SessionAttachment {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum Departure {
-    /// Another terminal on this Machine, on the same login.
-    Terminal,
+    /// Another terminal on this Machine, on the same login, named as people
+    /// see it (`Desktop`, `tmux %3`, `ttys004`) when the mover knew.
+    Terminal { to: Option<String> },
     Account {
         account: crate::store::ProviderAccountId,
     },

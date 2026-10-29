@@ -2256,9 +2256,9 @@ final class WorkModel {
         return repoPath
     }
 
-    func deferTask(_ task: RoadmapTask, deferred: Bool) async {
+    func assignTask(_ task: RoadmapTask, claimed: Bool) async {
         await performTaskAction(task.id) {
-            try await query.deferTask(issue: task.task.identifier, deferred: deferred, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.assignTask(issue: task.task.identifier, claimed: claimed, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 

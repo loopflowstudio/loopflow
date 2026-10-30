@@ -20,7 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # build.rs orders migrations by origin/main's first-parent history.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.revision }}
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Exercise revoked-token recovery

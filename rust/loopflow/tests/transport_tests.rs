@@ -671,9 +671,32 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
         });
     }
     let started = Instant::now();
-    let socket = loop {
+    // This owner answers whether a viewer holds control, then never
+    // acknowledges the attachment itself.
+    let mut socket = loop {
         match listener.accept() {
-            Ok((socket, _)) => break socket,
+            Ok((socket, _)) => {
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .unwrap();
+                let mut socket = BufReader::new(socket);
+                let mut request = String::new();
+                socket.read_line(&mut request).unwrap();
+                match serde_json::from_str::<Value>(&request).unwrap()["kind"]
+                    .as_str()
+                    .unwrap()
+                {
+                    "controlled" => writeln!(
+                        socket.get_mut(),
+                        "{}",
+                        json!({"kind":"controlled","held":false})
+                    )
+                    .unwrap(),
+                    "attach" => break socket,
+                    other => panic!("unexpected request {other}"),
+                }
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 assert!(started.elapsed() < Duration::from_secs(10));
                 std::thread::sleep(Duration::from_millis(20));
@@ -684,17 +707,6 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     std::fs::remove_file(&endpoint).unwrap();
     std::fs::rename(retained, endpoint).unwrap();
     drop(listener);
-    socket.set_nonblocking(false).unwrap();
-    socket
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
-    let mut socket = BufReader::new(socket);
-    let mut request = String::new();
-    socket.read_line(&mut request).unwrap();
-    assert_eq!(
-        serde_json::from_str::<Value>(&request).unwrap()["kind"],
-        "attach"
-    );
     if silent == SilentOwner::Cancelled {
         // SAFETY: signal only this test's live viewer, never the owner/provider.
         assert_eq!(unsafe { libc::kill(viewer.id() as i32, libc::SIGINT) }, 0);
@@ -1273,6 +1285,96 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
     let output = wait_for_viewer(reopened, Duration::from_secs(10));
     assert!(output.status.success(), "{output:?}");
     assert_eq!(output.stdout, b"same conversation");
+}
+
+/// An owner from an earlier lf can stay alive after an upgrade yet never answer
+/// its socket. Opening its Session neither waits on it nor gives up: the stale
+/// viewer record reads `detached`, and reconnecting stops its provider and
+/// continues the same provider thread in a new owner, without replaying input.
+#[test]
+fn opening_takes_over_from_an_owner_that_never_answers() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let mut owner = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "--interactive",
+            "--agent",
+            "claude",
+            ":",
+            "one original input",
+        ],
+    );
+    owner.env("PATH", &path);
+    let owner = fixture.owner(owner);
+    let launched = fixture.launches(1).remove(0);
+    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+    let session: String = fixture
+        .sql()
+        .query_row(
+            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+            [launched.split(':').nth(1).unwrap()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    // The owner keeps running, but its socket accepts and never replies, and
+    // its record still names the Desktop that quit.
+    let endpoint = fixture.endpoint(&owner);
+    std::fs::rename(&endpoint, endpoint.with_extension("retained")).unwrap();
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    std::thread::spawn(move || {
+        let held: Vec<UnixStream> = listener.incoming().map_while(Result::ok).collect();
+        drop(held);
+    });
+    fixture
+        .sql()
+        .execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
+        .unwrap();
+
+    let prepared = fixture
+        .command(&["session", "resume", &session, "--prepare", "--json"])
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    assert_eq!(prepared["state"], "detached", "{prepared}");
+    assert_eq!(prepared["actions"][0]["label"], "Reconnect", "{prepared}");
+
+    let reopened = fixture
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let launches = fixture.launches(2);
+    let (_, thread) = launches[1]
+        .split_once(" --resume ")
+        .unwrap_or_else(|| panic!("reopened without history: {launches:?}"));
+    assert!(!thread.contains(' '), "input replayed: {launches:?}");
+    assert!(launched.contains(thread), "another thread: {launches:?}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    // SAFETY: signal 0 only probes the fixture provider's PID.
+    while unsafe { libc::kill(provider, 0) } == 0 {
+        assert!(Instant::now() < deadline, "the old provider kept running");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let current: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_ne!(current, owner);
+    drop(wait_for_viewer(reopened, Duration::from_secs(10)));
+    for owner in [owner, current] {
+        if fixture.running(&owner) {
+            fixture.stop(&owner);
+        }
+    }
 }
 
 #[test]

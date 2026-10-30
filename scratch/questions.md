@@ -1,4 +1,7 @@
 # LOO-700 questions
 
 - Executable name: chose `Loopflow Dev` (matches CFBundleName/display name) over `LoopflowDev`. A space is fine for macOS bundles and `pgrep -x "Loopflow Dev"`; reversible by changing `DEV_EXECUTABLE` in `scripts/loopflow-dev.py`.
-- Check (after compress): `uv run pytest python/tests/test_loopflow_dev.py` — 9 passed. Installed-app proof (real build, relaunch, `pgrep -x Loopflow` misses Dev) left to demo; no Dev app relaunch here.
+- Name-based lookups (realign 2026-10-30): Swift finds itself via `Bundle.main.executableURL`; `lf`/install code hard-coding `Contents/MacOS/Loopflow` addresses only the release app; crash records (`desktop_exits.rs`) label Dev by bundle, not executable name. Nothing else needs changing.
+- Remaining: installed-app proof (real build, relaunch, `pgrep -x Loopflow` misses Dev, stale `Loopflow` gone) belongs to demo; no Dev app relaunch here.
+- Check: `uv run pytest python/tests/test_loopflow_dev.py` — 9 passed (after the record_live help/README fix).
+- Concept review (2026-10-30): the model holds. Each app has one process name (`Loopflow` for the release app, `Loopflow Dev` for Dev), and the bundle id, signing and install path don't change. Done: `record_live.py` `--process` help and the benchmark README now name `Loopflow Dev`; remaining `LoopflowMac` hits are the SwiftPM product/build path or crash-text fixtures, not process lookups. Keep the `Contents/MacOS/Loopflow` prefix in `_stop_loopflow_app`: it stops an older install's `Loopflow` binary during the upgrade and excludes the bundled `lf`, which agents may be running through `LF_BIN`. No open product choice.

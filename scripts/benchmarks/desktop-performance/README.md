@@ -7,7 +7,7 @@ uv run python scripts/benchmarks/desktop-performance/timings.py --json
 
 # Observe the running app without sending input.
 uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60
-uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --process LoopflowMac
+uv run python scripts/benchmarks/desktop-performance/record_live.py record --seconds 60 --process "Loopflow Dev"
 uv run python scripts/benchmarks/desktop-performance/record_live.py summarize /tmp/loopflow-live-recording
 
 # Compare native workspace journeys on the same host and build mode.

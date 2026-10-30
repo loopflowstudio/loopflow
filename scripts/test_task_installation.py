@@ -21,7 +21,7 @@ PROOFS = {
     "task_graph_read_keeps_captured_topology_and_counts_both_returns": "graph_tests",
     "installation_uses_candidate_authority_from_any_checkout": "global_commands",
     "installation_reaches_candidate_verdict_with_an_unreadable_task_registry": "global_commands",
-    "early_observation_records_preflight": "process_ownership_tests",
+    "install_preflight_records_no_process": "process_ownership_tests",
     # Structured-ID upgrade on a case-sensitive filesystem with live owners.
     "canonical_ids_live_receipt_defers_then_normal_settlement_allows_upgrade": CANONICAL_IDS,
     "canonical_ids_changed_claim_waits_for_canonical_live_caller": CANONICAL_IDS,

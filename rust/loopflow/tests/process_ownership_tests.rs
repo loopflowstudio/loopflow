@@ -655,7 +655,7 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
 
 #[tokio::test]
 #[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-async fn early_observation_records_preflight() {
+async fn install_preflight_records_no_process() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -673,14 +673,15 @@ async fn early_observation_records_preflight() {
     .unwrap();
     assert!(output.status.success(), "{output:?}");
     let conn = rusqlite::Connection::open(&database).unwrap();
-    let (count, completed): (i64, i64) = conn
+    // Preflight only reads, so it records no Process.
+    let count: i64 = conn
         .query_row(
-            "SELECT count(*),count(completed_at) FROM processes WHERE parent_lf_process_id=?1",
+            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
             [parent.id.as_str()],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert_eq!((count, completed), (1, 1));
+    assert_eq!(count, 0);
 }
 
 #[tokio::test]

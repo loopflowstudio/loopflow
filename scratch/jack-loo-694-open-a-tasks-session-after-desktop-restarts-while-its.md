@@ -1,6 +1,6 @@
 # LOO-694: open a Task's Session after Desktop restarts while its conversation runs
 
-Status: implemented (2026-10-30), awaiting gate.
+Status: implemented (2026-10-30), realigned against origin/main (no upstream changes to the touched files); awaiting gate.
 
 ## Observed failure (2026-10-30, Jack Heart's machine)
 
@@ -39,3 +39,23 @@ Status: implemented (2026-10-30), awaiting gate.
 - Passive list (`lf desktop sessions`, `listed`) still reads the column; the
   sidebar may show the stale row as active until the pane is shown. See questions.
 - MTG-214's live owner is untouched; opening it with this build reattaches.
+
+## Concept review (2026-10-30, headless)
+
+- Concept unchanged: "viewed" means a controlling viewer holds the owner, and
+  the owner's socket answers it; `processes.viewed` is that owner's record of it,
+  trusted only where no one-Session decision rides on it. Open/Move here/Reconnect
+  keep their meanings.
+- A hung or unreachable owner still reads `active`; Move here takes the
+  conversation over on the same provider thread, so no Session stays unopenable.
+- The passive sidebar label (questions.md) is presentation, not product direction:
+  showing the pane decides and reattaches. No open product choice; no change.
+
+## Proposed Wave memory (infrastructure; not written outside a Graph's memory step)
+
+- An owner from an earlier lf keeps running after an upgrade but cannot write a
+  store the newer lf advanced. Columns only that owner writes (`processes.viewed`)
+  go stale; the owner's socket (`controlled`) is the live truth, and a failed
+  owner write must not end its policy.
+
+Check: realign ran no tests (plan and diff agree); gate owns `cargo test -p loopflow --test transport_tests opening_reattaches`.

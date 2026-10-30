@@ -27,3 +27,16 @@ GitHub's repo page for the branch shows the root README; `scripts/check_architec
 Implemented 2026-10-30. Remaining: `.lf/wave/infrastructure/MEMORY.md:893` still links
 `.github/README.md`; repoint it in the next infrastructure Wave pass.
 Check: `uv run python scripts/check_architecture.py` — pass.
+
+## Demo result (2026-10-30, headless, standing in for Jack)
+GitHub's README API — the same selection the repository page renders — on
+`loopflowstudio/loopflow`:
+- `main`: `.github/README.md` (the CI notes; the bug).
+- this branch (pushed, in sync with origin): `README.md` (the root README; fixed).
+
+`uv run python scripts/check_architecture.py` passes. No remaining `.github/README.md`
+reference outside scratch except the infrastructure Wave memory line noted above.
+Decision: advance. No product judgment was needed; the full README audit stays outside this PR.
+
+## Gate (2026-10-30)
+`uv run python scripts/test.py --reuse-passing` — PASS (architecture, python, website; rust/swift unreachable). No polish needed; `.github/CI.md` has no stale self-references.

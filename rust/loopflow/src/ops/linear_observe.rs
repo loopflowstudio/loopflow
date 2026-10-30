@@ -151,6 +151,11 @@ pub(crate) async fn check_before_write(repo: &std::path::Path) -> OpsResult<()> 
 /// update Tasks. Freshness belongs to the scope, even when several repositories
 /// or processes share it.
 pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResult<bool> {
+    check_scope(store, repository, fresh_for(repository)).await
+}
+
+/// `check_repository` unless a check started within `fresh_for` seconds.
+async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResult<bool> {
     if !super::planning_client::connected(repository) {
         return Ok(false);
     }
@@ -206,7 +211,7 @@ pub(crate) async fn check_repository(store: &Store, repository: &str) -> OpsResu
     let now = OffsetDateTime::now_utc();
     let Some(since) = store
         .sqlite
-        .begin_linear_team_check(&team, now.unix_timestamp(), fresh_for(repository))
+        .begin_linear_team_check(&team, now.unix_timestamp(), fresh_for)
         .map_err(message)?
     else {
         return Ok(false);
@@ -298,7 +303,7 @@ pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
     if !super::planning_client::is_linear(repository) {
         return false;
     }
-    check_repository_bounded(store, repository).await;
+    check_repository_bounded(store, repository, fresh_for(repository)).await;
     let Ok(team) = super::planning_client::repository_scope(std::path::Path::new(repository))
     else {
         return false;
@@ -315,9 +320,12 @@ pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
 
 /// Bring the repository's scope delta up to date within five seconds; whether
 /// it changed local state. Unavailable or slow providers leave state as it is.
-async fn check_repository_bounded(store: &Store, repository: &str) -> bool {
-    let check =
-        tokio::time::timeout(Duration::from_secs(5), check_repository(store, repository)).await;
+async fn check_repository_bounded(store: &Store, repository: &str, fresh_for: i64) -> bool {
+    let check = tokio::time::timeout(
+        Duration::from_secs(5),
+        check_scope(store, repository, fresh_for),
+    )
+    .await;
     match check {
         Ok(Ok(changed)) => changed,
         result => {
@@ -329,7 +337,19 @@ async fn check_repository_bounded(store: &Store, repository: &str) -> bool {
 
 /// Bound on-demand work and retain local planning when Linear is unavailable.
 pub(crate) async fn sync_repository(store: &Store, repository: &str) -> bool {
-    let changed = check_repository_bounded(store, repository).await;
+    sync_scope(store, repository, fresh_for(repository)).await
+}
+
+/// An explicit planning refresh: the scope delta, however recently a check
+/// started, then pending deliveries. It runs before the Wave inventory, which
+/// would otherwise learn a remote completion first and leave the delta skipping
+/// that finished Task's other changes, such as a comment made alongside it.
+pub(crate) async fn refresh_repository(store: &Store, repository: &str) -> bool {
+    sync_scope(store, repository, 0).await
+}
+
+async fn sync_scope(store: &Store, repository: &str, fresh_for: i64) -> bool {
+    let changed = check_repository_bounded(store, repository, fresh_for).await;
     // Each delivery has its own deadline. A shared deadline repeatedly canceled
     // the first slow export and starved every later saved Task.
     if let Err(error) = sync_repository_deliveries(store, repository).await {

@@ -350,6 +350,15 @@ fn publish_destination(
 
 /// Provider exit is also a useful boundary for Taskless conversations.
 pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
+    sync_directory(directory, false)
+}
+
+/// `wave status --sync`'s exchange, before it refreshes the Wave inventory.
+pub(crate) fn refresh_directory(directory: &Path) -> OpsResult<()> {
+    sync_directory(directory, true)
+}
+
+fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
     let repo = crate::repository::CanonicalRepo::discover(directory)
         .map_err(message)?
         .to_string();
@@ -361,7 +370,11 @@ pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
         .build()?
         .block_on(async {
             let store = planning_store().await?;
-            super::linear_observe::sync_repository(&store, &repo).await;
+            if refresh {
+                super::linear_observe::refresh_repository(&store, &repo).await;
+            } else {
+                super::linear_observe::sync_repository(&store, &repo).await;
+            }
             Ok(())
         })
 }

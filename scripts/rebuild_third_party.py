@@ -13,6 +13,8 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+from app_bundle import embed_frameworks
+
 
 def _run(args: list[str], cwd: Path) -> None:
     subprocess.run(args, cwd=cwd, check=True)
@@ -105,6 +107,7 @@ def build(work: Path) -> None:
     executable = plistlib.loads(info.read_bytes())["CFBundleExecutable"]
     shutil.copyfile(info, contents / "Info.plist")
     shutil.copy2(swift / ".build/release/LoopflowMac", contents / "MacOS" / executable)
+    embed_frameworks(swift / ".build/release", contents / "MacOS" / executable)
     shutil.copy2(app_source / "target/release/lf", contents / "MacOS/lf")
     for bundle in (swift / ".build/release").glob("*.bundle"):
         shutil.copytree(bundle, contents / "Resources" / bundle.name, dirs_exist_ok=True)

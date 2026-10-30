@@ -317,6 +317,7 @@ def _package_sources(root: Path, output: Path, inventory: dict, framework: Path)
     _source_snapshot(root, output / "loopflow.tar.gz")
     shutil.copyfile(root / "third_party/REBUILD.md", output / "REBUILD.md")
     shutil.copyfile(root / "scripts/rebuild_third_party.py", output / "rebuild.py")
+    shutil.copyfile(root / "scripts/app_bundle.py", output / "app_bundle.py")
     libraries = sorted(framework.glob("*/libghostty.a"))
     if len(libraries) != 1:
         raise ValueError("Expected one universal macOS GhosttyKit library")
@@ -365,6 +366,7 @@ def verify(destination: Path) -> None:
         "ThirdPartyNotices/inventory.json",
         "ThirdPartySources/REBUILD.md",
         "ThirdPartySources/rebuild.py",
+        "ThirdPartySources/app_bundle.py",
         "ThirdPartySources/loopflow.tar.gz",
         "ThirdPartySources/GhosttyKit.zip",
         "ThirdPartySources/libintl-arm64.a",

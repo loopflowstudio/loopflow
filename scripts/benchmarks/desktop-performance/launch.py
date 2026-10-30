@@ -28,6 +28,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 from collections import Counter
 from contextlib import closing
@@ -37,6 +38,11 @@ from timings import BUDGETS_MS, _stats
 
 REPO = Path(__file__).resolve().parents[3]
 SWIFT = REPO / "swift"
+
+sys.path.insert(0, str(REPO / "scripts"))
+
+from app_bundle import embed_frameworks  # noqa: E402
+
 BUNDLE_ID = "com.loopflow.mac.bench"
 READS = '"machine id"|"wave list"|"wave show"*|"desktop sessions"|"activity "*|"ps "*|"ps "'
 SHIM = f"""#!/bin/sh
@@ -106,6 +112,7 @@ def bundle(app: Path, strip: bool) -> None:
     (contents / "MacOS").mkdir(parents=True, exist_ok=True)
     (contents / "Resources").mkdir(exist_ok=True)
     shutil.copy(SWIFT / ".build/release/LoopflowMac", contents / "MacOS/Loopflow")
+    embed_frameworks(SWIFT / ".build/release", contents / "MacOS/Loopflow")
     if strip:
         _sh(["strip", "-x", str(contents / "MacOS/Loopflow")], capture_output=True)
     shutil.copy(SWIFT / "LoopflowMac/Info.plist", contents)

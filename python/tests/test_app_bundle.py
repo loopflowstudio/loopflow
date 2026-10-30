@@ -1,8 +1,10 @@
-"""Tests for scripts/app_bundle.py against real Mach-O binaries."""
+"""Tests for scripts/app_bundle.py and the bundle builders, against real Mach-O binaries."""
 
 from __future__ import annotations
 
+import json
 import platform
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -10,11 +12,12 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-try:
-    import app_bundle
-finally:
-    sys.path.pop(0)
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+sys.path[:0] = [str(SCRIPTS), str(SCRIPTS / "benchmarks/desktop-performance")]
+
+import app_bundle  # noqa: E402
+import launch  # noqa: E402
+import rebuild_third_party as rebuild  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     platform.system() != "Darwin" or shutil.which("cc") is None,
@@ -41,8 +44,14 @@ def _swiftpm_build(build_dir: Path) -> Path:
         ],
         check=True,
     )
+    # codesign accepts a framework only with its Info.plist.
+    (versions / "B" / "Resources").mkdir()
+    (versions / "B" / "Resources" / "Info.plist").write_bytes(
+        plistlib.dumps({"CFBundleIdentifier": "org.sparkle-project.Sparkle"})
+    )
     (versions / "Current").symlink_to("B")
     (build_dir / "Sparkle.framework" / "Sparkle").symlink_to("Versions/Current/Sparkle")
+    (build_dir / "Sparkle.framework" / "Resources").symlink_to("Versions/Current/Resources")
     executable = build_dir / "LoopflowMac"
     subprocess.run(
         [
@@ -95,3 +104,66 @@ def test_embedded_sparkle_loads_from_contents_frameworks(tmp_path: Path) -> None
 def test_embedding_requires_the_built_framework(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="Missing built Sparkle.framework"):
         app_bundle.embed_frameworks(tmp_path, tmp_path / "Loopflow.app/Contents/MacOS/Loopflow")
+
+
+def _swift_package(swift: Path) -> None:
+    """A SwiftPM release build plus the app sources the builders copy beside it."""
+    _swiftpm_build(swift / ".build/release")
+    (swift / "LoopflowMac").mkdir()
+    (swift / "LoopflowMac/Info.plist").write_bytes(
+        plistlib.dumps({"CFBundleExecutable": "Loopflow", "CFBundleIdentifier": "test"})
+    )
+    (swift / "LoopflowMac/AppIcon.icns").write_bytes(b"icon")
+
+
+def _assert_launches_with_embedded_sparkle(app: Path) -> None:
+    assert (app / "Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle").is_file()
+    assert subprocess.run([str(app / "Contents/MacOS/Loopflow")]).returncode == 0
+
+
+def test_launch_benchmark_bundle_embeds_sparkle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    swift = tmp_path / "swift"
+    _swift_package(swift)
+    monkeypatch.setattr(launch, "SWIFT", swift)
+    real_sh = launch._sh
+    monkeypatch.setattr(
+        launch, "_sh", lambda cmd, **kw: None if cmd[0] == "swift" else real_sh(cmd, **kw)
+    )
+
+    launch.bundle(tmp_path / "Loopflow Bench.app", strip=False)
+
+    shutil.rmtree(swift / ".build")
+    _assert_launches_with_embedded_sparkle(tmp_path / "Loopflow Bench.app")
+
+
+def test_third_party_rebuild_embeds_sparkle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "loopflow"
+    swift = source / "swift"
+    _swift_package(swift)
+    (swift / "Package.swift").write_text("// package")
+    (swift / "GhosttyKit.xcframework/macos").mkdir(parents=True)
+    (swift / "GhosttyKit.xcframework/macos/libghostty.a").write_bytes(b"")
+    (source / "third_party").mkdir()
+    (source / "third_party/manifest.json").write_text(
+        json.dumps({"ghostty": {"revision": "r", "libintl_members": []}})
+    )
+    (source / "target/release").mkdir(parents=True)
+    (source / "target/release/lf").write_bytes(b"")
+    # Compiling libintl, relinking GhosttyKit and the swift/cargo builds are out of scope here.
+    monkeypatch.setattr(rebuild, "build_libintl", lambda *args: None)
+    monkeypatch.setattr(
+        rebuild,
+        "_run",
+        lambda args, cwd: (
+            subprocess.run(args, cwd=cwd, check=True) if args[0] == "codesign" else None
+        ),
+    )
+
+    rebuild.build(tmp_path)
+
+    shutil.rmtree(swift / ".build")
+    _assert_launches_with_embedded_sparkle(tmp_path / "Loopflow Rebuilt.app")

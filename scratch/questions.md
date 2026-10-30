@@ -58,3 +58,8 @@
 - **On dev, Desktop stays put rather than following preview (concept review after slice 8).**
   The alternative keeps Sparkle on preview and has `adopt` leave a dev link alone; that keeps
   Desktop fresher but runs two streams on one Machine. Chose the simpler one-stream reading.
+- **Store-ahead refusals still name `lf install --dev`** (`migrations.rs` unknown-migration, floor,
+  changed-reader and skipped-migration messages; `install.rs` unmerged-candidate refusal). These fire
+  when this lf is behind the store, e.g. the cron gate binary after a newer install. On a stable
+  Machine `--dev` would switch streams; plain `lf install` usually relinks a current build. Left as is
+  (outside the two concept-review defects); revisit if a stable Machine hits one.

@@ -144,7 +144,7 @@ applied versions, checksums and reader floors are read on every open.
 | State | Message |
 | --- | --- |
 | Behind the chain, private Home | applies the missing tail and continues |
-| Behind the chain, `~/.lf/loopflow.db` | names the pending migration and `lf install --dev` (or a private `LF_HOME` for unmerged work) |
+| Behind the chain, `~/.lf/loopflow.db` | names the pending migration and `lf install`, which finishes installing this build (or a private `LF_HOME` for unmerged work) |
 | Pre-namespace `001_initial` stamp | adopted as `0.10.001_initial` — same bytes, no data moved |
 | Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
 | Newer migrations whose floor this build knows | opens; this build's schema must survive unchanged |

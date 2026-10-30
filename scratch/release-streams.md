@@ -227,6 +227,8 @@ commit it, and do not land; publish and land once, after slice 8.
   previews `promote_and_migrate` (ahead of the store), `lf install` on preview/stable runs that
   `lf install adopt` before the stream lookup. The store refusal and `lf doctor` now say
   "run `lf install` to finish installing this build" instead of `lf install --dev`.
+  `store/MIGRATIONS.md`'s state table says the same.
+  Compress: `is_current` and `finish_adoption` share one `preflight_verdict` probe (`e7d686fc30`).
   `swift test --filter AppUpdatesTests` 4: pass. `--lib lf::commands::install::` (incl. new
   `an_app_ahead_of_the_store_is_adopted_in_place`), the updated frontier refusal test and clippy:
   not run — the lib test build was killed at the 1 h limit still compiling; owner: gate.

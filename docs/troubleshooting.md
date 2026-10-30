@@ -188,9 +188,11 @@ recent activity do, until `--all`. Unfinished Tasks' checkouts, persistent
 checkouts and any a running process holds are always kept. Unpushed commits
 and source changes are saved as `refs/lf/pruned/<branch>/<commit>` first.
 
-With `--branches`, a branch goes only with evidence at its exact head: a merged or closed PR, a
-finished Task already in the default branch, or a release candidate whose tag
-exists. An open PR, a worktree or an unfinished Task always keeps it. `lf wt delete <name> --force`
+With `--branches`, a branch goes only with evidence at its exact head: a merged PR, a
+finished Task's closed PR, a finished Task already in the default branch, or a
+release candidate whose tag exists. An open PR, a worktree or an unfinished Task
+always keeps it. Open PRs based on a deleted branch move to the default branch
+first, so the PR above a landed one in a stack stays open. `lf wt delete <name> --force`
 discards a checkout without saving anything.
 
 A branch behind `main`:

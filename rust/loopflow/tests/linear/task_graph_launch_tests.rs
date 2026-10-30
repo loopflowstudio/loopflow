@@ -2399,6 +2399,53 @@ fn task_ship_stop_withdraws_the_approval_and_ends_its_ship() {
 }
 
 #[test]
+fn task_ship_stop_sticks_through_a_headless_relaunch() {
+    let task = shipping_task();
+    task.repo.create_file(
+        ".lf/graphs/landing.yaml",
+        "- graph: proof\n- cmd: pr land\n",
+    );
+    // A person stops shipping; the stop stands though nothing was shipping.
+    let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    assert!(stopped.status.success());
+    // A run with nothing interactive ahead would approve Auto-Ship and merge;
+    // under the stop it waits at the landing step instead.
+    let ran = task.task_run(&["task", "run", "INF-123", "landing"]);
+    assert!(ran.success(), "{}", ran.text);
+    assert!(
+        ran.text
+            .contains("Waiting at pr land: not approved to merge"),
+        "{}",
+        ran.text
+    );
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert_ne!(task.state(), "shipping");
+    // Relaunched headless from its first step, it still never ships.
+    let again = task.run(&["-b", "task", "run", "INF-123", "--from", "proof"]);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert_ne!(task.state(), "shipping");
+    assert!(handoffs(&task).is_empty());
+    let status = task.status();
+    assert!(status["ship_approval"].is_null());
+    assert_eq!(status["ship_stop"]["by"]["kind"], "person");
+    assert_eq!(status["started_by"]["kind"], "person");
+    // Standing at the landing step, a plain relaunch waits there again.
+    let waiting = task.task_run(&["task", "run", "INF-123"]);
+    assert!(waiting.success(), "{}", waiting.text);
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert!(
+        task.text_status().contains("Not shipping: "),
+        "{}",
+        task.text_status()
+    );
+}
+
+#[test]
 fn task_ship_stops_shipping_when_its_run_fails_the_same_way_every_attempt() {
     let task = shipping_task();
     // `gate` refuses identically until the repository defines `late`.

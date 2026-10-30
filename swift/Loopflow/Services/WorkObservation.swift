@@ -119,7 +119,7 @@ public struct WorkFrame: Sendable {
         public let work: TaskOverview
         public let graphProcesses: [GraphProcessDetail]
         public let comments: TaskComments
-        public let diagnostics: TaskWork?
+        public let execution: TaskExecution?
     }
 
     public struct WorkActivityPart: Sendable {
@@ -197,11 +197,10 @@ public struct WorkFrame: Sendable {
     }
 
     private struct TaskStatusReading: Decodable {
-        struct Execution: Decodable { let work: TaskWork }
         let overview: TaskOverview?
         let graphProcesses: [GraphProcessDetail]
         let comments: TaskComments?
-        let execution: Execution?
+        let execution: TaskExecution?
         let row: RoadmapTask?
 
         enum CodingKeys: String, CodingKey {
@@ -266,7 +265,7 @@ public struct WorkFrame: Sendable {
             }
             return frame(read, .task(TaskPart(task: task, row: status.row, work: work,
                                               graphProcesses: status.graphProcesses,
-                                              comments: comments, diagnostics: status.execution?.work)))
+                                              comments: comments, execution: status.execution)))
         case .workActivity:
             let read = try envelope(WorkActivitySnapshot.self)
             return frame(read, .workActivity(zip(scope.activity, read.body).map {

@@ -69,11 +69,14 @@ conflicts, verify and push, then reread status.
    complete the Task. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
-3. **Advance the work.** `lf task run <issue>` runs the Task's graph in its
-   worktree until the next interactive step and returns once it is running.
-   `lf task status <issue>` follows it. `-b` runs every step headless, straight
-   past interactive steps, and waits for the end: use it only when no one needs
-   to take part. Check installed
+3. **Advance the work.** `lf task run <issue>` launches: it runs the Task's
+   graph in its worktree until the next interactive step and returns once it
+   is running. `lf task status <issue>` follows it. Launching is not approving.
+   `lf -b task run` and `lf ship` run headless past every interactive step to
+   `end`, and a run reaching `end` approves Auto-Ship, which may merge the PR.
+   Use them only when the person explicitly asks to ship or land. After someone
+   stops shipping, a relaunch continues the work and never ships it; only
+   `lf ship`, when they ask for it, approves it again. Check installed
    help first. Leave a live Graph process running. After a stopped or failed Graph,
    launch only the work that remains; never relaunch merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session

@@ -1078,8 +1078,8 @@ final class WorkModel {
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskOverview>()
-    /// Its recorded Sessions and Processes, from the same part.
-    private(set) var taskDiagnostics = TaskReadings<TaskWork>()
+    /// Its recorded Sessions, Processes and Auto-Ship marks, from the same part.
+    private(set) var taskExecution = TaskReadings<TaskExecution>()
     /// That Task's Graph processes keyed by Graph process, from the same part.
     private(set) var graphProcesses: [String: GraphProcessDetail] = [:]
     /// Conversation history, read only on disclosure.
@@ -1477,7 +1477,7 @@ final class WorkModel {
         if repoPath != nil { applySelectionPlans(nil, reason: reason) }
         if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
-        taskDiagnostics.values = taskDiagnostics.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
+        taskExecution.values = taskExecution.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
         taskWork.values = taskWork.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
         if let selection, selection.kind == .task {
             taskWork.values[selection.id] = .unavailable(lastGood: taskWork[selection.id].value, reason: reason)
@@ -1547,7 +1547,7 @@ final class WorkModel {
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
                 comments.values[task.id] = .unavailable(lastGood: comments[task.id].value, reason: reason)
-                taskDiagnostics.values[task.id] = .unavailable(lastGood: taskDiagnostics[task.id].value, reason: reason)
+                taskExecution.values[task.id] = .unavailable(lastGood: taskExecution[task.id].value, reason: reason)
                 break
             }
             guard body.task == task.task.identifier else { return }
@@ -1556,8 +1556,8 @@ final class WorkModel {
             if taskWork[task.id] != next { taskWork.values[task.id] = next }
             let runs = Dictionary(body.graphProcesses.map { ($0.entry.id, $0) }) { _, newer in newer }
             if graphProcesses != runs { graphProcesses = runs }
-            if let work = body.diagnostics, taskDiagnostics[task.id] != .available(work) {
-                taskDiagnostics.values[task.id] = .available(work)
+            if let execution = body.execution, taskExecution[task.id] != .available(execution) {
+                taskExecution.values[task.id] = .available(execution)
             }
         case .workActivity(let body):
             guard answers >= scopeFloor, let scope = activityScope(for: selection) else { return }
@@ -1637,7 +1637,7 @@ final class WorkModel {
         peerPlanningGeneration &+= 1
         savedSessionRepos = []
         taskWork = TaskReadings<TaskOverview>()
-        taskDiagnostics = TaskReadings<TaskWork>()
+        taskExecution = TaskReadings<TaskExecution>()
         graphProcesses = [:]
     }
 

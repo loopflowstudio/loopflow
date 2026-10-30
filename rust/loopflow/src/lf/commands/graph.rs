@@ -433,6 +433,7 @@ fn execute(
             launcher: cli,
             position: Mutex::new(start.clone()),
             task,
+            task_run: task_run.is_some(),
             interrupt,
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
@@ -520,9 +521,7 @@ fn report_outcome(outcome: GraphOutcome) -> Result<()> {
     match outcome {
         GraphOutcome::Completed => Ok(()),
         GraphOutcome::StoppedAt(step) => {
-            eprintln!(
-                "Stopped at {step}, an interactive step; the Task conversation takes it from here."
-            );
+            eprintln!("Stopped at {step}; the Task waits there for its conversation.");
             Ok(())
         }
         GraphOutcome::Interrupted => Err(crate::process::CommandExit(130).into()),
@@ -695,6 +694,8 @@ struct RunningGraph<'a> {
     /// Where the runner stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
     task: Option<crate::durable::TaskId>,
+    /// This Graph carries its Task's `lf task run`, which a stop keeps from merging.
+    task_run: bool,
     /// The Task's latest interrupt when its run began; a later one stops the Graph.
     interrupt: Option<i64>,
 }
@@ -741,6 +742,30 @@ impl RunningGraph<'_> {
         self.store
             .sqlite
             .record_graph_step(&self.process, &step, key, &iterations)?;
+        Ok(Some(step))
+    }
+
+    /// Where a Task run waits instead of merging: the step about to run merges
+    /// and someone stopped shipping the Task. Read when the step is reached,
+    /// so a stop made mid-run counts; an unreadable stop fails the step.
+    fn stopped_landing(&self) -> Result<Option<String>> {
+        let Some(task) = self.task.as_ref().filter(|_| self.task_run) else {
+            return Ok(None);
+        };
+        let Some(step) = self
+            .current()
+            .as_ref()
+            .and_then(crate::task_graph::landing_name)
+        else {
+            return Ok(None);
+        };
+        let Some(stop) = self.store.sqlite.task_ship_stop(task)? else {
+            return Ok(None);
+        };
+        let by = crate::ops::task::ship::starter(&self.store.sqlite, stop.by.as_ref())?;
+        eprintln!(
+            "Waiting at {step}: not approved to merge ({by} stopped shipping). `lf ship` lands it."
+        );
         Ok(Some(step))
     }
 
@@ -932,6 +957,9 @@ impl SkillExecutor for &RunningGraph<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        if let Some(step) = self.stopped_landing()? {
+            return Ok(SkillOutcome::Unapproved(step));
+        }
         crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
@@ -1036,6 +1064,9 @@ impl SkillExecutor for &RunningGraph<'_> {
         ops: &crate::graph::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        if let Some(step) = self.stopped_landing()? {
+            return Ok(SkillOutcome::Unapproved(step));
+        }
         crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let label = ops.item.display_name();
         eprintln!("op: {label}");
@@ -1154,6 +1185,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: None,
+                task_run: false,
                 interrupt: None,
             };
             runtime.block_on(async {
@@ -1234,6 +1266,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: Some(task.id.clone()),
+                task_run: false,
                 interrupt: Some(
                     runtime
                         .block_on(fixture.store.latest_interrupt_id(&work))

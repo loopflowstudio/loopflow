@@ -633,10 +633,40 @@ fn print_task_snapshot(
         if let Some(graph) = &snapshot.work.graph {
             println!("  {}", graph.summary());
         }
+        let when = |at: i64| {
+            time::OffsetDateTime::from_unix_timestamp(at)
+                .ok()
+                .and_then(|at| {
+                    at.format(&time::format_description::well_known::Rfc3339)
+                        .ok()
+                })
+                .unwrap_or_else(|| at.to_string())
+        };
+        if let Some(approval) = &snapshot.ship_approval {
+            println!(
+                "  Auto-Ship approved by {} {}",
+                approval.by,
+                when(approval.at)
+            );
+        }
+        if let Some(stop) = &snapshot.ship_stop {
+            println!(
+                "  Not shipping: {} stopped it {} · `lf ship {}` approves it again",
+                stop.by,
+                when(stop.at),
+                snapshot.issue_identifier
+            );
+        }
         if let Some(conflict) = &snapshot.completion_pending {
             println!("  error: {conflict}");
         }
-        println!("  latest Graph: {}", snapshot.execution.reason);
+        match &snapshot.started_by {
+            Some(starter) => println!(
+                "  latest Graph: {} · started by {starter}",
+                snapshot.execution.reason
+            ),
+            None => println!("  latest Graph: {}", snapshot.execution.reason),
+        }
         if let Some(run) = &snapshot.execution.captured {
             println!("  Session event: {run}");
         }
@@ -1369,21 +1399,17 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 println!("{}: no comments", result.identifier);
             } else {
                 for comment in &result.comments {
-                    let author = match &comment.author {
-                        loopflow::work::task::comment::TaskCommentAuthor::Person { name } => {
-                            name.as_deref().unwrap_or("unnamed person")
-                        }
-                        loopflow::work::task::comment::TaskCommentAuthor::Integration => {
-                            "integration"
-                        }
-                    };
                     let date = comment.created_at.as_deref().unwrap_or("date unavailable");
                     let sync = if result.pending_sync.contains(&comment.id) {
                         " · pending sync"
                     } else {
                         ""
                     };
-                    println!("── {author} · {date}{sync}\n{}\n", comment.body.trim_end());
+                    println!(
+                        "── {} · {date}{sync}\n{}\n",
+                        comment.author,
+                        comment.body.trim_end()
+                    );
                     if let Some(body) = result.conflicts.get(&comment.id) {
                         println!("Saved local comment; Linear’s edit is current:\n{body}\n");
                     }
@@ -2455,7 +2481,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             if loopflow::ops::task::ship::ship_stop(&issue, reason.as_deref())? {
                 println!("{issue} stopped shipping");
             } else {
-                println!("{issue} is not shipping");
+                println!("{issue} is not shipping; no run ships it until `lf ship {issue}`");
             }
             return Ok(());
         }

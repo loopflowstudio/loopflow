@@ -390,6 +390,7 @@ impl From<&LinearComment> for TaskComment {
                         comment.author_name.as_deref(),
                     ),
                 }
+                .read(&comment.body)
             } else {
                 TaskCommentAuthor::Integration
             };
@@ -3106,6 +3107,30 @@ mod tests {
         let body: Value = serde_json::from_str(&requests[0].body).expect("body is json");
         assert_eq!(body["variables"]["id"], "issue-1");
         assert_eq!(body["variables"]["comments"], OBSERVATION_COMMENT_PAGE);
+    }
+
+    #[test]
+    fn an_agent_steer_round_trips_as_its_sessions_for_its_requester() {
+        let comment = LinearComment {
+            id: "c-agent".into(),
+            created_at: None,
+            revision: None,
+            body: "Restart after a crash\n\n<!-- loopflow-requester:\"Jack Heart\" -->\n\n<!-- loopflow-session:session_05214bdabd2e4f66b4a8951aac87e9e7 -->\n\n<!-- loopflow-steer:c-agent -->".into(),
+            author_id: Some("user-loopflow".into()),
+            author_name: Some("Loopflow".into()),
+        };
+        let author = TaskComment::from(&comment).author;
+        assert_eq!(
+            author,
+            TaskCommentAuthor::Session {
+                session_id: "session_05214bdabd2e4f66b4a8951aac87e9e7".into(),
+                requester: Some("Jack Heart".into()),
+            }
+        );
+        assert_eq!(
+            author.to_string(),
+            "Session session_05214bdabd2e4f66b4a8951aac87e9e7 for Jack Heart"
+        );
     }
 
     #[tokio::test]

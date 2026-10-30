@@ -413,6 +413,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Write::TaskAbandon { .. }
         | Write::TaskNotes { .. }
         | Write::TaskOwnership { .. }
+        | Write::ShipStop { .. }
         | Write::TaskMove { .. }
         | Write::TaskSave { .. }
         | Write::SessionRename { .. }
@@ -611,6 +612,25 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         assert_eq!(owner(&written), owner(&printed), "{args:?}");
         assert_eq!(owner(&written).is_null(), !claimed, "{written}");
     }
+    // Stopping a Task that is not shipping saves the stop, which keeps a run
+    // from approving it until `lf ship`, under the Process that made it. The
+    // ship process it kills and the merge request it takes back are the ship
+    // tests'.
+    let stop = Write::ShipStop {
+        directory: directory.clone(),
+        issue: "INF-123".into(),
+    };
+    let stopped = || {
+        let task = Read::DesktopTask {
+            directory: directory.clone(),
+            issue: "INF-123".into(),
+        }
+        .read()
+        .unwrap();
+        serde_json::from_str::<Value>(&task).unwrap()["execution"]["ship_stop"]["by"].clone()
+    };
+    assert!(compare(stop.clone(), &|| stop.clone(), &stopped) > 0);
+    assert_eq!(stopped()["kind"], "person", "no stop saved");
     // Which repositories the app shows, as the app reads them.
     let portfolio =
         || without_clock(serde_json::from_str(&Read::Portfolio.read().unwrap()).unwrap());

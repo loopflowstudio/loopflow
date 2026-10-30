@@ -762,7 +762,7 @@ impl RunningGraph<'_> {
         let Some(stop) = self.store.sqlite.task_ship_stop(task)? else {
             return Ok(None);
         };
-        let by = crate::ops::task::ship::starter(&self.store.sqlite, stop.by.as_ref())?;
+        let by = crate::ops::task::ship::starter(&self.store.sqlite, self.cwd, stop.by.as_ref())?;
         eprintln!(
             "Waiting at {step}: not approved to merge ({by} stopped shipping). `lf ship` lands it."
         );

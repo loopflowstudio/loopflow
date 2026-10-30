@@ -2478,11 +2478,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
         if *stop {
-            if loopflow::ops::task::ship::ship_stop(&issue, reason.as_deref())? {
-                println!("{issue} stopped shipping");
-            } else {
-                println!("{issue} is not shipping; no run ships it until `lf ship {issue}`");
-            }
+            print!(
+                "{}",
+                loopflow::lf::commands::ship::stop(&issue, reason.as_deref())?
+            );
             return Ok(());
         }
         let directory = loopflow::repo::working_directory()?;

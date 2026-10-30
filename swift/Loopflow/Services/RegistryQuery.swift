@@ -229,6 +229,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskAbandon(directory: String, issue: String)
     case taskNotes(directory: String, issue: String, notes: String)
     case taskOwnership(directory: String, issue: String, claimed: Bool)
+    case shipStop(directory: String, issue: String)
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
     case sessionRename(directory: String, id: String, name: String)
@@ -258,6 +259,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskAbandon(_, let issue): ["task", "abandon", issue]
         case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)"]
         case .taskOwnership(_, let issue, let claimed): ["task", claimed ? "claim" : "unassign", issue, "--json"]
+        case .shipStop(_, let issue): ["--task", issue, "ship", "--stop"]
         case .taskMove(_, let issue, let wave):
             ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
         case .taskSave(_, let issue, let path, let revision, _):
@@ -328,6 +330,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task_notes", ["directory": directory, "issue": issue, "notes": notes])
         case .taskOwnership(let directory, let issue, let claimed):
             TaggedFields("task_ownership", ["directory": directory, "issue": issue, "claimed": claimed])
+        case .shipStop(let directory, let issue):
+            TaggedFields("ship_stop", ["directory": directory, "issue": issue])
         case .taskMove(let directory, let issue, let wave):
             TaggedFields("task_move", ["directory": directory, "issue": issue, "wave": wave])
         case .taskSave(let directory, let issue, let path, let revision, let content):
@@ -792,7 +796,7 @@ public struct RegistryQuery: Sendable {
     /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
     /// auto-merge Loopflow armed is disabled.
     public func stopShipping(issue: String, cwd: String?) async throws {
-        _ = try await run(["--task", issue, "ship", "--stop"], cwd)
+        _ = try await write(.shipStop(directory: cwd ?? "/", issue: issue))
     }
 
     /// Reopen every conversation on this Machine that a restart or crash cut off,

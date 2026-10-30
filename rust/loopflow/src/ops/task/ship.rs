@@ -75,16 +75,17 @@ async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))
 }
 
-/// Who started `process`, read from its ancestry; no process leaves
-/// attribution unresolved.
+/// Who started `process`, read from its ancestry, with the person named as
+/// in `repo`; no process leaves attribution unresolved.
 pub(crate) fn starter(
     sqlite: &crate::store::sqlite::SqliteStore,
+    repo: &std::path::Path,
     process: Option<&LfProcessId>,
 ) -> crate::store::StoreResult<crate::process::Starter> {
     let Some(process) = process else {
         return Ok(crate::process::Starter::Person { name: None });
     };
-    let person = crate::config::participant_name().ok().flatten();
+    let person = crate::config::participant_name_in(repo).ok().flatten();
     sqlite.process_starter(process, person.as_deref())
 }
 
@@ -272,7 +273,8 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         ) {
             return Ok(ShipStart::AtEnd { issue });
         }
-        let by = starter(&store.sqlite, Some(&process)).map_err(task_error)?;
+        let repo = super::repository_for_task(&store, &task)?;
+        let by = starter(&store.sqlite, &repo, Some(&process)).map_err(task_error)?;
         let mut handoff = format!("{by} shipped it");
         if let Some(graph) = graph {
             handoff.push_str(&format!(" with {graph}"));
@@ -326,7 +328,8 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
         let task = task_by_issue(&store, issue).await?;
         let (note, stopped_by) = match &withdrawal {
             Withdrawal::Stop { process, note } => {
-                let by = starter(&store.sqlite, Some(process)).map_err(task_error)?;
+                let repo = super::repository_for_task(&store, &task)?;
+                let by = starter(&store.sqlite, &repo, Some(process)).map_err(task_error)?;
                 let note = match note {
                     Some(note) => format!("{by}: {note}"),
                     None => by.to_string(),

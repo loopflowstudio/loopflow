@@ -48,6 +48,8 @@ pub enum Write {
         issue: String,
         claimed: bool,
     },
+    /// `lf --task <issue> ship --stop`: withdraws the Task's Auto-Ship approval.
+    ShipStop { directory: PathBuf, issue: String },
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
     TaskMove {
         directory: PathBuf,
@@ -187,6 +189,7 @@ impl Write {
                     "--json",
                 ]
             }
+            Self::ShipStop { issue, .. } => vec!["--task", issue, "ship", "--stop"],
             Self::TaskMove { issue, wave, .. } => match wave {
                 Some(wave) => vec!["task", "move", issue, "--wave", wave],
                 None => vec!["task", "move", issue, "--no-wave"],
@@ -345,6 +348,7 @@ impl Write {
             | Self::TaskAbandon { directory, .. }
             | Self::TaskNotes { directory, .. }
             | Self::TaskOwnership { directory, .. }
+            | Self::ShipStop { directory, .. }
             | Self::TaskMove { directory, .. }
             | Self::TaskSave { directory, .. }
             | Self::SessionRename { directory, .. }
@@ -376,6 +380,7 @@ impl Write {
             | Self::TaskAbandon { issue, .. }
             | Self::TaskNotes { issue, .. }
             | Self::TaskOwnership { issue, .. }
+            | Self::ShipStop { issue, .. }
             | Self::TaskMove { issue, .. }
             | Self::TaskSave { issue, .. } => Ok(task_repository(directory, Some(issue))?),
             Self::WaveEnsure { .. } | Self::NewChapter { .. } => {
@@ -446,6 +451,7 @@ impl Write {
                     serde_json::to_string(&change(repo, issue, requested)?)?
                 )
             }
+            Self::ShipStop { issue, .. } => super::ship::stop(issue, None)?,
             Self::TaskMove { issue, wave, .. } => {
                 let moved = task_move_membership(repo, issue, wave.as_deref())?;
                 format!("{}: membership saved\n", moved.id)
@@ -562,6 +568,10 @@ mod tests {
             ]
         );
         assert_eq!(
+            write(r#"{"write":"ship_stop","directory":"/r","issue":"FIX-1"}"#),
+            ["--cwd", "/r", "--task", "FIX-1", "ship", "--stop"]
+        );
+        assert_eq!(
             write(r#"{"write":"portfolio","change":["remove","/r"]}"#),
             ["--cwd", "/", "portfolio", "remove", "/r", "--json"]
         );
@@ -671,6 +681,10 @@ mod tests {
                 directory: directory.clone(),
                 issue: "FIX-1".into(),
                 claimed: false,
+            },
+            Write::ShipStop {
+                directory: directory.clone(),
+                issue: "FIX-1".into(),
             },
             Write::SessionResume {
                 directory: directory.clone(),

@@ -63,6 +63,9 @@ struct RegistryQueryTests {
         #expect(try object(move) == object(#"{"write":"task_move","directory":"/r","issue":"FIX-1","wave":null}"#))
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave"])
         #expect(move.cwd == "/r")
+        let stop = ServedWrite.shipStop(directory: "/r", issue: "FIX-1")
+        #expect(try object(stop) == object(#"{"write":"ship_stop","directory":"/r","issue":"FIX-1"}"#))
+        #expect(stop.argv == ["--task", "FIX-1", "ship", "--stop"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(
             #"{"write":"task_save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#))

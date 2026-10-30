@@ -68,28 +68,23 @@ def _swiftpm_build(build_dir: Path) -> Path:
     return executable
 
 
-def _bundle_executable(build_dir: Path, app: Path) -> Path:
-    macos = app / "Contents" / "MacOS"
-    macos.mkdir(parents=True)
-    executable = macos / "Loopflow"
-    shutil.copy(build_dir / "LoopflowMac", executable)
-    return executable
+def _info_plist(path: Path, executable: str = "Loopflow") -> Path:
+    path.write_bytes(plistlib.dumps({"CFBundleExecutable": executable}))
+    return path
 
 
 def test_bare_swiftpm_binary_in_a_bundle_cannot_load_sparkle(tmp_path: Path) -> None:
     build_dir = tmp_path / "build"
     _swiftpm_build(build_dir)
-    executable = _bundle_executable(build_dir, tmp_path / "Loopflow.app")
+    # Copied as builders did before embedding: the executable alone.
+    executable = tmp_path / "Loopflow.app/Contents/MacOS/Loopflow"
+    executable.parent.mkdir(parents=True)
+    shutil.copy(build_dir / "LoopflowMac", executable)
 
     with pytest.raises(RuntimeError, match="cannot load Sparkle.framework/Versions/B/Sparkle"):
         app_bundle.verify_rpath_libraries(executable)
     launch = subprocess.run([str(executable)], capture_output=True, text=True)
     assert "Library not loaded: @rpath/Sparkle.framework" in launch.stderr
-
-
-def _info_plist(path: Path, executable: str = "Loopflow") -> Path:
-    path.write_bytes(plistlib.dumps({"CFBundleExecutable": executable}))
-    return path
 
 
 def test_installed_app_executable_is_named_by_the_plist_and_loads_sparkle(tmp_path: Path) -> None:

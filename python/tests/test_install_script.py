@@ -42,14 +42,8 @@ def _stage_build_artifacts(root: Path) -> None:
 
     swift_loopflow = root / "swift" / "LoopflowMac"
     swift_loopflow.mkdir(parents=True)
-    (swift_loopflow / "Info.plist").write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
-        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-        '<plist version="1.0"><dict>'
-        "<key>CFBundleExecutable</key><string>Loopflow</string>"
-        "<key>CFBundleName</key><string>Loopflow</string>"
-        "</dict></plist>\n"
+    (swift_loopflow / "Info.plist").write_bytes(
+        plistlib.dumps({"CFBundleExecutable": "Loopflow", "CFBundleName": "Loopflow"})
     )
     (swift_loopflow / "AppIcon.icns").write_bytes(b"icns-fake")
 

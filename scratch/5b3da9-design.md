@@ -54,9 +54,9 @@ October 30, 2026: Desktop's four `--watch` readers (`lf monitor work` became `--
 | Idle copy after `lf monitor prune` | installed 0.15.1 | 1.8% | 2.4% | 6.6% | 0.3% |
 | Idle copy after `lf monitor prune` | branch | 2.2% | 1.0% | 7.6% | 0.2% |
 
-Neither done-when is met: idle is under 2% only for `desktop plans` (and `monitor ps` once the store is pruned), and busy exceeds the proposed 15% for all four. Causes, from `sample`:
-- The store holds 105,908 unfinished Process rows across 65,091 PIDs, 104,853 of them installed Desktop's `lf task diff` calls that never recorded an exit (October 27–30). Each `monitor ps` tick reads every row, its receipt and its PID. `lf monitor prune` settles all but 191 in 65 s. On this branch `task diff` records no row, so the backlog stops growing once Desktop runs it. Until then installed Desktop keeps adding about one a second.
-- `desktop sessions` rereads every Session summary (`session_summaries_in`, the 5.7 MB done-when) on the 2 s `ACTIVITY_CLOCK`, even when nothing changed.
+At 0fa8c08ce4 idle was under 2% only for `desktop plans` (and `monitor ps` once pruned), and busy exceeded 15% for all four. Causes, from `sample`, the first two fixed in d93846f113 (next table):
+- The store holds 105,908 unfinished Process rows across 65,091 PIDs, 104,853 of them installed Desktop's `lf task diff` calls that never recorded an exit (October 27–30). Each `monitor ps` tick read every row, its receipt and its PID. On this branch `task diff` records no row, so the backlog stops growing once Desktop runs it; until then installed Desktop adds about one a second.
+- `desktop sessions` reread every Session summary (`session_summaries_in`, the 5.7 MB done-when) on the 2 s `ACTIVITY_CLOCK`, even when nothing changed.
 - Busy cost comes from installed Desktop's own Process writes (`processes` revision about 7/s), which wake every reader. The busy numbers can't show this branch's gain until Desktop runs it.
 
 October 30, 2026, after this pass (`monitor ps` incremental reader, `desktop sessions` probe): branch debug build, the same four readers on a fresh `.backup` copy (idle, 105,931 unfinished rows, unpruned) and on the live store (agents active, installed Desktop writing) at once, cumulative CPU over 300 s as % of one core:
@@ -118,12 +118,14 @@ Idle meets the 2% done-when for every reader. Busy is under the proposed 15% for
 
 ## Remaining work
 
-From the October 30 demo (`scratch/5b3da9-demo.md`): both failing tests are repaired and pass locally; the branch merged origin/main through f6af59cc66 and the PR is CLEAN; done-whens and CPU numbers are restored above (installed 0.15.1, the installed release by then, not 0.15.0). CI at 64d8597166 reported 2 checks passed and 15 skipped, so the Rust matrix hasn't confirmed the two repairs yet. The CPU done-whens remain unmet.
+From the October 30 demo (`scratch/5b3da9-demo.md`): both failing tests are repaired and pass locally; the branch merged origin/main through f6af59cc66 and the PR is CLEAN; done-whens and CPU numbers are restored above (installed 0.15.1, the installed release by then, not 0.15.0). CI on 3aff8660f9 (merged through a9c6f6ce49, pushed) is still running; the Rust matrix hasn't confirmed the two repairs yet, and the PR reads BLOCKED until it does.
+
+CPU done-whens, on the branch debug build (table above): idle is under 2% for every reader. Busy is under 15% for `monitor ps` (1.8%) and `desktop sessions` (14.4%); `desktop plan --all` (17.2%) and `desktop plans` (16.5%) exceed it on a live store where installed Desktop still writes about 7 `processes` revisions a second. Whether they meet it once Desktop runs this branch is unmeasured: that is verify's installed-release measurement (Jack Heart, comment a8d1e914).
 
 `lf` watch efficiency:
 - `lf history` still selects every input in its window in SQL (3,322 rows on the live copy) before decoding the few it shows; that selection is now most of the 0.40 s. Only worth pushing into SQL if the installed-build profile shows it.
 - `task status --watch` (`desktop task`, one per open Task pane) still rereads on every 2 s activity clock; it could take a probe like `desktop sessions` if verify's installed measurement shows it.
-- The unfinished-row backlog needs one `lf monitor prune` on Jack Heart's live store once Desktop runs this branch. Dead rows stay derived on read (October 29 decision), so nothing settles them automatically.
+- A watch now pays for the unfinished-row backlog once, on its first reading, but one-shot `lf monitor ps` still reads every unfinished row. One `lf monitor prune` on Jack Heart's live store once Desktop runs this branch clears it; dead rows stay derived on read (October 29 decision), so nothing settles them automatically.
 - Verify measures the CPU done-whens on the installed release (Jack Heart, comment a8d1e914).
 
 In-app library:
@@ -144,6 +146,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git (`git show 3909e495a8:scratch/5b3da9-design.md`).
+- October 30, realign after the CPU pass: plan matches 3aff8660f9 (`a_watch_reads_each_dead_row_once`, `session_observations_move_when_a_session_goes_quiet_or_an_agent_lives`, `Watched::probe` present); branch pushed, 0 behind origin/main, CI pending; no tests rerun.
 - October 30, compress of the CPU pass (`clock_moved` matches the probe's answer alone): `--lib lf::commands::watch::` 3/3, fmt clean.
 - October 30, CPU pass (incremental `monitor ps`, `desktop sessions` probe): `--lib lf::commands::top:: store::sqlite::revisions::` 13/13, `--test integration session_list_watch::` 1/1, `--test served_reads` 1/1; 300 s measurement above.
 - October 30, realign after the demo repairs: plan matches 64d8597166; `git rev-list HEAD..origin/main` 0, PR mergeState CLEAN; no tests rerun.

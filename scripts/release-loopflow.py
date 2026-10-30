@@ -25,6 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from app_bundle import embed_frameworks, verify_rpath_libraries
 from bundle_version import read_release_version, read_source_revision, stamp_bundle_version
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -287,27 +288,6 @@ def _copy_app_executable(build_dir: Path, info_plist: Path, app_macos_dir: Path)
     shutil.copy(source, app_macos_dir / executable)
 
 
-# SwiftPM links Sparkle beside the build products; the bundle keeps it in Frameworks.
-SPARKLE_FRAMEWORK = "Sparkle.framework"
-
-
-def _embed_frameworks(build_dir: Path, info_plist: Path, app_dir: Path) -> None:
-    source = build_dir / SPARKLE_FRAMEWORK
-    if not source.is_dir():
-        raise RuntimeError(f"Missing built {SPARKLE_FRAMEWORK}: {source}")
-    frameworks = app_dir / "Frameworks"
-    frameworks.mkdir(exist_ok=True)
-    shutil.copytree(source, frameworks / SPARKLE_FRAMEWORK, symlinks=True)
-    run(
-        [
-            "install_name_tool",
-            "-add_rpath",
-            "@executable_path/../Frameworks",
-            str(app_dir / "MacOS" / _bundle_executable(info_plist)),
-        ]
-    )
-
-
 # A signed app under the shipped bundle id hangs at launch while Loopflow
 # Desktop runs; the check launches a copy under its own id instead.
 RESOURCE_CHECK_BUNDLE_ID = "com.loopflow.mac.release-check"
@@ -424,7 +404,9 @@ def release() -> int:
     build_dir = SWIFT_DIR / ".build" / "release"
     info_plist = SWIFT_DIR / "LoopflowMac" / "Info.plist"
     _copy_app_executable(build_dir, info_plist, app_dir / "MacOS")
-    _embed_frameworks(build_dir, info_plist, app_dir)
+    executable = app_dir / "MacOS" / _bundle_executable(info_plist)
+    embed_frameworks(build_dir, executable)
+    verify_rpath_libraries(executable)
     shutil.copy(info_plist, app_dir)
     stamp_bundle_version(app_dir / "Info.plist", version, read_source_revision(REPO_ROOT))
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")

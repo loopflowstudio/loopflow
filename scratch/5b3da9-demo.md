@@ -25,3 +25,5 @@ Pass 1's gaps, checked against evidence:
 CPU done-whens (branch debug build, 300 s, % of one core): idle under 2% for all four Desktop readers (1.9 / 0.7 / 0.9 / 0.1). Busy under 15% for `monitor ps` (1.8) and `desktop sessions` (14.4); `desktop plan --all` (17.2) and `desktop plans` (16.5) exceed it, woken by installed Desktop's own Process writes, which this branch's Desktop no longer makes.
 
 Decision: advance. Jack Heart's comment a8d1e914 (October 30) says no further CPU iteration before landing; verify measures busy CPU on the installed release. Remaining unproven: the busy budget on an installed build with this branch's Desktop, and the Working Tasks sidebar gap (needs Desktop; listed in questions.md).
+
+Correction (gate, 2026-10-30): the CI runs on 64d8597166, 3aff8660f9 and 4c21e22a3f concluded success only because PR CI skips every test job until the PR is a submit/land candidate (`scratch-clear` candidate=false). The last CI run that tested code is 41055952060 on 99a1ef3581, which failed. The two repairs and the CPU pass are proven by gate's local run below, and CI proves them when submit makes the PR a candidate.

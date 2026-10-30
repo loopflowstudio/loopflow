@@ -1,6 +1,14 @@
 # LOO-698: GitHub shows the CI notes instead of the README
 
 Jack, 2026-10-30: go forward with the simple fix only; no README audit.
+The Task description still asks for the full audit of root `README.md`;
+whether that becomes its own Task is unresolved. That is ordinary later Task
+creation, not a choice this PR waits on; the PR title and body describe the
+rename, not an audit.
+
+Concept review, 2026-10-30: no change. A `.github/` README reads as the repo's
+front page on GitHub; naming the maintainer CI notes `CI.md` makes the root
+README the only front door, which is what the growth Wave wants.
 
 GitHub's repository page renders `.github/README.md` in preference to the root
 `README.md`, so visitors see "# CI / Scratch, cancellation and macOS path filters".

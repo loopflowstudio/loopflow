@@ -186,11 +186,10 @@ public struct TaskWorktreeSnapshot: Decodable, Sendable, Hashable {
     }
 }
 
-public enum RoadmapSection: String, Decodable, Sendable, Hashable {
-    case now
-    case waiting
-    case notStarted = "not_started"
-    case later
+/// Where a Task sits on the Wave board, derived once in Rust: the board, the
+/// sidebar's Working Tasks and every count read it.
+public enum TaskSection: String, Decodable, Sendable, Hashable {
+    case backlog, working, autonomous, done, abandoned
 }
 
 public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
@@ -210,7 +209,7 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     public let shipControl: TaskRunControl
     public let shipping: ShippingSnapshot?
     public let pr: PrSnapshot?
-    public let section: RoadmapSection
+    public let section: TaskSection
 
     enum CodingKeys: String, CodingKey {
         case task, reference, runtime, condition, actions, execution, section, pr

@@ -439,7 +439,7 @@
           "abandoned_at": null
         },
         "graph_source": "task",
-        "section": "waiting"
+        "section": "backlog"
       },
       {
         "task": {
@@ -564,7 +564,7 @@
         "shipping": null,
         "pr": null,
         "graph_source": "task",
-        "section": "not_started"
+        "section": "backlog"
       }
     ],
     "truncated": false

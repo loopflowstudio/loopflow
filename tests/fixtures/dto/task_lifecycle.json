@@ -160,7 +160,7 @@
         "updated_at": "2026-10-28T02:59:03Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "later",
+      "section": "done",
       "ship_control": {
         "unavailable": "Task is complete"
       },
@@ -857,7 +857,7 @@
           "updated_at": "2026-10-28T02:59:03Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "later",
+        "section": "done",
         "ship_control": {
           "unavailable": "Task is complete"
         },
@@ -1165,7 +1165,7 @@
         "updated_at": "2026-10-28T02:59:03Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "later",
+      "section": "done",
       "ship_control": {
         "unavailable": "Task is complete"
       },
@@ -1815,7 +1815,7 @@
           "updated_at": "2026-10-28T02:59:03Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "later",
+        "section": "done",
         "ship_control": {
           "unavailable": "Task is complete"
         },
@@ -2123,7 +2123,7 @@
         "updated_at": "2026-10-28T02:59:00Z",
         "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
       },
-      "section": "now",
+      "section": "autonomous",
       "ship_control": {
         "unavailable": "Task is already shipping"
       },
@@ -2745,7 +2745,7 @@
           "updated_at": "2026-10-28T02:59:00Z",
           "work_id": "task_9d1de6a17408459aa2db78181c5fb02a"
         },
-        "section": "now",
+        "section": "autonomous",
         "ship_control": {
           "unavailable": "Task is already shipping"
         },

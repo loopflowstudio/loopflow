@@ -34,7 +34,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -130,7 +130,7 @@
       "owner": "wave",
       "reason": "Linear Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "actions": {
       "recommended": "no_action",
       "reason": "Task is completed"
@@ -416,7 +416,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "working",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -676,7 +676,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -772,7 +772,7 @@
       "owner": "user",
       "reason": "choose the recovery boundary"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "no_action",
       "reason": "Waiting for your answer"
@@ -1033,7 +1033,7 @@
       "owner": "task",
       "reason": "implementing"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "run",
       "reason": "resume the parked Task"
@@ -1129,7 +1129,7 @@
       "owner": "user",
       "reason": "merge pull request head head-commits on GitHub"
     },
-    "section": "waiting",
+    "section": "backlog",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"

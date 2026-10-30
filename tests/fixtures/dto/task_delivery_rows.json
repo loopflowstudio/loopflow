@@ -57,7 +57,7 @@
       "owner": "wave",
       "reason": "Merged; complete the Task"
     },
-    "section": "waiting",
+    "section": "working",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -343,7 +343,7 @@
       "owner": "wave",
       "reason": "Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -629,7 +629,7 @@
       "owner": "wave",
       "reason": "Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -892,7 +892,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -965,7 +965,7 @@
       "owner": "wave",
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "actions": {
       "recommended": null,
       "reason": "Task is ready to start"
@@ -1061,7 +1061,7 @@
       "owner": "wave",
       "reason": "Merged; complete the Task"
     },
-    "section": "waiting",
+    "section": "working",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"
@@ -1347,7 +1347,7 @@
       "owner": "wave",
       "reason": "Merged; complete the Task"
     },
-    "section": "waiting",
+    "section": "done",
     "actions": {
       "recommended": "open_pr",
       "reason": "merge head head-commits on GitHub"

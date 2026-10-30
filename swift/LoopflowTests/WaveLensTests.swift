@@ -192,7 +192,7 @@ struct WaveLensTests {
         "next_move":{"owner":"task","reason":"\(reason)"},
         "condition":{"state":"\(state)","reason":"\(reason)","observed_at":"2026-07-15T00:00:00Z","evidence_age_secs":null,"local_progress":{"state":"not_applicable","unsettled":false,"dirty":null,"authored_commits":null,"recovery_required":null,"reason":null},"unresolved_execution":false},
         "actions":{"recommended":null,"reason":"Task is ready to start"},
-        "pr":null,"section":"now"}
+        "pr":null,"section":"working"}
         """
         return try JSONDecoder().decode(RoadmapTask.self, from: Data(json.utf8))
     }

@@ -335,7 +335,7 @@
         "abandoned_at": null
       },
       "graph_source": "task",
-      "section": "later",
+      "section": "done",
       "ship_control": {
         "unavailable": null
       },

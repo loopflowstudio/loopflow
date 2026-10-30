@@ -597,20 +597,13 @@ private struct NowRowView: View {
     }
 }
 
-extension RoadmapSection {
-    var label: String {
-        switch self {
-        case .now: "Now"
-        case .waiting: "Waiting"
-        case .notStarted: "Not started"
-        case .later: "Later"
-        }
-    }
+extension TaskSection {
+    var label: String { rawValue.capitalized }
 
     func color(in palette: LoopflowPalette) -> Color {
         switch self {
-        case .waiting: palette.warning
-        case .now, .notStarted, .later: palette.textTertiary
+        case .working: palette.accent
+        case .backlog, .autonomous, .done, .abandoned: palette.textTertiary
         }
     }
 }

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from app_bundle import embed_frameworks
 from bundle_version import read_release_version, read_source_revision, stamp_bundle_version
 
 ROOT = Path(__file__).parent.parent
@@ -42,6 +43,7 @@ class BundleSpec:
     """Paths that define the Loopflow.app bundle."""
 
     app_path: Path
+    swift_build_dir: Path
     executables: tuple[Path, ...]
     info_plist: Path
     resources: tuple[Path, ...]
@@ -74,11 +76,13 @@ def _bundle_binary_name(executable: Path) -> str:
 
 def default_bundle_spec(root: Path = ROOT) -> BundleSpec:
     swift = root / "swift"
+    swift_release = swift / ".build" / "release"
     cargo_release = root / "target" / "release"
     return BundleSpec(
         app_path=root / "local-bin" / f"{APP_NAME}.app",
+        swift_build_dir=swift_release,
         executables=(
-            swift / ".build" / "release" / "LoopflowMac",
+            swift_release / SWIFT_APP_PRODUCT,
             cargo_release / "lf",
         ),
         info_plist=swift / "LoopflowMac" / "Info.plist",
@@ -270,6 +274,10 @@ def _install_loopflow(spec: BundleSpec, version: str) -> None:
 
     for executable in spec.executables:
         _atomic_install(executable, spec.macos_dir / _bundle_binary_name(executable))
+    try:
+        embed_frameworks(spec.swift_build_dir, spec.contents_dir, APP_NAME)
+    except (RuntimeError, subprocess.CalledProcessError) as exc:
+        raise StageError(f"embedding frameworks failed: {exc}") from exc
 
     installed_plist = spec.contents_dir / spec.info_plist.name
     shutil.copy(spec.info_plist, installed_plist)

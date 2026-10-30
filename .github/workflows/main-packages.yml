@@ -1,8 +1,8 @@
 name: Packages (main)
 
-# Every green main commit gets native `lf` packages, so `lf self install --main`
-# can install it without a release. The artifacts expire; releases stay the
-# durable channel.
+# Every green main commit gets native `lf` packages and a signed, notarized
+# Loopflow.dmg, so `lf install --dev` can install it without a release. The
+# artifacts expire; releases stay the durable channel.
 on:
   workflow_run:
     workflows: [CI]
@@ -16,3 +16,60 @@ jobs:
     uses: ./.github/workflows/package-build.yml
     with:
       revision: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+  # Desktop and the terminal stay on one build: the app bundles the exact
+  # `lf` bytes of the aarch64 package, which promotion checks.
+  desktop-app:
+    needs: packages
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      # build.rs orders migrations by origin/main's first-parent history.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: lf-aarch64-apple-darwin
+          path: package
+      - name: Import the Developer ID certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          printf '%s' "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" login.keychain
+          rm "$RUNNER_TEMP/certificate.p12"
+      - name: Build, sign and notarize Loopflow.app
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          set -euo pipefail
+          tar -xzf package/lf-aarch64-apple-darwin.tar.gz -C package
+          LF_RELEASE_BINARY="$PWD/package/lf" uv run python scripts/release-loopflow.py
+      - name: Verify the stapled DMG
+        run: |
+          set -euo pipefail
+          xcrun stapler validate swift/dist/Loopflow.dmg
+          spctl --assess --type open --context context:primary-signature swift/dist/Loopflow.dmg
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Loopflow-dmg
+          path: swift/dist/Loopflow.dmg
+          retention-days: 14
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true

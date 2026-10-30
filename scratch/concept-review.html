@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-688 concept review: the dev app</title>
+<style>
+  :root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fbfbf8; --muted:#666; --code:#f0efe9; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8e6e1; --bg:#161615; --muted:#9a978f; --code:#22221f; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Iowan Old Style", Georgia, serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
+  header p { color:var(--muted); font-size:.9rem; margin:.2rem 0; }
+  h1 { font-size:1.6rem; margin:0 0 .5rem; }
+  h2 { font-size:1.15rem; margin:2.5rem 0 .6rem; }
+  pre { background:var(--code); padding:.9rem 1rem; overflow-x:auto; font:13px/1.5 ui-monospace, Menlo, monospace; border-radius:4px; }
+  code { font-family:ui-monospace, Menlo, monospace; font-size:.9em; }
+</style>
+</head>
+<main>
+<header>
+  <h1>Nothing to change</h1>
+  <p>LOO-688 · concept-review after compress · 2026-10-30</p>
+  <p>Built from <code>scratch/loo-688-dev-app.md</code>, <code>scratch/questions.md</code>, <code>release/README.md</code>, <code>.github/workflows/main-packages.yml</code>, <code>rust/loopflow/src/lf/commands/install/published.rs</code></p>
+</header>
+
+<p>This ran headless and needs no decision. The change adds no concept: <code>dev</code> stays one stream, and on a Mac its build now means CLI and app together, as <code>stable</code> and <code>preview</code> already did.</p>
+
+<h2>Actions → concepts → APIs</h2>
+<pre>you run                   concept                     API
+lf install --dev          Stream dev = green main     main_build()
+                          one build: lf + app         promote --cli-target --app-source --app-target
+app running, GUI or SSH   promotion quits/reopens     (existing promote path; no Sparkle on dev)
+LF_INSTALL_CLI_ONLY=1     CLI alone                   installs_app()</pre>
+<p>Before this branch the middle row read “lf only” on dev, so the terminal and Desktop drifted. That mismatch is the one the Task named, and it is gone.</p>
+
+<h2>Checked against the accepted design</h2>
+<ul>
+  <li><b>No updater on dev</b> (slice 7, kept per the Task's direction): the only replacement path is promotion, which already handles a running app.</li>
+  <li><b>Same checks as a release DMG</b>: <code>codesign --deep --strict</code> and <code>spctl</code> before promotion; an unsigned image is refused (test).</li>
+  <li><b>Credentials in Actions</b>: the Task directed GitHub secrets from Doppler; the README's “GitHub is credential-free” line now names the exception.</li>
+  <li><b>Recovery</b>: a failed download, verify or promotion leaves the installed lf and app in place; the image detaches on drop.</li>
+</ul>
+
+<h2>Counterexamples kept open, not product choices</h2>
+<p>Recorded in <code>scratch/questions.md</code> as reversible: the dev app carries the last release's version number, and it is ARM64 only (same as <code>install.sh</code>). Neither changes what the product should be.</p>
+
+<h2>Questions</h2>
+<p>None.</p>
+</main>
+</body>
+</html>

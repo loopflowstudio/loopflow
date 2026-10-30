@@ -632,13 +632,14 @@ fn render_report(report: &RolloverReport) -> String {
     lines.join("\n")
 }
 
-/// Shown after a promote: which processes still run what it replaced.
-pub fn report_after_promote() {
+/// Shown after a promote: which processes still run what it replaced. A promote
+/// that replaced Loopflow.app already moved Desktop's bundled lf.
+pub fn report_after_promote(replaced_app: bool) {
     match inventory() {
         Ok(inventory) => {
             if let Some(summary) = superseded_summary(&inventory) {
                 println!("still running the previous lf: {summary}");
-                if inventory.superseded().any(RunningBinary::is_app_helper) {
+                if !replaced_app && inventory.superseded().any(RunningBinary::is_app_helper) {
                     println!(
                         "Desktop keeps its bundled lf until Loopflow.app is updated; this promote did not change it"
                     );

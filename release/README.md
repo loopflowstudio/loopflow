@@ -119,7 +119,8 @@ curl -fsSL https://loopflow.studio/install.sh | sh -s -- --channel preview
 A Machine follows one stream, recorded as `stream:` in `~/.lf/config.yaml`.
 A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
 `install.sh` follow it, `stable` when none is recorded. `install.sh` installs
-`stable` or `preview`; `dev` comes from CI artifacts through `lf install --dev`.
+`stable` or `preview`; `dev` comes from CI artifacts through `lf install --dev`,
+which on a Mac installs that run's signed, notarized Loopflow.app with its `lf`.
 Before downloading a release, `lf install` checks the release's
 `reader-catalog.txt` against this Machine's store. When a newer lf migrated the
 store past what that build reads, it keeps the installed lf and says so; the
@@ -128,8 +129,8 @@ Every install schedules `lf install` daily (launchd, or cron on Linux) unless a
 cadence is already installed, so a Machine stays on its stream unasked.
 
 The installed Loopflow.app updates itself through Sparkle from its stream's
-appcast; on `dev` it stays put while `lf install --dev` updates the CLI alone.
-Publishing writes `appcast-preview.xml`;
+appcast. `dev` has no appcast and runs no updater: each `lf install --dev`
+replaces the app itself, quitting and reopening it when it runs. Publishing writes `appcast-preview.xml`;
 `promote` writes `appcast-stable.xml`, both signed with the publisher's
 `SPARKLE_ED_PRIVATE_KEY` (Doppler) against the `SUPublicEDKey` in
 `swift/LoopflowMac/Info.plist`. Before installing, the app asks its bundled
@@ -158,7 +159,7 @@ Surveyed 2026-10-28 for LOO-669 (ideas only; no code taken).
 | Stable is a pointer to a build that already shipped, moved forward, never rebuilt | Claude Code, Rust, Zed, Deno | Adopted: `stable` follows releases ≥ 7 days old |
 | Skip bad builds instead of yanking them | Claude Code, Rust's regression labels | Adopted: `--regressed-in` holds `stable` below a regression |
 | One appcast per stream, chosen by a setting | Ghostty | Adopted: `appcast-preview.xml` and `appcast-stable.xml` |
-| Signed, notarized builds of main (`tip`) | Ghostty, Deno canary | Not yet: `dev` is CLI-only until CI signs the app |
+| Signed, notarized builds of main (`tip`) | Ghostty, Deno canary | Adopted: `Packages (main)` signs and notarizes the app for `dev` |
 | Refuse newer-format data and name which side to update | Rex, Firefox | Adopted: `can_open` before every install, never "delete the store" |
 | A channel switch never installs older | 1Password, Claude Code `minimumVersion` | Partly: the schedule never moves back; an explicit switch may, when the store allows it |
 | One install per machine; the app carries its CLI | Rex; Atuin's duplicate-install bugs | Adopted: `~/.local/bin/lf` links into Loopflow.app |
@@ -173,13 +174,15 @@ Evidence and links: `git show e03537f7ca:scratch/release-research.md`.
 
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
-| Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version` | `lf install --dev` installs it; artifacts expire after 14 days |
+| Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version`; signs and notarizes a Loopflow.dmg bundling the ARM64 `lf` | `lf install --dev` installs it; artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` crontab line | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
 | Local | `scripts/install.py local` | Build `lf` and `Loopflow.app` into `local-bin/` | No |
 | Local | `lf install` | Download, verify, and promote the stable control plane and Mac app | Yes, installed Machine |
 
-GitHub owns credential-free compilation. The maintained Loopflow host owns the
+GitHub owns compilation, credential-free except the `dev` app: `Packages (main)`
+signs and notarizes it with the Developer ID and notary Actions secrets (sourced
+from Doppler `loopflow`/`prd`). The maintained Loopflow host owns the release's
 credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
 and the GitHub Release. It deploys the website from the exact tag and requires
 `/healthz` to report that tag. If the proof fails it restores the previous Fly

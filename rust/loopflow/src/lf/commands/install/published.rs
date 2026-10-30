@@ -19,6 +19,8 @@ const REPOSITORY: &str = "loopflowstudio/loopflow";
 const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
 /// Packages every green main commit (`.github/workflows/main-packages.yml`).
 const MAIN_PACKAGES: &str = "main-packages.yml";
+/// The artifact holding that run's signed, notarized Loopflow.dmg.
+const MAIN_APP: &str = "Loopflow-dmg";
 /// The reader floors a release's build opens (`lf self install reader-catalog`).
 const READER_CATALOG: &str = "reader-catalog.txt";
 /// Starts Loopflow.app's own update check (`LoopflowApp.handleDeepLink`).
@@ -102,12 +104,11 @@ fn stream_release(client: &Client, stream: Stream) -> Result<String> {
 fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
     let directory = install_dir()?;
     let applications = applications_dir();
-    let cli_only = std::env::var("LF_INSTALL_CLI_ONLY").as_deref() == Ok("1");
     let stream = stream.as_str();
     if is_current(
         &directory,
         tag,
-        (cfg!(target_os = "macos") && !cli_only).then_some(applications.as_path()),
+        installs_app().then_some(applications.as_path()),
     ) {
         println!("{stream} {tag} is already installed.");
         return Ok(());
@@ -121,7 +122,7 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
         return Ok(());
     }
     let app = applications.join("Loopflow.app");
-    if cfg!(target_os = "macos") && !cli_only && updates_itself(&app) && app_is_running(&app)? {
+    if installs_app() && updates_itself(&app) && app_is_running(&app)? {
         // Replacing a running bundle under it is Sparkle's job, not ours.
         let status = Command::new("/usr/bin/open")
             .args(["-g", APP_UPDATE_LINK])
@@ -193,6 +194,11 @@ fn finish_adoption(applications: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Loopflow.app installs beside `lf` on a Mac unless `LF_INSTALL_CLI_ONLY=1`.
+fn installs_app() -> bool {
+    cfg!(target_os = "macos") && std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1")
 }
 
 fn applications_dir() -> PathBuf {
@@ -313,8 +319,9 @@ fn record_stream(home: &Path, stream: Stream) -> Result<()> {
     })
 }
 
-/// Install the package CI built for the newest green main commit. GitHub keeps
-/// those artifacts behind authentication, so this uses the `gh` login.
+/// Install the package CI built for the newest green main commit, with its
+/// Loopflow.app on a Mac. GitHub keeps those artifacts behind authentication,
+/// so this uses the `gh` login.
 fn main_build() -> Result<()> {
     let target =
         package_target().ok_or_else(|| anyhow!("no main package is built for this platform"))?;
@@ -336,17 +343,7 @@ fn main_build() -> Result<()> {
     ])?;
     let (run, revision) = newest_run(&runs)?;
     let temporary = tempfile::tempdir()?;
-    gh(&[
-        "run",
-        "download",
-        &run.to_string(),
-        "--repo",
-        REPOSITORY,
-        "--name",
-        &format!("lf-{target}"),
-        "--dir",
-        &temporary.path().to_string_lossy(),
-    ])?;
+    download_artifact(run, &format!("lf-{target}"), temporary.path())?;
     let archive = temporary.path().join(format!("lf-{target}.tar.gz"));
     let status = Command::new("tar")
         .arg("-xzf")
@@ -360,10 +357,27 @@ fn main_build() -> Result<()> {
     }
     let candidate = temporary.path().join("lf");
     let directory = install_dir()?;
-    let status = Command::new(&candidate)
+    let mut promote = Command::new(&candidate);
+    promote
         .args(["self", "install", "promote", "--cli-target"])
         .arg(directory.join("lf"))
-        .arg("--sync-skills")
+        .arg("--sync-skills");
+    // Mounted until promotion has copied the app out of it.
+    let image = installs_app()
+        .then(|| DiskImage::download(run, temporary.path()))
+        .transpose()?;
+    if let Some(image) = &image {
+        let applications = applications_dir();
+        // Promotion quits a running app, replaces it and reopens it.
+        promote
+            .arg("--app-source")
+            .arg(image.app())
+            .arg("--app-target")
+            .arg(applications.join("Loopflow.app"))
+            .arg("--legacy-app-target")
+            .arg(applications.join("Concerto.app"));
+    }
+    let status = promote
         .status()
         .context("start the main build's promotion")?;
     if !status.success() {
@@ -374,6 +388,76 @@ fn main_build() -> Result<()> {
         directory.join("lf").display()
     );
     schedule(None)
+}
+
+/// The signed, notarized Loopflow.dmg a main packages run built, mounted
+/// read-only and checked the way `install.sh` checks a release's.
+struct DiskImage {
+    mount: PathBuf,
+}
+
+impl DiskImage {
+    fn download(run: u64, temporary: &Path) -> Result<Self> {
+        download_artifact(run, MAIN_APP, temporary)?;
+        Self::mount(&temporary.join("Loopflow.dmg"), &temporary.join("mount"))
+    }
+
+    fn mount(dmg: &Path, mount: &Path) -> Result<Self> {
+        fs::create_dir(mount)?;
+        checked(Command::new("/usr/bin/hdiutil").arg("verify").arg(dmg))?;
+        checked(
+            Command::new("/usr/bin/hdiutil")
+                .args(["attach", "-nobrowse", "-readonly", "-mountpoint"])
+                .arg(mount)
+                .arg(dmg),
+        )?;
+        let image = Self {
+            mount: mount.to_path_buf(),
+        };
+        let app = image.app();
+        if !app.is_dir() {
+            bail!("{} does not contain Loopflow.app", dmg.display());
+        }
+        checked(
+            Command::new("/usr/bin/codesign")
+                .args(["--verify", "--deep", "--strict"])
+                .arg(&app),
+        )?;
+        checked(
+            Command::new("/usr/sbin/spctl")
+                .args(["--assess", "--type", "execute"])
+                .arg(&app),
+        )?;
+        Ok(image)
+    }
+
+    fn app(&self) -> PathBuf {
+        self.mount.join("Loopflow.app")
+    }
+}
+
+impl Drop for DiskImage {
+    fn drop(&mut self) {
+        let _ = Command::new("/usr/bin/hdiutil")
+            .args(["detach", "-quiet"])
+            .arg(&self.mount)
+            .status();
+    }
+}
+
+fn checked(command: &mut Command) -> Result<()> {
+    let output = command
+        .output()
+        .with_context(|| format!("start {:?}", command.get_program()))?;
+    if !output.status.success() {
+        bail!(
+            "{:?} failed ({}): {}",
+            command.get_program(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
 }
 
 /// The package name CI gives this platform's `lf`.
@@ -400,6 +484,21 @@ fn newest_run(json: &str) -> Result<(u64, String)> {
         .next()
         .ok_or_else(|| anyhow!("no green main build has packages yet"))?;
     Ok((run.database_id, run.head_sha))
+}
+
+fn download_artifact(run: u64, name: &str, directory: &Path) -> Result<()> {
+    gh(&[
+        "run",
+        "download",
+        &run.to_string(),
+        "--repo",
+        REPOSITORY,
+        "--name",
+        name,
+        "--dir",
+        &directory.to_string_lossy(),
+    ])
+    .map(drop)
 }
 
 fn gh(args: &[&str]) -> Result<String> {
@@ -786,15 +885,19 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::{checked, DiskImage};
     use super::{
         cron_table, finish_adoption, is_current, newest_release, newest_run, opens_store,
         package_target, record_stream, recorded_stream, release_tag, run_verified_installer,
-        Stream, CRON_MARKER,
+        updates_itself, Stream, CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
+    #[cfg(target_os = "macos")]
+    use std::process::Command;
 
     fn binary(path: &Path, name: &str) {
         fs::write(path, format!(
@@ -850,6 +953,28 @@ mod tests {
             .to_string()
             .contains("no green main build"));
         assert!(package_target().is_some_and(|target| target.contains(std::env::consts::ARCH)));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_main_build_app_without_a_developer_id_signature_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let macos = source.join("Loopflow.app/Contents/MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        binary(&macos.join("Loopflow"), "Loopflow");
+        let dmg = temp.path().join("Loopflow.dmg");
+        checked(
+            Command::new("/usr/bin/hdiutil")
+                .args(["create", "-quiet", "-format", "UDZO", "-srcfolder"])
+                .arg(&source)
+                .arg(&dmg),
+        )
+        .unwrap();
+        let mount = temp.path().join("mount");
+        let error = DiskImage::mount(&dmg, &mount).err().unwrap().to_string();
+        assert!(error.contains("codesign"), "{error}");
+        assert!(!mount.join("Loopflow.app").exists());
     }
 
     #[test]
@@ -979,13 +1104,13 @@ mod tests {
     fn only_an_app_with_a_sparkle_key_updates_itself() {
         let temp = tempfile::tempdir().unwrap();
         let app = temp.path().join("Loopflow.app");
-        assert!(!super::updates_itself(&app));
+        assert!(!updates_itself(&app));
         fs::create_dir_all(app.join("Contents")).unwrap();
         for (key, expected) in [("", false), ("test-public-key", true)] {
             fs::write(app.join("Contents/Info.plist"), format!(
                 "<plist version=\"1.0\"><dict><key>SUPublicEDKey</key><string>{key}</string></dict></plist>"
             )).unwrap();
-            assert_eq!(super::updates_itself(&app), expected);
+            assert_eq!(updates_itself(&app), expected);
         }
     }
 }

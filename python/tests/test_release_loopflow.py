@@ -52,21 +52,18 @@ def test_release_bundle_embeds_sparkle_with_its_version_links(
     (framework / "Versions/B/Sparkle").write_bytes(b"sparkle")
     (framework / "Versions/Current").symlink_to("B")
     (framework / "Sparkle").symlink_to("Versions/Current/Sparkle")
-    info_plist = tmp_path / "Info.plist"
-    with info_plist.open("wb") as file:
-        plistlib.dump({"CFBundleExecutable": "Loopflow"}, file)
     app_dir = tmp_path / "Loopflow.app" / "Contents"
     (app_dir / "MacOS").mkdir(parents=True)
-    monkeypatch.setattr(release_loopflow, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
 
-    release_loopflow._embed_frameworks(build_dir, info_plist, app_dir)
+    release_loopflow.embed_frameworks(build_dir, app_dir, "Loopflow")
 
     embedded = app_dir / "Frameworks/Sparkle.framework"
     assert (embedded / "Sparkle").is_symlink()
     assert (embedded / "Sparkle").read_bytes() == b"sparkle"
     shutil.rmtree(framework)
     with pytest.raises(RuntimeError, match="Missing built Sparkle.framework"):
-        release_loopflow._embed_frameworks(build_dir, info_plist, tmp_path / "other")
+        release_loopflow.embed_frameworks(build_dir, tmp_path / "other", "Loopflow")
 
 
 def test_release_bundle_carries_the_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

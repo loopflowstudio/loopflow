@@ -4368,12 +4368,8 @@ async fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
 /// The stable stream against Linear's regressions. Unread regressions hold
 /// `stable` where it is and say why.
 fn read_stable_stream(repo: &Path, releases: &[PublishedRelease]) -> OpsResult<StableStream> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    Ok(runtime.block_on(stable_against_linear(repo, releases)))
-}
-
-async fn stable_against_linear(repo: &Path, releases: &[PublishedRelease]) -> StableStream {
-    match regressions(repo).await {
+    let regressions = tokio::runtime::Runtime::new()?.block_on(regressions(repo));
+    Ok(match regressions {
         Ok(regressions) => stable_stream(releases, &regressions, chrono::Utc::now()),
         Err(error) => StableStream {
             current: releases
@@ -4385,7 +4381,7 @@ async fn stable_against_linear(repo: &Path, releases: &[PublishedRelease]) -> St
                 reason: error.to_string(),
             }],
         },
-    }
+    })
 }
 
 /// The release `stable` should point at now, when that is ahead of where it
@@ -4757,18 +4753,16 @@ mod tests {
         let _restore = test_fixture::PlanningEnvironment::isolate();
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("LF_HOME", home.path());
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let fixture = test_fixture::Fixture::new().await;
-            let (repo, _wave) = fixture.planning_repo().await;
-            fixture.seed(test_fixture::now() + 3600).await;
-            let (url, _) = crate::linear::test_server::spawn(responses).await;
-            LINEAR_TEST_CONTEXT
-                .scope(
-                    fixture.context(&url),
-                    stable_against_linear(&repo, releases),
-                )
-                .await
-        })
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(test_fixture::Fixture::new());
+        let (repo, _wave) = runtime.block_on(fixture.planning_repo());
+        runtime.block_on(fixture.seed(test_fixture::now() + 3600));
+        let (url, _) = runtime.block_on(crate::linear::test_server::spawn(responses));
+        LINEAR_TEST_CONTEXT
+            .sync_scope(fixture.context(&url), || {
+                read_stable_stream(&repo, releases)
+            })
+            .unwrap()
     }
 
     fn regressed_issues(

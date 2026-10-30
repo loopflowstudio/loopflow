@@ -1484,6 +1484,7 @@ pub fn task_create(
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     if regression.regressed_in.is_some() {
         validate_task_edit_input(&regression)?;
+        // Refuse before creating a Task the label could never reach.
         super::linear::repository_team_id(&main)?;
     }
     block_on_task(async {
@@ -1534,14 +1535,12 @@ pub fn task_create(
             .await
             .map_err(task_error)?;
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
-        let created = || async {
-            store
-                .get_task(&task.id)
-                .await
-                .map_err(task_error)?
-                .ok_or_else(|| task_error("Created Task is missing"))
-        };
-        let task = created().await?;
+        // Sync may have given the Task its Linear issue, which the label needs.
+        let task = store
+            .get_task(&task.id)
+            .await
+            .map_err(task_error)?
+            .ok_or_else(|| task_error("Created Task is missing"))?;
         let Some(version) = &regression.regressed_in else {
             return Ok(task);
         };
@@ -1549,8 +1548,7 @@ pub fn task_create(
         store
             .edit_task(&task.id, task.revision, &regression)
             .await
-            .map_err(task_error)?;
-        created().await
+            .map_err(task_error)
     })
 }
 

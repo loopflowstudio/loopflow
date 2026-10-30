@@ -52,7 +52,7 @@ else
 fi
 
 lf_home="${LF_HOME:-$HOME/.lf}"
-# The checks below and both job wrappers run in this one environment.
+# The checks below and the telemetry-daily wrapper run in this environment.
 minimal_env=(
   env -i
   "HOME=$HOME"
@@ -105,18 +105,18 @@ step "unattended tool path"
 '
 step "host-local provider authority"
 # Each home holds its own logins; copying a store would share rotating grants.
-for home in main release; do
-  if [ "$home" = main ]; then
-    auth_status="$("${minimal_env[@]}" "$lf_bin" account --json)"
-  else
-    auth_status="$("${release_env[@]}" "$release_lf" account --json)"
-  fi
+require_account() {
+  local home="$1" auth_status
+  shift
+  auth_status="$("$@" account --json)"
   printf '%s\n' "$auth_status"
   if ! jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")' >/dev/null <<<"$auth_status"; then
     printf 'no managed provider account verified live in the %s home; log in with LF_HOME set to it\n' "$home" >&2
     exit 1
   fi
-done
+}
+require_account main "${minimal_env[@]}" "$lf_bin"
+require_account release "${release_env[@]}" "$release_lf"
 
 step "release home planning authority"
 # `lf release check` reads regressions from Linear; exit 1 alone means nothing

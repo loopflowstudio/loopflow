@@ -4,7 +4,7 @@
 
 Plan of record: `scratch/design.md` (Done / Remaining).
 
-Check: `cargo test -p loopflow --lib -- linear::regressions:: ops::release::tests:: task_edit_regressed_in task_create_in_linear_repository` — 56 pass; `cargo clippy --all-targets -- -D warnings` clean; `release_tests -- daily_run_moves_stable release_check` — 6 pass.
+Check: `cargo test -p loopflow --lib -- linear::regressions:: ops::release::tests:: task_edit_regressed_in task_create_in_linear_repository` — 56 pass after the compress pass; `cargo clippy --all-targets -- -D warnings` clean; `release_tests -- daily_run_moves_stable release_check` — 6 pass (prior pass; integration paths unchanged).
 
 ## Host: option (b) taken (reversible; Jack Heart can overturn in review)
 

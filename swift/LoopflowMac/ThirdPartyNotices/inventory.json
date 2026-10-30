@@ -1,6 +1,6 @@
 {
   "inputs": {
-    "Cargo.lock": "a1c5e6c4132c42000756e0c29b1b9c2ad0d5f882ffe52b145a2e91a9ec5df79e",
+    "Cargo.lock": "a5743b0ec4757710eb802a6b18870231309833647878cda8e65a51d2cd66b730",
     "swift/GhosttyKitPatches/0001-command-blocks.patch": "304566cfebd53802689026ba72271297c1487a661f979b9986fe25c5dd6f3e11",
     "swift/GhosttyKitPatches/0002-embedded-login-session.patch": "a487a5fbbed854105bfacde7eb5885313fa45ae5cb8cfb7887af56ae41595288",
     "swift/GhosttyKitPatches/0003-program-status.patch": "4f658df88384d38dc9b4f044ee1099190698e3d7e5a71c36b26c479af69170d8",
@@ -60,7 +60,7 @@
     "swift/LoopflowMac/GhosttyResources/share/terminfo/78/xterm-ghostty": "7b9448b1abe6f0f36410f424fd269da67116e31aea600dfbbfca863d09a5bc20",
     "swift/LoopflowMac/GhosttyResources/share/terminfo/ghostty.terminfo": "e5e9cc4e9fddf6aab3088b40ec42fafe8309ef1ae5d3764d0bbf2fc44105ccf0",
     "swift/Package.resolved": "e94c5d32d844b9cabdf242d8cca2bb854cf0e6320975b6f6954c45e14b9d3544",
-    "swift/Package.swift": "dd8a4770c6a4aea6ae848c9ee05a38d9fa528df8bb4f32fd9c41bb9bbb7da059",
+    "swift/Package.swift": "5d0e22f4569ddf59c0ac3e75eab6ca57069a4b1bc80a0d892a1171b22fb6d62d",
     "third_party/README.md": "ab704e7eef1524c178bc75259b58c5a96406dc2160d59d0bce20e300458a4bcb",
     "third_party/REBUILD.md": "12cbefeb54c2d3d541761bbfaae006f10b82a558ccb3bbb61060bd85fb7037b6",
     "third_party/manifest.json": "b94e28af405a1976f2412cf43b5034282d55688a3fdc57395690f098e5892e25",

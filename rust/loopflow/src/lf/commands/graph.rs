@@ -762,7 +762,7 @@ impl RunningGraph<'_> {
         let Some(stop) = self.store.sqlite.task_ship_stop(task)? else {
             return Ok(None);
         };
-        let by = crate::ops::task::ship::starter(&self.store.sqlite, stop.by.as_ref())?;
+        let by = crate::ops::task::ship::starter(&self.store.sqlite, self.cwd, stop.by.as_ref())?;
         eprintln!(
             "Waiting at {step}: not approved to merge ({by} stopped shipping). `lf ship` lands it."
         );
@@ -802,6 +802,7 @@ impl RunningGraph<'_> {
         let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
+        command.env(crate::journal::GRAPH_STEP_ENV, "1");
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");

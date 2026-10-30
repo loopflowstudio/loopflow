@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use crate::id::LfProcessId;
 use crate::journal::{
     prune_process_receipts_at, read_process_receipts_at, recorded_process_evidence,
     recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
@@ -139,11 +140,18 @@ pub fn run_top() -> Result<()> {
 
 /// Stream the call trees: Process rows change with the store, liveness and
 /// activity state only on the clock.
-pub fn watch_ps() -> Result<()> {
-    super::watch::run(
+pub fn watch_ps(transport: super::watch::Transport) -> Result<Option<super::watch::Subscription>> {
+    super::watch::start(
         (),
         super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
-        |_, ()| async { load_snapshot() },
+        {
+            let mut reader = ActivityReader::default();
+            move |_, ()| {
+                let snapshot = reader.read();
+                async { snapshot }
+            }
+        },
+        transport,
     )
 }
 
@@ -225,20 +233,77 @@ fn stale_process_receipt_pids(processes: &[OsProcess], receipts: &[ProcessReceip
 }
 
 pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let path = crate::store::database_path_from_env()?;
-    if !path.exists() {
-        return Ok(ActivitySnapshot { nodes: Vec::new() });
+    ActivityReader::default().read()
+}
+
+/// Reads activity again and again, each time reading only the unfinished rows
+/// not yet proven dead. Death is permanent, so a row that never recorded its
+/// exit costs one reading of its receipt and PID, not one every tick.
+#[derive(Debug, Default)]
+pub(crate) struct ActivityReader {
+    store: Option<SqliteStore>,
+    dead: HashSet<LfProcessId>,
+    /// The rows not yet proven dead, read at this `processes` revision.
+    rows: Option<(i64, Vec<crate::process::LfProcess>)>,
+}
+
+impl ActivityReader {
+    pub(crate) fn read(&mut self) -> Result<ActivitySnapshot> {
+        let store = match &self.store {
+            Some(store) => store,
+            None => {
+                let path = crate::store::database_path_from_env()?;
+                if !path.exists() {
+                    return Ok(ActivitySnapshot { nodes: Vec::new() });
+                }
+                self.store
+                    .insert(SqliteStore::open_processes_read_only(&path)?)
+            }
+        };
+        // Rows change only with the revision, read before them; liveness is
+        // read every time.
+        let revision = store.revisions()?.processes;
+        let records = match self.rows.take() {
+            Some((read_at, rows)) if read_at == revision => rows,
+            _ => store.unfinished_processes_except(&mut self.dead)?,
+        };
+        let snapshot = read_activity(store, records.clone())?;
+        let shown: HashSet<&str> = snapshot.nodes.iter().map(|node| node.id.as_str()).collect();
+        let current = crate::journal::current_lf_process_id();
+        let (dead, alive) = records.into_iter().partition::<Vec<_>, _>(|row| {
+            !shown.contains(row.id.as_str()) && Some(&row.id) != current.as_ref()
+        });
+        self.dead.extend(dead.into_iter().map(|row| row.id));
+        self.rows = Some((revision, alive));
+        Ok(snapshot)
     }
-    let store = SqliteStore::open_processes_read_only(&path)?;
-    let records = store.unfinished_processes()?;
-    let processes = OsProcess::sample(now);
+}
+
+fn read_activity(
+    store: &SqliteStore,
+    records: Vec<crate::process::LfProcess>,
+) -> Result<ActivitySnapshot> {
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    // Each unfinished row reads its own receipt and its own OS processes, so
+    // cost follows live work, not history or the rest of the Machine.
+    let mut receipts: HashMap<_, _> = records
+        .iter()
+        .map(|record| (record.id.clone(), recorded_process_receipt(store, record)))
+        .collect();
+    let mut pids: Vec<u32> = records.iter().filter_map(|record| record.pid).collect();
+    pids.extend(
+        receipts
+            .values()
+            .filter_map(|receipt| receipt.as_ref().ok()?.as_ref().map(|receipt| receipt.pid)),
+    );
+    pids.sort_unstable();
+    pids.dedup();
+    let processes = OsProcess::read_each(&pids, now);
     if let Err(error) = &processes {
         tracing::warn!(%error, "activity OS observation unavailable");
     }
-    // Each unfinished row reads its own receipt, so cost follows live work, not history.
     collect_activity(records, processes.as_deref().ok(), |record| {
-        recorded_process_receipt(&store, record)
+        receipts.remove(&record.id).unwrap_or(Ok(None))
     })
 }
 
@@ -841,6 +906,65 @@ mod tests {
         let after = load_snapshot().map(ids);
         std::fs::set_permissions(&root, permissions).unwrap();
         assert_eq!(after.unwrap(), before);
+    }
+
+    /// A watch shows new rows and exits as they commit, and reads a row proven
+    /// dead only once: its receipt and PID are never read again.
+    #[test]
+    #[cfg(unix)]
+    fn a_watch_reads_each_dead_row_once() {
+        use super::ActivityReader;
+        use crate::store::sqlite::SqliteStore;
+
+        let _lock = crate::journal::test_env_lock();
+        let _ambient = crate::test_ambient::EnvGuard::new();
+        let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let path = home.path().join("loopflow.db");
+        SqliteStore::open_ephemeral(&path).unwrap();
+        let sql = rusqlite::Connection::open(path).unwrap();
+        let pid = std::process::id();
+        let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let insert = |start: i64| {
+            let id = LfProcessId::new();
+            sql.execute(
+                "INSERT INTO processes(id,trace_id,started_at,pid,os_started_at) VALUES(?1,?1,?2,?3,?4)",
+                rusqlite::params![id, started, pid, start],
+            )
+            .unwrap();
+            id
+        };
+        let mut reader = ActivityReader::default();
+        let mut shown = || {
+            let mut ids: Vec<_> = reader
+                .read()
+                .unwrap()
+                .nodes
+                .into_iter()
+                .map(|node| node.id)
+                .collect();
+            ids.sort();
+            ids
+        };
+        let first = insert(started);
+        let dead = insert(started + 3600);
+        assert_eq!(shown(), [first.to_string()]);
+
+        let second = insert(started);
+        let mut both = vec![first.to_string(), second.to_string()];
+        both.sort();
+        assert_eq!(shown(), both);
+
+        sql.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&first])
+            .unwrap();
+        // A row read dead stays dead even if its identity were to match again.
+        sql.execute(
+            "UPDATE processes SET os_started_at=?2 WHERE id=?1",
+            rusqlite::params![dead, started],
+        )
+        .unwrap();
+        assert_eq!(shown(), [second.to_string()]);
     }
 
     #[test]

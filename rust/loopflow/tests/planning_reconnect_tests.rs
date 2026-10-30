@@ -9,8 +9,8 @@ use std::process::Command;
 use support::{register_task_without_pr, EnvGuard};
 
 #[test]
-fn planning_status_watch_reconnects_repository_planning() {
-    planning_reconnect_fixture("watch");
+fn planning_refresh_reconnects_repository_planning() {
+    planning_reconnect_fixture("refresh");
 }
 
 #[test]

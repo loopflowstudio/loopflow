@@ -1,6 +1,8 @@
-// The local macOS registry query: `RegistryQuery` backed by a launcher-resolved
-// `lf`. Discovery and history are `lf` subprocesses over the local store, run off the
-// main actor so a slow query never stalls the UI.
+// The local macOS registry query: `RegistryQuery` over this Machine. The Work
+// watches, served reads and served writes run in the app through Loopflow's
+// library; other commands, writes `lf` sends to another Machine, and the remote
+// Task file watch run the bundled `lf` off the main actor so a slow one never
+// stalls the UI.
 
 #if os(macOS)
 import Foundation
@@ -9,7 +11,14 @@ import Loopflow
 enum RegistryQueryLocal {
     static let shared = RegistryQuery(runWithInput: { args, cwd, input in
         try await LocalWaveAgentLauncher.queryLf(args, cwd: cwd, input: input)
+    }, serve: { query in
+        try await LoopflowLibrary.read(query)
+    }, write: { change in
+        if let made = try await LoopflowLibrary.write(change) { return made }
+        // `lf` sends this write to another Machine; its command does.
+        return try await LocalWaveAgentLauncher.queryLf(change.argv, cwd: change.cwd, input: change.input)
     }, watchFiles: { args, cwd in
+        // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {
             let configuration = try ReaderLaunchConfiguration.current()
             let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
@@ -22,18 +31,7 @@ enum RegistryQueryLocal {
             return TaskFilesObservation(frames: reader.frames, cancel: reader.cancel)
         }.value
     }, watchWork: {
-        try await Task.detached(priority: .userInitiated) {
-            let configuration = try ReaderLaunchConfiguration.current()
-            return try LocalWorkObservation.start(
-                process: { args, cwd in
-                    let process = LocalWaveAgentLauncher.queryProcess([configuration.helper] + args)
-                    process.environment = configuration.environment
-                    if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-                    return process
-                },
-                configurationChanged: { try ReaderLaunchConfiguration.current() != configuration }
-            )
-        }.value
+        try WorkWatches.observe(launch: LoopflowLibrary.watch)
     }) { args, cwd in
         try await Perf.measure(Perf.lf, args.prefix(2).joined(separator: " ")) {
             let started = ContinuousClock.now

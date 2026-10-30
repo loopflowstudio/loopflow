@@ -273,7 +273,8 @@ competing plans remain unresolved. Preserve active Task identity, worktree, PR
 and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
 Current navigation stays Wave → Task and Linear retains past Projects.
 
-LfProcess is one actual lf process, including direct and agent-issued nested commands.
+LfProcess is one actual lf process that changes Work, including direct and agent-issued
+nested commands; reads, navigation and arrangement record none (`Commands::changes_work`).
 Its `id`, an `LfProcessId`, is durable Loopflow identity; `pid` is only the optional
 Unix PID and may collide across history. References are `<role>_lf_process_id`:
 `lf_process_id`, `parent_lf_process_id`. AgentProcess is the provider's OS process

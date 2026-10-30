@@ -1,43 +1,11 @@
 use crate::support;
 
 use std::fs;
-use std::io::Write;
-use std::path::Path;
-use std::process::{Command, Stdio};
 
+use crate::isolated_lf::isolated_read as read;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 use support::{register_task_with_pr, EnvGuard};
-
-fn read(repo: &Path, home: &Path, args: &[&str], input: Option<&str>) -> Value {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_lf"))
-        .env_clear()
-        .env("HOME", home)
-        .env("LF_HOME", home)
-        .env("PATH", "/usr/bin:/bin")
-        .current_dir(repo)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    if let Some(input) = input {
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(input.as_bytes())
-            .unwrap();
-    }
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "{args:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).unwrap()
-}
 
 #[test]
 fn diff_files_preserves_comparison_identity_and_draft_editing() {
@@ -62,7 +30,9 @@ fn diff_files_preserves_comparison_identity_and_draft_editing() {
     repo.stage_all();
     repo.create_file("edit.txt", "working\n");
     repo.create_file("untracked.txt", "untracked\n");
-    let query = |args: &[&str], input| read(repo.path(), home.path(), args, input);
+    let query = |args: &[&str], input| -> Value {
+        serde_json::from_str(&read(repo.path(), home.path(), args, input)).unwrap()
+    };
 
     let files = query(&["task", "diff", "INF-123", "--files", "--json"], None);
     assert_eq!(files["task_id"], task.task.id.as_str());

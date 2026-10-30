@@ -44,8 +44,12 @@ pub fn require_repo_root(cwd: &Path, operation: &str) -> Result<PathBuf> {
 
 /// Resolve directory-scoped context without requiring Git metadata.
 pub fn working_directory() -> Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
-    Ok(discover_repo_root(&cwd)?.unwrap_or(cwd))
+    working_directory_in(&std::env::current_dir()?)
+}
+
+/// The repository containing `directory`, else `directory` itself.
+pub fn working_directory_in(directory: &Path) -> Result<PathBuf> {
+    Ok(discover_repo_root(directory)?.unwrap_or_else(|| directory.to_owned()))
 }
 
 pub fn find_repo_root() -> Result<PathBuf> {

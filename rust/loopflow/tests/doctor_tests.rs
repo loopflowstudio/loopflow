@@ -182,7 +182,7 @@ fn doctor_accepts_machine_commands_without_a_repository() {
     assert!(identity["detail"]
         .as_str()
         .unwrap()
-        .contains("2 Process(s) without repository scope"));
+        .contains("1 Process(s) without repository scope"));
 }
 
 #[test]

@@ -5,19 +5,28 @@
 //! The store's change revisions say when a commit can have changed the result.
 //! A reading runs only then, or on the read's clock for facts outside the store
 //! (Process liveness, Git), on a read-only connection with one pinned snapshot.
-//! An unchanged result sends nothing. A slow reading rests `BUSY_SHARE` times
-//! its duration before a change is read again.
+//! A read whose outside facts can be observed cheaply probes them on its clock
+//! and reads only when they moved. An unchanged result sends nothing. A slow
+//! reading rests `BUSY_SHARE` times its duration before a change is read again.
 //!
 //! Each stdin line is a request, `{"id": 1, "args": {...}}`. `args` replaces
 //! the read's arguments; without it the request confirms the current result.
 //! Either way the next frame answers it, changed or not. The watch ends, after
 //! answering what it was asked, when stdin closes or its parent exits.
+//!
+//! [`Subscription`] serves the same watch inside this process, as Ghostty's
+//! embedding API does: a data-free wakeup from any thread says a result may
+//! have changed, and the app pulls on its own thread, where the reading runs
+//! and coalesces a burst into one frame. The app reads exactly what the `lf`
+//! command would print.
 
 mod checkouts;
 
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -26,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::store::changes::StoreChanges;
-use crate::store::sqlite::StoreRevisions;
+use crate::store::sqlite::{SqliteStore, StoreRevisions};
 use crate::store::{SharedStore, StorageConfig};
 
 /// A burst is read once it has been quiet this long…
@@ -74,13 +83,29 @@ pub(crate) struct Watched {
     /// The result shows Git facts of Task checkouts: read again when one
     /// changes on disk and Git's answer about it differs.
     pub checkouts: bool,
+    /// The facts outside the store the result reads, observed far more
+    /// cheaply than the reading. Without one, every clock tick reads.
+    pub probe: Option<Probe>,
 }
+
+/// Observe the facts a read takes from outside the store at this moment.
+pub(crate) type Probe = fn(&SqliteStore) -> Result<Vec<u8>>;
 
 impl Watched {
     pub(crate) fn every(clock: Duration) -> Self {
         Self {
             clock,
             checkouts: false,
+            probe: None,
+        }
+    }
+
+    /// Read on the clock only when `probe`'s answer differs from the one
+    /// observed before the last reading.
+    pub(crate) fn probing(self, probe: Probe) -> Self {
+        Self {
+            probe: Some(probe),
+            ..self
         }
     }
 
@@ -108,6 +133,16 @@ struct Mailbox<A> {
     look: bool,
     closed: bool,
     error: Option<String>,
+    /// When an in-process puller should step next; `None` while its wakeup
+    /// waits for a pull.
+    pull_at: Option<Instant>,
+}
+
+impl<A> Mailbox<A> {
+    /// Whether the watch should step before its clock says.
+    fn asked(&self) -> bool {
+        self.look || !self.requests.is_empty() || self.error.is_some()
+    }
 }
 
 type Shared<A> = Arc<(Mutex<Mailbox<A>>, Condvar)>;
@@ -118,181 +153,497 @@ fn lock<A>(shared: &Shared<A>) -> MutexGuard<'_, Mailbox<A>> {
 
 /// Print `read(store, args)` as frames until stdin closes or the parent exits.
 /// `store` is `None` until a Loopflow store exists on this Machine.
-pub(crate) fn run<A, T, F, Fut>(args: A, watched: Watched, mut read: F) -> Result<()>
+pub(crate) fn run<A, T, F, Fut>(args: A, watched: Watched, read: F) -> Result<()>
 where
     A: DeserializeOwned + Clone + Send + 'static,
     T: Serialize,
     F: FnMut(Option<SharedStore>, A) -> Fut,
     Fut: std::future::Future<Output = Result<T>>,
 {
-    let database = crate::store::database_path_from_env()?;
-    if watched.checkouts {
-        // Every reading asks Git the same questions about the same checkouts;
-        // only a checkout that changed on disk is asked again.
-        crate::git::retain_reads();
+    // Read before anything can be scheduled: a parent that exits after this
+    // is noticed even if it exits before the observer starts.
+    let parent = parent_process();
+    let shared = mailbox();
+    let input = shared.clone();
+    std::thread::spawn(move || read_requests(&input));
+    let mut reader = Reader::new(shared.clone(), parent, args, watched, read)?;
+    let mut stdout = std::io::stdout().lock();
+    loop {
+        let step = reader.step()?;
+        if let Some(frame) = step.frame {
+            if stdout
+                .write_all(&frame)
+                .and_then(|()| stdout.flush())
+                .is_err()
+            {
+                return Ok(());
+            }
+        }
+        if step.closing {
+            return Ok(());
+        }
+        wait(&shared, step.wake);
     }
-    let mut checkouts = checkouts::Checkouts::default();
-    let mut followed_at = None;
-    let mut stale = false;
-    let shared: Shared<A> = Arc::new((
+}
+
+/// Where a watch's requests come from and its frames go.
+pub enum Transport {
+    /// stdin and stdout, ending with the parent: `lf <read> --json --watch`.
+    Stdio,
+    /// Requests and pulls through the returned [`Subscription`]; the callback
+    /// says, from any thread and carrying nothing, that a pull may find a frame.
+    Pull(Box<dyn Fn() + Send + Sync>),
+}
+
+impl std::fmt::Debug for Transport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Stdio => "Stdio",
+            Self::Pull(_) => "Pull",
+        })
+    }
+}
+
+/// Serve `read` over `transport`. Stdio runs until the watch ends; a pulled
+/// watch returns its subscription at once.
+pub(crate) fn start<A, T, F, Fut>(
+    args: A,
+    watched: Watched,
+    read: F,
+    transport: Transport,
+) -> Result<Option<Subscription>>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    match transport {
+        Transport::Stdio => run(args, watched, read).map(|()| None),
+        Transport::Pull(wake) => subscribe(args, watched, read, wake).map(Some),
+    }
+}
+
+/// A watch served inside this process. Requests are the lines
+/// `lf <read> --json --watch` takes on stdin; [`Subscription::pull`] reads on
+/// the caller's thread and returns the frame that command would print next.
+/// Dropping it ends the watch.
+pub struct Subscription {
+    inbox: Arc<dyn Inbox>,
+    pull: Mutex<Box<dyn FnMut() -> Option<Vec<u8>> + Send>>,
+    ended: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for Subscription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Subscription").finish_non_exhaustive()
+    }
+}
+
+impl Subscription {
+    /// One request line, as on the stdin of the equivalent `lf` watch.
+    pub fn request(&self, line: &[u8]) {
+        self.inbox.deliver(line);
+    }
+
+    /// The newest changed frame, or `None` when nothing changed since the last
+    /// pull. Any read snapshot is released before this returns. A watch that
+    /// fails or panics returns its error as a last frame.
+    pub fn pull(&self) -> Option<Vec<u8>> {
+        let mut pull = self
+            .pull
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        (*pull)()
+    }
+
+    /// The watch failed and sent its error as a last frame; nothing follows,
+    /// as nothing follows the exit of `lf <read> --json --watch`.
+    pub fn ended(&self) -> bool {
+        self.ended.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        self.inbox.close();
+    }
+}
+
+/// A mailbox whose argument type is known only to its watch.
+trait Inbox: Send + Sync {
+    fn deliver(&self, line: &[u8]);
+    fn close(&self);
+    /// Ask the watch to look at the store again; false once it has closed.
+    fn look(&self) -> bool;
+}
+
+impl<A: DeserializeOwned + Send> Inbox for (Mutex<Mailbox<A>>, Condvar) {
+    fn deliver(&self, line: &[u8]) {
+        let mut mailbox = self.0.lock().expect("watch mailbox poisoned");
+        accept(&mut mailbox, line);
+        self.1.notify_all();
+    }
+
+    fn close(&self) {
+        self.0.lock().expect("watch mailbox poisoned").closed = true;
+        self.1.notify_all();
+    }
+
+    fn look(&self) -> bool {
+        let mut mailbox = self.0.lock().expect("watch mailbox poisoned");
+        mailbox.look = true;
+        self.1.notify_all();
+        !mailbox.closed
+    }
+}
+
+/// Serve `read` as `run` does, read on the puller's thread. A thread of this
+/// process only waits for the next reason to read and calls `wake`.
+fn subscribe<A, T, F, Fut>(
+    args: A,
+    watched: Watched,
+    read: F,
+    wake: Box<dyn Fn() + Send + Sync>,
+) -> Result<Subscription>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    let shared = mailbox();
+    let inbox: Arc<dyn Inbox> = shared.clone();
+    let mut reader = Reader::new(shared.clone(), None, args, watched, read)?;
+    lock(&shared).pull_at = Some(Instant::now());
+    let waker = shared.clone();
+    std::thread::spawn(move || {
+        let mut mailbox = lock(&waker);
+        while !mailbox.closed {
+            mailbox = match mailbox.pull_at {
+                Some(at) if mailbox.asked() || Instant::now() >= at => {
+                    mailbox.pull_at = None;
+                    drop(mailbox);
+                    wake();
+                    lock(&waker)
+                }
+                Some(at) => {
+                    let wait = at.saturating_duration_since(Instant::now());
+                    waker
+                        .1
+                        .wait_timeout(mailbox, wait)
+                        .expect("watch mailbox poisoned")
+                        .0
+                }
+                None => waker.1.wait(mailbox).expect("watch mailbox poisoned"),
+            };
+        }
+    });
+    let ended = Arc::new(AtomicBool::new(false));
+    let failed = ended.clone();
+    let pull = move || -> Option<Vec<u8>> {
+        if failed.load(Ordering::Acquire) {
+            return None;
+        }
+        let stepped = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.step()));
+        let error = match stepped {
+            Ok(Ok(step)) => {
+                lock(&shared).pull_at = Some(step.wake);
+                shared.1.notify_all();
+                return step.frame;
+            }
+            Ok(Err(error)) => format!("{error:#}"),
+            Err(panic) => format!("watch panicked: {}", panic_message(&panic)),
+        };
+        failed.store(true, Ordering::Release);
+        encode(&WatchFrame::<()> {
+            answers: None,
+            unavailable: Some(error),
+            body: None,
+        })
+        .ok()
+    };
+    Ok(Subscription {
+        inbox,
+        pull: Mutex::new(Box::new(pull)),
+        ended,
+    })
+}
+
+/// The text a panic was raised with.
+pub fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("unknown panic")
+}
+
+fn mailbox<A>() -> Shared<A> {
+    Arc::new((
         Mutex::new(Mailbox {
             requests: Vec::new(),
             look: false,
             closed: false,
             error: None,
+            pull_at: None,
         }),
         Condvar::new(),
-    ));
-    let input = shared.clone();
-    std::thread::spawn(move || read_requests(&input));
-    let changes = shared.clone();
-    let wal = database.clone();
-    std::thread::spawn(move || observe(&changes, &wal));
+    ))
+}
 
-    let runtime = tokio::runtime::Runtime::new()?;
-    let mut stdout = std::io::stdout().lock();
-    let mut args = args;
-    let mut store: Option<SharedStore> = None;
+/// Wait until `wake`, or until the mailbox has a reason to read sooner.
+fn wait<A>(shared: &Shared<A>, wake: Instant) {
+    let wait = wake.saturating_duration_since(Instant::now()).min(CHECK);
+    let mailbox = lock(shared);
+    drop(
+        shared
+            .1
+            .wait_timeout_while(mailbox, wait, |mailbox| !mailbox.asked() && !mailbox.closed)
+            .expect("watch mailbox poisoned"),
+    );
+}
+
+/// What one step of a watch did.
+struct Step {
+    /// The frame to send, when the result changed or a request was answered.
+    frame: Option<Vec<u8>>,
+    /// The watch has answered what it was asked and ends.
+    closing: bool,
+    /// When to step again unless the mailbox has a reason sooner.
+    wake: Instant,
+}
+
+/// One watch's reading state: what it last read and sent, and when.
+struct Reader<A, F> {
+    shared: Shared<A>,
+    database: PathBuf,
+    watched: Watched,
+    read: F,
+    args: A,
+    runtime: tokio::runtime::Runtime,
+    checkouts: checkouts::Checkouts,
+    followed_at: Option<i64>,
+    stale: bool,
+    store: Option<SharedStore>,
     // Why the store that exists cannot be opened; a refused store is not an empty one.
-    let mut refused: Option<String> = None;
-    let mut answers = None;
-    let mut force = true;
-    let mut read_at = None;
-    let mut read_on: Option<Instant> = None;
-    let mut cost = Duration::ZERO;
-    let mut failures = 0u32;
-    let mut sent = None;
-    loop {
+    refused: Option<String>,
+    answers: Option<u64>,
+    force: bool,
+    read_at: Option<StoreRevisions>,
+    read_on: Option<Instant>,
+    /// When the clock last read or probed the facts outside the store.
+    clocked_on: Option<Instant>,
+    /// What the probe observed just before the last reading.
+    probed: Option<Vec<u8>>,
+    cost: Duration,
+    failures: u32,
+    sent: Option<[u8; 32]>,
+}
+
+impl<A, T, F, Fut> Reader<A, F>
+where
+    A: DeserializeOwned + Clone + Send + 'static,
+    T: Serialize,
+    F: FnMut(Option<SharedStore>, A) -> Fut,
+    Fut: std::future::Future<Output = Result<T>>,
+{
+    /// Start observing the store for `shared`'s watch, closing it when
+    /// `parent` (when it follows one) exits.
+    fn new(
+        shared: Shared<A>,
+        parent: Option<u32>,
+        args: A,
+        watched: Watched,
+        read: F,
+    ) -> Result<Self> {
+        let database = crate::store::database_path_from_env()?;
+        if watched.checkouts {
+            // Every reading asks Git the same questions about the same checkouts;
+            // only a checkout that changed on disk is asked again.
+            crate::git::retain_reads();
+        }
+        let inbox: Arc<dyn Inbox> = shared.clone();
+        follow_store(&database, &inbox, parent);
+        Ok(Self {
+            shared,
+            database,
+            watched,
+            read,
+            args,
+            runtime: tokio::runtime::Runtime::new()?,
+            checkouts: checkouts::Checkouts::default(),
+            followed_at: None,
+            stale: false,
+            store: None,
+            refused: None,
+            answers: None,
+            force: true,
+            read_at: None,
+            read_on: None,
+            clocked_on: None,
+            probed: None,
+            cost: Duration::ZERO,
+            failures: 0,
+            sent: None,
+        })
+    }
+
+    /// Take requests, read when the result may have changed, and say what to
+    /// send and when to step again.
+    fn step(&mut self) -> Result<Step> {
         // A closed watch still answers what it was asked, then stops.
         let closing = {
-            let mut mailbox = lock(&shared);
+            let mut mailbox = lock(&self.shared);
             if let Some(error) = mailbox.error.take() {
                 anyhow::bail!(error);
             }
             mailbox.look = false;
             for request in std::mem::take(&mut mailbox.requests) {
                 if let Some(next) = request.args {
-                    args = next;
+                    self.args = next;
                 }
-                answers = Some(request.id);
-                force = true;
+                self.answers = Some(request.id);
+                self.force = true;
             }
             mailbox.closed
         };
-        if store.is_none() && database.exists() {
-            let config = StorageConfig::sqlite(database.clone());
-            match runtime.block_on(crate::store::open_read_only_store(&config)) {
+        if self.store.is_none() && self.database.exists() {
+            let config = StorageConfig::sqlite(self.database.clone());
+            match self
+                .runtime
+                .block_on(crate::store::open_read_only_store(&config))
+            {
                 Ok(opened) => {
-                    store = Some(Arc::new(opened));
-                    refused = None;
+                    self.store = Some(Arc::new(opened));
+                    self.refused = None;
                 }
-                Err(error) => refused = Some(format!("{error:#}")),
+                Err(error) => self.refused = Some(format!("{error:#}")),
             }
         }
-        let revisions = store
+        let revisions = self
+            .store
             .as_ref()
             .and_then(|store| store.sqlite.revisions().ok());
-        if watched.checkouts {
-            if let (Some(store), Some(revisions)) = (&store, revisions) {
-                if followed_at != Some(revisions.planning) {
-                    follow_checkouts(&mut checkouts, store, &shared);
-                    followed_at = Some(revisions.planning);
+        if self.watched.checkouts {
+            if let (Some(store), Some(revisions)) = (&self.store, revisions) {
+                if self.followed_at != Some(revisions.planning) {
+                    follow_checkouts(&mut self.checkouts, store, &self.shared);
+                    self.followed_at = Some(revisions.planning);
                 }
             }
-            let changed = checkouts.take(Instant::now());
+            let changed = self.checkouts.take(Instant::now());
             // Every one is asked again, not only up to the first that differs.
             for worktree in &changed {
-                stale |= crate::git::reread_retained(worktree);
+                self.stale |= crate::git::reread_retained(worktree);
             }
         }
         let now = Instant::now();
-        let due = force
-            || match read_on {
+        let due = self.force
+            || match self.read_on {
                 None => true,
                 Some(read_on) => {
-                    let changed = match (read_at, revisions) {
+                    let changed = match (self.read_at, revisions) {
                         (Some(old), Some(new)) => changed(old, new),
                         (None, None) => false,
                         _ => true,
                     };
-                    retry_due(failures, read_on, now)
-                        || (now - read_on >= cost.saturating_mul(BUSY_SHARE)
-                            && (changed || stale || now - read_on >= watched.clock))
+                    retry_due(self.failures, read_on, now)
+                        || (now - read_on >= self.cost.saturating_mul(BUSY_SHARE)
+                            && (changed || self.stale || self.clock_moved(now)))
                 }
             };
+        let mut frame = None;
         if due {
-            if !force && read_at.is_some() && read_at != revisions {
-                settle(&shared);
+            if !self.force && self.read_at.is_some() && self.read_at != revisions {
+                settle(&self.shared);
             }
             // The first revision query pins the snapshot the whole reading uses.
-            let snapshot = store
+            let snapshot = self
+                .store
                 .as_ref()
                 .map(|store| store.sqlite.read_snapshot())
                 .transpose()?;
-            let revisions = store
+            let revisions = self
+                .store
                 .as_ref()
                 .map(|store| store.sqlite.revisions())
                 .transpose()?;
             let began = Instant::now();
-            let reading = match &refused {
+            self.probed = self.probe();
+            let reading = match &self.refused {
                 Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
-                None => runtime.block_on(read(store.clone(), args.clone())),
+                None => self
+                    .runtime
+                    .block_on((self.read)(self.store.clone(), self.args.clone())),
             };
             let (unavailable, body) = match reading {
                 Ok(body) => (None, Some(body)),
                 Err(error) => (Some(format!("{error:#}")), None),
             };
             drop(snapshot);
-            cost = began.elapsed();
+            self.cost = began.elapsed();
             let identity = identity(&unavailable, &body)?;
-            if force || sent != Some(identity) {
-                let frame = WatchFrame {
-                    answers,
+            if self.force || self.sent != Some(identity) {
+                frame = Some(encode(&WatchFrame {
+                    answers: self.answers,
                     unavailable,
                     body: body.as_ref(),
-                };
-                if stdout
-                    .write_all(&encode(&frame)?)
-                    .and_then(|()| stdout.flush())
-                    .is_err()
-                {
-                    return Ok(());
-                }
+                })?);
             }
-            failures = if body.is_none() {
-                failures.saturating_add(1)
+            self.failures = if body.is_none() {
+                self.failures.saturating_add(1)
             } else {
                 0
             };
-            sent = Some(identity);
-            read_at = revisions;
-            read_on = Some(began);
-            force = false;
-            stale = false;
+            self.sent = Some(identity);
+            self.read_at = revisions;
+            self.read_on = Some(began);
+            self.clocked_on = Some(began);
+            self.force = false;
+            self.stale = false;
         }
-        if closing {
-            return Ok(());
-        }
-        let read_on = read_on.expect("a watch reads before it waits");
-        let rest_end = read_on + cost.saturating_mul(BUSY_SHARE);
+        let read_on = self.read_on.expect("a watch reads before it waits");
+        let rest_end = read_on + self.cost.saturating_mul(BUSY_SHARE);
         let wake = if rest_end > now {
             rest_end
         } else {
-            read_on + watched.clock
+            self.clocked_on.expect("a reading sets the clock") + self.watched.clock
         };
-        let wait = wake.saturating_duration_since(Instant::now()).min(CHECK);
-        let mailbox = lock(&shared);
-        drop(
-            shared
-                .1
-                .wait_timeout_while(mailbox, wait, |mailbox| {
-                    !mailbox.look
-                        && mailbox.requests.is_empty()
-                        && !mailbox.closed
-                        && mailbox.error.is_none()
-                })
-                .expect("watch mailbox poisoned"),
-        );
+        Ok(Step {
+            frame,
+            closing,
+            wake,
+        })
+    }
+}
+
+impl<A, F> Reader<A, F> {
+    /// Whether the clock says facts outside the store may have moved: its
+    /// period has passed and, for a probed read, the probe's answer differs.
+    fn clock_moved(&mut self, now: Instant) -> bool {
+        let clocked_on = self.clocked_on.expect("a reading sets the clock");
+        if now - clocked_on < self.watched.clock {
+            return false;
+        }
+        self.clocked_on = Some(now);
+        match self.probe() {
+            Some(observed) => self.probed.as_ref() != Some(&observed),
+            None => true,
+        }
+    }
+
+    /// The probe's answer now; `None` without a probe, a store or an answer.
+    fn probe(&self) -> Option<Vec<u8>> {
+        let probe = self.watched.probe?;
+        let store = self.store.as_ref()?;
+        match probe(&store.sqlite) {
+            Ok(observed) => Some(observed),
+            Err(error) => {
+                tracing::debug!(%error, "watch probe unavailable");
+                None
+            }
+        }
     }
 }
 
@@ -326,9 +677,10 @@ fn strip_reading_time(value: &mut serde_json::Value) {
 fn identity<T: Serialize>(unavailable: &Option<String>, body: &Option<T>) -> Result<[u8; 32]> {
     let mut value = serde_json::to_value(body)?;
     strip_reading_time(&mut value);
+    // Streamed: a large reading is never held a second time as bytes.
     let mut hash = Sha256::new();
-    hash.update(serde_json::to_vec(unavailable)?);
-    hash.update(serde_json::to_vec(&value)?);
+    serde_json::to_writer(&mut hash, unavailable)?;
+    serde_json::to_writer(&mut hash, &value)?;
     Ok(hash.finalize().into())
 }
 
@@ -355,11 +707,8 @@ fn read_requests<A: DeserializeOwned>(shared: &Shared<A>) {
         let mut mailbox = lock(shared);
         match read {
             Ok(0) => mailbox.closed = true,
-            Ok(_) if line.len() <= MAX_REQUEST => match serde_json::from_slice(&line) {
-                Ok(request) => mailbox.requests.push(request),
-                Err(error) => mailbox.error = Some(format!("invalid watch request: {error}")),
-            },
-            _ => mailbox.error = Some("watch stdin failed or request exceeds 16 KiB".into()),
+            Ok(_) => accept(&mut mailbox, &line),
+            Err(_) => mailbox.error = Some("watch stdin failed".into()),
         }
         let done = mailbox.closed || mailbox.error.is_some();
         shared.1.notify_all();
@@ -369,27 +718,80 @@ fn read_requests<A: DeserializeOwned>(shared: &Shared<A>) {
     }
 }
 
-/// Wake the watch when the store may have changed, and close it when its
-/// parent exits: a descendant that inherited the pipe can hold stdin open
-/// long after the parent is gone.
-fn observe<A>(shared: &Shared<A>, database: &Path) {
-    #[cfg(unix)]
-    let parent = std::os::unix::process::parent_id();
+/// Take one request line, or the error that ends the watch.
+fn accept<A: DeserializeOwned>(mailbox: &mut Mailbox<A>, line: &[u8]) {
+    if line.len() > MAX_REQUEST {
+        mailbox.error = Some("watch request exceeds 16 KiB".into());
+        return;
+    }
+    match serde_json::from_slice(line) {
+        Ok(request) => mailbox.requests.push(request),
+        Err(error) => mailbox.error = Some(format!("invalid watch request: {error}")),
+    }
+}
+
+/// The watches of one store in this process, and the parent each follows.
+type Followers = Vec<(Weak<dyn Inbox>, Option<u32>)>;
+
+/// Every watch of a store in this process shares one observer of it, so an
+/// app serving many subscriptions watches its store once.
+static OBSERVERS: OnceLock<Mutex<HashMap<PathBuf, Followers>>> = OnceLock::new();
+
+fn observers() -> MutexGuard<'static, HashMap<PathBuf, Followers>> {
+    OBSERVERS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+}
+
+/// Wake `inbox` when `database` may have changed, and close it when `parent`
+/// (when it follows one) exits.
+fn follow_store(database: &Path, inbox: &Arc<dyn Inbox>, parent: Option<u32>) {
+    let mut observers = observers();
+    let followers = observers.entry(database.to_owned()).or_default();
+    followers.push((Arc::downgrade(inbox), parent));
+    if followers.len() == 1 {
+        let database = database.to_owned();
+        std::thread::spawn(move || observe(&database));
+    }
+}
+
+/// Wake each watch of `database` when the store may have changed, and close
+/// one whose parent exited: a descendant that inherited the pipe can hold
+/// stdin open long after the parent is gone. Ends with its last watch.
+fn observe(database: &Path) {
     let mut store = StoreChanges::watch(database);
     loop {
         store.wait(CHECK);
-        let mut mailbox = lock(shared);
-        #[cfg(unix)]
-        if std::os::unix::process::parent_id() != parent {
-            mailbox.closed = true;
+        let current = parent_process();
+        let mut observers = observers();
+        let followers = observers
+            .get_mut(database)
+            .expect("a store's followers outlive its observer");
+        followers.retain(|(inbox, parent)| {
+            let Some(inbox) = inbox.upgrade() else {
+                return false;
+            };
+            // A watch served in-process follows no parent.
+            if parent.is_some() && *parent != current {
+                inbox.close();
+                return false;
+            }
+            inbox.look()
+        });
+        if followers.is_empty() {
+            observers.remove(database);
+            return;
         }
-        if mailbox.closed {
-            shared.1.notify_all();
-            break;
-        }
-        mailbox.look = true;
-        shared.1.notify_all();
     }
+}
+
+/// The process that started this one; an orphan is adopted by another.
+fn parent_process() -> Option<u32> {
+    #[cfg(unix)]
+    return Some(std::os::unix::process::parent_id());
+    #[cfg(not(unix))]
+    None
 }
 
 /// Follow the checkouts of the Tasks registered now and the repositories

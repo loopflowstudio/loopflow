@@ -166,10 +166,16 @@ def cmd_setup(install: bool = False, dry_run: bool = False) -> int:
     return run(cmd, cwd=REPO_ROOT, check=False).returncode
 
 
+def cmd_ffi(release: bool = False) -> int:
+    """Build the Rust library the app links, where Package.swift finds it."""
+    cargo = ["cargo", "build", "--locked", "-p", "loopflow-ffi", "--lib"]
+    return run(cargo + (["--release"] if release else []), cwd=REPO_ROOT, check=False).returncode
+
+
 def cmd_build() -> int:
     """Build the app."""
     print("Building Loopflow...")
-    return run(["swift", "build"], cwd=SWIFT_DIR, check=False).returncode
+    return cmd_ffi() or run(["swift", "build"], cwd=SWIFT_DIR, check=False).returncode
 
 
 def cmd_install() -> int:
@@ -185,6 +191,8 @@ def cmd_install() -> int:
 def cmd_test() -> int:
     """Build and run tests."""
     print("Building and testing...")
+    if built := cmd_ffi():
+        return built
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
     if result.returncode != 0:
         return result.returncode
@@ -700,6 +708,7 @@ def cmd_screenshots() -> int:
 
 COMMANDS = {
     "setup": (cmd_setup, "Install/check repo dev environment tools"),
+    "ffi": (cmd_ffi, "Build the Rust library the app links"),
     "build": (cmd_build, "Build the app"),
     "install": (cmd_install, "Build and install without launching"),
     "test": (cmd_test, "Build and run tests"),
@@ -751,6 +760,10 @@ def main() -> int:
                 action="store_true",
                 help="print what would be installed",
             )
+        if name == "ffi":
+            sub.add_argument(
+                "--release", action="store_true", help="build for `swift build -c release`"
+            )
         if name == "bundle-control-tools":
             sub.add_argument(
                 "--output",
@@ -771,6 +784,8 @@ def main() -> int:
         return func(install=args.install, dry_run=args.dry_run)
     if args.command == "bundle-control-tools":
         return func(output=args.output)
+    if args.command == "ffi":
+        return func(release=args.release)
     return func()
 
 

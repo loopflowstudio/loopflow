@@ -187,6 +187,38 @@ mod tests {
         assert!(reader.read_snapshot().is_ok());
     }
 
+    /// A watch rereads Session summaries on its clock only when what they
+    /// observe outside their rows moved.
+    #[test]
+    fn session_observations_move_when_a_session_goes_quiet_or_an_agent_lives() {
+        let (_dir, store) = store();
+        store.test_session("quiet", &crate::session_record::new_artifact_key());
+        let pid = std::process::id();
+        let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute("INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded) VALUES('quiet',1000,0,0,0)", []).unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,kind,started_at,pid,os_started_at) VALUES(?1,?1,'agent',1,?2,?3)",
+                params![crate::id::LfProcessId::new(), pid, started + 3600],
+            )
+            .unwrap();
+        }
+        let at = |now| store.session_observations(now).unwrap();
+        let quiet = crate::session::AVAILABILITY_QUIET_SECONDS;
+        assert_eq!(at(1000), at(1000 + quiet - 1));
+        assert_ne!(at(1000 + quiet - 1), at(1000 + quiet));
+
+        let before = at(1000);
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE processes SET os_started_at=?1", [started])
+            .unwrap();
+        assert_ne!(at(1000), before);
+    }
+
     #[test]
     fn store_revisions_cover_every_table() {
         let (_dir, store) = store();

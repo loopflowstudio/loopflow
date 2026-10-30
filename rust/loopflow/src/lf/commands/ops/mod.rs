@@ -852,14 +852,19 @@ pub fn sync_planning(
 /// Refresh shared planning before `wave status --sync` reads it: the Wave from
 /// Linear, or the repository's Git planning ref, whose exchange is per repository.
 /// Returns the Wave a Linear refresh resolved.
-pub fn refresh_status(wave: Option<&str>) -> Result<Option<String>> {
-    let repo = crate::repo::working_directory()?;
+pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<Option<String>> {
+    let repo = crate::repo::working_directory_in(directory)?;
     if crate::lf::commands::planning::plans_through_git(&repo)? {
         crate::lf::commands::planning::refresh(&repo)?;
         return Ok(None);
     }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
+    // The Team delta brings changes and comments in and pending saves go out,
+    // so a save left by an outage is delivered on the next refresh.
+    if let Err(error) = crate::ops::planning_sync::refresh_directory(&repo) {
+        tracing::debug!(%error, "planning delivery pending before refresh");
+    }
     tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave))?;
     Ok(Some(wave))
 }

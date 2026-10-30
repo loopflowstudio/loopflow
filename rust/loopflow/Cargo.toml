@@ -30,6 +30,10 @@ name = "integration"
 path = "tests/integration.rs"
 
 [[test]]
+name = "served_reads"
+path = "tests/served_reads.rs"
+
+[[test]]
 name = "agent_tests"
 path = "tests/agent_tests.rs"
 

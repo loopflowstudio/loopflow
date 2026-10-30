@@ -1761,10 +1761,22 @@ fn interrupting_an_idle_task_records_nothing_and_says_so() {
 #[test]
 fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_stop() {
     let task = GraphTask::new();
+    // A commit held in its pre-commit hook: an open Process that changes Work
+    // in the Task's checkout, with no Graph running.
+    let hooks = task.repo.path().join(".git/hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-commit");
+    fs::write(
+        &hook,
+        "#!/bin/sh\nwhile [ ! -e \"$LF_HOME/release\" ]; do sleep 0.05; done\n",
+    )
+    .unwrap();
+    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    task.repo.create_file("held.txt", "held\n");
     let mut waiter = command(
         task.repo.path(),
         task.home.path(),
-        &["task", "wait", "INF-123", "--timeout", "60s"],
+        &["commit", "-m", "Held in its hook"],
     )
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::null())
@@ -1777,7 +1789,7 @@ fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_s
             .ok()
             .and_then(|conn| {
                 conn.query_row(
-                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"wait\"%'",
+                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"commit\"%'",
                     [],
                     |row| row.get(0),
                 )
@@ -1791,7 +1803,7 @@ fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_s
     }
     let before = interrupt_rows(task.home.path());
     let output = task.run(&["task", "interrupt", "INF-123"]);
-    waiter.kill().unwrap();
+    fs::write(task.home.path().join("release"), "").unwrap();
     waiter.wait().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(

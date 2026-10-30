@@ -451,7 +451,7 @@ struct WorkMachineControl: View {
     private func load() async {
         error = nil
         // A newer load or a navigation cancels this one; that is not a failure to show.
-        do { machines = try await model.machines(for: target) }
+        do { machines = try await model.machines() }
         catch is CancellationError {}
         catch { self.error = error.localizedDescription }
     }

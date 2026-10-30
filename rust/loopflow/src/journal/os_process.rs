@@ -40,6 +40,23 @@ impl OsProcess {
         }
     }
 
+    /// The live processes among `pids`, without sampling every other one.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn read_each(pids: &[u32], _now: i64) -> io::Result<Vec<Self>> {
+        pids.iter()
+            .filter_map(|pid| macos::read(*pid).transpose())
+            .collect()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub(crate) fn read_each(pids: &[u32], now: i64) -> io::Result<Vec<Self>> {
+        if pids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pids = pids.iter().map(u32::to_string).collect::<Vec<_>>();
+        query(&["-p", &pids.join(",")], now)
+    }
+
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn sample(now: i64) -> io::Result<Vec<Self>> {
         query(&["-ax"], now)

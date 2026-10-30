@@ -295,7 +295,12 @@ pub(crate) fn selected_context(
     cli: &crate::lf::Cli,
     session: Option<&str>,
 ) -> Result<ContextExplanation> {
-    let resolution = work_context(cli.task.as_deref(), cli.wave.as_deref(), session)?;
+    let resolution = work_context(
+        &std::env::current_dir()?,
+        cli.task.as_deref(),
+        cli.wave.as_deref(),
+        session,
+    )?;
     if cli.selects_repository() {
         if let ContextFact::Bound { value, .. } = &resolution.repository_path {
             anyhow::ensure!(
@@ -310,10 +315,11 @@ pub(crate) fn selected_context(
     Ok(resolution)
 }
 
-/// Work, its execution location and an optional exact Session, from the cwd.
-/// A plain Git repository opens before planning has ever been initialized;
-/// only an absent registry allows that.
+/// Work, its execution location and an optional exact Session, from
+/// `directory`. A plain Git repository opens before planning has ever been
+/// initialized; only an absent registry allows that.
 fn work_context(
+    directory: &Path,
     task: Option<&str>,
     wave: Option<&str>,
     session: Option<&str>,
@@ -323,7 +329,7 @@ fn work_context(
         && session.is_none()
         && crate::store::read_existing_registry()?.is_none()
     {
-        let repo = crate::repository::CanonicalRepo::current()?
+        let repo = crate::repository::CanonicalRepo::containing(directory)?
             .context("select a Git repository with --repo before opening it")?;
         let mut resolution = ContextExplanation::empty();
         resolution.repository_path = ContextFact::bound(repo, "local_locator");
@@ -332,9 +338,9 @@ fn work_context(
     // Without a Task, an exact Session selects the Work; a Wave must contain it.
     let mut resolution = match (task, session) {
         (None, Some(session)) => {
-            let selected = super::context::explain(None, None, Some(session), None)?;
+            let selected = super::context::explain_in(directory, None, None, Some(session), None)?;
             if let Some(wave) = wave {
-                let work = super::context::explain(Some(wave), None, None, None)?;
+                let work = super::context::explain_in(directory, Some(wave), None, None, None)?;
                 anyhow::ensure!(
                     matches!((&work.wave, &selected.wave),
                     (ContextFact::Bound { value: wave, .. }, ContextFact::Bound { value: session_wave, .. }) if wave == session_wave),
@@ -343,7 +349,7 @@ fn work_context(
             }
             selected
         }
-        _ => super::context::explain(wave, task, None, None)?,
+        _ => super::context::explain_in(directory, wave, task, None, None)?,
     };
     if let ContextFact::Bound { value, .. } = &resolution.task {
         let task = crate::durable::TaskId::parse(value)?;
@@ -364,7 +370,7 @@ fn work_context(
                 source: "explicit_session_on_execution_machine".into(),
             };
         } else {
-            let selected = super::context::explain(None, None, Some(session), None)?;
+            let selected = super::context::explain_in(directory, None, None, Some(session), None)?;
             anyhow::ensure!(
                 matches!((&resolution.task, &selected.task),
                 (ContextFact::Bound { value: task, .. }, ContextFact::Bound { value: session_task, .. }) if task == session_task),
@@ -572,7 +578,7 @@ fn folder_name(path: &Path) -> Option<&str> {
 
 /// Registered repositories whose folder has this name, collapsed by location
 /// and identity. Folder names locate; the registered identity decides.
-fn repository_for(store: Option<&Store>, url: &WorkUrl) -> Result<PathBuf> {
+fn repository_for(store: Option<&Store>, url: &WorkUrl, directory: &Path) -> Result<PathBuf> {
     let registered = registered(store)?;
     if let Some(qualifier) = &url.qualifier {
         return registered
@@ -599,7 +605,7 @@ fn repository_for(store: Option<&Store>, url: &WorkUrl) -> Result<PathBuf> {
         [repo] => Ok(repo.path.clone()),
         [] => {
             // The current checkout locates a plain repository before it has a plan.
-            let current = crate::repository::CanonicalRepo::current()
+            let current = crate::repository::CanonicalRepo::containing(directory)
                 .ok()
                 .flatten()
                 .map(|repo| repo.as_path().to_path_buf())
@@ -1546,17 +1552,7 @@ fn targets(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<Resolved>, Vec<
                 cli.task.is_none() && cli.wave.is_none(),
                 "select Work with either a link or --task/--wave, not both"
             );
-            let url = WorkUrl::parse(text)?;
-            let session = session.or_else(|| url.session.clone());
-            let diff = args.diff || url.diff;
-            let _cwd = Cwd::enter(&repository_for(store, &url)?)?;
-            let (task, wave) = match &url.target {
-                WorkTarget::Task(id) => (Some(id.as_str()), None),
-                WorkTarget::Wave(name) => (None, Some(name.as_str())),
-                WorkTarget::Repository => (None, None),
-            };
-            let context = work_context(task, wave, session.as_deref())?;
-            describe(store, &context, session, diff, None)?
+            url_target(store, &std::env::current_dir()?, text, session, args.diff)?
         }
         None => {
             let context = selected_context(cli, session.as_deref())?;
@@ -1564,6 +1560,34 @@ fn targets(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<Resolved>, Vec<
         }
     };
     Ok((vec![resolved], Vec::new()))
+}
+
+/// The Work a link names, resolved as if `lf open` ran in `directory`.
+fn url_target(
+    store: Option<&Store>,
+    directory: &Path,
+    text: &str,
+    session: Option<String>,
+    diff: bool,
+) -> Result<Resolved> {
+    let url = WorkUrl::parse(text)?;
+    let session = session.or_else(|| url.session.clone());
+    let diff = diff || url.diff;
+    let repository = repository_for(store, &url, directory)?;
+    let (task, wave) = match &url.target {
+        WorkTarget::Task(id) => (Some(id.as_str()), None),
+        WorkTarget::Wave(name) => (None, Some(name.as_str())),
+        WorkTarget::Repository => (None, None),
+    };
+    let context = work_context(&repository, task, wave, session.as_deref())?;
+    describe(store, &context, session, diff, None)
+}
+
+/// What `lf --cwd <directory> open <url> --link --json` prints.
+pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
+    let store = crate::store::read_existing_registry()?;
+    let target = url_target(store.as_ref(), directory, url, None, false)?;
+    Ok(vec![target.link(route(OpenHost::Auto))])
 }
 
 /// Read-only links for `--link` and `--explain`.
@@ -1695,23 +1719,6 @@ fn fallback_text(argv: &[String]) -> String {
 fn print_unknown(unknown: &[String]) {
     for item in unknown {
         println!("Unknown: {item}");
-    }
-}
-
-struct Cwd(PathBuf);
-
-impl Cwd {
-    fn enter(path: &Path) -> Result<Self> {
-        let previous = std::env::current_dir()?;
-        std::env::set_current_dir(path)
-            .with_context(|| format!("enter repository {}", path.display()))?;
-        Ok(Self(previous))
-    }
-}
-
-impl Drop for Cwd {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.0);
     }
 }
 

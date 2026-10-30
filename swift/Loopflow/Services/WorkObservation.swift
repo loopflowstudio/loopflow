@@ -1,7 +1,7 @@
 import Foundation
 
-/// What a window shows, kept current by one `lf … --json --watch` process per
-/// part: the same reads any client runs, each internally consistent.
+/// What a window shows, kept current by one served watch per part: the reads
+/// `lf … --json --watch` prints, each internally consistent.
 public struct WorkObservation: Sendable {
     public let frames: AsyncThrowingStream<WorkFrame, any Error>
     /// Requests are delivered in the order they are made.
@@ -18,11 +18,6 @@ public struct WorkObservation: Sendable {
         self.request = request
         self.cancel = cancel
     }
-}
-
-public enum WorkObservationError: Error, Sendable {
-    /// Replace the reader only after draining its previous launch authority.
-    case configurationChanged
 }
 
 /// The Work whose activity is shown: `lf history`'s filters.
@@ -71,33 +66,27 @@ public enum WorkRequest: Equatable, Sendable {
     }
 }
 
-/// One watch a window runs, and the `lf` read behind it.
+/// One watch a window runs, and the read behind it.
 public enum WorkPart: String, CaseIterable, Sendable {
     case task, sessions, planning, selections, activity
     case peerPlanning = "peer_planning"
     case workActivity = "work_activity"
 
-    /// The read this part watches for `scope`, and the directory it runs in;
-    /// nil when the scope shows no such part.
-    public func command(for scope: WorkScope) -> (args: [String], cwd: String?)? {
+    /// The read this part watches for `scope`; nil when the scope shows no such part.
+    public func read(for scope: WorkScope) -> ServedRead? {
         switch self {
-        case .planning: return (["desktop", "plan", "--all"], nil)
-        case .activity: return (["monitor", "ps"], nil)
-        case .selections:
-            return scope.repo.map { (["desktop", "plans"], $0) }
-        case .peerPlanning:
-            return scope.repo.map { (["planning", "status"], $0) }
-        case .sessions:
-            return scope.repo.map { (["desktop", "sessions"] + (scope.headless ? ["--interactive", "all"] : []), $0) }
+        case .planning: return .allPlans
+        case .activity: return .monitorPs
+        case .selections: return scope.repo.map { .desktopPlans(directory: $0) }
+        case .peerPlanning: return scope.repo.map { .planningStatus(directory: $0) }
+        case .sessions: return scope.repo.map { .desktopSessions(directory: $0, headless: scope.headless) }
         case .task:
-            return scope.task.map { (["desktop", "task", $0], scope.repo) }
+            // Without a repository the Task resolves Machine-wide, from no checkout.
+            return scope.task.map { .desktopTask(directory: scope.repo ?? "/", issue: $0) }
         case .workActivity:
-            guard let activity = scope.activity else { return nil }
-            var args = ["history", "--since", "7d", "--limit", "50"]
-            if let wave = activity.wave { args += ["--wave", wave] }
-            if let project = activity.project { args += ["--project", project] }
-            if let task = activity.task { args += ["--task", task] }
-            return (args, nil)
+            return scope.activity.map {
+                .history(since: "7d", limit: 50, wave: $0.wave, project: $0.project, task: $0.task)
+            }
         }
     }
 }
@@ -294,12 +283,12 @@ private func zip<A, B>(_ a: A?, _ b: B?) -> (A, B)? {
     return (a, b)
 }
 
-/// One owned `lf … --json --watch` process speaking newline-delimited JSON.
+/// One served watch speaking `lf <read> --json --watch`'s newline-delimited JSON.
 public struct LineWatch: Sendable {
     public let lines: AsyncThrowingStream<Data, any Error>
     /// Queue one newline-terminated request line.
     public let send: @Sendable (Data) -> Void
-    /// Returns only after the process has exited.
+    /// Returns only after the watch has ended.
     public let cancel: @Sendable () async -> Void
 
     public init(lines: AsyncThrowingStream<Data, any Error>, send: @escaping @Sendable (Data) -> Void,
@@ -314,13 +303,12 @@ public struct LineWatch: Sendable {
 /// observation. A scope change restarts only the watches whose read changed;
 /// the others answer it from their last frame without reading again.
 public final class WorkWatches: @unchecked Sendable {
-    /// Starts `lf <args> --json --watch` in `cwd`.
-    public typealias Launch = @Sendable (_ args: [String], _ cwd: String?) throws -> LineWatch
+    /// Serves `read` as `lf <read> --watch` prints it.
+    public typealias Launch = @Sendable (_ read: ServedRead) throws -> LineWatch
 
     private struct Running {
         let generation: Int
-        let args: [String]
-        let cwd: String?
+        let read: ServedRead
         let watch: LineWatch
         let reader: Task<Void, Never>
         /// The request it was started after: every reading it makes is newer.
@@ -379,16 +367,16 @@ public final class WorkWatches: @unchecked Sendable {
     private func select(id: Int) throws {
         var stopped: [Running] = []
         for part in WorkPart.allCases {
-            let command = part.command(for: scope)
-            if var current = running[part], let command, current.args == command.args, current.cwd == command.cwd {
+            let read = part.read(for: scope)
+            if var current = running[part], current.read == read {
                 current.floor = id
                 running[part] = current
                 if let last = current.last { yield(part, last) }
                 continue
             }
             if let current = running.removeValue(forKey: part) { stopped.append(current) }
-            guard let command else { continue }
-            let watch = try launch(command.args + ["--json", "--watch"], command.cwd)
+            guard let read else { continue }
+            let watch = try launch(read)
             generation += 1
             let generation = generation
             let reader = Task { [weak self] in
@@ -399,7 +387,7 @@ public final class WorkWatches: @unchecked Sendable {
                     self?.ended(part, generation, error: error)
                 }
             }
-            running[part] = Running(generation: generation, args: command.args, cwd: command.cwd, watch: watch,
+            running[part] = Running(generation: generation, read: read, watch: watch,
                                     reader: reader, launched: id, floor: id)
         }
         if !stopped.isEmpty {

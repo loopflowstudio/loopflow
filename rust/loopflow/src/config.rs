@@ -27,8 +27,9 @@ struct UserConfig {
     name: Option<String>,
 }
 
-/// Resolve a display name from personal Loopflow configuration or Git's user.name.
-fn load_user_name() -> Result<Option<String>, LoadError> {
+/// Resolve a display name from personal Loopflow configuration or Git's
+/// user.name in `directory`.
+fn load_user_name(directory: &Path) -> Result<Option<String>, LoadError> {
     if let Some(config) = load_yaml_file(&global_config_path())? {
         if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
             let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
@@ -40,6 +41,8 @@ fn load_user_name() -> Result<Option<String>, LoadError> {
         }
     }
     let Some(output) = Command::new("git")
+        .arg("-C")
+        .arg(directory)
         .args(["config", "--get", "user.name"])
         .output()
         .ok()
@@ -70,12 +73,18 @@ pub(crate) fn machine_flag(home: &Path, path: &[&str]) -> bool {
 
 /// Resolve a direct invocation's participant before execution moves Machines.
 pub fn participant_name() -> Result<Option<String>, LoadError> {
+    participant_name_in(Path::new("."))
+}
+
+/// The participant as `lf` would name them running in `directory`: an app
+/// resolves a repository's Git name from that repository, not where it stands.
+pub fn participant_name_in(directory: &Path) -> Result<Option<String>, LoadError> {
     match std::env::var(USER_NAME_ENV) {
         Ok(name) => match normalize_user_name(&name) {
             Some(name) => Ok(Some(name)),
-            None => load_user_name(),
+            None => load_user_name(directory),
         },
-        Err(std::env::VarError::NotPresent) => load_user_name(),
+        Err(std::env::VarError::NotPresent) => load_user_name(directory),
         Err(error) => Err(LoadError::InvalidGraph(format!(
             "Invalid {USER_NAME_ENV}: {error}"
         ))),
@@ -117,10 +126,28 @@ pub fn yolo_override() -> bool {
 
 pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
 
+thread_local! {
+    static CALL_AGENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 pub fn agent_override() -> Option<String> {
-    std::env::var(AGENT_OVERRIDE_ENV)
-        .ok()
+    CALL_AGENT
+        .with(|agent| agent.borrow().clone())
+        .or_else(|| std::env::var(AGENT_OVERRIDE_ENV).ok())
         .filter(|value| !value.is_empty())
+}
+
+/// Select `agent` for one call on this thread, as `lf --agent` selects it for
+/// its whole process through `LF_AGENT_OVERRIDE`.
+pub fn with_agent_override<T>(agent: Option<&str>, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CALL_AGENT.with(|agent| *agent.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(CALL_AGENT.with(|current| current.replace(agent.map(str::to_owned))));
+    run()
 }
 
 /// How a recorded conversation continues under the invocation's agent choice.

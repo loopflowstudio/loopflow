@@ -736,11 +736,23 @@ The repository-wide gate is `uv run python scripts/test.py --all`.
 lf desktop plan --all --json --watch       # the plan: Waves, Projects, open Tasks as Desktop shows them
 lf desktop task LOO-1 --json --watch       # the shown Task: work, Graphs, comments
 lf desktop sessions --json --watch         # the repository's Sessions as Desktop lists them
-lf planning status --json --watch          # sync receipts; keeps planning exchanged
+lf planning status --json --watch          # stored sync receipts
 ```
 
-A window runs `--watch` reads, one process per part, through
-`RegistryQuery.watchWork()`: the plan, the repository's Dashboard plans
+A window serves these `--watch` reads inside the app, one subscription per
+part, through `RegistryQuery.watchWork()` and Loopflow's Rust library
+(`rust/loopflow-ffi/include/loopflow.h`): no `lf` process runs. Each part names
+its `ServedRead`, the `lf` command above that prints the same frames. Task
+file and diff reads, the Wave list, this Machine's identity, the portfolio, a
+Work's saved panes, Task owners and the Graph catalog are `ServedRead`s too,
+read once and served the same way, so opening a window starts no `lf`.
+Completing, reopening, deferring, moving and editing a Task, saving a Task
+file, renaming or binding a Session, ensuring a Wave's Project, the planning
+refresh, and Dashboard, Task-order and pane arrangement are `ServedWrite`s: the
+library calls the function their `lf` command calls and records the same
+Process; arrangement records none, as its command does. Other writes, the
+commands that start work (`task create --run`, `task run`, `ship`, `resume`,
+`session connect`) and other Machines' reads still run the bundled `lf`. The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window
@@ -956,6 +968,7 @@ for optional hosted execution and cleanup.
 
 ```bash
 cargo build -p loopflow --bin lf # Real CLI transport proofs
+uv run python scripts/loopflow-dev.py ffi # The Rust library the app links; test_desktop.sh builds it too
 scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered

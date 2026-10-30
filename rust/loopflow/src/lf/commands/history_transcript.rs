@@ -198,17 +198,23 @@ fn render_turn(out: &mut String, turn: &Turn) {
 // -- lf history retention --
 
 pub fn retention(json: bool) -> Result<()> {
-    let Some(store) = read_only_store()? else {
+    let Some(summary) = retention_summary()? else {
         println!("No Sessions recorded.");
         return Ok(());
     };
-    let summary = summarize(&store, now())?;
     if json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
     } else {
         print!("{}", render_retention(&summary));
     }
     Ok(())
+}
+
+/// What `lf history retention` reports; `None` without a store.
+pub(crate) fn retention_summary() -> Result<Option<RetentionSummary>> {
+    read_only_store()?
+        .map(|store| summarize(&store, now()))
+        .transpose()
 }
 
 fn render_retention(summary: &RetentionSummary) -> String {

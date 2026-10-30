@@ -36,6 +36,14 @@ run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnin
 `binary(name)` matches only the standalone `[[test]]` binaries in
 `rust/loopflow/Cargo.toml`; suites inside `integration` take `test(name::)`, and
 an unknown binary name fails the whole filterset before anything runs.
+A filtered run covers `-p loopflow` only: run `cargo test -p loopflow-ffi`
+separately when the app's library changed. Substring filters such as
+`test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
+`local_planning`) and can exhaust the Rust phase's 1200 s budget; name modules.
+Changes to `swift/project.yml` reach the Xcode build: run `--loopflow`.
+The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
+with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
+and rerun.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
 A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures

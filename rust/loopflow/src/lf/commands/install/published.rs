@@ -19,6 +19,8 @@ const REPOSITORY: &str = "loopflowstudio/loopflow";
 const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
 /// Packages every green main commit (`.github/workflows/main-packages.yml`).
 const MAIN_PACKAGES: &str = "main-packages.yml";
+/// The artifact holding that run's signed, notarized Loopflow.dmg.
+const MAIN_APP: &str = "Loopflow-dmg";
 /// The reader floors a release's build opens (`lf self install reader-catalog`).
 const READER_CATALOG: &str = "reader-catalog.txt";
 /// Starts Loopflow.app's own update check (`LoopflowApp.handleDeepLink`).
@@ -313,8 +315,9 @@ fn record_stream(home: &Path, stream: Stream) -> Result<()> {
     })
 }
 
-/// Install the package CI built for the newest green main commit. GitHub keeps
-/// those artifacts behind authentication, so this uses the `gh` login.
+/// Install the package CI built for the newest green main commit, with its
+/// Loopflow.app on a Mac. GitHub keeps those artifacts behind authentication,
+/// so this uses the `gh` login.
 fn main_build() -> Result<()> {
     let target =
         package_target().ok_or_else(|| anyhow!("no main package is built for this platform"))?;
@@ -360,10 +363,28 @@ fn main_build() -> Result<()> {
     }
     let candidate = temporary.path().join("lf");
     let directory = install_dir()?;
-    let status = Command::new(&candidate)
+    let mut promote = Command::new(&candidate);
+    promote
         .args(["self", "install", "promote", "--cli-target"])
         .arg(directory.join("lf"))
-        .arg("--sync-skills")
+        .arg("--sync-skills");
+    // Mounted until promotion has copied the app out of it.
+    let image = (cfg!(target_os = "macos")
+        && std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1"))
+    .then(|| DiskImage::download(run, temporary.path()))
+    .transpose()?;
+    if let Some(image) = &image {
+        let applications = applications_dir();
+        // Promotion quits a running app, replaces it and reopens it.
+        promote
+            .arg("--app-source")
+            .arg(image.app())
+            .arg("--app-target")
+            .arg(applications.join("Loopflow.app"))
+            .arg("--legacy-app-target")
+            .arg(applications.join("Concerto.app"));
+    }
+    let status = promote
         .status()
         .context("start the main build's promotion")?;
     if !status.success() {
@@ -374,6 +395,86 @@ fn main_build() -> Result<()> {
         directory.join("lf").display()
     );
     schedule(None)
+}
+
+/// The signed, notarized Loopflow.dmg a main packages run built, mounted
+/// read-only and checked the way `install.sh` checks a release's.
+struct DiskImage {
+    mount: PathBuf,
+}
+
+impl DiskImage {
+    fn download(run: u64, temporary: &Path) -> Result<Self> {
+        gh(&[
+            "run",
+            "download",
+            &run.to_string(),
+            "--repo",
+            REPOSITORY,
+            "--name",
+            MAIN_APP,
+            "--dir",
+            &temporary.to_string_lossy(),
+        ])?;
+        Self::mount(&temporary.join("Loopflow.dmg"), &temporary.join("mount"))
+    }
+
+    fn mount(dmg: &Path, mount: &Path) -> Result<Self> {
+        fs::create_dir(mount)?;
+        checked(Command::new("/usr/bin/hdiutil").arg("verify").arg(dmg))?;
+        checked(
+            Command::new("/usr/bin/hdiutil")
+                .args(["attach", "-nobrowse", "-readonly", "-mountpoint"])
+                .arg(mount)
+                .arg(dmg),
+        )?;
+        let image = Self {
+            mount: mount.to_path_buf(),
+        };
+        let app = image.app();
+        if !app.is_dir() {
+            bail!("{} does not contain Loopflow.app", dmg.display());
+        }
+        checked(
+            Command::new("/usr/bin/codesign")
+                .args(["--verify", "--deep", "--strict"])
+                .arg(&app),
+        )?;
+        checked(
+            Command::new("/usr/sbin/spctl")
+                .args(["--assess", "--type", "execute"])
+                .arg(&app),
+        )?;
+        Ok(image)
+    }
+
+    fn app(&self) -> PathBuf {
+        self.mount.join("Loopflow.app")
+    }
+}
+
+impl Drop for DiskImage {
+    fn drop(&mut self) {
+        let _ = Command::new("/usr/bin/hdiutil")
+            .args(["detach", "-quiet"])
+            .arg(&self.mount)
+            .status();
+    }
+}
+
+fn checked(command: &mut Command) -> Result<()> {
+    let output = command
+        .output()
+        .with_context(|| format!("start {:?}", command.get_program()))?;
+    if !output.status.success() {
+        bail!(
+            "{:?} failed ({}): {}",
+            command.get_program(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
 }
 
 /// The package name CI gives this platform's `lf`.
@@ -786,6 +887,8 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::{checked, DiskImage};
     use super::{
         cron_table, finish_adoption, is_current, newest_release, newest_run, opens_store,
         package_target, record_stream, recorded_stream, release_tag, run_verified_installer,
@@ -795,6 +898,8 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
+    #[cfg(target_os = "macos")]
+    use std::process::Command;
 
     fn binary(path: &Path, name: &str) {
         fs::write(path, format!(
@@ -850,6 +955,28 @@ mod tests {
             .to_string()
             .contains("no green main build"));
         assert!(package_target().is_some_and(|target| target.contains(std::env::consts::ARCH)));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_main_build_app_without_a_developer_id_signature_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let macos = source.join("Loopflow.app/Contents/MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        binary(&macos.join("Loopflow"), "Loopflow");
+        let dmg = temp.path().join("Loopflow.dmg");
+        checked(
+            Command::new("/usr/bin/hdiutil")
+                .args(["create", "-quiet", "-format", "UDZO", "-srcfolder"])
+                .arg(&source)
+                .arg(&dmg),
+        )
+        .unwrap();
+        let mount = temp.path().join("mount");
+        let error = DiskImage::mount(&dmg, &mount).err().unwrap().to_string();
+        assert!(error.contains("codesign"), "{error}");
+        assert!(!mount.join("Loopflow.app").exists());
     }
 
     #[test]

@@ -23,14 +23,17 @@ def read_release_version(repo_root: Path) -> str:
 
 
 def read_source_revision(repo_root: Path) -> str:
-    """Use GITHUB_SHA on CI, otherwise the checkout's HEAD; `unknown` outside git."""
-    sha = os.environ.get("GITHUB_SHA")
-    if sha:
-        return sha
+    """The checkout's HEAD, else GITHUB_SHA, else `unknown`.
+
+    HEAD comes first: a `workflow_run` build checks out the commit it packages,
+    while its GITHUB_SHA names main's newest commit.
+    """
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True, check=False
     )
-    return result.stdout.strip() if result.returncode == 0 else "unknown"
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return os.environ.get("GITHUB_SHA") or "unknown"
 
 
 def stamp_bundle_version(info_plist: Path, version: str, revision: str) -> None:

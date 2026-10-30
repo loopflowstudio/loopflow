@@ -482,8 +482,11 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("task_comments.json")
         let thread = try JSONDecoder().decode(TaskComments.self, from: data)
         #expect(thread.identifier == "LOO-291")
-        #expect(thread.comments.map(\.id) == ["c-bot", "c-1", "c-2"])
-        #expect(thread.comments.map(\.author) == [.integration, .person(name: "Maya"), .person(name: nil)])
+        #expect(thread.comments.map(\.id) == ["c-bot", "c-1", "c-2", "c-3"])
+        #expect(thread.comments.map(\.author) == [
+            .integration, .person(name: "Maya"), .person(name: nil),
+            .session(id: "session_05214bdabd2e4f66b4a8951aac87e9e7", requester: "Maya"),
+        ])
         #expect(thread.comments[0].createdAt == nil)
         #expect(thread.comments[1].body == "- first\n  - nested\n\n[spec](https://example.com)")
         var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -493,6 +496,28 @@ struct DTOFixtureTests {
         let incomplete = try JSONSerialization.data(withJSONObject: root)
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(TaskComments.self, from: incomplete)
+        }
+    }
+
+    @Test("Task execution names who started its Graph and who stopped Auto-Ship, requiring every mark")
+    func taskExecutionAttributionFixture() throws {
+        let data = try loadFixtureData("task_checkout.json")
+        let execution = try JSONDecoder().decode(TaskExecution.self, from: data)
+        #expect(execution.startedBy?.label == "Session \"LOO-291 task\" for Maya")
+        #expect(execution.shipApproval == nil)
+        #expect(execution.shipStop == ShipMark(at: 1793266380, by: .person(name: "Maya")))
+        #expect(Starter.person(name: nil).label == "attribution unresolved")
+        var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        root.removeValue(forKey: "ship_approval")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: root))
+        }
+        let lifecycle = try #require(JSONSerialization.jsonObject(with: loadFixtureData("task_lifecycle.json")) as? [String: [String: Any]])
+        for (phase, capture) in lifecycle {
+            let status = try #require(capture["status"] as? [String: Any], "\(phase)")
+            let recorded = try JSONDecoder().decode(
+                TaskExecution.self, from: JSONSerialization.data(withJSONObject: try #require(status["execution"])))
+            #expect(recorded.startedBy == nil && recorded.shipStop == nil, "\(phase)")
         }
     }
 
@@ -904,7 +929,7 @@ struct DTOFixtureTests {
         }
         #expect(read.task == "LOO-1")
         #expect(read.graphProcesses.count == read.work.graphProcesses.count)
-        #expect(read.diagnostics == nil)
+        #expect(read.execution == nil)
 
         // Saved text restores through the decoders one-shot reads use.
         let roadmap = try #require(frames[0].wire?.roadmap)

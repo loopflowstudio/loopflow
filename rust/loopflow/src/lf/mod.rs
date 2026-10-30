@@ -164,6 +164,18 @@ impl Cli {
         self.repo.is_some() || self.repository.is_some()
     }
 
+    /// The command merges a PR, or asks GitHub to merge it.
+    pub fn merges(&self) -> bool {
+        matches!(
+            &self.command,
+            Some(Commands::Ops {
+                cmd: OpsCommand::Pr {
+                    cmd: Some(PrCommand::Land { .. } | PrCommand::Arm { .. })
+                }
+            })
+        )
+    }
+
     pub fn may_launch_agent(&self) -> bool {
         match &self.command {
             None
@@ -427,7 +439,8 @@ pub enum Commands {
     /// Returns once the Task is shipping and runs on to its end (`-b` waits for
     /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
     /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
-    /// `--stop` withdraws the approval and takes back its merge request.
+    /// `--stop` withdraws the approval and takes back its merge request; the
+    /// stop stands, so no run ships the Task again until `lf ship`.
     Ship {
         issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
@@ -436,7 +449,7 @@ pub enum Commands {
         /// Why, kept in the Task's history
         #[arg(long)]
         reason: Option<String>,
-        /// Stop Auto-Ship: end the ship process and disarm auto-merge it armed
+        /// Stop Auto-Ship until the next `lf ship`: end the ship process and disarm auto-merge it armed
         #[arg(long)]
         stop: bool,
     },
@@ -1613,12 +1626,14 @@ pub enum TaskCommand {
         json: bool,
     },
     /// Run the Task's Graph in its worktree until the next interactive step;
-    /// returns once it runs (`-b` runs every step headless and waits for the end)
+    /// returns once it runs (`-b` runs every step headless to `end`, approving Auto-Ship)
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
 `graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
 conversation; the next `lf task run` continues after it. `-i` runs every step with you in this \
-terminal instead."
+terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
+which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
+until `lf ship`."
     )]
     Run {
         issue: Option<String>,

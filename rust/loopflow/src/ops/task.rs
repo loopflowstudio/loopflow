@@ -180,6 +180,19 @@ pub struct TaskSnapshot {
     /// freshly confirmed.
     pub observation: Observation,
     pub actions: TaskActionModel,
+    /// Who started the Task's latest Graph.
+    pub started_by: Option<crate::process::Starter>,
+    /// Who approved Auto-Ship and when, while the Task is approved.
+    pub ship_approval: Option<ShipMark>,
+    /// The stop that keeps a run from approving Auto-Ship, until `lf ship`.
+    pub ship_stop: Option<ShipMark>,
+}
+
+/// When someone approved or stopped Auto-Ship, and who.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ShipMark {
+    pub at: i64,
+    pub by: crate::process::Starter,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -695,16 +708,20 @@ pub(crate) fn select_task_run(
                 graph.describe_steps()
             )))
         }
-        (None, None) => {
-            let place = graph.interactive_step(step).ok_or_else(|| {
-                task_error(format!(
-                    "Task {issue} is at {step:?}, which graph {} no longer names; `lf task run {issue} --from <step>` chooses where to go on. Steps: {}",
-                    graph.name,
-                    graph.describe_steps()
-                ))
-            })?;
-            graph.after(&place)
-        }
+        // Waiting at a step that merges, the Task starts at it again.
+        (None, None) => match graph.landing_step(step) {
+            Some(landing) => Some(landing),
+            None => {
+                let place = graph.interactive_step(step).ok_or_else(|| {
+                    task_error(format!(
+                        "Task {issue} is at {step:?}, which graph {} no longer names; `lf task run {issue} --from <step>` chooses where to go on. Steps: {}",
+                        graph.name,
+                        graph.describe_steps()
+                    ))
+                })?;
+                graph.after(&place)
+            }
+        },
     };
     Ok(TaskRunSelection {
         graph,
@@ -2378,12 +2395,30 @@ pub(crate) fn append_task_comment(
                 )
             })
             .unwrap_or_default();
+        // An agent's steer is its Session's, written for the person.
+        let session = crate::journal::agent_caller().map(|caller| caller.session_id.to_string());
+        let marker = session
+            .as_ref()
+            .map(|session| {
+                format!(
+                    "\n\n{}{session} -->",
+                    crate::work::task::comment::SESSION_MARKER
+                )
+            })
+            .unwrap_or_default();
+        let author = match session {
+            Some(session_id) => crate::work::task::comment::TaskCommentAuthor::Session {
+                session_id,
+                requester: name,
+            },
+            None => crate::work::task::comment::TaskCommentAuthor::Person { name },
+        };
         (
             format!(
-                "{}{requester}\n\n<!-- loopflow-steer:{id} -->",
+                "{}{requester}{marker}\n\n<!-- loopflow-steer:{id} -->",
                 message.trim()
             ),
-            crate::work::task::comment::TaskCommentAuthor::Person { name },
+            author,
         )
     };
     store

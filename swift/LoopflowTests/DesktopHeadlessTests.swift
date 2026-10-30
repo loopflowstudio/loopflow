@@ -160,16 +160,27 @@ struct DesktopHeadlessTests {
 
         // `lf task status`: its work, Graph processes, comments and recorded execution.
         feed.send(try frame("task", sequence: 2, answers: 2, task: task.task.identifier,
-                            body: ["overview": work, "graph_processes": [run], "execution": ["work": work],
+                            body: ["overview": work, "graph_processes": [run], "execution": ["work": work, "ship_approval": ["at": 1793266000, "by": ["kind": "person", "name": "Maya"]],
+                                                 "started_by": ["kind": "session", "id": "session_1", "name": "LOO-1 task", "requester": "Maya"],
+                                                 "ship_stop": ["at": 1793266380, "by": ["kind": "person", "name": "Maya"]]],
                                    "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
-        try await eventually { model.taskDiagnostics[task.id].value != nil }
-        let diagnostics = try #require(model.taskDiagnostics[task.id].value)
+        try await eventually { model.taskExecution[task.id].value != nil }
+        let diagnostics = try #require(model.taskExecution[task.id].value?.work)
         let view = TaskWorkView(model: model, task: task)
         for id in diagnostics.sessions.map(\.id) + diagnostics.processes.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
+        // The shipping line names who approved it.
+        let bar = TaskWorkflowBar(model: model, task: task, work: model.taskWork[task.id])
+        #expect(bar.live == "\(try #require(task.shipping).reason) · approved by Maya")
+        // A person's stop says why the Task isn't shipping and how to approve it again.
+        let stop = try #require(model.taskExecution[task.id].value?.shipStop)
+        #expect(stop.by == .person(name: "Maya"))
+        let line = TaskWorkflowBar.notShipping(stop, issue: task.task.identifier)
+        #expect(line.hasPrefix("Not shipping: Maya stopped it "))
+        #expect(line.hasSuffix(" · lf ship \(task.task.identifier) approves it again"))
 
         // Any Graph process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.
@@ -179,6 +190,9 @@ struct DesktopHeadlessTests {
             try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-status-\(graph.id)")
         }
         #expect(throws: (any Error).self) { try log.inspect().find(text: graph.id) }
+        let latest = try #require(shown.graphProcesses.last)
+        let starter = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-started-by-\(latest.id)")
+        #expect(try starter.text().string() == "started by Session \"LOO-1 task\" for Maya")
         model.navigation.expandedGraphProcesses.insert(graph.id)
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-id-\(graph.id)")
         let detail = try #require(model.graphProcesses[graph.id])
@@ -220,7 +234,7 @@ struct DesktopHeadlessTests {
         await moving.value
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
         #expect(model.taskWork[task.id].value?.graph?.position == .at(step: "demo"))
-        #expect(model.comments[task.id].value?.comments.count == 3)
+        #expect(model.comments[task.id].value?.comments.count == 4)
         #expect(model.comments[task.id].value?.pendingSync == ["c-1"])
         model.navigation.expandedComments.insert(task.id)
         let comments = TaskCommentsView(model: model, task: task)

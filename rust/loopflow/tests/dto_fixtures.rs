@@ -36,6 +36,13 @@ fn task_comments_keep_authorship_and_require_every_field() {
         thread.comments[2].author,
         TaskCommentAuthor::Person { name: None }
     );
+    assert_eq!(
+        thread.comments[3].author,
+        TaskCommentAuthor::Session {
+            session_id: "session_05214bdabd2e4f66b4a8951aac87e9e7".into(),
+            requester: Some("Maya".into())
+        }
+    );
     // What `lf task comment ISSUE --json` prints is exactly what Swift decodes,
     // including explicit nulls Swift requires to be present.
     assert_eq!(
@@ -454,6 +461,11 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
         snapshot.execution.state,
         loopflow::ops::task_execution::TaskExecutionState::Idle
     );
+    assert_eq!(
+        snapshot.started_by.as_ref().unwrap().to_string(),
+        "Session \"LOO-291 task\" for Maya"
+    );
+    assert_eq!(snapshot.ship_stop.as_ref().unwrap().by.to_string(), "Maya");
     assert_eq!(
         serde_json::to_value(&snapshot).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

@@ -15,7 +15,7 @@ use std::process::Command;
 
 use crate::child::ChildRef;
 use crate::config::parse_agent;
-use crate::ops::error::OpsResult;
+use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
 use crate::work::task::{PrPhase, Task, TaskPr};
@@ -129,6 +129,34 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         }
     });
     let completion_pending = completion_pending(store, &task)?;
+    let starter = |process: Option<&crate::id::LfProcessId>| {
+        super::ship::starter(&store.sqlite, process).map_err(task_error)
+    };
+    let mark = |at, by: Option<&crate::id::LfProcessId>| {
+        Ok::<_, OpsError>(super::ShipMark {
+            at,
+            by: starter(by)?,
+        })
+    };
+    let started_by = store
+        .sqlite
+        .latest_task_graphs(&[&task.id])
+        .map_err(task_error)?
+        .get(&task.id)
+        .map(|graph| starter(Some(graph.id())))
+        .transpose()?;
+    let ship_approval = store
+        .sqlite
+        .task_shipping(&task.id)
+        .map_err(task_error)?
+        .map(|shipping| mark(shipping.shipped_at, shipping.approved_by.as_ref()))
+        .transpose()?;
+    let ship_stop = store
+        .sqlite
+        .task_ship_stop(&task.id)
+        .map_err(task_error)?
+        .map(|stop| mark(stop.at, stop.by.as_ref()))
+        .transpose()?;
     Ok(TaskSnapshot {
         machine_id,
         issue_id: task.linear_id.as_ref().map(|id| id.as_str().to_string()),
@@ -160,6 +188,9 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         updated_at: task.updated_at,
         observation: task.observation,
         actions,
+        started_by,
+        ship_approval,
+        ship_stop,
     })
 }
 

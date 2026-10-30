@@ -415,9 +415,24 @@ struct TaskWorkflowBar: View {
         work.value?.graph.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
     }
 
-    /// What is happening now, in one line.
+    /// What is happening now, in one line: shipping and who approved it, or
+    /// the stop that keeps it from shipping.
     var live: String {
-        if let shipping = task.shipping { return shipping.reason }
+        let execution = model.taskExecution[task.id].value
+        if let shipping = task.shipping {
+            guard let approval = execution?.shipApproval else { return shipping.reason }
+            return "\(shipping.reason) · approved by \(approval.by.label)"
+        }
+        guard let stop = execution?.shipStop else { return position }
+        return "\(Self.notShipping(stop, issue: task.task.identifier)) · \(position)"
+    }
+
+    static func notShipping(_ stop: ShipMark, issue: String) -> String {
+        let when = Date(timeIntervalSince1970: TimeInterval(stop.at)).formatted(date: .abbreviated, time: .shortened)
+        return "Not shipping: \(stop.by.label) stopped it \(when) · lf ship \(issue) approves it again"
+    }
+
+    private var position: String {
         guard let workflow = work.value?.graph else {
             if let error = work.errorMessage { return "Workflow could not be read: \(error)" }
             if work.value == nil { return "Reading workflow…" }
@@ -708,7 +723,9 @@ struct GraphProcessLog: View {
                 if let graphs = captured?.map(\.entry) ?? (readsWindow ? reading?.value?.graphProcesses : nil) {
                     ForEach(Array(graphs.reversed().enumerated()), id: \.element.id) { index, graph in
                         if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                        GraphProcessView(model: model, graph: graph, run: captured?.first { $0.entry.id == graph.id } ?? (readsWindow ? model.graphProcesses[graph.id] : nil))
+                        // Status names who started the Task's latest Graph: the newest row.
+                        GraphProcessView(model: model, graph: graph, run: captured?.first { $0.entry.id == graph.id } ?? (readsWindow ? model.graphProcesses[graph.id] : nil),
+                                         startedBy: index == 0 && readsWindow ? task.flatMap { model.taskExecution[$0.id].value?.startedBy } : nil)
                     }
                     if graphs.isEmpty {
                         Text("No Graph has run.").padding(.vertical, 6)
@@ -784,7 +801,7 @@ struct TaskWorkView: View {
             WorkSectionHeading(title: "Work") {
                 Button("Refresh") { model.rescanWork() }
             }
-            if let work = model.taskDiagnostics[task.id].value {
+            if let work = model.taskExecution[task.id].value?.work {
                 ForEach(work.sessions) { session in
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
@@ -797,7 +814,7 @@ struct TaskWorkView: View {
                     Text("No recorded work.")
                 }
             }
-            if let error = model.taskDiagnostics[task.id].errorMessage {
+            if let error = model.taskExecution[task.id].errorMessage {
                 Text("Work could not be read: \(error)")
                 Button("Retry") { model.rescanWork() }
             }
@@ -827,6 +844,7 @@ struct GraphProcessView: View {
     let model: WorkModel
     let graph: GraphProcessInventoryEntry
     let run: GraphProcessDetail?
+    var startedBy: Starter? = nil
     private var expanded: Bool { model.navigation.expandedGraphProcesses.contains(graph.id) }
     @State private var inspected: UInt32?
     @Environment(\.palette) private var palette
@@ -856,6 +874,11 @@ struct GraphProcessView: View {
                     Text(graph.state == .current ? "running" : graph.state.rawValue)
                         .foregroundStyle(tone?.ink(in: palette) ?? palette.textSecondary)
                     Spacer()
+                    if let startedBy {
+                        Text("started by \(startedBy.label)").lineLimit(1).truncationMode(.middle)
+                            .help("started by \(startedBy.label)")
+                            .accessibilityIdentifier("graph-process-started-by-\(graph.id)")
+                    }
                     Text(Date(timeIntervalSince1970: TimeInterval(started))
                         .formatted(date: .abbreviated, time: .shortened))
                     if let ended = graph.endedAt {

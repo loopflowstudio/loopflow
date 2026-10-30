@@ -789,7 +789,7 @@ mod tests {
     use super::{
         cron_table, finish_adoption, is_current, newest_release, newest_run, opens_store,
         package_target, record_stream, recorded_stream, release_tag, run_verified_installer,
-        updates_itself, Stream, CRON_MARKER,
+        Stream, CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -979,13 +979,13 @@ mod tests {
     fn only_an_app_with_a_sparkle_key_updates_itself() {
         let temp = tempfile::tempdir().unwrap();
         let app = temp.path().join("Loopflow.app");
-        assert!(!updates_itself(&app));
+        assert!(!super::updates_itself(&app));
         fs::create_dir_all(app.join("Contents")).unwrap();
         for (key, expected) in [("", false), ("test-public-key", true)] {
             fs::write(app.join("Contents/Info.plist"), format!(
                 "<plist version=\"1.0\"><dict><key>SUPublicEDKey</key><string>{key}</string></dict></plist>"
             )).unwrap();
-            assert_eq!(updates_itself(&app), expected);
+            assert_eq!(super::updates_itself(&app), expected);
         }
     }
 }

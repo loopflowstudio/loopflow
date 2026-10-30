@@ -9,6 +9,7 @@ label per issue); `--regressed-in` writes that label; unread Linear holds
 Remains: the host half of the design (see counterexample); gate/CI.
 
 Check: `cargo test -p loopflow --lib -- linear::regressions:: ops::release::tests::` — pass; `daily_run_moves_stable` (release_tests) — pass; clippy clean.
+Compress check: `cargo test -p loopflow --lib -- ops::task::` — pass (34); clippy clean.
 
 ## Counterexample: release home cannot follow `dev` on its own (blocking host half)
 

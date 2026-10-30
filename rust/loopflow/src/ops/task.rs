@@ -1477,15 +1477,13 @@ pub fn task_create(
     regressed_in: Option<String>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
-    let regression = regressed_in.map(|version| crate::work::task::TaskUpdate {
-        regressed_in: Some(version),
+    let regression = crate::work::task::TaskUpdate {
+        regressed_in,
         ..Default::default()
-    });
-    if let Some(update) = &regression {
-        validate_task_edit_input(update)?;
-    }
+    };
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
-    if regression.is_some() {
+    if regression.regressed_in.is_some() {
+        validate_task_edit_input(&regression)?;
         super::linear::repository_team_id(&main)?;
     }
     block_on_task(async {
@@ -1543,13 +1541,13 @@ pub fn task_create(
                 .map_err(task_error)?
                 .ok_or_else(|| task_error("Created Task is missing"))
         };
-        let Some(update) = &regression else {
-            return created().await;
+        let task = created().await?;
+        let Some(version) = &regression.regressed_in else {
+            return Ok(task);
         };
-        let synced = created().await?;
-        mark_regression(&main, &synced, update).await?;
+        mark_regression(&main, &task, version).await?;
         store
-            .edit_task(&synced.id, synced.revision, update)
+            .edit_task(&task.id, task.revision, &regression)
             .await
             .map_err(task_error)?;
         created().await
@@ -1558,14 +1556,7 @@ pub fn task_create(
 
 /// Label the Task's Linear issue with the release it regressed in. Releases
 /// read regressions from Linear, so a mark that misses Linear holds nothing.
-async fn mark_regression(
-    repo: &Path,
-    task: &Task,
-    update: &crate::work::task::TaskUpdate,
-) -> OpsResult<()> {
-    let Some(version) = &update.regressed_in else {
-        return Ok(());
-    };
+async fn mark_regression(repo: &Path, task: &Task, version: &str) -> OpsResult<()> {
     let team = super::linear::repository_team_id(repo)?;
     let issue = task.linear_id().map_err(|_| {
         task_error(format!(
@@ -2330,16 +2321,15 @@ pub fn task_edit(
     validate_task_edit_input(&update)?;
     block_on_task(async {
         let (store, task) = resolve_saved_task(repo, wave, issue).await?;
-        mark_regression(&repository_for_task(&store, &task)?, &task, &update).await?;
+        let task_repo = repository_for_task(&store, &task)?;
+        if let Some(version) = &update.regressed_in {
+            mark_regression(&task_repo, &task, version).await?;
+        }
         let edited = store
             .edit_task(&task.id, task.revision, &update)
             .await
             .map_err(task_error)?;
-        super::planning_sync::sync_after_save(
-            &store,
-            &repository_for_task(&store, &task)?.to_string_lossy(),
-        )
-        .await;
+        super::planning_sync::sync_after_save(&store, &task_repo.to_string_lossy()).await;
         Ok(TaskEdit {
             id: edited.id.to_string(),
             sync: store

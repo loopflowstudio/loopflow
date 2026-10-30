@@ -204,7 +204,7 @@
           "owner": "task",
           "reason": "ready"
         },
-        "section": "now",
+        "section": "backlog",
         "actions": {
           "recommended": "run",
           "reason": "resume the parked Task"
@@ -467,7 +467,7 @@
           "owner": "user",
           "reason": "merge pull request head abc1234 on GitHub"
         },
-        "section": "waiting",
+        "section": "backlog",
         "actions": {
           "recommended": "open_pr",
           "reason": "merge head abc1234 on GitHub"
@@ -732,7 +732,7 @@
           "owner": "wave",
           "reason": "Task is ready to start"
         },
-        "section": "not_started",
+        "section": "backlog",
         "actions": {
           "recommended": null,
           "reason": "Task is ready to start"
@@ -828,7 +828,7 @@
           "owner": "wave",
           "reason": "Linear Task is complete"
         },
-        "section": "later",
+        "section": "done",
         "actions": {
           "recommended": "no_action",
           "reason": "Task is completed"

@@ -459,6 +459,40 @@ impl TaskState {
     }
 }
 
+/// Where a Task sits on the Wave board. The one bucketing rule: the board, the
+/// sidebar's Working Tasks, Wave counts and `lf wave show` all read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskSection {
+    /// Waiting for someone to pick it up: unstarted, or started and unassigned.
+    Backlog,
+    /// Someone's idle, active or moving Task.
+    Working,
+    /// Someone's shipping Task, running to merge with nothing left for a person.
+    Autonomous,
+    Done,
+    Abandoned,
+}
+
+impl TaskSection {
+    /// `owned`: someone holds the Task's claim. `plan_state` is planning's state
+    /// type; closing a Task there withdraws it only if it never started.
+    pub fn of(state: TaskState, owned: bool, plan_state: Option<&str>) -> Self {
+        match state {
+            TaskState::Done => Self::Done,
+            TaskState::Abandoned => Self::Abandoned,
+            TaskState::Unstarted => match plan_state {
+                Some("completed") => Self::Done,
+                Some("canceled" | "duplicate") => Self::Abandoned,
+                _ => Self::Backlog,
+            },
+            _ if !owned => Self::Backlog,
+            TaskState::Shipping => Self::Autonomous,
+            TaskState::Idle | TaskState::Active | TaskState::Moving => Self::Working,
+        }
+    }
+}
+
 impl std::fmt::Display for TaskState {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.label().replace('_', " "))
@@ -539,7 +573,30 @@ impl GraphStepProcess {
 
 #[cfg(test)]
 mod tests {
-    use super::WorkStatus;
+    #[test]
+    fn task_sections_put_unassigned_and_withdrawn_tasks_where_the_board_does() {
+        let of = TaskSection::of;
+        assert_eq!(of(TaskState::Idle, true, None), TaskSection::Working);
+        assert_eq!(
+            of(TaskState::Moving, true, Some("completed")),
+            TaskSection::Working
+        );
+        assert_eq!(of(TaskState::Idle, false, None), TaskSection::Backlog);
+        assert_eq!(of(TaskState::Shipping, true, None), TaskSection::Autonomous);
+        assert_eq!(of(TaskState::Shipping, false, None), TaskSection::Backlog);
+        assert_eq!(of(TaskState::Unstarted, true, None), TaskSection::Backlog);
+        assert_eq!(
+            of(TaskState::Unstarted, false, Some("completed")),
+            TaskSection::Done
+        );
+        assert_eq!(
+            of(TaskState::Unstarted, false, Some("canceled")),
+            TaskSection::Abandoned
+        );
+        assert_eq!(of(TaskState::Abandoned, true, None), TaskSection::Abandoned);
+    }
+
+    use super::{TaskSection, TaskState, WorkStatus};
 
     #[test]
     fn work_status_fixture_round_trips_every_current_variant() {

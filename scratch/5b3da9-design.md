@@ -90,9 +90,9 @@ October 28, 2026, a `sqlite3 .backup` copy of Jack Heart's live store, one-shot 
 - Measure idle and busy CPU on an installed build that contains this branch. The 0.15.0 baseline above has none of it. Gate owns this if no branch build can be installed headless.
 
 In-app library:
-- Every local `RegistryQuery` read is served in-process as a `Read`. What still runs `lf` is the writes below, `onMachine` reads and the remote-only `taskLocation`.
+- Every local `RegistryQuery` read is served in-process as a `Read`, and every write but the ones below as a `Write`.
 - Desktop files Tasks only with `task create --run`, a launching command (decision above), so no `TaskCreate` write is needed.
-- Writes still on `lf`, from `RegistryQuery.swift` (every remaining `run(` in Swift is there): the read and write fallbacks for transports without the library, `config repository` (prepares the store, which the library never does; revisit at demo), the launching commands (`task create --run`, `task run`, `ship`, `resume --all`; `ship --stop` is a `Write` since the fifth slice), and the remote ones (`task move --machine`, `set machine`, `onMachine` reads, `taskLocation`). In the app, a write `lf` would forward also runs as `lf`.
+- Writes still on `lf`, from `RegistryQuery.swift` (every remaining `run(` in Swift is there): the read and write fallbacks for transports without the library, `config repository` (prepares the store, which the library never does; revisit at demo), the launching commands (`task create --run`, `task run`, `ship`, `resume --all`), and the remote ones (`task move --machine`, `set machine`, `onMachine` reads, `taskLocation`). In the app, a write `lf` would forward also runs as `lf`.
 - `session resume --task <task> --prepare` (`prepareTaskSession`) is served but has no served_reads case: the fixture's Task checkout is its repository, so it would add little over the bare and `<id>` cases. A routed write (another Machine) is covered only by `forward`'s shared logic with `lf`'s dispatch; no test fakes a second Machine for the in-app `None`.
 - served_reads abandons a PR-less Task. The PR and branch path runs through the same `task_abandon`, covered with a fake `gh` by `task_abandon_composes_cancellation_pr_and_git_from_anywhere`. The chapter rotation is compared as a preview only: an applied one needs a Linear-planned Wave.
 - The working-tasks `TileMove` is proven through the Dashboard board, which uses the same `edit_tiles` writer. The served_reads fixture has no started Task in its repository order.
@@ -107,6 +107,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git (`git show 3909e495a8:scratch/5b3da9-design.md`).
+- October 29, realign after the fifth slice: plan matches a50c3fe83a; `grep -n 'run(' swift/Loopflow/Services/RegistryQuery.swift` lists no `ship --stop`; no tests rerun.
 - October 29, compress of the fifth slice (`ShipStop` drops the unused `reason`): `--test served_reads` 1/1, `--lib write::` 6/6, `test_desktop.sh` four suites 65/65, clippy (incl. loopflow-ffi) and fmt clean.
 - October 29, fifth write slice (`ShipStop`, repository-resolved starter name): `--test served_reads` 1/1, `--lib write::` 6/6, `-p loopflow-ffi` 3/3, `user_cli_tests::` 2/2, `test_desktop.sh` four suites 65/65, clippy and fmt clean. `grep -n 'run(' swift/Loopflow/Services/RegistryQuery.swift` no longer lists `ship --stop`.
 - October 29, compress of the fourth slice (served_reads fixture moved off `session connect`, which #1767 removed; `graph::EnvVarGuard` reused; `LoopflowLibrary.call` shared again; Swift `sessionResume` argv split for the type-checker): `--test served_reads` 1/1, `--lib write::` 6/6, `-p loopflow-ffi` 3/3, `test_desktop.sh` over `RegistryQueryTests|SessionControlsTests|WorkModelTests|DesktopHeadlessTests` 65/65, clippy and fmt clean.

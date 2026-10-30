@@ -111,6 +111,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git (`git show 3909e495a8:scratch/5b3da9-design.md`).
+- October 30, realign after the lifecycle fix: plan matches ddfd5b6226 (`run_admitted` ends an unwinding Process `Errored`; `CALL_SCOPED` exports no identity; `write::a_write_that_panics_ends_its_process_and_leaves_no_identity` present); no tests rerun.
 - October 30, in-app write lifecycle after compress (one `inherits` flag, one identity export in `create_process_context`): `--lib write::` 7/7, `--lib journal::` 30/30, `--test served_reads` 1/1, `-p loopflow-ffi` 3/3, clippy (loopflow, loopflow-ffi) and fmt clean.
 - October 29, realign after the fifth slice: plan matches a50c3fe83a; `grep -n 'run(' swift/Loopflow/Services/RegistryQuery.swift` lists no `ship --stop`; no tests rerun.
 - October 29, compress of the fifth slice (`ShipStop` drops the unused `reason`): `--test served_reads` 1/1, `--lib write::` 6/6, `test_desktop.sh` four suites 65/65, clippy (incl. loopflow-ffi) and fmt clean.

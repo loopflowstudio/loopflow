@@ -447,6 +447,17 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Releas
     }
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    if target.completion == ReleaseCompletion::GithubRelease {
+        // `stable` reads regressions from Linear. A release home that cannot
+        // read them learns it here, before a run publishes and holds `stable`.
+        tokio::runtime::Runtime::new()?
+            .block_on(regressions(&main_repo))
+            .map_err(|error| {
+                OpsError::Message(format!(
+                    "this home cannot read regressions from Linear, so stable would hold: {error}"
+                ))
+            })?;
+    }
     collect_release_changes(&main_repo, &target)
 }
 
@@ -4831,6 +4842,50 @@ mod tests {
             panic!("expected an unread-regressions hold: {:?}", stable.holds);
         };
         assert!(reason.contains("Authentication required"), "{reason}");
+    }
+
+    #[test]
+    fn release_check_reports_a_home_that_cannot_read_linear_regressions() {
+        use crate::ops::linear::{test_fixture, LINEAR_TEST_CONTEXT};
+        let _lock = crate::journal::test_env_lock();
+        let _restore = test_fixture::PlanningEnvironment::isolate();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        // Only `gh --version` runs; the refusal comes before any other gh call.
+        let bin = home.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("gh"), "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(
+            bin.join("gh"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin];
+        paths.extend(std::env::split_paths(&path));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(test_fixture::Fixture::new());
+        let (repo, _wave) = runtime.block_on(fixture.planning_repo());
+        std::fs::write(
+            repo.join(".lf/config.yaml"),
+            "planning:\n  provider: linear\n  team: team-1\nrelease:\n  targets:\n    default:\n      completion: github-release\n",
+        )
+        .unwrap();
+        runtime.block_on(fixture.seed(test_fixture::now() + 3600));
+        let refused = crate::linear::test_server::json_response(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"errors": [{"message": "Authentication required"}]}),
+        );
+        let (url, _) = runtime.block_on(crate::linear::test_server::spawn(vec![refused]));
+
+        let error = LINEAR_TEST_CONTEXT
+            .sync_scope(fixture.context(&url), || release_check(&repo, None))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("stable would hold"), "{error}");
+        assert!(error.contains("Authentication required"), "{error}");
     }
 
     #[test]

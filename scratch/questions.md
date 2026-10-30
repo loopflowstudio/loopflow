@@ -4,39 +4,37 @@
 
 Plan of record: `scratch/design.md` (Done / Remaining).
 
-Check: `cargo test -p loopflow --lib -- linear::regressions:: ops::release::tests:: ops::task::` + `daily_run_moves_stable` — pass; clippy clean (prior pass, not rerun at realign).
+Check: `cargo test -p loopflow --lib -- linear::regressions:: ops::release::tests:: task_edit_regressed_in task_create_in_linear_repository` — 56 pass; `cargo clippy --all-targets -- -D warnings` clean; `release_tests -- daily_run_moves_stable release_check` — 6 pass.
 
-## Counterexample: release home cannot follow `dev` on its own (blocking host half)
+## Host: option (b) taken (reversible; Jack Heart can overturn in review)
 
-`installation::root_for_home` places the install under the OS account
-(`~/.lf-machine/install`, "outside every loopflow home"). A release `LF_HOME`
-cannot hold its own `dev` install: `lf install --dev` run for it switches the
-account's one `lf`, so Jack Heart's main home would be opened by a `dev` build
-and migrated forward. `scripts/bootstrap-cron-host.sh` is unchanged. Choices
-for Jack Heart:
-- a) release home with its own `LF_HOME` on the account's installed `lf`
-  (store/Session isolation, no `dev` code; needs its own provider and Linear
-  auth).
-- b) release job runs a separately built `lf` (e.g. `scripts/install.py`
-  `local-bin/` from origin/main) under the release `LF_HOME`.
-- c) per-home installations (install model change; its own Task).
-2b (install a `dev` build after #1780 lands) still applies to whichever home
-the host releases from.
+Installs are per OS account (`~/.lf-machine/install`), so a release `LF_HOME`
+cannot hold an installed `dev` build. The release home instead runs an `lf`
+built from origin/main in a clone at `~/.lf-release/src`
+(`scripts/install.py local`), with `LF_HOME`/`LF_BIN` pointing at it. Checked as
+safe for the main home: a custom home's paths that read the account store
+(`build_cleanup_registries`, worktree prune guards) open it read-only without
+migrating, and child `lf` resolves through `LF_BIN`. A clone, not a worktree, keeps the main
+checkout's worktree pruning away from it.
+- The release home follows main only when bootstrap reruns. Rebuilding before
+  each scheduled run is the alternative; it was not chosen because a failed
+  build would block that day's release.
+- The release home needs its own provider and Linear logins. Copying a store
+  would share rotating OAuth grants between homes.
+- Unverified headless: a fresh release home resolving Wave `infrastructure` for
+  `lf --wave infrastructure --batch graph release-run` (demo).
 
 ## Assumptions (reversible)
 
 - `--regressed-in` labels the issue directly through `LinearClient`
   (`mark_regressed_in`) after validating, before the local save; not through
-  planning-change receipts. Linear observation does not yet bring labels back
-  into `tasks.regressed_in` (needs a `pm_items` column and migration), so
-  another home's local display lacks the mark. The release reads Linear, so
-  `stable` is unaffected.
+  planning-change receipts. Projecting the label back into `tasks.regressed_in`
+  is LOO-695.
 - A repository without Linear planning (`planning.team`) has no regressions;
   `stable` moves on soak alone there. `--regressed-in` there is refused.
 - Repository → Linear mapping comes from `.lf/config.yaml` `planning.team`,
   readable without a synced store. Linear auth comes from the home's store.
-- `lf release check` (the change-set command) does not verify Linear auth; an
-  unauthenticated release home shows up as a `stable` hold in the run log and
-  `lf release status`.
+- `lf release check` verifies only that regressions are readable (auth and query)
+  for `completion: github-release` targets; other targets skip Linear.
 - Regression query filters `labels: {some: {parent: {name: {eq: "Regressed in"}}}}`
   and includes archived issues; not yet exercised against live Linear.

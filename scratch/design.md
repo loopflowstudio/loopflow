@@ -26,20 +26,27 @@ the release reads regressions from Linear, not from its own store.
   `RegressionsUnread` reason in the run log and `lf release status`.
 - `release/README.md` and the `release-run` skill describe Linear regressions;
   local-only regression tests are removed.
+- `lf release check` reads Linear regressions for a `completion: github-release`
+  target and fails, naming the reason, when this home cannot
+  (`release_check_reports_a_home_that_cannot_read_linear_regressions`).
+- `lf task edit --regressed-in` through the ops path labels the issue, replaces an
+  earlier version, and refuses a Task with no Linear issue or a repository with
+  no `planning.team` (`task_edit_regressed_in_*` on the stateful Linear fake).
+- Host, option (b), recorded as an assumption in `questions.md`.
+  `scripts/bootstrap-cron-host.sh` builds `lf` from origin/main in a clone at
+  `$LF_RELEASE_HOME/src` (default `~/.lf-release`) with `scripts/install.py
+  local`. release-run's wrapper runs that `lf` with `LF_HOME`/`LF_BIN` set to
+  the release home. Bootstrap verifies the release home's provider login and its
+  `lf release check`. telemetry-daily stays on the installed `lf`.
 
 ## Remaining
 
-- **Host (blocked on Jack Heart's choice, see `questions.md` counterexample).**
-  Installs are per OS account, not per `LF_HOME`, so a release home cannot
-  hold its own `dev` build. Until chosen, `scripts/bootstrap-cron-host.sh` is
-  unchanged and `release/README.md` says the host runs its installed `lf`.
-- Observation does not bring the label back into `tasks.regressed_in`
-  (needs a `pm_items` column + migration); other homes' local display lacks
-  the mark. Release behavior is unaffected. Do here or file a Task.
-- `lf release check` does not verify Linear auth (design asked for it).
-- Proof gaps: no `lf task edit --regressed-in` test through the ops path (the
-  label write is tested at `LinearClient`); the regression query is unexercised
-  against live Linear.
+- Observation projecting the label into `tasks.regressed_in`: LOO-695
+  (Infrastructure). Release behavior does not depend on it.
+- Demo, on the release host: first bootstrap, release-home logins
+  (`account connect linear`, provider), and one scheduled release-run under the
+  release home. The live-Linear regression query also runs here. Not runnable
+  headless.
 - Gate/CI.
 
 ## Preserve
@@ -50,5 +57,6 @@ the release reads regressions from Linear, not from its own store.
 
 ## After landing (Jack chose 2b)
 
-Install the `dev` build that contains this change into whichever home the host
-releases from, so the next daily release uses the fetch fix.
+Rerun `scripts/bootstrap-cron-host.sh infrastructure` on the release host. It
+builds this change into the release home, and the next daily release uses the
+fetch fix.

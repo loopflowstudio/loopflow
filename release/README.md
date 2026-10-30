@@ -55,9 +55,19 @@ repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
 
-The release host runs its installed `lf` on any stream; it need not follow
-`dev`. To release with a fix the installed build lacks, `lf install --dev`
-first: a main build refuses a store missing main's migrations.
+```bash
+scripts/bootstrap-cron-host.sh infrastructure  # build the release home's lf from origin/main
+LF_HOME=~/.lf-release ~/.lf-release/src/local-bin/lf account connect linear  # first time, then rerun
+```
+
+The release job runs in its own release home, `~/.lf-release`
+(`LF_RELEASE_HOME`). Bootstrap builds that home's `lf` from origin/main
+in `~/.lf-release/src`, so releases use main's release code while the installed
+`lf` and your home stay on their stream. A bad main build is repaired by
+rerunning bootstrap; nothing else moves. The release home keeps its own
+provider and Linear logins. Log in there; never copy a store, because both
+homes would share one rotating grant. Bootstrap fails when the release home
+cannot read Linear regressions.
 
 Failed release-PR checks enter the same watched CI repair as `lf pr land`.
 Release preparation still rebuilds version metadata when main advances.

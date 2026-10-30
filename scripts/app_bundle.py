@@ -1,22 +1,47 @@
-"""Embed the frameworks Loopflow.app links, and prove its executable loads them.
+"""Place Loopflow.app's executable with the frameworks it links, and prove it loads them.
 
-SwiftPM links Sparkle beside its build products with only an `@loader_path`
-rpath. Copied into `Contents/MacOS` alone, that binary aborts in dyld at launch
-("Library not loaded: @rpath/Sparkle.framework/..."). Every bundle builder
-embeds the framework here, which checks the result before signing.
+SwiftPM builds the app as `LoopflowMac` and links Sparkle beside it with only an
+`@loader_path` rpath. Copied into `Contents/MacOS` alone, that binary aborts in
+dyld at launch ("Library not loaded: @rpath/Sparkle.framework/..."). Every bundle
+builder places the executable here, which embeds the frameworks and checks the
+result before signing.
 """
 
 from __future__ import annotations
 
+import plistlib
 import shutil
 import subprocess
 from pathlib import Path
 
+# SwiftPM product; the library owns the bare `Loopflow` name.
+SWIFT_APP_PRODUCT = "LoopflowMac"
 SPARKLE_FRAMEWORK = "Sparkle.framework"
 FRAMEWORKS_RPATH = "@executable_path/../Frameworks"
 
 
-def embed_frameworks(build_dir: Path, executable: Path) -> None:
+def executable_name(info_plist: Path) -> str:
+    """The binary macOS launches, per CFBundleExecutable."""
+    name = plistlib.loads(info_plist.read_bytes()).get("CFBundleExecutable")
+    if not isinstance(name, str) or not name:
+        raise RuntimeError(f"Missing CFBundleExecutable in {info_plist}")
+    return name
+
+
+def install_app_executable(build_dir: Path, info_plist: Path, contents: Path) -> Path:
+    """Copy the built app into Contents/MacOS under its CFBundleExecutable name,
+    embed the frameworks it links, and return the executable."""
+    source = build_dir / SWIFT_APP_PRODUCT
+    if not source.is_file():
+        raise RuntimeError(f"Missing built app executable: {source}")
+    executable = contents / "MacOS" / executable_name(info_plist)
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(source, executable)
+    _embed_frameworks(build_dir, executable)
+    return executable
+
+
+def _embed_frameworks(build_dir: Path, executable: Path) -> None:
     """Copy SwiftPM's Sparkle.framework into Contents/Frameworks, point the executable at it,
     and verify every `@rpath` library it links now resolves."""
     source = build_dir / SPARKLE_FRAMEWORK

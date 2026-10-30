@@ -38,7 +38,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from app_bundle import embed_frameworks
+from app_bundle import SWIFT_APP_PRODUCT, install_app_executable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -596,36 +596,19 @@ def _ensure_dev_signing_identity() -> str:
     return identity
 
 
-def _bundle_executable_name(info_plist: Path) -> str:
-    """The binary macOS actually launches, per CFBundleExecutable."""
-    result = run_capture(
-        ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleExecutable", str(info_plist)]
-    )
-    name = (result.stdout or "").strip()
-    if result.returncode != 0 or not name:
-        raise RuntimeError(f"Could not read CFBundleExecutable from {info_plist}")
-    return name
-
-
 def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
-    macos_dir = app_dir / "MacOS"
-    macos_dir.mkdir(parents=True, exist_ok=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    # `swift build` names the product LoopflowMac, but Info.plist declares
-    # CFBundleExecutable = Loopflow, so that is the name macOS launches. Copying
-    # the build under its own name leaves whatever `Loopflow` was already there
-    # to run forever: the app keeps starting a stale binary while the fresh one
-    # sits beside it, and codesigning bumps the stale mtime so it even looks new.
-    executable = _bundle_executable_name(SWIFT_DIR / "LoopflowMac" / "Info.plist")
-    build_dir = SWIFT_DIR / ".build" / "debug"
-    shutil.copy(build_dir / "LoopflowMac", macos_dir / executable)
-    embed_frameworks(build_dir, macos_dir / executable)
-    stale = macos_dir / "LoopflowMac"
-    if stale.name != executable and stale.exists():
-        stale.unlink()
+    executable = install_app_executable(
+        SWIFT_DIR / ".build" / "debug", SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir
+    )
+    # Earlier dev installs copied the build under its product name; macOS launches
+    # CFBundleExecutable, so a leftover product binary only misleads.
+    stale = executable.parent / SWIFT_APP_PRODUCT
+    if stale != executable:
+        stale.unlink(missing_ok=True)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")

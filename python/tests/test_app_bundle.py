@@ -87,23 +87,35 @@ def test_bare_swiftpm_binary_in_a_bundle_cannot_load_sparkle(tmp_path: Path) -> 
     assert "Library not loaded: @rpath/Sparkle.framework" in launch.stderr
 
 
-def test_embedded_sparkle_loads_from_contents_frameworks(tmp_path: Path) -> None:
+def _info_plist(path: Path, executable: str = "Loopflow") -> Path:
+    path.write_bytes(plistlib.dumps({"CFBundleExecutable": executable}))
+    return path
+
+
+def test_installed_app_executable_is_named_by_the_plist_and_loads_sparkle(tmp_path: Path) -> None:
     build_dir = tmp_path / "build"
     _swiftpm_build(build_dir)
-    app = tmp_path / "Loopflow.app"
-    executable = _bundle_executable(build_dir, app)
+    contents = tmp_path / "Loopflow Dev.app" / "Contents"
+    info = _info_plist(tmp_path / "Info.plist", "Loopflow Dev")
 
-    app_bundle.embed_frameworks(build_dir, executable)
-    app_bundle.embed_frameworks(build_dir, executable)  # rebuilding in place replaces it
+    app_bundle.install_app_executable(build_dir, info, contents)
+    executable = app_bundle.install_app_executable(build_dir, info, contents)  # rebuild in place
 
     shutil.rmtree(build_dir)
+    assert executable == contents / "MacOS" / "Loopflow Dev"
     assert subprocess.run([str(executable)]).returncode == 0
-    assert (app / "Contents" / "Frameworks" / "Sparkle.framework" / "Sparkle").is_symlink()
+    assert (contents / "Frameworks" / "Sparkle.framework" / "Sparkle").is_symlink()
 
 
-def test_embedding_requires_the_built_framework(tmp_path: Path) -> None:
+def test_installing_requires_the_built_app_and_framework(tmp_path: Path) -> None:
+    info = _info_plist(tmp_path / "Info.plist")
+    contents = tmp_path / "Loopflow.app" / "Contents"
+
+    with pytest.raises(RuntimeError, match="Missing built app executable: .*LoopflowMac"):
+        app_bundle.install_app_executable(tmp_path, info, contents)
+    (tmp_path / "LoopflowMac").write_bytes(b"")
     with pytest.raises(RuntimeError, match="Missing built Sparkle.framework"):
-        app_bundle.embed_frameworks(tmp_path, tmp_path / "Loopflow.app/Contents/MacOS/Loopflow")
+        app_bundle.install_app_executable(tmp_path, info, contents)
 
 
 def _swift_package(swift: Path) -> None:

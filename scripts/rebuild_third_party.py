@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import plistlib
 import re
 import shutil
 import subprocess
@@ -13,7 +12,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-from app_bundle import embed_frameworks
+from app_bundle import install_app_executable
 
 
 def _run(args: list[str], cwd: Path) -> None:
@@ -101,13 +100,10 @@ def build(work: Path) -> None:
     _run(["swift", "build", "-c", "release", "--product", "LoopflowMac"], swift)
     _run(["cargo", "build", "--locked", "--release", "--bin", "lf"], app_source)
     contents = work / "Loopflow Rebuilt.app/Contents"
-    (contents / "MacOS").mkdir(parents=True, exist_ok=True)
-    (contents / "Resources").mkdir(exist_ok=True)
+    (contents / "Resources").mkdir(parents=True, exist_ok=True)
     info = swift / "LoopflowMac/Info.plist"
-    executable = plistlib.loads(info.read_bytes())["CFBundleExecutable"]
     shutil.copyfile(info, contents / "Info.plist")
-    shutil.copy2(swift / ".build/release/LoopflowMac", contents / "MacOS" / executable)
-    embed_frameworks(swift / ".build/release", contents / "MacOS" / executable)
+    install_app_executable(swift / ".build/release", info, contents)
     shutil.copy2(app_source / "target/release/lf", contents / "MacOS/lf")
     for bundle in (swift / ".build/release").glob("*.bundle"):
         shutil.copytree(bundle, contents / "Resources" / bundle.name, dirs_exist_ok=True)

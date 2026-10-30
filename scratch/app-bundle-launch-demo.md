@@ -46,6 +46,55 @@ Branch restarted from origin/main `646b20fb24`; the merged branch's history held
 Check: `uv run pytest python/tests/test_app_bundle.py python/tests/test_third_party.py python/tests/test_desktop_launch.py` → 21 passed (again after compress, 2026-10-30).
 Not run: a real `swift build` through either builder (release binary already proven in pass 1); left to demo.
 
+## Concept review (2026-10-30, headless)
+
+Users meet one thing: *a Loopflow.app built from this source starts*. The code
+holds that as two separable steps in five builders: copy `LoopflowMac` under the
+`CFBundleExecutable` name, then `embed_frameworks`. The incident was a builder
+doing the first without the second; pass 2 fixed it by adding the second call twice
+more. The next builder (or the next linked framework) repeats the incident, because
+nothing joins the steps. Naming the bundle executable has five spellings too:
+`release-loopflow.py _bundle_executable` (plistlib), `loopflow-dev.py
+_bundle_executable_name` (PlistBuddy), `rebuild_third_party.py` inline plistlib,
+`install.py APP_NAME` + `_bundle_binary_name`, and `launch.py`'s literal `Loopflow`.
+
+Settled by the accepted outcome and AGENTS.md's one-implementation rule (agent,
+not Jack): **the app executable and its frameworks are one placement.**
+
+Next implement direction:
+
+- `app_bundle.install_app_executable(build_dir, info_plist, contents) -> Path`:
+  reads `CFBundleExecutable`, fails naming the missing `LoopflowMac`, copies it to
+  `Contents/MacOS/<name>`, embeds and verifies, returns the executable path.
+  `embed_frameworks` becomes private to `app_bundle.py`.
+- All five builders call it; delete `_bundle_executable`, `_copy_app_executable`,
+  `_bundle_executable_name`, launch.py's literal, and install.py's app-binary branch
+  of `_bundle_binary_name` (`lf`/auxiliary tools keep `_atomic_install`; the app dir
+  is removed first, so the app binary needs no atomic swap).
+- Dev's stale-`LoopflowMac` cleanup stays in `loopflow-dev.py` (dev reuses its bundle).
+- Stays per builder: Info.plist stamping/bundle-id overrides, icon, resource bundles,
+  `strip`, signing. They differ for real reasons; folding them in would make a
+  builder framework nobody asked for.
+- Existing tests keep their real-Mach-O launch proof; one `app_bundle` test covers
+  the missing-product and name-from-plist cases.
+
+Counterexample checked: the shipped third-party `rebuild.py` already imports
+`app_bundle.py` beside it, so the shared call costs recipients nothing new.
+
+No open product choice.
+
+## Implementation pass 3: one placement (2026-10-30)
+
+`app_bundle.install_app_executable(build_dir, info_plist, contents)` is the only way
+the app executable enters a bundle; `_embed_frameworks` is private and
+`app_bundle.executable_name` is the one CFBundleExecutable reader (release's check copy,
+install's layout check, launch.py's `launch()`). All five builders call it. Deleted:
+release `_bundle_executable`/`_copy_app_executable` (and its unit test), dev
+`_bundle_executable_name`, install `_bundle_binary_name`/`SWIFT_APP_PRODUCT`
+(`BundleSpec.executables` became `tools`), launch.py's `MacOS/Loopflow` literals.
+
+Check: `uv run pytest python/tests/test_app_bundle.py test_third_party.py test_desktop_launch.py test_install_script.py test_release_loopflow.py test_loopflow_dev.py` → 49 passed; `grep embed_frameworks` hits only `scripts/app_bundle.py`.
+
 ## Remaining
 
-- New PR on this Task (#1794 is merged).
+- Publish as a new PR on this Task (#1794 is merged).

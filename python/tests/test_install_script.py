@@ -47,6 +47,7 @@ def _stage_build_artifacts(root: Path) -> None:
         '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
         '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
         '<plist version="1.0"><dict>'
+        "<key>CFBundleExecutable</key><string>Loopflow</string>"
         "<key>CFBundleName</key><string>Loopflow</string>"
         "</dict></plist>\n"
     )
@@ -58,7 +59,11 @@ def _stage_build_artifacts(root: Path) -> None:
 
 
 def _make_spec(root: Path) -> install.BundleSpec:
-    return install.default_bundle_spec(root=root)
+    spec = install.default_bundle_spec(root=root)
+    spec.info_plist.parent.mkdir(parents=True, exist_ok=True)
+    if not spec.info_plist.exists():
+        spec.info_plist.write_bytes(plistlib.dumps({"CFBundleExecutable": "Loopflow"}))
+    return spec
 
 
 def _stage_bundle(spec: install.BundleSpec, binaries: tuple[str, ...]) -> None:
@@ -197,7 +202,7 @@ def test_local_dry_run_has_no_production_activation_path(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     root = tmp_path / "repo"
-    bundle_spec = install.default_bundle_spec(root)
+    bundle_spec = _make_spec(root)
     monkeypatch.setattr(install, "ROOT", root)
     monkeypatch.setattr(install, "LOCAL_BIN", root / "local-bin")
     monkeypatch.setattr(install, "default_bundle_spec", lambda: bundle_spec)

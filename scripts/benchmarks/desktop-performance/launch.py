@@ -41,7 +41,7 @@ SWIFT = REPO / "swift"
 
 sys.path.insert(0, str(REPO / "scripts"))
 
-from app_bundle import embed_frameworks  # noqa: E402
+from app_bundle import executable_name, install_app_executable  # noqa: E402
 
 BUNDLE_ID = "com.loopflow.mac.bench"
 READS = '"machine id"|"wave list"|"wave show"*|"desktop sessions"|"activity "*|"ps "*|"ps "'
@@ -109,12 +109,12 @@ def snapshot(home: Path, source: Path) -> None:
 def bundle(app: Path, strip: bool) -> None:
     _sh(["swift", "build", "-c", "release", "--product", "LoopflowMac"], cwd=SWIFT)
     contents = app / "Contents"
-    (contents / "MacOS").mkdir(parents=True, exist_ok=True)
-    (contents / "Resources").mkdir(exist_ok=True)
-    shutil.copy(SWIFT / ".build/release/LoopflowMac", contents / "MacOS/Loopflow")
-    embed_frameworks(SWIFT / ".build/release", contents / "MacOS/Loopflow")
+    (contents / "Resources").mkdir(parents=True, exist_ok=True)
+    executable = install_app_executable(
+        SWIFT / ".build/release", SWIFT / "LoopflowMac/Info.plist", contents
+    )
     if strip:
-        _sh(["strip", "-x", str(contents / "MacOS/Loopflow")], capture_output=True)
+        _sh(["strip", "-x", str(executable)], capture_output=True)
     shutil.copy(SWIFT / "LoopflowMac/Info.plist", contents)
     shutil.copy(SWIFT / "LoopflowMac/AppIcon.icns", contents / "Resources")
     _sh(
@@ -147,7 +147,7 @@ def bundle(app: Path, strip: bool) -> None:
         capture_output=True,
         text=True,
     )
-    megabytes = (contents / "MacOS/Loopflow").stat().st_size / 1e6
+    megabytes = executable.stat().st_size / 1e6
     (app / "Contents/Resources/source").write_text(
         f"{source.stdout.strip()}, {megabytes:.1f} MB executable"
         + (" without local symbols" if strip else ""),
@@ -195,7 +195,7 @@ def launch(app: Path, home: Path, repo: Path, scenario: str, timeout: float) -> 
     for key, value in env.items():
         command += ["--env", f"{key}={value}"]
     _sh([*command, str(app), "--args", "--repo", str(repo)])
-    executable = app / "Contents/MacOS/Loopflow"
+    executable = app / "Contents/MacOS" / executable_name(app / "Contents/Info.plist")
     deadline = time.monotonic() + timeout
     events: dict[str, dict] = {}
     while time.monotonic() < deadline:

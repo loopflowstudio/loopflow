@@ -29,3 +29,10 @@ Check: `cargo test -p loopflow --lib lf::commands::install::` 30 pass; clippy pa
 Concept review 2026-10-30 (after compress): nothing to change; no open product choice.
 Jack's steer on infrastructure MEMORY.md (`lf install --dev` alone advances `~/.lf`) is
 already in `abe4ee458e`.
+
+Steers 2026-10-30 (after sync onto main, #1776 merged):
+- MEMORY.md `lf install --dev` phrase: already done.
+- "delete loopflow.db" refusal: gone on main since v0.15.0 (`incompatible()` says keep it, or run `lf install`).
+- `install.py local` Sparkle: `scripts/app_bundle.embed_frameworks` shared with release packaging.
+- Preview install output: the link was right (into the app); the "promoted" line printed the staged
+  `~/.lf/bin` copy and the Desktop warning fired after replacing the app. Both fixed.

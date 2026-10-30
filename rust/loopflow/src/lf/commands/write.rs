@@ -6,7 +6,9 @@
 //! its command does.
 //!
 //! Every write names the directory the app ran it from: `--cwd <directory>`
-//! in its argv, and the same path in-process.
+//! in its argv, and the same path in-process. A write `lf` would send to
+//! another Machine is not made here: [`Write::write`] returns `None`, and the
+//! app runs its command, which sends it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -17,8 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::lf::{Cli, Commands};
 use crate::ops::task::{
-    task_complete, task_edit, task_move_membership, task_reopen, task_repository,
-    task_save,
+    task_complete, task_edit, task_move_membership, task_reopen, task_repository, task_save,
 };
 use crate::work::task::TaskUpdate;
 
@@ -40,6 +41,13 @@ pub enum Write {
     /// `lf task abandon <issue>`: cancels the Task and removes its PRs and
     /// branches.
     TaskAbandon { directory: PathBuf, issue: String },
+    /// `lf task claim <issue> --json`, or `lf task unassign <issue> --json`
+    /// when not `claimed`.
+    TaskOwnership {
+        directory: PathBuf,
+        issue: String,
+        claimed: bool,
+    },
     /// `lf task move <issue> --wave <wave>`, or `--no-wave` without one.
     TaskMove {
         directory: PathBuf,
@@ -66,6 +74,23 @@ pub enum Write {
         directory: PathBuf,
         id: String,
         task: String,
+    },
+    /// `lf [--agent <agent>] session resume [<id>] [--task <task>] [--wave <wave>]
+    /// --prepare --json`, with `--repo <directory>` when it names none of them:
+    /// the conversation and the command that opens it, no provider started.
+    SessionResume {
+        directory: PathBuf,
+        id: Option<String>,
+        task: Option<String>,
+        wave: Option<String>,
+        agent: Option<String>,
+    },
+    /// `lf [--agent <agent>] session new <id> --prepare --json`: the
+    /// conversation on a fresh provider thread, not yet started.
+    SessionNew {
+        directory: PathBuf,
+        id: String,
+        agent: Option<String>,
     },
     /// `lf wave ensure <wave> --json`: the Wave's active Project.
     WaveEnsure { directory: PathBuf, wave: String },
@@ -154,6 +179,14 @@ impl Write {
                 notes_flag = format!("--notes={notes}");
                 vec!["task", "edit", issue, &notes_flag]
             }
+            Self::TaskOwnership { issue, claimed, .. } => {
+                vec![
+                    "task",
+                    if *claimed { "claim" } else { "unassign" },
+                    issue,
+                    "--json",
+                ]
+            }
             Self::TaskMove { issue, wave, .. } => match wave {
                 Some(wave) => vec!["task", "move", issue, "--wave", wave],
                 None => vec!["task", "move", issue, "--no-wave"],
@@ -177,6 +210,40 @@ impl Write {
             }
             Self::SessionBind { id, task, .. } => {
                 vec!["session", "bind", "--json", "--task", task, "--", id]
+            }
+            Self::SessionResume {
+                directory,
+                id,
+                task,
+                wave,
+                agent,
+            } => {
+                let mut words = Vec::new();
+                if id.is_none() && task.is_none() && wave.is_none() {
+                    path = directory.display().to_string();
+                    words.extend(["--repo", path.as_str()]);
+                }
+                if let Some(agent) = agent {
+                    words.extend(["--agent", agent]);
+                }
+                words.extend(["session", "resume"]);
+                words.extend(id.as_deref());
+                if let Some(task) = task {
+                    words.extend(["--task", task]);
+                }
+                if let Some(wave) = wave {
+                    words.extend(["--wave", wave]);
+                }
+                words.extend(["--prepare", "--json"]);
+                words
+            }
+            Self::SessionNew { id, agent, .. } => {
+                let mut words = Vec::new();
+                if let Some(agent) = agent {
+                    words.extend(["--agent", agent]);
+                }
+                words.extend(["session", "new", id, "--prepare", "--json"]);
+                words
             }
             Self::WaveEnsure { wave, .. } => vec!["wave", "ensure", wave, "--json"],
             Self::PlanningRefresh { wave, .. } => {
@@ -277,10 +344,13 @@ impl Write {
             | Self::TaskReopen { directory, .. }
             | Self::TaskAbandon { directory, .. }
             | Self::TaskNotes { directory, .. }
+            | Self::TaskOwnership { directory, .. }
             | Self::TaskMove { directory, .. }
             | Self::TaskSave { directory, .. }
             | Self::SessionRename { directory, .. }
             | Self::SessionBind { directory, .. }
+            | Self::SessionResume { directory, .. }
+            | Self::SessionNew { directory, .. }
             | Self::WaveEnsure { directory, .. }
             | Self::PlanningRefresh { directory, .. }
             | Self::NewChapter { directory, .. }
@@ -305,6 +375,7 @@ impl Write {
             | Self::TaskReopen { issue, .. }
             | Self::TaskAbandon { issue, .. }
             | Self::TaskNotes { issue, .. }
+            | Self::TaskOwnership { issue, .. }
             | Self::TaskMove { issue, .. }
             | Self::TaskSave { issue, .. } => Ok(task_repository(directory, Some(issue))?),
             Self::WaveEnsure { .. } | Self::NewChapter { .. } => {
@@ -316,22 +387,30 @@ impl Write {
 
     /// Make the write on the caller's thread and return what `lf <argv>`
     /// prints to stdout, recording its Process around it when `lf` would.
-    pub fn write(&self) -> anyhow::Result<String> {
+    /// `None` when `lf` would send it to another Machine: nothing was written.
+    pub fn write(&self) -> anyhow::Result<Option<String>> {
         let argv: Vec<String> = std::iter::once("lf".to_owned())
             .chain(self.argv())
             .collect();
-        let command = Cli::try_parse_from(&argv)?
-            .command
-            .context("a write names its command")?;
+        let cli = Cli::try_parse_from(&argv)?;
+        if super::work_route::forward(&cli, &argv, self.directory())?.is_some() {
+            return Ok(None);
+        }
         let repo = self.repo()?;
-        if !command.changes_work() {
-            return self.perform(&repo, command);
+        if !cli.command.as_ref().is_some_and(Commands::changes_work) {
+            return self.perform(&repo, &cli).map(Some);
         }
         let _writing = WRITING.lock().unwrap_or_else(|poison| poison.into_inner());
-        crate::journal::with_runtime(&repo, &argv, || self.perform(&repo, command))
+        // `lf` hands its `--agent` to what it runs through the environment.
+        let _agent = cli
+            .agent
+            .as_deref()
+            .map(|agent| super::graph::EnvVarGuard::set(crate::config::AGENT_OVERRIDE_ENV, agent));
+        crate::journal::with_runtime(&repo, &argv, || self.perform(&repo, &cli)).map(Some)
     }
 
-    fn perform(&self, repo: &Path, command: Commands) -> anyhow::Result<String> {
+    fn perform(&self, repo: &Path, cli: &Cli) -> anyhow::Result<String> {
+        let command = cli.command.as_ref().context("a write names its command")?;
         Ok(match self {
             Self::TaskComplete { issue, .. } => {
                 task_complete(repo, issue, None)?;
@@ -355,6 +434,18 @@ impl Write {
                 // the app's planning refresh to retry.
                 format!("{}: updated\n", task_edit(repo, issue, None, update)?.id)
             }
+            Self::TaskOwnership { issue, claimed, .. } => {
+                use crate::ops::task_ownership::{change, OwnershipChange};
+                let requested = if *claimed {
+                    OwnershipChange::Claim
+                } else {
+                    OwnershipChange::Unassign
+                };
+                format!(
+                    "{}\n",
+                    serde_json::to_string(&change(repo, issue, requested)?)?
+                )
+            }
             Self::TaskMove { issue, wave, .. } => {
                 let moved = task_move_membership(repo, issue, wave.as_deref())?;
                 format!("{}: membership saved\n", moved.id)
@@ -368,6 +459,9 @@ impl Write {
             } => pretty(&task_save(issue, path, revision, content)?)?,
             Self::SessionRename { id, name, .. } => pretty(&super::session::renamed(id, name)?)?,
             Self::SessionBind { id, task, .. } => pretty(&super::session::bound(id, task)?)?,
+            Self::SessionResume { directory, .. } | Self::SessionNew { directory, .. } => {
+                pretty(&super::session::prepared(cli, directory)?)?
+            }
             Self::WaveEnsure { wave, .. } => pretty(
                 &tokio::runtime::Runtime::new()?
                     .block_on(crate::ops::project::ensure(repo, wave))?,
@@ -399,7 +493,7 @@ impl Write {
                 };
                 format!(
                     "{}\n",
-                    serde_json::to_string(&crate::portfolio::change(&cmd)?)?
+                    serde_json::to_string(&crate::portfolio::change(cmd)?)?
                 )
             }
             // Arrangement parses its own argv, so the app and `lf` reach the
@@ -416,7 +510,7 @@ impl Write {
                 };
                 let input = self.input().unwrap_or_default();
                 let saved =
-                    super::desktop::save_arrangement(None, directory, &cmd, &mut input.as_bytes())?;
+                    super::desktop::save_arrangement(None, directory, cmd, &mut input.as_bytes())?;
                 format!("{saved}\n")
             }
         })
@@ -477,6 +571,35 @@ mod tests {
         .unwrap();
         assert_eq!(chapter.input(), Some("{}"));
         assert_eq!(chapter.argv().last().map(String::as_str), Some("--dry-run"));
+        assert_eq!(
+            write(
+                r#"{"write":"session_resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
+            ),
+            [
+                "--cwd",
+                "/r",
+                "--repo",
+                "/r",
+                "session",
+                "resume",
+                "--prepare",
+                "--json"
+            ]
+        );
+        assert_eq!(
+            write(r#"{"write":"session_new","directory":"/r","id":"session_1","agent":"codex"}"#),
+            [
+                "--cwd",
+                "/r",
+                "--agent",
+                "codex",
+                "session",
+                "new",
+                "session_1",
+                "--prepare",
+                "--json"
+            ]
+        );
         let save = serde_json::from_str::<Write>(
             r#"{"write":"task_save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
         )
@@ -543,6 +666,23 @@ mod tests {
             },
             Write::Portfolio {
                 change: vec!["add".into(), "/tmp/repo".into()],
+            },
+            Write::TaskOwnership {
+                directory: directory.clone(),
+                issue: "FIX-1".into(),
+                claimed: false,
+            },
+            Write::SessionResume {
+                directory: directory.clone(),
+                id: None,
+                task: Some("FIX-1".into()),
+                wave: None,
+                agent: Some("codex".into()),
+            },
+            Write::SessionNew {
+                directory: directory.clone(),
+                id: "session_1".into(),
+                agent: None,
             },
         ];
         // Arrangement, a customized Graph and a chapter preview record nothing.

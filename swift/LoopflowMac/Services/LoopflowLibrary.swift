@@ -16,26 +16,31 @@ enum LoopflowLibrary {
 
     /// What `read.argv` prints, read off the caller's thread.
     static func read(_ read: ServedRead) async throws -> String {
-        try await call(lf_read, try JSONEncoder().encode(read), failure: "read")
+        let request = try JSONEncoder().encode(read)
+        guard let printed = try await call(lf_read, request) else {
+            throw RegistryQueryError("Loopflow could not read \(String(decoding: request, as: UTF8.self))")
+        }
+        return printed
     }
 
-    /// What `write.argv` prints, written off the caller's thread.
-    static func write(_ write: ServedWrite) async throws -> String {
-        try await call(lf_write, try JSONEncoder().encode(write), failure: "make")
+    /// What `write.argv` prints, written off the caller's thread; `nil` when
+    /// `lf` would send it to another Machine, so nothing was written here.
+    static func write(_ write: ServedWrite) async throws -> String? {
+        try await call(lf_write, try JSONEncoder().encode(write))
     }
 
+    /// The string `entry` returns for `request`; `nil` when it returns none
+    /// and reports no error.
     private static func call(
         _ entry: @escaping @Sendable (UnsafePointer<CChar>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?) -> UnsafeMutablePointer<CChar>?,
-        _ request: Data,
-        failure: String
-    ) async throws -> String {
+        _ request: Data
+    ) async throws -> String? {
         let json = String(decoding: request, as: UTF8.self)
         return try await Task.detached(priority: .userInitiated) {
             var error: UnsafeMutablePointer<CChar>?
-            guard let result = entry(json, &error) else {
-                throw RegistryQueryError(take(error) ?? "Loopflow could not \(failure) \(json)")
-            }
-            return take(result) ?? ""
+            let result = entry(json, &error)
+            if let error = take(error) { throw RegistryQueryError(error) }
+            return result.flatMap(take)
         }.value
     }
 }

@@ -1,7 +1,8 @@
 // The local macOS registry query: `RegistryQuery` over this Machine. The Work
 // watches, served reads and served writes run in the app through Loopflow's
-// library; other commands, and the remote Task file watch, run the bundled `lf`
-// off the main actor so a slow one never stalls the UI.
+// library; other commands, writes `lf` sends to another Machine, and the remote
+// Task file watch run the bundled `lf` off the main actor so a slow one never
+// stalls the UI.
 
 #if os(macOS)
 import Foundation
@@ -13,7 +14,9 @@ enum RegistryQueryLocal {
     }, serve: { query in
         try await LoopflowLibrary.read(query)
     }, write: { change in
-        try await LoopflowLibrary.write(change)
+        if let made = try await LoopflowLibrary.write(change) { return made }
+        // `lf` sends this write to another Machine; its command does.
+        return try await LocalWaveAgentLauncher.queryLf(change.argv, cwd: change.cwd, input: change.input)
     }, watchFiles: { args, cwd in
         // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {

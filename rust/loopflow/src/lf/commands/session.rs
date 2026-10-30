@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
@@ -637,15 +638,10 @@ async fn resume(
     );
     let progress = crate::startup::Startup::new("Finding conversation");
     let store = open_shared_store().await?;
-    let selected =
-        crate::ops::human_session::select_connection(&store, &std::env::current_dir()?, target)
-            .await?;
+    let cwd = std::env::current_dir()?;
     drop(progress);
-    if selected.started {
-        eprintln!("Nothing to resume here; starting a new conversation.");
-    }
-    let id = selected.id;
     if let Some(message) = message {
+        let id = select(&store, &cwd, target).await?;
         let session = crate::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
@@ -653,8 +649,62 @@ async fn resume(
         let id = session.id;
         return tokio::task::block_in_place(|| crate::lf::commands::run::resume(&id, message, cli));
     }
-    let session = crate::ops::human_session::open(&store, &id, fork, !*prepare).await?;
+    let session = reopen(&store, &cwd, target, fork, !*prepare).await?;
     print_opened(cli, connection, &session)
+}
+
+/// The conversation `lf resume` run from `directory` selects.
+async fn select(
+    store: &Arc<Store>,
+    directory: &Path,
+    target: crate::ops::human_session::SessionTarget<'_>,
+) -> anyhow::Result<String> {
+    let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
+    if selected.started {
+        eprintln!("Nothing to resume here; starting a new conversation.");
+    }
+    Ok(selected.id)
+}
+
+/// `lf session resume` without a message: the selected conversation, opened
+/// here, and its provider started unless `launch` is false (`--prepare`).
+async fn reopen(
+    store: &Arc<Store>,
+    directory: &Path,
+    target: crate::ops::human_session::SessionTarget<'_>,
+    fork: bool,
+    launch: bool,
+) -> anyhow::Result<SessionRecord> {
+    let id = select(store, directory, target).await?;
+    crate::ops::human_session::open(store, &id, fork, launch).await
+}
+
+/// What `lf session resume|new --prepare` run from `directory` records and
+/// prints: the conversation and the command that opens it, with no provider
+/// started.
+pub fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result<SessionRecord> {
+    let Some(crate::lf::Commands::Session { cmd }) = &cli.command else {
+        bail!("not a Session command");
+    };
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_shared_store().await?;
+        match cmd {
+            SessionCommand::Resume {
+                id,
+                connection,
+                fork,
+                all: false,
+            } if connection.prepare => {
+                let target = connection.target(cli, id.as_deref())?;
+                reopen(&store, directory, target, *fork, false).await
+            }
+            SessionCommand::New { id, connection } if connection.prepare => {
+                let target = connection.target(cli, id.as_deref())?;
+                restarted(&store, directory, target, false).await
+            }
+            _ => bail!("only `--prepare` opens a Session without starting its provider"),
+        }
+    })
 }
 
 /// `lf session new`: the scope's conversation continues on a fresh provider
@@ -670,10 +720,26 @@ async fn new_thread(
         "`lf session new` starts an interactive thread; continue it with `lf -b resume --message`"
     );
     let store = open_shared_store().await?;
-    let selected =
-        crate::ops::human_session::select_connection(&store, &std::env::current_dir()?, target)
-            .await?;
-    let session = crate::ops::human_session::session_by_id(&store, &selected.id)
+    let record = restarted(
+        &store,
+        &std::env::current_dir()?,
+        target,
+        !connection.prepare,
+    )
+    .await?;
+    print_opened(cli, connection, &record)
+}
+
+/// The conversation `lf session new` run from `directory` selects, on a fresh
+/// provider thread started unless `launch` is false.
+async fn restarted(
+    store: &Arc<Store>,
+    directory: &Path,
+    target: crate::ops::human_session::SessionTarget<'_>,
+    launch: bool,
+) -> anyhow::Result<SessionRecord> {
+    let selected = crate::ops::human_session::select_connection(store, directory, target).await?;
+    let session = crate::ops::human_session::session_by_id(store, &selected.id)
         .await?
         .context("Session not found")?;
     let threaded = match session.artifact_key.as_deref() {
@@ -685,21 +751,12 @@ async fn new_thread(
         if selected.started {
             eprintln!("Nothing to restart here; starting a new conversation.");
         }
-        let record =
-            crate::ops::human_session::open(&store, &selected.id, false, !connection.prepare)
-                .await?;
-        return print_opened(cli, connection, &record);
+        return crate::ops::human_session::open(store, &selected.id, false, launch).await;
     }
     let agent = crate::config::agent_override();
-    let next = crate::ops::human_session::new_thread(
-        &store,
-        &selected.id,
-        agent.as_deref(),
-        !connection.prepare,
-    )
-    .await?;
-    let record = crate::ops::human_session::surface(&store, &next).await?;
-    print_opened(cli, connection, &record)
+    let next = crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch)
+        .await?;
+    crate::ops::human_session::surface(store, &next).await
 }
 
 fn print_opened(

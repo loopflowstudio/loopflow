@@ -83,6 +83,14 @@ struct RegistryQueryTests {
         #expect(try object(chapter) == object(
             #"{"write":"new_chapter","directory":"/r","name":"October","plan":"{}","preview":true}"#))
         #expect(chapter.input == "{}")
+        let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil)
+        #expect(try object(primary) == object(
+            #"{"write":"session_resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#))
+        #expect(primary.argv == ["--repo", "/r", "session", "resume", "--prepare", "--json"])
+        let restart = ServedWrite.sessionNew(directory: "/r", id: "session_1", agent: "codex")
+        #expect(try object(restart) == object(
+            #"{"write":"session_new","directory":"/r","id":"session_1","agent":"codex"}"#))
+        #expect(restart.argv == ["--agent", "codex", "session", "new", "session_1", "--prepare", "--json"])
     }
 
     @Test("Recording a remote reading preserves its Machine and transport", arguments: [false, true])

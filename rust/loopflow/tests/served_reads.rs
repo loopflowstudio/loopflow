@@ -55,7 +55,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     let session: Value = serde_json::from_str(&read(
         repo.path(),
         home.path(),
-        &["session", "connect", "--prepare", "--json", "--try"],
+        &["session", "resume", "--prepare", "--json"],
         None,
     ))
     .unwrap();
@@ -412,10 +412,13 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Write::TaskReopen { .. }
         | Write::TaskAbandon { .. }
         | Write::TaskNotes { .. }
+        | Write::TaskOwnership { .. }
         | Write::TaskMove { .. }
         | Write::TaskSave { .. }
         | Write::SessionRename { .. }
         | Write::SessionBind { .. }
+        | Write::SessionResume { .. }
+        | Write::SessionNew { .. }
         | Write::WaveEnsure { .. }
         | Write::PlanningRefresh { .. }
         | Write::NewChapter { .. }
@@ -448,6 +451,27 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                     directory: directory.clone(),
                     id: session.clone(),
                     task: "INF-123".into(),
+                },
+                // The repository's conversation, one Session and its fresh
+                // thread: prepared, never started.
+                Write::SessionResume {
+                    directory: directory.clone(),
+                    id: None,
+                    task: None,
+                    wave: None,
+                    agent: None,
+                },
+                Write::SessionResume {
+                    directory: directory.clone(),
+                    id: Some(session.clone()),
+                    task: None,
+                    wave: None,
+                    agent: None,
+                },
+                Write::SessionNew {
+                    directory: directory.clone(),
+                    id: session.clone(),
+                    agent: None,
                 },
                 Write::TaskComplete {
                     directory: directory.clone(),
@@ -526,8 +550,10 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     let compare = |served: Write, again: &dyn Fn() -> Write, effect: &dyn Fn() -> Value| {
         let argv = served.argv();
         let before = processes(&database);
-        let written = served.write().unwrap();
+        let written = served.write().unwrap().expect("made in the app");
         let recorded = processes(&database) - before;
+        // Nothing it started outlives it: no provider, no child of the app.
+        assert_eq!(children(), "", "{argv:?}");
         let effected = effect();
         let again = again();
         let args = again.argv();
@@ -563,6 +589,28 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
     compare(save(file_revision()), &|| save(file_revision()), &|| {
         effect("INF-123")
     });
+    // Claiming and unassigning leave the same owner, which each prints from the
+    // store, and record a Process as `lf` does. Every claim appends to the
+    // ownership log, so the log itself differs.
+    for claimed in [true, false] {
+        let ownership = Write::TaskOwnership {
+            directory: directory.clone(),
+            issue: "INF-123".into(),
+            claimed,
+        };
+        let owner = |text: &str| serde_json::from_str::<Value>(text).unwrap()["owner"].clone();
+        let before = processes(&database);
+        let written = ownership.write().unwrap().expect("made in the app");
+        let recorded = processes(&database) - before;
+        let args = ownership.argv();
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let before = processes(&database);
+        let printed = read(repo.path(), home.path(), &args, None);
+        assert_eq!(processes(&database) - before, recorded, "{args:?}");
+        assert!(recorded > 0, "{args:?} recorded no Process");
+        assert_eq!(owner(&written), owner(&printed), "{args:?}");
+        assert_eq!(owner(&written).is_null(), !claimed, "{written}");
+    }
     // Which repositories the app shows, as the app reads them.
     let portfolio =
         || without_clock(serde_json::from_str(&Read::Portfolio.read().unwrap()).unwrap());
@@ -624,12 +672,21 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         expression: format!("task:{task_id}"),
         revision: None,
     };
-    let created = create.write().unwrap();
+    let created = create.write().unwrap().unwrap();
     assert_eq!(layout("query:served")["id"], "served", "{created}");
     for write in arrangement {
         let recorded = compare(write(), &*write, &dashboard);
         assert_eq!(recorded, 0, "{:?} recorded a Process", write().argv());
     }
+}
+
+/// The processes this test started that are still running.
+fn children() -> String {
+    let output = std::process::Command::new("pgrep")
+        .args(["-P", &std::process::id().to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8(output.stdout).unwrap()
 }
 
 /// A saved record without its revision, which each save advances.

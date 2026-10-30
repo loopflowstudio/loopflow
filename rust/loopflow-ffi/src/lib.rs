@@ -84,7 +84,9 @@ pub unsafe extern "C" fn lf_read(read: *const c_char, error: *mut *mut c_char) -
 }
 
 /// Make `write` on this thread: what its `lf` command prints, or null with
-/// `*error` set. Free either with `lf_string_free`.
+/// `*error` set. Null with `*error` left null when `lf` would send the write
+/// to another Machine: nothing was written, and its `lf` command sends it.
+/// Free either string with `lf_string_free`.
 ///
 /// # Safety
 /// `write` is a NUL-terminated string; `error` is null or writable.
@@ -92,6 +94,7 @@ pub unsafe extern "C" fn lf_read(read: *const c_char, error: *mut *mut c_char) -
 pub unsafe extern "C" fn lf_write(write: *const c_char, error: *mut *mut c_char) -> *mut c_char {
     // SAFETY: the caller's guarantees, passed on.
     unsafe { serve("lf_write", write, error, |write: Write| write.write()) }
+        .flatten()
         .map_or(std::ptr::null_mut(), |text| c_string(&text).into_raw())
 }
 

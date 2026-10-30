@@ -228,10 +228,14 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskReopen(directory: String, issue: String)
     case taskAbandon(directory: String, issue: String)
     case taskNotes(directory: String, issue: String, notes: String)
+    case taskOwnership(directory: String, issue: String, claimed: Bool)
     case taskMove(directory: String, issue: String, wave: String?)
     case taskSave(directory: String, issue: String, path: String, revision: String, content: String)
     case sessionRename(directory: String, id: String, name: String)
     case sessionBind(directory: String, id: String, task: String)
+    /// The repository's conversation when it names no Session, Task or Wave.
+    case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
+    case sessionNew(directory: String, id: String, agent: String?)
     case waveEnsure(directory: String, wave: String)
     case planningRefresh(directory: String, wave: String)
     case newChapter(directory: String, name: String, plan: String, preview: Bool)
@@ -253,12 +257,19 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskReopen(_, let issue): ["task", "reopen", issue]
         case .taskAbandon(_, let issue): ["task", "abandon", issue]
         case .taskNotes(_, let issue, let notes): ["task", "edit", issue, "--notes=\(notes)"]
+        case .taskOwnership(_, let issue, let claimed): ["task", claimed ? "claim" : "unassign", issue, "--json"]
         case .taskMove(_, let issue, let wave):
             ["task", "move", issue] + (wave.map { ["--wave", $0] } ?? ["--no-wave"])
         case .taskSave(_, let issue, let path, let revision, _):
             ["task", "save", issue, path, "--revision", revision, "--json"]
         case .sessionRename(_, let id, let name): ["session", "rename", "--json", "--", id, name]
         case .sessionBind(_, let id, let task): ["session", "bind", "--json", "--task", task, "--", id]
+        case .sessionResume(let directory, let id, let task, let wave, let agent):
+            Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
+                + Self.option("--task", task) + Self.option("--wave", wave),
+                repo: id == nil && task == nil && wave == nil ? directory : nil)
+        case .sessionNew(_, let id, let agent):
+            Self.prepared(agent, ["session", "new", id], repo: nil)
         case .waveEnsure(_, let wave): ["wave", "ensure", wave, "--json"]
         case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
         case .newChapter(_, let name, _, let preview):
@@ -279,6 +290,15 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             ["desktop", "move", "-p", "\(board)/\(member)", "--destination", destination]
         case .paneLayout(_, let work, _): ["desktop", "layout", work, "--save"]
         }
+    }
+
+    /// `lf [--repo <repo>] [--agent <agent>] <command> --prepare --json`.
+    private static func prepared(_ agent: String?, _ command: [String], repo: String?) -> [String] {
+        option("--repo", repo) + option("--agent", agent) + command + ["--prepare", "--json"]
+    }
+
+    private static func option(_ flag: String, _ value: String?) -> [String] {
+        value.map { [flag, $0] } ?? []
     }
 
     /// The directory `argv` runs in; Rust's `--cwd`.
@@ -306,6 +326,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("task_abandon", ["directory": directory, "issue": issue])
         case .taskNotes(let directory, let issue, let notes):
             TaggedFields("task_notes", ["directory": directory, "issue": issue, "notes": notes])
+        case .taskOwnership(let directory, let issue, let claimed):
+            TaggedFields("task_ownership", ["directory": directory, "issue": issue, "claimed": claimed])
         case .taskMove(let directory, let issue, let wave):
             TaggedFields("task_move", ["directory": directory, "issue": issue, "wave": wave])
         case .taskSave(let directory, let issue, let path, let revision, let content):
@@ -315,6 +337,11 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             TaggedFields("session_rename", ["directory": directory, "id": id, "name": name])
         case .sessionBind(let directory, let id, let task):
             TaggedFields("session_bind", ["directory": directory, "id": id, "task": task])
+        case .sessionResume(let directory, let id, let task, let wave, let agent):
+            TaggedFields("session_resume", ["directory": directory, "id": id, "task": task, "wave": wave,
+                                            "agent": agent])
+        case .sessionNew(let directory, let id, let agent):
+            TaggedFields("session_new", ["directory": directory, "id": id, "agent": agent])
         case .waveEnsure(let directory, let wave):
             TaggedFields("wave_ensure", ["directory": directory, "wave": wave])
         case .planningRefresh(let directory, let wave):
@@ -794,7 +821,7 @@ public struct RegistryQuery: Sendable {
 
     /// `lf task claim` or `lf task unassign`.
     public func assignTask(issue: String, claimed: Bool, cwd: String?) async throws {
-        _ = try await run(["task", claimed ? "claim" : "unassign", issue], cwd)
+        _ = try await write(.taskOwnership(directory: cwd ?? "/", issue: issue, claimed: claimed))
     }
 
     public func completeTask(issue: String, cwd: String?) async throws {
@@ -862,10 +889,8 @@ public struct RegistryQuery: Sendable {
 
     /// The repository or Wave's retained conversation; explicit opening only.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
-        var args = ["session", "resume", "--prepare", "--json"]
-        if wave == nil { args = ["--repo", cwd] + args }
-        if let wave { args += ["--wave", wave] }
-        return try Self.decode(SessionRecord.self, from: await run(args, cwd))
+        try Self.decode(SessionRecord.self, from: await write(
+            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil)))
     }
 
     /// The Task's one ongoing conversation: the one already chosen, else its
@@ -873,8 +898,8 @@ public struct RegistryQuery: Sendable {
     /// choice is remembered as the Task's primary. External ownership is returned
     /// as a Move here action without transferring control.
     public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
-        let stdout = try await run(["session", "resume", "--task", issue, "--prepare", "--json"], cwd)
-        return try Self.decode(SessionRecord.self, from: stdout)
+        try Self.decode(SessionRecord.self, from: await write(
+            .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil)))
     }
 
     /// Prepare one Session’s terminal command without starting its provider. The
@@ -884,10 +909,8 @@ public struct RegistryQuery: Sendable {
         agent: String? = nil,
         cwd: String? = nil
     ) async throws -> SessionRecord {
-        let args = ["session", "resume", id, "--prepare", "--json"]
-            + (agent.map { ["--agent", $0] } ?? [])
-        let stdout = try await run(args, cwd)
-        return try Self.decode(SessionRecord.self, from: stdout)
+        try Self.decode(SessionRecord.self, from: await write(
+            .sessionResume(directory: cwd ?? "/", id: id, task: nil, wave: nil, agent: agent)))
     }
 
     /// Give one Session a human-assigned name and return the authoritative
@@ -904,9 +927,8 @@ public struct RegistryQuery: Sendable {
     /// Restart the conversation on a fresh provider thread seeded with what the
     /// last thread knew; the same Session keeps its history.
     public func resetSession(_ session: SessionRecord, agent: String?, cwd: String?) async throws -> SessionRecord {
-        var args = ["session", "new", session.id, "--prepare", "--json"]
-        if let agent { args += ["--agent", agent] }
-        return try Self.decode(SessionRecord.self, from: await run(args, cwd))
+        try Self.decode(SessionRecord.self, from: await write(
+            .sessionNew(directory: cwd ?? "/", id: session.id, agent: agent)))
     }
 
     public func previewSessionBinding(id: String, task: String) async throws -> SessionBindingPreview {

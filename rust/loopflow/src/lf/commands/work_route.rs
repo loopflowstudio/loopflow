@@ -1,5 +1,7 @@
 //! Work chooses execution; SSH transports the ordinary command unchanged.
-use crate::durable::{RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
+use std::path::Path;
+
+use crate::durable::{MachineId, RepositoryId, RepositoryIdentity, TaskExecutionRoute, TaskId};
 use crate::lf::{Cli, Commands, SessionCommand, TaskCommand};
 use crate::store::sqlite::SqliteStore;
 use anyhow::{anyhow, Result};
@@ -145,7 +147,7 @@ fn launch_task(cli: &Cli) -> Option<&str> {
 
 /// Bare `lf resume` in a Task's worktree acts on that Task, so it routes to
 /// its Machine exactly as `--task` does.
-fn worktree_task(cli: &Cli) -> Result<Option<String>> {
+fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
     let bare = match &cli.command {
         Some(Commands::Session {
             cmd:
@@ -163,8 +165,9 @@ fn worktree_task(cli: &Cli) -> Result<Option<String>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    let cwd = std::env::current_dir()?;
-    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    let cwd = directory
+        .canonicalize()
+        .unwrap_or_else(|_| directory.to_path_buf());
     Ok(store
         .task_checkouts()?
         .into_iter()
@@ -178,29 +181,65 @@ fn worktree_task(cli: &Cli) -> Result<Option<String>> {
         .map(|checkout| checkout.task_id.to_string()))
 }
 
+/// A command `lf` sends to another Machine instead of running here.
+#[derive(Debug)]
+pub struct Forward {
+    pub machine: MachineId,
+    /// The command as the destination parses it, when it differs from the caller's.
+    resumed: Option<Cli>,
+    args: Vec<String>,
+    route: Option<TaskExecutionRoute>,
+}
+
 /// Return whether dispatch completed remotely. No Task Graph or checkout is
 /// mutated before routing. Unknown provider aliases retain ordinary acquisition.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
-    if dispatch_moved_session(cli, args)? {
-        return Ok(true);
+    let Some(forward) = forward(cli, args, &std::env::current_dir()?)? else {
+        return Ok(false);
+    };
+    let task_run = matches!(
+        cli.command,
+        Some(Commands::Task {
+            cmd: TaskCommand::Run { .. }
+        })
+    );
+    let result = super::ssh::run(
+        forward.machine.as_str(),
+        false,
+        forward.resumed.as_ref().unwrap_or(cli),
+        &forward.args,
+        forward.route,
+    );
+    if task_run {
+        // The laptop waited for the run; a rented machine whose work drained goes back now.
+        super::rental::settle(&forward.machine);
     }
-    let worktree_task = worktree_task(cli)?;
+    result?;
+    Ok(true)
+}
+
+/// Where `lf <args>` run from `directory` goes instead of running here, if
+/// anywhere. Reads records only; nothing is sent.
+pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Forward>> {
+    if let Some(forward) = moved_session(cli, args)? {
+        return Ok(Some(forward));
+    }
+    let worktree_task = worktree_task(cli, directory)?;
     let Some(selector) = launch_task(cli).or(worktree_task.as_deref()) else {
-        return dispatch_primary_session(cli, args);
+        return primary_session(cli, args, directory);
     };
     let Some(store) = read_registry()? else {
-        return Ok(false);
+        return Ok(None);
     };
-    let Some(route) = resolve_task(&store, cli, selector)? else {
-        return Ok(false);
+    let Some(route) = resolve_task(&store, cli, selector, directory)? else {
+        return Ok(None);
     };
     if route.machine_id == store.local_machine()?.id {
-        return dispatch_moved_task_conversation(cli, args, &store, &route.task_id);
+        return moved_task_conversation(cli, args, &store, &route.task_id);
     }
     if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
     }
-    let machine = route.machine_id.clone();
     let mut forwarded = args[1..].to_vec();
     if matches!(
         cli.command,
@@ -213,8 +252,12 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
             Some(position) => forwarded[position] = route.task_id.to_string(),
             None => forwarded.extend(["--task".into(), route.task_id.to_string()]),
         }
-        super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route))?;
-        return Ok(true);
+        return Ok(Some(Forward {
+            machine: route.machine_id.clone(),
+            resumed: None,
+            args: forwarded,
+            route: Some(route),
+        }));
     }
     // Carry the observed exact target in addition to the positional selector.
     // Destination resolution rejects an alias that now names different Work.
@@ -237,23 +280,21 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     if !found {
         forwarded.splice(0..0, ["--task".into(), route.task_id.to_string()]);
     }
-    let task_run = matches!(
+    if matches!(
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
         })
-    );
-    if task_run {
+    ) {
         // Placement already chose this Machine; the destination runs in place.
         forwarded = without_placement(forwarded);
     }
-    let result = super::ssh::run(machine.as_str(), false, cli, &forwarded, Some(route));
-    if task_run {
-        // The laptop waited for the run; a rented machine whose work drained goes back now.
-        super::rental::settle(&machine);
-    }
-    result?;
-    Ok(true)
+    Ok(Some(Forward {
+        machine: route.machine_id.clone(),
+        resumed: None,
+        args: forwarded,
+        route: Some(route),
+    }))
 }
 
 /// The Session an explicit `resume <session>` names.
@@ -287,43 +328,44 @@ pub(super) fn resumed_task(cli: &Cli) -> Option<&str> {
 }
 
 /// A Session that moved to another Machine resumes there.
-fn dispatch_moved_session(cli: &Cli, args: &[String]) -> Result<bool> {
+fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(id) = resumed_session(cli) else {
-        return Ok(false);
+        return Ok(None);
     };
     if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
-        return Ok(false);
+        return Ok(None);
     }
     let Some(store) = read_registry()? else {
-        return Ok(false);
+        return Ok(None);
     };
-    let Some(machine) = store.session_moved_to(id)? else {
-        return Ok(false);
-    };
-    super::ssh::run(machine.as_str(), false, cli, &args[1..], None)?;
-    Ok(true)
+    Ok(store.session_moved_to(id)?.map(|machine| Forward {
+        machine,
+        resumed: None,
+        args: args[1..].to_vec(),
+        route: None,
+    }))
 }
 
 /// `resume --task X` for a Task that stayed here while its conversation moved
 /// on its own resumes that conversation where it went.
-fn dispatch_moved_task_conversation(
+fn moved_task_conversation(
     cli: &Cli,
     args: &[String],
     store: &SqliteStore,
     task: &TaskId,
-) -> Result<bool> {
+) -> Result<Option<Forward>> {
     let Some(Commands::Session {
         cmd: SessionCommand::Resume { connection, .. },
     }) = &cli.command
     else {
-        return Ok(false);
+        return Ok(None);
     };
     let named = connection.task.is_some() || cli.task.is_some();
     if !named || std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
-        return Ok(false);
+        return Ok(None);
     }
     let Some((session, machine)) = store.task_conversation_moved_to(task)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let mut forwarded = Vec::new();
     let mut rest = args[1..].iter();
@@ -348,8 +390,12 @@ fn dispatch_moved_task_conversation(
     let resumed = <Cli as clap::Parser>::try_parse_from(
         std::iter::once("lf".to_string()).chain(forwarded.iter().cloned()),
     )?;
-    super::ssh::run(machine.as_str(), false, &resumed, &forwarded, None)?;
-    Ok(true)
+    Ok(Some(Forward {
+        machine,
+        resumed: Some(resumed),
+        args: forwarded,
+        route: None,
+    }))
 }
 
 /// `lf task run`'s `--pool`, `--rent` and `--quote`, removed before `--`.
@@ -378,7 +424,7 @@ fn without_placement(args: Vec<String>) -> Vec<String> {
 /// destination runs it wherever it arrives, even if its own copy differs. A
 /// bare resume resolves its scope from the worktree exactly as the local
 /// resume would, then routes the same way.
-fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
+fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Forward>> {
     let (
         Some(Commands::Session {
             cmd:
@@ -391,17 +437,18 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
         None,
     ) = (&cli.command, cli.task.as_deref())
     else {
-        return Ok(false);
+        return Ok(None);
     };
     if std::env::var_os(super::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
-        return Ok(false);
+        return Ok(None);
     }
     let Some(registry) = crate::store::read_existing_registry()? else {
-        return Ok(false);
+        return Ok(None);
     };
     let registry: crate::store::SharedStore = std::sync::Arc::new(registry);
     let store = &registry.sqlite;
-    let repo = crate::repository::CanonicalRepo::current()?.map(|repo| repo.to_string());
+    let repo =
+        crate::repository::CanonicalRepo::containing(directory)?.map(|repo| repo.to_string());
     let repository = match (&cli.repository, repo.as_deref()) {
         (Some(repository), _) => Some(repository.clone()),
         (None, Some(repo)) => store.repository_id(repo)?,
@@ -410,17 +457,17 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
     let wave = match cli.wave.clone() {
         Some(wave) => Some(wave),
         None if cli.selects_repository() => None,
-        None => match context_scope(&registry, repo.as_deref())? {
+        None => match context_scope(&registry, repo.as_deref(), directory)? {
             Some(ContextScope::Wave(name)) => Some(name),
             Some(ContextScope::Repository) => None,
             // A Task's Session follows its claim; unresolved context stays local.
-            _ => return Ok(false),
+            _ => return Ok(None),
         },
     };
     let (machine, scope) = match wave.as_deref() {
         Some(wave) => {
             let Some(wave_id) = store.resolve_wave_id(wave, repo.as_deref())? else {
-                return Ok(false);
+                return Ok(None);
             };
             (
                 store
@@ -431,7 +478,7 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
         }
         None => {
             let Some(repository) = &repository else {
-                return Ok(false);
+                return Ok(None);
             };
             (
                 store
@@ -442,7 +489,7 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
         }
     };
     if machine == store.local_machine()?.id {
-        return Ok(false);
+        return Ok(None);
     }
     // The destination finds its own checkout by identity, never by this path.
     let mut forwarded = Vec::new();
@@ -464,8 +511,12 @@ fn dispatch_primary_session(cli: &Cli, args: &[String]) -> Result<bool> {
         .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repository` here so it can address the repository"))?;
         forwarded.splice(0..0, ["--repository".into(), repository.to_string()]);
     }
-    super::ssh::run(machine.as_str(), false, cli, &forwarded, None)?;
-    Ok(true)
+    Ok(Some(Forward {
+        machine,
+        resumed: None,
+        args: forwarded,
+        route: None,
+    }))
 }
 
 /// The scope a bare connect here opens, when it is a Wave or the repository.
@@ -480,16 +531,16 @@ enum ContextScope {
 fn context_scope(
     store: &crate::store::SharedStore,
     repo: Option<&str>,
+    cwd: &Path,
 ) -> Result<Option<ContextScope>> {
     let Some(repo) = repo else {
         return Ok(None);
     };
-    let cwd = std::env::current_dir()?;
     tokio::runtime::Runtime::new()?.block_on(async {
         use crate::ops::human_session::{connection_scope, SessionTarget};
         use crate::session::PrimaryScope;
         Ok(
-            match connection_scope(store, &cwd, SessionTarget::Context).await {
+            match connection_scope(store, cwd, SessionTarget::Context).await {
                 Ok(PrimaryScope::Wave(id)) => store
                     .list_waves(Some(repo))
                     .await?
@@ -512,13 +563,14 @@ pub(super) fn resolve(cli: &Cli) -> Result<Option<TaskExecutionRoute>> {
     let Some(store) = read_registry()? else {
         return Ok(None);
     };
-    resolve_task(&store, cli, selector)
+    resolve_task(&store, cli, selector, &std::env::current_dir()?)
 }
 
 fn resolve_task(
     store: &SqliteStore,
     cli: &Cli,
     selector: &str,
+    directory: &Path,
 ) -> Result<Option<TaskExecutionRoute>> {
     let repo =
         if let Some(id) = &cli.repository {
@@ -527,7 +579,7 @@ fn resolve_task(
             })?)
         } else if cli.repo.is_some() {
             Some(
-                crate::repository::CanonicalRepo::current()?
+                crate::repository::CanonicalRepo::containing(directory)?
                     .ok_or_else(|| anyhow!("selected repository is unavailable"))?
                     .to_string(),
             )
@@ -607,6 +659,8 @@ fn resolve_task_id(
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{launch_task, repository_path, resolve, resolve_task, without_placement};
     use crate::durable::{RepositoryId, TaskId};
     use crate::lf::Cli;
@@ -648,24 +702,26 @@ mod tests {
         store.bind_repository(selected_repo, &selected).unwrap();
         let cli = Cli::try_parse_from(["lf", "--repository", prior.as_str()]).unwrap();
         assert_eq!(
-            resolve_task(&store, &cli, "abcd").unwrap(),
+            resolve_task(&store, &cli, "abcd", Path::new("/")).unwrap(),
             Some(store.task_execution_route(&first).unwrap())
         );
         assert_eq!(
-            resolve_task(&store, &cli, first.as_str())
+            resolve_task(&store, &cli, first.as_str(), Path::new("/"))
                 .unwrap()
                 .unwrap()
                 .repository_id,
             selected
         );
-        assert!(resolve_task(&store, &cli, second.as_str())
+        assert!(resolve_task(&store, &cli, second.as_str(), Path::new("/"))
             .unwrap_err()
             .to_string()
             .contains("does not belong"));
-        assert!(resolve_task(&store, &cli, "UNKNOWN-1").unwrap().is_none());
+        assert!(resolve_task(&store, &cli, "UNKNOWN-1", Path::new("/"))
+            .unwrap()
+            .is_none());
         let unbound = RepositoryId::new();
         let cli = Cli::try_parse_from(["lf", "--repository", unbound.as_str()]).unwrap();
-        assert!(resolve_task(&store, &cli, first.as_str())
+        assert!(resolve_task(&store, &cli, first.as_str(), Path::new("/"))
             .unwrap_err()
             .to_string()
             .contains("no local checkout"));

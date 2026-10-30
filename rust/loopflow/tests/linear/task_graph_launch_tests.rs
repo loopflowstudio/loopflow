@@ -1771,11 +1771,7 @@ fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_s
         "#!/bin/sh\nwhile [ ! -e \"$LF_HOME/release\" ]; do sleep 0.05; done\n",
     )
     .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     task.repo.create_file("held.txt", "held\n");
     let mut waiter = command(
         task.repo.path(),

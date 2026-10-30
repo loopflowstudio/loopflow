@@ -129,6 +129,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git (`git show 3909e495a8:scratch/5b3da9-design.md`).
+- October 30, compress after the demo repairs (hook test uses the file's one-line `PermissionsExt` idiom): `--lib interrupting_a_task_with_only_an_open_process` 1/1, fmt clean.
 - October 30, demo repairs (merged origin/main 5c35b47a21; 0fa8c08ce4): `--lib interrupting_a_task_with_only_an_open_process` 1/1; `--lib linear_on_demand` 9/9; `planning_reconnect_tests` 2/2 in a Linux arm64 container (`rust:1`), and with the old refresh order `planning_refresh_reconnects_repository_planning` fails as CI did; `cargo clippy -p loopflow --all-targets -D warnings` clean; `third_party.py check` clean.
 - October 30, realign after the lifecycle fix: plan matches ddfd5b6226 (`run_admitted` ends an unwinding Process `Errored`; `CALL_SCOPED` exports no identity; `write::a_write_that_panics_ends_its_process_and_leaves_no_identity` present); no tests rerun.
 - October 30, in-app write lifecycle after compress (one `inherits` flag, one identity export in `create_process_context`): `--lib write::` 7/7, `--lib journal::` 30/30, `--test served_reads` 1/1, `-p loopflow-ffi` 3/3, clippy (loopflow, loopflow-ffi) and fmt clean.

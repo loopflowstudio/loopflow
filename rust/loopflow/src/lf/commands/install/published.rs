@@ -104,12 +104,11 @@ fn stream_release(client: &Client, stream: Stream) -> Result<String> {
 fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
     let directory = install_dir()?;
     let applications = applications_dir();
-    let cli_only = std::env::var("LF_INSTALL_CLI_ONLY").as_deref() == Ok("1");
     let stream = stream.as_str();
     if is_current(
         &directory,
         tag,
-        (cfg!(target_os = "macos") && !cli_only).then_some(applications.as_path()),
+        installs_app().then_some(applications.as_path()),
     ) {
         println!("{stream} {tag} is already installed.");
         return Ok(());
@@ -123,7 +122,7 @@ fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
         return Ok(());
     }
     let app = applications.join("Loopflow.app");
-    if cfg!(target_os = "macos") && !cli_only && updates_itself(&app) && app_is_running(&app)? {
+    if installs_app() && updates_itself(&app) && app_is_running(&app)? {
         // Replacing a running bundle under it is Sparkle's job, not ours.
         let status = Command::new("/usr/bin/open")
             .args(["-g", APP_UPDATE_LINK])
@@ -195,6 +194,11 @@ fn finish_adoption(applications: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Loopflow.app installs beside `lf` on a Mac unless `LF_INSTALL_CLI_ONLY=1`.
+fn installs_app() -> bool {
+    cfg!(target_os = "macos") && std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1")
 }
 
 fn applications_dir() -> PathBuf {
@@ -339,17 +343,7 @@ fn main_build() -> Result<()> {
     ])?;
     let (run, revision) = newest_run(&runs)?;
     let temporary = tempfile::tempdir()?;
-    gh(&[
-        "run",
-        "download",
-        &run.to_string(),
-        "--repo",
-        REPOSITORY,
-        "--name",
-        &format!("lf-{target}"),
-        "--dir",
-        &temporary.path().to_string_lossy(),
-    ])?;
+    download_artifact(run, &format!("lf-{target}"), temporary.path())?;
     let archive = temporary.path().join(format!("lf-{target}.tar.gz"));
     let status = Command::new("tar")
         .arg("-xzf")
@@ -369,10 +363,9 @@ fn main_build() -> Result<()> {
         .arg(directory.join("lf"))
         .arg("--sync-skills");
     // Mounted until promotion has copied the app out of it.
-    let image = (cfg!(target_os = "macos")
-        && std::env::var("LF_INSTALL_CLI_ONLY").as_deref() != Ok("1"))
-    .then(|| DiskImage::download(run, temporary.path()))
-    .transpose()?;
+    let image = installs_app()
+        .then(|| DiskImage::download(run, temporary.path()))
+        .transpose()?;
     if let Some(image) = &image {
         let applications = applications_dir();
         // Promotion quits a running app, replaces it and reopens it.
@@ -405,17 +398,7 @@ struct DiskImage {
 
 impl DiskImage {
     fn download(run: u64, temporary: &Path) -> Result<Self> {
-        gh(&[
-            "run",
-            "download",
-            &run.to_string(),
-            "--repo",
-            REPOSITORY,
-            "--name",
-            MAIN_APP,
-            "--dir",
-            &temporary.to_string_lossy(),
-        ])?;
+        download_artifact(run, MAIN_APP, temporary)?;
         Self::mount(&temporary.join("Loopflow.dmg"), &temporary.join("mount"))
     }
 
@@ -501,6 +484,21 @@ fn newest_run(json: &str) -> Result<(u64, String)> {
         .next()
         .ok_or_else(|| anyhow!("no green main build has packages yet"))?;
     Ok((run.database_id, run.head_sha))
+}
+
+fn download_artifact(run: u64, name: &str, directory: &Path) -> Result<()> {
+    gh(&[
+        "run",
+        "download",
+        &run.to_string(),
+        "--repo",
+        REPOSITORY,
+        "--name",
+        name,
+        "--dir",
+        &directory.to_string_lossy(),
+    ])
+    .map(drop)
 }
 
 fn gh(args: &[&str]) -> Result<String> {

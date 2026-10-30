@@ -24,4 +24,4 @@ Remaining:
 - Demo: `lf install --dev` on a Mac with Loopflow.app running → app quits, is replaced,
   reopens; `lf --version` and the app's `LoopflowSourceRevision` name the same commit.
 
-Check: `cargo test -p loopflow --lib lf::commands::install::` 30 pass; clippy pass.
+Check: `cargo test -p loopflow --lib lf::commands::install::` 30 pass; clippy pass (after compress).

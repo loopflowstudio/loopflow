@@ -17,7 +17,7 @@ pub(crate) struct Fixture {
 }
 
 impl Fixture {
-    pub(super) async fn new() -> Self {
+    pub(in crate::ops) async fn new() -> Self {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("loopflow.db");
         let store = Arc::new(
@@ -56,7 +56,7 @@ impl Fixture {
             .unwrap()
     }
 
-    pub(super) fn context(&self, graphql_url: &str) -> LinearTestContext {
+    pub(in crate::ops) fn context(&self, graphql_url: &str) -> LinearTestContext {
         LinearTestContext {
             path: self.database.clone(),
             store: self.store.clone(),
@@ -64,13 +64,13 @@ impl Fixture {
         }
     }
 
-    pub(super) async fn seed(&self, expires_at: i64) -> ProviderToken {
+    pub(in crate::ops) async fn seed(&self, expires_at: i64) -> ProviderToken {
         let token = token("A1", "R1", expires_at);
         self.store.upsert_provider_token(&token).await.unwrap();
         token
     }
 
-    pub(super) async fn planning_repo(&self) -> (PathBuf, Wave) {
+    pub(in crate::ops) async fn planning_repo(&self) -> (PathBuf, Wave) {
         let repo = self.directory.path().join("repo");
         std::fs::create_dir_all(repo.join(".lf")).unwrap();
         // Local fixture history only; no installed Machine or remote is touched.
@@ -116,7 +116,7 @@ impl Fixture {
     }
 }
 
-pub(super) fn now() -> i64 {
+pub(in crate::ops) fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
 }
 

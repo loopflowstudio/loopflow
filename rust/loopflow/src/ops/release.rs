@@ -421,11 +421,7 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
                 .iter()
                 .find(|release| preview_tag.as_deref() == Some(release.tag.as_str()))
                 .map(|release| release.published_at),
-            Some(stable_stream(
-                &releases,
-                &regressions(&main_repo)?,
-                chrono::Utc::now(),
-            )),
+            Some(read_stable_stream(&main_repo, &releases)?),
         )
     } else {
         (None, None)
@@ -4305,8 +4301,8 @@ fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<Publ
         .collect())
 }
 
-/// A regression Task as the stable rule reads it: releases from `version` on
-/// carry the bug, until the first release published after its fix landed.
+/// A regression as the stable rule reads it: releases from `version` on carry
+/// the bug, until the first release published after its fix landed.
 #[derive(Debug)]
 struct Regression {
     task: String,
@@ -4323,21 +4319,26 @@ impl Regression {
     }
 }
 
-/// The repository's regression Tasks. A done Task whose completion time is
-/// unreadable keeps covering, so a stalled `stable` is the failure, not a bug.
-fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(crate::ops::planning_sync::planning_store())?;
-    let tasks = store
-        .sqlite
-        .regression_tasks(&repo.to_string_lossy())
-        .map_err(|error| OpsError::Message(format!("read regression Tasks: {error}")))?;
-    Ok(tasks
+/// The repository's regressions, read from its Linear Team so every home sees
+/// the same ones. A repository without Linear planning has none. A completed
+/// issue whose completion time is unreadable keeps covering, so a stalled
+/// `stable` is the failure, not a bug.
+async fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
+    let Some(team) = super::linear::selected_linear_team(repo)? else {
+        return Ok(Vec::new());
+    };
+    let client = super::linear::issue_client().await?;
+    let issues = client
+        .regressions(&team)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    Ok(issues
         .into_iter()
-        .filter(|task| task.state.as_deref() != Some("canceled"))
-        .filter_map(|task| {
-            let fixed_at = if task.state.as_deref() == Some("completed") {
-                task.completed_at
+        .filter(|issue| issue.state.as_deref() != Some("canceled"))
+        .filter_map(|issue| {
+            let fixed_at = if issue.state.as_deref() == Some("completed") {
+                issue
+                    .completed_at
                     .as_deref()
                     .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
                     .map(|at| at.with_timezone(&chrono::Utc))
@@ -4345,12 +4346,35 @@ fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
                 None
             };
             Some(Regression {
-                version: parse_version(task.regressed_in.as_deref()?)?,
-                task: task.identifier,
+                version: parse_version(&issue.version)?,
+                task: issue.identifier,
                 fixed_at,
             })
         })
         .collect())
+}
+
+/// The stable stream against Linear's regressions. Unread regressions hold
+/// `stable` where it is and say why.
+fn read_stable_stream(repo: &Path, releases: &[PublishedRelease]) -> OpsResult<StableStream> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    Ok(runtime.block_on(stable_against_linear(repo, releases)))
+}
+
+async fn stable_against_linear(repo: &Path, releases: &[PublishedRelease]) -> StableStream {
+    match regressions(repo).await {
+        Ok(regressions) => stable_stream(releases, &regressions, chrono::Utc::now()),
+        Err(error) => StableStream {
+            current: releases
+                .iter()
+                .find(|release| release.is_latest)
+                .map(StreamRelease::from),
+            next: None,
+            holds: vec![StableHold::RegressionsUnread {
+                reason: error.to_string(),
+            }],
+        },
+    }
 }
 
 /// The release `stable` should point at now, when that is ahead of where it
@@ -4404,6 +4428,10 @@ pub enum StableHold {
         task: String,
         tags: Vec<String>,
     },
+    /// Linear's regressions could not be read; `stable` stays put.
+    RegressionsUnread {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for StableHold {
@@ -4414,6 +4442,12 @@ impl std::fmt::Display for StableHold {
             }
             Self::Regression { task, tags } => {
                 write!(formatter, "{task} holds {}", tags.join(", "))
+            }
+            Self::RegressionsUnread { reason } => {
+                write!(
+                    formatter,
+                    "stable holds: regressions unread from Linear: {reason}"
+                )
             }
         }
     }
@@ -4485,11 +4519,7 @@ fn advance_stable(
     progress: &impl Progress,
     lock: &ReleaseLock,
 ) -> OpsResult<()> {
-    let stable = stable_stream(
-        &published_releases(repo, target)?,
-        &regressions(repo)?,
-        chrono::Utc::now(),
-    );
+    let stable = read_stable_stream(repo, &published_releases(repo, target)?)?;
     for hold in &stable.holds {
         progress.status(&hold.to_string());
     }
@@ -4703,6 +4733,104 @@ mod tests {
                 until: releases[0].published_at + STABLE_SOAK,
             }]
         );
+    }
+
+    /// The stable stream for `releases` against a Linear double answering
+    /// with `responses`.
+    fn stable_with_linear(
+        releases: &[PublishedRelease],
+        responses: Vec<crate::linear::test_server::QueuedResponse>,
+    ) -> StableStream {
+        use crate::ops::linear::{test_fixture, LINEAR_TEST_CONTEXT};
+        let _lock = crate::journal::test_env_lock();
+        let _restore = test_fixture::PlanningEnvironment::isolate();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let fixture = test_fixture::Fixture::new().await;
+            let (repo, _wave) = fixture.planning_repo().await;
+            fixture.seed(test_fixture::now() + 3600).await;
+            let (url, _) = crate::linear::test_server::spawn(responses).await;
+            LINEAR_TEST_CONTEXT
+                .scope(
+                    fixture.context(&url),
+                    stable_against_linear(&repo, releases),
+                )
+                .await
+        })
+    }
+
+    fn regressed_issues(
+        state: &str,
+        completed_days_ago: Option<i64>,
+    ) -> crate::linear::test_server::QueuedResponse {
+        let completed_at = completed_days_ago
+            .map(|days| (chrono::Utc::now() - chrono::TimeDelta::days(days)).to_rfc3339());
+        crate::linear::test_server::json_response(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"data": {"issues": {
+                "nodes": [{
+                    "identifier": "LOO-7",
+                    "completedAt": completed_at,
+                    "state": {"type": state},
+                    "labels": {"nodes": [
+                        {"name": "Bug", "parent": null},
+                        {"name": "v0.16.0", "parent": {"name": "Regressed in"}},
+                    ]},
+                }],
+                "pageInfo": {"hasNextPage": false, "endCursor": null},
+            }}}),
+        )
+    }
+
+    #[test]
+    fn an_open_linear_regression_holds_stable() {
+        let releases = [
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.9", 20, false),
+            published("v0.15.2", 30, true),
+        ];
+
+        let stable = stable_with_linear(&releases, vec![regressed_issues("started", None)]);
+
+        assert_eq!(stable.next.unwrap().tag, "v0.15.9");
+        let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
+        assert_eq!(holds, ["LOO-7 holds v0.16.1, v0.16.0"]);
+    }
+
+    #[test]
+    fn a_completed_linear_regression_releases_the_next_soaked_release() {
+        let releases = [
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.2", 30, true),
+        ];
+
+        let stable = stable_with_linear(&releases, vec![regressed_issues("completed", Some(10))]);
+
+        assert_eq!(stable.next.unwrap().tag, "v0.16.1");
+    }
+
+    #[test]
+    fn unread_linear_regressions_hold_stable_and_say_why() {
+        let releases = [
+            published("v0.16.0", 12, false),
+            published("v0.15.2", 30, true),
+        ];
+        let refused = crate::linear::test_server::json_response(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"errors": [{"message": "Authentication required"}]}),
+        );
+
+        let stable = stable_with_linear(&releases, vec![refused]);
+
+        assert_eq!(stable.current.unwrap().tag, "v0.15.2");
+        assert_eq!(stable.next, None);
+        let [StableHold::RegressionsUnread { reason }] = stable.holds.as_slice() else {
+            panic!("expected an unread-regressions hold: {:?}", stable.holds);
+        };
+        assert!(reason.contains("Authentication required"), "{reason}");
     }
 
     #[test]

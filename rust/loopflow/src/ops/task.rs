@@ -1485,6 +1485,9 @@ pub fn task_create(
         validate_task_edit_input(update)?;
     }
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
+    if regression.is_some() {
+        super::linear::repository_team_id(&main)?;
+    }
     block_on_task(async {
         let store = super::planning_sync::planning_store().await?;
         if let Err(error) =
@@ -1532,19 +1535,54 @@ pub fn task_create(
             )
             .await
             .map_err(task_error)?;
-        if let Some(update) = &regression {
-            store
-                .edit_task(&task.id, task.revision, update)
-                .await
-                .map_err(task_error)?;
-        }
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
+        let created = || async {
+            store
+                .get_task(&task.id)
+                .await
+                .map_err(task_error)?
+                .ok_or_else(|| task_error("Created Task is missing"))
+        };
+        let Some(update) = &regression else {
+            return created().await;
+        };
+        let synced = created().await?;
+        mark_regression(&main, &synced, update).await?;
         store
-            .get_task(&task.id)
+            .edit_task(&synced.id, synced.revision, update)
             .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error("Created Task is missing"))
+            .map_err(task_error)?;
+        created().await
     })
+}
+
+/// Label the Task's Linear issue with the release it regressed in. Releases
+/// read regressions from Linear, so a mark that misses Linear holds nothing.
+async fn mark_regression(
+    repo: &Path,
+    task: &Task,
+    update: &crate::work::task::TaskUpdate,
+) -> OpsResult<()> {
+    let Some(version) = &update.regressed_in else {
+        return Ok(());
+    };
+    let team = super::linear::repository_team_id(repo)?;
+    let issue = task.linear_id().map_err(|_| {
+        task_error(format!(
+            "Task {} has no Linear issue yet; once it syncs, run `lf task edit {} --regressed-in {version}`",
+            task.identifier, task.identifier
+        ))
+    })?;
+    super::linear::issue_client()
+        .await?
+        .mark_regressed_in(issue.as_str(), &team, version)
+        .await
+        .map_err(|error| {
+            task_error(format!(
+                "mark {} regressed in {version}: {error}",
+                task.identifier
+            ))
+        })
 }
 
 pub fn resolve_task_create_input(
@@ -2292,6 +2330,7 @@ pub fn task_edit(
     validate_task_edit_input(&update)?;
     block_on_task(async {
         let (store, task) = resolve_saved_task(repo, wave, issue).await?;
+        mark_regression(&repository_for_task(&store, &task)?, &task, &update).await?;
         let edited = store
             .edit_task(&task.id, task.revision, &update)
             .await

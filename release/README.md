@@ -146,11 +146,15 @@ lf task create --title "Sessions lose their name" --regressed-in v0.15.3
 lf task edit LOO-12 --regressed-in v0.15.3      # mark an existing bug
 ```
 
-A regression is a bug Task marked with the release it regressed in. While it
-is open, `stable` stays below that release. Completing it (landing the fix)
-makes the first release published afterwards eligible once it soaks; releases
-in between still carry the bug and stay skipped. The run logs which Task holds
-`stable`. It reads the release Machine's Tasks, never Linear.
+A regression is a bug Task marked with the release it regressed in: a
+`Regressed in › v0.15.3` label on its Linear issue, so every Machine sees it.
+While it is open, `stable` stays below that release. Completing it (landing the
+fix) makes the first release published afterwards eligible once it soaks;
+releases in between still carry the bug and stay skipped. The run reads the
+repository Team's labelled issues from Linear and logs which Task holds
+`stable`. When Linear can't be read, the release still publishes, `stable`
+stays put, and the run says why. A repository without Linear planning has no
+regressions.
 
 ## What we took from other projects
 

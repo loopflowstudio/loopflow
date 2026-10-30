@@ -491,22 +491,6 @@ impl SqliteStore {
         tasks_in(&conn, wave_id)
     }
 
-    /// One repository's regression Tasks, open or done; abandoned ones covered nothing.
-    pub fn regression_tasks(&self, repo: &str) -> StoreResult<Vec<Task>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let conn = conn.savepoint()?;
-        let query = format!(
-            "{TASK_COLUMNS} WHERE t.repository_id=(SELECT id FROM repository_plans WHERE repo=?1)
-             AND t.regressed_in IS NOT NULL AND t.abandoned_at IS NULL AND {TASK_VISIBLE}"
-        );
-        let identifiers = TaskIdentifiers::read(&conn)?;
-        let mut statement = conn.prepare(&query)?;
-        let tasks = statement
-            .query_map([repo], |row| map_listed_task_row(&identifiers, row))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(tasks)
-    }
-
     /// Tasks that are neither done nor abandoned: the live plan.
     pub fn list_open_tasks(&self, wave_id: Option<&WaveId>) -> StoreResult<Vec<Task>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");

@@ -94,7 +94,7 @@ released batches and breaking migrations name themselves. Every ledger row
 records it. A build opens a store holding migrations it does not know only when
 it knows their floor, and then requires every object it expects to be present
 unchanged; tables may have gained columns. Otherwise it refuses with
-`this store needs an lf that knows drop_waves (it has drop_waves; latest known task_graphs); install it with \`lf install --dev\``.
+`this store needs an lf that knows drop_waves (it has drop_waves; latest known task_graphs); run \`lf install\``.
 Install previews name the breaking migration a candidate would apply. Promotion
 never applies history it does not know; selecting an older build the floor
 admits, as a rollback does, applies nothing and is allowed.
@@ -149,7 +149,7 @@ applied versions, checksums and reader floors are read on every open.
 | Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
 | Newer migrations whose floor this build knows | opens; this build's schema must survive unchanged |
 | Newer migrations whose floor this build does not know | names the migration the store needs |
-| Skipped a migration, or drifted from the chain's schema | keep `loopflow.db`; open it with the lf that last migrated it (named from the ledger when that build recorded itself), or `lf install --dev` |
+| Skipped a migration, or drifted from the chain's schema | keep `loopflow.db`; open it with the lf that last migrated it (named from the ledger when that build recorded itself), or run `lf install` |
 
 Every refusal names a build that opens the store; none suggests deleting it.
 

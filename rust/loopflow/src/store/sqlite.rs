@@ -2398,7 +2398,7 @@ mod frontier_tests {
         assert!(
             refusal.contains(&format!(
                 "this store needs an lf that knows {newer} (it has "
-            )) && refusal.ends_with("install it with `lf install --dev`"),
+            )) && refusal.ends_with("run `lf install`"),
             "{refusal}"
         );
     }

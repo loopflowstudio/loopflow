@@ -1119,7 +1119,7 @@ fn pending_migrations<'a>(
             || super::migration_catalog::is_slug(version)
         {
             Err(StoreError::InvalidData(format!(
-                "database migration {version} is unknown to lf {} (latest known {}); a newer lf migrated this store; install it with `lf install --dev`",
+                "database migration {version} is unknown to lf {} (latest known {}); a newer lf migrated this store; run `lf install`",
                 crate::build_info::BUILD_VERSION,
                 set.last()
                     .map(Migration::version)
@@ -1178,7 +1178,7 @@ fn admitted_newer_floor(
     let floor = floor.expect("a newer tail has at least one row");
     if !known.contains(&floor) {
         return Err(StoreError::InvalidData(format!(
-            "this store needs an lf that knows {floor} (it has {}; latest known {}); install it with `lf install --dev`",
+            "this store needs an lf that knows {floor} (it has {}; latest known {}); run `lf install`",
             applied.last().expect("a newer tail is not empty"),
             known.last().map(String::as_str).unwrap_or("none"),
         )));
@@ -1343,7 +1343,7 @@ fn validate_schema_within(conn: &rusqlite::Connection, set: &[Migration]) -> Sto
         .find(|old| !actual.iter().any(|new| schema_object_within(old, new)))
     {
         return Err(StoreError::InvalidData(format!(
-            "a newer lf changed {} {}, which lf {} reads; install the newer build with `lf install --dev`",
+            "a newer lf changed {} {}, which lf {} reads; run `lf install`",
             missing.object_type,
             missing.name,
             crate::build_info::BUILD_VERSION
@@ -1496,7 +1496,7 @@ fn incompatible(conn: &rusqlite::Connection) -> StoreError {
     };
     StoreError::InvalidData(format!(
         "this Loopflow database's migration history or schema differs from lf {} (latest known {}); \
-         {keep}, or install the newest with `lf install --dev`",
+         {keep}, or run `lf install`",
         crate::build_info::BUILD_VERSION,
         latest_known_version(),
     ))
@@ -5964,14 +5964,14 @@ mod tests {
             message.contains("latest known 0.10.001_initial"),
             "{message}"
         );
-        assert!(message.contains("lf install --dev"), "{message}");
+        assert!(message.contains("run `lf install`"), "{message}");
     }
 
     fn assert_keeps_the_store(error: &crate::store::StoreError) {
         let message = error.to_string();
         assert!(!message.contains("delete"), "{message}");
         assert!(message.contains("keep loopflow.db"), "{message}");
-        assert!(message.contains("lf install --dev"), "{message}");
+        assert!(message.contains("run `lf install`"), "{message}");
     }
 
     /// The pre-loop store's flat ledger (`001_initial`, `002_...`, …) was abandoned

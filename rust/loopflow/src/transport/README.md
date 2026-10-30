@@ -16,6 +16,9 @@ viewer's input token is revoked and that terminal says where the conversation we
 opening a socket or starting a provider. Desktop decides from the record's `state`
 whether showing a pane reattaches: a `detached` Session reattaches, an `active` one
 waits for Move here, and an ended one waits for an explicit open.
+Preparing asks a running owner whether a viewer holds control, so an owner from an
+earlier lf, which cannot record its viewers in a store a newer lf advanced, reads
+`detached` once Desktop restarts and its pane reattaches.
 
 `lf resume --all` is the one automatic restart: it resumes Sessions whose owner
 never recorded an exit and is gone from the OS, as after a reboot, crash or kill.

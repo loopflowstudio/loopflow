@@ -38,6 +38,9 @@ def _stage_build_artifacts(root: Path) -> None:
     swift_rel = root / "swift" / ".build" / "release"
     swift_rel.mkdir(parents=True)
     _write_fake_macho(swift_rel / "LoopflowMac")
+    sparkle = swift_rel / "Sparkle.framework" / "Versions" / "B"
+    sparkle.mkdir(parents=True)
+    _write_fake_macho(sparkle / "Sparkle")
 
     swift_loopflow = root / "swift" / "LoopflowMac"
     swift_loopflow.mkdir(parents=True)
@@ -83,6 +86,8 @@ def _patch_subprocess(
     real_run = subprocess.run
 
     def fake_run(cmd, *args, **kwargs):
+        if cmd and cmd[0] == "install_name_tool":
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd and cmd[0] == "lipo" and cmd[1:2] == ["-archs"]:
             return subprocess.CompletedProcess(cmd, 0, stdout=" ".join(arch_list), stderr="")
         if cmd and cmd[0] == "codesign":
@@ -113,6 +118,7 @@ def test_install_loopflow_bundles_the_control_plane_helpers(
     assert (spec.macos_dir / "Loopflow").exists()
     assert (spec.macos_dir / "lf").exists()
     assert not (spec.macos_dir / "lfd").exists()
+    assert (spec.contents_dir / "Frameworks/Sparkle.framework/Versions/B/Sparkle").exists()
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"

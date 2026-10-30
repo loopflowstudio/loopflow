@@ -2649,10 +2649,10 @@ fn promote_from_installation(
         "promoted {}: {} -> {} (store {})",
         preview.candidate.display_version(),
         prepared.cli_target.display(),
-        switch.candidate.path.display(),
+        public_cli_target(&switch.candidate.path, &switch.activation).display(),
         store_path.display()
     );
-    crate::lf::commands::rollover::report_after_promote();
+    crate::lf::commands::rollover::report_after_promote(switch.activation.app.is_some());
     if sync_skills {
         if let Err(error) = crate::lf::commands::ops::run_sync_skills(true, false, false) {
             eprintln!(

@@ -76,3 +76,5 @@
   pipe from Doppler `loopflow`/`prd`). `DOPPLER_TOKEN_PRD` already exists in Actions but no
   workflow uses it; using it instead would avoid the copies (rotation in two places) at the cost
   of exposing all prd secrets to the job. Followed the Task's direction.
+
+- Sync onto main (2026-10-30): main shipped this branch's decisions in `release/v0.15.1/DECISIONS.md`, whose last implication says `lf install --dev` links the CLI alone "until dev packages include a signed app". This PR delivers that signed app, but `release/unreleased/DECISIONS.md` no longer exists and the shipped record stays unedited. Whether LOO-688 earns its own unreleased decision entry is still open.

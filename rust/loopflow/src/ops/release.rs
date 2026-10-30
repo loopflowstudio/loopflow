@@ -923,8 +923,9 @@ fn release_version(
                     ))
                 })?;
                 // No candidate was built yet, so the version is unspent: corrections
-                // merged after the release PR ship under the same version. Fetching
-                // the merge commit also refreshes origin's default branch.
+                // merged after the release PR ship under the same version. An unseen
+                // merge commit means origin's default branch is stale too; one fetch
+                // refreshes both.
                 ensure_commit_local(main_repo, &release_commit, lock)?;
                 let main_ref = format!("origin/{default_branch}");
                 let current_main = run_stdout(main_repo, "git", &["rev-parse", &main_ref])?;
@@ -4067,16 +4068,16 @@ fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate, lock: &Releas
     }
 }
 
-/// Ensure `sha` (or any revision) exists in `repo`'s local object database,
-/// fetching from origin if it doesn't.
+/// Ensure `revision` exists in `repo`'s local object database, fetching from
+/// origin if it doesn't.
 ///
 /// `git rev-parse <40-char-hex>` echoes the input without verifying the
 /// object is actually present. When the SHA originates from `gh pr view`
 /// (a merge commit landed on origin via the merge queue), the local repo
 /// may not have fetched it yet — and `git tag <name> <sha>` then fails
 /// with `trying to write ref ... with nonexistent object`.
-fn ensure_commit_local(repo: &Path, sha: &str, lock: &ReleaseLock) -> OpsResult<()> {
-    if commit_exists_locally(repo, sha) {
+fn ensure_commit_local(repo: &Path, revision: &str, lock: &ReleaseLock) -> OpsResult<()> {
+    if commit_exists_locally(repo, revision) {
         return Ok(());
     }
     let fetch = lock
@@ -4090,11 +4091,11 @@ fn ensure_commit_local(repo: &Path, sha: &str, lock: &ReleaseLock) -> OpsResult<
             stderr: String::from_utf8_lossy(&fetch.stderr).to_string(),
         });
     }
-    if commit_exists_locally(repo, sha) {
+    if commit_exists_locally(repo, revision) {
         return Ok(());
     }
     Err(OpsError::Message(format!(
-        "commit {sha} is not present locally even after fetching origin"
+        "commit {revision} is not present locally even after fetching origin"
     )))
 }
 

@@ -105,6 +105,8 @@ Neither done-when is met: idle is under 2% only for `desktop plans` (and `monito
 
 ## Remaining work
 
+From the October 30 demo (`scratch/5b3da9-demo.md`): both failing tests are repaired and pass locally; the branch merged origin/main through f6af59cc66 and the PR is CLEAN; done-whens and CPU numbers are restored above (installed 0.15.1, the installed release by then, not 0.15.0). CI at 64d8597166 reported 2 checks passed and 15 skipped, so the Rust matrix hasn't confirmed the two repairs yet. The CPU done-whens remain unmet.
+
 `lf` watch efficiency:
 - `lf history` still selects every input in its window in SQL (3,322 rows on the live copy) before decoding the few it shows; that selection is now most of the 0.40 s. Only worth pushing into SQL if the installed-build profile shows it.
 - Clock-driven readings (`Watched::every(ACTIVITY_CLOCK)`: `desktop sessions`, `task status`, `monitor ps`) reread their whole result every 2 s. Session availability changes with time alone (`available_sql`'s `now - observed_at >= quiet`), with process liveness and with client receipts. A cheap clock check must predict the next quiet-threshold crossing and fingerprint open Process evidence and receipts before it can skip a reading; a longer clock would instead delay Desktop's waiting state. Undecided; this is the remaining idle cost.
@@ -129,6 +131,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git (`git show 3909e495a8:scratch/5b3da9-design.md`).
+- October 30, realign after the demo repairs: plan matches 64d8597166; `git rev-list HEAD..origin/main` 0, PR mergeState CLEAN; no tests rerun.
 - October 30, compress after the demo repairs (hook test uses the file's one-line `PermissionsExt` idiom): `--lib interrupting_a_task_with_only_an_open_process` 1/1, fmt clean.
 - October 30, demo repairs (merged origin/main 5c35b47a21; 0fa8c08ce4): `--lib interrupting_a_task_with_only_an_open_process` 1/1; `--lib linear_on_demand` 9/9; `planning_reconnect_tests` 2/2 in a Linux arm64 container (`rust:1`), and with the old refresh order `planning_refresh_reconnects_repository_planning` fails as CI did; `cargo clippy -p loopflow --all-targets -D warnings` clean; `third_party.py check` clean.
 - October 30, realign after the lifecycle fix: plan matches ddfd5b6226 (`run_admitted` ends an unwinding Process `Errored`; `CALL_SCOPED` exports no identity; `write::a_write_that_panics_ends_its_process_and_leaves_no_identity` present); no tests rerun.

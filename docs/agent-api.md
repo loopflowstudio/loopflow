@@ -30,7 +30,7 @@ Give an agent harness the same operating contract when it was not launched by
 Loopflow:
 
 ```bash
-npx skills add loopflowstudio/loopflow --skill loopflow -g -y
+npx skills add loopflowstudio/loopflow --skill loopflow -g
 ```
 
 The installed skill teaches the harness to use `lf`; it does not implement a

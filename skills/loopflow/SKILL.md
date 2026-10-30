@@ -14,10 +14,15 @@ When the person asks for a change that should end in a pull request, make it a
 Task and run it, one Task per reviewable outcome:
 
 ```bash
-lf task create --title "<outcome in the person's words>"   # prints the Task ID
-lf task run <ID>                                             # own worktree and branch; returns once running
-lf open --task <ID> --link --format markdown                 # the link to give back
+lf task create <<'EOF'                         # prints the Task ID
+<outcome in the person's words: the first line is the title>
+EOF
+lf task run <ID>                               # own worktree and branch; returns once running
+lf open --task <ID> --link --format markdown   # the link to give back
 ```
+
+The person's words are data, never shell: send them on stdin through a quoted
+heredoc as above, or as one single-quoted argument with each `'` written `'\''`.
 
 Give back each Task's link and say what it will deliver. Questions, reading
 code and one-line fixes the person wants here happen in this checkout, without
@@ -29,7 +34,7 @@ and ask.
 ```bash
 lf task list                          # open Tasks
 lf task status <ID>                   # its run, its PR, what it needs from the person
-lf comment <ID> "<direction>"         # reaches the run before its next step
+lf comment <ID> '<direction>'         # reaches the run before its next step
 lf resume --task <ID>                 # the Task's conversation, for the person
 lf land --wait-and-fix                # only when the person asks to land
 ```
@@ -39,9 +44,10 @@ not a completed Task; say which happened.
 
 ## Skills and Graphs
 
-The repository's own Skills and Graphs come first. Find them with `lf list`,
-read one with `lf help <name>`, then run it: `lf <skill>` here, or
-`lf task run <ID> <graph>` on a Task.
+Run a Skill or Graph only when the person asks for it, by name or by what it
+does. They are the repository's own prompts and steps, so read one with
+`lf help <name>` and say what it will do before running it: `lf <skill>` here,
+or `lf task run <ID> <graph>` on a Task. `lf list` shows what exists.
 
 ## Boundaries
 

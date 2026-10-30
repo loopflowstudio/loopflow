@@ -37,7 +37,7 @@ def test_external_user_and_internal_worker_authority_are_distinct() -> None:
     assert "external harness" in agent_api
     assert "Loopflow-launched" in agent_api
 
-    install = "npx skills add loopflowstudio/loopflow --skill loopflow -g -y"
+    install = "npx skills add loopflowstudio/loopflow --skill loopflow -g"
     assert install in agent_api
     assert install in readme
 

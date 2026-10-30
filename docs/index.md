@@ -3,7 +3,7 @@
 ```bash
 curl -fsSL https://loopflow.studio/install.sh | sh
 lf init
-npx skills add loopflowstudio/loopflow --skill loopflow -g -y   # teach your coding agent to use lf
+npx skills add loopflowstudio/loopflow --skill loopflow -g   # teach your coding agent to use lf
 ```
 
 `lf` is how your agent orchestra conducts itself. It's a task system for coding

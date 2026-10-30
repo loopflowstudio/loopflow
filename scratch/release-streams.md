@@ -233,6 +233,22 @@ commit it, and do not land; publish and land once, after slice 8.
   `an_app_ahead_of_the_store_is_adopted_in_place`), the updated frontier refusal test and clippy:
   not run — the lib test build was killed at the 1 h limit still compiling; owner: gate.
 
+**Concept review after realign (2026-10-29) — next implement.** Jack's "b" is built
+(`published::install` hands off only when the app `updates_itself` and `app_is_running`;
+otherwise it replaces the bundle). One mismatch is left. A store that is ahead of this
+`lf` still produces refusals that name `lf install --dev`. Two accepted decisions settle
+it: a stream flag switches and records the stream, and refusals name the build to install.
+Following that advice would quietly move a stable Machine onto dev, and from then on main
+builds would migrate its store. The common cause is a stale binary, such as the cron gate
+after a newer install. Plain `lf install` follows the recorded stream, relinks or adopts,
+and when it can't open the store it names the stream and date itself. So:
+- `migrations.rs` unknown-migration (`:1122`), floor (`:1181`), changed-reader (`:1346`) and
+  `incompatible` (`:1499`) say "run `lf install`" (incompatible keeps "open it with lf
+  <build>" first). Update `sqlite.rs:2401`, the `migrations.rs` tests at `:5967`/`:5974`
+  and `MIGRATIONS.md:49,97,152` to match.
+- Keep `--dev` where dev is the subject: `install.rs:202` (unmerged-migration candidate) and
+  the `published.rs` dev download and stream-choice messages.
+
 Check (slices 3–8, 2026-10-29): focused suites per slice above pass; full gate (nextest, clippy, Swift, release pytest) not yet run on the combined tree — owner: gate before the one PR.
 
 ## Neighbouring Tasks

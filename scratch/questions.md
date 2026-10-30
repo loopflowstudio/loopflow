@@ -1,1 +1,0 @@
-- LOO-694 fix forward: an owner that doesn't answer the `controlled` probe within 1 s is taken over (its provider stopped, thread resumed in a new owner). A healthy owner stalled >1 s would also be taken over; accepted as the simpler choice since takeover preserves the thread and replays no input.

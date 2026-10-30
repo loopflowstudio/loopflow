@@ -25,7 +25,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from app_bundle import embed_frameworks, verify_rpath_libraries
+from app_bundle import embed_frameworks
 from bundle_version import read_release_version, read_source_revision, stamp_bundle_version
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -404,9 +404,7 @@ def release() -> int:
     build_dir = SWIFT_DIR / ".build" / "release"
     info_plist = SWIFT_DIR / "LoopflowMac" / "Info.plist"
     _copy_app_executable(build_dir, info_plist, app_dir / "MacOS")
-    executable = app_dir / "MacOS" / _bundle_executable(info_plist)
-    embed_frameworks(build_dir, executable)
-    verify_rpath_libraries(executable)
+    embed_frameworks(build_dir, app_dir / "MacOS" / _bundle_executable(info_plist))
     shutil.copy(info_plist, app_dir)
     stamp_bundle_version(app_dir / "Info.plist", version, read_source_revision(REPO_ROOT))
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")

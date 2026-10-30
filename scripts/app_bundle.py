@@ -3,7 +3,7 @@
 SwiftPM links Sparkle beside its build products with only an `@loader_path`
 rpath. Copied into `Contents/MacOS` alone, that binary aborts in dyld at launch
 ("Library not loaded: @rpath/Sparkle.framework/..."). Every bundle builder
-embeds the framework here and checks the result before signing.
+embeds the framework here, which checks the result before signing.
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ FRAMEWORKS_RPATH = "@executable_path/../Frameworks"
 
 
 def embed_frameworks(build_dir: Path, executable: Path) -> None:
-    """Copy SwiftPM's Sparkle.framework into Contents/Frameworks and point the executable at it."""
+    """Copy SwiftPM's Sparkle.framework into Contents/Frameworks, point the executable at it,
+    and verify every `@rpath` library it links now resolves."""
     source = build_dir / SPARKLE_FRAMEWORK
     if not source.is_dir():
         raise RuntimeError(f"Missing built {SPARKLE_FRAMEWORK}: {source}")
@@ -29,6 +30,7 @@ def embed_frameworks(build_dir: Path, executable: Path) -> None:
     shutil.copytree(source, destination, symlinks=True)
     if FRAMEWORKS_RPATH not in _rpaths(executable):
         _run_tool(["install_name_tool", "-add_rpath", FRAMEWORKS_RPATH, str(executable)])
+    verify_rpath_libraries(executable)
 
 
 def verify_rpath_libraries(executable: Path) -> None:

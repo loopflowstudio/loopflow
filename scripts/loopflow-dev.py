@@ -38,7 +38,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from app_bundle import embed_frameworks, verify_rpath_libraries
+from app_bundle import embed_frameworks
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -623,7 +623,6 @@ def _install_dev_app() -> None:
     build_dir = SWIFT_DIR / ".build" / "debug"
     shutil.copy(build_dir / "LoopflowMac", macos_dir / executable)
     embed_frameworks(build_dir, macos_dir / executable)
-    verify_rpath_libraries(macos_dir / executable)
     stale = macos_dir / "LoopflowMac"
     if stale.name != executable and stale.exists():
         stale.unlink()

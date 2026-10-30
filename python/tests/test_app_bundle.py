@@ -87,7 +87,6 @@ def test_embedded_sparkle_loads_from_contents_frameworks(tmp_path: Path) -> None
     app_bundle.embed_frameworks(build_dir, executable)
     app_bundle.embed_frameworks(build_dir, executable)  # rebuilding in place replaces it
 
-    app_bundle.verify_rpath_libraries(executable)
     shutil.rmtree(build_dir)
     assert subprocess.run([str(executable)]).returncode == 0
     assert (app / "Contents" / "Frameworks" / "Sparkle.framework" / "Sparkle").is_symlink()

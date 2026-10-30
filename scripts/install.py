@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from app_bundle import embed_frameworks, verify_rpath_libraries
+from app_bundle import embed_frameworks
 from bundle_version import read_release_version, read_source_revision, stamp_bundle_version
 
 ROOT = Path(__file__).parent.parent
@@ -281,10 +281,8 @@ def _install_loopflow(spec: BundleSpec, version: str) -> None:
 
     for executable in spec.executables:
         _atomic_install(executable, spec.macos_dir / _bundle_binary_name(executable))
-    app_executable = spec.macos_dir / APP_NAME
     try:
-        embed_frameworks(spec.swift_build_dir, app_executable)
-        verify_rpath_libraries(app_executable)
+        embed_frameworks(spec.swift_build_dir, spec.macos_dir / APP_NAME)
     except RuntimeError as exc:
         raise StageError(str(exc)) from exc
 

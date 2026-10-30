@@ -19,8 +19,8 @@ dynamically. Only `release-loopflow.py` embedded the framework and added the
 
 ## Repair
 `scripts/app_bundle.py` embeds Sparkle.framework (keeping symlinks) and adds
-the rpath. `verify_rpath_libraries` resolves each `@rpath` dependency against the
-binary's rpaths before signing. All three builders use it. The helper reports the
+the rpath, then `verify_rpath_libraries` resolves each `@rpath` dependency against
+the binary's rpaths before signing. All three builders make that one call. The helper reports the
 broken local-bin bundle as `cannot load Sparkle.framework/Versions/B/Sparkle` and
 passes the installed app.
 

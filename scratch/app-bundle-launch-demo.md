@@ -106,7 +106,30 @@ CFBundleExecutable reader (no builder rewrites that key). The per-builder residu
 (plist stamping, icon, resources, strip, signing) is the accepted boundary. Nothing to
 change; no open product choice.
 
+## Demo pass 2 (2026-10-30, headless, agent standing in for Jack Heart)
+
+On HEAD `8ffeb67540` (PR #1796):
+
+- `launch.py bundle()` ran for real (`swift build -c release`, 66 s). The bundle has
+  `Contents/Frameworks/Sparkle.framework`, rpaths `@loader_path` + `@executable_path/../Frameworks`.
+  Launched `-ui-test-mode empty-workspaces` with a temp `LF_HOME`: still running at 10 s, no dyld output.
+  `codesign --verify --strict` reports "a sealed resource is missing": `bundle()` writes
+  `Resources/source` after it signs. origin/main does the same (since `8417d95c3b`), the
+  launch is unaffected, and it is outside this Task.
+- `rebuild_third_party.py build()`'s placement tail (Info.plist, `install_app_executable`, resource
+  bundles, ad-hoc sign) ran on the real release build: strict verify ok, still running at 10 s, no dyld output.
+  Not run: the full relink (it needs the shipped Ghostty/gettext materials). The tail after
+  `swift build` is the code this Task changed.
+- `pytest` over the six builder suites: 49 passed.
+
+Decision: **advance**. Every builder now produces a Loopflow.app that launches.
+
+## Gate (2026-10-30)
+
+Diff review: no changes needed; docs (REBUILD.md, notices inventory) match the code.
+Check: `scripts/test.py --reuse-passing` → PASS (architecture, python 250 s, swift 215 s; rust/website/e2e not reached). `ruff check` clean on changed files except launch.py E501s and an install.py format nit, both present on origin/main and not CI-enforced; left alone.
+
 ## Remaining
 
-- PR #1796 (open) carries passes 3+: review and land. #1794 is merged.
-- Not run: a real `swift build` through launch.py or rebuild.py; left to demo.
+- PR #1796 (open, mergeable) carries passes 3+: review and land. #1794 is merged.
+- Optional follow-up outside this Task: sign the launch benchmark's bundle after it writes `Resources/source`.

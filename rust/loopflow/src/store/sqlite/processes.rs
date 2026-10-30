@@ -332,6 +332,34 @@ impl SqliteStore {
         unfinished_processes(&self.conn.lock().expect("store mutex poisoned"))
     }
 
+    /// The unfinished rows not in `skip`, reading only the index for those in
+    /// it. `skip` forgets rows that are no longer unfinished.
+    pub(crate) fn unfinished_processes_except(
+        &self,
+        skip: &mut std::collections::HashSet<LfProcessId>,
+    ) -> StoreResult<Vec<LfProcess>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let ids = conn
+            .prepare(
+                "SELECT id FROM processes INDEXED BY processes_unfinished
+                 WHERE completed_at IS NULL ORDER BY started_at DESC,id",
+            )?
+            .query_map([], |row| row.get::<_, LfProcessId>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut read = conn.prepare(&format!("{PROCESS_SELECT} WHERE e.id=?1"))?;
+        let mut records = Vec::new();
+        let mut skipped = std::collections::HashSet::new();
+        for id in ids {
+            if skip.contains(&id) {
+                skipped.insert(id);
+            } else {
+                records.extend(read.query_row([&id], read_process).optional()?);
+            }
+        }
+        *skip = skipped;
+        Ok(records)
+    }
+
     pub fn processes_since(&self, since: i64) -> StoreResult<Vec<LfProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(

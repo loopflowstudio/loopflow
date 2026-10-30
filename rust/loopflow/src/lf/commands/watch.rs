@@ -5,7 +5,8 @@
 //! The store's change revisions say when a commit can have changed the result.
 //! A reading runs only then, or on the read's clock for facts outside the store
 //! (Process liveness, Git), on a read-only connection with one pinned snapshot.
-//! An unchanged result sends nothing. A slow reading rests `BUSY_SHARE` times
+//! A read whose outside facts can be observed cheaply probes them on its clock
+//! and reads only when they moved. An unchanged result sends nothing. A slow reading rests `BUSY_SHARE` times
 //! its duration before a change is read again.
 //!
 //! Each stdin line is a request, `{"id": 1, "args": {...}}`. `args` replaces
@@ -34,7 +35,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::store::changes::StoreChanges;
-use crate::store::sqlite::StoreRevisions;
+use crate::store::sqlite::{SqliteStore, StoreRevisions};
 use crate::store::{SharedStore, StorageConfig};
 
 /// A burst is read once it has been quiet this long…
@@ -82,13 +83,29 @@ pub(crate) struct Watched {
     /// The result shows Git facts of Task checkouts: read again when one
     /// changes on disk and Git's answer about it differs.
     pub checkouts: bool,
+    /// The facts outside the store the result reads, observed far more
+    /// cheaply than the reading. Without one, every clock tick reads.
+    pub probe: Option<Probe>,
 }
+
+/// Observe the facts a read takes from outside the store at this moment.
+pub(crate) type Probe = fn(&SqliteStore) -> Result<Vec<u8>>;
 
 impl Watched {
     pub(crate) fn every(clock: Duration) -> Self {
         Self {
             clock,
             checkouts: false,
+            probe: None,
+        }
+    }
+
+    /// Read on the clock only when `probe`'s answer differs from the one
+    /// observed before the last reading.
+    pub(crate) fn probing(self, probe: Probe) -> Self {
+        Self {
+            probe: Some(probe),
+            ..self
         }
     }
 
@@ -415,6 +432,10 @@ struct Reader<A, F> {
     force: bool,
     read_at: Option<StoreRevisions>,
     read_on: Option<Instant>,
+    /// When the clock last read or probed the facts outside the store.
+    clocked_on: Option<Instant>,
+    /// What the probe observed just before the last reading.
+    probed: Option<Vec<u8>>,
     cost: Duration,
     failures: u32,
     sent: Option<[u8; 32]>,
@@ -460,6 +481,8 @@ where
             force: true,
             read_at: None,
             read_on: None,
+            clocked_on: None,
+            probed: None,
             cost: Duration::ZERO,
             failures: 0,
             sent: None,
@@ -527,7 +550,7 @@ where
                     };
                     retry_due(self.failures, read_on, now)
                         || (now - read_on >= self.cost.saturating_mul(BUSY_SHARE)
-                            && (changed || self.stale || now - read_on >= self.watched.clock))
+                            && (changed || self.stale || self.clock_moved(now)))
                 }
             };
         let mut frame = None;
@@ -547,6 +570,7 @@ where
                 .map(|store| store.sqlite.revisions())
                 .transpose()?;
             let began = Instant::now();
+            self.probed = self.probe();
             let reading = match &self.refused {
                 Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
                 None => self
@@ -575,6 +599,7 @@ where
             self.sent = Some(identity);
             self.read_at = revisions;
             self.read_on = Some(began);
+            self.clocked_on = Some(began);
             self.force = false;
             self.stale = false;
         }
@@ -583,13 +608,42 @@ where
         let wake = if rest_end > now {
             rest_end
         } else {
-            read_on + self.watched.clock
+            self.clocked_on.expect("a reading sets the clock") + self.watched.clock
         };
         Ok(Step {
             frame,
             closing,
             wake,
         })
+    }
+}
+
+impl<A, F> Reader<A, F> {
+    /// Whether the clock says facts outside the store may have moved: its
+    /// period has passed and, for a probed read, the probe's answer differs.
+    fn clock_moved(&mut self, now: Instant) -> bool {
+        let clocked_on = self.clocked_on.expect("a reading sets the clock");
+        if now - clocked_on < self.watched.clock {
+            return false;
+        }
+        self.clocked_on = Some(now);
+        match (self.watched.probe, self.probe()) {
+            (Some(_), Some(observed)) => self.probed.as_ref() != Some(&observed),
+            _ => true,
+        }
+    }
+
+    /// The probe's answer now; `None` without a probe, a store or an answer.
+    fn probe(&self) -> Option<Vec<u8>> {
+        let probe = self.watched.probe?;
+        let store = self.store.as_ref()?;
+        match probe(&store.sqlite) {
+            Ok(observed) => Some(observed),
+            Err(error) => {
+                tracing::debug!(%error, "watch probe unavailable");
+                None
+            }
+        }
     }
 }
 

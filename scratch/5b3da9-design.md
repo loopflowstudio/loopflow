@@ -59,7 +59,20 @@ Neither done-when is met: idle is under 2% only for `desktop plans` (and `monito
 - `desktop sessions` rereads every Session summary (`session_summaries_in`, the 5.7 MB done-when) on the 2 s `ACTIVITY_CLOCK`, even when nothing changed.
 - Busy cost comes from installed Desktop's own Process writes (`processes` revision about 7/s), which wake every reader. The busy numbers can't show this branch's gain until Desktop runs it.
 
+October 30, 2026, after this pass (`monitor ps` incremental reader, `desktop sessions` probe): branch debug build, the same four readers on a fresh `.backup` copy (idle, 105,931 unfinished rows, unpruned) and on the live store (agents active, installed Desktop writing) at once, cumulative CPU over 300 s as % of one core:
+
+| Store | `desktop plan --all` | `monitor ps` | `desktop sessions` | `desktop plans` |
+|---|---|---|---|---|
+| Idle copy | 1.9% | 0.7% (was 18.5%) | 0.9% (was 8.8%) | 0.1% |
+| Live, agents active | 17.2% | 1.8% (was 18.1%) | 14.4% | 16.5% |
+
+Idle meets the 2% done-when for every reader. Busy is under the proposed 15% for `monitor ps` and `desktop sessions`; `desktop plan --all` and `desktop plans` exceed it, woken by installed Desktop's own Process writes, which this branch's Desktop no longer makes. A first run of the probe cost 18.2% idle: its `ORDER BY id` walked every row's primary key, fixed by reading the agent-only index and sorting in Rust. Per Jack Heart's decision below, verify measures the installed release; no further CPU iteration before landing.
+
 ## Decisions
+
+- October 30, 2026, Jack Heart (comment a8d1e914): the `desktop sessions` idle cost is not a blocker. One pass at a cheap clock check, dropped if hard or risky; no further CPU iteration before landing. The CPU done-whens are measured on the installed release during verify, not before landing. Next: concept-review, pr-publish, gate, land.
+- October 30, 2026 (implement pass): a clock-driven watch may carry a `Watched::probe`, a cheap observation of the facts it reads outside the store. On a clock tick without a revision change it reads only when the probe's answer differs from the one taken before its last reading. `desktop sessions` / `session list --watch` probe with `SqliteStore::session_observations`: each unfinished AgentProcess's evidence, the count of `session_activity` rows past the availability quiet threshold, and which persistent checkouts exist. Summaries read no receipts, so receipts are not probed. Covered by `revisions::tests::session_observations_move_when_a_session_goes_quiet_or_an_agent_lives` and `session_list_watch` (a provider's death still reaches the list).
+- October 30, 2026 (implement pass): `monitor ps --watch` keeps an `ActivityReader` across readings. Death is permanent, so a row once proven dead is skipped by id (index-only scan) and its receipt and PID are never read again; rows are reread only when the `processes` revision moves. One-shot `lf monitor ps` is one fresh reader. Covered by `top::tests::a_watch_reads_each_dead_row_once`.
 
 - October 28, 2026 (implement pass): `lf history --watch` re-reads on the 5-minute planning clock, not the 2 s activity clock. It shows committed facts only; the clock just ages the window.
 - October 28, 2026 (implement pass): a watch reads its parent's PID before starting any thread, so a parent that exits during startup is still noticed. Covered by `watch::a_watch_ends_with_its_parent_while_stdin_stays_open`.
@@ -109,9 +122,9 @@ From the October 30 demo (`scratch/5b3da9-demo.md`): both failing tests are repa
 
 `lf` watch efficiency:
 - `lf history` still selects every input in its window in SQL (3,322 rows on the live copy) before decoding the few it shows; that selection is now most of the 0.40 s. Only worth pushing into SQL if the installed-build profile shows it.
-- Clock-driven readings (`Watched::every(ACTIVITY_CLOCK)`: `desktop sessions`, `task status`, `monitor ps`) reread their whole result every 2 s. Session availability changes with time alone (`available_sql`'s `now - observed_at >= quiet`), with process liveness and with client receipts. A cheap clock check must predict the next quiet-threshold crossing and fingerprint open Process evidence and receipts before it can skip a reading; a longer clock would instead delay Desktop's waiting state. Undecided; this is the remaining idle cost.
+- `task status --watch` (`desktop task`, one per open Task pane) still rereads on every 2 s activity clock; it could take a probe like `desktop sessions` if verify's installed measurement shows it.
 - The unfinished-row backlog needs one `lf monitor prune` on Jack Heart's live store once Desktop runs this branch. Dead rows stay derived on read (October 29 decision), so nothing settles them automatically.
-- Re-measure with an installed build of this branch. The October 30 table compares a debug build against release 0.15.1, with installed Desktop still writing.
+- Verify measures the CPU done-whens on the installed release (Jack Heart, comment a8d1e914).
 
 In-app library:
 - Every local `RegistryQuery` read is served in-process as a `Read`, and every write but the ones below as a `Write`.
@@ -131,6 +144,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git (`git show 3909e495a8:scratch/5b3da9-design.md`).
+- October 30, CPU pass (incremental `monitor ps`, `desktop sessions` probe): `--lib lf::commands::top:: store::sqlite::revisions::` 13/13, `--test integration session_list_watch::` 1/1, `--test served_reads` 1/1; 300 s measurement above.
 - October 30, realign after the demo repairs: plan matches 64d8597166; `git rev-list HEAD..origin/main` 0, PR mergeState CLEAN; no tests rerun.
 - October 30, compress after the demo repairs (hook test uses the file's one-line `PermissionsExt` idiom): `--lib interrupting_a_task_with_only_an_open_process` 1/1, fmt clean.
 - October 30, demo repairs (merged origin/main 5c35b47a21; 0fa8c08ce4): `--lib interrupting_a_task_with_only_an_open_process` 1/1; `--lib linear_on_demand` 9/9; `planning_reconnect_tests` 2/2 in a Linux arm64 container (`rust:1`), and with the old refresh order `planning_refresh_reconnects_repository_planning` fails as CI did; `cargo clippy -p loopflow --all-targets -D warnings` clean; `third_party.py check` clean.

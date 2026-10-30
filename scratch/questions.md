@@ -8,4 +8,3 @@
 - `Read::Doctor` served in-app returns the report even when a check fails; through `lf` the app saw an error, since the command exits 1. The telemetry view now shows failed checks instead of an error.
 - Desktop's planning refresh (`Write::PlanningRefresh`, in-process) runs once per shown Wave; a Git-planned repository with several Waves exchanges once per Wave each tick. Deduplicating per repository needs the transport, which Swift reads only from `PeerPlanning`.
 - An in-app write's Process carries Desktop's PID and the `lf` argv it equals; nothing else marks it as Desktop's. Add a marker if history needs to tell them apart.
-- Clock-driven readers' idle cost (see the design's October 30 table): skipping a reading on the activity clock needs the next availability quiet-threshold crossing plus a fingerprint of open Process evidence and receipts; the alternative is a longer `ACTIVITY_CLOCK`, which delays Desktop's waiting state. Left undecided for Jack Heart.

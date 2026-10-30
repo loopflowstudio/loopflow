@@ -397,9 +397,15 @@ pub(crate) fn watch_list(
         search: filter.search.clone(),
         interactive: filter.interactive,
     };
+    // A clock tick rereads every summary only when an AgentProcess lived or
+    // died, a Session went quiet long enough to become available, or a
+    // persistent checkout appeared or vanished.
+    let watched = super::watch::Watched::every(super::watch::ACTIVITY_CLOCK).probing(|store| {
+        Ok(store.session_observations(time::OffsetDateTime::now_utc().unix_timestamp())?)
+    });
     super::watch::start(
         args,
-        super::watch::Watched::every(super::watch::ACTIVITY_CLOCK),
+        watched,
         move |store, args| {
             let filter = crate::session::SessionFilter {
                 repo: args.repo,

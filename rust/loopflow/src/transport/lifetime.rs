@@ -62,7 +62,11 @@ fn watch(
         };
         match change {
             Ok(viewed) => {
-                store.record_owner_viewers(owner, viewed)?;
+                // A store a newer lf has advanced refuses this write. The
+                // policy keeps running; readers ask this owner directly.
+                if let Err(error) = store.record_owner_viewers(owner, viewed) {
+                    tracing::warn!(%error, %owner, viewed, "cannot record Session viewers");
+                }
                 due = limit
                     .filter(|_| !viewed)
                     .map(|limit| Instant::now() + limit);

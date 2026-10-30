@@ -660,7 +660,8 @@ database. Private `LF_HOME` experiments remain disposable and explicit.
 Only `/Applications/Loopflow.app` updates itself (`AppUpdater`, Sparkle): it
 reads its stream from `~/.lf/config.yaml`, asks its bundled
 `lf install can-open` before installing, and runs `lf install adopt` on the first
-launch of a new version. Dev builds never check for updates.
+launch of a new version. Dev builds, and a Machine recording `dev` (which has no
+appcast), never check for updates.
 
 | Command | What it does |
 | --- | --- |

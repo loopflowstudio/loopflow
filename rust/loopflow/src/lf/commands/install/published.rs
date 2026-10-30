@@ -70,6 +70,9 @@ pub fn install(switch: Option<Stream>) -> Result<()> {
     if stream == Stream::Dev {
         return main_build();
     }
+    if cfg!(target_os = "macos") {
+        finish_adoption(&applications_dir())?;
+    }
     let client = http_client()?;
     let tag = stream_release(&client, stream)?;
     install_release(&client, stream, &tag)
@@ -169,6 +172,31 @@ pub fn adopt() -> Result<()> {
         true,
         false,
     )
+}
+
+/// Adopt Loopflow.app when Sparkle replaced it and its first launch hasn't run
+/// yet: the app's `lf` is ahead of the store, so every terminal `lf` refuses
+/// until something migrates it. Moves no files; true when it adopted.
+fn finish_adoption(applications: &Path) -> Result<bool> {
+    let lf = applications.join("Loopflow.app/Contents/MacOS/lf");
+    let ahead = inspect(&lf, &["install", "preflight", "--json"])
+        .filter(|output| output.status.success())
+        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
+        .is_some_and(|preview| preview["verdict"]["kind"] == "promote_and_migrate");
+    if !ahead {
+        return Ok(false);
+    }
+    let status = Command::new(&lf)
+        .args(["install", "adopt"])
+        .status()
+        .with_context(|| format!("adopt {}", lf.display()))?;
+    if !status.success() {
+        bail!(
+            "adopting the updated {} failed ({status}); fix the error above and rerun `lf install`",
+            lf.display()
+        );
+    }
+    Ok(true)
 }
 
 fn applications_dir() -> PathBuf {
@@ -760,9 +788,9 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 #[cfg(test)]
 mod tests {
     use super::{
-        cron_table, is_current, newest_release, newest_run, opens_store, package_target,
-        record_stream, recorded_stream, release_tag, run_verified_installer, updates_itself,
-        Stream, CRON_MARKER,
+        cron_table, finish_adoption, is_current, newest_release, newest_run, opens_store,
+        package_target, record_stream, recorded_stream, release_tag, run_verified_installer,
+        updates_itself, Stream, CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -921,6 +949,30 @@ mod tests {
         assert!(!current());
         fs::write(contents.join("Info.plist"), "invalid plist").unwrap();
         assert!(!current());
+    }
+
+    /// Between Sparkle's install-on-quit and the app's next launch, `lf install`
+    /// migrates the store through the app's own `lf` instead of downloading.
+    #[test]
+    fn an_app_ahead_of_the_store_is_adopted_in_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let macos = temp.path().join("Loopflow.app/Contents/MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        assert!(!finish_adoption(temp.path()).unwrap());
+        let adopted = temp.path().join("adopted");
+        let app_lf = |verdict: &str| {
+            fs::write(macos.join("lf"), format!(
+                "#!/bin/sh\ncase \"$*\" in\n  'install preflight --json') echo '{{\"verdict\":{{\"kind\":\"{verdict}\"}}}}' ;;\n  'install adopt') touch '{}' ;;\n  *) exit 2 ;;\nesac\n",
+                adopted.display()
+            )).unwrap();
+            fs::set_permissions(macos.join("lf"), fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        app_lf("promote");
+        assert!(!finish_adoption(temp.path()).unwrap());
+        assert!(!adopted.exists());
+        app_lf("promote_and_migrate");
+        assert!(finish_adoption(temp.path()).unwrap());
+        assert!(adopted.exists());
     }
 
     #[cfg(target_os = "macos")]

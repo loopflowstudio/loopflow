@@ -92,8 +92,8 @@ fn unapplied_message(path: &Path, pending: &str) -> String {
         )
     } else {
         format!(
-            "shared store {} does not have migration {pending} yet; install a build that \
-             carries it with `lf install --dev`",
+            "shared store {} does not have migration {pending} yet; run `lf install` to \
+             finish installing this build",
             path.display()
         )
     }
@@ -2463,10 +2463,14 @@ mod frontier_tests {
         // than reuse a schema older than its own code.
         let error = open(&path, &shared.home, Forbidden)
             .expect_err("an ordinary open ahead of the frontier must refuse");
+        // `lf install` finishes an app Sparkle replaced; `--dev` would move a
+        // stable Machine to dev.
+        let error = error.to_string();
         assert!(
-            error.to_string().contains(&latest_known_version())
-                && (error.to_string().contains("lf install --dev")
-                    || error.to_string().contains("private LF_HOME")),
+            error.contains(&latest_known_version())
+                && (error.contains("run `lf install` to finish")
+                    || error.contains("private LF_HOME"))
+                && !error.contains("--dev"),
             "the refusal names the pending migration and its fix: {error}"
         );
         assert_eq!(

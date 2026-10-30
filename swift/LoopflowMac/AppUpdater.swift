@@ -3,8 +3,8 @@ import Sparkle
 
 /// The installed Loopflow.app updates itself through Sparkle from the stream
 /// `~/.lf/config.yaml` records (`lf install --preview`), one appcast per stream,
-/// and only to a release whose build can open this Machine's store. Dev builds
-/// and test hosts never update themselves.
+/// and only to a release whose build can open this Machine's store. Dev builds,
+/// test hosts and a Machine recording `dev` never update themselves.
 enum AppUpdates {
     static let downloads = URL(string: "https://downloads.loopflow.studio")!
 
@@ -17,9 +17,14 @@ enum AppUpdates {
         return recorded.flatMap { $0.isEmpty ? nil : $0 } ?? "stable"
     }
 
-    /// dev builds come from CI (`lf install --dev`); between them the app follows preview.
-    static func feedURL(stream: String) -> URL {
-        downloads.appending(path: stream == "stable" ? "appcast-stable.xml" : "appcast-preview.xml")
+    /// dev has no appcast: `lf install --dev` links the CLI alone, and an app that
+    /// followed preview would relink `lf` away from it on its next launch.
+    static func feedURL(stream: String) -> URL? {
+        switch stream {
+        case "dev": nil
+        case "preview": downloads.appending(path: "appcast-preview.xml")
+        default: downloads.appending(path: "appcast-stable.xml")
+        }
     }
 
     /// `/Applications/Loopflow.app` (or `LF_APPLICATIONS_DIR`'s), the bundle `lf install` manages.
@@ -77,7 +82,8 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @unchecked Sendable {
     private var controller: SPUStandardUpdaterController?
 
     @MainActor func start(bundle: Bundle = .main) {
-        guard controller == nil, AppUpdates.isInstalled(bundle.bundleURL) else { return }
+        guard controller == nil, AppUpdates.isInstalled(bundle.bundleURL),
+              AppUpdates.feedURL(stream: AppUpdates.recordedStream()) != nil else { return }
         controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
     }
 
@@ -87,7 +93,14 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @unchecked Sendable {
     }
 
     func feedURLString(for updater: SPUUpdater) -> String? {
-        AppUpdates.feedURL(stream: AppUpdates.recordedStream()).absoluteString
+        AppUpdates.feedURL(stream: AppUpdates.recordedStream())?.absoluteString
+    }
+
+    /// A switch to dev while the app runs stops its checks until the next launch.
+    func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        guard feedURLString(for: updater) != nil else {
+            throw LocalLfError(errorDescription: "this Machine follows dev; `lf install --dev` updates the CLI alone")
+        }
     }
 
     /// Veto a release whose build can't open the store; `lf` names when that changes.

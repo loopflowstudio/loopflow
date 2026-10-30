@@ -6,9 +6,12 @@ struct AppUpdatesTests {
     @Test func theAppFollowsTheStreamLfInstallRecorded() {
         #expect(AppUpdates.recordedStream(config: nil) == "stable")
         #expect(AppUpdates.recordedStream(config: "repo_root: /src\nstream: preview\n") == "preview")
-        #expect(AppUpdates.feedURL(stream: "preview").lastPathComponent == "appcast-preview.xml")
-        #expect(AppUpdates.feedURL(stream: "dev").lastPathComponent == "appcast-preview.xml")
-        #expect(AppUpdates.feedURL(stream: "stable").lastPathComponent == "appcast-stable.xml")
+        #expect(AppUpdates.feedURL(stream: "preview")?.lastPathComponent == "appcast-preview.xml")
+        #expect(AppUpdates.feedURL(stream: "stable")?.lastPathComponent == "appcast-stable.xml")
+    }
+
+    @Test func devRunsNoUpdater() {
+        #expect(AppUpdates.feedURL(stream: AppUpdates.recordedStream(config: "stream: dev\n")) == nil)
     }
 
     @Test func onlyTheInstalledAppUpdatesItself() {

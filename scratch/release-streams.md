@@ -199,7 +199,7 @@ commit it, and do not land; publish and land once, after slice 8.
 7. **Sparkle — built 2026-10-29, unpublished.** Sparkle 2.10.1 (SwiftPM and
    project.yml); `AppUpdater` starts only in the installed bundle
    (`/Applications/Loopflow.app` or `LF_APPLICATIONS_DIR`), feeds from
-   `appcast-<stream>.xml` per `~/.lf/config.yaml` (dev follows preview), vetoes a release
+   `appcast-<stream>.xml` per `~/.lf/config.yaml` (dev has none: no updater runs), vetoes a release
    whose `lf install can-open v<version>` fails, and handles `loopflow://update`. First
    launch of a new `CFBundleVersion` runs `lf install adopt`. `Info.plist` carries
    `SUPublicEDKey` (automatic daily checks and installs); the private half is Doppler
@@ -219,25 +219,17 @@ commit it, and do not land; publish and land once, after slice 8.
 8. **Learn from the best — built 2026-10-29.** `release/README.md` "What we took from
    other projects": adopt/decline table, evidence pointer to `e03537f7ca`.
 
-**Concept review after slices 4–8 (2026-10-29, headless) — next implement direction.**
-Both follow from accepted decisions ("the stream is recorded once … Sparkle's feed choice
-reads that one value"; "the schedule, Sparkle and self-update follow it"; refusals name the
-fix). Neither is a new product choice.
-- **dev on a Mac with the app flip-flops `lf`.** `AppUpdates.feedURL` maps `dev` to
-  `appcast-preview.xml`, so Sparkle installs a preview app; its first launch runs
-  `lf install adopt`, which relinks `~/.local/bin/lf` from the dev CLI into the preview app.
-  The next scheduled `lf install` (dev) relinks it back. Direction: dev has no appcast, so the
-  app runs no updater while `dev` is recorded; the dev CLI stays linked until CI signs dev app
-  builds and a dev appcast exists. (Desktop lagging the dev CLI is the interim gap already in
-  `scratch/questions.md`.)
-- **Between Sparkle's install and the app's next launch, the terminal names the wrong fix.**
-  `SUAutomaticallyUpdate` installs on quit; `lf` already links into the new bundle, but nothing
-  has adopted it. If the release adds a migration, every terminal `lf` refuses with
-  `unapplied_message`'s "install a build that carries it with `lf install --dev`", which moves a
-  stable Machine to dev. Direction: plain `lf install` finishes the adoption (the installed app is
-  newer than the receipt → `adopt`, no download), and the refusal names `lf install`.
-  Proof: a fixture with the app's `lf` ahead of the receipt; `lf install` adopts and the refusal
-  text names it.
+**Concept review after slices 4–8 (2026-10-29) — both fixes built 2026-10-29.**
+- **dev no longer flip-flops `lf`.** `AppUpdates.feedURL("dev")` is nil, so `AppUpdater` starts
+  no updater while dev is recorded, and a switch to dev while the app runs vetoes further checks
+  (`updater(_:mayPerform:)`). The dev CLI stays linked until CI signs dev app builds.
+- **`lf install` finishes a Sparkle install the app hasn't adopted.** When the app's bundled `lf`
+  previews `promote_and_migrate` (ahead of the store), `lf install` on preview/stable runs that
+  `lf install adopt` before the stream lookup. The store refusal and `lf doctor` now say
+  "run `lf install` to finish installing this build" instead of `lf install --dev`.
+  `swift test --filter AppUpdatesTests` 4: pass. `--lib lf::commands::install::` (incl. new
+  `an_app_ahead_of_the_store_is_adopted_in_place`), the updated frontier refusal test and clippy:
+  not run — the lib test build was killed at the 1 h limit still compiling; owner: gate.
 
 Check (slices 3–8, 2026-10-29): focused suites per slice above pass; full gate (nextest, clippy, Swift, release pytest) not yet run on the combined tree — owner: gate before the one PR.
 

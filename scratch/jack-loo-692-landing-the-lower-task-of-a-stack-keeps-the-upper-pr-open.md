@@ -1,6 +1,6 @@
 # LOO-692: landing the lower Task of a stack keeps the upper PR open
 
-Status: implemented, awaiting gate. Realigned 2026-10-30: no upstream changes since the base; code matches this plan.
+Status: implemented, gated. Realigned 2026-10-30: no upstream changes since the base; code matches this plan.
 
 ## Outcome
 
@@ -63,4 +63,6 @@ No change. The PR-side retarget agrees with the existing Task stack model in
 including `landing_the_lower_of_a_stack_keeps_the_upper_pr_open_on_its_branch`.
 With the retarget step disabled, that test fails (CLOSED ≠ OPEN). `land_tests::`
 passes (30). After compress, `wt_prune_branches::` passes (9). Lib `ops::branch_prune::`, `ops::wt::` and `ops::task::lifecycle`
-pass. Clippy is left to gate.
+pass.
+
+Gate (2026-10-30): `scripts/test.py --reuse-passing --rust-filter 'test(wt_prune_branches::) | test(land_tests::) | test(task_abandonment::) | test(ops::wt::) | test(ops::branch_prune::) | test(ops::task::lifecycle) | test(ops::pr_landing::) | test(ops::abandon::) | test(ops::land::)'` — PASS (architecture, rustfmt, nextest, clippy, website). Live GitHub stack left to verify.

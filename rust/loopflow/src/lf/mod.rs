@@ -2612,8 +2612,8 @@ pub enum WtCommand {
         /// Reclaim old generated output from completed Tasks; retain checkouts
         #[arg(long)]
         builds: bool,
-        /// Delete origin and local branches tied to merged or closed PRs,
-        /// finished Tasks, or published release candidates
+        /// Delete origin and local branches tied to merged PRs, finished
+        /// Tasks, or published release candidates
         #[arg(long, conflicts_with = "builds")]
         branches: bool,
         /// Emit every checkout's verdict, or build cleanup receipts

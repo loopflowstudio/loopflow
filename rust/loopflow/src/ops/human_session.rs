@@ -1100,6 +1100,30 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
+/// One Session's summary, with its viewers confirmed by its execution owner.
+/// The owner records its own viewers, but an owner from an earlier lf cannot
+/// write a store a newer lf has advanced: after an upgrade and a Desktop
+/// restart its record still says viewed. Its controlling viewer is the truth.
+pub(crate) fn viewed_summary(
+    store: &SqliteStore,
+    id: &str,
+) -> Result<Option<crate::session::SessionSummary>> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let Some(mut summary) = store.session_summary(id, now)? else {
+        return Ok(None);
+    };
+    let released = !summary.unviewed
+        && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
+        && store
+            .session_transport(id)?
+            .is_some_and(|owner| crate::transport::controlled(&owner).is_ok_and(|held| !held));
+    if released {
+        summary.unviewed = true;
+        summary.terminal_id = None;
+    }
+    Ok(Some(summary))
+}
+
 /// A Session as its row and its current input describe it.
 pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<SessionRecord> {
     let work = match (&session.task_id, &session.wave_id) {
@@ -1107,12 +1131,7 @@ pub(crate) async fn surface(store: &SharedStore, session: &LfSession) -> Result<
         (None, Some(wave)) => Some(WorkRef::Wave(wave.clone())),
         (None, None) => None,
     };
-    let metadata = store
-        .sqlite
-        .session_summary(
-            &session.id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?
+    let metadata = viewed_summary(&store.sqlite, &session.id)?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
     let actions = session_actions(state, session.interactive);

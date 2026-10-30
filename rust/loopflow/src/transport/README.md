@@ -45,8 +45,9 @@ an explicit transition to the provider's native UI. That transition preserves th
 Session and saved conversation, but does not preserve its old in-flight turn or
 resubmit its input.
 
-An owner that answers but then fails to attach leaves delivery unknown. That
-reconnection does not launch another provider or replay a Graph. Finished Runs retain results in Session history.
+An owner that answers but then fails to attach leaves delivery unknown; that
+reconnection launches no other provider and replays no Graph. Finished Runs retain
+results in Session history.
 After connecting, attachment waits up to five seconds for acknowledgement. Timeout
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
 acknowledged, the attachment has no time limit.

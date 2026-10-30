@@ -36,6 +36,11 @@ test fails if SKILL.md or LOOPFLOW.md double-quotes a `<…>` placeholder. Liter
 doc examples (`--title "add passkeys"`) stay. `lf comment` has no stdin form, so
 the skill keeps the single-quote escape rule.
 
+Second pass (headless, 2026-10-30): implemented change matches the rule; no open
+product choice. LOOPFLOW.md shows `'<outcome>'` without the `'\''` escape note;
+an unescaped apostrophe fails as a shell syntax error, never as expansion, so
+the every-run token cost isn't earned there.
+
 The `-y` drop is the recorded assumption in `scratch/questions.md`; the Task
 delegated the PromptScript decision.
 

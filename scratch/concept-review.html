@@ -62,10 +62,10 @@ steer with `lf comment &lt;ID&gt; '&lt;direction&gt;'`.</pre>
 <p>The positional <code>REQUEST</code> is the CLI's own concept ("what you want, in your words; its first line the title"), so <code>--title</code> drops out of the guidance. The alignment test asserts no <code>&lt;…&gt;</code> placeholder sits inside double quotes in SKILL.md or LOOPFLOW.md. Literal doc examples stay.</p>
 <p>Not changing: the skill's heredoc (robust for any text), and the single-quote rule for <code>lf comment</code>, which has no stdin form.</p>
 
-<h2>Questions</h2>
+<h2>Settled</h2>
 <ol>
-  <li>LOOPFLOW.md handoff form: (a) single-quoted positional, proposed; (b) quoted heredoc, matching the skill at more tokens per run.</li>
-  <li>README one-liner: (a) keep <code>-y</code> dropped, so the installer shows its assessments and asks; (b) restore <code>-y</code> for a one-shot install and accept the harmless PromptScript failure line.</li>
+  <li>LOOPFLOW.md uses the single-quoted positional (implemented). An unescaped apostrophe fails as a syntax error, not expansion, so the escape note stays in the skill only.</li>
+  <li>The README drops <code>-y</code>; the assumption is recorded in <code>scratch/questions.md</code>.</li>
 </ol>
 </main></body>
 </html>

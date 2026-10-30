@@ -1676,10 +1676,13 @@ async fn steering_publication_resolves_empty_participant_from_config_or_git() {
     let _restore = EnvRestore::capture(&[
         "LF_HOME",
         "LF_USER_NAME",
+        "LF_AGENT_CALLER",
         "GIT_CONFIG_COUNT",
         "GIT_CONFIG_KEY_0",
         "GIT_CONFIG_VALUE_0",
     ]);
+    // A person's steer: no agent Session runs this publication.
+    std::env::remove_var("LF_AGENT_CALLER");
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = task_fixture_at("FIX-STEER", repo.path().canonicalize().unwrap()).await;
     std::env::set_var("LF_HOME", fixture._database.path());

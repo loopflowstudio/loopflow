@@ -3,7 +3,8 @@
 //! headless, standing in for the person. The approval is stored; the Task reads
 //! shipping while this Machine's ship process carries it there, and idle when
 //! that process exited. Unassigning the Task stops the ship, Stop withdraws the
-//! approval, and a ship process that died is started again.
+//! approval until the next `lf ship` (no run into `end` approves it meanwhile),
+//! and a ship process that died is started again.
 
 use serde::{Deserialize, Serialize};
 
@@ -74,12 +75,17 @@ async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))
 }
 
-/// The configured participant's name, or `fallback` when none is set.
-fn participant_or(fallback: &str) -> String {
-    crate::config::participant_name()
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| fallback.into())
+/// Who started `process`, read from its ancestry; no process leaves
+/// attribution unresolved.
+pub(crate) fn starter(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    process: Option<&LfProcessId>,
+) -> crate::store::StoreResult<crate::process::Starter> {
+    let Some(process) = process else {
+        return Ok(crate::process::Starter::Person { name: None });
+    };
+    let person = crate::config::participant_name().ok().flatten();
+    sqlite.process_starter(process, person.as_deref())
 }
 
 /// Whether the process carrying a shipping Task has exited. Unknown evidence
@@ -266,7 +272,7 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         ) {
             return Ok(ShipStart::AtEnd { issue });
         }
-        let by = participant_or("someone");
+        let by = starter(&store.sqlite, Some(&process)).map_err(task_error)?;
         let mut handoff = format!("{by} shipped it");
         if let Some(graph) = graph {
             handoff.push_str(&format!(" with {graph}"));
@@ -288,30 +294,50 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
 }
 
 /// Withdraw a Task's Auto-Ship approval: stop its ship process and take back any
-/// merge request Loopflow armed on GitHub. Returns false when it was not shipping.
+/// merge request Loopflow armed on GitHub. The stop stands until `lf ship`: a
+/// run reaching `end` no longer approves it. Returns false when it was not shipping.
 pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
-    let by = participant_or("someone");
-    let note = match note {
-        Some(note) => format!("{by}: {note}"),
-        None => by,
-    };
-    withdraw(issue, &note)
+    let process = crate::journal::current_lf_process_id()
+        .ok_or_else(|| task_error("lf ship --stop requires a registered Process"))?;
+    withdraw(issue, Withdrawal::Stop { process, note })
 }
 
 /// Withdraw the approval from inside the ship process when every attempt of its
-/// run failed with one error: restarting it would only repeat the failure.
+/// run failed with one error: restarting it would only repeat the failure. This
+/// is no person's stop, so a relaunch that reaches `end` may approve it again.
 pub fn ship_halt(issue: &str, cause: &str) -> OpsResult<bool> {
-    withdraw(issue, &format!("Loopflow: {cause}"))
+    withdraw(issue, Withdrawal::Halt { cause })
 }
 
-fn withdraw(issue: &str, note: &str) -> OpsResult<bool> {
+enum Withdrawal<'a> {
+    Stop {
+        process: LfProcessId,
+        note: Option<&'a str>,
+    },
+    Halt {
+        cause: &'a str,
+    },
+}
+
+fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
     let current = crate::journal::current_lf_process_id();
     let (task, stopped) = block_on_task(async {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
+        let (note, stopped_by) = match &withdrawal {
+            Withdrawal::Stop { process, note } => {
+                let by = starter(&store.sqlite, Some(process)).map_err(task_error)?;
+                let note = match note {
+                    Some(note) => format!("{by}: {note}"),
+                    None => by.to_string(),
+                };
+                (note, Some(process))
+            }
+            Withdrawal::Halt { cause } => (format!("Loopflow: {cause}"), None),
+        };
         let stopped = store
             .sqlite
-            .stop_shipping(&task.id, note)
+            .stop_shipping(&task.id, &note, stopped_by)
             .map_err(task_error)?;
         if let Some(process) = stopped
             .as_ref()
@@ -574,6 +600,7 @@ mod tests {
     fn a_failed_ship_restarts_later_each_time_and_says_why() {
         let mut handoff = TaskShipping {
             shipped_at: 5,
+            approved_by: None,
             process: Some(LfProcessId::new()),
             restarts: 0,
         };
@@ -651,6 +678,7 @@ mod tests {
         });
         let handoff = TaskShipping {
             shipped_at: 5,
+            approved_by: None,
             process: Some(LfProcessId::new()),
             restarts: 0,
         };

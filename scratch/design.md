@@ -55,6 +55,13 @@ the release reads regressions from Linear, not from its own store.
 - Jack's main home is never opened by the release job.
 - No regressions were marked as of 2026-10-30, so no data migration.
 
+## Proposed Wave memory (infrastructure; not yet written)
+
+- Release-run runs in its own home (`~/.lf-release`) on an `lf` built from
+  origin/main by `scripts/bootstrap-cron-host.sh`; the main home and installed
+  `lf` stay on their channel. Regressions are Linear `Regressed in › vX.Y.Z`
+  labels, read live by each release (accepted by Jack Heart, 2026-10-30).
+
 ## After landing (Jack chose 2b)
 
 Rerun `scripts/bootstrap-cron-host.sh infrastructure` on the release host. It

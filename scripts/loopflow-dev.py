@@ -38,6 +38,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from app_bundle import embed_frameworks
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 DEV_APP = Path.home() / "Applications" / "Loopflow Dev.app"
@@ -618,7 +620,9 @@ def _install_dev_app() -> None:
     # to run forever: the app keeps starting a stale binary while the fresh one
     # sits beside it, and codesigning bumps the stale mtime so it even looks new.
     executable = _bundle_executable_name(SWIFT_DIR / "LoopflowMac" / "Info.plist")
-    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", macos_dir / executable)
+    build_dir = SWIFT_DIR / ".build" / "debug"
+    shutil.copy(build_dir / "LoopflowMac", macos_dir / executable)
+    embed_frameworks(build_dir, macos_dir / executable)
     stale = macos_dir / "LoopflowMac"
     if stale.name != executable and stale.exists():
         stale.unlink()

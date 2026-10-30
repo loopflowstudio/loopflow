@@ -25,3 +25,7 @@ Remaining:
   reopens; `lf --version` and the app's `LoopflowSourceRevision` name the same commit.
 
 Check: `cargo test -p loopflow --lib lf::commands::install::` 30 pass; clippy pass (after compress).
+
+Concept review 2026-10-30 (after compress): nothing to change; no open product choice.
+Jack's steer on infrastructure MEMORY.md (`lf install --dev` alone advances `~/.lf`) is
+already in `abe4ee458e`.

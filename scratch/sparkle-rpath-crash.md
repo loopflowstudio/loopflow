@@ -134,8 +134,8 @@ Done: the repair is committed on this LOO-699 branch, based on main `bdb891563b`
 LOO-699 acceptance bullets have code and tests.
 
 Remaining:
-- Gate: run the full `install.py local` entrypoint (and release packaging at the
-  next release run) on a real SwiftPM build. Not yet done.
+- Gate: done for `install.py local` (see Gate); release packaging remains for the
+  next release run.
 - Publish the PR.
 - Landing order against #1777 (LOO-688, open): needs Jack. Proposal unchanged.
 - LOO-700 / PR #1792 (open, at `demo`) also edits `scripts/loopflow-dev.py` and
@@ -164,3 +164,31 @@ should make it true or drop the claim.
 
 Open but outside LOO-699's outcome: local build identity (Jack). It changes how a
 local build presents, not whether it launches, so it does not block this Task.
+
+## Demo (2026-10-30, headless, decided in place of Jack)
+
+Experience: "a Loopflow.app built by a supported path launches." Run on real
+artifacts with `scripts/app_bundle.py`:
+- `/Applications/Loopflow.app` (installed release): `verify_rpath_libraries` PASS.
+- LOO-669's real SwiftPM `swift/.build/release/LoopflowMac`, copied bare into a temp
+  `Demo.app`: FAIL, `cannot load Sparkle.framework/Versions/B/Sparkle`, the
+  incident's library. After `embed_frameworks` and ad-hoc signing: PASS, and the
+  executable launched and was still running after 3s with Sparkle loaded
+  (`DYLD_PRINT_LIBRARIES`); killed by its own handle.
+- The broken `local-bin/Loopflow.app` from the incident is gone, so the "Open"
+  item to rebuild or delete it is resolved.
+- Focused suites: 32 passed.
+
+Not demonstrated, owned by gate: the full `install.py local` entrypoint (it
+signs with Developer ID and installs; not run headless to avoid replacing the
+installed app) and release packaging at the next release run.
+Decision: advance. Landing order against #1777 and local build identity stay
+Jack's, outside this Task's outcome.
+
+## Gate (2026-10-30)
+
+- `scripts/test.py --reuse-passing`: PASS (architecture, python 186s); rust/swift skipped, no paths reached.
+- `ruff check` on changed files: PASS. `ruff format --check` flags `install.py:89`, pre-existing on main and not CI-enforced; left alone.
+- Full `install.py local` on a real build: rc=0 in 237s. `local-bin/Loopflow.app` has Frameworks/Sparkle.framework, rpaths `@loader_path` + `@executable_path/../Frameworks`, Developer ID signature, `codesign --verify --deep --strict` OK, `verify_rpath_libraries` PASS. Not launched: it carries the shipped bundle id while Desktop runs.
+- Dev path: `embed_frameworks` on a copy of a real SwiftPM debug `LoopflowMac` PASS (only `@rpath` dependency is Sparkle).
+- Release packaging: deferred to the next `release-run`.

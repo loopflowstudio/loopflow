@@ -34,3 +34,18 @@ old serve stops blocking because the Session's owner becomes the new one. The 1 
 decision; `scratch/questions.md` records it, and it isn't an open product choice. The two unknowns stay distinct on
 purpose. An owner that answers and then fails to attach may still hold a live viewer, so only the silent owner is
 taken over.
+
+## Demo (headless, 2026-10-30)
+
+Nobody was available, so the agent ran this demo standing in for Jack. It was read-only against the live MTG-214 chain: serve pid 20629 and claude pid 21242 were still alive, and nothing was killed or resumed.
+
+- Installed lf 0.15.1, `lf session resume 7d29bee8… --prepare --json`: `state: active`, Open here unavailable ("active in another terminal"), only Move here offered. This is the bug Jack reported.
+- Branch `target/debug/lf`, same command: `state: detached`, one action, `Reconnect` ("Show the running Session in this terminal"), available.
+- `cargo test -p loopflow --test transport_tests -- opening_ attachment_ stops_reading`: 7 passed, including `opening_takes_over_from_an_owner_that_never_answers`.
+
+Not demonstrated: clicking Reconnect in Desktop on MTG-214. That stops the live provider and continues thread `17e4176a…` in a new owner, which is Jack's call. The test covers that takeover path.
+Next: publish (squash; tree diff is only this fix), then verify Reconnect in Desktop after install.
+
+## Gate (2026-10-30)
+
+`scripts/test.py --reuse-passing --rust-filter 'binary(transport_tests) | test(human_session::) | test(commands::open::)'`: PASS. That covers architecture, test inventory, fmt, 53 tests (all of transport_tests, plus human_session and open), and clippy -D warnings. No code changes were needed.

@@ -2,14 +2,9 @@
 
 ## Status (2026-10-30)
 
-Done: release fetches the revisions it builds or tags (#1780 contents).
-Done: regressions read from Linear (`Regressed in` label group, one version
-label per issue); `--regressed-in` writes that label; unread Linear holds
-`stable` with a logged reason and the release still publishes.
-Remains: the host half of the design (see counterexample); gate/CI.
+Plan of record: `scratch/design.md` (Done / Remaining).
 
-Check: `cargo test -p loopflow --lib -- linear::regressions:: ops::release::tests::` — pass; `daily_run_moves_stable` (release_tests) — pass; clippy clean.
-Compress check: `cargo test -p loopflow --lib -- ops::task::` — pass (34); clippy clean.
+Check: `cargo test -p loopflow --lib -- linear::regressions:: ops::release::tests:: ops::task::` + `daily_run_moves_stable` — pass; clippy clean (prior pass, not rerun at realign).
 
 ## Counterexample: release home cannot follow `dev` on its own (blocking host half)
 

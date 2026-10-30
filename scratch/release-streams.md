@@ -245,7 +245,7 @@ and `DECISIONS.md` all say stream flags and plain `lf install`. On dev, the term
 differ from Desktop. That breaks "never diverge" and is already recorded as Remaining under slice 7
 (CI Developer ID signing), not a new choice.
 
-Check (slices 3–8, 2026-10-29): focused suites per slice above pass; `--lib store::` 391 pass after the refusal change (one load timeout passed on rerun); full gate (nextest, clippy, Swift, release pytest) not yet run on the combined tree — owner: gate before the one PR.
+Check (slices 3–8, 2026-10-29): focused suites per slice above pass; `--lib store::` 391 pass after the refusal change (one load timeout passed on rerun); before publish: `--lib lf::commands::install::` 29, `cargo fmt --check` and clippy `--all-targets` pass on the combined tree; full nextest, Swift and release pytest — owner: CI on the one PR.
 
 ## Neighbouring Tasks
 

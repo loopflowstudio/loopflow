@@ -51,9 +51,6 @@ DEV_SIGNING_IDENTITY = "Loopflow Dev"
 # The dev app's executable gets its own name so `pgrep -x Loopflow`, Activity
 # Monitor and `ps` address the release app without touching Loopflow Dev.
 DEV_EXECUTABLE = "Loopflow Dev"
-# Names earlier installs left in Contents/MacOS: the release executable and the
-# SwiftPM product name.
-STALE_DEV_EXECUTABLES = ("Loopflow", "LoopflowMac")
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
@@ -606,18 +603,17 @@ def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
     macos_dir = app_dir / "MacOS"
-    macos_dir.mkdir(parents=True, exist_ok=True)
+    # Every install writes the whole of Contents/MacOS, so start it empty: a
+    # binary an older install left under another name can never be launched.
+    shutil.rmtree(macos_dir, ignore_errors=True)
+    macos_dir.mkdir(parents=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    # Older installs left binaries under other names; remove them so the bundle
-    # holds only the executable CFBundleExecutable names and never starts a stale one.
     shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", macos_dir / DEV_EXECUTABLE)
-    for stale in STALE_DEV_EXECUTABLES:
-        (macos_dir / stale).unlink(missing_ok=True)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
-    _copy_bundled_tools(app_dir / "MacOS")
+    _copy_bundled_tools(macos_dir)
     (app_dir / "Resources" / DEV_CONTROL_CONFIG).unlink(missing_ok=True)
 
     run(
@@ -639,8 +635,7 @@ def _install_dev_app() -> None:
 
 
 def _apply_dev_identity(plist: Path) -> None:
-    """Rewrite the dev app's bundle id, name and executable so it gets its own
-    settings domain and process name."""
+    """Give the dev app its own settings domain and process name."""
     run(["plutil", "-replace", "CFBundleIdentifier", "-string", DEV_BUNDLE_ID, str(plist)])
     run(["plutil", "-replace", "CFBundleExecutable", "-string", DEV_EXECUTABLE, str(plist)])
     run(["plutil", "-replace", "CFBundleName", "-string", "Loopflow Dev", str(plist)])

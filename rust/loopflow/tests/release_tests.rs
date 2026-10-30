@@ -1467,65 +1467,21 @@ fn release_run_checks_the_host_local_publisher_role() {
 
 #[test]
 fn daily_run_moves_stable_to_the_newest_soaked_release() {
-    let effects = run_stable_advance(
-        &[
-            ("v0.9.3", 1, false),
-            ("v0.9.2", 8, false),
-            ("v0.9.1", 20, true),
-        ],
-        None,
-    );
+    let effects = run_stable_advance(&[
+        ("v0.9.3", 1, false),
+        ("v0.9.2", 8, false),
+        ("v0.9.1", 20, true),
+    ]);
     assert_eq!(
         effects,
         "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
     );
-}
-
-#[test]
-fn an_open_regression_task_holds_stable_below_the_release_it_regressed_in() {
-    let effects = run_stable_advance(
-        &[
-            ("v0.9.3", 9, false),
-            ("v0.9.2", 12, false),
-            ("v0.9.1", 20, true),
-        ],
-        Some("0.9.3"),
-    );
-    assert_eq!(
-        effects,
-        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
-    );
-}
-
-#[test]
-fn release_status_names_the_task_holding_stable() {
-    let (repo, _log, _env) = stable_fixture(
-        &[
-            ("v0.9.3", 9, false),
-            ("v0.9.2", 2, false),
-            ("v0.9.1", 20, true),
-        ],
-        Some("0.9.3"),
-    );
-
-    let status = release_status(repo.path(), None).unwrap();
-
-    assert_eq!(status.preview_tag.as_deref(), Some("v0.9.3"));
-    assert!(status.preview_published_at.is_some());
-    let stable = status.stable.unwrap();
-    assert_eq!(stable.current.unwrap().tag, "v0.9.1");
-    assert_eq!(stable.next, None);
-    let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
-    assert_eq!(holds.len(), 2);
-    assert!(holds[0].ends_with(" holds v0.9.3"), "{holds:?}");
-    assert!(holds[1].starts_with("v0.9.2 soaks until "), "{holds:?}");
 }
 
 /// Run the daily release with nothing to release against published `(tag,
-/// days ago, latest)` releases, optionally after marking a regression Task,
-/// and return the stream effects it logged.
-fn run_stable_advance(releases: &[(&str, i64, bool)], regressed_in: Option<&str>) -> String {
-    let (repo, log, _env) = stable_fixture(releases, regressed_in);
+/// days ago, latest)` releases and return the stream effects it logged.
+fn run_stable_advance(releases: &[(&str, i64, bool)]) -> String {
+    let (repo, log, _env) = stable_fixture(releases);
 
     let outcome = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
 
@@ -1534,12 +1490,8 @@ fn run_stable_advance(releases: &[(&str, i64, bool)], regressed_in: Option<&str>
 }
 
 /// A `completion: github-release` repository whose fake `gh` lists published
-/// `(tag, days ago, latest)` releases and logs stream effects, optionally
-/// with a regression Task marked.
-fn stable_fixture(
-    releases: &[(&str, i64, bool)],
-    regressed_in: Option<&str>,
-) -> (TestRepo, PathBuf, EnvGuard) {
+/// `(tag, days ago, latest)` releases and logs stream effects.
+fn stable_fixture(releases: &[(&str, i64, bool)]) -> (TestRepo, PathBuf, EnvGuard) {
     let repo = TestRepo::new();
     let log = repo.path().join("effects.log");
     let releases: Vec<_> = releases
@@ -1573,17 +1525,6 @@ fn stable_fixture(
     repo.commit("Configure release streams");
     git(&repo, &["push", "origin", "HEAD"]);
     git(&repo, &["tag", "v0.9.3"]);
-    if let Some(version) = regressed_in {
-        let task = loopflow::ops::task::task_create(
-            repo.path(),
-            None,
-            Some("Sessions lose their name".into()),
-            None,
-            Some(format!("v{version}")),
-        )
-        .unwrap();
-        assert_eq!(task.regressed_in, Some(format!("v{version}")));
-    }
     (repo, log, env)
 }
 
@@ -1651,6 +1592,62 @@ fn release_run_builds_fixes_merged_after_the_release_pr() {
     assert_eq!(
         git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
         fixed
+    );
+}
+
+#[test]
+fn release_run_fetches_a_release_merge_it_has_not_seen() {
+    let repo = TestRepo::new();
+    prepare_candidate_release_repo(&repo);
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      workflow: release.yml\n      verify: ['test -f feature.txt']\n",
+    )
+    .expect("write release config");
+    git(&repo, &["commit", "-am", "Verify release sources"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    // GitHub merges the release PR after this run fetched main: the merge
+    // commit exists only on origin until the run fetches it.
+    let merger = tempfile::tempdir().expect("merger clone");
+    let merger_path = merger.path().to_string_lossy();
+    let bare = repo.bare_path().to_string_lossy().to_string();
+    let merger_git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "user.name=GitHub",
+                "-c",
+                "user.email=noreply@github.com",
+            ])
+            .args(args)
+            .current_dir(merger.path())
+            .output()
+            .expect("run git");
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    merger_git(&["clone", "--quiet", &bare, "."]);
+    merger_git(&["commit", "--allow-empty", "-m", "release: v0.9.2 (#1176)"]);
+    let merge = merger_git(&["rev-parse", "HEAD"]);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let gh_script = write_gh_candidate_release_script(&log_path.to_string_lossy(), "success")
+        .replace(
+            r#"head="$(git rev-parse HEAD)""#,
+            &format!(r#"git -C '{merger_path}' push --quiet origin HEAD:main >&2; head="{merge}""#),
+        );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("release should fetch its merge commit and finish");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    assert_eq!(receipt.commit, merge);
+    assert_eq!(
+        git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+        merge
     );
 }
 

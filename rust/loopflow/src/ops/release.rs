@@ -421,11 +421,7 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
                 .iter()
                 .find(|release| preview_tag.as_deref() == Some(release.tag.as_str()))
                 .map(|release| release.published_at),
-            Some(stable_stream(
-                &releases,
-                &regressions(&main_repo)?,
-                chrono::Utc::now(),
-            )),
+            Some(read_stable_stream(&main_repo, &releases)?),
         )
     } else {
         (None, None)
@@ -451,6 +447,17 @@ pub fn release_check(repo: &Path, target_name: Option<&str>) -> OpsResult<Releas
     }
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    if target.completion == ReleaseCompletion::GithubRelease {
+        // `stable` reads regressions from Linear. A release home that cannot
+        // read them learns it here, before a run publishes and holds `stable`.
+        tokio::runtime::Runtime::new()?
+            .block_on(regressions(&main_repo))
+            .map_err(|error| {
+                OpsError::Message(format!(
+                    "this home cannot read regressions from Linear, so stable would hold: {error}"
+                ))
+            })?;
+    }
     collect_release_changes(&main_repo, &target)
 }
 
@@ -923,7 +930,10 @@ fn release_version(
                     ))
                 })?;
                 // No candidate was built yet, so the version is unspent: corrections
-                // merged after the release PR ship under the same version.
+                // merged after the release PR ship under the same version. An unseen
+                // merge commit means origin's default branch is stale too; one fetch
+                // refreshes both.
+                ensure_commit_local(main_repo, &release_commit, lock)?;
                 let main_ref = format!("origin/{default_branch}");
                 let current_main = run_stdout(main_repo, "git", &["rev-parse", &main_ref])?;
                 if current_main != release_commit
@@ -1146,6 +1156,9 @@ fn materialize_exact_source_worktree(
     };
     let path = worktree_path(repo, worktree_name);
     let branch = release_branch_name(repo, worktree_name)?;
+    // Release revisions often come from GitHub (a merge commit or a remote tag)
+    // after this run last fetched.
+    ensure_commit_local(repo, revision, lock)?;
     let expected_commit = rev_parse(repo, &format!("{revision}^{{commit}}"))?;
     let registrations = list_porcelain(repo)?;
     let registered_at_path = registrations
@@ -4062,7 +4075,7 @@ fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate, lock: &Releas
     }
 }
 
-/// Ensure `sha` exists in `repo`'s local object database, fetching from
+/// Ensure `revision` exists in `repo`'s local object database, fetching from
 /// origin if it doesn't.
 ///
 /// `git rev-parse <40-char-hex>` echoes the input without verifying the
@@ -4070,20 +4083,26 @@ fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate, lock: &Releas
 /// (a merge commit landed on origin via the merge queue), the local repo
 /// may not have fetched it yet — and `git tag <name> <sha>` then fails
 /// with `trying to write ref ... with nonexistent object`.
-fn ensure_commit_local(repo: &Path, sha: &str, lock: &ReleaseLock) -> OpsResult<()> {
-    if commit_exists_locally(repo, sha) {
+fn ensure_commit_local(repo: &Path, revision: &str, lock: &ReleaseLock) -> OpsResult<()> {
+    if commit_exists_locally(repo, revision) {
         return Ok(());
     }
-    let _ = lock
+    let fetch = lock
         .command("git")
         .args(["fetch", "origin"])
         .current_dir(repo)
-        .output();
-    if commit_exists_locally(repo, sha) {
+        .output()?;
+    if !fetch.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: "git fetch origin".into(),
+            stderr: String::from_utf8_lossy(&fetch.stderr).to_string(),
+        });
+    }
+    if commit_exists_locally(repo, revision) {
         return Ok(());
     }
     Err(OpsError::Message(format!(
-        "commit {sha} is not present locally even after fetching origin"
+        "commit {revision} is not present locally even after fetching origin"
     )))
 }
 
@@ -4293,8 +4312,8 @@ fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<Publ
         .collect())
 }
 
-/// A regression Task as the stable rule reads it: releases from `version` on
-/// carry the bug, until the first release published after its fix landed.
+/// A regression as the stable rule reads it: releases from `version` on carry
+/// the bug, until the first release published after its fix landed.
 #[derive(Debug)]
 struct Regression {
     task: String,
@@ -4311,21 +4330,26 @@ impl Regression {
     }
 }
 
-/// The repository's regression Tasks. A done Task whose completion time is
-/// unreadable keeps covering, so a stalled `stable` is the failure, not a bug.
-fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let store = runtime.block_on(crate::ops::planning_sync::planning_store())?;
-    let tasks = store
-        .sqlite
-        .regression_tasks(&repo.to_string_lossy())
-        .map_err(|error| OpsError::Message(format!("read regression Tasks: {error}")))?;
-    Ok(tasks
+/// The repository's regressions, read from its Linear Team so every home sees
+/// the same ones. A repository without Linear planning has none. A completed
+/// issue whose completion time is unreadable keeps covering, so a stalled
+/// `stable` is the failure, not a bug.
+async fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
+    let Some(team) = super::linear::selected_linear_team(repo)? else {
+        return Ok(Vec::new());
+    };
+    let client = super::linear::issue_client().await?;
+    let issues = client
+        .regressions(&team)
+        .await
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    Ok(issues
         .into_iter()
-        .filter(|task| task.state.as_deref() != Some("canceled"))
-        .filter_map(|task| {
-            let fixed_at = if task.state.as_deref() == Some("completed") {
-                task.completed_at
+        .filter(|issue| issue.state.as_deref() != Some("canceled"))
+        .filter_map(|issue| {
+            let fixed_at = if issue.state.as_deref() == Some("completed") {
+                issue
+                    .completed_at
                     .as_deref()
                     .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
                     .map(|at| at.with_timezone(&chrono::Utc))
@@ -4333,12 +4357,31 @@ fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
                 None
             };
             Some(Regression {
-                version: parse_version(task.regressed_in.as_deref()?)?,
-                task: task.identifier,
+                version: parse_version(&issue.version)?,
+                task: issue.identifier,
                 fixed_at,
             })
         })
         .collect())
+}
+
+/// The stable stream against Linear's regressions. Unread regressions hold
+/// `stable` where it is and say why.
+fn read_stable_stream(repo: &Path, releases: &[PublishedRelease]) -> OpsResult<StableStream> {
+    let regressions = tokio::runtime::Runtime::new()?.block_on(regressions(repo));
+    Ok(match regressions {
+        Ok(regressions) => stable_stream(releases, &regressions, chrono::Utc::now()),
+        Err(error) => StableStream {
+            current: releases
+                .iter()
+                .find(|release| release.is_latest)
+                .map(StreamRelease::from),
+            next: None,
+            holds: vec![StableHold::RegressionsUnread {
+                reason: error.to_string(),
+            }],
+        },
+    })
 }
 
 /// The release `stable` should point at now, when that is ahead of where it
@@ -4392,6 +4435,10 @@ pub enum StableHold {
         task: String,
         tags: Vec<String>,
     },
+    /// Linear's regressions could not be read; `stable` stays put.
+    RegressionsUnread {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for StableHold {
@@ -4402,6 +4449,12 @@ impl std::fmt::Display for StableHold {
             }
             Self::Regression { task, tags } => {
                 write!(formatter, "{task} holds {}", tags.join(", "))
+            }
+            Self::RegressionsUnread { reason } => {
+                write!(
+                    formatter,
+                    "stable holds: regressions unread from Linear: {reason}"
+                )
             }
         }
     }
@@ -4473,11 +4526,7 @@ fn advance_stable(
     progress: &impl Progress,
     lock: &ReleaseLock,
 ) -> OpsResult<()> {
-    let stable = stable_stream(
-        &published_releases(repo, target)?,
-        &regressions(repo)?,
-        chrono::Utc::now(),
-    );
+    let stable = read_stable_stream(repo, &published_releases(repo, target)?)?;
     for hold in &stable.holds {
         progress.status(&hold.to_string());
     }
@@ -4691,6 +4740,146 @@ mod tests {
                 until: releases[0].published_at + STABLE_SOAK,
             }]
         );
+    }
+
+    /// The stable stream for `releases` against a Linear double answering
+    /// with `responses`.
+    fn stable_with_linear(
+        releases: &[PublishedRelease],
+        responses: Vec<crate::linear::test_server::QueuedResponse>,
+    ) -> StableStream {
+        use crate::ops::linear::{test_fixture, LINEAR_TEST_CONTEXT};
+        let _lock = crate::journal::test_env_lock();
+        let _restore = test_fixture::PlanningEnvironment::isolate();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(test_fixture::Fixture::new());
+        let (repo, _wave) = runtime.block_on(fixture.planning_repo());
+        runtime.block_on(fixture.seed(test_fixture::now() + 3600));
+        let (url, _) = runtime.block_on(crate::linear::test_server::spawn(responses));
+        LINEAR_TEST_CONTEXT
+            .sync_scope(fixture.context(&url), || {
+                read_stable_stream(&repo, releases)
+            })
+            .unwrap()
+    }
+
+    fn regressed_issues(
+        state: &str,
+        completed_days_ago: Option<i64>,
+    ) -> crate::linear::test_server::QueuedResponse {
+        let completed_at = completed_days_ago
+            .map(|days| (chrono::Utc::now() - chrono::TimeDelta::days(days)).to_rfc3339());
+        crate::linear::test_server::json_response(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"data": {"issues": {
+                "nodes": [{
+                    "identifier": "LOO-7",
+                    "completedAt": completed_at,
+                    "state": {"type": state},
+                    "labels": {"nodes": [
+                        {"name": "Bug", "parent": null},
+                        {"name": "v0.16.0", "parent": {"name": "Regressed in"}},
+                    ]},
+                }],
+                "pageInfo": {"hasNextPage": false, "endCursor": null},
+            }}}),
+        )
+    }
+
+    #[test]
+    fn an_open_linear_regression_holds_stable() {
+        let releases = [
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.9", 20, false),
+            published("v0.15.2", 30, true),
+        ];
+
+        let stable = stable_with_linear(&releases, vec![regressed_issues("started", None)]);
+
+        assert_eq!(stable.next.unwrap().tag, "v0.15.9");
+        let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
+        assert_eq!(holds, ["LOO-7 holds v0.16.1, v0.16.0"]);
+    }
+
+    #[test]
+    fn a_completed_linear_regression_releases_the_next_soaked_release() {
+        let releases = [
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.2", 30, true),
+        ];
+
+        let stable = stable_with_linear(&releases, vec![regressed_issues("completed", Some(10))]);
+
+        assert_eq!(stable.next.unwrap().tag, "v0.16.1");
+    }
+
+    #[test]
+    fn unread_linear_regressions_hold_stable_and_say_why() {
+        let releases = [
+            published("v0.16.0", 12, false),
+            published("v0.15.2", 30, true),
+        ];
+        let refused = crate::linear::test_server::json_response(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"errors": [{"message": "Authentication required"}]}),
+        );
+
+        let stable = stable_with_linear(&releases, vec![refused]);
+
+        assert_eq!(stable.current.unwrap().tag, "v0.15.2");
+        assert_eq!(stable.next, None);
+        let [StableHold::RegressionsUnread { reason }] = stable.holds.as_slice() else {
+            panic!("expected an unread-regressions hold: {:?}", stable.holds);
+        };
+        assert!(reason.contains("Authentication required"), "{reason}");
+    }
+
+    #[test]
+    fn release_check_reports_a_home_that_cannot_read_linear_regressions() {
+        use crate::ops::linear::{test_fixture, LINEAR_TEST_CONTEXT};
+        let _lock = crate::journal::test_env_lock();
+        let _restore = test_fixture::PlanningEnvironment::isolate();
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("LF_HOME", home.path());
+        // Only `gh --version` runs; the refusal comes before any other gh call.
+        let bin = home.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("gh"), "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(
+            bin.join("gh"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o755),
+        )
+        .unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin];
+        paths.extend(std::env::split_paths(&path));
+        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let fixture = runtime.block_on(test_fixture::Fixture::new());
+        let (repo, _wave) = runtime.block_on(fixture.planning_repo());
+        std::fs::write(
+            repo.join(".lf/config.yaml"),
+            "planning:\n  provider: linear\n  team: team-1\nrelease:\n  targets:\n    default:\n      completion: github-release\n",
+        )
+        .unwrap();
+        runtime.block_on(fixture.seed(test_fixture::now() + 3600));
+        let refused = crate::linear::test_server::json_response(
+            axum::http::StatusCode::OK,
+            serde_json::json!({"errors": [{"message": "Authentication required"}]}),
+        );
+        let (url, _) = runtime.block_on(crate::linear::test_server::spawn(vec![refused]));
+
+        let error = LINEAR_TEST_CONTEXT
+            .sync_scope(fixture.context(&url), || release_check(&repo, None))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("stable would hold"), "{error}");
+        assert!(error.contains("Authentication required"), "{error}");
     }
 
     #[test]

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-691 concept review</title>
+<style>
+:root { --bg:#fbfaf7; --fg:#1d1c1a; --muted:#6b675f; --rule:#e2ded5; --code:#f1eee7; --prop:#2f6f4f; --propbg:#eaf4ee; --warn:#8a4b12; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161513; --fg:#e9e6df; --muted:#9a958b; --rule:#33302b; --code:#23211d; --prop:#8fd1ab; --propbg:#1c2a22; --warn:#e0a46a; } }
+body { background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin:0; padding:0 16px; }
+main { max-width:44rem; margin:3rem auto 5rem; }
+h1 { font-size:1.6rem; line-height:1.25; margin:0 0 .4rem; }
+h2 { font-size:1.15rem; margin:2.6rem 0 .6rem; }
+.meta { color:var(--muted); font-size:.9rem; }
+code, pre { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.86rem; background:var(--code); border-radius:4px; }
+code { padding:.05rem .3rem; }
+pre { padding:.8rem 1rem; overflow-x:auto; line-height:1.45; }
+.proposed { border-left:3px solid var(--prop); background:var(--propbg); padding:.6rem 1rem; margin:1rem 0; }
+.proposed > :first-child::before { content:"Proposed — "; color:var(--prop); font-weight:600; }
+.lead { font-size:1.08rem; }
+table { border-collapse:collapse; width:100%; font-size:.92rem; margin:.8rem 0; }
+th, td { text-align:left; vertical-align:top; padding:.45rem .5rem; border-bottom:1px solid var(--rule); }
+th { font-weight:600; }
+.mismatch { color:var(--warn); font-weight:600; }
+ol.q > li { margin-bottom:1rem; }
+ol.q ol { list-style:lower-alpha; margin-top:.3rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Which <code>lf</code> runs a release?</h1>
+<p class="meta">LOO-691 · step: demo · 2026-10-30 · from <code>rust/loopflow/src/ops/release.rs</code>, <code>release/README.md</code>, <code>scratch/questions.md</code>, PR #1780</p>
+
+<p class="lead">Updated after Jack proposed a separate release home. The fetch fix is settled. The open question is who carries it: the daily release is performed by the host's <em>installed</em> <code>lf</code>, so a fix to release itself only helps the release <em>after</em> the one that ships it. Decide whether that lag is the contract (question 1).</p>
+
+<h2>One interaction, end to end</h2>
+<table>
+<tr><th>You / the host do</th><th>Concept</th><th>What changes state</th></tr>
+<tr><td>Cron runs <code>lf release run patch</code></td><td>Release run (installed build)</td><td>fetch <code>origin/main</code>, open release PR</td></tr>
+<tr><td>GitHub merges the release PR</td><td>Merge commit — a fact learned from GitHub</td><td><code>observe_pr_merge</code> returns the sha</td></tr>
+<tr><td>The run builds and tags that sha</td><td>Candidate</td><td><code>materialize_exact_source_worktree</code>, <code>git tag</code></td></tr>
+<tr><td><em>Before:</em> sha not local → <code>unknown revision</code>; you <code>git fetch origin</code> and rerun</td><td></td><td></td></tr>
+<tr><td><em>After (PR #1780):</em> the run fetches whatever revision it is about to resolve, build or tag</td><td>no new concept</td><td><code>ensure_commit_local</code> at the build and tag chokepoints; fetch failure now surfaces</td></tr>
+</table>
+<p>The fetch-on-miss shape holds up: the remote is the truth, the local repo is a cache, and every consumer of a sha passes through one of two chokepoints. No change proposed there.</p>
+
+<h2 class="mismatch">The mismatch: the fix doesn't reach the run it fixes</h2>
+<p>The release host runs its installed build on its stream. PR #1780 lands on main, then ships in the next release — which the host performs with the <em>old</em> build. So the very next daily release can still stop at <code>unknown revision</code> and need one manual fetch and rerun. Only once the host installs that release does the fix take effect.</p>
+<p>That lag is general: every fix to <code>lf release run</code> is one release late on the host. Today's README records it as accepted:</p>
+<pre>The release host runs its installed `lf` on any stream; it need not follow
+`dev`. To release with a fix the installed build lacks, `lf install --dev`
+first: a main build refuses a store missing main's migrations.</pre>
+
+<div class="proposed">
+<p>Alternative wording if the host follows <code>dev</code> (1b):</p>
+<pre>The release host follows `dev` (`lf install --dev`), so each release runs
+main's release code, including fixes not yet shipped.</pre>
+</div>
+
+<h2>Normal path, failure, recovery</h2>
+<table>
+<tr><th></th><th>1a · installed stream (current)</th><th>1b · host follows dev</th></tr>
+<tr><td>Normal</td><td>Releases daily on the released build</td><td>Releases daily on green main</td></tr>
+<tr><td>Release-code bug fixed on main</td><td>One more release hits it; you fetch and rerun</td><td>Next run has the fix</td></tr>
+<tr><td>Bad main build</td><td>Unaffected</td><td>The release itself can break; recovery is <code>lf install</code> back to stable — but its store now has main's migrations, which a stable build refuses</td></tr>
+<tr><td>Must survive</td><td colspan="2">The host's store, open release PRs and saved candidates across any reinstall</td></tr>
+</table>
+<p>The counterexample for 1b is that last recovery row: once the host follows dev, it can't step back down to stable until stable catches up. Under 1a the only cost is one manual step per release-code fix.</p>
+
+<h2>Jack's proposal: a release home that follows dev</h2>
+<div class="proposed">
+<p>A dedicated release <code>lf</code> with its own <code>LF_HOME</code> and store, on <code>dev</code>. It runs main's release code. Your main home, its Sessions and its stream don't move.</p>
+<pre># release host
+LF_HOME=~/.lf-release lf install --dev
+LF_HOME=~/.lf-release lf release run patch   # the release-run job</pre>
+</div>
+<p>This removes 1b's counterexample: when main is bad, you reinstall the release home and your main store is never touched.</p>
+<table>
+<tr><th>Release reads from the store</th><th>In a separate release home</th></tr>
+<tr><td><code>repair_running</code>: is a CI repair live on the release PR?</td><td>Still correct: the release home starts its own repairs</td></tr>
+<tr><td class="mismatch"><code>regressions</code>: Tasks marked <code>--regressed-in</code> hold <code>stable</code> back</td><td class="mismatch">Empty. <code>stable</code> would move past known regressions. The README says it "reads the release Machine's Tasks, never Linear."</td></tr>
+<tr><td>release-notes agent Session</td><td>Kept in the release home, not in your main history</td></tr>
+</table>
+<p>Before a release home is safe, regressions need a source it can read.</p>
+
+<h2>Decided</h2>
+<p>2b: after #1780 lands, the host installs a <code>dev</code> build so the next release uses the fix. With 1c, that install goes in the release home.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Where does the release home read regressions from?
+  <ol>
+  <li>Linear: a regression is a Linear label plus a version, which any home can read.</li>
+  <li>GitHub: a <code>regressed-in:v0.15.3</code> label on the bug's issue or PR, read the same way the release already reads PRs.</li>
+  <li>Your main home's store, read-only, from the release home. A dev build reading a stable store couples the two stores' schema versions again.</li>
+  <li>Split the run: the release home cuts and publishes, and your main <code>lf</code> moves <code>stable</code>.</li>
+  </ol></li>
+<li>Scope: build the release home in LOO-691, or file it as its own Task and land #1780 as is?
+  <ol>
+  <li>Its own Task; #1780 lands now.</li>
+  <li>Fold it into LOO-691.</li>
+  </ol></li>
+</ol>
+</main>
+</body>
+</html>

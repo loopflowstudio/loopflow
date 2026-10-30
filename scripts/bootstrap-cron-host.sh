@@ -7,6 +7,11 @@
 # reconstructs the unattended environment from non-secret host-local paths;
 # the Machine-local publisher command injects authority only into its child.
 #
+# release-run runs in its own release home (LF_RELEASE_HOME, default
+# ~/.lf-release) with an `lf` built from origin/main in a clone inside it, so
+# the release uses main's release code and never opens the installed `lf`'s
+# home. Rerun this script to rebuild that `lf` from newer main.
+#
 # Usage: scripts/bootstrap-cron-host.sh [wave]
 #   scripts/bootstrap-cron-host.sh infrastructure
 set -euo pipefail
@@ -47,13 +52,38 @@ else
 fi
 
 lf_home="${LF_HOME:-$HOME/.lf}"
-# The checks below and both job wrappers run in this one environment.
+# The checks below and the telemetry-daily wrapper run in this environment.
 minimal_env=(
   env -i
   "HOME=$HOME"
   "USER=${USER:-}"
   "PATH=$host_path"
   "LF_HOME=$lf_home"
+  "TMPDIR=${TMPDIR:-/tmp}"
+  "LANG=${LANG:-C}"
+)
+
+step "release home lf"
+release_home="${LF_RELEASE_HOME:-$HOME/.lf-release}"
+release_src="$release_home/src"
+# A clone, not a worktree: the main checkout's worktree pruning never sees it.
+if [ ! -d "$release_src/.git" ]; then
+  mkdir -p "$release_home"
+  git clone --quiet "$(git remote get-url origin)" "$release_src"
+fi
+git -C "$release_src" fetch --quiet origin main
+git -C "$release_src" checkout --quiet --detach FETCH_HEAD
+(cd "$release_src" && uv run python scripts/install.py local)
+release_lf="$release_src/local-bin/lf"
+"$release_lf" --version
+# A private home launches its child lf processes through LF_BIN.
+release_env=(
+  env -i
+  "HOME=$HOME"
+  "USER=${USER:-}"
+  "PATH=$(dirname "$release_lf"):$PATH"
+  "LF_HOME=$release_home"
+  "LF_BIN=$release_lf"
   "TMPDIR=${TMPDIR:-/tmp}"
   "LANG=${LANG:-C}"
 )
@@ -74,10 +104,28 @@ step "unattended tool path"
   exit "$missing"
 '
 step "host-local provider authority"
-auth_status="$("${minimal_env[@]}" "$lf_bin" account --json)"
-printf '%s\n' "$auth_status"
-if ! jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")' >/dev/null <<<"$auth_status"; then
-  printf 'no managed provider account verified live from the Machine store\n' >&2
+# Each home holds its own logins; copying a store would share rotating grants.
+require_account() {
+  local home="$1" auth_status
+  shift
+  auth_status="$("$@" account --json)"
+  printf '%s\n' "$auth_status"
+  if ! jq -e 'any(.accounts[]; .scope == "managed" and .verification == "accepted")' >/dev/null <<<"$auth_status"; then
+    printf 'no managed provider account verified live in the %s home; log in with LF_HOME set to it\n' "$home" >&2
+    exit 1
+  fi
+}
+require_account main "${minimal_env[@]}" "$lf_bin"
+require_account release "${release_env[@]}" "$release_lf"
+
+step "release home planning authority"
+# `lf release check` reads regressions from Linear; exit 1 alone means nothing
+# merged since the last tag.
+if ! check_output="$("${release_env[@]}" "$release_lf" release check 2>&1 >/dev/null)" &&
+  ! grep -q '^No commits in the target area' <<<"$check_output"; then
+  printf '%s\n' "$check_output" >&2
+  printf 'the release home cannot check a release; LF_HOME=%q %q account connect linear\n' \
+    "$release_home" "$release_lf" >&2
   exit 1
 fi
 
@@ -91,11 +139,15 @@ log_dir="$repo_root/.lf/logs"
 # reads only 999 bytes of a command line, and the host PATH alone can exceed it.
 cron_dir="$repo_root/.lf/cron"
 mkdir -p "$log_dir" "$cron_dir"
-cron_env="$(printf '%q ' "${minimal_env[@]}")"
 wrapper() {
-  local path="$cron_dir/$wave.$1.sh"
+  local path="$cron_dir/$wave.$1.sh" job_env job_lf
+  if [ "$1" = release-run ]; then
+    job_env="$(printf '%q ' "${release_env[@]}")" job_lf="$release_lf"
+  else
+    job_env="$(printf '%q ' "${minimal_env[@]}")" job_lf="$lf_bin"
+  fi
   printf '#!/bin/sh\ncd %q && exec %s%q --wave %q --batch graph %s >> %q 2>&1\n' \
-    "$repo_root" "$cron_env" "$lf_bin" "$wave" "$1" "$log_dir/$1.log" >"$path"
+    "$repo_root" "$job_env" "$job_lf" "$wave" "$1" "$log_dir/$1.log" >"$path"
   chmod 0755 "$path"
   printf '%s' "$path"
 }

@@ -108,6 +108,8 @@ pub(crate) struct PlanningState {
     comments: Vec<serde_json::Value>,
     attachments: Vec<String>,
     move_on_attachment_read: bool,
+    /// Issue labels: `{id, name, isGroup, team, parent}`; issues hold ids in `_labels`.
+    pub(crate) labels: Vec<serde_json::Value>,
 }
 
 /// Every issue edit enters its Linear history with the state it left behind.
@@ -545,6 +547,80 @@ async fn planning_response(
         json!({"issue":issue.map(|issue| json!({"history":page(
             issue["_history"].as_array().cloned().unwrap_or_default()
         )}))})
+    } else if query.contains("query RegressionLabels") {
+        let issue = state
+            .issues
+            .iter()
+            .find(|issue| issue["id"] == vars["issueId"]);
+        let applied = |issue: &serde_json::Value| {
+            issue["_labels"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|id| {
+                    let label = state
+                        .labels
+                        .iter()
+                        .find(|label| &label["id"] == id)
+                        .unwrap();
+                    json!({"id": id, "parent": label["parent"]})
+                })
+                .collect::<Vec<_>>()
+        };
+        json!({"issueLabels": {"nodes": state.labels},
+               "issue": issue.map(|issue| json!({"labels": {"nodes": applied(issue)}}))})
+    } else if query.contains("mutation CreateRegressionLabel") {
+        let input = &vars["input"];
+        let id = format!("label-{}", state.labels.len() + 1);
+        state.labels.push(json!({
+            "id": id, "name": input["name"], "isGroup": input["isGroup"],
+            "team": input["teamId"].as_str().map(|team| json!({"id": team})),
+            "parent": input["parentId"].as_str().map(|parent| json!({"id": parent})),
+        }));
+        json!({"issueLabelCreate": {"success": true, "issueLabel": {"id": id}}})
+    } else if query.contains("mutation MarkRegressedIn") {
+        let input = vars["input"].clone();
+        let issue = state
+            .issues
+            .iter_mut()
+            .find(|issue| issue["id"] == vars["id"])
+            .unwrap();
+        let mut applied = issue["_labels"].as_array().cloned().unwrap_or_default();
+        applied.retain(|id| !input["removedLabelIds"].as_array().unwrap().contains(id));
+        applied.extend(input["addedLabelIds"].as_array().unwrap().iter().cloned());
+        issue["_labels"] = json!(applied);
+        mark_issue_updated(issue);
+        json!({"issueUpdate": {"success": true}})
+    } else if query.contains("query RegressedIssues") {
+        let named = |id: &serde_json::Value| {
+            let label = state.labels.iter().find(|label| &label["id"] == id)?;
+            let parent = state
+                .labels
+                .iter()
+                .find(|group| Some(&group["id"]) == label["parent"].get("id"))
+                .map(|group| json!({"name": group["name"]}));
+            Some(json!({"name": label["name"], "parent": parent}))
+        };
+        let nodes: Vec<_> = state
+            .issues
+            .iter()
+            .filter_map(|issue| {
+                let labels: Vec<_> = issue["_labels"]
+                    .as_array()?
+                    .iter()
+                    .filter_map(named)
+                    .collect();
+                labels
+                    .iter()
+                    .any(|label| label["parent"]["name"] == "Regressed in")
+                    .then(|| {
+                        json!({"identifier": issue["identifier"], "completedAt": issue["completedAt"],
+                               "state": issue["state"], "labels": {"nodes": labels}})
+                    })
+            })
+            .collect();
+        json!({"issues": page(nodes)})
     } else if query.contains("query IssueTeam") {
         json!({"issue":{"team":{"id":"team-1"}}})
     } else if query.contains("query WorkflowStates") {
@@ -3829,6 +3905,83 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
         assert!(saved.linear_id.is_some());
         assert!(saved.identifier.starts_with("FIX-"));
         assert!(saved.worktree.is_none());
+    });
+}
+
+fn mark_regressed_in(repo: &Path, task: &Task, version: &str) -> crate::ops::OpsResult<()> {
+    crate::ops::task::task_edit(
+        repo,
+        task.id.as_str(),
+        None,
+        crate::work::task::TaskUpdate {
+            regressed_in: Some(version.into()),
+            ..Default::default()
+        },
+    )
+    .map(drop)
+}
+
+#[test]
+fn task_edit_regressed_in_labels_the_linear_issue_releases_read() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        mark_regressed_in(repo, task, "v0.15.3").unwrap();
+        mark_regressed_in(repo, task, "v0.15.4").unwrap();
+
+        let regressions = runtime.block_on(async {
+            crate::ops::linear::issue_client()
+                .await
+                .unwrap()
+                .regressions("team-1")
+                .await
+                .unwrap()
+        });
+        assert_eq!(regressions.len(), 1);
+        assert_eq!(regressions[0].identifier, task.identifier);
+        assert_eq!(regressions[0].version, "v0.15.4");
+        let provider = runtime.block_on(state.lock());
+        assert_eq!(provider.issues[0]["_labels"].as_array().unwrap().len(), 1);
+        drop(provider);
+        let saved = runtime
+            .block_on(fixture.store.get_task(&task.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(saved.regressed_in.as_deref(), Some("v0.15.4"));
+    });
+}
+
+#[test]
+fn task_edit_regressed_in_refuses_a_mark_linear_cannot_hold() {
+    with_planning_task(|runtime, fixture, repo, task, state| {
+        runtime.block_on(state.lock()).field_outage = true;
+        let unsynced = crate::ops::task::task_create(
+            repo,
+            Some("product"),
+            Some("Not yet in Linear".into()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(unsynced.linear_id.is_none());
+        let error = mark_regressed_in(repo, &unsynced, "v0.15.3").unwrap_err();
+        assert!(error.to_string().contains("no Linear issue yet"), "{error}");
+        runtime.block_on(state.lock()).field_outage = false;
+
+        std::fs::write(
+            repo.join(".lf/config.yaml"),
+            "planning:\n  provider: linear\n",
+        )
+        .unwrap();
+        let error = mark_regressed_in(repo, task, "v0.15.3").unwrap_err();
+        assert!(error.to_string().contains("planning.team"), "{error}");
+
+        assert!(runtime.block_on(state.lock()).labels.is_empty());
+        for id in [&unsynced.id, &task.id] {
+            let saved = runtime
+                .block_on(fixture.store.get_task(id))
+                .unwrap()
+                .unwrap();
+            assert_eq!(saved.regressed_in, None);
+        }
     });
 }
 

@@ -55,6 +55,20 @@ repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
 
+```bash
+scripts/bootstrap-cron-host.sh infrastructure  # build the release home's lf from origin/main
+LF_HOME=~/.lf-release ~/.lf-release/src/local-bin/lf account connect linear  # first time, then rerun
+```
+
+The release job runs in its own release home, `~/.lf-release`
+(`LF_RELEASE_HOME`). Bootstrap builds that home's `lf` from origin/main
+in `~/.lf-release/src`, so releases use main's release code while the installed
+`lf` and your home stay on their stream. A bad main build is repaired by
+rerunning bootstrap; nothing else moves. The release home keeps its own
+provider and Linear logins. Log in there; never copy a store, because both
+homes would share one rotating grant. Bootstrap fails when the release home
+cannot read Linear regressions.
+
 Failed release-PR checks enter the same watched CI repair as `lf pr land`.
 Release preparation still rebuilds version metadata when main advances.
 Blocked repairs retain their checkout so `lf release run` can resume the work.
@@ -142,11 +156,15 @@ lf task create --title "Sessions lose their name" --regressed-in v0.15.3
 lf task edit LOO-12 --regressed-in v0.15.3      # mark an existing bug
 ```
 
-A regression is a bug Task marked with the release it regressed in. While it
-is open, `stable` stays below that release. Completing it (landing the fix)
-makes the first release published afterwards eligible once it soaks; releases
-in between still carry the bug and stay skipped. The run logs which Task holds
-`stable`. It reads the release Machine's Tasks, never Linear.
+A regression is a bug Task marked with the release it regressed in: a
+`Regressed in › v0.15.3` label on its Linear issue, so every Machine sees it.
+While it is open, `stable` stays below that release. Completing it (landing the
+fix) makes the first release published afterwards eligible once it soaks;
+releases in between still carry the bug and stay skipped. The run reads the
+repository Team's labelled issues from Linear and logs which Task holds
+`stable`. When Linear can't be read, the release still publishes, `stable`
+stays put, and the run says why. A repository without Linear planning has no
+regressions.
 
 ## What we took from other projects
 

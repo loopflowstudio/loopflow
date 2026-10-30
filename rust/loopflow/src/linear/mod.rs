@@ -8,6 +8,7 @@ use crate::work::wave::metrics::MetricTarget;
 
 use self::project_document::parse_project_document;
 mod cooldown;
+pub(crate) mod regressions;
 pub mod request_log;
 mod team_changes;
 

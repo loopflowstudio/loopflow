@@ -40,8 +40,9 @@ That command is responsible for:
 - waiting for the target's configured completion evidence
 - for a `github-release` target, moving GitHub's Latest marker (the `stable`
   pointer) forward to the newest release published at least 7 days ago that no
-  regression Task (`lf task create --regressed-in <version>`) covers, even
-  when there was nothing to release
+  regression (`lf task create --regressed-in <version>`, a Linear label)
+  covers, even when there was nothing to release; when Linear can't be read,
+  `stable` stays put
 
 The repository owns `verify` and `prepare` commands, the selected candidate
 workflow, and the publisher under `release.targets` in `.lf/config.yaml`. Keep

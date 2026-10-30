@@ -1,6 +1,6 @@
 # LOO-694: open a Task's Session after Desktop restarts while its conversation runs
 
-Status: implemented (2026-10-30), realigned against origin/main (no upstream changes to the touched files); awaiting gate.
+Status: implemented and gated (2026-10-30).
 
 ## Observed failure (2026-10-30, Jack Heart's machine)
 
@@ -59,3 +59,22 @@ Status: implemented (2026-10-30), realigned against origin/main (no upstream cha
   owner write must not end its policy.
 
 Check: realign ran no tests (plan and diff agree); gate owns `cargo test -p loopflow --test transport_tests opening_reattaches`.
+
+## Demo (2026-10-30, headless, standing in for Jack Heart)
+
+- Experience: reopening a Session whose owner still claims a viewer that left
+  (the MTG-214 shape), through the real CLI path Desktop calls:
+  `lf session resume <id> --prepare --json`, then `lf session resume <id>`.
+- Observed: `cargo test -p loopflow --test transport_tests opening_reattaches`
+  passes — prepare reads `detached` with a single Reconnect action, and resume
+  reattaches the same execution (echo of "same conversation"). Whole
+  `transport_tests` suite: 19 passed.
+- Not exercised: Jack's live MTG-214 owner and Desktop's pane. Reattaching
+  that live Session would take over a running conversation unasked; the
+  fixture reproduces its store row and owner protocol instead.
+- Decision (agent, no person present): advance; behavior holds. Sidebar label
+  staleness stays the open question in questions.md.
+
+## Gate (2026-10-30, headless)
+
+Check: `scripts/test.py --reuse-passing --rust-filter 'binary(transport_tests) | test(ops::human_session::) | test(lf::commands::open::) | test(work_open_tests::)'` — PASS (architecture, inventory, fmt, 65/65 tests, clippy). No code changes from review.

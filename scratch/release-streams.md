@@ -161,8 +161,8 @@ commit it, and do not land; publish and land once, after slice 8.
    `ReleaseRunOutcome::NoChanges.latest_tag` keeps its name: it is the notes baseline, not a stream.
    `cargo test --lib ops::release::` 48 + `--test release_tests -- stable status regression` 9 + clippy: pass after compress.
 4. **Stream flags and the recorded stream — built 2026-10-29, unpublished.**
-   `lf install --dev|--preview|--stable` (one Clap group; `--main` gone, every refusal
-   now names `lf install --dev`) records `stream:` in `~/.lf/config.yaml`; no flag reads
+   `lf install --dev|--preview|--stable` (one Clap group; `--main` gone; store-ahead refusals
+   name plain `lf install`, see below) records `stream:` in `~/.lf/config.yaml`; no flag reads
    it, default stable; the launchd schedule runs plain `lf install`, so it follows.
    `published::install(Option<Stream>)` resolves preview from the GitHub releases API
    (first non-draft, non-prerelease) and stable from `releases/latest`. Every release

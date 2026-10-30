@@ -58,6 +58,6 @@
 - **On dev, Desktop stays put rather than following preview (concept review after slice 8).**
   The alternative keeps Sparkle on preview and has `adopt` leave a dev link alone; that keeps
   Desktop fresher but runs two streams on one Machine. Chose the simpler one-stream reading.
-- **Store-ahead refusals will say `lf install`, not `--dev`** (concept review after realign). This
-  follows from accepted decisions and is recorded as next implement in `release-streams.md`. Only
+- **Store-ahead refusals say `lf install`, not `--dev`** (concept review after realign; built in
+  `af588be646`). This follows from accepted decisions. Only
   `install.rs`'s unmerged-candidate refusal keeps `--dev`, because there the candidate is a main build.

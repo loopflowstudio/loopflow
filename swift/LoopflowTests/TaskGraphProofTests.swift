@@ -46,12 +46,13 @@ private func captureIfRequested(_ window: NSWindow, name: String) throws {
 @Suite("Task Graph")
 struct TaskGraphTests {
 
-    @Test("Task due date appears beside the conversation")
+    @Test("Task due date and regression mark appear beside the conversation")
     @MainActor
-    func dueDate() throws {
+    func planningFacts() throws {
         let rows = try JSONDecoder().decode([String: RoadmapTask].self, from: fixture("task_delivery_rows.json"))
-        let view = TaskDueDateView(task: try #require(rows["due"]))
+        let view = TaskPlanningFactsView(task: try #require(rows["due"]))
         #expect(try view.inspect().find(text: "Due 2026-10-08").string() == "Due 2026-10-08")
+        #expect(try view.inspect().find(text: "Regressed in v0.15.3").string() == "Regressed in v0.15.3")
     }
 
     @Test("Separate catalogs retain invalid entries and compiled composition")

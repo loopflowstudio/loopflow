@@ -9,7 +9,7 @@ uv run python scripts/loopflow-dev.py test         # run Swift tests
 
 The development app runs its bundled CLI on the main Machine's store, which it
 reads but never migrates. Only an install advances the store's schema:
-`lf self install --main` for a green main build, `lf install` for a release.
+`lf install --dev` for a green main build, `lf install` for your stream's release.
 With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
@@ -656,6 +656,12 @@ Existing providers keep their environment when reattached.
 launching. This checks repository registration, not all Desktop actions. Schema
 compatibility is checked by the store; ordinary commands cannot migrate the main
 database. Private `LF_HOME` experiments remain disposable and explicit.
+
+Only `/Applications/Loopflow.app` updates itself (`AppUpdater`, Sparkle): it
+reads its stream from `~/.lf/config.yaml`, asks its bundled
+`lf install can-open` before installing, and runs `lf install adopt` on the first
+launch of a new version. Dev builds, and a Machine recording `dev` (which has no
+appcast), never check for updates.
 
 | Command | What it does |
 | --- | --- |

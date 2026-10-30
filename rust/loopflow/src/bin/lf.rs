@@ -1062,6 +1062,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             wave,
             title,
             notes,
+            regressed_in,
             run,
             graph,
             json,
@@ -1069,6 +1070,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             if let Some(graph) = graph {
                 loopflow::lf::commands::task_create::check_graph(repo, graph)?;
             }
+
             let report = match request.as_ref().or(notes.as_ref()) {
                 Some(text) => Some(text.clone()),
                 None => piped_task_report()?,
@@ -1078,6 +1080,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 if *no_wave { None } else { wave.as_deref() },
                 title.clone(),
                 report,
+                regressed_in_arg(regressed_in),
             )?;
             match (*json, *run) {
                 (false, _) => println!("{} · {}", issue.title, issue.identifier),
@@ -1141,6 +1144,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     );
                     if let Some(due) = &task.due_date {
                         println!("Due: {due}");
+                    }
+                    if let Some(version) = &task.regressed_in {
+                        println!("Regressed in: {version}");
                     }
                     if let Some(ownership) = &status.ownership {
                         println!("{}", loopflow::ops::task_ownership::render(ownership));
@@ -1335,13 +1341,14 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             notes,
             rank,
             assignee,
+            regressed_in,
             wave,
         } => {
             let result = loopflow::ops::task::task_edit(
                 repo,
                 issue,
                 wave.as_deref(),
-                task_edit_update(title, notes, *rank, assignee),
+                task_edit_update(title, notes, *rank, assignee, regressed_in),
             )?;
             println!("{}: updated", result.id);
             print_planning_sync(&result.sync);
@@ -1438,13 +1445,22 @@ fn task_edit_update(
     notes: &Option<String>,
     rank: Option<u32>,
     assignee: &Option<String>,
+    regressed_in: &Option<String>,
 ) -> loopflow::work::task::TaskUpdate {
     loopflow::work::task::TaskUpdate {
         title: title.clone(),
         description: notes.clone(),
         rank,
         assignee: assignee.clone().map(Some),
+        regressed_in: regressed_in_arg(regressed_in),
     }
+}
+
+/// `0.15.3` reads as `v0.15.3`; an unreadable version reaches validation as typed.
+fn regressed_in_arg(version: &Option<String>) -> Option<String> {
+    version.as_deref().map(|version| {
+        loopflow::work::task::release_version(version).unwrap_or_else(|| version.to_string())
+    })
 }
 
 fn piped_task_report() -> anyhow::Result<Option<String>> {
@@ -1814,15 +1830,31 @@ fn run() -> anyhow::Result<()> {
     // trace/store capture. `lf install` opens the store only read-only, inside
     // its own preflight.
     if let Some(Commands::Self_ {
-        cmd: loopflow::lf::SelfCommand::Install { main, cmd },
+        cmd:
+            loopflow::lf::SelfCommand::Install {
+                dev,
+                preview,
+                stable,
+                cmd,
+            },
     }) = &cli.command
     {
+        use loopflow::lf::commands::install::Stream;
         return match cmd.as_ref() {
-            None if *main => loopflow::lf::commands::install::main_build(),
-            None => loopflow::lf::commands::install::latest(),
+            None => loopflow::lf::commands::install::install(
+                [
+                    (*dev, Stream::Dev),
+                    (*preview, Stream::Preview),
+                    (*stable, Stream::Stable),
+                ]
+                .into_iter()
+                .find_map(|(chosen, stream)| chosen.then_some(stream)),
+            ),
             Some(InstallCommand::Schedule { frequency }) => {
                 loopflow::lf::commands::install::schedule(*frequency)
             }
+            Some(InstallCommand::Adopt) => loopflow::lf::commands::install::adopt(),
+            Some(InstallCommand::CanOpen { tag }) => loopflow::lf::commands::install::can_open(tag),
             Some(InstallCommand::RecoverSwitch { switch }) => {
                 loopflow::lf::commands::install::recover_switch(switch)
             }
@@ -2047,13 +2079,18 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     notes,
                     rank,
                     assignee,
+                    regressed_in,
                     wave,
                     ..
                 },
         }) => Some((
             wave.as_deref().or(cli.wave.as_deref()),
             loopflow::ops::task::TaskPlanningRequest::Edit(task_edit_update(
-                title, notes, *rank, assignee,
+                title,
+                notes,
+                *rank,
+                assignee,
+                regressed_in,
             )),
         )),
         Some(Commands::Task {

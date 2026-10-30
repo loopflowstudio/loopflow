@@ -16,8 +16,8 @@ launchctl list | grep loopflow.cron            # macOS: LaunchAgents; Linux: cro
 ```
 
 ```bash
-lf install                                   # install the stable release
-lf install --main                            # install the newest green main build
+lf install                                   # your stream's newest build (stable by default)
+lf install --preview                         # switch to every release as it ships
 uv run python scripts/install.py local        # build only under local-bin/
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable experiment
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
@@ -36,9 +36,13 @@ Promotion refuses a candidate carrying migrations origin/main has not added.
 Explicit private Homes migrate themselves. Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
-Full installation restarts the replaced Desktop app and its bundled helpers.
-Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI without replacing or
-stopping Desktop and its clients. Promotion advances the shared store through
+On a Mac with Loopflow.app, `~/.local/bin/lf` links to the app's bundled
+`Contents/MacOS/lf`, so the terminal and Desktop always run one build; elsewhere
+it links to the selected build under `~/.lf/bin`. `lf install` replaces a
+Loopflow.app that isn't running. A running app that updates itself is asked to
+update instead, and `lf` follows the new bundle; an older running app is quit,
+replaced and reopened. Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI
+without replacing or stopping Desktop and its clients. Promotion advances the shared store through
 the install switch and retains the prior published artifacts;
 it does not restart Tasks or Flows.
 
@@ -79,6 +83,7 @@ the app is not a side artifact.
 | `lf-<target>.tar.gz` | GitHub Release | `Cargo.toml` |
 | `Loopflow-<version>.dmg` | R2 `downloads/` + GitHub Release | tag |
 | `Loopflow-latest.dmg` | R2 `downloads/` | the `stable` release |
+| `appcast-preview.xml`, `appcast-stable.xml` | R2 `downloads/` | that stream's release, EdDSA-signed |
 | `reader-catalog.txt` | GitHub Release | the reader floors this build opens |
 | `SHA256SUMS` | GitHub Release | release artifact bytes |
 | `loopflow` crate | crates.io | `Cargo.toml` |
@@ -91,9 +96,9 @@ version as `lf --version` — no separate manifest to bump or drift.
 
 | Stream | What it is | How it moves |
 |--------|------------|--------------|
-| `dev` | Newest green main build | Every green main (`lf install --main`) |
+| `dev` | Newest green main build | Every green main |
 | `preview` | Newest published release | Every release |
-| `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago |
+| `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago that no regression covers |
 
 Publishing never marks a release Latest (`gh release edit --latest=false`).
 After each run, including one with nothing to release, `lf release run` moves
@@ -102,14 +107,73 @@ moves it back: a Latest set ahead by hand stays until a newer release soaks.
 Before moving the marker it runs the publisher's `promote --tag <tag>`, which
 points `Loopflow-latest.dmg` at that release's DMG after checking it against
 `SHA256SUMS`. A failed promotion leaves the marker for the next run.
-`releases/latest`, `install.sh`, `lf install` and the website's download link
-all serve `stable`.
+`releases/latest` and the website's download link serve `stable`.
+
+```bash
+lf install --dev        # follow green main (needs gh auth)
+lf install --preview    # follow every release
+lf install --stable     # back to the default
+curl -fsSL https://loopflow.studio/install.sh | sh -s -- --channel preview
+```
+
+A Machine follows one stream, recorded as `stream:` in `~/.lf/config.yaml`.
+A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
+`install.sh` follow it, `stable` when none is recorded. `install.sh` installs
+`stable` or `preview`; `dev` comes from CI artifacts through `lf install --dev`.
+Before downloading a release, `lf install` checks the release's
+`reader-catalog.txt` against this Machine's store. When a newer lf migrated the
+store past what that build reads, it keeps the installed lf and says so; the
+next run installs once the stream reaches a build that opens the store.
+Every install schedules `lf install` daily (launchd, or cron on Linux) unless a
+cadence is already installed, so a Machine stays on its stream unasked.
+
+The installed Loopflow.app updates itself through Sparkle from its stream's
+appcast; on `dev` it stays put while `lf install --dev` updates the CLI alone.
+Publishing writes `appcast-preview.xml`;
+`promote` writes `appcast-stable.xml`, both signed with the publisher's
+`SPARKLE_ED_PRIVATE_KEY` (Doppler) against the `SUPublicEDKey` in
+`swift/LoopflowMac/Info.plist`. Before installing, the app asks its bundled
+`lf install can-open <tag>` and skips a release that can't open the store. Its
+first launch after an update runs `lf install adopt`, which migrates the store
+and links `lf` into the new bundle without moving files.
+
+```bash
+lf task create --title "Sessions lose their name" --regressed-in v0.15.3
+lf task edit LOO-12 --regressed-in v0.15.3      # mark an existing bug
+```
+
+A regression is a bug Task marked with the release it regressed in. While it
+is open, `stable` stays below that release. Completing it (landing the fix)
+makes the first release published afterwards eligible once it soaks; releases
+in between still carry the bug and stay skipped. The run logs which Task holds
+`stable`. It reads the release Machine's Tasks, never Linear.
+
+## What we took from other projects
+
+Surveyed 2026-10-28 for LOO-669 (ideas only; no code taken).
+
+| Practice | Seen in | Here |
+|----------|---------|------|
+| Cut every release from main; no paired minor/patch snapshot | Docker, opencode, Codex alphas, Ghostty tip | Adopted: a minor is a bigger number cut from main like any release |
+| Stable is a pointer to a build that already shipped, moved forward, never rebuilt | Claude Code, Rust, Zed, Deno | Adopted: `stable` follows releases ≥ 7 days old |
+| Skip bad builds instead of yanking them | Claude Code, Rust's regression labels | Adopted: `--regressed-in` holds `stable` below a regression |
+| One appcast per stream, chosen by a setting | Ghostty | Adopted: `appcast-preview.xml` and `appcast-stable.xml` |
+| Signed, notarized builds of main (`tip`) | Ghostty, Deno canary | Not yet: `dev` is CLI-only until CI signs the app |
+| Refuse newer-format data and name which side to update | Rex, Firefox | Adopted: `can_open` before every install, never "delete the store" |
+| A channel switch never installs older | 1Password, Claude Code `minimumVersion` | Partly: the schedule never moves back; an explicit switch may, when the store allows it |
+| One install per machine; the app carries its CLI | Rex; Atuin's duplicate-install bugs | Adopted: `~/.local/bin/lf` links into Loopflow.app |
+| Separate data per channel | Zed, Warp, VS Code | Declined: the store is the work model, and Tasks must not split by stream |
+| Release branches and cherry-picks for hotfixes | Zed, Tailscale | Declined for now: fix forward on main; branch only when main can't carry the fix (Docker's rule) |
+| Notes accrue as work lands | Zed `Release Notes:`, VS Code | Already here: `release/unreleased/DECISIONS.md` |
+| Unsigned build jobs, signing only on attested artifacts | opencode | Already close: the cron host signs and publishes; CI builds |
+
+Evidence and links: `git show e03537f7ca:scratch/release-research.md`.
 
 ## Automation rhythm
 
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
-| Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version` | `lf self install --main` installs it; artifacts expire after 14 days |
+| Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version` | `lf install --dev` installs it; artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` crontab line | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
 | Local | `scripts/install.py local` | Build `lf` and `Loopflow.app` into `local-bin/` | No |

@@ -384,7 +384,7 @@ pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult
         .next()
         .unwrap_or(&branch)
         .replace(['-', '_'], " ");
-    let task = super::task_create(repo, wave, Some(title), None)?;
+    let task = super::task_create(repo, wave, Some(title), None, None)?;
     super::prepare_task(
         repo,
         &task.identifier,

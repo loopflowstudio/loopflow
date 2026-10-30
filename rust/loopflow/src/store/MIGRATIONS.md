@@ -46,7 +46,7 @@ empty: the branch's migrations build a fresh store there, apart from the
 Machine's data. Editing an unmerged migration that a private Home already
 applied is a checksum mismatch; start a fresh `LF_HOME`. A branch build without
 a new migration runs its own code on `~/.lf` directly. Install a main build with
-`lf self install --main`; the install switch refuses a candidate whose pending
+`lf install --dev`; the install switch refuses a candidate whose pending
 migrations `origin/main` does not carry.
 
 The runner temporarily disables foreign-key actions around the transaction so a
@@ -94,7 +94,7 @@ released batches and breaking migrations name themselves. Every ledger row
 records it. A build opens a store holding migrations it does not know only when
 it knows their floor, and then requires every object it expects to be present
 unchanged; tables may have gained columns. Otherwise it refuses with
-`this store needs an lf that knows drop_waves (it has drop_waves; latest known task_graphs); install it with \`lf self install --main\``.
+`this store needs an lf that knows drop_waves (it has drop_waves; latest known task_graphs); run \`lf install\``.
 Install previews name the breaking migration a candidate would apply. Promotion
 never applies history it does not know; selecting an older build the floor
 admits, as a rollback does, applies nothing and is allowed.
@@ -144,12 +144,12 @@ applied versions, checksums and reader floors are read on every open.
 | State | Message |
 | --- | --- |
 | Behind the chain, private Home | applies the missing tail and continues |
-| Behind the chain, `~/.lf/loopflow.db` | names the pending migration and `lf self install --main` (or a private `LF_HOME` for unmerged work) |
+| Behind the chain, `~/.lf/loopflow.db` | names the pending migration and `lf install`, which finishes installing this build (or a private `LF_HOME` for unmerged work) |
 | Pre-namespace `001_initial` stamp | adopted as `0.10.001_initial` — same bytes, no data moved |
 | Known leading migration names under branch-local ordinals | verifies the complete product schema, rewrites the ledger to canonical order, then continues |
 | Newer migrations whose floor this build knows | opens; this build's schema must survive unchanged |
 | Newer migrations whose floor this build does not know | names the migration the store needs |
-| Skipped a migration, or drifted from the chain's schema | keep `loopflow.db`; open it with the lf that last migrated it (named from the ledger when that build recorded itself), or `lf self install --main` |
+| Skipped a migration, or drifted from the chain's schema | keep `loopflow.db`; open it with the lf that last migrated it (named from the ledger when that build recorded itself), or run `lf install` |
 
 Every refusal names a build that opens the store; none suggests deleting it.
 

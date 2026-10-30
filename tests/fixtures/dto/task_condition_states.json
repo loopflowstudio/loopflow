@@ -10,6 +10,7 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
+      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -82,6 +83,7 @@
       "state": "completed",
       "completed_at": null,
       "due_date": null,
+      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -367,6 +369,7 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
+      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -626,6 +629,7 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
+      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -721,6 +725,7 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
+      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -981,6 +986,7 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
+      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []
@@ -1076,6 +1082,7 @@
       "state": "unstarted",
       "completed_at": null,
       "due_date": null,
+      "regressed_in": null,
       "sync": {
         "connected": false,
         "changes": []

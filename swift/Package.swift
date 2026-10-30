@@ -15,6 +15,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.0"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.7.0"),
     ],
     targets: [
         .target(
@@ -37,6 +38,7 @@ let package = Package(
             dependencies: [
                 "Loopflow",
                 .target(name: "GhosttyKit", condition: .when(platforms: [.macOS])),
+                .product(name: "Sparkle", package: "Sparkle", condition: .when(platforms: [.macOS])),
             ],
             path: "LoopflowMac",
             exclude: [

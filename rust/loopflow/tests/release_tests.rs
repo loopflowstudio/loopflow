@@ -1467,19 +1467,96 @@ fn release_run_checks_the_host_local_publisher_role() {
 
 #[test]
 fn daily_run_moves_stable_to_the_newest_soaked_release() {
+    let effects = run_stable_advance(
+        &[
+            ("v0.9.3", 1, false),
+            ("v0.9.2", 8, false),
+            ("v0.9.1", 20, true),
+        ],
+        None,
+    );
+    assert_eq!(
+        effects,
+        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
+    );
+}
+
+#[test]
+fn an_open_regression_task_holds_stable_below_the_release_it_regressed_in() {
+    let effects = run_stable_advance(
+        &[
+            ("v0.9.3", 9, false),
+            ("v0.9.2", 12, false),
+            ("v0.9.1", 20, true),
+        ],
+        Some("0.9.3"),
+    );
+    assert_eq!(
+        effects,
+        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
+    );
+}
+
+#[test]
+fn release_status_names_the_task_holding_stable() {
+    let (repo, _log, _env) = stable_fixture(
+        &[
+            ("v0.9.3", 9, false),
+            ("v0.9.2", 2, false),
+            ("v0.9.1", 20, true),
+        ],
+        Some("0.9.3"),
+    );
+
+    let status = release_status(repo.path(), None).unwrap();
+
+    assert_eq!(status.preview_tag.as_deref(), Some("v0.9.3"));
+    assert!(status.preview_published_at.is_some());
+    let stable = status.stable.unwrap();
+    assert_eq!(stable.current.unwrap().tag, "v0.9.1");
+    assert_eq!(stable.next, None);
+    let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
+    assert_eq!(holds.len(), 2);
+    assert!(holds[0].ends_with(" holds v0.9.3"), "{holds:?}");
+    assert!(holds[1].starts_with("v0.9.2 soaks until "), "{holds:?}");
+}
+
+/// Run the daily release with nothing to release against published `(tag,
+/// days ago, latest)` releases, optionally after marking a regression Task,
+/// and return the stream effects it logged.
+fn run_stable_advance(releases: &[(&str, i64, bool)], regressed_in: Option<&str>) -> String {
+    let (repo, log, _env) = stable_fixture(releases, regressed_in);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
+
+    assert!(matches!(outcome, ReleaseRunOutcome::NoChanges { .. }));
+    fs::read_to_string(&log).unwrap_or_default()
+}
+
+/// A `completion: github-release` repository whose fake `gh` lists published
+/// `(tag, days ago, latest)` releases and logs stream effects, optionally
+/// with a regression Task marked.
+fn stable_fixture(
+    releases: &[(&str, i64, bool)],
+    regressed_in: Option<&str>,
+) -> (TestRepo, PathBuf, EnvGuard) {
     let repo = TestRepo::new();
     let log = repo.path().join("effects.log");
-    let days_ago = |days| (chrono::Utc::now() - chrono::TimeDelta::days(days)).to_rfc3339();
-    let releases = serde_json::json!([
-        {"tagName": "v0.9.3", "isLatest": false, "isDraft": false, "isPrerelease": false, "publishedAt": days_ago(1)},
-        {"tagName": "v0.9.2", "isLatest": false, "isDraft": false, "isPrerelease": false, "publishedAt": days_ago(8)},
-        {"tagName": "v0.9.1", "isLatest": true, "isDraft": false, "isPrerelease": false, "publishedAt": days_ago(20)},
-    ]);
+    let releases: Vec<_> = releases
+        .iter()
+        .map(|(tag, days, latest)| {
+            serde_json::json!({
+                "tagName": tag, "isLatest": latest, "isDraft": false, "isPrerelease": false,
+                "publishedAt": (chrono::Utc::now() - chrono::TimeDelta::days(*days)).to_rfc3339(),
+            })
+        })
+        .collect();
+    let releases = serde_json::Value::Array(releases);
     let gh = format!(
-        "#!/bin/sh\n[ \"$1\" != --version ] || exit 0\ncase \"$1 $2\" in\n  'release view') echo '{{\"isDraft\":false}}'; exit 0;;\n  'release list') cat <<'JSON'\n{releases}\nJSON\n    exit 0;;\n  'release edit') echo \"gh $*\" >> '{log}'; exit 0;;\n  'pr list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $*\" >&2\nexit 1\n",
+        "#!/bin/sh\n[ \"$1\" != --version ] || exit 0\ncase \"$1 $2\" in\n  'release view') echo '{{\"isDraft\":false}}'; exit 0;;\n  'release list') cat <<'JSON'\n{releases}\nJSON\n    exit 0;;\n  'release edit') echo \"gh $*\" >> '{log}'; exit 0;;\n  'pr list'|'run list') echo '[]'; exit 0;;\nesac\necho \"unexpected gh invocation: $*\" >&2\nexit 1\n",
         log = log.display()
     );
-    let _env = EnvGuard::new(&[("gh", gh.as_str())]);
+    let env = EnvGuard::new(&[("gh", gh.as_str())]);
     repo.create_file(
         "publisher.sh",
         &format!(
@@ -1496,14 +1573,18 @@ fn daily_run_moves_stable_to_the_newest_soaked_release() {
     repo.commit("Configure release streams");
     git(&repo, &["push", "origin", "HEAD"]);
     git(&repo, &["tag", "v0.9.3"]);
-
-    let outcome = release_run(repo.path(), "patch", None, &NullProgress).unwrap();
-
-    assert!(matches!(outcome, ReleaseRunOutcome::NoChanges { .. }));
-    assert_eq!(
-        fs::read_to_string(&log).unwrap(),
-        "publisher promote --tag v0.9.2\ngh release edit v0.9.2 --latest\n"
-    );
+    if let Some(version) = regressed_in {
+        let task = loopflow::ops::task::task_create(
+            repo.path(),
+            None,
+            Some("Sessions lose their name".into()),
+            None,
+            Some(format!("v{version}")),
+        )
+        .unwrap();
+        assert_eq!(task.regressed_in, Some(format!("v{version}")));
+    }
+    (repo, log, env)
 }
 
 #[test]
@@ -3363,7 +3444,7 @@ fn release_bump_updates_cargo_toml() {
 }
 
 #[test]
-fn release_status_reports_latest_tag_and_release() {
+fn release_status_reports_preview_tag_and_release() {
     let gh_script = write_gh_status_script(
         r#"[{"databaseId":7,"headBranch":"main","displayTitle":"Retry v0.9.1","status":"completed","conclusion":"failure","url":"https://example.com/run/7"},{"databaseId":42,"headBranch":"v0.9.1","displayTitle":"Release v0.9.1","status":"completed","conclusion":"success","url":"https://example.com/run/42"}]"#,
         r#"{"isDraft":false}"#,
@@ -3375,7 +3456,7 @@ fn release_status_reports_latest_tag_and_release() {
 
     let status = release_status(repo.path(), None).expect("status should succeed");
     assert_eq!(status.target, "default");
-    assert_eq!(status.latest_tag.as_deref(), Some("v0.9.1"));
+    assert_eq!(status.preview_tag.as_deref(), Some("v0.9.1"));
     assert_eq!(status.workflow_status.as_deref(), Some("completed"));
     assert_eq!(status.workflow_conclusion.as_deref(), Some("success"));
     assert_eq!(status.notes_status, Some(ReleaseNotesStatus::Missing));
@@ -3498,7 +3579,7 @@ release:
 
     let status = release_status(repo.path(), Some("cli")).expect("status should succeed");
     assert_eq!(status.target, "cli");
-    assert_eq!(status.latest_tag.as_deref(), Some("cli/v1.2.3"));
+    assert_eq!(status.preview_tag.as_deref(), Some("cli/v1.2.3"));
     assert!(status.release_exists);
 }
 

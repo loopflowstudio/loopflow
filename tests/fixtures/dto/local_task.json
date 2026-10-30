@@ -74,6 +74,7 @@
       "completed_at": null,
       "description": "Keep the escaped quote",
       "due_date": null,
+      "regressed_in": null,
       "id": "task_0123456789ab40008000000000000001",
       "identifier": "012345",
       "name": "Retain quoted input",

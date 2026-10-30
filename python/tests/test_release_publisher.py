@@ -6,11 +6,36 @@ import subprocess
 import tarfile
 import time
 import urllib.error
+import xml.etree.ElementTree as ElementTree
+from base64 import b64decode, b64encode
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
 
 from scripts import deploy_website, publish_release, release_install_smoke
+
+
+@pytest.fixture
+def sparkle_key(monkeypatch: pytest.MonkeyPatch) -> Ed25519PrivateKey:
+    key = Ed25519PrivateKey.generate()
+    seed = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+    monkeypatch.setenv("SPARKLE_ED_PRIVATE_KEY", b64encode(seed).decode())
+    return key
+
+
+def _offered_release(appcast: bytes, key: Ed25519PrivateKey, dmg: bytes) -> str:
+    """The version an appcast offers, after checking its signature covers `dmg`."""
+    sparkle = f"{{{publish_release.SPARKLE_NAMESPACE}}}"
+    item = ElementTree.fromstring(appcast).find("channel/item")
+    enclosure = item.find("enclosure")
+    signature = b64decode(enclosure.get(f"{sparkle}edSignature"))
+    key.public_key().verify(signature, dmg)
+    assert enclosure.get("length") == str(len(dmg))
+    version = item.findtext(f"{sparkle}version")
+    assert enclosure.get("url") == f"{publish_release.DOWNLOADS_URL}/Loopflow-{version}.dmg"
+    return version
 
 
 def _native_artifacts(directory: Path) -> None:
@@ -87,7 +112,7 @@ def test_publisher_rejects_invalid_candidate_preflight(
 
 @pytest.mark.parametrize("rejection", [None, "prepare", "reuse", "cleanup", "unavailable"])
 def test_publisher_prepares_exact_artifacts_before_marking_release_published(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejection: str | None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejection: str | None, sparkle_key
 ):
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
@@ -152,6 +177,8 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     monkeypatch.setattr(publish_release, "_run", fake_run)
     monkeypatch.setattr(publish_release, "_publish_crate", lambda: None)
     monkeypatch.setattr(publish_release, "_upload_dmg", lambda *args: None)
+    appcasts: dict[str, str] = {}
+    monkeypatch.setattr(publish_release, "_upload_appcast", appcasts.__setitem__)
     monkeypatch.setenv("LF_RELEASE_MAIN_REPO", str(tmp_path))
     monkeypatch.setenv("LF_RELEASE_WORKFLOW_RUN_ID", "42")
 
@@ -197,9 +224,13 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         "github_draft_staged",
         "crate_published",
         "versioned_dmg_uploaded",
+        "preview_appcast_uploaded",
         "website_deployed",
         "github_release_published",
     )
+    assert set(appcasts) == {"preview"}
+    dmg = (prepared_dir / "Loopflow.dmg").read_bytes()
+    assert _offered_release(appcasts["preview"].encode(), sparkle_key, dmg) == "1.2.3"
     assert set(receipt.artifact_sha256) == {
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
@@ -257,7 +288,7 @@ def test_public_artifact_hashes_reject_modified_and_missing_assets(tmp_path: Pat
 
 
 @pytest.fixture
-def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparkle_key):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     body = (
@@ -355,6 +386,13 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(publish_release, "_download", download)
     monkeypatch.setattr(publish_release, "_upload_dmg", upload)
+    monkeypatch.setattr(
+        publish_release,
+        "_upload_appcast",
+        lambda stream, appcast: remote.__setitem__(
+            f"{publish_release.DOWNLOADS_URL}/appcast-{stream}.xml", appcast.encode()
+        ),
+    )
     monkeypatch.setattr(publish_release, "_deploy_website", deploy)
     monkeypatch.setattr(publish_release, "_publish_crate", publish_crate)
     return remote, hashes
@@ -407,11 +445,15 @@ def test_preview_release_proof_leaves_the_stable_dmg_alone(tmp_path: Path, publi
     assert "website_release_verified" in result.completed_stages
 
 
-def test_promote_points_the_stable_dmg_at_the_published_release(public_release):
+def test_promote_points_the_stable_dmg_and_appcast_at_the_published_release(
+    public_release, sparkle_key
+):
     remote, _ = public_release
     remote[publish_release.LATEST_DMG_URL] = b"stable release"
     publish_release.promote_release("v1.2.3")
     assert remote[publish_release.LATEST_DMG_URL] == b"notarized artifact"
+    appcast = remote[f"{publish_release.DOWNLOADS_URL}/appcast-stable.xml"]
+    assert _offered_release(appcast, sparkle_key, b"notarized artifact") == "1.2.3"
 
 
 def test_promote_refuses_a_dmg_that_differs_from_its_checksums(public_release):
@@ -421,6 +463,7 @@ def test_promote_refuses_a_dmg_that_differs_from_its_checksums(public_release):
     with pytest.raises(RuntimeError, match="differs from SHA256SUMS"):
         publish_release.promote_release("v1.2.3")
     assert remote[publish_release.LATEST_DMG_URL] == b"stable release"
+    assert f"{publish_release.DOWNLOADS_URL}/appcast-stable.xml" not in remote
 
 
 def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(

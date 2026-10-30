@@ -147,6 +147,7 @@ fn open_task(store: &SqliteStore) -> TaskId {
         rank: 0,
         assignee: None,
         due_date: None,
+        regressed_in: None,
         state: None,
         completed_at: None,
         linear_id: None,

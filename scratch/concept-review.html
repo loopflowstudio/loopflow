@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-701 concept review</title>
+<style>
+  :root { --fg:#1c1c1e; --bg:#fcfcfa; --muted:#6b6b70; --rule:#e2e2dc; --code:#f1f0ea; --old:#a33; --new:#2a6f3f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8e8e6; --bg:#18181a; --muted:#9a9aa0; --rule:#333336; --code:#232326; --old:#e07a7a; --new:#7cc795; }
+  }
+  body { margin:0; background:var(--bg); color:var(--fg); font:17px/1.6 Georgia, "Iowan Old Style", serif; }
+  main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
+  header p { color:var(--muted); font-size:.9rem; margin:.2rem 0; }
+  h1 { font-size:1.6rem; line-height:1.25; margin:0 0 .6rem; }
+  h2 { font-size:1.15rem; margin:2.6rem 0 .6rem; }
+  pre, code { font-family: ui-monospace, Menlo, monospace; font-size:.85rem; }
+  pre { background:var(--code); padding:.8rem 1rem; overflow-x:auto; border-radius:4px; }
+  .old { border-left:3px solid var(--old); }
+  .new { border-left:3px solid var(--new); }
+  .tag { font-family: ui-monospace, Menlo, monospace; font-size:.8rem; color:var(--muted); }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; }
+  td, th { text-align:left; vertical-align:top; padding:.5rem .4rem; border-bottom:1px solid var(--rule); }
+  ol li { margin:.5rem 0; }
+</style>
+</head>
+<body><main>
+<header>
+  <h1>One way to hand off the person's words</h1>
+  <p>LOO-701 · concept-review step · 2026-10-30</p>
+  <p>Built from skills/loopflow/SKILL.md, skills/loopflow/README.md, rust/loopflow/src/builtins/LOOPFLOW.md, python/tests/test_loopflow_skill_alignment.py, <code>lf help task create</code></p>
+</header>
+
+<p>The decision is already implied by this change: <strong>the person's words are data, never shell.</strong> The published skill follows it. The builtin guidance that every Loopflow-launched run reads does not.</p>
+
+<h2>Action → concept → API</h2>
+<table>
+  <tr><th>Person does</th><th>Concept</th><th>Agent runs</th></tr>
+  <tr><td>asks for a change</td><td>Task (one outcome, one PR)</td><td><code>lf task create</code> → <code>lf task run</code> → <code>lf open --task … --link</code></td></tr>
+  <tr><td>adds direction</td><td>comment on the Task</td><td><code>lf comment &lt;ID&gt; …</code></td></tr>
+  <tr><td>names a Skill or Graph</td><td>repository prompt / steps</td><td><code>lf help &lt;name&gt;</code>, then <code>lf &lt;skill&gt;</code> or <code>lf task run &lt;ID&gt; &lt;graph&gt;</code></td></tr>
+</table>
+
+<h2>The mismatch</h2>
+<p>Handing off is taught three ways today:</p>
+<pre class="new"><span class="tag">skills/loopflow/SKILL.md (this change)</span>
+lf task create &lt;&lt;'EOF'
+&lt;outcome in the person's words: the first line is the title&gt;
+EOF
+lf comment &lt;ID&gt; '&lt;direction&gt;'</pre>
+<pre class="new"><span class="tag">skills/loopflow/README.md (this change)</span>
+lf task create 'validate session tokens on refresh'</pre>
+<pre class="old"><span class="tag">rust/loopflow/src/builtins/LOOPFLOW.md (existing, every run)</span>
+lf task create --title "&lt;outcome&gt;"
+lf comment &lt;ID&gt; "&lt;direction&gt;"</pre>
+<p>The last is the pattern Gen named INDIRECT_PROMPT_INJECTION. skills.sh never scans LOOPFLOW.md, so the rating doesn't move. The behavior does: a person's <code>$(…)</code> or <code>"</code> still expands in every launched agent's handoff.</p>
+
+<h2>Proposed</h2>
+<pre class="new"><span class="tag">LOOPFLOW.md, proposed</span>
+hand it off: `lf task create '&lt;outcome&gt;'`, then `lf task run &lt;ID&gt;` …
+steer with `lf comment &lt;ID&gt; '&lt;direction&gt;'`.</pre>
+<p>The positional <code>REQUEST</code> is the CLI's own concept ("what you want, in your words; its first line the title"), so <code>--title</code> drops out of the guidance. The alignment test asserts no <code>&lt;…&gt;</code> placeholder sits inside double quotes in SKILL.md or LOOPFLOW.md. Literal doc examples stay.</p>
+<p>Not changing: the skill's heredoc (robust for any text), and the single-quote rule for <code>lf comment</code>, which has no stdin form.</p>
+
+<h2>Questions</h2>
+<ol>
+  <li>LOOPFLOW.md handoff form: (a) single-quoted positional, proposed; (b) quoted heredoc, matching the skill at more tokens per run.</li>
+  <li>README one-liner: (a) keep <code>-y</code> dropped, so the installer shows its assessments and asks; (b) restore <code>-y</code> for a one-shot install and accept the harmless PromptScript failure line.</li>
+</ol>
+</main></body>
+</html>

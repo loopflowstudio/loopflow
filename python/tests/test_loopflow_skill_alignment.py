@@ -53,3 +53,11 @@ def test_launcher_surfaces_load_the_shared_work_contract() -> None:
     assert "lf wave list --json" in work
     assert "lf wave status <wave> --json" in work
     assert "lf wave show --json" in work
+
+
+def test_placeholders_never_sit_inside_double_quotes() -> None:
+    """The person's words are data, never shell: a `"<…>"` placeholder teaches
+    agents to paste text where the shell expands `$` and backticks."""
+    for path in (SKILL, LOOPFLOW):
+        found = re.findall(r'"<[^>"]+>"', path.read_text())
+        assert not found, f"{path.name} double-quotes placeholders: {found}"

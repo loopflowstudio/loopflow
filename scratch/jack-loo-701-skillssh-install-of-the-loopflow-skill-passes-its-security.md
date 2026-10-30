@@ -26,10 +26,23 @@ Status: implemented 2026-10-30; proof waits on the merged skill's re-audit.
   skill README says to install per project inside a PromptScript project.
   An agent running the installer still forces `-y` (the CLI does that itself).
 
+## Concept review (2026-10-30)
+
+Accepted rule: the person's words are data, never shell. The published skill
+hands off through a quoted heredoc; the skill README and builtin
+`rust/loopflow/src/builtins/LOOPFLOW.md` use single-quoted arguments
+(`lf task create '<outcome>'`, `lf comment <ID> '<direction>'`). The alignment
+test fails if SKILL.md or LOOPFLOW.md double-quotes a `<…>` placeholder. Literal
+doc examples (`--title "add passkeys"`) stay. `lf comment` has no stdin form, so
+the skill keeps the single-quote escape rule.
+
+The `-y` drop is the recorded assumption in `scratch/questions.md`; the Task
+delegated the PromptScript decision.
+
 ## Remaining
 
 - After merge, run a fresh `npx skills add loopflowstudio/loopflow --skill loopflow -g`
   and link the three audit pages in the PR. If Gen or Snyk rates the new text
   High/Critical, read the finding and repair the skill.
 
-Check: `uv run pytest python/tests/test_loopflow_skill_alignment.py` passed (4).
+Check: alignment pytest passed (5); `cargo test -p loopflow --test golden_prompt` passed.

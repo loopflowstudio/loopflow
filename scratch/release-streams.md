@@ -240,6 +240,11 @@ onto dev. `incompatible` still names the build that last migrated the store firs
 `--dev` stays only where dev is the subject: `MIGRATIONS.md`'s "install a main build",
 `install.rs` (unmerged-migration candidate) and `published.rs` dev download/stream choice.
 
+**Concept review after the refusal fix (2026-10-29): nothing to change.** Refusals, help, `release/README.md`
+and `DECISIONS.md` all say stream flags and plain `lf install`. On dev, the terminal lf can still
+differ from Desktop. That breaks "never diverge" and is already recorded as Remaining under slice 7
+(CI Developer ID signing), not a new choice.
+
 Check (slices 3–8, 2026-10-29): focused suites per slice above pass; `--lib store::` 391 pass after the refusal change (one load timeout passed on rerun); full gate (nextest, clippy, Swift, release pytest) not yet run on the combined tree — owner: gate before the one PR.
 
 ## Neighbouring Tasks

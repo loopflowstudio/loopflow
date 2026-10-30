@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-669 concept review: after realign</title>
+<title>LOO-669 concept review: after the refusal fix</title>
 <style>
-  :root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fbfbf8; --muted:#666; --rule:#ddd; --new:#2f6f3e; --old:#9a3b2b; --code:#f0efe9; }
-  @media (prefers-color-scheme: dark) { :root { --fg:#e8e6e1; --bg:#161615; --muted:#9a978f; --rule:#333; --new:#7fc493; --old:#e08b7a; --code:#22221f; } }
+  :root { color-scheme: light dark; --fg:#1b1b1b; --bg:#fbfbf8; --muted:#666; --code:#f0efe9; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e8e6e1; --bg:#161615; --muted:#9a978f; --code:#22221f; } }
   body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 -apple-system, "Iowan Old Style", Georgia, serif; }
   main { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 5rem; }
   header p { color:var(--muted); font-size:.9rem; margin:.2rem 0; }
@@ -14,45 +14,32 @@
   h2 { font-size:1.15rem; margin:2.5rem 0 .6rem; }
   pre { background:var(--code); padding:.9rem 1rem; overflow-x:auto; font:13px/1.5 ui-monospace, Menlo, monospace; border-radius:4px; }
   code { font-family:ui-monospace, Menlo, monospace; font-size:.9em; }
-  .old { border-left:3px solid var(--old); }
-  .new { border-left:3px solid var(--new); }
-  .tag { font-size:.85rem; color:var(--muted); margin:.8rem 0 .2rem; }
-  ol li { margin:.4rem 0; }
 </style>
 </head>
 <body>
 <main>
 <header>
-  <h1>Refusals shouldn't switch your stream</h1>
-  <p>LOO-669 · concept-review after realign (slices 3–8 on one branch) · 2026-10-29</p>
-  <p>Built from <code>scratch/release-streams.md</code>, <code>scratch/questions.md</code>, <code>rust/loopflow/src/lf/commands/install/published.rs</code>, <code>rust/loopflow/src/store/migrations.rs</code>, <code>rust/loopflow/src/store/sqlite.rs</code>, <code>rust/loopflow/src/store/MIGRATIONS.md</code></p>
+  <h1>Nothing to change</h1>
+  <p>LOO-669 · concept-review after the store-ahead refusal fix · 2026-10-29</p>
+  <p>Built from <code>scratch/release-streams.md</code>, <code>scratch/questions.md</code>, <code>release/README.md</code>, <code>release/unreleased/DECISIONS.md</code>, <code>rust/loopflow/src/lf/commands/install/published.rs</code>, <code>rust/loopflow/src/lf/commands/install.rs</code></p>
 </header>
 
-<p>This ran headless, so no decision is needed. Accepted decisions already settle the one mismatch below, so it goes back to implement.</p>
+<p>This ran headless and needs no decision. The concepts below match what's built.</p>
 
-<h2>Actions → concepts → APIs</h2>
+<h2>Actions → concepts → APIs (built)</h2>
 <pre>pick a stream          lf install --dev|--preview|--stable   stream: in ~/.lf/config.yaml
 stay current           launchd/cron → lf install              published::install(recorded)
-app running            lf install → loopflow://update         updates_itself &amp;&amp; app_is_running
-app not running        lf install replaces the bundle         promote, relink lf
-lf behind the store    refusal text                           migrations.rs / sqlite.rs</pre>
-<p>Jack's "b" (app running → Sparkle, otherwise <code>lf install</code> replaces the bundle) is built as decided. The mismatch is in the last row.</p>
+app running            lf install → loopflow://update         Sparkle on appcast-&lt;stream&gt;.xml
+app not running        lf install replaces the bundle         promote, relink ~/.local/bin/lf
+lf behind the store    "run `lf install`"                     follows the recorded stream
+mark a regression      lf task create --regressed-in v0.16.1  stable_advance skips it</pre>
 
-<h2>The mismatch: store-ahead refusals</h2>
-<p class="tag">Existing behavior</p>
-<pre class="old">  (stable Machine; the cron gate binary is older than the installed lf)
-$ lf task status
-this store needs an lf that knows task_regressed_in (…); install it with `lf install --dev`
-$ lf install --dev           # records stream: dev; main builds now migrate this store</pre>
-<p>A stream flag switches the stream and records it, and refusals name the build to install (both accepted). Following this advice moves a stable Machine onto dev for good.</p>
-<p class="tag">Proposed (next implement)</p>
-<pre class="new">this store needs an lf that knows task_regressed_in (…); run `lf install`
-$ lf install                 # recorded stream: relinks, adopts, or names stream + date</pre>
-<p>Applies to the unknown-migration, floor, changed-reader and incompatible messages, their tests, and <code>MIGRATIONS.md</code>. <code>--dev</code> stays only where the candidate is a main build (<code>install.rs:202</code>) and in the dev download messages.</p>
+<h2>Known gap, already recorded</h2>
+<p>On <code>dev</code>, the terminal's <code>lf</code> is a main build, but Desktop keeps the copy bundled in its app. Jack's "Desktop and the installed lf never diverge" holds only on preview and stable for now. Closing the gap means CI has to Developer-ID-sign dev app builds. That is listed as Remaining under slice 7, so it's a build item, not a product choice.</p>
 
 <h2>Questions</h2>
 <ol>
-  <li>None open. The dev-on-Mac divergence (CLI only until CI signs dev app builds) is already recorded as remaining work.</li>
+  <li>None open for this step. Assumptions stay in <code>scratch/questions.md</code>.</li>
 </ol>
 </main>
 </body>

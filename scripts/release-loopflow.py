@@ -468,7 +468,12 @@ def release() -> int:
     dmg_path = dist_dir / f"{app_name}.dmg"
     dmg_staging = dist_dir / "dmg_staging"
     dmg_staging.mkdir()
-    shutil.copytree(dist_dir / f"{app_name}.app", dmg_staging / f"{app_name}.app")
+    # Framework bundles are symlink trees; copying their targets breaks the signature.
+    shutil.copytree(dist_dir / f"{app_name}.app", dmg_staging / f"{app_name}.app", symlinks=True)
+    run(
+        ["codesign", "--verify", "--deep", "--strict", str(dmg_staging / f"{app_name}.app")],
+        timeout=5 * 60,
+    )
 
     bg_image = SWIFT_DIR / "LoopflowMac" / "dmg-background.png"
     has_create_dmg = shutil.which("create-dmg") is not None

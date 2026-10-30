@@ -247,6 +247,8 @@ differ from Desktop. That breaks "never diverge" and is already recorded as Rema
 
 Check (slices 3–8, 2026-10-29): focused suites per slice above pass; `--lib store::` 391 pass after the refusal change (one load timeout passed on rerun); before publish: `--lib lf::commands::install::` 29, `cargo fmt --check` and clippy `--all-targets` pass on the combined tree; full nextest, Swift and release pytest — owner: CI on the one PR.
 
+Gate (slices 3–8, 2026-10-30): `scripts/test.py` architecture (after mapping `process:crontab`), python 506, website 72, swift 663 pass; Rust filtered nextest (install, release, config, portfolio, store, linear, task, work, doctor, `release_tests`) 891 pass, fmt and clippy `--all-targets` pass. The first Rust run hit the 1200 s budget on four-to-five-minute `ops::linear` native-runner fixtures that take as long on main's CI; they're excluded locally and owned by CI.
+
 ## Neighbouring Tasks
 
 - **LOO-656** (active, Jack): install lf from main — migration ids and floors

@@ -128,7 +128,8 @@ Every install schedules `lf install` daily (launchd, or cron on Linux) unless a
 cadence is already installed, so a Machine stays on its stream unasked.
 
 The installed Loopflow.app updates itself through Sparkle from its stream's
-appcast (`dev` follows preview's). Publishing writes `appcast-preview.xml`;
+appcast; on `dev` it stays put while `lf install --dev` updates the CLI alone.
+Publishing writes `appcast-preview.xml`;
 `promote` writes `appcast-stable.xml`, both signed with the publisher's
 `SPARKLE_ED_PRIVATE_KEY` (Doppler) against the `SUPublicEDKey` in
 `swift/LoopflowMac/Info.plist`. Before installing, the app asks its bundled

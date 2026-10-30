@@ -38,6 +38,10 @@ run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnin
 an unknown binary name fails the whole filterset before anything runs.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
+A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
+(`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
+unless the diff reaches them; together they exceed the 1200 s Rust budget, and
+CI's partitions run them.
 Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 `rust-test` failure; CI's eight partitions own the full Rust matrix.
 

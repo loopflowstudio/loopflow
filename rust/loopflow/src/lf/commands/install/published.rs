@@ -176,15 +176,11 @@ pub fn adopt() -> Result<()> {
 
 /// Adopt Loopflow.app when Sparkle replaced it and its first launch hasn't run
 /// yet: the app's `lf` is ahead of the store, so every terminal `lf` refuses
-/// until something migrates it. Moves no files; true when it adopted.
-fn finish_adoption(applications: &Path) -> Result<bool> {
+/// until something migrates it. Moves no files.
+fn finish_adoption(applications: &Path) -> Result<()> {
     let lf = applications.join("Loopflow.app/Contents/MacOS/lf");
-    let ahead = inspect(&lf, &["install", "preflight", "--json"])
-        .filter(|output| output.status.success())
-        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
-        .is_some_and(|preview| preview["verdict"]["kind"] == "promote_and_migrate");
-    if !ahead {
-        return Ok(false);
+    if preflight_verdict(&lf).as_deref() != Some("promote_and_migrate") {
+        return Ok(());
     }
     let status = Command::new(&lf)
         .args(["install", "adopt"])
@@ -196,7 +192,7 @@ fn finish_adoption(applications: &Path) -> Result<bool> {
             lf.display()
         );
     }
-    Ok(true)
+    Ok(())
 }
 
 fn applications_dir() -> PathBuf {
@@ -452,19 +448,22 @@ fn install_dir() -> Result<PathBuf> {
 
 fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool {
     let version = tag.trim_start_matches('v');
-    if !["lf"].iter().all(|name| {
-        inspect(&directory.join(name), &["--version"]).is_some_and(|output| {
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout).trim() == format!("{name} {version}")
-        })
-    }) {
-        return false;
-    }
-    let published = inspect(&directory.join("lf"), &["install", "preflight", "--json"])
-        .filter(|output| output.status.success())
-        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
-        .is_some_and(|preview| preview["verdict"]["kind"] == "promote");
-    published && applications.is_none_or(|root| has_release_app(root, version))
+    let lf = directory.join("lf");
+    let installed = inspect(&lf, &["--version"]).is_some_and(|output| {
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout).trim() == format!("lf {version}")
+    });
+    installed
+        && preflight_verdict(&lf).as_deref() == Some("promote")
+        && applications.is_none_or(|root| has_release_app(root, version))
+}
+
+/// What `lf install preflight` says installing `lf` would do to the store.
+fn preflight_verdict(lf: &Path) -> Option<String> {
+    let output = inspect(lf, &["install", "preflight", "--json"])
+        .filter(|output| output.status.success())?;
+    let preview: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    preview["verdict"]["kind"].as_str().map(str::to_string)
 }
 
 // Installed binaries can be stale or broken; update detection must not hang.
@@ -958,7 +957,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let macos = temp.path().join("Loopflow.app/Contents/MacOS");
         fs::create_dir_all(&macos).unwrap();
-        assert!(!finish_adoption(temp.path()).unwrap());
+        finish_adoption(temp.path()).unwrap();
         let adopted = temp.path().join("adopted");
         let app_lf = |verdict: &str| {
             fs::write(macos.join("lf"), format!(
@@ -968,10 +967,10 @@ mod tests {
             fs::set_permissions(macos.join("lf"), fs::Permissions::from_mode(0o755)).unwrap();
         };
         app_lf("promote");
-        assert!(!finish_adoption(temp.path()).unwrap());
+        finish_adoption(temp.path()).unwrap();
         assert!(!adopted.exists());
         app_lf("promote_and_migrate");
-        assert!(finish_adoption(temp.path()).unwrap());
+        finish_adoption(temp.path()).unwrap();
         assert!(adopted.exists());
     }
 

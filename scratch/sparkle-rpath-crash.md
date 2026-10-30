@@ -32,8 +32,11 @@ passes the installed app.
 - Installed app (UUID 52626A50…, signed 08:29, replaced 08:51): notarized
   Developer ID, `codesign --verify --deep --strict` OK, `spctl` accepted, rpaths
   `@loader_path` + `@executable_path/../Frameworks`, Frameworks/Sparkle present.
-- Not run: a real `swift build` bundle through the new path. The next
-  `install.py local` or release run exercises it.
+- Real SwiftPM binary (LOO-669 checkout's 08:16 `swift/.build/release/LoopflowMac`,
+  temp bundle): `verify_rpath_libraries` fails before embedding with the incident's
+  library, passes after; embedding twice is idempotent; ad-hoc `codesign --verify
+  --deep --strict` OK. Not done: the full `install.py local` / release entrypoints,
+  which gate or the next release run.
 
 ## Open
 - ~~What copied local-bin/Loopflow.app into /Applications?~~ Answered below: the

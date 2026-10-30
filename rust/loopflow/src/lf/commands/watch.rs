@@ -6,8 +6,8 @@
 //! A reading runs only then, or on the read's clock for facts outside the store
 //! (Process liveness, Git), on a read-only connection with one pinned snapshot.
 //! A read whose outside facts can be observed cheaply probes them on its clock
-//! and reads only when they moved. An unchanged result sends nothing. A slow reading rests `BUSY_SHARE` times
-//! its duration before a change is read again.
+//! and reads only when they moved. An unchanged result sends nothing. A slow
+//! reading rests `BUSY_SHARE` times its duration before a change is read again.
 //!
 //! Each stdin line is a request, `{"id": 1, "args": {...}}`. `args` replaces
 //! the read's arguments; without it the request confirms the current result.
@@ -627,9 +627,9 @@ impl<A, F> Reader<A, F> {
             return false;
         }
         self.clocked_on = Some(now);
-        match (self.watched.probe, self.probe()) {
-            (Some(_), Some(observed)) => self.probed.as_ref() != Some(&observed),
-            _ => true,
+        match self.probe() {
+            Some(observed) => self.probed.as_ref() != Some(&observed),
+            None => true,
         }
     }
 

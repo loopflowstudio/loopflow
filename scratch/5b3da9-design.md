@@ -144,6 +144,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git (`git show 3909e495a8:scratch/5b3da9-design.md`).
+- October 30, compress of the CPU pass (`clock_moved` matches the probe's answer alone): `--lib lf::commands::watch::` 3/3, fmt clean.
 - October 30, CPU pass (incremental `monitor ps`, `desktop sessions` probe): `--lib lf::commands::top:: store::sqlite::revisions::` 13/13, `--test integration session_list_watch::` 1/1, `--test served_reads` 1/1; 300 s measurement above.
 - October 30, realign after the demo repairs: plan matches 64d8597166; `git rev-list HEAD..origin/main` 0, PR mergeState CLEAN; no tests rerun.
 - October 30, compress after the demo repairs (hook test uses the file's one-line `PermissionsExt` idiom): `--lib interrupting_a_task_with_only_an_open_process` 1/1, fmt clean.

@@ -923,7 +923,9 @@ fn release_version(
                     ))
                 })?;
                 // No candidate was built yet, so the version is unspent: corrections
-                // merged after the release PR ship under the same version.
+                // merged after the release PR ship under the same version. Fetching
+                // the merge commit also refreshes origin's default branch.
+                ensure_commit_local(main_repo, &release_commit, lock)?;
                 let main_ref = format!("origin/{default_branch}");
                 let current_main = run_stdout(main_repo, "git", &["rev-parse", &main_ref])?;
                 if current_main != release_commit
@@ -1146,6 +1148,9 @@ fn materialize_exact_source_worktree(
     };
     let path = worktree_path(repo, worktree_name);
     let branch = release_branch_name(repo, worktree_name)?;
+    // Release revisions often come from GitHub (a merge commit or a remote tag)
+    // after this run last fetched.
+    ensure_commit_local(repo, revision, lock)?;
     let expected_commit = rev_parse(repo, &format!("{revision}^{{commit}}"))?;
     let registrations = list_porcelain(repo)?;
     let registered_at_path = registrations
@@ -4062,8 +4067,8 @@ fn delete_candidate_ref(repo: &Path, candidate: &ReleaseCandidate, lock: &Releas
     }
 }
 
-/// Ensure `sha` exists in `repo`'s local object database, fetching from
-/// origin if it doesn't.
+/// Ensure `sha` (or any revision) exists in `repo`'s local object database,
+/// fetching from origin if it doesn't.
 ///
 /// `git rev-parse <40-char-hex>` echoes the input without verifying the
 /// object is actually present. When the SHA originates from `gh pr view`
@@ -4074,11 +4079,17 @@ fn ensure_commit_local(repo: &Path, sha: &str, lock: &ReleaseLock) -> OpsResult<
     if commit_exists_locally(repo, sha) {
         return Ok(());
     }
-    let _ = lock
+    let fetch = lock
         .command("git")
         .args(["fetch", "origin"])
         .current_dir(repo)
-        .output();
+        .output()?;
+    if !fetch.status.success() {
+        return Err(OpsError::CommandFailed {
+            command: "git fetch origin".into(),
+            stderr: String::from_utf8_lossy(&fetch.stderr).to_string(),
+        });
+    }
     if commit_exists_locally(repo, sha) {
         return Ok(());
     }

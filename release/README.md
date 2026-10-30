@@ -55,6 +55,10 @@ repository owns migration checks and preparation in `.lf/config.yaml`, plus
 package builds, signing, notarization, uploads, deployment, smoke tests, and
 secrets in its workflows and scripts.
 
+The release host runs its installed `lf` on any stream; it need not follow
+`dev`. To release with a fix the installed build lacks, `lf install --dev`
+first: a main build refuses a store missing main's migrations.
+
 Failed release-PR checks enter the same watched CI repair as `lf pr land`.
 Release preparation still rebuilds version metadata when main advances.
 Blocked repairs retain their checkout so `lf release run` can resume the work.

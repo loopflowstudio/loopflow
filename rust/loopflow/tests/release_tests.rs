@@ -1655,6 +1655,62 @@ fn release_run_builds_fixes_merged_after_the_release_pr() {
 }
 
 #[test]
+fn release_run_fetches_a_release_merge_it_has_not_seen() {
+    let repo = TestRepo::new();
+    prepare_candidate_release_repo(&repo);
+    fs::write(
+        repo.path().join(".lf/config.yaml"),
+        "release:\n  targets:\n    default:\n      workflow: release.yml\n      verify: ['test -f feature.txt']\n",
+    )
+    .expect("write release config");
+    git(&repo, &["commit", "-am", "Verify release sources"]);
+    git(&repo, &["push", "origin", "HEAD"]);
+    // GitHub merges the release PR after this run fetched main: the merge
+    // commit exists only on origin until the run fetches it.
+    let merger = tempfile::tempdir().expect("merger clone");
+    let merger_path = merger.path().to_string_lossy();
+    let bare = repo.bare_path().to_string_lossy().to_string();
+    let merger_git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "user.name=GitHub",
+                "-c",
+                "user.email=noreply@github.com",
+            ])
+            .args(args)
+            .current_dir(merger.path())
+            .output()
+            .expect("run git");
+        assert!(output.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    merger_git(&["clone", "--quiet", &bare, "."]);
+    merger_git(&["commit", "--allow-empty", "-m", "release: v0.9.2 (#1176)"]);
+    let merge = merger_git(&["rev-parse", "HEAD"]);
+    let state = tempfile::tempdir().expect("release state");
+    let log_path = state.path().join("gh.log");
+    let gh_script = write_gh_candidate_release_script(&log_path.to_string_lossy(), "success")
+        .replace(
+            r#"head="$(git rev-parse HEAD)""#,
+            &format!(r#"git -C '{merger_path}' push --quiet origin HEAD:main >&2; head="{merge}""#),
+        );
+    let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
+
+    let outcome = release_run(repo.path(), "patch", None, &NullProgress)
+        .expect("release should fetch its merge commit and finish");
+
+    let ReleaseRunOutcome::Released(receipt) = outcome else {
+        panic!("expected a released receipt");
+    };
+    assert_eq!(receipt.commit, merge);
+    assert_eq!(
+        git_output_bare(&repo, &["rev-parse", "refs/tags/v0.9.2"]),
+        merge
+    );
+}
+
+#[test]
 fn release_run_prepares_signed_artifacts_before_pushing_the_version_tag() {
     let repo = TestRepo::new();
     prepare_candidate_release_repo(&repo);

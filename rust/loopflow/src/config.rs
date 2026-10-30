@@ -126,10 +126,28 @@ pub fn yolo_override() -> bool {
 
 pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
 
+thread_local! {
+    static CALL_AGENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 pub fn agent_override() -> Option<String> {
-    std::env::var(AGENT_OVERRIDE_ENV)
-        .ok()
+    CALL_AGENT
+        .with(|agent| agent.borrow().clone())
+        .or_else(|| std::env::var(AGENT_OVERRIDE_ENV).ok())
         .filter(|value| !value.is_empty())
+}
+
+/// Select `agent` for one call on this thread, as `lf --agent` selects it for
+/// its whole process through `LF_AGENT_OVERRIDE`.
+pub fn with_agent_override<T>(agent: Option<&str>, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CALL_AGENT.with(|agent| *agent.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(CALL_AGENT.with(|current| current.replace(agent.map(str::to_owned))));
+    run()
 }
 
 /// How a recorded conversation continues under the invocation's agent choice.

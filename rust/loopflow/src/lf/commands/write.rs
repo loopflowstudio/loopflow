@@ -11,7 +11,6 @@
 //! app runs its command, which sends it.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use anyhow::Context;
 use clap::Parser;
@@ -163,10 +162,6 @@ pub enum Write {
         layout: String,
     },
 }
-
-/// In-app writes record one Process at a time: a Process's identity reaches
-/// what it runs through this process's environment.
-static WRITING: Mutex<()> = Mutex::new(());
 
 impl Write {
     /// The `lf` command this write equals, without the binary.
@@ -405,13 +400,10 @@ impl Write {
         if !cli.command.as_ref().is_some_and(Commands::changes_work) {
             return self.perform(&repo, &cli).map(Some);
         }
-        let _writing = WRITING.lock().unwrap_or_else(|poison| poison.into_inner());
-        // `lf` hands its `--agent` to what it runs through the environment.
-        let _agent = cli
-            .agent
-            .as_deref()
-            .map(|agent| super::graph::EnvVarGuard::set(crate::config::AGENT_OVERRIDE_ENV, agent));
-        crate::journal::with_runtime(&repo, &argv, || self.perform(&repo, &cli)).map(Some)
+        crate::config::with_agent_override(cli.agent.as_deref(), || {
+            crate::journal::with_call_process(&repo, &argv, || self.perform(&repo, &cli))
+        })
+        .map(Some)
     }
 
     fn perform(&self, repo: &Path, cli: &Cli) -> anyhow::Result<String> {
@@ -766,5 +758,66 @@ mod tests {
         for write in arrangement {
             assert!(!command(&write).changes_work(), "{write:?}");
         }
+    }
+
+    /// An in-app write lasts one call in a process that keeps running: one
+    /// that panics still ends its Process, and nothing it set outlives it.
+    #[test]
+    fn a_write_that_panics_ends_its_process_and_leaves_no_identity() {
+        use crate::journal::{
+            current_lf_process_id, has_caller, read_events, traces_root, with_call_process,
+            LfEventType, LF_PROCESS_ID_ENV, LF_TRACE_ID_ENV,
+        };
+        let guard = crate::journal::TestLedgerGuard::new();
+        std::env::remove_var(LF_PROCESS_ID_ENV);
+        std::env::remove_var(LF_TRACE_ID_ENV);
+        crate::journal::open_ledger().unwrap();
+        let repo = loopflow_test_support::TestRepo::new();
+        let write = Write::SessionRename {
+            directory: repo.path().to_path_buf(),
+            id: "session_1".into(),
+            name: "renamed".into(),
+        };
+        let argv: Vec<String> = std::iter::once("lf".to_owned())
+            .chain(write.argv())
+            .collect();
+
+        let panicked = std::cell::Cell::new(None);
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_call_process(repo.path(), &argv, || -> anyhow::Result<()> {
+                panicked.set(current_lf_process_id());
+                panic!("rename broke")
+            })
+        }));
+        assert!(unwound.is_err());
+        let panicked = panicked.take();
+        assert!(panicked.is_some());
+        assert_eq!(current_lf_process_id(), None);
+        assert_eq!(std::env::var_os(LF_PROCESS_ID_ENV), None);
+        assert_eq!(std::env::var_os(LF_TRACE_ID_ENV), None);
+
+        let (next, parented) = with_call_process(repo.path(), &argv, || {
+            Ok((current_lf_process_id(), has_caller()))
+        })
+        .unwrap();
+        assert!(next.is_some() && next != panicked);
+        assert!(!parented, "an in-app write has no parent");
+
+        let errors: Vec<_> = std::fs::read_dir(traces_root(repo.path()))
+            .unwrap()
+            .flat_map(|trace| read_events(&trace.unwrap().path()).unwrap())
+            .filter(|event| event.event == LfEventType::Errored)
+            .filter_map(|event| event.error)
+            .collect();
+        assert_eq!(errors, ["panicked: rename broke"]);
+        let running: i64 = rusqlite::Connection::open(guard.home().join("loopflow.db"))
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(running, 0);
     }
 }

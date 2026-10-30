@@ -1,7 +1,7 @@
 mod os_process;
 pub(crate) use os_process::OsProcess;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
@@ -104,6 +104,8 @@ impl Drop for TestLedgerGuard {
 
 thread_local! {
     static THREAD_CONTEXT: RefCell<Option<ProcessContext>> = const { RefCell::new(None) };
+    /// Set while `with_call_process` admits on this thread.
+    static CALL_SCOPED: Cell<bool> = const { Cell::new(false) };
 }
 
 // Only the executable entry point sets this. Library calls retain their own
@@ -174,6 +176,9 @@ struct ProcessContext {
     /// True when this process minted the trace id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the Process ends.
     minted_trace_id: bool,
+    /// An `lf` exports its identity for the processes it starts. A Process
+    /// that lasts one library call lives only in its thread's context.
+    exports_identity: bool,
     receipts: Arc<Mutex<ReceiptCost>>,
 }
 
@@ -394,11 +399,69 @@ pub fn with_runtime<T>(
     if is_cli_process() || current_context().is_some() {
         return run();
     }
-    admit_process(repo_root, command);
-    let result = run();
-    finish_runtime(repo_root, &result);
-    result
+    run_admitted(repo_root, command, run)
 }
+
+/// Record one Process around one call made inside a long-lived process that
+/// is not `lf`, such as Desktop's in-app writes. The Process reads and exports
+/// no identity through the environment, so it has no parent and nothing else
+/// in the process inherits it; it ends when the call returns or unwinds.
+pub fn with_call_process<T>(
+    repo_root: &Path,
+    command: &[String],
+    run: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    if is_cli_process() || current_context().is_some() {
+        return run();
+    }
+    struct Unscope;
+    impl Drop for Unscope {
+        fn drop(&mut self) {
+            CALL_SCOPED.with(|scoped| scoped.set(false));
+        }
+    }
+    CALL_SCOPED.with(|scoped| scoped.set(true));
+    let _unscope = Unscope;
+    run_admitted(repo_root, command, run)
+}
+
+/// A library caller's Process outlives no call: one that unwinds ends
+/// `Errored` with its panic, as an `lf` that panicked reads, and the unwind
+/// continues to the caller.
+fn run_admitted<T>(
+    repo_root: &Path,
+    command: &[String],
+    run: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    admit_process(repo_root, command);
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(result) => {
+            finish_runtime(repo_root, &result);
+            result
+        }
+        Err(panic) => {
+            let message = panic
+                .downcast_ref::<&str>()
+                .map(|message| (*message).to_owned())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".to_owned());
+            emit(
+                repo_root,
+                LfNode::Process,
+                LfEventType::Errored,
+                LfEventFields {
+                    error: Some(format!("panicked: {message}")),
+                    exit_code: Some(PANIC_EXIT),
+                    ..LfEventFields::default()
+                },
+            );
+            std::panic::resume_unwind(panic)
+        }
+    }
+}
+
+/// The status a Rust program exits with when it panics.
+const PANIC_EXIT: i32 = 101;
 
 /// Attach ordinary command observation after installation/data selection.
 pub fn admit_process(repo_root: &Path, command: &[String]) {
@@ -546,10 +609,12 @@ fn try_emit(
     ledger_insert(&context, &event, exit_code);
 
     if terminal {
-        if context.minted_trace_id {
-            std::env::remove_var(LF_TRACE_ID_ENV);
+        if context.exports_identity {
+            if context.minted_trace_id {
+                std::env::remove_var(LF_TRACE_ID_ENV);
+            }
+            std::env::remove_var(LF_PROCESS_ID_ENV);
         }
-        std::env::remove_var(LF_PROCESS_ID_ENV);
         clear_context();
     }
 
@@ -792,7 +857,11 @@ fn create_process_context(
         attribution.wave
     };
 
-    let agent_caller = same_store
+    // A call-scoped Process neither inherits nor exports identity through
+    // the environment of the process it runs in.
+    let exports_identity = !CALL_SCOPED.with(Cell::get);
+    let inherits = same_store && exports_identity;
+    let agent_caller = inherits
         .then(|| std::env::var_os(AGENT_CALLER_ENV))
         .flatten()
         .map(|value| {
@@ -804,7 +873,9 @@ fn create_process_context(
         .transpose()?;
     // A direct child of this lf process must inherit this Process, not the agent
     // edge that admitted it. Provider launches install their own fresh caller.
-    std::env::remove_var(AGENT_CALLER_ENV);
+    if exports_identity {
+        std::env::remove_var(AGENT_CALLER_ENV);
+    }
     let agent_parent = agent_caller.as_ref().and_then(|caller| {
         match ledger
             .clone()
@@ -823,18 +894,11 @@ fn create_process_context(
             .as_ref()
             .and_then(|(_, trace)| TraceId::parse(trace).ok())
     } else {
-        same_store.then(|| configured_trace_id(repo_root)).flatten()
+        inherits.then(|| configured_trace_id(repo_root)).flatten()
     };
     let (trace_id, minted_trace_id) = match inherited_trace {
         Some(trace_id) => (trace_id, false),
-        None => {
-            // Mint and export the trace id so prompt logs and child processes
-            // carry the same identity as the ledger rows. The export is
-            // removed when the Process ends (see try_emit).
-            let trace_id = TraceId::default();
-            std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
-            (trace_id, true)
-        }
+        None => (TraceId::default(), true),
     };
 
     // A parent process id only means "my parent within this trace, recorded in
@@ -856,9 +920,14 @@ fn create_process_context(
             .flatten()
             .filter(|parent| parent_is_recorded(parent, ledger.as_ref()))
     };
-    std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
     let lf_process_id = LfProcessId::default();
-    std::env::set_var(LF_PROCESS_ID_ENV, lf_process_id.as_str());
+    // Export the identity so prompt logs and child processes carry the same
+    // trace and parent as the ledger rows. The export is removed when the
+    // Process ends (see try_emit).
+    if exports_identity {
+        std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
+        std::env::set_var(LF_PROCESS_ID_ENV, lf_process_id.as_str());
+    }
 
     // Write the file journal wherever we can. Fall back to ledger-only when
     // the journal can't be
@@ -934,6 +1003,7 @@ fn create_process_context(
         wave: wave_name.clone(),
         finished: Arc::new(AtomicBool::new(false)),
         minted_trace_id,
+        exports_identity,
         receipts: Arc::default(),
     };
     set_context(context.clone());

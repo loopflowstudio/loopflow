@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>What a Process records</title>
+<title>An in-app write's Process lasts one call</title>
 <style>
 :root{--bg:#fbfaf7;--fg:#1d1c1a;--muted:#6b675f;--rule:#e2ded5;--code:#f1eee7;--now:#8a3b12;--prop:#1f5e3a;--propbg:#e9f3ec;--nowbg:#f8ece4}
 @media (prefers-color-scheme:dark){:root{--bg:#171614;--fg:#e9e6df;--muted:#a19c91;--rule:#34312c;--code:#24221f;--now:#f0a77a;--prop:#8fd3a8;--propbg:#1d2a22;--nowbg:#2c211b}}
@@ -12,7 +12,7 @@ body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 ui-serif,Georgi
 main{max-width:46rem;margin:0 auto;padding:2.5rem 16px 4rem}
 header p{margin:.2rem 0;color:var(--muted);font:14px/1.5 ui-sans-serif,system-ui,sans-serif}
 h1{font-size:1.7rem;line-height:1.25;margin:0 0 .6rem}
-h2{font-size:1.15rem;margin:2.6rem 0 .6rem}
+h2{font-size:1.15rem;margin:2.4rem 0 .6rem}
 code{font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:.05em .3em;border-radius:3px}
 .lead{font-size:1.1rem}
 table{width:100%;border-collapse:collapse;font:14px/1.45 ui-sans-serif,system-ui,sans-serif;margin:.8rem 0}
@@ -21,73 +21,48 @@ th{font-weight:600;color:var(--muted)}
 .now{color:var(--now)}
 .prop{color:var(--prop)}
 .box{border-left:3px solid var(--prop);background:var(--propbg);padding:.8rem 1rem;margin:1rem 0}
-.box.now{border-color:var(--now);background:var(--nowbg);color:var(--fg)}
+.box.now{border-color:var(--now);background:var(--nowbg)}
 .box p{margin:.3rem 0}
-.tag{font:600 12px ui-sans-serif,system-ui,sans-serif}
-ol li{margin:.7rem 0}
-ol ol{list-style:lower-alpha;margin-top:.3rem}
 .wrap{overflow-x:auto}
 </style>
 </head>
 <body>
 <main>
 <header>
-<h1>What a Process records</h1>
-<p>Task LOO-675 (5b3da9) · concept review with Jack Heart · October 29, 2026</p>
-<p>Built from <code>scratch/5b3da9-design.md</code>, <code>rust/loopflow/src/lf/mod.rs</code> (<code>Commands::changes_state</code>), <code>swift/Loopflow/Services/RegistryQuery.swift</code>, <code>swift/LoopflowMac/Views/SessionsView.swift</code>, PR #1773</p>
+<h1>An in-app write's Process lasts one call</h1>
+<p>Task 5b3da9 · concept-review step, no person present · October 29, 2026</p>
+<p>Built from <code>scratch/5b3da9-design.md</code>, <code>rust/loopflow/src/lf/commands/write.rs</code>, <code>rust/loopflow/src/journal/mod.rs</code>, <code>rust/loopflow-ffi/src/lib.rs</code>, <code>swift/LoopflowMac/LoopflowApp.swift</code></p>
 </header>
 
-<p class="lead"><strong>Decided October 29:</strong> Jack Heart chose 1a, and 2a by default. Applied in <code>Commands::changes_work</code>.</p>
-<p>One decision: <strong>does a Process record any change to the store, or only a change to Work?</strong> You said the second. PR #1773 does the first.</p>
+<p class="lead">No decision needed from you. The accepted decisions already settle this one; it goes to implement next.</p>
 
-<h2>Your rule</h2>
-<p>“Only things that actually change state (which could include editing a task name) should get process rows.” Then: adding or completing Tasks should be tracked, and Linear sync “is just followthrough on a previous write.”</p>
+<h2>The mismatch</h2>
+<p>Under <code>lf</code>, a Process and the OS process that ran it end together. In Desktop, a write's Process ends when the call returns, but Desktop keeps running. The journal still assumes the first case.</p>
 
-<h2>What you do → what records a Process</h2>
+<div class="box now">
+<p><strong>Existing behavior.</strong> <code>with_runtime</code> admits the Process, runs the write, then finishes it. If the write panics, the unwind skips the finish and the FFI turns the panic into an error. The app shows the error, but:</p>
+</div>
+
 <div class="wrap">
 <table>
-<tr><th>You, or an agent</th><th>Command</th><th class="now">Today in #1773</th><th class="prop">Proposed</th></tr>
-<tr><td>Look at anything</td><td><code>lf task status</code>, <code>lf wave status</code>, in-app reads</td><td>no Process</td><td>no Process</td></tr>
-<tr><td>Add, rename, complete or run a Task</td><td><code>lf task create|edit|complete|run</code></td><td>Process</td><td>Process</td></tr>
-<tr><td>Type into a Session’s terminal</td><td><code>lf desktop send|send-key|run</code></td><td>Process</td><td>Process (input to a Session is work)</td></tr>
-<tr><td>Refresh planning from Linear</td><td><code>lf wave status --sync</code>, every 5 min</td><td>Process</td><td>either, whichever is simpler</td></tr>
-<tr><td>Focus, zoom, resize or move a pane</td><td><code>lf desktop focus|zoom|resize|move|hide|show</code></td><td class="now">Process, wakes every Work reader</td><td class="prop">no Process</td></tr>
-<tr><td>Go back, reload or browse in a pane</td><td><code>lf desktop page-back|reload|browse|files</code></td><td class="now">Process, wakes every Work reader</td><td class="prop">no Process</td></tr>
-<tr><td>Rearrange panes or a dashboard</td><td><code>lf desktop layout --save</code>, dashboard pin, tile, reorder</td><td class="now">an <code>lf</code> process and a Process row on each change</td><td class="prop">saved, no Process</td></tr>
+<tr><th>Left behind</th><th>What you'd see</th></tr>
+<tr><td>A started Process with Desktop's PID</td><td>It counts as running until Desktop quits, so it shows up as live work in the Task's checkout</td></tr>
+<tr><td><code>THREAD_CONTEXT</code> on the calling thread</td><td>Later writes on that thread look nested and record no Process</td></tr>
+<tr><td><code>LF_PROCESS_ID</code> / <code>LF_TRACE_ID</code> in Desktop's environment</td><td>The next in-app Process gets the dead one as its parent</td></tr>
 </table>
 </div>
 
-<div class="box now">
-<p><span class="tag">Mismatch</span></p>
-<p><code>changes_state</code> asks “does this command change anything?” A window focus counts, because Desktop’s terminal state changes. So an agent driving panes, or you dragging a pane, writes Process rows. Each one advances the <code>processes</code> revision and wakes every Work reader. That is the same wake-up cost this Task set out to remove, now coming from UI actions instead of reads.</p>
-</div>
-
 <div class="box">
-<p><span class="tag">Proposed</span></p>
-<p>The question becomes “is this a change to Work?” Work means Tasks, Waves, Projects, Sessions, Graphs, PRs and planning. UI actions and arrangement are not Work: they record no Process and wake no Work reader. Arrangement is still saved.</p>
-<p>APIs: rename <code>changes_state</code> to <code>changes_work</code> and flip about 20 <code>DesktopCommand</code> arms. No new commands. The equivalence test is unchanged.</p>
+<p><strong>Proposed.</strong> When an in-app write unwinds, it ends its Process as <code>Errored</code> with the panic message and clears its context. The record then reads like an <code>lf</code> that panicked. The Process identity lives only in the thread context, never in Desktop's environment, which also removes the <code>setenv</code> race. If a write starts an <code>lf</code> child, the identity goes on that child's command.</p>
+<p>Proof: a write that panics leaves an <code>Errored</code> Process, no exported identity, and the next write records its own Process with no parent.</p>
 </div>
 
-<h2>Normal path, failure, recovery</h2>
-<p><strong>Normal:</strong> an agent focuses a pane and types into it. The focus records nothing. The <code>send</code> records a Process attached to the Session. The sidebar wakes once, for the send.</p>
-<p><strong>Failure:</strong> a layout save fails halfway. Today the failed <code>lf</code> process leaves a failed Process row in the Task’s work. Proposed, the save reports its error to Desktop and the Task’s history stays clean. Nothing about Work was lost.</p>
-<p><strong>What survives either way:</strong> every Task, Session and Graph change and its record, Linear delivery and its retry, and saved layouts.</p>
-
-<h2>One follow-on</h2>
-<p>Under (b) the library never writes, so a pane drag still starts an <code>lf</code> process just to save the layout, even when it records no Process. Arrangement is metadata only Desktop reads. It could be the single kind of write the library owns. You said you weren’t worried about metadata writes, but you chose (b).</p>
+<h2>Checked and fine</h2>
+<p>Desktop's environment already drops inherited Work-process variables at launch (<code>enrichProcessPathForGUILaunch</code>). So in-app reads and writes start from the same environment Desktop's <code>lf</code> children had. That question is closed.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>What should record a Process?
-  <ol>
-  <li>Only changes to Work. UI actions and arrangement record nothing. (proposed)</li>
-  <li>Any change, including UI actions, as #1773 does today.</li>
-  </ol></li>
-<li>Where do layout and dashboard arrangement saves run?
-  <ol>
-  <li>Still an <code>lf</code> process, with no Process row. The library stays read-only.</li>
-  <li>The library writes them in-process, as the one exception to (b).</li>
-  </ol></li>
+<li>None open. The remaining items in <code>scratch/questions.md</code> are judgment calls with a one-line flip, not product choices.</li>
 </ol>
 </main>
 </body>

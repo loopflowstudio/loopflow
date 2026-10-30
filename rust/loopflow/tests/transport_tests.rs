@@ -1192,6 +1192,89 @@ fn sessions_end_when_their_lf_executable_goes() {
     fixture.stop(&owners[3]);
 }
 
+/// Desktop restarting after an lf upgrade leaves the conversation in an owner
+/// from the earlier build, which cannot write the advanced store, so its record
+/// still says the departed terminal shows it. Opening the Session asks the owner, reads
+/// `detached` and reattaches to it without starting anything new.
+#[test]
+fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &["/bin/sh", "-c", "read -r answer; printf '%s' \"$answer\""],
+    ));
+    let session = fixture.session(&owner);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET provider='claude' WHERE id=?1",
+            [&session],
+        )
+        .unwrap();
+    let viewed = || -> bool {
+        fixture
+            .sql()
+            .query_row("SELECT viewed FROM processes WHERE id=?1", [&owner], |r| {
+                r.get(0)
+            })
+            .unwrap()
+    };
+    let desktop = fixture.viewer(&owner, true);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !viewed() {
+        assert!(Instant::now() < deadline, "owner never recorded its viewer");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Desktop quits.
+    desktop
+        .socket
+        .get_ref()
+        .shutdown(std::net::Shutdown::Both)
+        .unwrap();
+    drop(desktop);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while viewed() {
+        assert!(Instant::now() < deadline, "the viewer never left");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // An earlier build's owner cannot write the store a newer lf advanced, so
+    // its record keeps the viewer that left.
+    fixture
+        .sql()
+        .execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
+        .unwrap();
+
+    let prepared = fixture
+        .command(&["session", "resume", &session, "--prepare", "--json"])
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    assert_eq!(prepared["state"], "detached");
+    assert_eq!(
+        prepared["actions"],
+        json!([{"kind":"open","label":"Reconnect","help":"Show the running Session in this terminal","unavailable_reason":null}])
+    );
+    assert_eq!(prepared["terminal_ids"], json!([]));
+
+    let mut reopened = fixture
+        .command(&["session", "resume", &session])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    reopened
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"same conversation\n")
+        .unwrap();
+    let output = wait_for_viewer(reopened, Duration::from_secs(10));
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"same conversation");
+}
+
 #[test]
 fn nested_cli_execution_survives_its_calling_provider_and_viewer() {
     let fixture = Fixture::new();

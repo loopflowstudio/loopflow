@@ -1199,21 +1199,12 @@ struct Live {
 fn elsewhere(target: &Resolved) -> Option<Live> {
     let id = target.conversation()?;
     let store = crate::store::read_existing_registry().ok().flatten()?;
-    let summary = store
-        .sqlite
-        .session_summary(id, time::OffsetDateTime::now_utc().unix_timestamp())
+    let summary = crate::ops::human_session::viewed_summary(&store.sqlite, id)
         .ok()
         .flatten()?;
-    if summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Live {
-        return None;
-    }
-    let unviewed = store
-        .sqlite
-        .session_transport(id)
-        .ok()
-        .flatten()
-        .is_some_and(|owner| crate::transport::controlled(&owner).is_ok_and(|held| !held));
-    (!unviewed).then(|| Live {
+    let viewed = summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
+        && !summary.unviewed;
+    viewed.then(|| Live {
         reason: format!(
             "this conversation is already open in another client; move it here with `lf resume {id}` (unsent text there is not transferred)"
         ),

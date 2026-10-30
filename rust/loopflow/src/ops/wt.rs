@@ -2,7 +2,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::git::worktrees::{list_porcelain, main_repo_root, sibling_worktree_name};
+use crate::git::worktrees::{
+    github_repo_nwo, list_porcelain, main_repo_root, sibling_worktree_name,
+};
 use crate::git::{
     acquire_worktree_lease, delete_local_branch, get_default_branch, is_clean, ref_exists,
     rev_parse, worktree_remove_owned,
@@ -20,10 +22,21 @@ pub(crate) struct BranchDeletion {
 }
 
 fn git(repo: &Path, args: &[&str]) -> OpsResult<String> {
-    let output = Command::new("git").args(args).current_dir(repo).output()?;
+    run("git", repo, args)
+}
+
+fn gh(repo: &Path, args: &[&str]) -> OpsResult<String> {
+    run("gh", repo, args)
+}
+
+fn run(program: &str, repo: &Path, args: &[&str]) -> OpsResult<String> {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(repo)
+        .output()?;
     if !output.status.success() {
         return Err(OpsError::Message(format!(
-            "git {}: {}",
+            "{program} {}: {}",
             args.join(" "),
             String::from_utf8_lossy(&output.stderr).trim()
         )));
@@ -168,6 +181,7 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
         }
     }
     if let Some(head) = remote_head {
+        retarget_dependents(&repo, &branch, progress)?;
         progress.status("Deleting remote branch...");
         // A changed remote is new work, not permission to delete it on this retry.
         git(
@@ -193,6 +207,34 @@ pub(crate) fn apply_delete(deletion: BranchDeletion, progress: &impl Progress) -
     // A branch absent when observed and created since is new work.
     if local_head.is_some() && ref_exists(&repo, &format!("refs/heads/{branch}"))? {
         delete_local_branch(&repo, &branch)?;
+    }
+    Ok(())
+}
+
+/// Point open PRs based on `branch` at the default branch. GitHub closes a PR
+/// whose base branch is deleted, so a stacked PR must move before its base goes.
+fn retarget_dependents(repo: &Path, branch: &str, progress: &impl Progress) -> OpsResult<()> {
+    if github_repo_nwo(repo).is_none() {
+        return Ok(());
+    }
+    let listed = gh(
+        repo,
+        &[
+            "pr", "list", "--state", "open", "--base", branch, "--limit", "1000", "--json",
+            "number",
+        ],
+    )?;
+    let dependents: Vec<serde_json::Value> = serde_json::from_str(&listed)
+        .map_err(|error| OpsError::Message(format!("gh pr list --base {branch}: {error}")))?;
+    let default_branch = get_default_branch(repo)?;
+    for number in dependents.iter().filter_map(|pull| pull["number"].as_u64()) {
+        progress.status(&format!(
+            "Retargeting PR #{number} onto {default_branch}..."
+        ));
+        gh(
+            repo,
+            &["pr", "edit", &number.to_string(), "--base", &default_branch],
+        )?;
     }
     Ok(())
 }

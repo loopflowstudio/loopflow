@@ -77,5 +77,5 @@ The checks a change must add live with the code they protect:
 | runner, network isolation, resources, installation harness | `scripts/README.md` (this directory) |
 | Swift, Desktop, Xcode | `swift/README.md` (Testing) |
 | website, `docs/` | `website/README.md` (Testing) |
-| CI workflows, caches, Dependabot | `.github/README.md` |
+| CI workflows, caches, Dependabot | `.github/CI.md` |
 | `tests/e2e/` | `tests/e2e/README.md` |

@@ -18,7 +18,9 @@ whether showing a pane reattaches: a `detached` Session reattaches, an `active` 
 waits for Move here, and an ended one waits for an explicit open.
 Preparing asks a running owner whether a viewer holds control, so an owner from an
 earlier lf, which cannot record its viewers in a store a newer lf advanced, reads
-`detached` once Desktop restarts and its pane reattaches.
+`detached` once Desktop restarts and its pane reattaches. An owner that is running
+but never answers reads `detached` too; reattaching stops its provider and continues
+the same provider thread in a new owner, without replaying input.
 
 `lf resume --all` is the one automatic restart: it resumes Sessions whose owner
 never recorded an exit and is gone from the OS, as after a reboot, crash or kill.
@@ -43,8 +45,9 @@ an explicit transition to the provider's native UI. That transition preserves th
 Session and saved conversation, but does not preserve its old in-flight turn or
 resubmit its input.
 
-An unavailable owner leaves delivery unknown. Reconnection does not launch another
-provider or replay a Graph. Finished Runs retain results in Session history.
+An owner that answers but then fails to attach leaves delivery unknown; that
+reconnection launches no other provider and replays no Graph. Finished Runs retain
+results in Session history.
 After connecting, attachment waits up to five seconds for acknowledgement. Timeout
 or Ctrl+C while waiting closes only the viewer; execution remains unknown. Once
 acknowledged, the attachment has no time limit.

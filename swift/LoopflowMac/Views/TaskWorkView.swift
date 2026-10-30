@@ -134,7 +134,7 @@ struct TaskWorkflowHeader: View {
                     .padding(.vertical, 6)
             }
             .accessibilityIdentifier("task-overview")
-            TaskDueDateView(task: task)
+            TaskPlanningFactsView(task: task)
             // Completion may fail after the Workflow has already arrived.
             if let conflict = task.runtime?.completionPending {
                 HStack(spacing: Spacing.sm) {
@@ -678,8 +678,8 @@ struct TaskActionItems: View {
 }
 
 
-/// The Task due date stays beside the conversation and in Task details.
-struct TaskDueDateView: View {
+/// The Task's due date and regression mark stay beside the conversation and in Task details.
+struct TaskPlanningFactsView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
@@ -687,6 +687,11 @@ struct TaskDueDateView: View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             if let due = task.task.dueDate {
                 Text("Due \(due)")
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.textSecondary)
+            }
+            if let version = task.task.regressedIn {
+                Text("Regressed in \(version)")
                     .font(Typography.body(12.5))
                     .foregroundStyle(palette.textSecondary)
             }

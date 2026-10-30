@@ -2007,6 +2007,9 @@ until `lf ship`."
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
+        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
+        #[arg(long, value_name = "VERSION")]
+        regressed_in: Option<String>,
         /// Start it as `lf task run` does, then open its conversation here
         #[arg(long)]
         run: bool,
@@ -2141,6 +2144,9 @@ until `lf ship`."
         /// Assignee identity; provider user ID in connected plans
         #[arg(long)]
         assignee: Option<String>,
+        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
+        #[arg(long, value_name = "VERSION")]
+        regressed_in: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
@@ -2264,12 +2270,20 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
-    /// Install the latest Loopflow at login and weekly by default (macOS launchd)
+    /// Run `lf install` on your stream on a schedule (launchd at login, or cron)
     Schedule {
-        /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time)
-        #[arg(value_enum, default_value = "weekly")]
-        frequency: InstallFrequency,
+        /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
+        /// Defaults to the installed schedule's, else daily.
+        #[arg(value_enum)]
+        frequency: Option<InstallFrequency>,
     },
+    /// Record this Loopflow.app, updated in place, as the install: migrate the
+    /// store and link `lf` into it. Moves no files.
+    #[command(hide = true)]
+    Adopt,
+    /// Exit 0 only when release TAG's build can open this Machine's store.
+    #[command(hide = true)]
+    CanOpen { tag: String },
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
@@ -2474,11 +2488,22 @@ pub enum SelfCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Install the stable Loopflow release from any directory
+    /// Install the newest Loopflow on your stream from any directory
+    #[command(
+        after_help = "Without a stream flag, follows the stream recorded in ~/.lf/config.yaml \
+(`stable` when none is recorded). A flag switches the stream and records it. \
+A stream whose build cannot open this Machine's store keeps the installed lf until it can."
+    )]
     Install {
-        /// Install the newest green main build instead (needs `gh` auth)
-        #[arg(long)]
-        main: bool,
+        /// Follow the newest green main build (needs `gh` auth)
+        #[arg(long, group = "stream")]
+        dev: bool,
+        /// Follow the newest release
+        #[arg(long, group = "stream")]
+        preview: bool,
+        /// Follow the newest release soaked 7 days with no open regression
+        #[arg(long, group = "stream")]
+        stable: bool,
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
@@ -3121,7 +3146,9 @@ mod tests {
                 .command,
             Some(Commands::Self_ {
                 cmd: crate::lf::SelfCommand::Install {
-                    main: false,
+                    dev: false,
+                    preview: false,
+                    stable: false,
                     cmd: None
                 }
             })
@@ -3131,16 +3158,20 @@ mod tests {
         assert!(Cli::try_parse_from(["lf", "self", "install", "status"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "preflight"]).is_ok());
         assert!(matches!(
-            Cli::try_parse_from(["lf", "self", "install", "--main"])
+            Cli::try_parse_from(["lf", "self", "install", "--preview"])
                 .unwrap()
                 .command,
             Some(Commands::Self_ {
                 cmd: crate::lf::SelfCommand::Install {
-                    main: true,
+                    dev: false,
+                    preview: true,
+                    stable: false,
                     cmd: None
                 }
             })
         ));
+        assert!(Cli::try_parse_from(["lf", "self", "install", "--dev", "--stable"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "--main"]).is_err());
     }
 
     #[test]

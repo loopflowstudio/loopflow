@@ -36,7 +36,8 @@ placed on another Machine.
   it receives. Keep its implementation and provider selectors outside the
   checkout.
 - Install the Developer ID signing identity and host-native GitHub, registry,
-  R2, notarization, and Fly authority required by the release publisher.
+  R2, notarization, Sparkle (`SPARKLE_ED_PRIVATE_KEY`), and Fly authority required
+  by the release publisher.
 
 The bootstrap reconstructs a minimal environment containing only host paths,
 Machine/store paths, and basic locale/temp settings. It verifies a managed provider

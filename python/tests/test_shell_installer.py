@@ -43,6 +43,12 @@ def _write_stubs(stub_dir: Path) -> None:
         '    echo dummy > "$out"\n'
         "  fi\n"
         "fi\n"
+        'case "$url" in\n'
+        '  */releases\\?per_page=*) printf \'%s\' '
+        '\'[{"tag_name":"v9.10.0-rc.1","draft":false,"prerelease":true},\' '
+        '\'{"tag_name":"v9.9.10","draft":false,"prerelease":false},\' '
+        '\'{"tag_name":"v9.9.9","draft":false,"prerelease":false}]\' ;;\n'
+        "esac\n"
         'if [ "$effective" = "1" ]; then\n'
         '  case "$url" in\n'
         '    */releases/latest) printf "%s" '
@@ -128,6 +134,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         "LFTEST_LOG": str(tmp_path / "curl.log"),
         "LFTEST_PROMOTE_LOG": str(tmp_path / "promote.log"),
         "LF_INSTALL_CLI_ONLY": "1",
+        "HOME": str(tmp_path / "home"),
     }
 
 
@@ -172,14 +179,15 @@ def test_downloaded_candidate_owns_activation(
 ) -> None:
     result = _run(installer, [], env)
     assert result.returncode == 0, result.stderr
-    args = (tmp_path / "promote.log").read_text().split()
-    assert args[:4] == [
+    promote, schedule = (tmp_path / "promote.log").read_text().splitlines()
+    assert promote.split() == [
         "install",
         "promote",
         "--cli-target",
         str(tmp_path / "dest/lf"),
+        "--sync-skills",
     ]
-    assert args[4:] == ["--sync-skills"]
+    assert schedule == "install schedule"
 
 
 def test_latest_release_is_pinned_before_the_archive_download(
@@ -218,7 +226,7 @@ def test_macos_release_promotes_the_verified_app_with_the_control_plane(
     result = _run(installer, [], app_env)
 
     assert result.returncode == 0, result.stderr
-    args = (tmp_path / "promote.log").read_text().split()
+    args = (tmp_path / "promote.log").read_text().splitlines()[0].split()
     assert "--app-source" in args
     assert args[args.index("--app-target") + 1] == str(applications / "Loopflow.app")
     assert args[args.index("--legacy-app-target") + 1] == str(applications / "Concerto.app")
@@ -247,8 +255,47 @@ def test_download_failure_aborts_without_cryptic_error(installer: Path, tmp_path
         "LF_INSTALL_DIR": str(tmp_path / "dest"),
         "LFTEST_LOG": str(tmp_path / "curl.log"),
         "LFTEST_CURL_RC": "22",
+        "HOME": str(tmp_path / "home"),
     }
     result = _run(installer, [], env_extra)
     assert result.returncode != 0
     assert "Download failed" in result.stderr
     assert "No such file" not in (result.stdout + result.stderr)
+
+
+def test_preview_channel_installs_the_newest_release_and_records_it(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    config = tmp_path / "home/.lf/config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("repo_root: /src")
+    result = _run(installer, ["--channel", "preview"], env)
+    assert result.returncode == 0, result.stderr
+    assert "/releases/download/v9.9.10/lf-" in (tmp_path / "curl.log").read_text()
+    assert config.read_text() == "repo_root: /src\nstream: preview\n"
+
+
+def test_rerun_follows_the_recorded_channel(
+    installer: Path, env: dict[str, str], tmp_path: Path
+) -> None:
+    config = tmp_path / "home/.lf/config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("stream: preview\n")
+    result = _run(installer, [], env)
+    assert result.returncode == 0, result.stderr
+    assert "/releases/download/v9.9.10/" in (tmp_path / "curl.log").read_text()
+    result = _run(installer, ["--channel=stable"], env)
+    assert result.returncode == 0, result.stderr
+    assert config.read_text() == "stream: stable\n"
+
+
+def test_dev_channel_points_at_lf_install(installer: Path, env: dict[str, str]) -> None:
+    result = _run(installer, ["--channel", "dev"], env)
+    assert result.returncode != 0
+    assert "lf install --dev" in result.stderr
+
+
+def test_channel_and_version_conflict(installer: Path, env: dict[str, str]) -> None:
+    result = _run(installer, ["--channel", "preview", "--version", "0.9.9"], env)
+    assert result.returncode != 0
+    assert "not both" in result.stderr

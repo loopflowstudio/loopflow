@@ -1,4 +1,5 @@
-//! Published updates, green main builds, and the optional machine-local schedule.
+//! Stream installs (green main builds and published releases) and the optional
+//! machine-local schedule that follows the recorded stream.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -10,57 +11,311 @@ use anyhow::{anyhow, bail, Context, Result};
 use reqwest::blocking::Client;
 use sha2::{Digest, Sha256};
 
+use clap::ValueEnum;
+
 use crate::lf::InstallFrequency;
 
 const REPOSITORY: &str = "loopflowstudio/loopflow";
 const RELEASES: &str = "https://github.com/loopflowstudio/loopflow/releases";
 /// Packages every green main commit (`.github/workflows/main-packages.yml`).
 const MAIN_PACKAGES: &str = "main-packages.yml";
+/// The reader floors a release's build opens (`lf self install reader-catalog`).
+const READER_CATALOG: &str = "reader-catalog.txt";
+/// Starts Loopflow.app's own update check (`LoopflowApp.handleDeepLink`).
+const APP_UPDATE_LINK: &str = "loopflow://update";
 
-pub fn latest() -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
-    let response = client
+/// The build line an install follows (`release/README.md`, Streams).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stream {
+    /// The newest green main build.
+    Dev,
+    /// The newest release.
+    Preview,
+    /// GitHub's Latest release: the newest one soaked with no open regression.
+    Stable,
+}
+
+impl Stream {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Dev => "dev",
+            Self::Preview => "preview",
+            Self::Stable => "stable",
+        }
+    }
+
+    fn parse(name: &str) -> Option<Self> {
+        [Self::Dev, Self::Preview, Self::Stable]
+            .into_iter()
+            .find(|stream| stream.as_str() == name)
+    }
+}
+
+/// Install the newest build on `switch`, recording it as this Machine's
+/// stream, or on the recorded stream (`stable` when none is recorded).
+pub fn install(switch: Option<Stream>) -> Result<()> {
+    let home = crate::installation::account_home()?.join(".lf");
+    let stream = match switch {
+        Some(stream) => {
+            record_stream(&home, stream)?;
+            println!(
+                "stream: {} (recorded in {})",
+                stream.as_str(),
+                home.join("config.yaml").display()
+            );
+            stream
+        }
+        None => recorded_stream(&home)?.unwrap_or(Stream::Stable),
+    };
+    if stream == Stream::Dev {
+        return main_build();
+    }
+    if cfg!(target_os = "macos") {
+        finish_adoption(&applications_dir())?;
+    }
+    let client = http_client()?;
+    let tag = stream_release(&client, stream)?;
+    install_release(&client, stream, &tag)
+}
+
+/// The release a release stream is at: preview's newest, or stable's GitHub Latest.
+fn stream_release(client: &Client, stream: Stream) -> Result<String> {
+    if stream == Stream::Preview {
+        let releases = client
+            .get(format!(
+                "https://api.github.com/repos/{REPOSITORY}/releases?per_page=20"
+            ))
+            .send()
+            .context("look up the newest Loopflow release")?
+            .error_for_status()?
+            .text()?;
+        return newest_release(&releases);
+    }
+    let latest = client
         .head(format!("{RELEASES}/latest"))
         .send()
         .context("look up the stable Loopflow release")?
         .error_for_status()?;
-    let tag = release_tag(response.url().path())?;
+    release_tag(latest.url().path())
+}
+
+fn install_release(client: &Client, stream: Stream, tag: &str) -> Result<()> {
     let directory = install_dir()?;
-    let applications = std::env::var_os("LF_APPLICATIONS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Applications"));
+    let applications = applications_dir();
     let cli_only = std::env::var("LF_INSTALL_CLI_ONLY").as_deref() == Ok("1");
+    let stream = stream.as_str();
     if is_current(
         &directory,
-        &tag,
+        tag,
         (cfg!(target_os = "macos") && !cli_only).then_some(applications.as_path()),
     ) {
-        println!("Published release {tag} is already installed.");
+        println!("{stream} {tag} is already installed.");
         return Ok(());
     }
+    let manifest = release_manifest(client, tag)?;
+    if !release_opens_store(client, tag, &manifest)? {
+        println!(
+            "{stream} is at {tag}, which cannot open this Machine's store: a newer lf migrated it. \
+             Keeping the installed lf; `lf install` moves to {stream} once it reaches a build that opens the store."
+        );
+        return Ok(());
+    }
+    let app = applications.join("Loopflow.app");
+    if cfg!(target_os = "macos") && !cli_only && updates_itself(&app) && app_is_running(&app)? {
+        // Replacing a running bundle under it is Sparkle's job, not ours.
+        let status = Command::new("/usr/bin/open")
+            .args(["-g", APP_UPDATE_LINK])
+            .status()
+            .context("ask Loopflow.app to update")?;
+        if !status.success() {
+            bail!(
+                "could not ask {} to update ({status}); quit it and rerun `lf install`",
+                app.display()
+            );
+        }
+        println!(
+            "{stream} is at {tag}; Loopflow.app is running, so it installs the update and `lf` follows it."
+        );
+        return Ok(());
+    }
+    let installer = release_asset(client, tag, "install.sh")?;
     let temporary = tempfile::tempdir()?;
-    let base = format!("{RELEASES}/download/{tag}");
-    let manifest = client
-        .get(format!("{base}/SHA256SUMS"))
-        .send()?
-        .error_for_status()?
-        .text()?;
-    let installer = client
-        .get(format!("{base}/install.sh"))
-        .send()?
-        .error_for_status()?
-        .bytes()?;
-    run_verified_installer(&directory, temporary.path(), &tag, &manifest, &installer)?;
+    run_verified_installer(&directory, temporary.path(), tag, &manifest, &installer)?;
     println!(
-        "release: {tag}\ninstalled: {}",
+        "{stream}: {tag}\ninstalled: {}",
         directory.join("lf").display()
     );
     Ok(())
 }
 
+/// Record the installed Loopflow.app, which updated itself in place (Sparkle), as
+/// this Machine's install: migrate the store and link `lf` into it, moving no
+/// files. The app's first launch runs this through its own bundled `lf`.
+pub fn adopt() -> Result<()> {
+    let current = fs::canonicalize(std::env::current_exe()?)?;
+    let app = applications_dir().join("Loopflow.app");
+    if fs::canonicalize(app.join("Contents/MacOS/lf")).ok() != Some(current.clone()) {
+        println!(
+            "{} is not {}'s lf; nothing to adopt",
+            current.display(),
+            app.display()
+        );
+        return Ok(());
+    }
+    super::promote(
+        super::PromotionArtifacts {
+            cli_target: &install_dir()?.join("lf"),
+            app_source: Some(&app),
+            app_target: Some(&app),
+            legacy_app_target: None,
+        },
+        true,
+        false,
+    )
+}
+
+/// Adopt Loopflow.app when Sparkle replaced it and its first launch hasn't run
+/// yet: the app's `lf` is ahead of the store, so every terminal `lf` refuses
+/// until something migrates it. Moves no files.
+fn finish_adoption(applications: &Path) -> Result<()> {
+    let lf = applications.join("Loopflow.app/Contents/MacOS/lf");
+    if preflight_verdict(&lf).as_deref() != Some("promote_and_migrate") {
+        return Ok(());
+    }
+    let status = Command::new(&lf)
+        .args(["install", "adopt"])
+        .status()
+        .with_context(|| format!("adopt {}", lf.display()))?;
+    if !status.success() {
+        bail!(
+            "adopting the updated {} failed ({status}); fix the error above and rerun `lf install`",
+            lf.display()
+        );
+    }
+    Ok(())
+}
+
+fn applications_dir() -> PathBuf {
+    std::env::var_os("LF_APPLICATIONS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/Applications"))
+}
+
+/// Succeed only when release `tag` can open this Machine's store; Loopflow.app's
+/// updater asks before installing a release.
+pub fn can_open(tag: &str) -> Result<()> {
+    let client = http_client()?;
+    let manifest = release_manifest(&client, tag)?;
+    if !release_opens_store(&client, tag, &manifest)? {
+        bail!(
+            "{tag} cannot open this Machine's store: a newer lf migrated it. \
+             Loopflow stays on this build until its stream reaches one that opens the store."
+        );
+    }
+    println!("{tag} opens this Machine's store");
+    Ok(())
+}
+
+fn http_client() -> Result<Client> {
+    Ok(Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent(concat!("lf/", env!("CARGO_PKG_VERSION")))
+        .build()?)
+}
+
+fn release_asset(client: &Client, tag: &str, name: &str) -> Result<Vec<u8>> {
+    Ok(client
+        .get(format!("{RELEASES}/download/{tag}/{name}"))
+        .send()?
+        .error_for_status()?
+        .bytes()?
+        .to_vec())
+}
+
+/// Release `tag`'s `SHA256SUMS`, which names the digest of every asset.
+fn release_manifest(client: &Client, tag: &str) -> Result<String> {
+    Ok(String::from_utf8(release_asset(
+        client,
+        tag,
+        "SHA256SUMS",
+    )?)?)
+}
+
+/// Whether release `tag` opens the store, from its digest-checked reader catalog.
+fn release_opens_store(client: &Client, tag: &str, manifest: &str) -> Result<bool> {
+    // Releases before v0.16 publish no catalog; promotion still refuses them.
+    if manifest_digest(manifest, READER_CATALOG).is_none() {
+        return Ok(true);
+    }
+    let catalog = release_asset(client, tag, READER_CATALOG)?;
+    verify_asset(manifest, READER_CATALOG, &catalog)?;
+    opens_store(
+        &crate::store::production_database_path(),
+        &String::from_utf8_lossy(&catalog),
+    )
+}
+
+/// The newest published release in the GitHub releases list, which is newest first.
+fn newest_release(json: &str) -> Result<String> {
+    #[derive(serde::Deserialize)]
+    struct Release {
+        tag_name: String,
+        draft: bool,
+        prerelease: bool,
+    }
+    let releases: Vec<Release> = serde_json::from_str(json).context("read the release list")?;
+    releases
+        .into_iter()
+        .find(|release| !release.draft && !release.prerelease)
+        .map(|release| release.tag_name)
+        .ok_or_else(|| anyhow!("no published Loopflow release"))
+}
+
+/// Whether a build with this reader catalog opens the store. An absent store opens.
+fn opens_store(store: &Path, catalog: &str) -> Result<bool> {
+    if !store.exists() {
+        return Ok(true);
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        store,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let catalog: Vec<String> = catalog
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    Ok(crate::store::migrations::can_open(&conn, &catalog)?)
+}
+
+/// The stream recorded in `home`'s config.yaml.
+fn recorded_stream(home: &Path) -> Result<Option<Stream>> {
+    let config = home.join("config.yaml");
+    let Some(name) = crate::config::read_global_config_at(&config)?
+        .get("stream")
+        .and_then(|value| value.as_str().map(str::to_string))
+    else {
+        return Ok(None);
+    };
+    Stream::parse(&name).map(Some).ok_or_else(|| {
+        anyhow!(
+            "{}: unknown stream `{name}`; choose one with `lf install --dev`, `--preview` or `--stable`",
+            config.display()
+        )
+    })
+}
+
+fn record_stream(home: &Path, stream: Stream) -> Result<()> {
+    crate::config::update_global_config_at(home, |config| {
+        config["stream"] = stream.as_str().into();
+        Ok(())
+    })
+}
+
 /// Install the package CI built for the newest green main commit. GitHub keeps
 /// those artifacts behind authentication, so this uses the `gh` login.
-pub fn main_build() -> Result<()> {
+fn main_build() -> Result<()> {
     let target =
         package_target().ok_or_else(|| anyhow!("no main package is built for this platform"))?;
     let runs = gh(&[
@@ -112,13 +367,13 @@ pub fn main_build() -> Result<()> {
         .status()
         .context("start the main build's promotion")?;
     if !status.success() {
-        bail!("installing main {revision} failed ({status}); fix the error above and rerun `lf self install --main`");
+        bail!("installing main {revision} failed ({status}); fix the error above and rerun `lf install --dev`");
     }
     println!(
         "main: {revision}\ninstalled: {}",
         directory.join("lf").display()
     );
-    Ok(())
+    schedule(None)
 }
 
 /// The package name CI gives this platform's `lf`.
@@ -149,7 +404,7 @@ fn newest_run(json: &str) -> Result<(u64, String)> {
 
 fn gh(args: &[&str]) -> Result<String> {
     let output = Command::new("gh").args(args).output().context(
-        "`lf self install --main` downloads CI packages with `gh`; install it and run `gh auth login`",
+        "`lf install --dev` downloads CI packages with `gh`; install it and run `gh auth login`",
     )?;
     if !output.status.success() {
         bail!(
@@ -193,19 +448,22 @@ fn install_dir() -> Result<PathBuf> {
 
 fn is_current(directory: &Path, tag: &str, applications: Option<&Path>) -> bool {
     let version = tag.trim_start_matches('v');
-    if !["lf"].iter().all(|name| {
-        inspect(&directory.join(name), &["--version"]).is_some_and(|output| {
-            output.status.success()
-                && String::from_utf8_lossy(&output.stdout).trim() == format!("{name} {version}")
-        })
-    }) {
-        return false;
-    }
-    let published = inspect(&directory.join("lf"), &["install", "preflight", "--json"])
-        .filter(|output| output.status.success())
-        .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok())
-        .is_some_and(|preview| preview["verdict"]["kind"] == "promote");
-    published && applications.is_none_or(|root| has_release_app(root, version))
+    let lf = directory.join("lf");
+    let installed = inspect(&lf, &["--version"]).is_some_and(|output| {
+        output.status.success()
+            && String::from_utf8_lossy(&output.stdout).trim() == format!("lf {version}")
+    });
+    installed
+        && preflight_verdict(&lf).as_deref() == Some("promote")
+        && applications.is_none_or(|root| has_release_app(root, version))
+}
+
+/// What `lf install preflight` says installing `lf` would do to the store.
+fn preflight_verdict(lf: &Path) -> Option<String> {
+    let output = inspect(lf, &["install", "preflight", "--json"])
+        .filter(|output| output.status.success())?;
+    let preview: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    preview["verdict"]["kind"].as_str().map(str::to_string)
 }
 
 // Installed binaries can be stale or broken; update detection must not hang.
@@ -228,26 +486,60 @@ fn inspect(program: &Path, args: &[&str]) -> Option<Output> {
     })
 }
 
-fn has_release_app(applications: &Path, version: &str) -> bool {
-    let contents = applications.join("Loopflow.app/Contents");
-    let info = inspect(
+fn app_info(app: &Path) -> Option<serde_json::Value> {
+    inspect(
         Path::new("/usr/bin/plutil"),
         &[
             "-convert",
             "json",
             "-o",
             "-",
-            &contents.join("Info.plist").to_string_lossy(),
+            &app.join("Contents/Info.plist").to_string_lossy(),
         ],
     )
     .filter(|output| output.status.success())
-    .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok());
-    info.is_some_and(|info| {
+    .and_then(|output| serde_json::from_slice(&output.stdout).ok())
+}
+
+fn has_release_app(applications: &Path, version: &str) -> bool {
+    let app = applications.join("Loopflow.app");
+    app_info(&app).is_some_and(|info| {
         info["CFBundleShortVersionString"] == version && info["CFBundleVersion"] == version
     }) && ["Loopflow", "lf"].iter().all(|name| {
-        fs::metadata(contents.join("MacOS").join(name))
+        fs::metadata(app.join("Contents/MacOS").join(name))
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
     })
+}
+
+/// An app built with Sparkle's signing key installs its own updates.
+fn updates_itself(app: &Path) -> bool {
+    app_info(app).is_some_and(|info| {
+        info["SUPublicEDKey"]
+            .as_str()
+            .is_some_and(|key| !key.is_empty())
+    })
+}
+
+fn app_is_running(app: &Path) -> Result<bool> {
+    Ok(!super::running_app_processes(&[app.join("Contents/MacOS/Loopflow")])?.is_empty())
+}
+
+fn manifest_digest<'a>(manifest: &'a str, name: &str) -> Option<&'a str> {
+    manifest.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let digest = fields.next()?;
+        (fields.next()?.trim_start_matches('*') == name).then_some(digest)
+    })
+}
+
+fn verify_asset(manifest: &str, name: &str, bytes: &[u8]) -> Result<()> {
+    let expected = manifest_digest(manifest, name)
+        .with_context(|| format!("published SHA256SUMS does not name {name}"))?;
+    let actual = format!("{:x}", Sha256::digest(bytes));
+    if actual != expected {
+        bail!("digest mismatch for {name}: expected {expected}, downloaded {actual}");
+    }
+    Ok(())
 }
 
 fn run_verified_installer(
@@ -257,18 +549,7 @@ fn run_verified_installer(
     manifest: &str,
     installer: &[u8],
 ) -> Result<()> {
-    let expected = manifest
-        .lines()
-        .find_map(|line| {
-            let mut fields = line.split_whitespace();
-            let digest = fields.next()?;
-            (fields.next()?.trim_start_matches('*') == "install.sh").then_some(digest)
-        })
-        .context("published SHA256SUMS does not name install.sh")?;
-    let actual = format!("{:x}", Sha256::digest(installer));
-    if actual != expected {
-        bail!("digest mismatch for install.sh: expected {expected}, downloaded {actual}");
-    }
+    verify_asset(manifest, "install.sh", installer)?;
     let path = temporary.join("install.sh");
     fs::write(&path, installer)?;
     let status = Command::new("/bin/sh")
@@ -285,17 +566,63 @@ fn run_verified_installer(
     Ok(())
 }
 
-pub fn schedule(frequency: InstallFrequency) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        bail!("automatic installation currently uses macOS launchd; run `lf install` to update manually");
-    }
+/// Run `lf install` on the recorded stream on a schedule: `frequency`, else the
+/// installed schedule's own, else daily. Every install sets it, so a Machine
+/// updates itself without being asked.
+pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     let home = dirs::home_dir().context("cannot determine the installation home")?;
+    // launchd and cron schedule for the whole account; a disposable HOME
+    // (release smoke tests) must not replace the account's job.
+    if home != crate::installation::account_home()? {
+        println!(
+            "Not scheduling installation: HOME {} is not this account's home",
+            home.display()
+        );
+        return Ok(());
+    }
     let binary = install_dir()?.join("lf");
     let logs = crate::store::lf_home_dir().join("logs");
-    let path = home.join("Library/LaunchAgents/com.loopflow.refresh.plist");
     fs::create_dir_all(&logs)?;
+    if cfg!(target_os = "macos") {
+        launchd_schedule(&home, &binary, &logs, frequency)
+    } else {
+        cron_schedule(&home, &binary, &logs, frequency)
+    }
+}
+
+/// The frequency whose rendered schedule is already installed, else daily.
+fn installed_frequency(installed: impl Fn(InstallFrequency) -> bool) -> InstallFrequency {
+    InstallFrequency::value_variants()
+        .iter()
+        .copied()
+        .find(|frequency| installed(*frequency))
+        .unwrap_or(InstallFrequency::Daily)
+}
+
+fn cadence(frequency: InstallFrequency) -> &'static str {
+    match frequency {
+        InstallFrequency::Weekly => "weekly (Monday at 09:00 local time)",
+        InstallFrequency::Daily => "daily (09:00 local time)",
+        InstallFrequency::Hourly => "hourly",
+        InstallFrequency::FiveMinutes => "every five minutes",
+    }
+}
+
+fn launchd_schedule(
+    home: &Path,
+    binary: &Path,
+    logs: &Path,
+    frequency: Option<InstallFrequency>,
+) -> Result<()> {
+    let path = home.join("Library/LaunchAgents/com.loopflow.refresh.plist");
     fs::create_dir_all(path.parent().expect("launch agent has a parent"))?;
-    let payload = schedule_plist(&home, &binary, &logs, frequency);
+    let current = fs::read_to_string(&path).ok();
+    let frequency = frequency.unwrap_or_else(|| {
+        installed_frequency(|frequency| {
+            current.as_deref() == Some(&schedule_plist(home, binary, logs, frequency))
+        })
+    });
+    let payload = schedule_plist(home, binary, logs, frequency);
     let uid = Command::new("id")
         .arg("-u")
         .output()
@@ -310,7 +637,7 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
         .output()?
         .status
         .success();
-    if loaded && fs::read_to_string(&path).is_ok_and(|current| current == payload) {
+    if loaded && current.as_deref() == Some(payload.as_str()) {
         println!("Installation already scheduled: {}", path.display());
         return Ok(());
     }
@@ -331,18 +658,92 @@ pub fn schedule(frequency: InstallFrequency) -> Result<()> {
     {
         bail!("could not load the installation schedule; rerun `lf install schedule`");
     }
-    let cadence = match frequency {
-        InstallFrequency::Weekly => "weekly (Monday at 09:00 local time)",
-        InstallFrequency::Daily => "daily (09:00 local time)",
-        InstallFrequency::Hourly => "hourly",
-        InstallFrequency::FiveMinutes => "every five minutes",
-    };
     println!(
-        "Installation scheduled at login and {cadence}: {}; logs: {}",
+        "Installation scheduled at login and {}: {}; logs: {}",
+        cadence(frequency),
         path.display(),
         logs.join("refresh.log").display()
     );
     Ok(())
+}
+
+/// Marks the one crontab line `lf install schedule` owns.
+const CRON_MARKER: &str = "# loopflow install schedule";
+
+fn cron_schedule(
+    home: &Path,
+    binary: &Path,
+    logs: &Path,
+    frequency: Option<InstallFrequency>,
+) -> Result<()> {
+    let listed = Command::new("crontab").arg("-l").output().context(
+        "automatic installation uses cron; install it, or run `lf install` to update manually",
+    )?;
+    // `crontab -l` fails when the user has no crontab yet.
+    let current = if listed.status.success() {
+        String::from_utf8(listed.stdout)?
+    } else {
+        String::new()
+    };
+    let frequency = frequency.unwrap_or_else(|| {
+        installed_frequency(|frequency| {
+            let line = cron_line(home, binary, logs, frequency);
+            current.lines().any(|entry| entry == line)
+        })
+    });
+    let table = cron_table(&current, &cron_line(home, binary, logs, frequency));
+    if table == current {
+        println!("Installation already scheduled in your crontab");
+        return Ok(());
+    }
+    let mut child = Command::new("crontab")
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .context("start crontab")?;
+    std::io::Write::write_all(
+        child.stdin.as_mut().expect("crontab stdin is piped"),
+        table.as_bytes(),
+    )?;
+    if !child.wait()?.success() {
+        bail!("could not install the installation schedule; rerun `lf install schedule`");
+    }
+    println!(
+        "Installation scheduled {} in your crontab; logs: {}",
+        cadence(frequency),
+        logs.join("refresh.log").display()
+    );
+    Ok(())
+}
+
+fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
+    let when = match frequency {
+        InstallFrequency::Weekly => "0 9 * * 1",
+        InstallFrequency::Daily => "0 9 * * *",
+        InstallFrequency::Hourly => "0 * * * *",
+        InstallFrequency::FiveMinutes => "*/5 * * * *",
+    };
+    let bin = binary.parent().expect("installation binary has a parent");
+    format!(
+        "{when} LF_INSTALL_DIR='{}' PATH='{}:{}/.cargo/bin:/usr/local/bin:/usr/bin:/bin' '{}' install >> '{}' 2>&1 {CRON_MARKER}",
+        bin.display(),
+        bin.display(),
+        home.display(),
+        binary.display(),
+        logs.join("refresh.log").display()
+    )
+}
+
+/// `current` with its Loopflow line replaced by `line`; other entries stay.
+fn cron_table(current: &str, line: &str) -> String {
+    let mut table: String = current
+        .lines()
+        .filter(|entry| !entry.ends_with(CRON_MARKER))
+        .map(|entry| format!("{entry}\n"))
+        .collect();
+    table.push_str(line);
+    table.push('\n');
+    table
 }
 
 fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
@@ -385,7 +786,11 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 
 #[cfg(test)]
 mod tests {
-    use super::{is_current, newest_run, package_target, release_tag, run_verified_installer};
+    use super::{
+        cron_table, finish_adoption, is_current, newest_release, newest_run, opens_store,
+        package_target, record_stream, recorded_stream, release_tag, run_verified_installer,
+        Stream, CRON_MARKER,
+    };
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -448,6 +853,69 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_is_recorded_beside_other_machine_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join(".lf");
+        let config = home.join("config.yaml");
+        assert_eq!(recorded_stream(&home).unwrap(), None);
+        fs::create_dir_all(&home).unwrap();
+        fs::write(&config, "repo_root: /src\n").unwrap();
+        record_stream(&home, Stream::Preview).unwrap();
+        assert_eq!(recorded_stream(&home).unwrap(), Some(Stream::Preview));
+        record_stream(&home, Stream::Dev).unwrap();
+        assert_eq!(recorded_stream(&home).unwrap(), Some(Stream::Dev));
+        assert!(fs::read_to_string(&config)
+            .unwrap()
+            .contains("repo_root: /src"));
+        fs::write(&config, "stream: nightly\n").unwrap();
+        assert!(recorded_stream(&home)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown stream `nightly`"));
+    }
+
+    #[test]
+    fn preview_is_the_newest_published_release() {
+        let releases = r#"[
+            {"tag_name":"v0.17.0-rc.1","draft":false,"prerelease":true},
+            {"tag_name":"v0.16.2","draft":false,"prerelease":false},
+            {"tag_name":"v0.16.1","draft":false,"prerelease":false}
+        ]"#;
+        assert_eq!(newest_release(releases).unwrap(), "v0.16.2");
+        assert!(newest_release("[]").is_err());
+    }
+
+    #[test]
+    fn a_build_whose_catalog_lacks_the_stores_floor_cannot_open_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = temp.path().join("loopflow.db");
+        assert!(opens_store(&store, "").unwrap());
+        let connection = rusqlite::Connection::open(&store).unwrap();
+        crate::store::migrations::apply_sqlite(&connection).unwrap();
+        drop(connection);
+        let current = crate::store::migrations::reader_catalog().join("\n");
+        assert!(opens_store(&store, &current).unwrap());
+        let older = crate::store::migrations::reader_catalog()
+            .split_last()
+            .unwrap()
+            .1
+            .join("\n");
+        assert!(!opens_store(&store, &older).unwrap());
+    }
+
+    #[test]
+    fn the_cron_schedule_replaces_only_its_own_line() {
+        let ours = format!("0 9 * * 1 lf install {CRON_MARKER}");
+        let current = format!("MAILTO=me\n*/10 * * * * backup\n{ours}\n");
+        let daily = format!("0 9 * * * lf install {CRON_MARKER}");
+        assert_eq!(
+            cron_table(&current, &daily),
+            format!("MAILTO=me\n*/10 * * * * backup\n{daily}\n")
+        );
+        assert_eq!(cron_table("", &daily), format!("{daily}\n"));
+    }
+
+    #[test]
     fn failed_installer_remains_a_failure() {
         let temp = tempfile::tempdir().unwrap();
         let payload = b"#!/bin/sh\nexit 23\n";
@@ -480,5 +948,44 @@ mod tests {
         assert!(!current());
         fs::write(contents.join("Info.plist"), "invalid plist").unwrap();
         assert!(!current());
+    }
+
+    /// Between Sparkle's install-on-quit and the app's next launch, `lf install`
+    /// migrates the store through the app's own `lf` instead of downloading.
+    #[test]
+    fn an_app_ahead_of_the_store_is_adopted_in_place() {
+        let temp = tempfile::tempdir().unwrap();
+        let macos = temp.path().join("Loopflow.app/Contents/MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        finish_adoption(temp.path()).unwrap();
+        let adopted = temp.path().join("adopted");
+        let app_lf = |verdict: &str| {
+            fs::write(macos.join("lf"), format!(
+                "#!/bin/sh\ncase \"$*\" in\n  'install preflight --json') echo '{{\"verdict\":{{\"kind\":\"{verdict}\"}}}}' ;;\n  'install adopt') touch '{}' ;;\n  *) exit 2 ;;\nesac\n",
+                adopted.display()
+            )).unwrap();
+            fs::set_permissions(macos.join("lf"), fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        app_lf("promote");
+        finish_adoption(temp.path()).unwrap();
+        assert!(!adopted.exists());
+        app_lf("promote_and_migrate");
+        finish_adoption(temp.path()).unwrap();
+        assert!(adopted.exists());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn only_an_app_with_a_sparkle_key_updates_itself() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = temp.path().join("Loopflow.app");
+        assert!(!super::updates_itself(&app));
+        fs::create_dir_all(app.join("Contents")).unwrap();
+        for (key, expected) in [("", false), ("test-public-key", true)] {
+            fs::write(app.join("Contents/Info.plist"), format!(
+                "<plist version=\"1.0\"><dict><key>SUPublicEDKey</key><string>{key}</string></dict></plist>"
+            )).unwrap();
+            assert_eq!(super::updates_itself(&app), expected);
+        }
     }
 }

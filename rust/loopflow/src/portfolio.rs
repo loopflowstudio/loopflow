@@ -91,25 +91,6 @@ fn selection(config: &serde_yaml_ng::Value) -> Result<Option<Selection>> {
         .context("Invalid portfolio configuration")
 }
 
-fn read_config(path: &Path) -> Result<serde_yaml_ng::Value> {
-    match fs::read_to_string(path) {
-        Ok(text) => {
-            let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(&text)?;
-            if value.is_null() {
-                Ok(serde_yaml_ng::Value::Mapping(Default::default()))
-            } else if value.is_mapping() {
-                Ok(value)
-            } else {
-                bail!("{} must contain a configuration mapping", path.display())
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(serde_yaml_ng::Value::Mapping(Default::default()))
-        }
-        Err(error) => Err(error).with_context(|| format!("Read {}", path.display())),
-    }
-}
-
 fn reading(config: &serde_yaml_ng::Value) -> Result<Portfolio> {
     let selected = selection(config)?;
     let root: PathBuf = config
@@ -190,7 +171,7 @@ fn reading(config: &serde_yaml_ng::Value) -> Result<Portfolio> {
 }
 
 pub fn read() -> Result<Portfolio> {
-    reading(&read_config(
+    reading(&crate::config::read_global_config_at(
         &crate::store::lf_home_dir().join("config.yaml"),
     )?)
 }
@@ -200,17 +181,15 @@ pub fn change(command: &PortfolioCommand) -> Result<Portfolio> {
 }
 
 fn change_at(home: &Path, command: &PortfolioCommand) -> Result<Portfolio> {
-    fs::create_dir_all(home)?;
-    let lock = fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(home.join("config.lock"))?;
-    fs2::FileExt::lock_exclusive(&lock)?;
-    let path = home.join("config.yaml");
-    let mut config = read_config(&path)?;
-    let previous = selection(&config)?;
+    let config = crate::config::update_global_config_at(home, |config| {
+        change_config(config, command)?;
+        Ok(config.clone())
+    })?;
+    reading(&config)
+}
+
+fn change_config(config: &mut serde_yaml_ng::Value, command: &PortfolioCommand) -> Result<()> {
+    let previous = selection(config)?;
     if matches!(command, PortfolioCommand::Import { .. }) && previous.is_some() {
         bail!("Portfolio already configured; existing selection was preserved");
     }
@@ -247,8 +226,7 @@ fn change_at(home: &Path, command: &PortfolioCommand) -> Result<Portfolio> {
         }
     }
     config["portfolio"] = serde_yaml_ng::to_value(selected)?;
-    crate::config::write_global_config_at(&path, &config)?;
-    reading(&config)
+    Ok(())
 }
 
 pub fn run(command: Option<&PortfolioCommand>, json: bool) -> Result<()> {
@@ -282,7 +260,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    use super::{change_at, read_config, reading, Portfolio, PortfolioCommand, PortfolioMode};
+    use super::{change_at, reading, Portfolio, PortfolioCommand, PortfolioMode};
 
     fn git(path: &Path, args: &[&str]) {
         let output = Command::new("git")
@@ -383,7 +361,9 @@ mod tests {
             3
         );
         fs::remove_dir_all(&outside).unwrap();
-        let unavailable = reading(&read_config(&home.join("config.yaml")).unwrap()).unwrap();
+        let unavailable =
+            reading(&crate::config::read_global_config_at(&home.join("config.yaml")).unwrap())
+                .unwrap();
         assert!(unavailable
             .repos
             .iter()
@@ -400,7 +380,7 @@ mod tests {
         );
         assert!(first.exists());
         assert_eq!(
-            read_config(&home.join("config.yaml")).unwrap()["agent"],
+            crate::config::read_global_config_at(&home.join("config.yaml")).unwrap()["agent"],
             "codex"
         );
         assert!(!home.join("state.db").exists());
@@ -411,7 +391,9 @@ mod tests {
         let fixture = tempfile::tempdir().unwrap();
         let home = fixture.path().join("home");
         let missing = fixture.path().join("missing");
-        let empty = reading(&read_config(&home.join("config.yaml")).unwrap()).unwrap();
+        let empty =
+            reading(&crate::config::read_global_config_at(&home.join("config.yaml")).unwrap())
+                .unwrap();
         assert!(!empty.configured);
         assert_eq!(empty.mode, PortfolioMode::Folder);
         assert!(!home.exists());

@@ -208,7 +208,7 @@ the separate `lf reteam` operation.
 
 Any build may select a store it reads; promotion advances the store only with
 migrations origin/main carries. A release and a CI build of a main commit both
-qualify (`lf self install --main`). An unreleased build's receipt, `lf --version`
+qualify (`lf install --dev`). An unreleased build's receipt, `lf --version`
 and `lf doctor` name it, e.g. `build e9b2c2eac on v0.14.16`, or `schema work …`
 when it carries an unmerged migration.
 

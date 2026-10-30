@@ -51,7 +51,7 @@ struct TaskFilesView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(task.task.identifier).font(Typography.caption(11)).foregroundStyle(palette.textSecondary)
                         Text(task.task.name).font(Typography.strong(16))
-                        TaskDueDateView(task: task)
+                        TaskPlanningFactsView(task: task)
                         MarkdownBlocks(source: task.task.description).equatable()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

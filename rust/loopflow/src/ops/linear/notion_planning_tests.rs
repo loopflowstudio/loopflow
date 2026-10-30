@@ -429,6 +429,7 @@ fn notion_task_create_mirrors_task_as_a_database_page() {
             None,
             Some("Ship the Notion provider".into()),
             Some("Mirror **Tasks** into Notion\n\n- pages\n- comments".into()),
+            None,
         )
         .unwrap();
         let id = saved
@@ -482,7 +483,8 @@ fn notion_team_page_without_databases_gains_tasks_and_projects() {
             notion.databases.clear();
         });
         let saved =
-            crate::ops::task::task_create(repo, None, Some("First Task".into()), None).unwrap();
+            crate::ops::task::task_create(repo, None, Some("First Task".into()), None, None)
+                .unwrap();
         let page = mirrored(runtime, &state, saved.linear_id.as_ref().unwrap().as_str());
         let notion = runtime.block_on(state.lock());
         let titles: Vec<&Value> = notion.children[TEAM]
@@ -500,7 +502,8 @@ fn notion_team_page_without_databases_gains_tasks_and_projects() {
 fn notion_status_title_body_and_comments_write_back_to_the_page() {
     with_notion(|runtime, fixture, repo, state| {
         let saved =
-            crate::ops::task::task_create(repo, None, Some("Write back".into()), None).unwrap();
+            crate::ops::task::task_create(repo, None, Some("Write back".into()), None, None)
+                .unwrap();
         let id = saved.linear_id.clone().unwrap();
         let id = id.as_str();
         let status = |state: &Shared| {
@@ -571,7 +574,8 @@ fn notion_outage_keeps_the_local_save_and_publishes_once_on_retry() {
     with_notion(|runtime, fixture, repo, state| {
         runtime.block_on(state.lock()).offline = true;
         let saved =
-            crate::ops::task::task_create(repo, None, Some("Saved offline".into()), None).unwrap();
+            crate::ops::task::task_create(repo, None, Some("Saved offline".into()), None, None)
+                .unwrap();
         assert!(saved.linear_id.is_none());
 
         runtime.block_on(state.lock()).offline = false;
@@ -592,7 +596,8 @@ fn notion_outage_keeps_the_local_save_and_publishes_once_on_retry() {
 fn notion_comments_and_edits_by_people_become_task_direction() {
     with_notion(|runtime, fixture, repo, state| {
         let saved =
-            crate::ops::task::task_create(repo, None, Some("Take direction".into()), None).unwrap();
+            crate::ops::task::task_create(repo, None, Some("Take direction".into()), None, None)
+                .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         let task = runtime
             .block_on(fixture.store.get_task(&saved.id))
@@ -655,7 +660,7 @@ fn notion_comments_and_edits_by_people_become_task_direction() {
 fn notion_renames_and_completion_reach_the_task() {
     with_notion(|runtime, fixture, repo, state| {
         let saved =
-            crate::ops::task::task_create(repo, None, Some("Original".into()), None).unwrap();
+            crate::ops::task::task_create(repo, None, Some("Original".into()), None, None).unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         let page = mirrored(runtime, &state, &id)["id"]
             .as_str()
@@ -770,9 +775,14 @@ fn notion_pages_coworkers_create_become_tasks() {
 #[test]
 fn notion_pages_coworkers_archive_leave_the_plan() {
     with_notion(|runtime, fixture, repo, state| {
-        let saved =
-            crate::ops::task::task_create(repo, None, Some("Archived in Notion".into()), None)
-                .unwrap();
+        let saved = crate::ops::task::task_create(
+            repo,
+            None,
+            Some("Archived in Notion".into()),
+            None,
+            None,
+        )
+        .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         let page = mirrored(runtime, &state, &id)["id"]
             .as_str()
@@ -798,7 +808,8 @@ fn notion_pages_coworkers_archive_leave_the_plan() {
 fn notion_pages_move_to_in_progress_when_work_starts() {
     with_notion(|runtime, fixture, repo, state| {
         let saved =
-            crate::ops::task::task_create(repo, None, Some("Start here".into()), None).unwrap();
+            crate::ops::task::task_create(repo, None, Some("Start here".into()), None, None)
+                .unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         // Checkout claims the Task; the fixture has no fetchable origin.
         fixture.store.sqlite.claim_task(&saved.id).unwrap();
@@ -818,7 +829,7 @@ fn notion_pages_show_the_pr() {
     use crate::work::task::{GithubPr, PrPublication, TaskPr, TaskPrId};
     with_notion(|runtime, fixture, repo, state| {
         let saved =
-            crate::ops::task::task_create(repo, None, Some("Ship it".into()), None).unwrap();
+            crate::ops::task::task_create(repo, None, Some("Ship it".into()), None, None).unwrap();
         let id = saved.linear_id.clone().unwrap().as_str().to_string();
         let task = runtime
             .block_on(fixture.store.get_task(&saved.id))
@@ -884,9 +895,14 @@ fn notion_wave_projects_become_project_pages_related_to_their_tasks() {
         runtime
             .block_on(crate::ops::project::ensure(repo, "product"))
             .unwrap();
-        let saved =
-            crate::ops::task::task_create(repo, Some("product"), Some("Planned work".into()), None)
-                .unwrap();
+        let saved = crate::ops::task::task_create(
+            repo,
+            Some("product"),
+            Some("Planned work".into()),
+            None,
+            None,
+        )
+        .unwrap();
         let page = mirrored(
             runtime,
             &state,

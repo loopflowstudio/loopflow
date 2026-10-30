@@ -39,7 +39,8 @@ That command is responsible for:
 - tagging that commit only after its workflow and publisher preparation succeed
 - waiting for the target's configured completion evidence
 - for a `github-release` target, moving GitHub's Latest marker (the `stable`
-  pointer) forward to the newest release published at least 7 days ago, even
+  pointer) forward to the newest release published at least 7 days ago that no
+  regression Task (`lf task create --regressed-in <version>`) covers, even
   when there was nothing to release
 
 The repository owns `verify` and `prepare` commands, the selected candidate

@@ -1,6 +1,6 @@
 # LOO-692: landing the lower Task of a stack keeps the upper PR open
 
-Status: implemented, awaiting gate.
+Status: implemented, awaiting gate. Realigned 2026-10-30: no upstream changes since the base; code matches this plan.
 
 ## Outcome
 
@@ -18,9 +18,10 @@ stays open, now based on the default branch, and its branch stays intact.
   was 0.15.0, which logged "incompatible Loopflow database; Processes are not
   being recorded". No transcript, cron entry or launchd job names the command.
   mini-heart has no prune schedule.
-- Code evidence: every remote branch deletion goes through `wt::apply_delete`
-  (land, completed-Task cleanup, PR landing cleanup, abandon, `wt prune
-  --branches`). Only `branch_prune` treats a closed PR as deletion evidence. So
+- Code evidence: every Task branch deletion on origin goes through
+  `wt::apply_delete` (land, completed-Task cleanup, PR landing cleanup,
+  abandon, `wt prune --branches`); only release candidates are deleted
+  directly (`release.rs`), and nothing stacks on them. Only `branch_prune` treats a closed PR as deletion evidence. So
   defect 2 is `branch_prune` running without a worktree or live-Task protection
   for T3, for example from another clone or with an unreadable registry.
 
@@ -34,6 +35,23 @@ stays open, now based on the default branch, and its branch stays intact.
   when a finished Task names the branch. Otherwise the branch is retained as
   `Retention::ClosedPullRequest`.
 - Docs: `docs/troubleshooting.md` and the `wt prune --branches` help.
+
+## Concept review (2026-10-30)
+
+No change. The PR-side retarget agrees with the existing Task stack model in
+`ops::task::task_stack`:
+
+- Merged parent: the child's publication base is already the default branch,
+  and `stack_for_landing` refuses to land a child before its parent merges, so
+  a stacked parent always lands onto the default branch. Retargeting to the
+  default branch is the merged-into branch; no `baseRefName` lookup is needed.
+- Abandoned parent: `task_stack` refuses the child ("re-place the child
+  deliberately"). The retarget only keeps the upper PR open; placement stays
+  the person's decision at the child's next sync. Retaining the abandoned
+  parent's branch on origin instead is an alternative, not a requirement of
+  this outcome (see `questions.md`).
+- A closed PR is deletion evidence only beside a finished Task, matching
+  "uncertain evidence never auto-closes work".
 
 ## Delete — do not maintain
 

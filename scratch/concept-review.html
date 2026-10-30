@@ -25,47 +25,41 @@
 <body>
 <main>
 <header>
-  <p>LOO-699 · concept-review step (headless) · 2026-10-30</p>
+  <p>LOO-699 · concept-review step 2 (headless) · 2026-10-30</p>
   <p>Built from <code>scratch/app-bundle-launch-demo.md</code>, <code>scripts/app_bundle.py</code>, <code>scripts/install.py</code>, <code>scripts/loopflow-dev.py</code>, <code>scripts/release-loopflow.py</code>, <code>scripts/rebuild_third_party.py</code>, <code>scripts/benchmarks/desktop-performance/launch.py</code></p>
 </header>
 
-<h1>Placing the app binary and embedding its frameworks should be one call, not two that every builder has to remember.</h1>
+<h1>The app executable and its frameworks now go into the bundle in one call. Nothing is left to change.</h1>
 
-<p>Outcome: <strong>iterate</strong>. Accepted decisions already settle this. No product question is open.</p>
+<p>Outcome: <strong>advance</strong>. No product question is open.</p>
 
 <h2>Action → concept → API</h2>
 <p>The user's action: build Loopflow.app any way the repo offers, then open it. The one concept: <em>the app executable in a bundle</em>, meaning the binary plus the frameworks it links.</p>
 
 <div class="old">
-<p class="tag">Existing, after pass 2</p>
+<p class="tag">Before pass 3</p>
 <pre><code># five builders, each:
 name = &lt;their own way of reading CFBundleExecutable&gt;
 shutil.copy(build_dir / "LoopflowMac", macos / name)
 embed_frameworks(build_dir, macos / name)   # forget this → dyld abort</code></pre>
-<p>There are five ways of naming the executable: plistlib in release, PlistBuddy in dev, inline plistlib in rebuild, <code>APP_NAME</code> in install, and a literal <code>"Loopflow"</code> in the launch benchmark.</p>
 </div>
 
 <div class="new">
-<p class="tag">Proposed</p>
+<p class="tag">Existing on this branch</p>
 <pre><code>executable = app_bundle.install_app_executable(build_dir, info_plist, contents)
-# reads CFBundleExecutable, copies LoopflowMac, embeds, verifies rpaths</code></pre>
-<p>Each builder still owns what genuinely differs between them: plist stamping, bundle-id overrides, the icon, resource bundles, <code>strip</code> and signing.</p>
+# reads CFBundleExecutable, copies LoopflowMac, embeds Sparkle, verifies rpaths</code></pre>
+<p>install, dev, release, the launch benchmark and the third-party rebuild all call it. <code>_embed_frameworks</code> is private. <code>executable_name</code> is the only reader of <code>CFBundleExecutable</code>, and no builder rewrites that key.</p>
 </div>
 
-<h2>The mismatch</h2>
-<p>The incident happened because a builder did the copy without the embed. Pass 2 fixed the two remaining builders by adding the same call in two more places. The next builder, or the next linked framework, can repeat the incident, because nothing joins the two steps. Merging them makes the mistake impossible to write, and it deletes four helpers.</p>
+<h2>The mismatch, closed</h2>
+<p>The incident happened because a builder could copy the binary without embedding its frameworks. Both steps are now one function, so a builder can no longer do one and skip the other.</p>
 
-<h2>Checked</h2>
-<ul>
-  <li>The shipped third-party <code>rebuild.py</code> already gets <code>app_bundle.py</code> beside it, so recipients need nothing new.</li>
-  <li>Dev reuses its bundle, so its stale-<code>LoopflowMac</code> cleanup stays in <code>loopflow-dev.py</code>.</li>
-  <li>install.py removes the app directory before building, so the app binary needs no atomic swap. <code>lf</code> keeps <code>_atomic_install</code>.</li>
-</ul>
+<h2>Left per builder, as accepted</h2>
+<p>Plist stamping and bundle-id overrides, the icon, resource bundles, <code>strip</code>, signing, and dev's stale-<code>LoopflowMac</code> cleanup.</p>
 
 <h2>Questions</h2>
-<p>Nothing blocks. These are only for overriding the agent's call:</p>
+<p>Nothing blocks. This is here only in case you want to override the agent's call:</p>
 <ol>
-  <li>Merge the copy and the embed: (a) yes, as recorded; (b) no, ship pass 2 as it is.</li>
   <li>Should signing also move into <code>app_bundle</code>? (a) no, builders sign differently; (b) yes.</li>
 </ol>
 </main>

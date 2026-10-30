@@ -95,6 +95,18 @@ release `_bundle_executable`/`_copy_app_executable` (and its unit test), dev
 
 Check: `uv run pytest python/tests/test_app_bundle.py test_third_party.py test_desktop_launch.py test_install_script.py test_release_loopflow.py test_loopflow_dev.py` → 49 passed; `grep embed_frameworks` hits only `scripts/app_bundle.py`.
 
+Follow-up `1b5010c1d7`: the control test inlines its copy instead of reaching into a
+builder, and install fixtures write plists with plistlib.
+
+## Concept review 2 (2026-10-30, headless)
+
+Pass 3 matches the accepted model: `install_app_executable` is the only way the app
+binary enters a bundle, all five builders call it, and `executable_name` is the one
+CFBundleExecutable reader (no builder rewrites that key). The per-builder residue
+(plist stamping, icon, resources, strip, signing) is the accepted boundary. Nothing to
+change; no open product choice.
+
 ## Remaining
 
-- Publish as a new PR on this Task (#1794 is merged).
+- PR #1796 (open) carries passes 3+: review and land. #1794 is merged.
+- Not run: a real `swift build` through launch.py or rebuild.py; left to demo.

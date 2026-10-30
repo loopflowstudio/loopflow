@@ -76,6 +76,9 @@ pulls = json.loads({pulls:?})
 if sys.argv[1:3] == ["api", "rate_limit"]:
     print({BUDGET:?})
     sys.exit(0)
+if sys.argv[1:3] == ["pr", "list"]:
+    print("[]")
+    sys.exit(0)
 query = next(arg[6:] for arg in sys.argv if arg.startswith("query="))
 repository = {{}}
 for index, branch in re.findall(r'b(\d+): pullRequests\(first: 100, headRefName: "([^"]+)"', query):
@@ -169,11 +172,11 @@ fn deletes_finished_branches_and_retains_open_and_moved_work() {
         String::from_utf8_lossy(&dry.stderr)
     );
     assert!(
-        stdout.contains("would delete origin closed-feature  closed PR #11"),
+        stdout.contains("retained origin closed-feature  closed PR #11 without a finished Task"),
         "{stdout}"
     );
     assert!(
-        stdout.contains("would delete local  closed-feature"),
+        stdout.contains("retained local  closed-feature"),
         "{stdout}"
     );
     assert!(
@@ -189,7 +192,7 @@ fn deletes_finished_branches_and_retains_open_and_moved_work() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("would delete 2 remote, 1 local"),
+        stdout.contains("would delete 1 remote, 0 local"),
         "{stdout}"
     );
     assert!(origin_heads(&repo).contains(&"closed-feature".to_string()));
@@ -201,18 +204,97 @@ fn deletes_finished_branches_and_retains_open_and_moved_work() {
         "{stdout}\n{}",
         String::from_utf8_lossy(&run.stderr)
     );
-    assert!(stdout.contains("deleted 2 remote, 1 local"), "{stdout}");
+    assert!(stdout.contains("deleted 1 remote, 0 local"), "{stdout}");
     assert_eq!(
         origin_heads(&repo),
-        vec!["main", "moved-feature", "open-feature"]
+        vec!["closed-feature", "main", "moved-feature", "open-feature"]
     );
     assert_eq!(
         local_heads(&repo),
-        vec!["main", "moved-feature", "open-feature"]
+        vec!["closed-feature", "main", "moved-feature", "open-feature"]
     );
 
     let again = prune(&repo, &gh, false);
     assert!(String::from_utf8_lossy(&again.stdout).contains("deleted 0 remote, 0 local"));
+}
+
+/// GitHub for a stack: `pr list --base` and `pr edit --base` read and move each
+/// PR's base, and an open PR closes once its base branch is gone from origin.
+fn stack_gh_stub(bare: &Path, state: &Path) -> String {
+    format!(
+        r#"#!/usr/bin/env python3
+import json, re, subprocess, sys
+state_path = {state:?}
+pulls = json.load(open(state_path))
+def exists(branch):
+    return subprocess.run(["git", "--git-dir", {bare:?}, "show-ref", "--verify", "--quiet", "refs/heads/" + branch]).returncode == 0
+for nodes in pulls.values():
+    for node in nodes:
+        if node["state"] == "OPEN" and not exists(node["base"]):
+            node["state"] = "CLOSED"
+args = sys.argv[1:]
+if args[:2] == ["api", "rate_limit"]:
+    print({BUDGET:?})
+elif args[:2] == ["pr", "list"]:
+    base = args[args.index("--base") + 1]
+    print(json.dumps([{{"number": node["number"]}}
+        for nodes in pulls.values() for node in nodes
+        if node["state"] == "OPEN" and node["base"] == base]))
+elif args[:2] == ["pr", "edit"]:
+    for nodes in pulls.values():
+        for node in nodes:
+            if str(node["number"]) == args[2]:
+                node["base"] = args[args.index("--base") + 1]
+else:
+    query = next(arg[6:] for arg in args if arg.startswith("query="))
+    repository = {{}}
+    for index, branch in re.findall(r'b(\d+): pullRequests\(first: 100, headRefName: "([^"]+)"', query):
+        repository["b" + index] = {{"nodes": [{{key: node[key] for key in ("number", "headRefOid", "state")}} for node in pulls.get(branch, [])]}}
+        repository["r" + index] = {{"id": "ref"}}
+    print(json.dumps({{"data": {{"repository": repository}}}}))
+json.dump(pulls, open(state_path, "w"))
+"#,
+        bare = bare.display().to_string(),
+        state = state.display().to_string(),
+    )
+}
+
+#[test]
+fn landing_the_lower_of_a_stack_keeps_the_upper_pr_open_on_its_branch() {
+    let repo = github_fixture();
+    let lower = commit_branch(&repo, "lower");
+    git(repo.path(), &["checkout", "-q", "-b", "upper", "lower"]);
+    repo.create_file("upper.txt", "upper");
+    repo.stage_all();
+    repo.commit("upper");
+    git(repo.path(), &["push", "-q", "origin", "upper"]);
+    let upper = repo.head_sha();
+    git(repo.path(), &["checkout", "-q", "main"]);
+    let state = tempfile::NamedTempFile::new().unwrap();
+    let pulls = serde_json::json!({
+        "lower": [{"number": 1, "headRefOid": lower, "state": "MERGED", "base": "main"}],
+        "upper": [{"number": 2, "headRefOid": upper, "state": "OPEN", "base": "lower"}],
+    });
+    fs::write(state.path(), pulls.to_string()).unwrap();
+    let gh = stack_gh_stub(repo.bare_path(), state.path());
+
+    // A second sweep sees whatever the first one made GitHub do to the upper PR.
+    for _ in 0..2 {
+        let run = prune(&repo, &gh, false);
+        assert!(
+            run.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&run.stdout),
+            String::from_utf8_lossy(&run.stderr)
+        );
+    }
+
+    let pulls: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(state.path()).unwrap()).unwrap();
+    assert_eq!(pulls["upper"][0]["state"], "OPEN");
+    assert_eq!(pulls["upper"][0]["base"], "main");
+    assert_eq!(origin_heads(&repo), vec!["main", "upper"]);
+    assert_eq!(git(repo.path(), &["rev-parse", "upper"]), upper);
 }
 
 #[test]

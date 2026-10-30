@@ -125,6 +125,8 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_NSPrincipalClass: LoopflowTestsPrincipal
+        # `@testable import LoopflowMac` loads the LoopflowFFI module it imports.
+        SWIFT_INCLUDE_PATHS: $(SRCROOT)/LoopflowFFI
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Loopflow.app/Contents/MacOS/Loopflow
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"

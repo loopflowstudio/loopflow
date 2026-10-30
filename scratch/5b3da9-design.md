@@ -93,7 +93,7 @@ October 28, 2026, a `sqlite3 .backup` copy of Jack Heart's live store, one-shot 
 
 `lf` watch efficiency:
 - `lf history` still selects every input in its window in SQL (3,322 rows on the live copy) before decoding the few it shows; that selection is now most of the 0.40 s. Only worth pushing into SQL if the installed-build profile shows it.
-- Measure idle and busy CPU on an installed build that contains this branch. The 0.15.0 baseline above has none of it. Gate owns this if no branch build can be installed headless.
+- Measure idle and busy CPU on an installed build that contains this branch, after release (verify). The 0.15.0 baseline above has none of it.
 
 In-app library:
 - Every local `RegistryQuery` read is served in-process as a `Read`, and every write but the ones below as a `Write`.
@@ -113,6 +113,7 @@ Gone: `LocalWorkObservation`, `WorkWatches`' process launch, `RegistryQueryLocal
 ## Checks
 
 October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git (`git show 3909e495a8:scratch/5b3da9-design.md`).
+- October 30, gate (load average ≈150 from other work on the Mac): `scripts/test.py --reuse-passing` with a module filter; Rust 778/900 before the 1200 s phase budget killed it (broad `test(ship)`/`planning::` substrings pulled in slow `land_tests`/`local_planning`; no hang). The remaining 122 by name: 122/122. `-p loopflow-ffi` 3/3, clippy and fmt clean, website pass, Python 499/500 then 49/49 after fixes, `test_desktop.sh` 659/659, multiplatform boundaries pass, Xcode `build-for-testing` LoopflowMac succeeded. Fixed: `SessionsStoreTests.failedTransferCanRetry` hung (its fake expected `--agent` last; `ServedWrite` puts it first), Xcode `LoopflowTests` lacked the `LoopflowFFI` include path, `check_architecture` read `clap::Command::new("sessions")` as a subprocess, the notices inventory was stale after the sync's `Cargo.lock`, and `macos_inputs` now routes `write.rs` to `swift-test`. Deferred: installed-build idle/busy CPU (installing a branch build replaces Jack Heart's live `lf`, and this load makes any percentage meaningless); measure after release, during verify. CI owns the full matrix.
 - October 30, realign after the lifecycle fix: plan matches ddfd5b6226 (`run_admitted` ends an unwinding Process `Errored`; `CALL_SCOPED` exports no identity; `write::a_write_that_panics_ends_its_process_and_leaves_no_identity` present); no tests rerun.
 - October 30, in-app write lifecycle after compress (one `inherits` flag, one identity export in `create_process_context`): `--lib write::` 7/7, `--lib journal::` 30/30, `--test served_reads` 1/1, `-p loopflow-ffi` 3/3, clippy (loopflow, loopflow-ffi) and fmt clean.
 - October 29, realign after the fifth slice: plan matches a50c3fe83a; `grep -n 'run(' swift/Loopflow/Services/RegistryQuery.swift` lists no `ship --stop`; no tests rerun.
@@ -122,4 +123,4 @@ October 28–29, 2026, inherited `LF_*` unset. Earlier passes' lines are in git 
 - Earlier slices' broader suites (rotation/chapter 44/44, planning_foreground, cli_discovery, task_diff, work_open, session_cli, Desktop suites up to 146/146) passed on their pass and are untouched since.
 - Xcode `LoopflowMac` debug build succeeded before the window-open reads moved; not rerun since.
 
-Gate owns: the Xcode build rerun, installed-build CPU, the integration modules an earlier pass updated (`process_ownership_tests`, `global_commands`, `auth_tests`, `doctor_tests`, `machine_commands`, `machine_credentials`, `planning_foreground_tests`), the ship and stopped-landing tests (`starter` now resolves the name from a repository) and the full matrix. Demo owns the idle-Desktop observation.
+Verify owns installed-build idle/busy CPU after release. CI owns the full matrix. Demo owns the idle-Desktop observation.

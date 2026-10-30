@@ -36,7 +36,7 @@ CODE_TOKEN = re.compile(r"`([^`]+)`")
 MARKDOWN_LINK = re.compile(r"\[([^]]+)]\(([^)]+)\)")
 RELEASED_MIGRATION = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_[a-z0-9_]+\.sql$")
 SLUG_MIGRATION = re.compile(r"^[a-z][a-z0-9_]*\.sql$")
-COMMAND_EDGE = re.compile(r"(?:std::process::|tokio::process::)?Command::new\(\s*\"([^\"]+)\"")
+COMMAND_EDGE = re.compile(r"(?<!clap::)(?:std::process::|tokio::process::)?Command::new\(\s*\"([^\"]+)\"")
 SHIM_MARKER = re.compile(r"architecture-shim:\s*([a-z0-9-]+)")
 GRAPH_COMMAND = re.compile(r"^\s*-\s*cmd:\s*([a-z0-9_-]+)\s*$", re.MULTILINE)
 

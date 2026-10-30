@@ -1,6 +1,8 @@
 import importlib.util
+import plistlib
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -90,3 +92,46 @@ def test_repository_opening_reports_unavailable_helper(
     monkeypatch.setattr(loopflow_dev.subprocess, "run", fail)
     assert not loopflow_dev._check_repository_opening(tmp_path)
     assert str(failure) in capsys.readouterr().err
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="plutil rewrites the bundle plist")
+def test_dev_app_runs_under_its_own_executable_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    swift = tmp_path / "swift"
+    (swift / ".build/debug").mkdir(parents=True)
+    (swift / ".build/debug/LoopflowMac").write_bytes(b"fresh")
+    (swift / "LoopflowMac").mkdir()
+    (swift / "LoopflowMac/AppIcon.icns").write_bytes(b"icon")
+    with (swift / "LoopflowMac/Info.plist").open("wb") as file:
+        plistlib.dump(
+            {"CFBundleExecutable": "Loopflow", "CFBundleIdentifier": "com.loopflow.mac"}, file
+        )
+    app = tmp_path / "Loopflow Dev.app"
+    macos = app / "Contents/MacOS"
+    macos.mkdir(parents=True)
+    for stale in ("Loopflow", "LoopflowMac"):
+        (macos / stale).write_bytes(b"stale")
+
+    real_run = loopflow_dev.run
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        if command[0] == "plutil":
+            return real_run(command, **kwargs)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(loopflow_dev, "SWIFT_DIR", swift)
+    monkeypatch.setattr(loopflow_dev, "DEV_APP", app)
+    monkeypatch.setattr(loopflow_dev, "run", run)
+    monkeypatch.setattr(loopflow_dev, "_copy_bundled_tools", lambda _: None)
+    monkeypatch.setattr(loopflow_dev, "_ensure_dev_signing_identity", lambda: "identity")
+    loopflow_dev._install_dev_app()
+
+    info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    assert info["CFBundleExecutable"] == "Loopflow Dev"
+    assert info["CFBundleIdentifier"] == "com.loopflow.mac.dev"
+    assert sorted(path.name for path in macos.iterdir()) == ["Loopflow Dev"]
+    assert (macos / "Loopflow Dev").read_bytes() == b"fresh"
+    # The release app is untouched: its plist still names `Loopflow`.
+    source = plistlib.loads((swift / "LoopflowMac/Info.plist").read_bytes())
+    assert source["CFBundleExecutable"] == "Loopflow"

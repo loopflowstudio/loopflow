@@ -88,7 +88,7 @@ struct DashboardWorkspaceTests {
         // A sidebar row drop and a grid tile drop both name Work IDs.
         let row = try #require(model.workingTaskWorkID(row: "task_c"))
         let dragged = try #require(TaskOrderDrag.taskID(TaskOrderDrag.token(row)))
-        await model.reorderWorkingTask(dragged, to: "task_a")
+        await model.reorderWorkingTask(dragged, to: "task_a").value
         #expect(model.dashboardError == nil)
         #expect(model.workingTaskIDs == ["task_c", "task_a", "task_b"])
         #expect(model.workingTaskMembers.map(\.work.id) == model.workingTaskIDs)

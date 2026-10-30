@@ -251,11 +251,27 @@ struct WorkNavigationTests {
         model.applySelectionPlans([fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                                                    members: [task("issue-review"), task("issue-now")])], reason: "")
         #expect(model.workingTaskIDs == ["issue-review", "issue-now"])
-        let write = Task { await model.reorderWorkingTask("issue-now", to: "issue-review") }
-        for _ in 0..<20 where model.workingTaskIDs != ["issue-now", "issue-review"] { await Task.yield() }
+        let write = model.reorderWorkingTask("issue-now", to: "issue-review")
         #expect(model.workingTaskIDs == ["issue-now", "issue-review"])
         write.cancel()
         await write.value
+    }
+
+    @Test("A row dragged over another lands there on release and leaves no drag behind")
+    func draggedRowLandsOnRelease() {
+        let drag = TaskOrderDrag.State()
+        drag.frames = ["a": CGRect(x: 0, y: 0, width: 200, height: 60),
+                       "b": CGRect(x: 0, y: 65, width: 200, height: 60),
+                       "c": CGRect(x: 0, y: 130, width: 200, height: 60)]
+        drag.move("a", by: 10, at: 40, order: ["a", "b", "c"])
+        #expect(drag.target == nil)
+        drag.move("a", by: 120, at: 150, order: ["a", "b", "c"])
+        #expect(drag.landing(on: "c") == .bottom)
+        drag.move("a", by: 80, at: 90, order: ["a", "b", "c"])
+        #expect(drag.landing(on: "b") == .bottom)
+        let landed = drag.end()
+        #expect(landed?.0 == "a" && landed?.1 == "b")
+        #expect(drag.source == nil && drag.target == nil && drag.offset == 0)
     }
 
     @Test("The sidebar header names the Dashboard under the repository, and ⌘1 marks its first member")

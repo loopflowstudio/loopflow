@@ -2863,16 +2863,20 @@ extension WorkModel {
     /// The sidebar and the Working Tasks grid write the same order; both read the
     /// repository plan, so each shows the other's move.
     /// The row moves on drop; the written order replaces it, and a failed write re-reads it.
-    func reorderWorkingTask(_ task: String, to target: String) async {
-        guard task != target, let repoPath else { return }
+    /// The row moves now; the returned write follows.
+    @discardableResult
+    func reorderWorkingTask(_ task: String, to target: String) -> Task<Void, Never> {
+        guard task != target, let repoPath else { return Task {} }
         dashboardError = nil
         moveRepositoryMember(task, to: target)
-        do {
-            _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
-            try await refreshPlan(nil, repoPath: repoPath)
-        } catch {
-            dashboardError = error.localizedDescription
-            try? await refreshPlan(nil, repoPath: repoPath)
+        return Task {
+            do {
+                _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
+                try await refreshPlan(nil, repoPath: repoPath)
+            } catch {
+                dashboardError = error.localizedDescription
+                try? await refreshPlan(nil, repoPath: repoPath)
+            }
         }
     }
 

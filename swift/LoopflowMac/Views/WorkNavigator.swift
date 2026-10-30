@@ -101,7 +101,7 @@ struct WorkNavigator: View {
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
-                }.padding(8)
+                }.padding(8).coordinateSpace(.named(TaskOrderDrag.space))
             }
             WaveSectionDivider(navigation: model.navigation)
             waveSection
@@ -738,7 +738,8 @@ private struct RowHover<Content: View>: View {
 }
 
 /// Working Tasks rows reorder the repository's one Task order by drag; Wave lists don't.
-/// A drag is a move, not a copy: no + badge, and a line marks where the row lands.
+/// The row itself follows the pointer, a line marks where it lands, and release
+/// places it at once. A system drag would hold its image for the drop animation.
 private struct TaskOrderDragging: ViewModifier {
     let model: WorkModel
     let workID: String?
@@ -747,12 +748,22 @@ private struct TaskOrderDragging: ViewModifier {
 
     func body(content: Content) -> some View {
         if let workID {
+            let dragging = drag.source == workID
             content
-                .onDrag {
-                    drag.source = workID
-                    return NSItemProvider(object: TaskOrderDrag.token(workID) as NSString)
+                .background(dragging ? palette.surfaceMuted : .clear)
+                .shadow(color: .black.opacity(dragging ? 0.18 : 0), radius: 6, y: 2)
+                .offset(y: dragging ? drag.offset : 0)
+                .zIndex(dragging ? 1 : 0)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TaskOrderDrag.space)) } action: {
+                    drag.frames[workID] = $0
                 }
-                .onDrop(of: [.plainText], delegate: TaskOrderDrop(model: model, target: workID, drag: drag))
+                .highPriorityGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(TaskOrderDrag.space))
+                    .onChanged { drag.move(workID, by: $0.translation.height, at: $0.location.y,
+                                           order: model.workingTaskMembers.map(\.work.id)) }
+                    .onEnded { _ in
+                        guard let (source, target) = drag.end() else { return }
+                        model.reorderWorkingTask(source, to: target)
+                    })
                 .overlay(alignment: drag.landing(on: workID) ?? .top) {
                     if drag.landing(on: workID) != nil {
                         Rectangle().fill(palette.accent).frame(height: 2)
@@ -766,40 +777,37 @@ private struct TaskOrderDragging: ViewModifier {
 }
 
 extension TaskOrderDrag {
+    static let space = "task-order"
+
     /// The sidebar row being dragged and the row it would take the place of.
     @MainActor @Observable final class State {
         var source: String?
         var target: String?
         /// The dragged row lands after the target when it comes from above.
         var below = false
+        var offset: CGFloat = 0
+        /// Each row's frame in the list, read only while a drag picks its target.
+        @ObservationIgnored var frames: [String: CGRect] = [:]
 
         func landing(on row: String) -> Alignment? {
             target == row ? (below ? .bottom : .top) : nil
         }
-    }
-}
 
-private struct TaskOrderDrop: DropDelegate {
-    let model: WorkModel
-    let target: String
-    let drag: TaskOrderDrag.State
+        func move(_ row: String, by translation: CGFloat, at y: CGFloat, order: [String]) {
+            source = row
+            offset = translation
+            let over = order.first { $0 != row && frames[$0]?.minY ?? .infinity <= y && y < frames[$0]?.maxY ?? -.infinity }
+            if let over { target = over } else if frames[row]?.contains(CGPoint(x: frames[row]?.midX ?? 0, y: y)) == true { target = nil }
+            if let target {
+                below = (order.firstIndex(of: row) ?? 0) < (order.firstIndex(of: target) ?? 0)
+            }
+        }
 
-    func dropEntered(info: DropInfo) {
-        drag.target = drag.source == target ? nil : target
-        let ids = model.workingTaskMembers.map(\.work.id)
-        drag.below = (ids.firstIndex(of: drag.source ?? "") ?? 0) < (ids.firstIndex(of: target) ?? 0)
-    }
-
-    func dropExited(info: DropInfo) {
-        if drag.target == target { drag.target = nil }
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
-
-    func performDrop(info: DropInfo) -> Bool {
-        defer { drag.source = nil; drag.target = nil }
-        guard let source = drag.source, source != target else { return false }
-        Task { await model.reorderWorkingTask(source, to: target) }
-        return true
+        /// Clears the drag in the same frame the caller moves the row.
+        func end() -> (String, String)? {
+            defer { source = nil; target = nil; offset = 0 }
+            guard let source, let target else { return nil }
+            return (source, target)
+        }
     }
 }

@@ -795,7 +795,7 @@ impl World {
         Ok(())
     }
 
-    /// Open `wave`'s ongoing conversation the way `lf wave session` does and
+    /// Open `wave`'s ongoing conversation the way `lf --wave W session connect` does and
     /// give it `turns` as its Claude history.
     pub fn wave_conversation(
         &self,

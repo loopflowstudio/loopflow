@@ -11,7 +11,7 @@ as a PR to main in the same run.
   the fix needs one, stop: it belongs in a release.
 - No index of the live store's rows by hand, no `sqlite3` writes to
   `~/.lf/loopflow.db`. Reproduce and measure on the clone.
-- `lf repo release` cuts from main only. Don't use it for a hotfix.
+- `lf release` cuts from main only. Don't use it for a hotfix.
 - `~/.lf/bin/hotfix-*` are leftovers from an earlier hand-made hotfix. Ignore them.
 
 ## 1. Worktree from the installed commit

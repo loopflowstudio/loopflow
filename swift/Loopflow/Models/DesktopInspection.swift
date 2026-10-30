@@ -163,7 +163,7 @@ public struct DesktopActionArgument: Codable, Sendable, Equatable {
 }
 
 /// One gesture for an exact window, and for pane actions an exact pane.
-/// Arguments are the `k=v` strings `lf desktop do` passes; the registry parses them.
+/// Arguments are the `k=v` strings an `lf desktop` action passes; the registry parses them.
 public struct DesktopActionRequest: Codable, Sendable, Equatable {
     public let repository: String
     public let window: String

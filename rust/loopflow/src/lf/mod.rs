@@ -1350,10 +1350,15 @@ impl SelfCommand {
         match self {
             Self::Doctor { .. } => false,
             Self::Install { cmd, .. } => match cmd {
-                Some(InstallCommand::Preflight { .. } | InstallCommand::ReaderCatalog) => false,
+                Some(
+                    InstallCommand::Preflight { .. }
+                    | InstallCommand::ReaderCatalog
+                    | InstallCommand::CanOpen { .. },
+                ) => false,
                 None
                 | Some(
                     InstallCommand::Schedule { .. }
+                    | InstallCommand::Adopt
                     | InstallCommand::RecoverSwitch { .. }
                     | InstallCommand::AdvanceSwitch { .. }
                     | InstallCommand::Promote { .. }

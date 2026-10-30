@@ -860,7 +860,14 @@ pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result
     }
     let wave =
         planning_wave(&repo, wave)?.ok_or_else(|| anyhow::anyhow!("Select a Wave to refresh"))?;
-    tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave))?;
+    let refreshed =
+        tokio::runtime::Runtime::new()?.block_on(crate::ops::linear::refresh_wave(&repo, &wave));
+    // The Team delta brings comments in and pending saves go out, so a save
+    // left by an outage is delivered on the next refresh.
+    if let Err(error) = crate::ops::planning_sync::check_directory(&repo) {
+        tracing::debug!(%error, "planning delivery pending after refresh");
+    }
+    refreshed?;
     Ok(Some(wave))
 }
 

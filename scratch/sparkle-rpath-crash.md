@@ -25,7 +25,7 @@ broken local-bin bundle as `cannot load Sparkle.framework/Versions/B/Sparkle` an
 passes the installed app.
 
 ## Verification
-- `pytest python/tests/test_app_bundle.py test_install_script.py test_release_loopflow.py test_loopflow_dev.py`: 32 passed.
+- `uv run pytest python/tests/test_app_bundle.py test_install_script.py test_release_loopflow.py test_loopflow_dev.py`: 32 passed (re-run 2026-10-30 after the checkpoint commit).
   `test_app_bundle` links a real executable and dylib (`@loader_path` rpath, like
   SwiftPM). Before embedding, dyld fails with the incident's error; after
   embedding, it runs.
@@ -39,8 +39,6 @@ passes the installed app.
   which gate or the next release run.
 
 ## Open
-- ~~What copied local-bin/Loopflow.app into /Applications?~~ Answered below: the
-  LOO-669 release agent's `mv` + `ditto` at 08:16:54.
 - `install.py local` signs with the release Developer ID, so a local build looks
   like a release by team and version. Ad-hoc or Apple Development signing would
   have made the build easier to identify.
@@ -101,11 +99,11 @@ Side branches:
 
 ## Competing fixes
 
-`jack/loo-688-…` (PR #1777, commit 6635c947b4, 11:55) also adds
+`jack/loo-688-…` (PR #1777, open) also adds
 `scripts/app_bundle.py` with `embed_frameworks(build_dir, contents_dir, executable)`
-and wires it into `install.py` and `release-loopflow.py`. This worktree's
-uncommitted `app_bundle.py` has a different signature, adds
-`verify_rpath_libraries`, and also covers `loopflow-dev.py`. Whichever lands
+and wires it into `install.py` and `release-loopflow.py`. This branch's
+`app_bundle.py` has a different signature, adds `verify_rpath_libraries`, and also
+covers `loopflow-dev.py`. Whichever lands
 second will conflict on the same new file. Proposed: land this one, since it
 covers more, and have #1777 drop its `app_bundle.py`/`install.py`/release hunks
 when it rebases. Folding this into #1777 also works, but it delays the fix behind
@@ -129,20 +127,40 @@ transcripts under `~/.claude/projects/` answered in one grep, while lf.log could
 Not answered: whether `lf install --dev` on main still migrates the store under an
 older running app after #1777. That is #1777's demo to show.
 
-## Execution (2026-10-30)
+## Status (2026-10-30)
 
-- **LOO-699** "Every way of building Loopflow.app produces an app that launches": filed in
-  infrastructure for this worktree's fix. Not launched: the fix is uncommitted here and
-  this checkout is not bound to the Task, so a Task run would start a competing worktree.
-  Needs Jack: landing order against #1777, and whether to adopt this worktree
-  (commit on `jack-heart/app-bundle-rpath`, then `lf task checkout LOO-699 --recover-from <commit>`).
-- **LOO-700** "Loopflow Dev and Loopflow can be told apart by process name": filed and
-  running (`code` graph). Touches `loopflow-dev.py`, which this worktree also edits.
-- **LOO-688 / #1777**: commented with the conflict and the demo (`lf install --dev` with
-  Desktop running).
-- Deferred follow-ups, file after LOO-699 and #1777 settle:
-  - One bundle assembler shared by release, dev and local (depends on which `app_bundle.py` survives).
-  - PR CI assembles the local bundle ad-hoc signed and runs `verify_rpath_libraries` (needs LOO-699 merged).
-- Jack's decision: local build identity (`X.Y.Z-local+<rev>` or Apple Development signing vs
-  Developer ID kept for TCC continuity).
+Done: the repair is committed on this LOO-699 branch, based on main `bdb891563b`
+(no newer main commits at realign). Code matches the Repair section; all three
+LOO-699 acceptance bullets have code and tests.
+
+Remaining:
+- Gate: run the full `install.py local` entrypoint (and release packaging at the
+  next release run) on a real SwiftPM build. Not yet done.
+- Publish the PR.
+- Landing order against #1777 (LOO-688, open): needs Jack. Proposal unchanged.
+- LOO-700 / PR #1792 (open, at `demo`) also edits `scripts/loopflow-dev.py` and
+  `python/tests/test_loopflow_dev.py`. Different hunks (process name vs embed), so
+  expect at most a trivial rebase for whichever lands second.
+- Follow-ups to file after LOO-699 and #1777 settle: one shared bundle assembler;
+  PR CI assembling an ad-hoc-signed bundle and running `verify_rpath_libraries`.
+- Jack's decision: local build identity (`X.Y.Z-local+<rev>` or Apple Development
+  signing vs Developer ID kept for TCC continuity).
 - Agent conduct: recorded in memory (`ambiguous-reply-no-release`); no new guard.
+
+## Concept review (2026-10-30, headless)
+
+The user-facing contract is one sentence: any supported command that builds
+Loopflow.app produces an app that launches. The branch's model matches it: a
+bundle's linked frameworks are one fact (`app_bundle.embed_frameworks`), and the
+same call proves dyld can resolve them, so no builder can embed without the
+check. No new concept, flag or config surface for users.
+
+Settled, no implement change: merging the three assemblers into one
+`assemble_app` is the right end state but is the filed follow-up, not this Task;
+doing it here would collide with #1777's rewrite of the same scripts.
+`install.py:38` still calls `BundleSpec` the "single source of truth for
+Loopflow.app layout"; that stays false until the assembler follow-up, which
+should make it true or drop the claim.
+
+Open but outside LOO-699's outcome: local build identity (Jack). It changes how a
+local build presents, not whether it launches, so it does not block this Task.

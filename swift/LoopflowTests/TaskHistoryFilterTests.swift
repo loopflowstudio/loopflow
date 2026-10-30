@@ -253,7 +253,7 @@ struct TaskHistoryFilterTests {
         #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-status").text().string()
             == wave.wave.status.label.capitalized)
         // Selecting a Wave never starts work; every current Task is on the board.
-        for task in wave.tasks.items where task.task.isCurrent(task.condition) && task.section != .later {
+        for task in wave.tasks.items where task.task.isCurrent(task.condition) && task.section != .done && task.section != .abandoned {
             _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-row-\(task.id)")
         }
         #expect(model.selection == .wave(id: wave.wave.id))

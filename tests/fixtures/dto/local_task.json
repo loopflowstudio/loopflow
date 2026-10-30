@@ -68,7 +68,7 @@
       "updated_at": "2026-10-08T00:00:00Z",
       "work_id": "task_0123456789ab40008000000000000001"
     },
-    "section": "waiting",
+    "section": "backlog",
     "task": {
       "assignee": null,
       "completed_at": null,

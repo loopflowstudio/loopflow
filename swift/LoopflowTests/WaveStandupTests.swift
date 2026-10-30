@@ -15,7 +15,7 @@ struct WaveStandupTests {
             .deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
     }
 
-    private func task(_ id: String, section: String = "now", state: String? = nil, completedAt: String? = nil,
+    private func task(_ id: String, section: String = "working", state: String? = nil, completedAt: String? = nil,
                       rank: Int = 0, status: String? = nil, owner: String? = nil, email: String?? = .none,
                       pr: String? = nil, reason: String = "Next move") throws -> RoadmapTask {
         let rows = try #require(JSONSerialization.jsonObject(
@@ -54,19 +54,18 @@ struct WaveStandupTests {
         WaveStandup(tasks: tasks, closed: closed ?? tasks, doneDays: doneDays, now: now, github: github, sessions: sessions)
     }
 
-    @Test func bucketsByTaskState() throws {
+    @Test func columnsAreRustSections() throws {
         let tasks = [
-            try task("DONE-1", section: "later", state: "completed", completedAt: "2026-10-25T09:00:00Z"),
-            try task("DONE-OLD", section: "later", state: "completed", completedAt: "2026-10-01T09:00:00Z"),
-            try task("CANCELED", section: "later", state: "canceled", completedAt: "2026-10-25T09:00:00Z"),
+            try task("DONE-1", section: "done", state: "completed", completedAt: "2026-10-25T09:00:00Z"),
+            try task("DONE-OLD", section: "done", state: "completed", completedAt: "2026-10-01T09:00:00Z"),
+            try task("CANCELED", section: "abandoned", state: "canceled", completedAt: "2026-10-25T09:00:00Z"),
             try task("IDLE", rank: 2, status: "idle", owner: "Jack Heart"),
-            try task("MOVING", section: "waiting", rank: 1, status: "moving", owner: "Jack Heart", reason: "Waiting on CI"),
+            try task("MOVING", rank: 1, status: "moving", owner: "Jack Heart", reason: "Waiting on CI"),
             try task("MERGED", rank: 3, status: "active", owner: "Jack Heart", pr: "merged"),
-            try task("SHIP", rank: 4, status: "shipping", owner: "Jack Heart"),
-            // The roadmap files an unstarted Task under waiting; its state puts it in Backlog.
-            try task("FRESH", section: "waiting", rank: 5),
-            // Started, then unassigned: nothing moves it, so it waits in Backlog.
-            try task("HELD", section: "later", rank: 0, status: "idle"),
+            try task("SHIP", section: "autonomous", rank: 4, status: "shipping", owner: "Jack Heart"),
+            try task("FRESH", section: "backlog", rank: 5),
+            // Started, then unassigned: Rust files it under Backlog, whatever its state.
+            try task("HELD", section: "backlog", rank: 0, status: "idle"),
         ]
         let standup = standup(tasks, sessions: ["IDLE": .available, "SHIP": .busy])
         #expect(standup.done.map(\.id) == ["DONE-1"])
@@ -99,9 +98,9 @@ struct WaveStandupTests {
     }
 
     @Test func doneWindowCountsWholeDaysBackFromNow() throws {
-        let edge = try task("EDGE", section: "later", state: "completed", completedAt: "2026-10-19T12:00:00Z")
-        let past = try task("PAST", section: "later", state: "completed", completedAt: "2026-10-19T11:59:59Z")
-        let undated = try task("UNDATED", section: "later", state: "completed")
+        let edge = try task("EDGE", section: "done", state: "completed", completedAt: "2026-10-19T12:00:00Z")
+        let past = try task("PAST", section: "done", state: "completed", completedAt: "2026-10-19T11:59:59Z")
+        let undated = try task("UNDATED", section: "done", state: "completed")
         #expect(standup([edge, past, undated]).done.map(\.id) == ["EDGE"])
         #expect(standup([edge, past], doneDays: 14).done.count == 2)
         // Done reads only the closed source, so it can move to `lf task list --done`.

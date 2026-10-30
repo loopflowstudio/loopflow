@@ -221,7 +221,7 @@ struct DashboardTile: View {
                 .dropDestination(for: String.self) { values, _ in
                     guard let value = values.first else { return false }
                     if workingTasks, let task = TaskOrderDrag.taskID(value) {
-                        Task { await model.reorderWorkingTask(task, to: member.work.id) }; return true
+                        model.reorderWorkingTask(task, to: member.work.id); return true
                     }
                     guard arrangeable, let id = plan.dashboardID, !model.dashboardSaving,
                           let other = plan.resolution.members.first(where: { $0.token == value }), other.work != member.work else { return false }

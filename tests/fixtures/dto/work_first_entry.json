@@ -236,7 +236,7 @@
             "updated_at": "2026-10-11T22:28:08Z",
             "work_id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
           },
-          "section": "waiting",
+          "section": "backlog",
           "task": {
             "acquisition": {
               "observed_at": 1791757688,

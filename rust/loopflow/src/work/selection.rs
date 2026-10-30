@@ -120,7 +120,10 @@ pub enum SelectionState {
     Active,
     Moving,
     Shipping,
+    /// Board axis: the Task's `TaskSection`.
     Backlog,
+    Working,
+    Autonomous,
     Done,
 }
 
@@ -376,17 +379,10 @@ impl Selection {
                                     .unavailable
                                     .push(format!("Task {} state is unavailable", item.name));
                             }
-                            // The repository and a Wave list Working Tasks: idle,
-                            // active or moving. Unstarted Tasks live on the Wave
-                            // board's Backlog; Shipping Tasks leave for `state:shipping`.
-                            in_scope
-                                && [
-                                    SelectionState::Idle,
-                                    SelectionState::Active,
-                                    SelectionState::Moving,
-                                ]
-                                .iter()
-                                .any(|state| item.states.contains(state))
+                            // The repository and a Wave list the board's Working
+                            // section; the others are `state:backlog`, `state:autonomous`
+                            // and `state:done`.
+                            in_scope && item.states.contains(&SelectionState::Working)
                         }
                     };
                     if included {

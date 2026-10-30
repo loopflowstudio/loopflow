@@ -606,7 +606,7 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
         #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")
         #expect(detail.tasks.items[0].pr?.publication?.merge?.mode == .user)
-        #expect(detail.tasks.items.map(\.section) == [.waiting, .notStarted])
+        #expect(detail.tasks.items.map(\.section) == [.backlog, .backlog])
         #expect(detail.tasks.items[0].reference.workspace?.slug == "infrastructure-task")
         #expect(detail.tasks.items[0].reference.workspace?.worktree == "/src/loopflow.infrastructure.task")
         #expect(detail.tasks.items[0].reference.issueUrl?.host == "linear.app")
@@ -650,7 +650,7 @@ struct DTOFixtureTests {
         #expect(product.unavailableTasks[0].status == .unstarted)
         #expect(product.unavailableTasks[0].recovery.contains("lf task status task_40fbeea"))
         let tasks = product.tasks.items
-        #expect(tasks.map(\.section) == [.now, .waiting, .notStarted, .later])
+        #expect(tasks.map(\.section) == [.backlog, .backlog, .backlog, .done])
         #expect(tasks.map(\.condition.state) == [.clear, .waiting, .clear, .clear])
         #expect(tasks[0].reference.workspace?.slug == "make-lf-work-the-machine")
         #expect(tasks[0].reference.workspace?.machineLabel == "build-server")

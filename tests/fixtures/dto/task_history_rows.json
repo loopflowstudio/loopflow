@@ -52,7 +52,7 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "section": "later",
+    "section": "abandoned",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -119,7 +119,7 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "section": "later",
+    "section": "abandoned",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -186,7 +186,7 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "section": "later",
+    "section": "abandoned",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -253,7 +253,7 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "section": "later",
+    "section": "abandoned",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -320,7 +320,7 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "section": "later",
+    "section": "abandoned",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -387,7 +387,7 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "section": "later",
+    "section": "abandoned",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -454,7 +454,7 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "section": "later",
+    "section": "abandoned",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -521,7 +521,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -588,7 +588,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -655,7 +655,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -722,7 +722,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -789,7 +789,7 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -856,7 +856,7 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -923,7 +923,7 @@
       "recommended": null,
       "reason": "Linear Task is complete"
     },
-    "section": "later",
+    "section": "done",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -990,7 +990,7 @@
       "recommended": null,
       "reason": "Task is ready to start"
     },
-    "section": "not_started",
+    "section": "backlog",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,
@@ -1057,7 +1057,7 @@
       "recommended": null,
       "reason": "Linear Task is canceled"
     },
-    "section": "later",
+    "section": "abandoned",
     "graph_name": "feature",
     "latest_graph_process": null,
     "execution": null,

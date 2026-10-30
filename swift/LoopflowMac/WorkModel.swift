@@ -114,6 +114,8 @@ final class WorkModel {
 
     private var viewOpening: UUID?
     private var selectionOpening: DesktopOpening?
+    /// Tasks whose abandonment was requested; they leave the sidebar at once.
+    private(set) var abandoningTaskIDs: Set<String> = []
     var dashboardError: String?
     private(set) var dashboardSaving = false
 
@@ -1845,6 +1847,7 @@ final class WorkModel {
 
     var sidebarTaskIDs: [String] {
         taskIDs(in: sidebarMembers).filter { id in
+            if abandoningTaskIDs.contains(id) { return false }
             switch navigation.sidebarFilter {
             case .working: return true
             case .available:
@@ -1857,10 +1860,9 @@ final class WorkModel {
         }
     }
 
-    /// A Wave row's count: its board's Working and Autonomous columns, not Backlog or Done.
-    func startedTaskCount(_ wave: WaveRoadmap) -> Int {
-        let standup = WaveStandup(tasks: wave.tasks.items, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
-        return standup.working.count + standup.autonomous.count
+    /// A Wave or repository row's count: its board's Working and Autonomous columns.
+    func startedTaskCount(_ board: WorkNavigation.Board) -> Int {
+        (standupTasks(board)?.items ?? []).count { $0.section == .working || $0.section == .autonomous }
     }
 
     /// Below the Working Tasks: the scope's Autonomous Tasks, as the Wave board buckets
@@ -1873,10 +1875,8 @@ final class WorkModel {
         case .wave(let id): board = .wave(id)
         case .dashboard: return []
         }
-        let tasks = standupTasks(board)?.items ?? []
-        let working = Set(sidebarTaskIDs)
-        return WaveStandup(tasks: tasks, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
-            .autonomous.map(\.task.id).filter { !working.contains($0) }
+        return (standupTasks(board)?.items ?? []).filter { $0.section == .autonomous && !abandoningTaskIDs.contains($0.id) }
+            .sorted { $0.task.rank < $1.task.rank }.map(\.id)
     }
 
     func taskSessions(_ id: String) -> [SessionRecord] {
@@ -2276,22 +2276,38 @@ final class WorkModel {
     }
 
     func reopenTask(_ task: RoadmapTask) async {
+        abandoningTaskIDs.remove(task.id)
         await performTaskAction(task.id) {
             try await query.reopenTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
         }
     }
 
+    /// The row leaves the sidebar and the selection moves on before the slow
+    /// cleanup (PRs, branches, checkout) returns; a failure puts the row back.
     func abandonTask(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
+        let rows = sidebarTaskIDs + sidebarAutonomousTaskIDs
+        abandoningTaskIDs.insert(task.id)
+        if isSelected(.task(id: task.id)) {
+            let index = rows.firstIndex(of: task.id) ?? rows.count
+            let next = rows.dropFirst(index + 1).first ?? rows.prefix(index).last
+            select(next.map { .task(id: $0) } ?? sidebarWave.map { .wave(id: $0.wave.id) })
+        }
+        let accepted = await performTaskAction(task.id) {
             try await query.abandonTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+        }
+        if !accepted {
+            abandoningTaskIDs.remove(task.id)
+            dashboardError = navigation.taskRunDrafts[task.id]?.error
         }
     }
 
     /// Feedback belongs to the navigation and Task that began the command.
-    private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async {
+    /// Returns whether the command was accepted, refreshed or not.
+    @discardableResult
+    private func performTaskAction(_ taskId: String, _ action: () async throws -> Void) async -> Bool {
         let owner = navigation
         let home = workDataDirectory
-        guard owner.taskRunDrafts[taskId]?.acting != true else { return }
+        guard owner.taskRunDrafts[taskId]?.acting != true else { return false }
         owner.taskRunDrafts[taskId, default: TaskRunDraft()].phase = .runningCommand
         owner.taskRunDrafts[taskId]?.error = nil
         do {
@@ -2299,12 +2315,14 @@ final class WorkModel {
             owner.taskRunDrafts[taskId]?.phase = .awaitingObservation
             try await confirmWorkUpdate(after: home)
             owner.taskRunDrafts[taskId] = nil
+            return true
         } catch {
             let accepted = owner.taskRunDrafts[taskId]?.phase == .awaitingObservation
             owner.taskRunDrafts[taskId]?.phase = nil
             owner.taskRunDrafts[taskId]?.error = accepted
                 ? "Task update accepted; refresh not confirmed. \(error.localizedDescription)"
                 : error.localizedDescription
+            return accepted
         }
     }
 
@@ -2863,16 +2881,20 @@ extension WorkModel {
     /// The sidebar and the Working Tasks grid write the same order; both read the
     /// repository plan, so each shows the other's move.
     /// The row moves on drop; the written order replaces it, and a failed write re-reads it.
-    func reorderWorkingTask(_ task: String, to target: String) async {
-        guard task != target, let repoPath else { return }
+    /// The row moves now; the returned write follows.
+    @discardableResult
+    func reorderWorkingTask(_ task: String, to target: String) -> Task<Void, Never> {
+        guard task != target, let repoPath else { return Task {} }
         dashboardError = nil
         moveRepositoryMember(task, to: target)
-        do {
-            _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
-            try await refreshPlan(nil, repoPath: repoPath)
-        } catch {
-            dashboardError = error.localizedDescription
-            try? await refreshPlan(nil, repoPath: repoPath)
+        return Task {
+            do {
+                _ = try await query.reorderTask(task, to: target, repoPath: repoPath)
+                try await refreshPlan(nil, repoPath: repoPath)
+            } catch {
+                dashboardError = error.localizedDescription
+                try? await refreshPlan(nil, repoPath: repoPath)
+            }
         }
     }
 

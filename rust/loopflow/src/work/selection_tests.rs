@@ -74,7 +74,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
             "backlog" => BTreeSet::from([SelectionState::Backlog]),
             "done" => BTreeSet::from([SelectionState::Done]),
             "unstarted" => BTreeSet::from([SelectionState::Unstarted]),
-            "idle" => BTreeSet::from([SelectionState::Idle]),
+            "idle" => BTreeSet::from([SelectionState::Idle, SelectionState::Working]),
             _ => BTreeSet::new(),
         },
         key,
@@ -130,7 +130,7 @@ fn nested_sources_survive_insertions_and_report_unavailable_queries_and_cycles()
         parent_wave: None,
         open: Some(true),
         name: String::new(),
-        states: BTreeSet::from([SelectionState::Idle]),
+        states: BTreeSet::from([SelectionState::Idle, SelectionState::Working]),
         activity_known: false,
     }];
     let query = DashboardId("saved".into());
@@ -544,22 +544,31 @@ fn selection_portable_panes_round_trip_all_content_and_recovery() {
 }
 
 #[test]
-fn working_tasks_are_idle_active_or_moving_and_shipping_has_its_own_query() {
+fn working_tasks_are_the_working_section_and_the_others_have_their_own_queries() {
     let wave = WaveId::new();
     let work: Vec<_> = [
-        ("idle", SelectionState::Idle),
-        ("active", SelectionState::Active),
-        ("moving", SelectionState::Moving),
-        ("unstarted", SelectionState::Unstarted),
-        ("shipping", SelectionState::Shipping),
+        ("idle", SelectionState::Idle, SelectionState::Working),
+        ("active", SelectionState::Active, SelectionState::Working),
+        ("moving", SelectionState::Moving, SelectionState::Working),
+        ("unassigned", SelectionState::Idle, SelectionState::Backlog),
+        (
+            "unstarted",
+            SelectionState::Unstarted,
+            SelectionState::Backlog,
+        ),
+        (
+            "shipping",
+            SelectionState::Shipping,
+            SelectionState::Autonomous,
+        ),
     ]
     .into_iter()
-    .map(|(id, state)| SelectionWork {
+    .map(|(id, state, section)| SelectionWork {
         key: key(id, WorkWorkspaceKind::Task),
         parent_wave: Some(wave.clone()),
         open: Some(true),
         name: id.into(),
-        states: BTreeSet::from([SelectionState::Open, state]),
+        states: BTreeSet::from([SelectionState::Open, state, section]),
         activity_known: true,
     })
     .chain([SelectionWork {
@@ -589,8 +598,12 @@ fn working_tasks_are_idle_active_or_moving_and_shipping_has_its_own_query() {
         ["idle", "active", "moving"]
     );
     assert_eq!(
-        ids(Selection::parse("state:shipping", None).unwrap()),
+        ids(Selection::parse("state:autonomous", None).unwrap()),
         ["shipping"]
+    );
+    assert_eq!(
+        ids(Selection::parse("state:backlog", None).unwrap()),
+        ["unassigned", "unstarted"]
     );
     assert_eq!(
         ids(Selection::parse("state:moving", None).unwrap()),

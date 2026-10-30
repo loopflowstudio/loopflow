@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::durable::{Machine, TaskState, WorkRef, WorkStatus};
+use crate::durable::{Machine, TaskSection, TaskState, WorkRef, WorkStatus};
 use crate::lf::commands::session::SessionFacts;
 use crate::lf::commands::session_history::format_tokens;
 use crate::lf::commands::task_row::{TaskDetail, TaskGraphRow, TaskNames, TaskRow, TaskThread};
@@ -353,22 +353,6 @@ pub struct UnavailableTaskEvidence {
     pub recovery: String,
 }
 
-/// Where a row sits in the plan, derived once so every surface buckets it
-/// identically.
-///
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RoadmapSection {
-    /// This Work's own planner must move next.
-    Now,
-    /// Someone else must move: a Session, User, CI, or supervising Work.
-    Waiting,
-    /// Filed, not started, not complete — ready for someone to pick up.
-    NotStarted,
-    /// Done or dormant: terminal Work and completed plan rows.
-    Later,
-}
-
 /// `lf wave show` — every Wave's plan joined to durable Work and local delivery
 /// evidence, bucketed by planning section.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -552,7 +536,7 @@ pub struct RoadmapTask {
     pub ship_control: TaskRunControl,
     pub shipping: Option<crate::ops::task::ship::ShippingSnapshot>,
     pub pr: Option<PrSnapshot>,
-    pub section: RoadmapSection,
+    pub section: TaskSection,
     /// The graph step the Task stands at; `None` while a run carries it.
     /// Carried to `TaskRow`, not on Desktop's wire.
     #[serde(skip)]
@@ -1400,32 +1384,6 @@ pub(crate) fn task_state(task: &RoadmapTask) -> TaskState {
         .map_or(TaskState::Unstarted, |runtime| runtime.status)
 }
 
-/// A Task's section, from the same planning primitives the row already carries.
-fn task_section(
-    state: Option<&str>,
-    runtime: Option<&TaskRuntimeSnapshot>,
-    next_move: &NextMove,
-) -> RoadmapSection {
-    let Some(runtime) = runtime else {
-        return if crate::linear::terminal_reason(state).is_some() {
-            RoadmapSection::Later
-        } else {
-            RoadmapSection::NotStarted
-        };
-    };
-    // Linear completing a Task that never left `start` withdraws it from what
-    // is offered; an active one keeps its place and shows the conflict.
-    let withdrawn = matches!(runtime.status, TaskState::Unstarted)
-        && crate::linear::terminal_reason(state).is_some();
-    if runtime.status.is_terminal() || unassigned(runtime) || withdrawn {
-        return RoadmapSection::Later;
-    }
-    match next_move.owner {
-        NextMoveOwner::Task => RoadmapSection::Now,
-        _ => RoadmapSection::Waiting,
-    }
-}
-
 /// The wave `lf wave status` is about: the name the caller typed, else the wave this
 /// process is running inside.
 async fn resolve_status_wave(store: &SharedStore, requested: Option<&str>) -> Result<Wave> {
@@ -1970,7 +1928,11 @@ async fn snapshot_task_detail(
         .get(&task.id)
         .cloned()
         .ok_or_else(|| anyhow!("Task {} has no graph", task.id))?;
-    let section = task_section(task.state.as_deref(), Some(&runtime), &next_move);
+    let section = TaskSection::of(
+        runtime.status,
+        runtime.owner.is_some(),
+        task.state.as_deref(),
+    );
     Ok(RoadmapTask {
         task: task_summary(
             task,
@@ -2794,7 +2756,7 @@ fn print_history(history: &Evidence<SessionHistory>) {
 /// One rendered roadmap line, section already decided. Project-loop rows and
 /// Task rows share the shape so a section prints them together.
 struct RoadmapRow {
-    section: RoadmapSection,
+    section: TaskSection,
     id: String,
     issue_url: Option<String>,
     title: String,
@@ -2876,12 +2838,13 @@ fn task_identifier_label(
     format!("\x1b]8;;{url}\x1b\\{label}\x1b]8;;\x1b\\")
 }
 
-fn section_label(section: RoadmapSection) -> &'static str {
+fn section_label(section: TaskSection) -> &'static str {
     match section {
-        RoadmapSection::Now => "NOW",
-        RoadmapSection::Waiting => "WAITING",
-        RoadmapSection::NotStarted => "NOT STARTED",
-        RoadmapSection::Later => "LATER",
+        TaskSection::Backlog => "BACKLOG",
+        TaskSection::Working => "WORKING",
+        TaskSection::Autonomous => "AUTONOMOUS",
+        TaskSection::Done => "DONE",
+        TaskSection::Abandoned => "ABANDONED",
     }
 }
 
@@ -2926,10 +2889,11 @@ fn print_roadmap(roadmap: &RoadmapSnapshot) {
             .unwrap_or(0)
             .clamp(12, 32);
         for section in [
-            RoadmapSection::Now,
-            RoadmapSection::Waiting,
-            RoadmapSection::NotStarted,
-            RoadmapSection::Later,
+            TaskSection::Working,
+            TaskSection::Autonomous,
+            TaskSection::Backlog,
+            TaskSection::Done,
+            TaskSection::Abandoned,
         ] {
             let in_section: Vec<&RoadmapRow> =
                 rows.iter().filter(|row| row.section == section).collect();
@@ -3050,7 +3014,7 @@ mod tests {
         LocalProgressEvidence, LocalProgressEvidenceState, NextMove, NextMoveOwner,
         TaskConditionState, TaskRuntimeSnapshot,
     };
-    use crate::durable::{TaskState, WorkStatus};
+    use crate::durable::{TaskSection, TaskState, WorkStatus};
     use crate::ops::task_actions::TaskActionEvidence;
     use crate::ops::task_execution::{TaskExecutionSnapshot, TaskExecutionState};
     use crate::work::task::{CiObservation, CiState, PrMergeMode, PrMergeRequest, PrPhase};
@@ -3187,7 +3151,7 @@ mod tests {
             assert_eq!(detail.task.completed_at, item.completed_at);
             let terminal = crate::linear::terminal_reason(detail.task.state.as_deref());
             assert_eq!(
-                matches!(detail.section, super::RoadmapSection::Later),
+                matches!(detail.section, TaskSection::Done | TaskSection::Abandoned),
                 terminal.is_some()
             );
             if terminal.is_some() {

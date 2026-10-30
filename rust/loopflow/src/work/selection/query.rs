@@ -389,6 +389,8 @@ impl Parser {
                 "moving" => SelectionState::Moving,
                 "shipping" => SelectionState::Shipping,
                 "backlog" => SelectionState::Backlog,
+                "working" => SelectionState::Working,
+                "autonomous" => SelectionState::Autonomous,
                 "done" => SelectionState::Done,
                 _ => return Err(invalid(format!("unknown state {value}"))),
             }),

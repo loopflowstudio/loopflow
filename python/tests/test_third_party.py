@@ -70,6 +70,7 @@ def _packaged_materials(root: Path) -> Path:
         "loopflow.tar.gz",
         "REBUILD.md",
         "rebuild.py",
+        "app_bundle.py",
         "libintl-arm64.a",
         "libintl-x86_64.a",
     ]:
@@ -92,6 +93,7 @@ def _packaged_materials(root: Path) -> Path:
         "ThirdPartySources/example.tar.gz",
         "ThirdPartySources/libintl-arm64.a",
         "ThirdPartySources/rebuild.py",
+        "ThirdPartySources/app_bundle.py",
     ],
 )
 def test_final_bundle_rejects_missing_required_material(tmp_path: Path, missing: str) -> None:

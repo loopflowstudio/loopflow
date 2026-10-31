@@ -21,9 +21,10 @@ The LGPL text is in the offline notices and gettext's `COPYING.LIB`.
 
 `rebuild.py` compiles the library for both architectures, replaces only its
 members in a copy of the packaged `GhosttyKit.zip`, and links the application's
-source against that local framework. No new upstream binary is needed. The
-application source, build scripts, interfaces, Ghostty patches and Cargo lockfile
-are in `loopflow.tar.gz`. Other source archives are pinned by the adjacent
+source against that local framework. It embeds Sparkle.framework through the
+adjacent `app_bundle.py`, which checks the app can load it. No new upstream binary
+is needed. The application source, build scripts, interfaces, Ghostty patches and
+Cargo lockfile are in `loopflow.tar.gz`. Other source archives are pinned by the adjacent
 `ThirdPartyNotices/inventory.json` in the original app/framework. Changes to
 Ghostty's library integration are documented in `GhosttyKitPatches/README.md`;
 libintl's upstream `config.h` also documents its macOS adaptation. Loopflow makes

@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::lf::PlanningCommand;
-use crate::store::{RegistryUnavailable, Store};
+use crate::store::Store;
 
 pub fn run(cmd: &PlanningCommand) -> Result<()> {
     let repo = status_repository(&std::env::current_dir()?)?;
@@ -63,20 +63,14 @@ pub fn refresh(checkout: &Path) -> Result<()> {
 }
 
 async fn open_store() -> Result<Store> {
-    crate::store::open_registry_for_authority()
+    crate::store::open_existing_store()
         .await
-        .map_err(|error| match error {
-            RegistryUnavailable::MissingFile { path } => anyhow!(
+        .map_err(|error| anyhow!("Machine registry cannot be opened: {error}"))?
+        .ok_or_else(|| {
+            anyhow!(
                 "Machine registry is missing at {}; initialize or restore it before planning setup",
-                path.display()
-            ),
-            RegistryUnavailable::Unresolved { error } => {
-                anyhow!("Machine registry path cannot be resolved: {error}")
-            }
-            RegistryUnavailable::Incompatible { path, error } => anyhow!(
-                "Machine registry at {} is incompatible: {error}; run `lf doctor`",
-                path.display()
-            ),
+                crate::store::default_db_path().display()
+            )
         })
 }
 

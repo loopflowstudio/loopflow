@@ -53,7 +53,7 @@ pub fn run(
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it there first.
         runtime.block_on(async {
-            let Some(store) = crate::store::open_existing_store().await else {
+            let Some(store) = crate::store::open_existing_store().await? else {
                 return anyhow::Ok(());
             };
             let store: crate::store::SharedStore = std::sync::Arc::new(store);
@@ -268,7 +268,7 @@ async fn resolve_task_source(selector: Option<&str>) -> anyhow::Result<Option<Ta
     let Some(selector) = selector else {
         return Ok(None);
     };
-    let Some(store) = crate::store::open_existing_store().await else {
+    let Some(store) = crate::store::open_existing_store().await? else {
         return Ok(None);
     };
     // Validate pushed code before any planning I/O can hide missing source work.
@@ -340,7 +340,7 @@ pub(super) async fn resolve_target(
     forward_agent: bool,
 ) -> anyhow::Result<crate::durable::Machine> {
     let store = crate::store::open_existing_store()
-        .await
+        .await?
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))?;
     let machine = super::machine::find_machine(&store, target).await?;
     let probe = super::machine::probe(&machine.route, forward_agent).await?;

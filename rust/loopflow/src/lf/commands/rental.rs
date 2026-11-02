@@ -28,7 +28,7 @@ const SSH_WAIT: Duration = Duration::from_secs(20 * 60);
 
 fn open_store(runtime: &tokio::runtime::Runtime) -> anyhow::Result<Store> {
     runtime
-        .block_on(crate::store::open_existing_store())
+        .block_on(crate::store::open_existing_store())?
         .ok_or_else(|| anyhow!("this command needs an initialized local store"))
 }
 

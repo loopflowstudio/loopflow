@@ -1521,13 +1521,12 @@ fn _run_blocking_account<T: Send>(
 }
 
 async fn route_store() -> Result<Option<SharedStore>, ProviderAccountError> {
-    match crate::store::open_registry_for_authority().await {
-        Ok(store) => Ok(Some(Arc::new(store))),
-        Err(crate::store::RegistryUnavailable::MissingFile { .. }) => Ok(None),
-        Err(error) => Err(ProviderAccountError::Runtime(format!(
-            "open provider account store: {error:?}"
-        ))),
-    }
+    crate::store::open_existing_store()
+        .await
+        .map(|store| store.map(Arc::new))
+        .map_err(|error| {
+            ProviderAccountError::Runtime(format!("open provider account store: {error}"))
+        })
 }
 
 pub(crate) fn read_account_store() -> Result<Option<SharedStore>, ProviderAccountError> {

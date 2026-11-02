@@ -60,9 +60,11 @@ fidelity (sibling Task) stay out.
 - **The last screen survives.** Before a terminal owner exits (idle end,
   executable gone, or its command exiting) it writes
   `$LF_HOME/screens/<session>.vt`: the vt100 scrollback rows followed by the
-  visible grid redraw, the same bytes a viewer receives on attach. Desktop and
-  `lf resume` readers paint it before the provider is back. Format is the
-  sibling Task's to upgrade.
+  visible grid redraw, the same bytes a viewer receives on attach. The file is
+  keyed by Session because that is what a returning reader knows; one
+  conversation has one last screen, overwritten by each owner's end. This
+  branch delivers the writer and its test; the reader (`lf resume` painting
+  it when stdout is a terminal) and the format upgrade are LOO-710's.
 - **Return is cheap and starts nothing.** Unchanged: `lf resume <id|task>`
   reopens from provider history (`claude --resume <id>`), lands at the bottom,
   replays nothing.
@@ -77,15 +79,54 @@ Deleted: `lifetime::LONGEST_PAUSE`/`recheck`/`held_until` pacing (a held
 judgement restarts the grace instead) and `limit()`'s "unreadable config keeps
 the Session" branch.
 
-## Remaining (realigned 2026-11-02: code and plan agree)
+## Concept review (2026-11-02, headless)
 
-- **Decision (Jack Heart / LOO-710): one last-screen path and reader.** This
-  branch writes `$LF_HOME/screens/<session>.vt` with no DTO field; LOO-710
-  writes `<home>/snapshots/<owner>.ghostsnp` and adds `last_screen` to the
-  Session DTO. Unresolved; must agree before either publishes. See
-  `scratch/questions.md`.
-- PR body: before/after numbers below, and point the 27 pre-rule owners at
-  LOO-705's `lf monitor rollover`.
+Reviewed the accepted experience against the implemented change. No new
+concept for the person: the setting keeps its name, `lf resume` is unchanged,
+`lf resume --all` narrows, closing and idling are one thing. One mismatch
+between the contract and the code:
+
+- **Both exit causes judge "waits for a person" the same way.** The idle exit
+  treats the command's recent terminal output as a turn in progress (a native
+  Claude mid-turn leaves no store fact; its spinner does). The executable-gone
+  exit consults only the store, so an unviewed Claude mid-turn whose lf build
+  is replaced is cut, while the README promises a turn in progress keeps its
+  owner until it settles. Next implement direction: `lifetime::watch` ends a
+  gone owner only once the command has been quiet for at least one poll, from
+  a `last_output` the gone path reads and viewer changes do not reset
+  (viewers never hold a vanished build). A turn is finite, so the vanished
+  build still ends; the turn's work reaches provider history first.
+  `sessions_end_when_their_lf_executable_goes` keeps its quiet provider.
+
+Consequences recorded, no change needed:
+
+- A clean shutdown delivers SIGTERM, which records the owner's exit, so after
+  a clean reboot `lf resume --all` restores nothing; only a hard crash leaves
+  `outcome IS NULL`. Reopening what Desktop showed before a clean quit is
+  Desktop's pane restore through `lf resume` (LOO-672), unchanged here.
+- An unviewed provider blocked on a permission prompt is waiting for a person
+  and ends after the grace; `lf resume` shows the history and the person asks
+  again. This follows from the 2m default, which stays Jack's to change.
+- Screen files: one per Session, overwritten on each end, never removed.
+  LOO-710 leaves pruning to this Task's retention; nothing in the store's
+  Session retention deletes files today. Left as a known gap for whichever
+  branch lands second, with the format.
+
+## Remaining
+
+- **Last-screen path and reader: agreed with LOO-710 (2026-11-02).** LOO-710's
+  plan adopts this branch's directory and key, `<home>/screens/<session>`, in
+  its own format (`.ghostsnp`), adds no DTO field, and owns the reader:
+  `lf resume` paints the saved screen before launching the provider when its
+  stdout is a terminal. Whichever lands second deletes the `.vt` writer
+  (`transport::save_last_screen`/`last_screen_path`, `Output::last_screen`,
+  `terminal::last_screen`) and rewrites the `transport_tests` decode to
+  `.ghostsnp`. Jack Heart's steer asked the two Tasks to agree before either
+  publishes; they have.
+- The gone-path direction above.
+- PR body: before/after numbers below; point the 27 pre-rule owners at
+  LOO-705's `lf monitor rollover`; say that painting the last screen on return
+  arrives with LOO-710's reader, this PR writes it.
 
 ## Done when
 

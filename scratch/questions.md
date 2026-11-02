@@ -14,14 +14,14 @@
   field means touching every Swift fixture, and Desktop (LOO-672) is out of
   scope. Readers use `$LF_HOME/screens/<session>.vt`, named in the transport
   README and `transport::last_screen_path`. Jack Heart's 2026-11-02 steer
-  says LOO-710 writes `<home>/snapshots/<owner>.ghostsnp` and adds
-  `last_screen` to the Session DTO, and asks the two to agree on one path and
-  one reader before either publishes. This run is headless, so the choice is
-  left minimal for LOO-710 to replace: one function (`last_screen_path`) and
-  one writer (`save_last_screen`), keyed by Session because no reader knows
-  an owner id without a DTO field. The writer runs on every end the owner
-  decides, idle, executable gone, LOO-705's superseded, through the one
-  `ending` arm, and on its command's exit. An external SIGTERM writes none.
+  asked this Task and LOO-710 to agree on one path and one reader before
+  either publishes. Agreed 2026-11-02: LOO-710 adopted this branch's
+  directory and Session key (`<home>/screens/<session>`), keeps its own
+  format (`.ghostsnp`), adds no DTO field, and owns the reader in `lf resume`;
+  the second branch to land deletes the `.vt` writer. The writer runs on
+  every end the owner decides, idle, executable gone, LOO-705's superseded,
+  through the one `ending` arm, and on its command's exit. An external
+  SIGTERM writes none.
 - **Owners from before the rule.** Jack's 2026-11-02 steer: LOO-705's
   `lf monitor rollover` ends a superseded owner that cannot answer its socket
   and reports the cut turn. The PR points the 27 stale owners there instead

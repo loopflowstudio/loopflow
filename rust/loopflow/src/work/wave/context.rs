@@ -280,7 +280,9 @@ pub fn resolve_managed_wave_sync(
             .build()
             .expect("current-thread runtime always builds");
         runtime.block_on(async move {
-            let store = crate::store::open_existing_store().await;
+            let store = crate::store::open_existing_store()
+                .await
+                .map_err(|error| WaveResolveError::Registry(error.to_string()))?;
             resolve_managed_wave(
                 store.as_ref(),
                 repo.as_deref(),

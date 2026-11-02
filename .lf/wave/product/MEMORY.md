@@ -932,11 +932,12 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;
   repository configuration owns the Linear Team.
 - Wave lifecycle (LOO-500, Jack Heart 2026-10-28): `lf wave add|remove|rename` is
-  the one path for CLI and Desktop. Remove retires (never deletes rows); open Tasks
-  move to the parent Wave or repository, `--delete-backlog` deletes unstarted ones,
-  started Tasks always move. `lf wave list` and Desktop list the same live rows
-  (no `--current`); `lf wave show` reads a removed one. Authored `.lf/wave/<name>/`
-  changes commit on main; stale checkouts match directories by `config.yaml` id.
+  the one path for CLI and Desktop; `connect` only links (an unregistered name runs
+  `add` first). Remove retires (never deletes); open Tasks move to the parent
+  Wave or repository, `--delete-backlog` deletes unstarted ones, started Tasks
+  always move. `lf wave list` and Desktop list the same live rows; `lf wave show`
+  reads a removed one. Authored `.lf/wave/<name>/` changes commit on main; stale
+  checkouts match directories by `config.yaml` id.
 - `lf pm show --no-sync` is cache evidence, not proof of current provider state.
   `synced_at`, snapshot generation, and source freshness have different meanings.
   A rejected write can follow a successful provider mutation if readback failed;
@@ -957,11 +958,10 @@ lfd and resident-cron contracts remain in
 
 Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
 Unknown wire status stays explicit. Desktop lists Waves from the store only:
-LOO-500 (2026-11-02) deleted the `.lf/wave/*/GOAL.md` placeholder scan after a
-failed Linear archive left the directory on main and the sidebar showed the
-removed Wave again. Authored directories register through `lf` (`wave add`,
-`connect --all`, a repository joining the portfolio), never a read. AGENTS.md owns shared runtime vocabulary;
-earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
+LOO-500 (2026-11-02) deleted the `.lf/wave/*/GOAL.md` placeholder scan, which
+resurfaced a removed Wave whose directory outlived the store row. Directories
+register on `lf wave add`, `connect --all` or a portfolio join, never on a read.
+AGENTS.md owns shared runtime vocabulary; earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
 `92d95edfe:wave/product/MEMORY.md`, this heading.
 
 ## Performance — launch renders before any read (2026-10-04)

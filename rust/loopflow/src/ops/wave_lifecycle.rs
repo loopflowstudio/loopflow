@@ -87,7 +87,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
     Ok(added)
 }
 
-/// The one leftover an add or rename can have: files the main checkout did not take.
+/// Report authored files the main checkout could not commit.
 fn uncommitted_summary(slug: &str, files: &AuthoredFiles) -> Vec<String> {
     match files {
         AuthoredFiles::Uncommitted { reason } => {
@@ -487,7 +487,11 @@ fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<V
             &directory.join("config.yaml"),
             &parent_dir.join("config.yaml"),
         )?;
-        changed.push(authored_path(parent));
+        // Select the folded files, not the parent's whole tree: sibling Waves
+        // and the parent's other documents may have unrelated edits.
+        changed.extend(
+            ["MEMORY.md", "config.yaml"].map(|file| format!("{}/{file}", authored_path(parent))),
+        );
         changed.extend(rewrite_references(main, slug, parent)?);
     }
     std::fs::remove_dir_all(&directory)
@@ -795,11 +799,8 @@ fn leftovers(removal: &WaveRemoval) -> Vec<String> {
             ));
         }
     }
-    if let Some(AuthoredFiles::Uncommitted { reason }) = &removal.files {
-        lines.push(format!(
-            ".lf/wave/{} is not committed: {reason}.",
-            removal.name
-        ));
+    if let Some(files) = &removal.files {
+        lines.extend(uncommitted_summary(&removal.name, files));
     }
     if !removal.mentions.is_empty() {
         lines.push(format!(

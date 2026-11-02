@@ -220,6 +220,7 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     let lab = Lab::new();
     let product = lab.lf(&["wave", "add", "product", "--json"]);
     lab.lf(&["wave", "add", "product/desktop", "--json"]);
+    lab.lf(&["wave", "add", "product/cli", "--json"]);
     let child = lab.path().join(".lf/wave/product/desktop");
     std::fs::write(child.join("MEMORY.md"), "Keep sidebars narrow.\n").unwrap();
     std::fs::write(
@@ -231,6 +232,11 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     )
     .unwrap();
     let task = lab.task("product/desktop", "Sidebar");
+    // Folding into product must not commit its other documents or sibling Waves.
+    let unrelated = [".lf/wave/product/GOAL.md", ".lf/wave/product/cli/MEMORY.md"];
+    for path in unrelated {
+        std::fs::write(lab.path().join(path), "An unrelated edit.\n").unwrap();
+    }
 
     let removed = lab.lf(&["wave", "remove", "product/desktop", "--json"]);
     assert_eq!(removed["destination"], "product");
@@ -244,7 +250,17 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     let config = std::fs::read_to_string(lab.path().join(".lf/wave/product/config.yaml")).unwrap();
     assert!(config.contains("graph: auto"), "{config}");
     assert!(!child.exists());
-    assert_eq!(lab.live_waves(), ["product"]);
+    assert_eq!(lab.live_waves(), ["product", "product/cli"]);
+    let dirty = Command::new("git")
+        .current_dir(lab.path())
+        .args(["diff", "HEAD", "--name-only"])
+        .output()
+        .unwrap();
+    assert!(dirty.status.success());
+    assert_eq!(
+        String::from_utf8(dirty.stdout).unwrap(),
+        unrelated.join("\n") + "\n"
+    );
 }
 
 #[test]

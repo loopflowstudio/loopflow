@@ -56,9 +56,9 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
 4. Create the new waves
    - `lf wave add <wave>/<child>` — register each child and commit its
      `.lf/wave/<wave>/<child>/` files on the main checkout; then edit them there
-   - `.lf/wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
-   - `.lf/wave/<child>/MEMORY.md` — the decisions and context this child inherits
-   - `.lf/wave/<child>/metrics/*.md` — contracts allocated to that child
+   - `GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
+   - `MEMORY.md` — the decisions and context this child inherits
+   - `metrics/*.md` — contracts allocated to that child
    - `lf wave connect <child>` — create each child's Linear Initiative
    - Connection does not create a Project. Inspect each child's Linear plans:
      one In Progress Project is current; Planned and Completed Projects retain

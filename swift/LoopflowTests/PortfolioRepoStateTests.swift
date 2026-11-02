@@ -45,6 +45,22 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["mine"])
     }
 
+    @Test("a renamed Wave keeps its plan; a replacement at its old address does not inherit it")
+    func plansFollowWaveIdentity() {
+        let repo = PortfolioRepo(path: "/tmp/portfolio-rename", error: nil)
+        let state = PortfolioRepoState(repo: repo)
+        let original = Wave(id: "original", name: "product", repo: repo.path, status: .ready)
+        let plans = [original.id: WavePlan(objective: "Keep the workspace usable.")]
+        state.applyConnectedWaves([original], plans: plans)
+
+        let renamed = Wave(id: original.id, name: "prod", repo: repo.path, status: .ready)
+        let replacement = Wave(id: "replacement", name: "product", repo: repo.path, status: .ready)
+        state.applyConnectedWaves([renamed, replacement], plans: plans)
+
+        #expect(state.waves.first { $0.id == original.id }?.plan?.objective == "Keep the workspace usable.")
+        #expect(state.waves.first { $0.id == replacement.id }?.plan == nil)
+    }
+
     @Test("waves hold one stable alphabetical order, not a status regrouping")
     func wavesSortStableAlphabetical() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")

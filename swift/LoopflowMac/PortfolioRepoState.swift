@@ -16,7 +16,7 @@ final class PortfolioRepoState {
     private(set) var waves: [WaveViewModel] = []
     private(set) var isConnected = false
     private(set) var isLoading = true
-    private var plansByKey: [String: WavePlan] = [:]
+    private var plansByWaveId: [String: WavePlan] = [:]
 
     init(
         repo: PortfolioRepo,
@@ -45,7 +45,7 @@ final class PortfolioRepoState {
             // path filter would discard the canonical registry rows a
             // development worktree needs to see.
             let loaded = try await registryQuery.allWaves()
-            applyConnectedWaves(loaded, plans: plansByKey)
+            applyConnectedWaves(loaded, plans: plansByWaveId)
             isConnected = true
         } catch {
             isConnected = false
@@ -53,14 +53,14 @@ final class PortfolioRepoState {
     }
 
     func applyConnectedWaves(_ connectedWaves: [Wave], plans: [String: WavePlan] = [:]) {
-        plansByKey = plans
+        plansByWaveId = plans
         let origin = WaveOrigin.resolve(repoPath).normalizedFilePath
         let filtered = connectedWaves
             .filter { WaveOrigin.resolve($0.repo).normalizedFilePath == origin }
             .map { wave in
                 WaveViewModel(
                     api: wave,
-                    plan: plans[Self.wavePlanKey(repoPath: wave.repo, waveName: wave.name)]
+                    plan: plans[wave.id]
                 )
             }
         waves = Self.sortWaves(filtered)
@@ -71,10 +71,6 @@ final class PortfolioRepoState {
     func markRefreshFailed() {
         isConnected = false
         isLoading = false
-    }
-
-    nonisolated static func wavePlanKey(repoPath: String, waveName: String) -> String {
-        "\(repoPath.normalizedFilePath)#\(waveName)"
     }
 
     /// One stable alphabetical list. The row's lens carries state, so rows never

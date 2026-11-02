@@ -613,19 +613,10 @@ pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec
     let mut checkouts = Checkouts::default();
     for wave in waves {
         let checkout = wave_repository(&wave, &mut checkouts)?;
-        let snapshot = snapshot_wave(store, &wave, &checkout).await?;
-        if !removed(&snapshot) {
-            snapshots.push(snapshot);
-        }
+        snapshots.push(snapshot_wave(store, &wave, &checkout).await?);
     }
     snapshots.sort_by(|a, b| a.repo.cmp(&b.repo).then(a.name.cmp(&b.name)));
     Ok(snapshots)
-}
-
-/// `lf wave remove` retires the row. A legacy `abandoned` row that was never
-/// removed stays listed so **Remove Wave…** can finish it.
-fn removed(wave: &WaveSnapshot) -> bool {
-    wave.retired_at.is_some()
 }
 
 /// Publication is local; Session claims and receipts never enter planning sync.
@@ -1389,7 +1380,7 @@ async fn roadmap_snapshot(
             .unwrap_or(wave);
         let checkout = wave_repository(wave, &mut checkouts)?;
         let snapshot = snapshot_wave(store, wave, &checkout).await?;
-        if !include_history && removed(&snapshot) {
+        if !include_history && snapshot.retired_at.is_some() {
             continue;
         }
         if task.is_some()
@@ -2598,7 +2589,7 @@ fn print_wave_heading(wave: &WaveSnapshot) {
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
-        status = if removed(wave) {
+        status = if wave.retired_at.is_some() {
             "removed"
         } else {
             wave.status.label()

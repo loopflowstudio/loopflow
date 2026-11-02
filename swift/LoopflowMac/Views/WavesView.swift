@@ -47,16 +47,12 @@ struct WavesView: View {
     /// processes start and stop.
     private var allWaves: [WaveViewModel] {
         repos.flatMap { repo in
-            (repoStates[repo.path]?.waves ?? []).sorted {
-                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
-            }
+            repoStates[repo.path]?.waves ?? []
         }
     }
 
     /// The filtered Waves arranged as an outline: roots alphabetical, each parent
-    /// immediately followed by its children (indented). Today's Waves are flat,
-    /// but a future child Wave — a Project promoted to residency — indents under
-    /// its parent with the same lens and selection behavior.
+    /// immediately followed by its children (indented).
     private var outlinedWaves: [(wave: WaveViewModel, indent: Int)] {
         waveOutline(filteredWaves)
     }
@@ -75,14 +71,7 @@ struct WavesView: View {
 
     private var selectedWave: WaveViewModel? {
         guard let selectedWaveId else { return nil }
-        return allWaves.first { waveSelectionId($0) == selectedWaveId }
-    }
-
-    private func waveSelectionId(_ wave: WaveViewModel) -> String {
-        Self.wavePlanKey(
-            repoPath: WaveOrigin.resolve(wave.repo),
-            waveName: wave.name
-        )
+        return allWaves.first { $0.id == selectedWaveId }
     }
 
     private var isAnyConnected: Bool {
@@ -124,7 +113,7 @@ struct WavesView: View {
                 displayName: wave.displayName,
                 repo: waveRepoPath(for: wave),
                 onRemoved: {
-                    if selectedWaveId == waveSelectionId(wave) { selectedWaveId = nil }
+                    if selectedWaveId == wave.id { selectedWaveId = nil }
                     removing = nil
                     Task { await syncRepoStates() }
                 },
@@ -164,7 +153,7 @@ struct WavesView: View {
         .onChange(of: selection) { _, _ in
             // Drop a wave selection that no longer matches the active repo filter.
             if let id = selectedWaveId,
-               !filteredWaves.contains(where: { waveSelectionId($0) == id }) {
+               !filteredWaves.contains(where: { $0.id == id }) {
                 selectedWaveId = nil
             }
             model.setRepoPath(roadmapRepoPath)
@@ -187,8 +176,8 @@ struct WavesView: View {
                         ForEach(outlinedWaves, id: \.wave.id) { entry in
                             WaveRow(
                                 wave: entry.wave,
-                                isSelected: selectedWaveId == waveSelectionId(entry.wave),
-                                onSelect: { selectedWaveId = waveSelectionId(entry.wave) },
+                                isSelected: selectedWaveId == entry.wave.id,
+                                onSelect: { selectedWaveId = entry.wave.id },
                                 indentLevel: entry.indent,
                                 onRemove: { removing = entry.wave },
                                 onRename: { renaming = entry.wave }
@@ -381,7 +370,7 @@ struct WavesView: View {
                     openTask(waveRepoPath(for: wave), id)
                 }
             )
-            .id(waveSelectionId(wave))
+            .id(wave.id)
         } else {
             RoadmapView(model: model, onOpenWave: openRoadmapWave, onOpenTask: openTask)
         }
@@ -395,11 +384,8 @@ struct WavesView: View {
     private func openRoadmapWave(_ snapshot: WaveSnapshot) {
         guard let wave = allWaves.first(where: {
             $0.id == snapshot.id
-                || ($0.name == snapshot.name
-                    && WaveOrigin.resolve($0.repo).normalizedFilePath
-                        == WaveOrigin.resolve(snapshot.repo).normalizedFilePath)
         }) else { return }
-        selectedWaveId = waveSelectionId(wave)
+        selectedWaveId = wave.id
     }
 
     /// Resolve the canonical repository shared by Work and Session navigation.
@@ -436,10 +422,6 @@ struct WavesView: View {
     }
 
     // MARK: - Data
-
-    private nonisolated static func wavePlanKey(repoPath: String, waveName: String) -> String {
-        PortfolioRepoState.wavePlanKey(repoPath: repoPath, waveName: waveName)
-    }
 
     private func createWave(repoPath: String, name: String, objective: String) async throws -> WaveAdded {
         let added = try await model.addWave(name: name, objective: objective, repo: repoPath)
@@ -512,7 +494,7 @@ struct WavesView: View {
         repoStates[repo.path] = state
         if selectedWaveId == nil,
            let selected = state.waves.first(where: { $0.name == MockWaveFixture.selectedWaveName }) {
-            selectedWaveId = waveSelectionId(selected)
+            selectedWaveId = selected.id
         }
     }
 
@@ -533,26 +515,21 @@ struct WavesView: View {
     /// Each Wave's Projects arrive with the roadmap in every planning frame;
     /// only the authored objective is read here, from its GOAL.md.
     private func buildWavePlanCache(registryWaves: [Wave]) -> [String: WavePlan] {
-        var targets: [String: (repoPath: String, waveName: String)] = [:]
-        for wave in registryWaves {
-            let key = Self.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
-            targets[key] = (wave.repo, wave.name)
-        }
         var projects: [String: WorkEvidence<ProjectPlanningSnapshot>] = [:]
         for roadmap in model.roadmap.value?.waves ?? [] {
-            projects[Self.wavePlanKey(repoPath: roadmap.wave.repo, waveName: roadmap.wave.name)] = roadmap.projects
+            projects[roadmap.wave.id] = roadmap.projects
         }
 
         var plans: [String: WavePlan] = [:]
-        for (key, target) in targets {
+        for wave in registryWaves {
             let objective = WavePlanParser.objective(
-                repoRoot: URL(fileURLWithPath: target.repoPath),
-                waveName: target.waveName
+                repoRoot: URL(fileURLWithPath: wave.repo),
+                waveName: wave.name
             ) ?? ""
-            if let projects = projects[key] {
-                plans[key] = WavePlan(objective: objective, projects: projects)
+            if let projects = projects[wave.id] {
+                plans[wave.id] = WavePlan(objective: objective, projects: projects)
             } else if !objective.isEmpty {
-                plans[key] = WavePlan(objective: objective)
+                plans[wave.id] = WavePlan(objective: objective)
             }
         }
         return plans
@@ -592,7 +569,7 @@ struct WavesView: View {
               let requested = AppTestMode.selectBranch,
               let selected = allWaves.first(where: { $0.name == requested })
         else { return }
-        selectedWaveId = waveSelectionId(selected)
+        selectedWaveId = selected.id
     }
 }
 

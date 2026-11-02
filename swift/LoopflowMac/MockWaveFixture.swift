@@ -68,8 +68,7 @@ enum MockWaveFixture {
     static var plans: [String: WavePlan] {
         var result: [String: WavePlan] = [:]
         for wave in waves {
-            let key = PortfolioRepoState.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
-            result[key] = WavePlan(objective: objective(for: wave.name), projects: wave.name == detailWaveName ? (selectedWaveDetail()?.projects ?? .unavailable(reason: "Fixture missing")) : .available(items: [], truncated: false))
+            result[wave.id] = WavePlan(objective: objective(for: wave.name), projects: wave.name == detailWaveName ? (selectedWaveDetail()?.projects ?? .unavailable(reason: "Fixture missing")) : .available(items: [], truncated: false))
         }
         return result
     }

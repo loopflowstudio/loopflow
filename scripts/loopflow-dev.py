@@ -38,7 +38,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from app_bundle import SWIFT_APP_PRODUCT, install_app_executable
+from app_bundle import install_app_executable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -50,6 +50,9 @@ DEV_BUNDLE_ID = "com.loopflow.mac.dev"
 # yields a fresh cdhash every build, so the keychain ACL that "Always Allow"
 # stays stable across builds and macOS keeps previously granted permissions.
 DEV_SIGNING_IDENTITY = "Loopflow Dev"
+# The dev app's executable gets its own name so `pgrep -x Loopflow`, Activity
+# Monitor and `ps` address the release app without touching Loopflow Dev.
+DEV_EXECUTABLE = "Loopflow Dev"
 LOGIN_KEYCHAIN = Path.home() / "Library" / "Keychains" / "login.keychain-db"
 ENV_SETUP = REPO_ROOT / "scripts" / "env-setup.sh"
 DEV_LOG_DIR = Path.home() / ".lf" / "logs" / "dev"
@@ -131,6 +134,8 @@ def run_app_bundle_with_log(
 
 def _stop_loopflow_app(app_path: Path) -> None:
     """Quit Loopflow Dev, falling back to killing the app if a modal blocks quit."""
+    # A prefix of both `Loopflow Dev` and an older install's `Loopflow`, so an
+    # upgrade stops the app it replaces; the bundled `lf` never matches.
     executable = app_path / "Contents" / "MacOS" / "Loopflow"
 
     run(["osascript", "-e", f'tell application id "{DEV_BUNDLE_ID}" to quit'], check=False)
@@ -599,20 +604,19 @@ def _ensure_dev_signing_identity() -> str:
 def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
+    macos_dir = app_dir / "MacOS"
+    # Every install writes the whole of Contents/MacOS, so start it empty: a
+    # binary an older install left under another name can never be launched.
+    shutil.rmtree(macos_dir, ignore_errors=True)
+    macos_dir.mkdir(parents=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    executable = install_app_executable(
-        SWIFT_DIR / ".build" / "debug", SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir
-    )
-    # Earlier dev installs copied the build under its product name; macOS launches
-    # CFBundleExecutable, so a leftover product binary only misleads.
-    stale = executable.parent / SWIFT_APP_PRODUCT
-    if stale != executable:
-        stale.unlink(missing_ok=True)
+    # The dev plist names the executable `Loopflow Dev`, so install against it.
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
+    install_app_executable(SWIFT_DIR / ".build" / "debug", app_dir / "Info.plist", app_dir)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
-    _copy_bundled_tools(app_dir / "MacOS")
+    _copy_bundled_tools(macos_dir)
     (app_dir / "Resources" / DEV_CONTROL_CONFIG).unlink(missing_ok=True)
 
     run(
@@ -634,8 +638,9 @@ def _install_dev_app() -> None:
 
 
 def _apply_dev_identity(plist: Path) -> None:
-    """Rewrite the dev app's bundle id and name so it gets its own settings domain."""
+    """Give the dev app its own settings domain and process name."""
     run(["plutil", "-replace", "CFBundleIdentifier", "-string", DEV_BUNDLE_ID, str(plist)])
+    run(["plutil", "-replace", "CFBundleExecutable", "-string", DEV_EXECUTABLE, str(plist)])
     run(["plutil", "-replace", "CFBundleName", "-string", "Loopflow Dev", str(plist)])
     run(["plutil", "-replace", "CFBundleDisplayName", "-string", "Loopflow Dev", str(plist)])
 

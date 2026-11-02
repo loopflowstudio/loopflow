@@ -27,6 +27,8 @@ Built from <a href="loo-708-processes-stay-small.md">the working design</a>,
 <a href="questions.md">questions.md</a>, and Rust Session commands,
 human_session.rs, transport.rs, native_exit.rs, journal/mod.rs and transport tests.</header>
 <main>
+<p><small>Historical review: the JSON and exit-result gaps below have since been
+repaired. The linked working design holds current evidence and remaining acceptance.</small></p>
 <h1>Keep the command's result when its waiting process goes away.</h1>
 <p><strong>Review result: design changed.</strong> The next implementation preserves
 post-return JSON and launcher exit semantics across exec. Jack Heart's accepted

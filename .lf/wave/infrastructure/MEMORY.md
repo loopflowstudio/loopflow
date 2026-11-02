@@ -415,7 +415,10 @@ their wait. A blocking child wait wakes the descriptor loop without taking
 SIGCHLD from background runtimes. Stand-in footprint: owner/relay 20/2.5 MB;
 installed acceptance remains unproved. LOO-705 must supply the Session successor:
 replaying relay argv targets the ended owner. LOO-712 owns wire encoding.
-Release's entry-path lesson applies to the composed resume path, not just helpers.
+Release's entry-path lesson applies to each resume/new-thread entry. Exec
+discards post-return work: carry the resulting Session identity without replaying
+mutations. Owner settlement shares returning-launcher result/capture semantics;
+native status alone cannot redefine command failure or attachment loss.
 
 ## Session steers (lf-9c03797, 2026-10-11)
 

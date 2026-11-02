@@ -187,26 +187,43 @@ pub fn delegate_current(batch: bool) -> Result<bool> {
 }
 
 pub(crate) fn delegate_session(batch: bool, json_session: Option<&str>) -> Result<bool> {
+    let mut argv: Vec<String> = std::env::args().collect();
+    if json_session.is_some() {
+        // The viewer owns this continuation, including an early detach.
+        argv.retain(|arg| arg != "--json");
+    }
+    delegate(batch, json_session, argv)
+}
+
+/// Open the resulting Session after a fork or thread replacement, without
+/// repeating the command that prepared it.
+pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
+    delegate(
+        false,
+        json.then_some(id),
+        vec![String::new(), "session".into(), "resume".into(), id.into()],
+    )
+}
+
+fn delegate(batch: bool, json_session: Option<&str>, mut argv: Vec<String>) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
     }
     // Library tests do not execute the CLI entry point.
     #[cfg(test)]
     {
-        let _ = (batch, json_session);
+        let _ = (batch, json_session, &mut argv);
         Ok(false)
     }
     #[cfg(not(test))]
     {
-        let mut argv: Vec<String> = std::env::args().collect();
-        crate::journal::admit_process(&std::env::current_dir()?, &argv);
+        crate::journal::admit_process(
+            &std::env::current_dir()?,
+            &std::env::args().collect::<Vec<_>>(),
+        );
         crate::journal::current_lf_process_id()
             .context("Execution requires an admitted invocation; check the process ledger and caller provenance")?;
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
-        if json_session.is_some() {
-            // The viewer owns this continuation, including an early detach.
-            argv.retain(|arg| arg != "--json");
-        }
         // `lf -b … > file` typed at a terminal writes only the answer, never a
         // relayed screen; an interactive run keeps the terminal it reads from.
         let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
@@ -871,7 +888,14 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         detached,
                     );
                 }
-                let process = format!("lf/{}", record.lf_process_id.as_str().replace('-', ""));
+                let process = format!(
+                    "lf/{}",
+                    record
+                        .attachment
+                        .provider_lf_process_id
+                        .as_str()
+                        .replace('-', "")
+                );
                 output.report(
                     format!("{process}/step"),
                     crate::program_status::State::Clear,

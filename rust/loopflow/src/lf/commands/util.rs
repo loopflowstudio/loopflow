@@ -563,8 +563,6 @@ fn run_native_session(
         let exit = crate::harness::native_exit::NativeExit {
             session: owner.1.clone(),
             attachment: owner.2.clone(),
-            lf_process_id: crate::journal::current_lf_process_id()
-                .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?,
             provider: command.program.clone(),
             resuming: agent_session.is_some(),
             cwd: command.cwd.clone(),

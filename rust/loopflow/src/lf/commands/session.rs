@@ -771,8 +771,9 @@ async fn restarted(
         return crate::ops::human_session::open(store, &selected.id, false, launch, json).await;
     }
     let agent = crate::config::agent_override();
-    let next = crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch)
-        .await?;
+    let next =
+        crate::ops::human_session::new_thread(store, &selected.id, agent.as_deref(), launch, json)
+            .await?;
     crate::ops::human_session::surface(store, &next).await
 }
 

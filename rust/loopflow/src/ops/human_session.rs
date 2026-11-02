@@ -769,7 +769,7 @@ pub(crate) async fn open(
     }
     if fork {
         drop(progress);
-        return self::fork(store, session, resume).await;
+        return self::fork(store, session, resume, json).await;
     }
     let provider_session = match session.artifact_key.as_deref() {
         Some(key) => store.sqlite.input_provider_session(key)?,
@@ -780,7 +780,7 @@ pub(crate) async fn open(
             conversation_log::read(&store.sqlite, session)?;
         } else {
             drop(progress);
-            new_thread(store, &session.id, Some(&agent), true).await?;
+            new_thread(store, &session.id, Some(&agent), true, json).await?;
             let session = store
                 .session(&session.id)
                 .await?
@@ -909,7 +909,12 @@ pub(crate) async fn open(
 
 /// A new conversation in the same Work, seeded with `source`'s log. The
 /// source and whatever holds it are left alone.
-async fn fork(store: &SharedStore, source: &LfSession, launch: bool) -> Result<SessionRecord> {
+async fn fork(
+    store: &SharedStore,
+    source: &LfSession,
+    launch: bool,
+    json: bool,
+) -> Result<SessionRecord> {
     let request = conversation_log::continuation(&store.sqlite, source)?;
     let (provider, model) = match crate::config::agent_override() {
         Some(agent) => {
@@ -952,11 +957,18 @@ async fn fork(store: &SharedStore, source: &LfSession, launch: bool) -> Result<S
     );
     let record = surface(store, &next).await?;
     if launch {
-        let id = next.id.to_string();
-        let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&id)).await??;
-        serve_locked(store, &next, launch_lock).await?;
+        open_prepared(store, &next.id, json).await?;
     }
     Ok(record)
+}
+
+/// Preparation has already mutated the Session. Only its resulting identity
+/// crosses to the owner; opening it reacquires the lock and reads current state.
+async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
+    if !crate::transport::delegate_prepared_session(id, json)? {
+        open_waiting(store, id).await?;
+    }
+    Ok(())
 }
 
 /// Why `lf resume` refuses a Run (a headless conversation, alone or a Graph
@@ -1068,6 +1080,7 @@ pub(crate) async fn new_thread(
     id: &str,
     agent: Option<&str>,
     launch: bool,
+    json: bool,
 ) -> Result<LfSession> {
     let lock_id = id.to_string();
     let launch_lock = tokio::task::spawn_blocking(move || lock_session_process(&lock_id)).await??;
@@ -1103,7 +1116,8 @@ pub(crate) async fn new_thread(
         next.title
     );
     if launch {
-        serve_locked(store, &next, launch_lock).await?;
+        drop(launch_lock);
+        open_prepared(store, &next.id, json).await?;
     }
     Ok(next)
 }

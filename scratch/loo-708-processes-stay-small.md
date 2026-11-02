@@ -28,7 +28,7 @@ sockets directly, polling commands and ending idle providers remain outside
 LOO-708. The current per-conversation implementation does not decide the later
 shared-owner question.
 
-## Implemented approach (reconciled 2026-11-02)
+## Implemented approach (reconciled 2026-11-02, preservation pass)
 
 **Exec, not a new wait.** A process that already owns the child keeps owning
 it across `exec`: PID, parent, PTY, process group and the owner's `wait`
@@ -53,8 +53,13 @@ all survive. So nothing learns to wait on a non-child.
   (`LF_SESSION_LAUNCH_LOCK`) and the launcher drops it where it already drops
   the resume path's lock. Handoff env uses `carry_across_exec`.
 - **Viewer → relay.** `transport::attach` completes the viewer's ledger row
-  and `exec`s `lf session attach OWNER [--moved TEXT]`, handled at the top of
-  `run()` before Clap, tracing or any store: socket, stdin, stdout only.
+  and `exec`s `lf session attach OWNER [--moved TEXT] [--session-json SESSION]`,
+  handled at the top of `run()` before Clap, tracing or any store. The relay
+  uses socket, stdin and stdout; only a successful return opens the store to
+  print the requested Session record. Fork/new-thread callers now delegate
+  `session resume RESULT_ID` after preparation and carry that ID to the relay.
+  They do not replay the original mutation. Thread replacement releases its
+  preparation lock; the opener reacquires it and reads the current input.
 
 ## Delete — do not maintain
 
@@ -65,12 +70,18 @@ all survive. So nothing learns to wait on a non-child.
 - Removed: the duplicated native-client completion branch in `transport::serve`.
   A launcher announcement or the owner's child wait enters the same drain/finish
   path before settlement. No second wait or terminal-completion authority remains.
+- Removed: `NativeExit::lf_process_id`. The validated attachment already names
+  the launcher as `provider_lf_process_id`; settlement and terminal status use
+  that identity instead of carrying a second copy. Transport fixtures share
+  provider installation while retaining each scenario's script and assertions.
 - Keep `spawn_session_process`, `session_is_resumable` and their exclusive
   polling fixtures deleted, along with the launcher wait on the exec path and
   the viewer heap. The Session-ID continuation restores post-return output
   without a retained waiter or live relay store. LOO-712 owns framing.
 
-No remaining deletion target was identified in this pass.
+Removed in the mutation-path repair: direct `serve_locked` calls from `fork`
+and `new_thread`. Both now use the same prepared-input opener; no mutation
+command is replayed in the owner. No remaining deletion target is identified.
 
 ## What changed during implementation
 
@@ -98,48 +109,51 @@ Jack Heart's 2026-11-02 coordination comment on LOO-705
 (`5bbe5c1c-532e-454f-96a0-212a80091b25`) requires an owner-supplied successor:
 the installed entry plus `session resume <session id>`. Replaying this branch's
 relay argv would attach to the ended owner. LOO-705 owns that behavior; its
-PR #1799 is open at reconciliation. The accepted order recorded on LOO-712 is
+PR #1799 was open at the prior reconciliation; no fresh hosted state was read.
+The accepted order recorded on LOO-712 is
 LOO-705, then LOO-708/LOO-709, then LOO-712 carrying the successor in its control
 event. That integration is not in this checkout yet.
 
-Related branch memory was inspected at `81544931d3` (LOO-712), `7cdda980f5`
-(LOO-709) and `ca6493ff68` (LOO-710). These are branch evidence, not merged
-behavior here: LOO-709 changes lifetime policy; LOO-710 changes terminal state;
-LOO-712 changes framing. Their integration must preserve this branch's wake
-pipe, exit handoff and store-free relay. Release child Wave memory reinforces
-testing the real entry path rather than treating a helper fixture as installed
-acceptance; its GOAL.md and full MEMORY.md were read, with no other immediate
-child Wave directories present.
+Related local branches were rechecked on 2026-11-02: LOO-705 at `c788a6ea32`
+sends the full successor for removed, replaced and superseded executables;
+LOO-712 at `35a2d5eec7` carries it through the control event and restores the
+terminal before following, with exact-argv and exit/error fixtures. Neither
+branch is merged here. Their combined integration must retain this branch's
+wake pipe, exit handoff, store-free live relay and post-return JSON obligation.
+LOO-712's framing and per-viewer appearance changes remain outside this Task.
+
+LOO-709 memory at `9bc58f47ba` now protects recent native output for both
+lifetime exit causes, retains running Graphs/headless Runs, and records its
+agreement with LOO-710 on `screens/<session>.ghostsnp`. Its disposable-Home
+check ended 20 owners but resumed only three; this is not acceptance here.
+Earlier LOO-710 evidence remains `ca6493ff68`. These lifetime and snapshot
+responsibilities remain with those Tasks during integration.
 
 ## Acceptance evidence and remaining work
 
-- Caller review after the preservation repair found one remaining JSON cutover:
-  `human_session::fork` and `human_session::new_thread` call `serve_locked`
-  before the JSON-aware delegation in `human_session::open`. The former receives
-  no JSON intent; the latter also serves `session new` and provider-changing
-  resume. Their exec still bypasses the caller's `print_opened`. Next implement
-  must carry the correct resulting Session ID through these paths too, without
-  replaying the fork/new-thread mutation or retaining a waiter. Add focused
-  `resume --fork --json` and `session new --json` proofs, including one provider
-  launch and the resulting Session identity. This is a code-inspection finding;
-  the seven passing transport checks below do not exercise these paths.
+- The fork/new-thread JSON cutover is repaired: JSON intent and the resulting
+  Session ID travel with the prepared launch. Three focused checks prove
+  `resume --fork --json`, threaded `session new --json`, and provider-changing
+  resume launch once, append one input and return the correct identity.
+  Fork also preserves its source input; each result contains one JSON record.
 - Implemented and fixture-proven: one owner plus one relay through Desktop's
   prepared-command path, Claude directly parented by the owner, one provider
   launch, attachment exit, AgentProcess completion, capture settlement and
   launcher completion. The interactive Graph regression proves each step
   settles before the next starts. These use stand-ins, not a rendered Desktop
   or authenticated Claude.
-- Still required: exit recording, takeover notices, `lf resume`, reboot
-  `lf resume --all`, and Graph behavior remain intact. Transport passed after
-  compression; gate owns lifecycle/launch-contract, startup-cost and journal
-  acceptance checks against the final implementation. Earlier lifecycle (28),
+- Exit/continuation checks cover returning and handed-off exits 7/130, failed
+  exec with one failed capture, JSON on initial launch/reconnection/takeover,
+  and stale-owner settlement preserving a replacement attachment.
+- Gate owns lifecycle/launch-contract, startup-cost and journal acceptance
+  checks against the final implementation. Transport's exit, takeover, resume,
+  reboot recovery and Graph checks passed after compression. Earlier lifecycle (28),
   launch-contract (25) and focused unit (111) passes are baseline evidence.
 - Still required: real Desktop/Claude process-count acceptance and PR inclusion
   of the footprint comparison. No PR exists yet. The release measurement below
   predates compression; no final-tree measurement is claimed.
 - Integration after LOO-705 must retain the explicit successor through the
-  thin relay. LOO-712 owns subsequent encoding changes. No substantial missing
-  process implementation was identified in this reconciliation.
+  thin relay. LOO-712 owns subsequent encoding changes.
 - Concept review below resolves the draft compatibility assumptions by preserving
   the existing command contract. The repair below restores the JSON continuation and launcher-result
   interpretation; no acceptance of their removal is inferred.
@@ -168,79 +182,36 @@ user-facing lifecycle. No new table, shared daemon, provider turn, or wire encod
 change follows from this review. Graph children and Codex/OpenCode retain the
 waits their current execution paths need.
 
-### Experience and proposed documentation
+The concept review found that exec discarded `resume`'s `print_opened`
+continuation, and owner settlement reinterpreted raw provider status instead
+of preserving the returning launcher's command/capture result. Both are repaired.
+The initial review and counterexamples remain at
+`705e6c150a:scratch/loo-708-processes-stay-small.md`, Concept review.
 
-Keep the existing Session and transport usage guidance. The following behavior
-is the preservation target:
+The failed assumption was that replacing a waiting process automatically
+preserved its caller's remaining work. Exec keeps process identity and open
+handles, but discards the call stack. A continuation must follow the actual
+resulting Session identity through each entry, including mutation paths.
+Before this pass, fork and new-thread reached `serve_locked` before `open`'s
+JSON-aware delegation; `fork` received no JSON intent and `restarted` dropped
+it on the threaded branch.
+Delegating the original command after the mutation would replay fork/new-thread
+creation in the owner. The repair separates the prepared launch
+from that mutation, carries the resulting identity, and retains one launch.
+This follows the accepted preservation contract; no new product decision
+is inferred.
 
-```sh
-lf resume SESSION                  # return to the same conversation
-lf resume SESSION --prepare --json # return the command Desktop opens
-lf resume SESSION --json            # retain the existing Session JSON after a successful return
-```
+The removed connect poll's historical startup wording need not return: the
+launcher's actionable failure remains the contract. Graph steps still settle
+before their successor; reboot recovery and final Desktop/footprint acceptance
+retain their separate checks above.
 
-Closing the viewer leaves the provider and capture with the owner. Reopening
-attaches to the same live provider; a takeover tells the departing viewer where
-the conversation went. After a reboot, `lf resume --all` restores eligible
-interrupted conversations from history without replaying input. Existing skills
-need no extra command or distinction for the smaller process chain.
-
-### Consequential mismatch: a process disappeared, but its command still owes a result
-
-1. **Preserve the JSON continuation.** `session.rs::resume` calls `print_opened`
-   after `reopen`, and `print_opened` honors both JSON flags. The old attach returned
-   through `human_session.rs::open`; successful `transport::attach` now execs and
-   cannot reach that continuation. The unchanged `--prepare --json` path does not
-   replace this behavior. Carry only the information needed to finish the command;
-   any final store read can happen after relaying ends. Keep the live viewer small
-   and store-free, and retain the output's existing timing and success conditions.
-   Do not add a waiter or change LOO-712's stream encoding to solve it.
-2. **Preserve launcher semantics when the owner settles.** A native provider
-   exiting 7 formerly returned an ordinary error from
-   `util.rs::spawn_session_command_with_env`, mapped by
-   `journal::command_exit_code` to launcher exit 1. `native_exit.rs::settle` instead
-   assigns 7 to both the launcher record and viewer exit. It also treats raw 130
-   as an interruption and computes capture outcome without `lost`, whereas the
-   returning path includes attachment loss in `SessionCommandOutcome.interrupted`.
-   Use the same interpretation for handed-off and returning launches: preserve
-   the established command result, capture outcome and takeover behavior while
-   retaining native status as evidence. Moving the writer to the owner must not
-   silently redefine success or interruption. Keep attachment fencing and the
-   shared `record_process` writer; no parallel persistence model is needed.
-
-The startup error can come directly from the launcher: the deleted connect poll
-need not survive just to print “before becoming resumable.” The existing lifecycle
-test instead requires the actionable “failed to start” error. This wording does
-not change the recovery action or authorize another launch. PlanningSync moving
-with the wait likewise adds no user choice.
-
-### Counterexamples and next proof
-
-- Normal: prepare a Claude conversation, open its prepared command, detach and
-  reattach. Retain one owner plus one small viewer, the provider identity and one
-  launch. On successful `resume --json` return, retain the Session JSON too.
-- Failure: a native stand-in exits 7 or 130. Compare the returning launch with
-  the owner-settled launch across CLI result, Process result and capture outcome;
-  a raw status alone must not invent a different command contract. A failed exec
-  must still report failure and settle without a second provider launch.
-- Recovery: move an attachment during a live launch, then end the old provider.
-  Preserve the departure notice and existing capture semantics without modifying
-  the new attachment. Kill an owner and use the existing reboot-resume fixture:
-  Session/history survive, and prior input is not replayed. Graph steps still
-  settle before their successor starts.
-
-These are focused proof obligations for the repair.
-LOO-705's explicit successor integration and final Desktop/footprint acceptance
-remain as recorded above. The review itself changed only scratch documentation; the implementation repair
-below follows its direction without changing Wave memory or the review boundary.
-
-## Preservation repair — 2026-11-02
-
-`resume` passes its JSON intent to `open`. A reconnect carries the Session ID
-through the relay exec; a newly delegated connection transfers its JSON tail to
-the viewer and strips the child's JSON flag. The relay reads the current Session
-record after success, including viewer takeover, and never opens the store while
-relaying. Failed relays return their failure without printing a success record.
+Ordinary resume transfers its JSON continuation to the viewer and strips the
+child's JSON flag. The relay prints the current Session record after success,
+including viewer takeover; failure prints no success record. `--prepare --json`
+is unchanged. Root `--json` remains rejected by existing CLI validation; the
+proofs use the command's `--json`. Usage lives in
+`rust/loopflow/src/transport/README.md`.
 
 The owner and returning native launcher share `SessionCommandOutcome` for command
 results and captures. Raw exits 7/130 map to command failure 1; only recorded
@@ -249,18 +220,6 @@ the provider status. Settlement errors also fail the viewer rather than inheriti
 a successful provider code. Failed exec returns to the launcher and withdraws the
 owner's handoff, preserving one settlement path.
 
-Six focused repair checks passed: returning/handed-off exits 7 and 130,
-failed exec with one failed capture, JSON on initial launch and reconnection,
-JSON after viewer takeover, and stale-owner settlement preserving a replacement
-attachment. The existing one-owner/one-relay assertion remains in the successful
-reconnection test. Root `--json` remains rejected by existing CLI validation;
-these proofs use the command's `--json`.
-
-Gate retains the broader acceptance inventory above, including `binary(lf)`,
-transport, session lifecycle/launch-contract, agent startup and journal checks;
-`scripts/test.py --list` selects architecture and Rust for the branch. No new
-authenticated provider turn or Desktop claim is made.
-
 ## Checks
 
-2026-11-02: `cargo nextest run -p loopflow --test transport_tests -E 'test(a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit) | test(native_exit_preserves_returning_launcher_results) | test(failed_native_exec_settles_once_without_launching_a_provider) | test(interactive_graph_settles_each_step_before_starting_the_next) | test(resume_json) | test(opening_a_prepared_conversation_runs_one_owner_and_one_relay)'` passed (7); prior unchanged stale-owner settlement test reused; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` passed; `lf context` within both budgets; inherited `LF_*` cleared and stdin closed; fork/new-thread JSON cutover belongs to implement, broader acceptance to gate, Desktop/footprint judgment to authored review.
+2026-11-02: `cargo test -p loopflow --test transport_tests` passed (30); `cargo test -p loopflow --lib harness::native_exit::` passed (1; nonfatal linker unwind-size warning); `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; inherited `LF_*` cleared and stdin closed; `lf context` within both budgets. Gate owns remaining affected suites; authored review owns Desktop/footprint judgment.

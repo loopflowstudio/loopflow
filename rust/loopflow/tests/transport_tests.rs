@@ -160,27 +160,28 @@ impl Fixture {
     fn sql(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
     }
-    /// Put a `claude` stand-in that logs each launch to `launches` and waits on
-    /// its terminal first on a PATH, returned.
-    fn waiting_provider(&self) -> String {
+    /// Install a stand-in first on PATH without invoking a Machine provider.
+    fn provider(&self, script: &str) -> String {
         let bin = self.home.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let provider = bin.join("claude");
-        std::fs::write(
-            &provider,
+        std::fs::write(&provider, script).unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        )
+    }
+    /// Log each launch to `launches` and wait on its terminal.
+    fn waiting_provider(&self) -> String {
+        self.provider(
             r#"#!/bin/sh
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
 stty -echo < /dev/tty
 printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
 read -r answer < /dev/tty
 "#,
-        )
-        .unwrap();
-        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-        format!(
-            "{}:{}",
-            bin.display(),
-            std::env::var("PATH").unwrap_or_default()
         )
     }
     /// The first `count` lines `waiting_provider` logged, once they exist.
@@ -745,11 +746,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
 
 fn native_pending_request(silent_owner: Option<SilentOwner>) {
     let fixture = Fixture::new();
-    let bin = fixture.home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let provider = bin.join("claude");
-    std::fs::write(
-        &provider,
+    let path = fixture.provider(
         r#"#!/bin/sh
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
 stty -echo < /dev/tty
@@ -758,9 +755,7 @@ printf 'permission request-17\n'
 read -r answer < /dev/tty
 printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
 "#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let mut owner = fixture.serve(
         true,
         &[
@@ -772,14 +767,7 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
             "one original input",
         ],
     );
-    owner.env(
-        "PATH",
-        format!(
-            "{}:{}",
-            bin.display(),
-            std::env::var("PATH").unwrap_or_default()
-        ),
-    );
+    owner.env("PATH", path);
     let owner = fixture.owner(owner);
     let launched = fixture.wait_file("launches");
     let (pid, capture) = launched.trim().split_once(':').unwrap();
@@ -864,24 +852,13 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
 
 /// A `claude` stand-in that logs its PID and parent, then waits on its terminal.
 fn parented_provider(fixture: &Fixture) -> String {
-    let bin = fixture.home.path().join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    let provider = bin.join("claude");
-    std::fs::write(
-        &provider,
+    fixture.provider(
         r#"#!/bin/sh
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
 stty -echo < /dev/tty
 printf '%s:%s:%s\n' "$$" "$PPID" "$LF_CAPTURE_KEY" >> "$HOME/launches"
 read -r answer < /dev/tty
 "#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    format!(
-        "{}:{}",
-        bin.display(),
-        std::env::var("PATH").unwrap_or_default()
     )
 }
 
@@ -1092,12 +1069,9 @@ fn native_exit_preserves_returning_launcher_results() {
 #[test]
 fn failed_native_exec_settles_once_without_launching_a_provider() {
     let fixture = Fixture::new();
-    let path = parented_provider(&fixture);
-    let provider = fixture.home.path().join("bin/claude");
     // Discovery succeeds, then exec meets an absent interpreter. No real
     // provider or substitute from the Machine can run.
-    std::fs::write(
-        &provider,
+    let path = fixture.provider(
         r#"#!/bin/sh
 if [ "$1" = --version ]; then
     printf '#!/absent/fixture-interpreter\n' > "$0"
@@ -1106,8 +1080,7 @@ if [ "$1" = --version ]; then
 fi
 exit 99
 "#,
-    )
-    .unwrap();
+    );
     let mut command = fixture.serve(
         true,
         &[
@@ -1236,6 +1209,134 @@ fn resume_json_returns_after_relay_and_viewer_takeover() {
     next.input("done\n");
     next.finish();
     fixture.ends(&owner);
+}
+
+fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
+    let fixture = Fixture::new();
+    let bin = fixture.home.path().join("bin");
+    // The only executable provider is this stand-in; no native turn is sent.
+    fixture.provider(
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.1.302'; exit; fi\nprintf '%s\\n' \"$LF_CAPTURE_KEY\" >> \"$HOME/launches\"\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin.display());
+    let prepared = fixture
+        .command(&["-a", source_provider, "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let source: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let source_id = source["id"].as_str().unwrap();
+    let sql = fixture.sql();
+    let input = format!("run_{}", uuid::Uuid::new_v4().simple());
+    sql.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
+         VALUES(?1,'captured',?2,1,json_object('artifact_key',?2))",
+        [source_id, &input],
+    )
+    .unwrap();
+    sql.execute(
+        "UPDATE agent_sessions SET current_capture=?2,input_published=1 WHERE id=?1",
+        rusqlite::params![source_id, sql.last_insert_rowid()],
+    )
+    .unwrap();
+    let native = uuid::Uuid::new_v4().to_string();
+    sql.execute(
+        "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
+        [source_id, &native],
+    )
+    .unwrap();
+    sql.execute(
+        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+         SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture FROM agent_sessions WHERE id=?1",
+        [source_id, &input, &native],
+    ).unwrap();
+    let transcript = if source_provider == "codex" {
+        fixture.home.path().join(format!(
+            "codex/sessions/2026/11/02/rollout-2026-11-02T00-00-00-{native}.jsonl"
+        ))
+    } else {
+        fixture
+            .home
+            .path()
+            .join(format!("claude/projects/fixture/{native}.jsonl"))
+    };
+    std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    let request = "Keep the original request";
+    let turn = if source_provider == "codex" {
+        json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":request}]}})
+    } else {
+        json!({"type":"user","userType":"external","message":{"content":request}})
+    };
+    std::fs::write(transcript, turn.to_string()).unwrap();
+    let mut args = vec!["-a", "claude", "session", command, source_id, "--json"];
+    if fork {
+        args.push("--fork");
+    }
+    let viewer = fixture
+        .command(&args)
+        .env("PATH", &path)
+        .env("CLAUDE_CONFIG_DIR", fixture.home.path().join("claude"))
+        .env("CODEX_HOME", fixture.home.path().join("codex"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let result = wait_for_viewer(viewer, Duration::from_secs(30));
+    assert!(result.status.success(), "{result:?}");
+    // Exactly one JSON record, for the resulting conversation.
+    let returned: Value = serde_json::from_slice(&result.stdout).unwrap();
+    let id = returned["id"].as_str().unwrap();
+    assert_eq!(id != source_id, fork);
+    assert_eq!(returned["provider"], "claude");
+    let (next_input, request, owner): (String, String, String) = sql
+        .query_row(
+            "SELECT c.receipt_key,s.request,s.transport_lf_process_id FROM agent_sessions s JOIN session_events c ON c.seq=s.current_capture WHERE s.id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_ne!(next_input, input);
+    assert!(request.contains("Keep the original request"));
+    assert_eq!(fixture.launches(1), vec![next_input]);
+    let sessions: i64 = sql
+        .query_row("SELECT count(*) FROM agent_sessions", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(sessions, if fork { 2 } else { 1 });
+    let captures: i64 = sql
+        .query_row(
+            "SELECT count(*) FROM session_events WHERE kind='captured'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(captures, 2, "thread preparation was replayed");
+    if fork {
+        let retained: String = sql
+            .query_row(
+                "SELECT c.receipt_key FROM agent_sessions s JOIN session_events c ON c.seq=s.current_capture WHERE s.id=?1",
+                [source_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, input);
+    }
+    fixture.ends(&owner);
+}
+
+#[test]
+fn resume_fork_json_launches_once_and_returns_the_new_session() {
+    prepared_thread_json("resume", true, "claude");
+}
+
+#[test]
+fn session_new_json_launches_once_and_keeps_the_session() {
+    prepared_thread_json("new", false, "claude");
+}
+
+#[test]
+fn provider_changing_resume_json_launches_once_and_keeps_the_session() {
+    prepared_thread_json("resume", false, "codex");
 }
 
 /// Opening a prepared conversation leaves one owner and one relay: the connect

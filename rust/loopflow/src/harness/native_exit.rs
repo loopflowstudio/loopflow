@@ -12,7 +12,6 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::harness::agent_process::AttachmentOwner;
-use crate::id::LfProcessId;
 use crate::process::SessionAttachment;
 use crate::session_record::CaptureHandoff;
 use crate::store::sqlite::SqliteStore;
@@ -21,9 +20,8 @@ use crate::store::{ProviderAccountId, StoreError};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct NativeExit {
     pub session: String,
+    /// Names the provider and its launcher Process, which completes at exit.
     pub attachment: SessionAttachment,
-    /// The launcher's own Process, completed when the provider exits.
-    pub lf_process_id: LfProcessId,
     pub provider: String,
     pub resuming: bool,
     pub cwd: PathBuf,
@@ -87,7 +85,7 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
             .push(format!("Loopflow recorded diagnostics: {}", path.display()));
     }
     let mut process = store
-        .process(&exit.lf_process_id)?
+        .process(&attachment.provider_lf_process_id)?
         .context("handed-off launcher is not recorded")?;
     process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
     process.outcome = Some(
@@ -214,7 +212,6 @@ mod tests {
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
-                lf_process_id: launcher.clone(),
                 provider: "claude".into(),
                 resuming: true,
                 cwd: home.into(),

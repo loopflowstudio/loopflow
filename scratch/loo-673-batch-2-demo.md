@@ -20,6 +20,8 @@ Jack then asked for `lf sync`, which merged main (`70bf7652b0`, through #1797) a
 
 Jack said "not open" after that. Crash report `Loopflow Dev-2026-11-02-133856.ips` and `lf doctor`: pids 5201 and 42459 both died by SIGILL 5 minutes after launch. Cause: since #1773, `lf_write` parses the whole `lf` command line in-process; a debug build's clap frame is 375 KB (pc is the stack probe at offset 0x14 of `Commands::augment_subcommands`, data abort at sp) on a 512 KB Swift task thread. `LoopflowLibrary.call` now runs on an 8 MB thread; `LoopflowLibraryTests` crashed before and passes after. Pid 79544 from the fixed build was still up with a window 5m44s after launch. Release builds were not measured.
 
+Jack's 14:05 screenshot of that build: "Invalid selections watch frame ... WorkSelectionState from invalid String value working", and "No working Tasks in this list". A batch 2 bug: Rust gained `working`/`autonomous` selection states without the Swift mirror, and no fixture carried them. Fixed; `selection_states.json` now lists every state, checked against the Rust schema and decoded in Swift. Agent could not screenshot the window (no screen-recording permission), so Jack's eyes are the check.
+
 ## Jack's observations
 
 (pending)

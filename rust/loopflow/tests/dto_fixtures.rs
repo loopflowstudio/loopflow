@@ -530,6 +530,40 @@ fn graph_detail_keeps_its_launched_graph_and_every_step() {
     );
 }
 
+/// Every state Rust can send, so Swift's decoder is tested against all of them.
+#[test]
+fn selection_states_fixture_lists_every_state() {
+    use loopflow::work::selection::SelectionState;
+    fn collect(schema: &serde_json::Value, names: &mut Vec<String>) {
+        match schema {
+            serde_json::Value::Object(fields) => {
+                for (key, value) in fields {
+                    match (key.as_str(), value) {
+                        ("const", serde_json::Value::String(name)) => names.push(name.clone()),
+                        ("enum", serde_json::Value::Array(values)) => names
+                            .extend(values.iter().filter_map(|v| v.as_str().map(str::to_owned))),
+                        _ => collect(value, names),
+                    }
+                }
+            }
+            serde_json::Value::Array(values) => values.iter().for_each(|v| collect(v, names)),
+            _ => {}
+        }
+    }
+    let mut sent = Vec::new();
+    collect(
+        &serde_json::to_value(schemars::schema_for!(SelectionState)).unwrap(),
+        &mut sent,
+    );
+    sent.sort();
+    let mut fixture: Vec<String> = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/dto/selection_states.json"
+    ))
+    .unwrap();
+    fixture.sort();
+    assert_eq!(fixture, sent);
+}
+
 #[test]
 fn watch_frames_carry_each_reads_json_result() {
     use loopflow::lf::commands::watch::WatchFrame;

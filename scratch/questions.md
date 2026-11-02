@@ -33,8 +33,8 @@ Nothing in this Task's scope. Gate owns the affected suites.
   refused store as "no registry" (implicit Work binding on launch, `lf context`,
   session resume over ssh, `lf ci`, metrics publishing) now exit nonzero with
   the skew and `lf install`. An agent reading "nothing here" as fact is the
-  bug; a launch path that should keep running unbound under skew would be a
-  product decision, left open.
+  bug. Settled by the concept review below: no launch path keeps running
+  unbound under skew.
 - **One registry opener.** `open_registry_for_authority` and `RegistryUnavailable`
   are deleted; their seven callers use `open_existing_store`. Refusal messages
   name the path only where a caller still adds `default_db_path()`.
@@ -48,3 +48,50 @@ Nothing in this Task's scope. Gate owns the affected suites.
 Check: `cargo test -p loopflow --lib store::sqlite::frontier_tests::` 11 passed;
 `--test task_pr_authority_tests` 12 passed; `--test integration -- doctor_tests::status_reads` passed;
 clippy clean (tree unchanged since; realign reran nothing).
+
+## Concept review (2026-11-02, headless)
+
+Reviewed the implemented change against Jack Heart's decisions of 2026-11-02.
+Page: `scratch/concept-review.html`.
+
+**Accepted experience.** Jack installs a newer lf while steps and conversations
+run on the older one. Nothing he does changes: the install migrates `~/.lf`,
+running work keeps going, and any lf that can no longer read the store says
+which migration it lacks and `run \`lf install\``, exiting nonzero. Agents never
+see an empty registry. Nobody is told to delete loopflow.db.
+
+**Model.** Two concepts carry it. A *store* has a migration frontier; a
+*reader* is any lf process holding it open. A newer tail is additive unless a
+migration says `-- breaks:`. Skew is a reader behind a breaking tail. Three
+surfaces: `open_existing_store` (one opener; `Ok(None)` only when no file),
+`validate_current_schema` after every Graph step, and the two refusal texts
+(`this store needs an lf that knows <v> … run \`lf install\`` for a breaking
+tail; `incompatible()` for a diverged history). No new record, flag or state.
+
+**Settled from accepted decisions.**
+- Launch under skew fails with the skew. "Exit nonzero and name the fix"
+  covers launches; one lf per Mac (LOO-669/688) makes skew itself the defect,
+  and an unbound launch would hide it from the one person who can run
+  `lf install`. The earlier "left open" note is withdrawn.
+- `Ok(None)` keeps meaning "no store on this Machine yet"; callers that say
+  `run \`lf doctor\`` for that case are right, since there is no skew to name.
+
+**Normal path, failure, recovery.**
+- Additive install under a running Graph: the step finishes, revalidation
+  passes, the Graph continues. Proved by `frontier_tests`.
+- Breaking install under a running Graph: the step's row is recorded, then
+  the Graph stops naming the skew and `lf install`; the worktree keeps the
+  step's files. `lf install`, then `lf task run <ID>` restarts that run from
+  where it began (the ordinary stopped-Graph contract, not a replay of effects).
+- Held counterexample, no change: a step's own long-lived connection that
+  meets a `-- breaks:` migration mid-write fails with a raw SQLite error, not
+  the skew text. Every fresh lf the agent runs inside the step, and the Graph
+  at the step boundary, name the skew. Wrapping every write in a revalidate
+  would be machinery for a case `-- breaks:` is designed to make rare.
+- Private `LF_HOME` stores refuse any newer tail because they self-migrate;
+  running steps live in `~/.lf`, so the rule stays. Developers sharing one
+  private store between two builds see the refusal with `lf install`.
+
+**Open product choices.** None.
+
+**Next proof.** Gate: the suites named under Check above; nothing new.

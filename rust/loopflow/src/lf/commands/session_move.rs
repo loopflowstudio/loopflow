@@ -55,7 +55,7 @@ pub fn move_task(issue: &str, target: &str) -> Result<TaskOwnership> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store: SharedStore = std::sync::Arc::new(
             crate::store::open_existing_store()
-                .await
+                .await?
                 .ok_or_else(|| anyhow!("no Loopflow registry on this machine; run `lf doctor`"))?,
         );
         relay_task(&store, issue, target).await

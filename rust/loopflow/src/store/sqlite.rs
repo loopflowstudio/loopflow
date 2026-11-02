@@ -2334,6 +2334,65 @@ mod frontier_tests {
         );
     }
 
+    /// A Graph holds its store across steps and revalidates it after each one
+    /// (`validate_current_schema`). A newer build that adds a slug migration
+    /// meanwhile leaves that running reader working; one that breaks stops it
+    /// with the skew and `lf install`, never advice to delete the database.
+    #[test]
+    fn a_running_older_reader_survives_an_additive_upgrade_under_it() {
+        let shared = SharedMachine::new();
+        let path = shared.shared_db();
+        open(&path, &shared.home, Authorized).unwrap();
+        let running = open(&path, &shared.home, Forbidden).unwrap();
+        let before = Wave::new(WaveId::new(), "Before upgrade".into(), "/repo".into());
+        running.create_wave(&before).unwrap();
+
+        let newer = rusqlite::Connection::open(&path).unwrap();
+        apply_newer_migration(
+            &newer,
+            "ALTER TABLE waves ADD COLUMN colour TEXT;
+             CREATE TABLE wave_badges (wave_id TEXT NOT NULL, badge TEXT);",
+            true,
+        )
+        .unwrap();
+
+        running
+            .validate_current_schema()
+            .expect("an additive newer migration keeps the running reader valid");
+        let after = Wave::new(WaveId::new(), "After upgrade".into(), "/repo".into());
+        running.create_wave(&after).unwrap();
+        for wave in [&before, &after] {
+            assert_eq!(
+                running
+                    .get_wave(wave.id())
+                    .unwrap()
+                    .map(|w| w.name().to_string()),
+                Some(wave.name().to_string())
+            );
+        }
+
+        let broken = SharedMachine::new();
+        let path = broken.shared_db();
+        open(&path, &broken.home, Authorized).unwrap();
+        let running = open(&path, &broken.home, Forbidden).unwrap();
+        let newer = apply_newer_migration(
+            &rusqlite::Connection::open(&path).unwrap(),
+            "CREATE TABLE wave_marks (wave_id TEXT NOT NULL);",
+            false,
+        )
+        .unwrap();
+        let refusal = running
+            .validate_current_schema()
+            .expect_err("a breaking newer migration stops the running reader")
+            .to_string();
+        assert!(
+            refusal.contains(&format!("this store needs an lf that knows {newer}"))
+                && refusal.ends_with("run `lf install`")
+                && !refusal.contains("delete"),
+            "{refusal}"
+        );
+    }
+
     #[test]
     fn a_private_store_opens_with_the_current_work_schema() {
         let shared = SharedMachine::new();

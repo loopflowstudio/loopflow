@@ -1475,7 +1475,10 @@ async fn refresh_async(
     let mut blocking = Vec::new();
     let team_id = selected_linear_team(repo)?;
 
-    if let Some(store) = open_existing_store().await {
+    if let Some(store) = open_existing_store()
+        .await
+        .map_err(|error| OpsError::Message(format!("failed to open Wave registry: {error}")))?
+    {
         let origin = crate::work::wave::context::wave_origin(repo);
         for wave in store
             .list_waves(Some(&origin.display().to_string()))

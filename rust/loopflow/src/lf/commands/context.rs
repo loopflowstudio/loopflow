@@ -29,7 +29,7 @@ pub fn run(json: bool, wave: Option<&str>, task: Option<&str>) -> Result<()> {
     let mut repo = crate::repo::require_repo_root(&std::env::current_dir()?, "lf context")?;
     let runtime = tokio::runtime::Runtime::new()?;
     let binding = runtime.block_on(async {
-        let Some(store) = crate::store::open_existing_store().await else {
+        let Some(store) = crate::store::open_existing_store().await? else {
             anyhow::ensure!(task.is_none(), "Task usage unavailable: no local registry");
             return Ok::<_, anyhow::Error>(None);
         };

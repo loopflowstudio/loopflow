@@ -6,9 +6,7 @@ Status: implementation stopped at delivery design, 2026-11-02. Requested by Jack
 
 Jack asked to combine worker messages into the Task Session with a separate
 activity view, offering a minimal default and expanded detail. This supersedes
-the kickoff's wait-only proposal and its exclusion of Desktop changes below.
-The kickoff implementation details remain historical proposals, not an accepted
-build plan.
+the kickoff's wait-only proposal and its exclusion of Desktop changes.
 
 Jack's latest preference is screen 2, the run page in
 `scratch/prototype-screens.html`: "2 is probably the closest." It groups history
@@ -41,8 +39,7 @@ Source: the continued Session's Claude conversation log at
 
 Jack Heart's selected outcome remains **worker posts into the Session plus the
 run page**. Neither a Desktop status badge nor a next-prompt context injection
-alone meets it. The wait-only kickoff below is historical; its scope, deletion
-list and Done when are not the current implementation contract.
+alone meets it. The archived kickoff is not the implementation contract.
 
 The code inspection found no existing worker-to-native-Session posting operation.
 This is a missing delivery design, not evidence that native delivery is impossible.
@@ -97,7 +94,7 @@ The latter is not a live subscription, so automatic remote updates remain work.
 - Files retains the diff. Existing Task navigation, run controls, remote
   location selection and Session surfaces retain their current owners.
 
-### Delete — do not maintain (current target)
+### Delete — do not maintain
 
 - Replace `GraphProcessView.detail`'s default diagram plus flat step list with
   grouped run history. Preserve every recorded step, nested loop position,
@@ -131,274 +128,35 @@ alone would leave the selected outcome incomplete; applying the old wait-only
 plan would implement the superseded alternative. The missing native delivery
 contract returns this design to review before dependent implementation.
 
-Check: source inspection only; no production diff, so no build/test run. Native delivery acceptance remains unproved.
+## Retained evidence and superseded proposal
 
-## Kickoff proposal (superseded where noted above)
+The original notes and all five HTML explorations are preserved at
+`5f658180d9:scratch/`. The wait-only proposal is in that commit's
+`loo-711-task-sessions-tell.md`, under **Kickoff proposal**. It proposed a
+watch-driven `task wait --until moved`, new output/timeout semantics and
+skill-owned re-arming. None was implemented or remains required by the selected
+design. Its provider exclusions and draft-colliding Desktop fallback must not
+be carried forward. The HTML files remain simulated review references.
 
-## Problem
+Reusable findings from that proposal (paths under `rust/loopflow/src/`):
 
-Jack leaves a Task Session open while `lf task run` works in the background.
-The Session hears nothing: it acts only during a turn, and no turn starts when
-a step ends, fails, or stops at an interactive step. So Jack types "what's
-going on now? did it finish?" to get a report he should already have.
+- `lf/commands/watch.rs` already streams Task status on store revisions and a
+  liveness clock. Graph/Process rows supply movement facts without an additional
+  event store. `ops/task.rs::task_wait` still polls for submitted/terminal.
+- `lf/commands/graph.rs::RunningGraph::spawn` records step start and exit in
+  separate commits. Coalesce exit/next-start updates rather than announcing the
+  transient between-steps state. A completed Graph may mean an interactive stop;
+  use the Task's position to distinguish that from reaching `end`.
+- Task steers fan out to worker Runs as well as interactive Sessions. Delivery
+  must select interactive recipients instead of feeding events back to workers.
+- Product memory's October 1 Ask-removal decision rejects a separate notification
+  queue or required handoff. Existing Graph facts remain the status authority.
+- Claude wake probes and their limitations are retained in
+  `research-harnesses.md`. They establish primitives, not production delivery.
 
-Outcome: Jack can leave a Task Session open and learn when its background work
-moves, finishes or fails, without asking.
+Demo remains: leave a Task Session idle in Desktop or a terminal with an unsent
+draft, run its Graph, and observe a report without typing. Show failure/log
+navigation and an interactive stop without advancing it; inspect the same run
+in the page. The draft and Session identity must survive.
 
-## Demo
-
-In Desktop (or a terminal), `lf resume --task LOO-711`. The Session reads the
-Task, says where it stands, and ends its turn. In another terminal,
-`lf task run LOO-711`. With nothing typed, the Session speaks:
-
-> kickoff started (Graph `feature`, Process b40d…).
-
-and later:
-
-> kickoff finished; explore is interactive and waiting here. Read
-> `scratch/loo-711-task-sessions-tell.md` and tell me which approach to build.
-
-If the step fails, the Session says so with the log path. The cursor stays in
-Jack's input box throughout; a half-typed draft survives.
-
-## What exists (findings, 2026-11-02)
-
-Verified in this checkout. Paths are under `rust/loopflow/src/`.
-
-- **An interactive Task Session is Claude Code's native TUI on a pty** held by
-  a detached owner process (`transport.rs`); Desktop attaches a Ghostty pane as
-  the controlling viewer. Only that viewer's token may write to the pty
-  (`transport.rs:614-624`). lf has no `session prompt`; `lf desktop send` types
-  into the pane like a person and would collide with a draft.
-- **Steers are pulled, never pushed.** `lf session steer` saves a row and the
-  hooks lf installs (`context_block.rs:242-265`: SessionStart, UserPromptSubmit,
-  steer-gated PostToolUse, Stop) paste pending steers into context at the next
-  boundary. A steer saved while the Session is idle appears on Jack's next
-  prompt. Stop never blocks or continues a turn. Nothing wakes an idle Session.
-  The comment at `steer.rs:10-14` ("Prompt boundaries always check") is stale
-  since 3ce34e29c8c; both prompt and tool moments use the seen-marker check.
-- **Claude Code re-invokes a Session when a background command exits.** Probed
-  here: a `run_in_background` Bash that exited after four seconds produced a
-  task notification and a new model turn with no person present. Third-party
-  write-ups describe the same for interactive sessions (the harness sends one
-  completion notification, "like SIGCHLD"). This is the only mechanism that
-  starts a turn in the native TUI, and it is provider-native: no lf process
-  writes to the pty.
-- **`lf task status <issue> --json --watch` already streams a frame on every
-  change** (`lf/commands/watch.rs`): store revisions say when a commit could
-  have changed the result, a kqueue on the WAL wakes the reader, a 2 s clock
-  covers Process liveness. The `task` body carries `task.state`, `task.reason`
-  (a sentence such as "Step Process … is running kickoff"), `task.graph.step`,
-  `graph_processes[].{state,step}` and `task.pr`. The `graphs` and `processes`
-  revision domains cover `task_graphs` and Graph step Processes.
-- **`lf task wait`** (`ops/task.rs:2558`) is a 1 s poll of the full status,
-  with `--until submitted|terminal` only, and returns success on timeout.
-- **Step lifecycle, as recorded.** `RunningGraph::spawn` (`lf/commands/
-  graph.rs:791-884`) starts each step as an `lf` child, writes its
-  `graph_process_steps` row once the child registers (`graphs` domain), and
-  `child.wait()`s; the exit lands on the step's own `processes` row
-  (`processes` domain). A run that stops before an interactive step, or
-  reaches `end`, arrives in `task_graphs` (`planning` domain); a failed or
-  interrupted run writes nothing there. So one step boundary is two commits a
-  process spawn apart, with `task.reason` reading "Graph is between steps
-  after kickoff" in the gap. `graph_processes[].state` reports both "reached
-  end" and "stopped at an interactive step" as completed; `task.graph.step`
-  and `task.reason` tell them apart.
-- **Nothing announces steps today.** No per-step comment, Linear comment or
-  Task event; `TaskEventKind::GraphFinished` has no live writer. Task steers
-  reconcile to every member Session, including the Graph's own step Runs, so
-  a step-event steer would be delivered back to the worker that caused it.
-- Wave memory, 2026-10-01 (Ask removal): Jack asked for no notification queue,
-  reporting command or required handoff. Steers are the one durable authored
-  input; there is no agent messaging substrate. Step events are already Work
-  state (GraphProcess rows), so no new record is needed.
-
-## Decision (kickoff, 2026-11-02)
-
-**The Task Session subscribes itself, through the provider's own background
-notification, to an lf wait that returns when the Task's work moves.**
-
-Two changes, no new store, no new delivery channel:
-
-1. `lf task wait <issue> --until moved` returns when the Task's work position
-   differs from when the wait began. It is driven by the watch machinery, not
-   a poll; `submitted` and `terminal` move onto the same loop.
-2. The task-session skill arms that wait in the background before ending any
-   turn in which the Task has live work, and treats its return as a turn:
-   reread status, say what moved and what is available now, re-arm.
-
-Why this and not the other options Jack named:
-
-- *Better skill instructions alone* cannot reach an idle Session; the brief
-  already saw this. They are half of the answer: the arming rule.
-- *Automatic injection from the worker Graph into the Session* (a steer or a
-  context-block line per step) only lands on Jack's next prompt. It would add
-  a second record of what GraphProcess rows already say, and the 2026-10-01
-  decision rules out a notification queue. The wait reads Work state instead.
-- *Graphs providing their own updates* is a prose channel beside the step
-  Processes that already carry the facts. Not needed for this outcome.
-- *A Stop hook that blocks and continues the turn* would hold the Session busy
-  for the length of a step (pursue runs for an hour), make it read as
-  unavailable, and keep Ctrl-C semantics undecided. Rejected.
-- *A Desktop badge* lets Jack see movement without typing but does not make
-  the Session say anything, and leaves terminal Sessions out. Free to add
-  later; not this Task.
-
-### Which events start a turn
-
-Every move of the Task's work position: a step Process starts or ends, the run
-stops before an interactive step, the Graph reaches `end` or fails, Auto-Ship
-state changes, the PR opens, merges or closes, the Task completes. Not: token
-usage, comments, Session liveness, or a Linear sync that changes nothing in the
-position. A step boundary is one event: the wait's settle window (below)
-folds the step's exit and the next step's start together.
-
-Rationale: Jack's complaint is silence. A turn per step boundary is one short
-read and two sentences; the `feature` graph has about ten steps per pass. If
-this proves noisy, the knob is the skill text ("report only failures, waits
-and end"), not the command. Recorded as a product assumption in
-`scratch/questions.md`.
-
-### Interactive and headless
-
-Only an interactive conversation arms the wait. A headless `lf --task <issue>
-skill task-session` run ends when its turn ends; a background wait would keep
-it alive for nothing. The run-mode line in the launch context says which it is.
-
-Codex, OpenCode and Pi Sessions have no provider notification that starts a
-turn; for them the wait returns at their next prompt. Tasks run on Claude, so
-this is a documented limit, not a gap to close here.
-
-## `lf task wait --until moved`
-
-Source of truth: the `lf task status --json` body (`task_detail`), read by the
-same reader `--watch` uses. The wait compares a **position** projection of two
-readings and returns when it differs:
-
-```
-task.state, task.reason, task.graph, task.pr, task.next,
-graph_processes[].{id, state, step}, task done/abandoned
-```
-
-Everything else in the body (comments, sessions, timestamps) is ignored.
-
-Behaviour:
-
-- `--until moved` (new): returns on the first position change after the wait
-  began, once the position has held still for a settle window of 2 s (capped
-  at 10 s after the first change). The window folds a step's exit and the
-  next step's start into one return, so "between steps after kickoff" is
-  rarely what the Session reports. `submitted` and `terminal` keep their
-  predicates and run on the same loop, without the window.
-- Output: what `lf task status --json` prints, with or without `--json` as
-  today's status does. The old `TaskSnapshot` shape goes away from wait.
-- Exit status: 0 when the condition was reached; 2 when `--timeout` elapsed
-  first (status is still printed). `after_help` states both.
-- Mechanism: `watch::start` with `Transport::Pull`, a `Watched::every
-  (ACTIVITY_CLOCK)` reader (process liveness is outside the store), and the
-  caller pulling frames until the predicate holds. The 1 s poll in
-  `task_wait` is deleted.
-- No LM is involved; a wait is one lf process reading on store revisions.
-
-## Skill change
-
-`rust/loopflow/src/builtins/task/skill/task_session.md`, replacing "What
-happens between turns":
-
-```
-## Hearing the Task move
-
-A turn starts when the person writes, or when a background command you started
-returns. That return is how you hear the Task: no steer or hook wakes an idle
-conversation.
-
-- Before ending any turn in which the Task has a live Graph process, a run
-  waiting on checks or an open PR, start `lf task wait <issue> --until moved
-  --json` in the background: one command that exits on the first change, not a
-  monitor. It returns when a step starts or ends, the run stops at an
-  interactive step, the Graph reaches `end` or fails, or the PR opens, merges
-  or closes. Exit 2 means its timeout passed with no change.
-- When it returns, that is your turn. Reread status, say in a sentence or two
-  what moved and what is available now (the step waiting here, a PR to
-  review, a failure with its log), then apply the procedure and arm the wait
-  again while work is live. Say nothing when nothing moved.
-- Headless, do not arm: report and exit. Never hold a turn on a foreground
-  wait unless the person asked to wait now. Do not poll.
-```
-
-The same "Within a turn, `lf task wait …`" sentence in `wave_session.md` and
-`repo_session.md` is corrected to the new flags; those conversations operate
-many Tasks and keep their current turn model (exclusion below).
-
-## Risk findings
-
-- **Does the native TUI start a turn on a background notification while
-  idle?** Confirmed headless by probe; interactive is documented by third
-  parties, not by Anthropic. The demo's first check. If interactive Claude only
-  queues the notification until the next prompt, the design degrades to
-  "appears on your next turn" with no code change, and the fallback wake is
-  `lf desktop send` keyed by Session plus `send-key enter` (Desktop only,
-  draft-colliding). Decide then, not now.
-- **A wake can be lost mid-turn.** anthropics/claude-code#86365 reports a
-  background notification dropped, not queued, when it arrives while the
-  Session is mid-turn; closed "not planned" 2026-10-16. The skill's rule that
-  every turn starts from fresh reads and re-arms before ending makes a lost
-  wake cost one report, delivered on the next turn. The interactive wake
-  itself is confirmed: probed in this Session on 2026-11-02 (13:33) and by
-  #87689's reporter. See `scratch/research-harnesses.md`.
-- **Compliance.** The arming rule is skill text; a model that forgets to re-arm
-  goes quiet until the next prompt, which is today's behaviour. Mitigation is
-  the rule's placement (a turn-ending check, like the existing "end a turn
-  only when the Task has its disposition") and the demo.
-- **Background limits.** Claude stops a background command after at most two
-  hours and re-invokes; the Session re-arms. `pursue` loops longer than that
-  cost one extra wake per two hours.
-- **Store availability.** The wait needs this Machine's store; without one it
-  fails as `--watch` does ("only a registered Task can be watched").
-
-## Scope
-
-User-visible outcome: with a Task Session open and idle, running its Graph
-makes the Session report each move with no message from Jack.
-
-Affected surfaces: `lf task wait` (flags, output shape, exit status),
-task-session skill, the two sibling session skills' wait sentence,
-`docs/work.md` and `docs/agent-api.md` wait examples, `docs/lf-reference.md`
-(synced from Clap). Desktop and wire DTOs unchanged.
-
-Absent and error states: no Task for the issue is an error as today; a Task
-with no Graph process and no PR returns only when planning closes it; timeout
-exits 2 with the current status.
-
-Exclusions: Wave and repo Sessions keep their turn model; a Desktop "moved"
-badge; a UserPromptSubmit context line summarising moves since the last turn
-(the lazy path, revisit only if compliance evidence calls for it); Codex and
-OpenCode wake-ups; the writerless `TaskEventKind::GraphFinished`, an earlier
-notion of a finish event kept for reading old rows, whose removal is its own
-cleanup.
-
-### Delete — do not maintain
-
-- The 1 s polling loop in `ops::task::task_wait` (replaced by the watch loop).
-- `print_task` / `TaskSnapshot` as wait's output (wait prints the status body).
-- "You act only during a turn; nothing schedules your next one. Do not promise
-  to watch, check back or follow up later." in `task_session.md`.
-- The stale comment at `steer.rs:10-14`.
-
-Forbidden: a step-event table or steer kind; a second wait command; a Stop hook
-that continues turns; any lf write into a Session's pty.
-
-## Done when
-
-- `lf task wait <issue> --until moved --json` in one process returns, with
-  exit 0 and the new status body, within five seconds of another process
-  recording a Graph step Process for that Task, and returns once when that
-  Process's exit and the next step's row are written 500 ms apart;
-  `--timeout 0s` exits 2 and still prints the body. Integration test in
-  `rust/loopflow/tests/` (the standalone wait assertion at
-  `task_initialization_tests.rs:350` moves to the new shape).
-- The three session skills name the new flags; `cargo test -p loopflow --test
-  integration documented_commands::` passes.
-- Demo: the moment described above, in Desktop, with nothing typed.
-
-Check: design only, no build or test run this step.
+Check: `git diff --check` and `lf context` pass; notes only, no build/test needed. Native delivery acceptance remains unproved and belongs to implementation/demo.

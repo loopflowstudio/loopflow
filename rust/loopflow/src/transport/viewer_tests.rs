@@ -24,7 +24,7 @@ fn snapshot_preview_fixture() {
     let mut saved = Terminal::new(80, 24).unwrap();
     saved.write(b"\x1b[?1049h");
     saved.write(MODES);
-    saved.write(b"saved preview");
+    saved.write(b"\x1b]4;1;rgb:12/34/56\x1b\\\x1b]10;rgb:ab/cd/ef\x1b\\\x1b[31msaved preview");
     let screens = home.join("screens");
     std::fs::create_dir_all(&screens).unwrap();
     let mut bytes = format!("lf-terminal-snapshot/1 ghostty={REVISION}\n").into_bytes();
@@ -193,17 +193,6 @@ fn mode_replies(terminal: &mut Terminal) -> Vec<u8> {
 
 struct ViewerProcess(std::process::Child);
 
-impl std::ops::Deref for ViewerProcess {
-    type Target = std::process::Child;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl std::ops::DerefMut for ViewerProcess {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
 impl Drop for ViewerProcess {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -238,6 +227,8 @@ fn preview_case(case: &str) {
             .unwrap(),
     );
     let mut display = Terminal::new(80, 24).unwrap();
+    let theme = [0x87, 0x65, 0x43];
+    display.set_theme(theme);
     display.write(b"shell prompt> ");
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut output = Vec::new();
@@ -264,9 +255,10 @@ fn preview_case(case: &str) {
         if case == "cancel" && !cancelled && home.path().join("pending").exists() {
             assert!(display.alternate_screen());
             assert!(display.text().unwrap().contains("saved preview"));
+            assert_eq!(display.foreground(0, 0), [0x12, 0x34, 0x56]);
             // SIGTERM exercises the registered cleanup; Rust Drop does not run.
             // SAFETY: this is the live child created by this fixture.
-            unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+            unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) };
             cancelled = true;
         }
         if !inspected
@@ -287,12 +279,15 @@ fn preview_case(case: &str) {
                 expected.write(MODES);
             }
             assert_eq!(mode_replies(&mut display), mode_replies(&mut expected));
+            display.write(b"\x1b[H\x1b[31mX\x1b[0mY");
+            assert_eq!(display.foreground(0, 0), theme);
+            assert_eq!(display.foreground(1, 0), theme);
             master
                 .write_all(if case == "resume" { b"done\n" } else { &[0x1d] })
                 .unwrap();
             inspected = true;
         }
-        if let Some(status) = child.try_wait().unwrap() {
+        if let Some(status) = child.0.try_wait().unwrap() {
             // Drain cleanup written immediately before the child exited.
             // SAFETY: poll receives the same live descriptor as above.
             while unsafe { libc::poll(&mut fd, 1, 0) } > 0 {
@@ -309,6 +304,7 @@ fn preview_case(case: &str) {
     };
     let mut error = String::new();
     child
+        .0
         .stderr
         .take()
         .unwrap()
@@ -323,6 +319,9 @@ fn preview_case(case: &str) {
     assert!(!display.alternate_screen());
     let mut fresh = Terminal::new(80, 24).unwrap();
     assert_eq!(mode_replies(&mut display), mode_replies(&mut fresh));
+    display.write(b"\x1b[H\x1b[31mX\x1b[0mY");
+    assert_eq!(display.foreground(0, 0), theme);
+    assert_eq!(display.foreground(1, 0), theme);
     // SAFETY: tcgetattr writes a termios for this live PTY.
     let attrs = unsafe {
         let mut attrs = std::mem::zeroed::<libc::termios>();

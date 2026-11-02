@@ -271,6 +271,36 @@ impl Terminal {
         Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
+    #[cfg(test)]
+    pub fn set_theme(&mut self, rgb: [u8; 3]) {
+        let palette = [rgb; 256];
+        // SAFETY: options 11..=13 take RGB triples; 14 takes 256 RGB triples.
+        unsafe {
+            for option in 11..=13 {
+                self.set("theme", option, rgb.as_ptr().cast()).unwrap();
+            }
+            self.set("palette", 14, palette.as_ptr().cast()).unwrap();
+        }
+    }
+
+    /// Resolve a rendered HTML cell's foreground against its emitted palette.
+    #[cfg(test)]
+    pub fn foreground(&self, x: u16, y: u32) -> [u8; 3] {
+        let html = self.format(2, Range::Cell { x, y }, false).unwrap();
+        let html = String::from_utf8(html).unwrap();
+        let (palette, cell) = html.split_once("</style>").unwrap();
+        let Some((_, color)) = cell.split_once("color: ") else {
+            return self.data::<[u8; 3]>(18, "foreground").unwrap();
+        };
+        let rgb = if let Some(variable) = color.strip_prefix("var(") {
+            let variable = variable.split_once(')').unwrap().0;
+            palette.split_once(&format!("{variable}: #")).unwrap().1
+        } else {
+            color.strip_prefix('#').unwrap()
+        };
+        std::array::from_fn(|i| u8::from_str_radix(&rgb[i * 2..i * 2 + 2], 16).unwrap())
+    }
+
     /// VT bytes that draw the active screen from the cursor's home position and
     /// restore every state the formatter can express: styles, hyperlinks, cursor,
     /// Kitty keyboard flags, charsets, palette, modes (alternate screen, mouse,
@@ -303,6 +333,11 @@ impl Terminal {
     fn format(&self, emit: i32, range: Range, restore: bool) -> Result<Vec<u8>, Error> {
         let (cols, rows) = self.size();
         let (start, end) = match range {
+            #[cfg(test)]
+            Range::Cell { x, y } => (
+                self.grid_ref(ffi::POINT_TAG_ACTIVE, x, y)?,
+                self.grid_ref(ffi::POINT_TAG_ACTIVE, x, y)?,
+            ),
             Range::Active => (
                 self.grid_ref(ffi::POINT_TAG_ACTIVE, 0, 0)?,
                 self.grid_ref(ffi::POINT_TAG_ACTIVE, cols - 1, u32::from(rows) - 1)?,
@@ -325,9 +360,9 @@ impl Terminal {
             trim: false,
             extra: ffi::FormatterTerminalExtra {
                 size: std::mem::size_of::<ffi::FormatterTerminalExtra>(),
-                // The viewer's terminal keeps its own palette; the owner
-                // never learned the real one.
-                palette: false,
+                // Our formatter patch emits program overrides only, preserving
+                // the viewer's configured theme (including in history rows).
+                palette: true,
                 modes: restore,
                 scrolling_region: restore,
                 tabstops: restore,
@@ -485,8 +520,16 @@ unsafe fn take_allocation(ptr: *mut u8, len: usize) -> Vec<u8> {
 
 #[derive(Debug, Clone, Copy)]
 enum Range {
+    #[cfg(test)]
+    Cell {
+        x: u16,
+        y: u32,
+    },
     Active,
-    History { first: usize, last: usize },
+    History {
+        first: usize,
+        last: usize,
+    },
 }
 
 /// The subset of `include/ghostty/vt/*.h` the owner uses. Enums are `int`

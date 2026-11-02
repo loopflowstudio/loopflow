@@ -20,8 +20,10 @@
   is overwritten by the next owner's end. Left to the idle Task's retention rules.
 - **Desktop decoding.** GhosttyKit exposes no snapshot decoder; Desktop's pane gets
   the last screen through `lf resume` painting it, not by reading the file (LOO-672).
-- **Palette.** The repaint does not emit OSC 4 so a viewer's terminal keeps its
-  theme; programs that changed palette entries lose those on reattach.
+- **Colors (resolved, 2026-11-02).** Jack Heart's accepted fidelity requires
+  explicit program colors. The formatter emits only tracked overrides; the
+  viewer's default theme stays local. Cleanup resets program colors to that
+  configured theme, matching the existing mode-reset boundary.
 - **Alternate-screen preview ownership (resolved direction, 2026-11-02).** The
   earlier assumption that Claude's primary-screen behavior justified leaving the
   preview outside terminal cleanup is withdrawn. The accepted Session recovery

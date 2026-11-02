@@ -274,6 +274,12 @@ LOO-710 (2026-11-02) the owner keeps a libghostty-vt terminal, repaints viewers
 through Ghostty's VT formatter and leaves `screens/<session>.ghostsnp` at its end;
 the GHOSTSNP format promises nothing across Ghostty revisions, so every file names
 its revision and GhosttyKit still exposes no decoder for Desktop (LOO-672).
+Preview bytes require the same cleanup owner as live output, established before
+startup: failed launch and pre-acknowledgement cancellation must restore modes.
+Live state supersedes the preview even when blank; freshness means no output,
+not empty text, because keyboard modes can change without drawing. LOO-710's
+November 2 isolated PTY and public resume fixtures prove these boundaries with
+stand-in providers, not configured Claude, Desktop or four-target packaging.
 
 Admission is not execution: Task filing and explicit Wave admission now commit
 uncaptured primary Sessions; explicit execution reserves input and claims the

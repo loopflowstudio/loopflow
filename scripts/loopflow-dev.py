@@ -387,21 +387,22 @@ def cmd_ghostty_vt_build(publish: bool = False) -> int:
     source = _download_ghostty_source(build_root)
     if (code := _apply_patches(source, GHOSTTY_VT_PIN.parent / "ghostty-vt-patches")) != 0:
         return code
-    # The patch changes the VT formatter; prove it before building the archives.
-    result = run(
-        [
-            zig,
-            "build",
-            "test-lib-vt",
-            "-Demit-lib-vt=true",
-            "-Dsimd=false",
-            "-Dtest-filter=hyperlink",
-        ],
-        cwd=source,
-        check=False,
-    )
-    if result.returncode != 0:
-        return result.returncode
+    # Prove each formatter patch before producing archives.
+    for test_filter in ("hyperlink", "TerminalFormatter vt with palette"):
+        result = run(
+            [
+                zig,
+                "build",
+                "test-lib-vt",
+                "-Demit-lib-vt=true",
+                "-Dsimd=false",
+                f"-Dtest-filter={test_filter}",
+            ],
+            cwd=source,
+            check=False,
+        )
+        if result.returncode != 0:
+            return result.returncode
     artifacts = SWIFT_DIR / ".build" / "artifacts"
     artifacts.mkdir(parents=True, exist_ok=True)
     for rust_target, zig_target in GHOSTTY_VT_TARGETS.items():
@@ -429,7 +430,7 @@ def cmd_ghostty_vt_build(publish: bool = False) -> int:
         )
         if result.returncode != 0:
             return result.returncode
-        name = _ghostty_vt_archive_name(pin, rust_target)
+        name = f"libghostty-vt-{pin['revision'][:7]}-{pin['artifact']}-{rust_target}.tar.gz"
         archive = artifacts / name
         _write_ghostty_vt_archive(archive, prefix, source)
         pin["sha256"][rust_target] = hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -441,10 +442,6 @@ def cmd_ghostty_vt_build(publish: bool = False) -> int:
     GHOSTTY_VT_PIN.write_text(json.dumps(pin, indent=2) + "\n")
     print(f"Pinned checksums in {GHOSTTY_VT_PIN}")
     return 0
-
-
-def _ghostty_vt_archive_name(pin: dict, rust_target: str) -> str:
-    return f"libghostty-vt-{pin['revision'][:7]}-{pin['artifact']}-{rust_target}.tar.gz"
 
 
 def _write_ghostty_vt_archive(archive: Path, prefix: Path, source: Path) -> None:

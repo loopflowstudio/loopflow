@@ -37,3 +37,9 @@ symbols, so both link into the app.
 the HTML formatter already does, so a repainted viewer keeps the program's
 hyperlinks. Upstream notes this as future work. The build runs the formatter's
 `hyperlink` tests before producing archives.
+
+`0002-vt-program-colors.patch`: VT palette restoration emits only explicitly
+changed entries, including overrides equal to the owner's default. It also emits
+program foreground, background and cursor overrides. A viewer keeps its configured
+theme for every untouched color. HTML palette output is unchanged. The build runs
+`TerminalFormatter vt with palette` round-trip and pin-map tests as well.

@@ -4,9 +4,9 @@ use crate::ghostty_vt::{Error, Terminal};
 
 /// Input modes a repaint or a program may have set in a viewer's terminal:
 /// Kitty keyboard flags, modifyOtherKeys, application keys, focus and mouse reporting, bracketed
-/// paste; then a visible cursor and plain style.
+/// paste; then a visible cursor, plain style and the viewer's configured colors.
 pub(super) const RESET_MODES: &[u8] =
-    b"\x1b[<u\x1b[>4;0m\x1b[?1l\x1b>\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m";
+    b"\x1b[<u\x1b[>4;0m\x1b[?1l\x1b>\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m\x1b]104\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\";
 
 /// Scrollback rows a repaint carries at most. The whole repaint travels in one
 /// transport response, so the byte bound below wins when rows are wide or styled.
@@ -18,23 +18,33 @@ const HISTORY_BYTES: usize = 768 * 1024;
 /// keyboard state. The viewer's own history is kept beneath.
 pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
     let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
-    // On the alternate screen the formatter re-enters it, which starts blank.
-    if !terminal.alternate_screen() {
-        if !terminal.received_output() {
-            // Nothing to redraw: the viewer's terminal keeps its own history and
-            // the owner's output flows from the cursor as any command's would.
-            return Ok(bytes);
-        }
-        bytes.extend(history(terminal)?);
-        // Scroll everything the viewer showed, history included, into its own
-        // scrollback so the owner's screen starts at the top.
-        let (_, rows) = terminal.size();
-        for _ in 0..rows {
-            bytes.extend(b"\r\n");
-        }
+    if !terminal.received_output() {
+        // Nothing to redraw: the owner's first output flows from the viewer's cursor.
+        return Ok(bytes);
     }
-    bytes.extend(b"\x1b[H");
-    bytes.extend(terminal.repaint_screen()?);
+    let retained_primary = if terminal.alternate_screen() {
+        // Switching only a disposable copy preserves the owner's parser,
+        // continuation and replies. Paint primary first so a bare screen switch
+        // later reveals the owner's retained content and saved cursor.
+        let mut primary = Terminal::decode(&terminal.encode()?)?;
+        primary.write(b"\x18\x1b[?1049l\x1b[?1047l\x1b[?47l");
+        Some(primary)
+    } else {
+        None
+    };
+    let primary = retained_primary.as_ref().unwrap_or(terminal);
+    bytes.extend(history(primary)?);
+    // Scroll the viewer's content and the owner's history out of the way.
+    let (_, rows) = primary.size();
+    for _ in 0..rows {
+        bytes.extend(b"\r\n");
+    }
+    bytes.extend(primary.repaint_screen()?);
+    // The formatter enters alternate before homing for its tabstops/content.
+    // Homing here would overwrite the primary cursor that 1049 must save.
+    if retained_primary.is_some() {
+        bytes.extend(terminal.repaint_screen()?);
+    }
     Ok(bytes)
 }
 
@@ -81,7 +91,7 @@ impl AlternateScreen {
 
 #[cfg(test)]
 mod tests {
-    use super::{repaint, AlternateScreen};
+    use super::{repaint, AlternateScreen, RESET_MODES};
     use crate::ghostty_vt::Terminal;
 
     fn viewer_showing(bytes: &[u8]) -> Terminal {
@@ -168,5 +178,90 @@ mod tests {
         assert!(restored.alternate_screen());
         assert_eq!(restored.text().unwrap().trim_end(), "hello");
         assert_eq!(restored.cursor(), owner.cursor());
+    }
+
+    #[test]
+    fn alternate_attachment_retains_primary_screen_history_and_modes() {
+        for saved in [false, true] {
+            let mut owner = Terminal::new(80, 24).unwrap();
+            for line in 0..30 {
+                owner.write(format!("primary {line}\r\n").as_bytes());
+            }
+            owner.write(b"kept primary\x1b[?2004h\x1b[>5u\x1b[?1049h\x1b[Halternate\x1b[>1u");
+            if saved {
+                owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+            }
+            // Attachment must not complete or discard unfinished live input.
+            owner.write(b"\x1b[?1");
+            let before = owner.encode().unwrap();
+            let mut viewer = viewer_showing(b"old shell history\r\n");
+            viewer.write(&repaint(&owner).unwrap());
+            assert_eq!(owner.encode().unwrap(), before);
+            assert!(viewer.alternate_screen());
+            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+            assert_eq!(viewer.cursor(), owner.cursor());
+            viewer.write(&owner.continuation().unwrap());
+            owner.write(b"h");
+            viewer.write(b"h");
+
+            for terminal in [&mut owner, &mut viewer] {
+                terminal.write(b"\x1b[?2004$p\x1b[?1$p\x1b[?u");
+            }
+            assert_eq!(viewer.take_replies(), owner.take_replies());
+            // No redraw accompanies the program's return to its primary screen.
+            owner.write(b"\x1b[?1049l");
+            viewer.write(b"\x1b[?1049l");
+            assert!(!viewer.alternate_screen());
+            assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+            assert_eq!(viewer.cursor(), owner.cursor());
+            for terminal in [&mut owner, &mut viewer] {
+                terminal.write(b"\x1b[?2004$p\x1b[?1$p\x1b[?u");
+            }
+            assert_eq!(viewer.take_replies(), owner.take_replies());
+            let history = viewer.repaint_history(viewer.scrollback_rows()).unwrap();
+            let history = String::from_utf8(history).unwrap();
+            assert!(history.starts_with("old shell history\r\n"), "{history:?}");
+            let owner_history = owner.repaint_history(owner.scrollback_rows()).unwrap();
+            assert!(
+                history.contains(std::str::from_utf8(&owner_history).unwrap()),
+                "{history:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn program_colors_survive_attachment_and_snapshot_without_replacing_the_theme() {
+        for saved in [false, true] {
+            let mut owner = Terminal::new(80, 24).unwrap();
+            owner.write(b"\x1b]4;1;rgb:12/34/56\x1b\\\x1b[31mP\x1b[0m\x1b[?1049h\x1b[H\x1b[31mA\x1b[32mT\x1b[0mD");
+            owner.write(b"\x1b[33mE");
+            let explicit_default = owner.foreground(3, 0);
+            owner.write(
+                format!(
+                    "\x1b]4;3;rgb:{:02x}/{:02x}/{:02x}\x1b\\",
+                    explicit_default[0], explicit_default[1], explicit_default[2]
+                )
+                .as_bytes(),
+            );
+            if saved {
+                owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+            }
+            let mut viewer = Terminal::new(80, 24).unwrap();
+            let theme = [0x87, 0x65, 0x43];
+            viewer.set_theme(theme);
+            viewer.write(&repaint(&owner).unwrap());
+            assert_eq!(viewer.foreground(0, 0), owner.foreground(0, 0));
+            assert_eq!(viewer.foreground(0, 0), [0x12, 0x34, 0x56]);
+            assert_eq!(viewer.foreground(1, 0), theme);
+            assert_eq!(viewer.foreground(2, 0), theme);
+            assert_eq!(viewer.foreground(3, 0), explicit_default);
+            // Forwarded indexed output uses the restored program palette too.
+            for terminal in [&mut owner, &mut viewer] {
+                terminal.write(b"\x1b[31mN\x1b[?1049l");
+            }
+            assert_eq!(viewer.foreground(0, 0), owner.foreground(0, 0));
+            viewer.write(RESET_MODES);
+            assert_eq!(viewer.foreground(0, 0), theme);
+        }
     }
 }

@@ -63,9 +63,11 @@ is repainted through Ghostty's VT formatter: the newest scrollback rows (up to 2
 under 768 KiB) above its own history, then the active screen with colors and
 styles, OSC 8 hyperlinks, cursor position, Kitty keyboard flags, charsets, modes
 (alternate screen, application keys, bracketed paste, mouse, focus), scrolling
-region, tabstops and pwd. On the alternate screen only that screen is painted; the
-primary screen and its history stay with the owner. The viewer's own palette is kept.
-Images and the owner's palette changes are not repainted.
+region, tabstops and pwd. Reattach while a program uses its alternate screen;
+returning to its primary screen keeps the conversation and retained history.
+Program-defined palette, foreground, background and cursor colors survive
+reattachment; default colors follow the viewer's theme. Detach and failed resume
+reset program colors to that configured theme. Images are not repainted.
 
 When an owner ends it writes `<Machine home>/screens/<session>.ghostsnp`: a header
 line naming the Ghostty revision, then Ghostty's snapshot stream with both screens,

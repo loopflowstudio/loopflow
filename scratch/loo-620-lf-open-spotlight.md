@@ -3,7 +3,7 @@
 Status: implemented, synced onto main through #1792, realigned and compressed twice
 (2026-11-02). Concept review sent one change back; it landed (432eefbff3); the second
 pass found nothing to change and no open choice. Published as #1798 (2026-11-02);
-demoed headless on Jack's Mac (below); gate next.
+demoed headless on Jack's Mac (below); gated 2026-11-02 (below), ready for the merge click.
 Source: Task definition (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop
 database-mismatch incident).
 
@@ -155,14 +155,19 @@ Acceptance tests rerun on this tree: the two `open::tests::desktop_*` tests and 
 repeated-installs test (3 passed), `test_only_release_packaging_carries_the_installed_bundle_id`
 (1 passed). No design change came out of the demo.
 
-## Remaining
+## Gate (2026-11-02, this tree)
 
-- Gate: affected suites (`global_commands`, `work_open_tests`, install lib tests,
-  `test_release_loopflow.py`, `test_app_bundle.py`, `test_install_script.py`), clippy.
-  `global_commands::scheduled_install_is_independent_of_the_invoking_checkout_and_reusable`
-  fails on main too (#1776's HOME-vs-account-home check, macOS-only); not this branch.
+Diff reviewed against main: one destination enum, one scratch directory, one
+sweep; nothing to change in code. `release/README.md` said the local app lands
+beside `lf` in `local-bin/`; it now names `local-bin/app.noindex/`.
 
-Checks: `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::`
-36 passed, `--test integration -- available_conversations_need_no_question` and
-`--test global_commands -- open_delivers_exact_task_to_desktop` passed, fmt and clippy
-clean on this tree (2026-11-02, after 432eefbff3); Python suites 35 passed, gate reruns them.
+Checks: `scripts/test.py --reuse-passing --rust-filter 'test(lf::commands::install::) |
+test(lf::commands::open::) | test(installation::) | test(link_receiver::) |
+test(work_open_tests::) | binary(global_commands)'`: architecture, Python (512 passed,
+1 skipped) and Swift (663 passed, boundaries) green; Rust 122 passed, fmt clean, 1 failed:
+`global_commands::scheduled_install_is_independent_of_the_invoking_checkout_and_reusable`
+(fake `launchctl` keyed on `$HOME` while lf reads the account home, #1776; fails on main,
+macOS only, untouched here; CI owns it). `cargo clippy --all-targets -- -D warnings`
+clean. `swift/project.yml` changed, so `xcodegen generate` + `xcodebuild build-for-testing`
+(the `--loopflow` suite's commands) ran: TEST BUILD SUCCEEDED, and the built
+`Debug/Loopflow.app` reports `com.loopflow.mac.dev`.

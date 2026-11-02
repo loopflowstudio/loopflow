@@ -24,6 +24,7 @@ use crate::work::selection::WorkWorkspaceKind;
 
 pub(crate) const DESKTOP_BUNDLE: &str = "com.loopflow.mac";
 const HOST_TIMEOUT: Duration = Duration::from_secs(2);
+pub(crate) const NO_DESKTOP: &str = "no installed Loopflow Desktop; `lf install` places it";
 /// How long a just-created destination stands for its Work while its
 /// conversation starts and attaches. Later, attachment placement answers.
 const STARTING: Duration = Duration::from_secs(30);
@@ -857,6 +858,45 @@ fn named_bundle(desktop: Option<&str>) -> &str {
         .unwrap_or(DESKTOP_BUNDLE)
 }
 
+/// The Desktop an opening reaches. Launch Services resolves a bundle id to any
+/// registered copy, so only a caller's own non-release Desktop is named by id;
+/// everything else launches the installed app by path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DesktopApp {
+    /// The Desktop this caller runs inside, named by `LF_DESKTOP`, when the
+    /// installed app is not it.
+    Running(String),
+    Installed(PathBuf),
+}
+
+impl DesktopApp {
+    pub(crate) fn current() -> Option<Self> {
+        Self::select(
+            std::env::var(DESKTOP).ok().as_deref(),
+            crate::installation::installed_app(),
+        )
+    }
+
+    /// Only release packaging carries `DESKTOP_BUNDLE`, so a caller inside
+    /// that Desktop reaches it by the installed path, which names one copy
+    /// where the id names any registered one.
+    fn select(desktop: Option<&str>, installed: Option<PathBuf>) -> Option<Self> {
+        match (desktop.filter(|value| !value.is_empty()), installed) {
+            (Some(bundle), Some(app)) if bundle == DESKTOP_BUNDLE => Some(Self::Installed(app)),
+            (Some(bundle), _) => Some(Self::Running(bundle.to_owned())),
+            (None, installed) => installed.map(Self::Installed),
+        }
+    }
+
+    /// `open` arguments that address this app.
+    pub(crate) fn open_args(&self) -> [&std::ffi::OsStr; 2] {
+        match self {
+            Self::Running(bundle) => ["-b".as_ref(), bundle.as_ref()],
+            Self::Installed(app) => ["-a".as_ref(), app.as_os_str()],
+        }
+    }
+}
+
 fn in_herdr() -> bool {
     std::env::var(HERDR_ENV).as_deref() == Ok("1") && set(HERDR_SOCKET) && set(HERDR_PANE)
 }
@@ -953,7 +993,10 @@ fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<Open
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "lf".into());
     let mut receipts: Vec<OpenReceipt> = Vec::new();
-    let mut desktop = DesktopBatch::default();
+    let mut desktop = DesktopBatch {
+        app: DesktopApp::current(),
+        ..DesktopBatch::default()
+    };
     for (index, target) in targets.iter().enumerate() {
         let focus = index + 1 == targets.len();
         desktop.next = index;
@@ -988,7 +1031,7 @@ fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<Open
 /// only the latest arrival's window, so the batch changes focus once.
 #[derive(Default)]
 struct DesktopBatch {
-    installed: Option<bool>,
+    app: Option<DesktopApp>,
     /// The receipt index of the item being opened.
     next: usize,
     /// Receipt index and address of each item waiting to be sent.
@@ -997,10 +1040,10 @@ struct DesktopBatch {
 }
 
 impl DesktopBatch {
-    fn installed(&mut self) -> bool {
-        *self.installed.get_or_insert_with(|| {
-            crate::work::link_receiver::application_for_bundle(&desktop_bundle()).is_some()
-        })
+    fn app(&self) -> Result<&DesktopApp, RouteError> {
+        self.app
+            .as_ref()
+            .ok_or_else(|| RouteError::Definite(NO_DESKTOP.into()))
     }
 
     /// Send every waiting address, then `last`; only a focused request activates Desktop.
@@ -1008,8 +1051,9 @@ impl DesktopBatch {
         if self.waiting.is_empty() && last.is_none() {
             return Ok(());
         }
+        let app = self.app()?;
         let mut command = Command::new("open");
-        command.arg("-b").arg(desktop_bundle());
+        command.args(app.open_args());
         if !focus {
             command.arg("-g");
         }
@@ -1237,11 +1281,7 @@ fn open_desktop(
     if focus {
         batch.send(Some(&url), true)?;
     } else {
-        if !batch.installed() {
-            return Err(RouteError::Definite(
-                "Launch Services finds no Loopflow Desktop".into(),
-            ));
-        }
+        batch.app()?;
         batch.waiting.push((batch.next, url));
     }
     Ok(Opened::opening(None))
@@ -1724,16 +1764,51 @@ fn print_unknown(unknown: &[String]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{named_bundle, DESKTOP_BUNDLE};
+    use super::{named_bundle, DesktopApp, DESKTOP_BUNDLE};
+    use std::path::PathBuf;
 
     #[test]
-    fn desktop_bundle_defaults_to_the_installed_app() {
+    fn desktop_bundle_defaults_to_the_release_id() {
         for desktop in [None, Some("")] {
             assert_eq!(named_bundle(desktop), DESKTOP_BUNDLE, "{desktop:?}");
         }
         assert_eq!(
             named_bundle(Some("com.loopflow.mac.dev")),
             "com.loopflow.mac.dev"
+        );
+    }
+
+    #[test]
+    fn desktop_launches_the_installed_app_by_path() {
+        // Another registered copy may carry the same bundle id; a path names one.
+        let installed = PathBuf::from("/Applications/Loopflow.app");
+        let app = DesktopApp::select(Some(""), Some(installed.clone())).unwrap();
+        assert_eq!(app.open_args(), ["-a".as_ref(), installed.as_os_str()]);
+        assert_eq!(DesktopApp::select(None, None), None);
+    }
+
+    #[test]
+    fn desktop_inside_a_build_routes_back_to_it_by_bundle_id() {
+        let installed = PathBuf::from("/Applications/Loopflow.app");
+        let app = DesktopApp::select(Some("com.loopflow.mac.dev"), Some(installed)).unwrap();
+        assert_eq!(
+            app.open_args(),
+            ["-b".as_ref(), std::ffi::OsStr::new("com.loopflow.mac.dev")]
+        );
+    }
+
+    #[test]
+    fn desktop_inside_the_installed_app_reaches_it_by_path() {
+        // `open -b com.loopflow.mac` was the 2026-11-02 incident command: the
+        // release id resolves to any registered copy, the path to one.
+        let installed = PathBuf::from("/Applications/Loopflow.app");
+        let app = DesktopApp::select(Some(DESKTOP_BUNDLE), Some(installed.clone())).unwrap();
+        assert_eq!(app.open_args(), ["-a".as_ref(), installed.as_os_str()]);
+
+        let app = DesktopApp::select(Some(DESKTOP_BUNDLE), None).unwrap();
+        assert_eq!(
+            app.open_args(),
+            ["-b".as_ref(), std::ffi::OsStr::new(DESKTOP_BUNDLE)]
         );
     }
 }

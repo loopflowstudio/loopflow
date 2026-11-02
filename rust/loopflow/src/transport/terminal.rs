@@ -1,64 +1,53 @@
-//! Library-backed terminal snapshots and replies while no controlling viewer exists.
+//! Repainting a viewer from the owner's terminal, and what a viewer was sent.
 
-#[derive(Default)]
-pub(super) struct Queries {
-    pub detached: bool,
-    pub replies: Vec<u8>,
-}
+use crate::ghostty_vt::{Error, Terminal};
 
-impl vt100::Callbacks for Queries {
-    fn unhandled_csi(
-        &mut self,
-        screen: &mut vt100::Screen,
-        prefix: Option<u8>,
-        _: Option<u8>,
-        params: &[&[u16]],
-        command: char,
-    ) {
-        if !self.detached {
-            return;
-        }
-        let first = params.first().and_then(|p| p.first()).copied().unwrap_or(0);
-        match (prefix, first, command) {
-            (None, 6, 'n') => {
-                let (row, col) = screen.cursor_position();
-                self.replies
-                    .extend(format!("\x1b[{};{}R", row + 1, col + 1).bytes());
-            }
-            (None, 5, 'n') => self.replies.extend(b"\x1b[0n"),
-            (None, 0, 'c') => self.replies.extend(b"\x1b[?1;2c"),
-            _ => {}
-        }
-    }
-}
+/// Scrollback rows a repaint carries at most. The whole repaint travels in one
+/// transport response, so the byte bound below wins when rows are wide or styled.
+const HISTORY_ROWS: usize = 2000;
+const HISTORY_BYTES: usize = 768 * 1024;
 
-pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
+/// Bytes that make a viewer's terminal show the owner's screen: its scrollback
+/// above, then the active screen with its styles, hyperlinks, cursor, modes and
+/// keyboard state. The viewer's own history is kept beneath.
+pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
     let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
-    let mut history = screen.clone();
-    history.set_scrollback(usize::MAX);
-    if screen.alternate_screen() {
-        bytes.extend(b"\x1b[?1049h");
-    } else if untouched(screen, &history) {
-        // Nothing to redraw: the viewer's terminal keeps its own history and
-        // the owner's output flows from the cursor as any command's would.
-        return bytes;
-    } else {
-        // Only the owner's visible screen is redrawn. The viewer's screen
-        // scrolls into its own scrollback first, so nothing it showed is
-        // erased: a screen's height of newlines blanks it from any cursor row.
-        for _ in 0..screen.size().0 {
+    // On the alternate screen the formatter re-enters it, which starts blank.
+    if !terminal.alternate_screen() {
+        if untouched(terminal) {
+            // Nothing to redraw: the viewer's terminal keeps its own history and
+            // the owner's output flows from the cursor as any command's would.
+            return Ok(bytes);
+        }
+        bytes.extend(history(terminal)?);
+        // Scroll everything the viewer showed, history included, into its own
+        // scrollback so the owner's screen starts at the top.
+        let (_, rows) = terminal.size();
+        for _ in 0..rows {
             bytes.extend(b"\r\n");
         }
     }
-    bytes.extend(screen.state_formatted());
-    bytes
+    bytes.extend(b"\x1b[H");
+    bytes.extend(terminal.repaint_screen()?);
+    Ok(bytes)
+}
+
+fn history(terminal: &Terminal) -> Result<Vec<u8>, Error> {
+    let mut rows = terminal.scrollback_rows().min(HISTORY_ROWS);
+    loop {
+        let bytes = terminal.repaint_history(rows)?;
+        if bytes.len() <= HISTORY_BYTES || rows <= 1 {
+            return Ok(bytes);
+        }
+        rows /= 2;
+    }
 }
 
 /// A screen the owner has not drawn on: no history, nothing visible, cursor home.
-fn untouched(screen: &vt100::Screen, history: &vt100::Screen) -> bool {
-    history.scrollback() == 0
-        && screen.cursor_position() == (0, 0)
-        && screen.contents().trim().is_empty()
+fn untouched(terminal: &Terminal) -> bool {
+    terminal.scrollback_rows() == 0
+        && terminal.cursor() == (0, 0)
+        && terminal.text().is_ok_and(|text| text.trim().is_empty())
 }
 
 /// Whether output written to a viewer's terminal left it on the alternate
@@ -91,110 +80,47 @@ impl AlternateScreen {
     }
 }
 
-/// Reports may be inserted only between complete terminal sequences and UTF-8
-/// characters. The parser decides boundaries; raw provider bytes stay unchanged.
-pub(super) struct Boundary {
-    parser: vte::Parser,
-    state: Complete,
-    pending: Vec<u8>,
-    overflow: bool,
-}
-struct Complete {
-    ready: bool,
-    was_ready: bool,
-}
-impl vte::Perform for Complete {
-    fn print(&mut self, _: char) {
-        self.ready = true;
-    }
-    fn execute(&mut self, _: u8) {
-        self.ready = self.was_ready;
-    }
-    fn csi_dispatch(&mut self, _: &vte::Params, _: &[u8], _: bool, _: char) {
-        self.ready = true;
-    }
-    fn esc_dispatch(&mut self, _: &[u8], _: bool, _: u8) {
-        self.ready = true;
-    }
-    fn osc_dispatch(&mut self, _: &[&[u8]], _: bool) {
-        self.ready = true;
-    }
-    fn unhook(&mut self) {
-        self.ready = true;
-    }
-}
-impl Boundary {
-    pub fn new() -> Self {
-        Self {
-            parser: vte::Parser::new(),
-            pending: Vec::new(),
-            overflow: false,
-            state: Complete {
-                ready: true,
-                was_ready: true,
-            },
-        }
-    }
-    pub fn advance(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            if self.pending.len() < 65536 {
-                self.pending.push(*byte);
-            } else {
-                self.overflow = true;
-            }
-            self.state.was_ready = self.state.ready;
-            self.state.ready = false;
-            self.parser.advance(&mut self.state, &[*byte]);
-            if *byte == 0x1b {
-                self.state.ready = false;
-            }
-            if self.state.ready {
-                self.pending.clear();
-                self.overflow = false;
-            }
-        }
-    }
-    pub fn pending(&self) -> Option<&[u8]> {
-        (!self.overflow).then_some(self.pending.as_slice())
-    }
-    pub fn ready(&self) -> bool {
-        self.state.ready
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{snapshot, AlternateScreen, Boundary, Queries};
+    use super::{repaint, AlternateScreen};
+    use crate::ghostty_vt::Terminal;
+
+    fn viewer_showing(bytes: &[u8]) -> Terminal {
+        let mut viewer = Terminal::new(80, 24).unwrap();
+        viewer.write(bytes);
+        viewer
+    }
 
     #[test]
     fn attaching_before_the_owner_draws_leaves_the_viewer_terminal_alone() {
-        let fresh = vt100::Parser::new(24, 80, 2000);
-        assert_eq!(snapshot(fresh.screen()), b"\x1b[0m\x1b[?25h");
-        let mut drawn = vt100::Parser::new(24, 80, 2000);
-        drawn.process(b"Error: no stock\r\n");
-        let bytes = snapshot(drawn.screen());
-        let mut restored = vt100::Parser::new(24, 80, 2000);
-        restored.process(&bytes);
-        assert_eq!(restored.screen().contents().trim(), "Error: no stock");
+        let fresh = Terminal::new(80, 24).unwrap();
+        assert_eq!(repaint(&fresh).unwrap(), b"\x1b[0m\x1b[?25h");
+        let mut drawn = Terminal::new(80, 24).unwrap();
+        drawn.write(b"Error: no stock\r\n");
+        let restored = viewer_showing(&repaint(&drawn).unwrap());
+        assert_eq!(restored.text().unwrap().trim(), "Error: no stock");
+        assert_eq!(restored.cursor(), drawn.cursor());
     }
 
     #[test]
     fn redrawing_shows_the_owner_screen_and_keeps_the_viewers_scrollback() {
-        let mut owner = vt100::Parser::new(24, 80, 2000);
+        let mut owner = Terminal::new(80, 24).unwrap();
         for line in 0..30 {
-            owner.process(format!("owner {line}\r\n").as_bytes());
+            owner.write(format!("owner {line}\r\n").as_bytes());
         }
-        let mut viewer = vt100::Parser::new(24, 80, 2000);
-        viewer.process(b"$ ls\r\nnotes.md\r\n$ lf resume\r\n");
-        viewer.process(&snapshot(owner.screen()));
-        assert_eq!(viewer.screen().contents(), owner.screen().contents());
-        viewer.screen_mut().set_scrollback(usize::MAX);
-        let scrollback = viewer.screen().contents();
+        let mut viewer = viewer_showing(b"$ ls\r\nnotes.md\r\n$ lf resume\r\n");
+        viewer.write(&repaint(&owner).unwrap());
+        assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+        let viewer_rows = viewer.scrollback_rows();
+        let viewer_history =
+            String::from_utf8_lossy(&viewer.repaint_history(viewer_rows).unwrap()).into_owned();
         assert!(
-            scrollback.starts_with("$ ls\nnotes.md\n$ lf resume"),
-            "{scrollback}"
+            viewer_history.starts_with("$ ls\r\nnotes.md\r\n$ lf resume"),
+            "{viewer_history:?}"
         );
-        assert!(!scrollback.contains("owner 0\n"), "{scrollback}");
+        // The owner's scrollback follows the viewer's own.
+        assert!(viewer_history.contains("owner 0\r\n"), "{viewer_history:?}");
+        assert!(viewer_history.contains("owner 5\r\n"), "{viewer_history:?}");
     }
 
     #[test]
@@ -208,55 +134,22 @@ mod tests {
     }
 
     #[test]
-    fn restores_grid_and_input_modes_without_replaying_terminal_queries() {
-        let mut parser = vt100::Parser::new_with_callbacks(
-            24,
-            80,
-            2000,
-            Queries {
-                detached: true,
-                ..Default::default()
-            },
+    fn restores_alternate_screen_colors_links_and_input_modes() {
+        let mut owner = Terminal::new(80, 24).unwrap();
+        owner.write(b"\x1b[?1049h\x1b[?2004h\x1b[?1h\x1b[>1u\x1b[34m\x1b]8;;https://loopflow.studio\x1b\\hello\x1b]8;;\x1b\\");
+        let bytes = repaint(&owner).unwrap();
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        assert!(text.contains("\x1b[?2004h"), "{text:?}");
+        assert!(text.contains("\x1b[?1h"), "{text:?}");
+        assert!(text.contains("\x1b[=1;1u"), "{text:?}");
+        assert!(
+            text.contains("\x1b]8;;https://loopflow.studio\x1b\\hello"),
+            "{text:?}"
         );
-        parser.process(b"\x1b[?1049h\x1b[?2004h\x1b[?1hhello\x1b[6n");
-        assert_eq!(parser.callbacks().replies, b"\x1b[1;6R");
-        let mut restored = vt100::Parser::new(24, 80, 2000);
-        restored.process(&snapshot(parser.screen()));
-        assert_eq!(restored.screen().contents(), "hello");
-        assert!(restored.screen().alternate_screen());
-        assert_eq!(
-            restored.screen().input_mode_formatted(),
-            parser.screen().input_mode_formatted()
-        );
-    }
-
-    #[test]
-    fn reconnect_retains_an_incomplete_escape_prefix() {
-        let mut boundary = Boundary::new();
-        boundary.advance(b"text\x1b[?20");
-        assert_eq!(boundary.pending(), Some(b"\x1b[?20".as_slice()));
-        let mut restored = vt100::Parser::new(24, 80, 0);
-        restored.process(boundary.pending().unwrap());
-        restored.process(b"04h");
-        assert!(restored.screen().bracketed_paste());
-        boundary.advance(b"04h");
-        assert_eq!(boundary.pending(), Some(b"".as_slice()));
-    }
-
-    #[test]
-    fn status_never_splits_an_osc_csi_or_utf8_character() {
-        let mut boundary = Boundary::new();
-        for frame in [
-            b"\x1b]7501;state=working\x1b\\".as_slice(),
-            b"\x1b[?2004h",
-            "\u{1f980}".as_bytes(),
-        ] {
-            for byte in &frame[..frame.len() - 1] {
-                boundary.advance(&[*byte]);
-                assert!(!boundary.ready());
-            }
-            boundary.advance(&frame[frame.len() - 1..]);
-            assert!(boundary.ready());
-        }
+        assert!(text.contains("\x1b[38;5;4m"), "{text:?}");
+        let restored = viewer_showing(&bytes);
+        assert!(restored.alternate_screen());
+        assert_eq!(restored.text().unwrap().trim_end(), "hello");
+        assert_eq!(restored.cursor(), owner.cursor());
     }
 }

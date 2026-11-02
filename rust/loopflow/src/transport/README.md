@@ -56,12 +56,24 @@ For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
 attachments keep their PTY open; the running program interprets terminal EOF keys.
 
-Terminal snapshots retain a text grid and up to 2,000 scrollback rows. They restore
-alternate-screen state, application keys, bracketed paste and mouse modes supported
-by vt100. Images, hyperlinks, extended keyboard protocols and exact restoration of
-both screen buffers are not supported. Headless observation retains a bounded output
-tail and preserves stdout/stderr on delivery. Slow viewers disconnect; execution
-continues draining.
+The owner keeps a libghostty-vt terminal (the Ghostty revision pinned in
+`rust/loopflow/ghostty-vt.json`, 8 MiB of scrollback) and answers the program's
+cursor, device and mode queries while no viewer's terminal is there to. A new viewer
+is repainted through Ghostty's VT formatter: the newest scrollback rows (up to 2,000,
+under 768 KiB) above its own history, then the active screen with colors and
+styles, OSC 8 hyperlinks, cursor position, Kitty keyboard flags, charsets, modes
+(alternate screen, application keys, bracketed paste, mouse, focus), scrolling
+region, tabstops and pwd. On the alternate screen only that screen is painted; the
+primary screen and its history stay with the owner. The viewer's own palette is kept.
+Images and the owner's palette changes are not repainted.
+
+When an owner ends it writes `<Machine home>/screens/<session>.ghostsnp`: a header
+line naming the Ghostty revision, then Ghostty's snapshot stream with both screens,
+scrollback, styles, hyperlinks, modes and unfinished input. `lf resume` paints that
+screen before the provider is back. Snapshot format v1 promises no compatibility
+across revisions, so another revision's file reads as absent.
+Headless observation retains a bounded output tail and preserves stdout/stderr on
+delivery. Slow viewers disconnect; execution continues draining.
 
 An execution command delegates to a detached owner, which holds its PTY or pipes
 and records an ordinary Process. Loopflow launches that owner itself; it has no

@@ -4,6 +4,7 @@
 mod lifetime;
 mod native;
 mod output;
+pub(crate) mod snapshot;
 mod terminal;
 
 use std::collections::VecDeque;
@@ -320,8 +321,8 @@ pub(crate) fn terminal_pair() -> io::Result<(File, File)> {
 }
 
 fn dimensions(rows: u16, cols: u16) -> (u16, u16) {
-    // An unopened terminal may report zero. vt100 needs room for a wide glyph
-    // and a previous row when wrapping, even in a temporarily collapsed pane.
+    // An unopened terminal may report zero. The owner's terminal needs room for
+    // a wide glyph and a previous row when wrapping, even in a collapsed pane.
     (
         if rows == 0 { 24 } else { rows.clamp(2, 500) },
         if cols == 0 { 80 } else { cols.clamp(2, 500) },
@@ -480,7 +481,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut viewers: Vec<Viewer> = Vec::new();
     let mut control: Option<String> = None;
     let mut pending_input = VecDeque::new();
-    let mut output = output::Output::new(terminal);
+    let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
     let mut client: Option<native::NativeClient> = None;
@@ -573,7 +574,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                         rows,
                                         cols,
                                     )?;
-                                    output.resize(rows, cols);
+                                    output.resize(rows, cols)?;
                                 }
                             } else {
                                 if viewer.token.is_some() && viewer.token == control {
@@ -643,7 +644,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 rows,
                                 cols,
                             )?;
-                            output.resize(rows, cols);
+                            output.resize(rows, cols)?;
                         }
                         _ => {} // stale and passive viewers cannot write or release another claim
                     }
@@ -688,6 +689,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 }
                 let _ = viewer.flush();
             }
+            snapshot::leave(&id, &output);
             crate::platform::kill_process(std::process::id());
         }
         let now_viewed = viewers.iter().any(|v| v.attached);
@@ -843,6 +845,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             {
                 group.disarm();
                 let _ = std::fs::remove_file(path);
+                snapshot::leave(&id, &output);
                 return if code == 0 {
                     Ok(())
                 } else {
@@ -958,9 +961,7 @@ impl Drop for RawTerminal {
             unsafe {
                 libc::tcsetattr(0, libc::TCSAFLUSH, &original);
             }
-            let _ = self.output.stdout.write_all(
-                b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m",
-            );
+            let _ = self.output.stdout.write_all(native::RESET_MODES);
             if self.alternate.entered {
                 let _ = self.output.stdout.write_all(b"\x1b[?1049l");
             }

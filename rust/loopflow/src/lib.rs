@@ -14,6 +14,7 @@ pub(crate) mod desktop_exits;
 pub mod diagnostic_log;
 pub mod durable;
 pub mod error;
+pub(crate) mod ghostty_vt;
 pub mod git;
 pub mod graph;
 pub mod harness;

@@ -8,6 +8,7 @@ pub use workspace::SessionWorkspace;
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -830,6 +831,9 @@ pub(crate) async fn open(
                 }
             }
         }
+        if session.interactive {
+            paint_last_screen(&session.id)?;
+        }
         if crate::transport::delegate_current(false)? {
             return surface(store, session).await;
         }
@@ -1089,6 +1093,20 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).context("resolve prepared Session input"),
     }
+}
+
+/// Show the screen the Session's last owner left, while its provider comes back.
+fn paint_last_screen(session: &crate::id::LfSessionId) -> Result<()> {
+    if !std::io::stdout().is_terminal() {
+        return Ok(());
+    }
+    let Some(bytes) = crate::transport::snapshot::last_screen(session.as_str()) else {
+        return Ok(());
+    };
+    let mut stdout = std::io::stdout().lock();
+    stdout.write_all(&bytes)?;
+    stdout.flush()?;
+    Ok(())
 }
 
 /// An execution owner runs until it records its exit or the OS shows it gone,

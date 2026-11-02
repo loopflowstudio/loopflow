@@ -1,0 +1,11 @@
+{
+  "revision": "a60e9e2a57f73e1eef2bd1cf2995a467f69e7fb0",
+  "artifact": "lf3",
+  "base_url": "https://bin.loopflow.studio",
+  "sha256": {
+    "aarch64-apple-darwin": "3d80162213c181565beb4e158455369c1663123598a8fc566ff19daaf777e026",
+    "x86_64-apple-darwin": "fc56e2b105ef5c9bff804c663d3d7ee27091732465486faede9768decb9b1a01",
+    "x86_64-unknown-linux-gnu": "e6371d577227d2e662d502cd2ea8372d28d473ba39edc7597b493912e4fea35c",
+    "aarch64-unknown-linux-gnu": "8e7d87acae3e6dc8bf57be26dca499d18f8c0b6ac42179361e846edc2576914c"
+  }
+}

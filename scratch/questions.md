@@ -1,7 +1,8 @@
 # LOO-693 plan: running steps and conversations survive a store upgrade
 
-Reconciled 2026-11-02 after the second concept review (`786a1c4d62`).
-origin/main (`7404ba92ef`, #1792) is merged; it shares no file with this change.
+Reconciled 2026-11-02 after implement and compress landed the concept
+review's one finding (`040c41ab79`, `cf6f2a0c6e`). origin/main (`d404104d55`,
+#1777) is merged; it touches only the Wave memory, merged without conflict.
 
 ## Exists (proved on this branch)
 

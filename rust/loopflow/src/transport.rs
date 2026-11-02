@@ -394,7 +394,7 @@ impl Viewer {
 
     fn event(&mut self, event: Event) {
         self.seq += 1;
-        self.events.push(wire::event(&self.nonce, self.seq, &event));
+        self.events.push(wire::event(&self.nonce, self.seq, event));
     }
 
     /// Place queued events on the stream.
@@ -705,8 +705,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             socket.set_nonblocking(true)?;
             viewers.push(Viewer::new(socket));
         }
-        let mut results = Vec::with_capacity(viewers.len());
-        for viewer in viewers.iter_mut() {
+        viewers.retain_mut(|viewer| {
             let result = (|| -> Result<()> {
                 for (tag, payload) in viewer.read()? {
                     let request = match tag {
@@ -865,17 +864,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 viewer.flush()?;
                 Ok(())
             })();
-            results.push(result);
-        }
-        let mut results = results.into_iter();
-        viewers.retain_mut(
-            |viewer| match results.next().expect("one result per viewer") {
+            match result {
                 Ok(()) => !viewer.leaving,
                 Err(error) => error
                     .downcast_ref()
                     .is_some_and(|error| survive(viewer, error)),
-            },
-        );
+            }
+        });
         // A resume moves its connection onto the dropped viewer's stream.
         for index in 0..viewers.len() {
             let Some((answers, resume)) = viewers[index].resuming.take() else {
@@ -1363,7 +1358,7 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     let mut decoder = Decoder::default();
     let mut scanner: Option<Scanner> = None;
     let mut terminal = None;
-    let mut token = None;
+    let mut controlled = false;
     let mut owned = false;
     let mut returning = None;
     let mut stdin_open = true;
@@ -1382,7 +1377,7 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                 revents: 0,
             },
             libc::pollfd {
-                fd: if stdin_open && (token.is_some() || terminal.is_some()) {
+                fd: if stdin_open && (controlled || terminal.is_some()) {
                     0
                 } else {
                     -1
@@ -1414,7 +1409,7 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                                 ..
                             } => {
                                 acknowledgement_deadline = None;
-                                token = claim;
+                                controlled = claim.is_some();
                                 owned = owner.as_ref() == Some(&viewer);
                                 scanner = Some(Scanner::new(&nonce));
                                 if is_terminal && terminal.is_none() {
@@ -1500,7 +1495,7 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
             let n = io::stdin().read(&mut bytes)?;
             if n == 0 {
                 stdin_open = false;
-                if terminal.is_none() && token.is_some() {
+                if terminal.is_none() && controlled {
                     send(&mut socket, Request::EndInput)?;
                 }
             } else if terminal.is_some() && bytes[..n].contains(&0x1d) {
@@ -1512,7 +1507,7 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                     eprintln!("\n{detach}");
                 }
                 return Ok(());
-            } else if token.is_some() {
+            } else if controlled {
                 send_frame(&mut socket, Tag::Input, &bytes[..n])?;
             }
         }

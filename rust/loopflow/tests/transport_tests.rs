@@ -158,7 +158,6 @@ impl Fixture {
             .unwrap();
         Viewer {
             socket,
-            buffer: Vec::new(),
             token: None,
             id: String::new(),
             reconnect: String::new(),
@@ -290,24 +289,16 @@ fn frame(tag: u8, payload: &[u8]) -> Vec<u8> {
 }
 
 /// The next frame from `reader`, or `None` at EOF.
-fn read_frame(reader: &mut impl Read, buffer: &mut Vec<u8>) -> Option<(u8, Vec<u8>)> {
-    loop {
-        if buffer.len() >= 5 {
-            let length = u32::from_be_bytes(buffer[1..5].try_into().unwrap()) as usize;
-            if buffer.len() >= 5 + length {
-                let payload = buffer[5..5 + length].to_vec();
-                let tag = buffer[0];
-                buffer.drain(..5 + length);
-                return Some((tag, payload));
-            }
-        }
-        let mut bytes = [0; 65536];
-        match reader.read(&mut bytes) {
-            Ok(0) => return None,
-            Ok(n) => buffer.extend_from_slice(&bytes[..n]),
-            Err(error) => panic!("read frame: {error}"),
-        }
+fn read_frame(reader: &mut impl Read) -> Option<(u8, Vec<u8>)> {
+    let mut header = [0; 5];
+    if reader.read(&mut header[..1]).unwrap() == 0 {
+        return None;
     }
+    reader.read_exact(&mut header[1..]).unwrap();
+    let length = u32::from_be_bytes(header[1..].try_into().unwrap()) as usize;
+    let mut payload = vec![0; length];
+    reader.read_exact(&mut payload).unwrap();
+    Some((header[0], payload))
 }
 
 /// What a viewer receives: replies to its requests, stream bytes, and the
@@ -323,7 +314,6 @@ enum Item {
 
 struct Viewer {
     socket: UnixStream,
-    buffer: Vec<u8>,
     token: Option<String>,
     id: String,
     reconnect: String,
@@ -351,7 +341,7 @@ impl Viewer {
     }
     /// The next item, or `None` once the owner closes this connection.
     fn next(&mut self) -> Option<Item> {
-        let (tag, payload) = read_frame(&mut self.socket, &mut self.buffer)?;
+        let (tag, payload) = read_frame(&mut self.socket)?;
         self.wire += 5 + payload.len() as u64;
         if tag != REPLY {
             self.received += payload.len() as u64;
@@ -786,8 +776,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
                 socket
                     .set_read_timeout(Some(Duration::from_secs(10)))
                     .unwrap();
-                let mut buffer = Vec::new();
-                let (tag, payload) = read_frame(&mut socket, &mut buffer).unwrap();
+                let (tag, payload) = read_frame(&mut socket).unwrap();
                 assert_eq!(tag, REQUEST);
                 let request: Value = serde_json::from_slice(&payload).unwrap();
                 match request["kind"].as_str().unwrap() {

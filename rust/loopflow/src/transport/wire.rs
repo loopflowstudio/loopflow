@@ -17,33 +17,23 @@ const MAX_EVENT: usize = CHUNK;
 const HEADER: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub(super) enum Tag {
     /// JSON answering one request.
-    Reply,
+    Reply = 0x01,
     /// The owner's terminal snapshot, in whatever format the owner has.
-    Snapshot,
+    Snapshot = 0x02,
     /// Stream 1: PTY output, or stdout for a piped command.
-    Out,
+    Out = 0x03,
     /// Stream 2: stderr for a piped command.
-    Err,
+    Err = 0x04,
     /// JSON carrying an `id`.
-    Request,
+    Request = 0x11,
     /// Keystrokes from the controlling connection.
-    Input,
+    Input = 0x12,
 }
 
 impl Tag {
-    fn byte(self) -> u8 {
-        match self {
-            Self::Reply => 0x01,
-            Self::Snapshot => 0x02,
-            Self::Out => 0x03,
-            Self::Err => 0x04,
-            Self::Request => 0x11,
-            Self::Input => 0x12,
-        }
-    }
-
     /// The tag carrying stream `stream`: 1 is out, 2 is err.
     pub(super) fn stream(stream: u8) -> Self {
         if stream == 2 {
@@ -68,7 +58,7 @@ impl Tag {
 
 /// Append `payload` as one frame.
 pub(super) fn encode(tag: Tag, payload: &[u8], into: &mut VecDeque<u8>) {
-    into.push_back(tag.byte());
+    into.push_back(tag as u8);
     into.extend((payload.len() as u32).to_be_bytes());
     into.extend(payload);
 }
@@ -299,15 +289,9 @@ fn prefix(nonce: &str) -> Vec<u8> {
 }
 
 /// `event` as the APC sequence a viewer holding `nonce` recognizes.
-pub(super) fn event(nonce: &str, seq: u64, event: &Event) -> Vec<u8> {
+pub(super) fn event(nonce: &str, seq: u64, event: Event) -> Vec<u8> {
     let mut bytes = prefix(nonce);
-    bytes.extend(
-        serde_json::to_vec(&Sequenced {
-            seq,
-            event: event.clone(),
-        })
-        .expect("events serialize"),
-    );
+    bytes.extend(serde_json::to_vec(&Sequenced { seq, event }).expect("events serialize"));
     bytes.extend(b"\x1b\\");
     bytes
 }
@@ -439,8 +423,8 @@ mod tests {
             rows: 40,
             cols: 120,
         };
-        let ours = event("a1b2", 7, &resize);
-        let theirs = event("ffff", 7, &resize);
+        let ours = event("a1b2", 7, resize.clone());
+        let theirs = event("ffff", 7, resize.clone());
         let mut scanner = Scanner::new("a1b2");
         let mut stream = b"before".to_vec();
         stream.extend(&ours);
@@ -460,7 +444,7 @@ mod tests {
     #[test]
     fn an_event_split_across_frames_is_reassembled() {
         let exit = Event::ChildExited { code: 3 };
-        let bytes = event("0123456789abcdef", 1, &exit);
+        let bytes = event("0123456789abcdef", 1, exit.clone());
         let mut scanner = Scanner::new("0123456789abcdef");
         let mut pieces = Vec::new();
         for byte in &bytes {

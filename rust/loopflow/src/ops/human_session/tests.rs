@@ -257,7 +257,7 @@ fn session_metadata_keeps_unknown_position_visible() {
 
 use std::ffi::OsString;
 
-use super::{human_session_argv, session_is_resumable};
+use super::human_session_argv;
 use crate::session::LfSession;
 use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
 use crate::work::task::TaskId;
@@ -554,90 +554,6 @@ fn human_sessions_open_through_the_public_session_command() {
     );
     assert!(argv.contains(&format!("LF_HOME={}", home.home.path().display())));
     assert!(!argv.iter().any(|argument| argument == "tmux"));
-}
-
-#[test]
-fn foreground_session_can_wait_for_first_use_before_native_history() {
-    let _lock = crate::journal::test_env_lock();
-    let home = SessionHome::new();
-    let _store =
-        crate::store::sqlite::SqliteStore::new(&home.home.path().join("loopflow.db")).unwrap();
-    let mut command = tokio::process::Command::new("/bin/sleep");
-    command.arg("60").stdin(std::process::Stdio::null());
-    let input = crate::session_record::new_artifact_key();
-    // Advance explicitly: a real child's I/O can prevent the paused clock
-    // from auto-advancing. Dropping the future reaps it through kill_on_drop.
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .start_paused(true)
-        .build()
-        .unwrap()
-        .block_on(async {
-            let launch = super::spawn_session_process(&mut command, &input);
-            tokio::pin!(launch);
-            assert!(futures_util::poll!(&mut launch).is_pending());
-            tokio::time::advance(std::time::Duration::from_secs(31)).await;
-            tokio::time::resume();
-            let result = tokio::time::timeout(std::time::Duration::from_secs(1), &mut launch).await;
-            assert!(
-                result.is_err(),
-                "foreground launch ended before first-use input: {result:?}"
-            );
-        });
-}
-
-#[test]
-fn initial_session_publication_requires_history_and_a_live_agent() {
-    let _lock = crate::journal::test_env_lock();
-    let _ambient = crate::test_ambient::EnvGuard::new();
-    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
-    let home = tempfile::tempdir().unwrap();
-    let capture = crate::session_record::CaptureHandle::begin_at(
-        home.path(),
-        crate::session_record::SessionCaptureSpec {
-            harness: "sleep".into(),
-            model: None,
-            surface: "tui".into(),
-            cwd: home.path().into(),
-            repo: None,
-            worktree: None,
-            skill: Some("explore".into()),
-            subjects: Vec::new(),
-            graph: crate::session_record::SessionGraphMembership::Independent,
-            work: None,
-        },
-    )
-    .unwrap();
-    let dir = capture.artifact_dir();
-    let store = crate::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
-    assert!(!session_is_resumable(&store, &dir).unwrap());
-    crate::session_record::write_provider_session(&dir, &"provider-session".into(), None).unwrap();
-    assert!(!session_is_resumable(&store, &dir).unwrap());
-    let mut client = std::process::Command::new("/bin/sleep")
-        .arg("60")
-        .spawn()
-        .unwrap();
-    let session = store
-        .session_for_artifact(&capture.artifact_key())
-        .unwrap()
-        .unwrap();
-    let attachment = store
-        .claim_session_attachment(&session.id, None, &store.test_lf_process(), true)
-        .unwrap();
-    let publication = store.record_agent_process_identity(
-        &session.id,
-        &attachment,
-        client.id(),
-        crate::journal::process_started_at(client.id())
-            .unwrap()
-            .unwrap(),
-    );
-    let resumable = publication
-        .map_err(anyhow::Error::from)
-        .and_then(|()| session_is_resumable(&store, &dir));
-    client.kill().unwrap();
-    client.wait().unwrap();
-    assert!(resumable.unwrap());
 }
 
 #[test]

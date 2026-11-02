@@ -862,6 +862,286 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     assert_eq!(provider_id, attachment.0);
 }
 
+/// A `claude` stand-in that logs its PID and parent, then waits on its terminal.
+fn parented_provider(fixture: &Fixture) -> String {
+    let bin = fixture.home.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let provider = bin.join("claude");
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$PPID" "$LF_CAPTURE_KEY" >> "$HOME/launches"
+read -r answer < /dev/tty
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
+fn pid_of_process(fixture: &Fixture, id: &str) -> i64 {
+    fixture
+        .sql()
+        .query_row("SELECT pid FROM processes WHERE id=?1", [id], |r| r.get(0))
+        .unwrap()
+}
+
+fn command_of(pid: i64) -> String {
+    let output = Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// The launcher becomes its provider: Claude's parent is the owner itself, no
+/// `lf -i` waits beside it, and the owner records what the launcher used to
+/// when the provider exits.
+#[test]
+fn a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit() {
+    let fixture = Fixture::new();
+    let path = parented_provider(&fixture);
+    let mut owner = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "--interactive",
+            "--agent",
+            "claude",
+            ":",
+            "stay small",
+        ],
+    );
+    owner.env("PATH", &path);
+    let owner = fixture.owner(owner);
+    let launched = fixture.launches(1)[0].clone();
+    let mut fields = launched.split(':');
+    let provider: i64 = fields.next().unwrap().parse().unwrap();
+    let parent: i64 = fields.next().unwrap().parse().unwrap();
+    let capture = fields.next().unwrap().to_owned();
+    assert_eq!(
+        parent,
+        pid_of_process(&fixture, &owner),
+        "a launcher still waits between the owner and its provider: {}",
+        command_of(parent)
+    );
+    let sql = fixture.sql();
+    let session: String = sql
+        .query_row(
+            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+            [&capture],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let (agent, launcher): (i64, String) = sql
+        .query_row(
+            "SELECT p.pid, p.attached_lf_process_id FROM processes p
+             JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1",
+            [&session],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        agent, provider,
+        "the AgentProcess names the exec'd launcher's PID"
+    );
+    assert!(
+        fixture.running(&launcher),
+        "the launcher's Process completed before its provider exited"
+    );
+    let mut viewer = fixture.viewer(&owner, true);
+    viewer.input("bye\n");
+    viewer.finish();
+    fixture.ends(&owner);
+    let exit: (String, Option<String>) = sql
+        .query_row(
+            "SELECT json_extract(payload,'$.outcome'), lf_process_id FROM session_events
+             WHERE session_id=?1 AND json_extract(payload,'$.type')='attachment_exit'",
+            [&session],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(exit, ("completed".to_owned(), Some(launcher.clone())));
+    let settled: i64 = sql
+        .query_row(
+            "SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%'",
+            [&session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(settled, 1, "the owner did not settle the capture");
+    let agent_done: bool = sql
+        .query_row(
+            "SELECT p.completed_at IS NOT NULL FROM processes p
+             JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1",
+            [&session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(agent_done, "the AgentProcess never recorded its exit");
+    let launcher_outcome: Option<String> = sql
+        .query_row(
+            "SELECT outcome FROM processes WHERE id=?1",
+            [&launcher],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(launcher_outcome.as_deref(), Some("succeeded"));
+}
+
+/// Opening a prepared conversation leaves one owner and one relay: the connect
+/// becomes the launcher, the launcher becomes Claude, and a viewer that
+/// resolved the Session relays bytes with nothing else loaded.
+#[test]
+fn opening_a_prepared_conversation_runs_one_owner_and_one_relay() {
+    let fixture = Fixture::new();
+    let path = parented_provider(&fixture);
+    let prepared = fixture
+        .command(&["-a", "claude", "session", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = prepared["id"].as_str().unwrap().to_owned();
+    // What Desktop's pane runs, under the terminal owner it delegates to.
+    let mut owner = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "-a",
+            "claude",
+            "session",
+            "resume",
+            &session,
+        ],
+    );
+    owner.env("PATH", &path);
+    let owner = fixture.owner(owner);
+    let launched = fixture.launches(1)[0].clone();
+    let mut fields = launched.split(':');
+    let provider: i64 = fields.next().unwrap().parse().unwrap();
+    let parent: i64 = fields.next().unwrap().parse().unwrap();
+    let owner_pid = pid_of_process(&fixture, &owner);
+    assert_eq!(
+        parent,
+        owner_pid,
+        "a process still waits between the owner and its provider: {}",
+        command_of(parent)
+    );
+    // The owner's planning sync runs short `git` commands; no `lf` stays.
+    let children = Command::new("pgrep")
+        .args(["-P", &owner_pid.to_string()])
+        .output()
+        .unwrap();
+    let lf_children: Vec<String> = std::str::from_utf8(&children.stdout)
+        .unwrap()
+        .split_whitespace()
+        .filter(|pid| *pid != provider.to_string())
+        .map(|pid| command_of(pid.parse().unwrap()))
+        .filter(|command| command.contains(env!("CARGO_BIN_EXE_lf")))
+        .collect();
+    assert!(
+        lf_children.is_empty(),
+        "lf processes beside the provider: {lf_children:?}"
+    );
+    let mut viewer = fixture
+        .command(&["-a", "claude", "session", "resume", &session])
+        .env("PATH", &path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let relay = loop {
+        let command = command_of(i64::from(viewer.id()));
+        if command.contains("session attach") {
+            break command;
+        }
+        assert!(
+            Instant::now() < deadline && viewer.try_wait().unwrap().is_none(),
+            "the viewer kept the process that resolved the Session: {command}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(relay.contains(&owner), "{relay}");
+    viewer.stdin.take().unwrap().write_all(b"bye\n").unwrap();
+    let result = wait_for_viewer(viewer, Duration::from_secs(30));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert_eq!(
+        fixture.launches(1).len(),
+        1,
+        "the provider was launched twice"
+    );
+    fixture.ends(&owner);
+}
+
+#[test]
+fn interactive_graph_settles_each_step_before_starting_the_next() {
+    let fixture = Fixture::new();
+    let path = parented_provider(&fixture);
+    fixture
+        .repo
+        .create_file(".lf/skills/probe.md", "Do the fixture work.");
+    fixture
+        .repo
+        .create_file(".lf/graphs/proof.yaml", "- probe\n- probe\n");
+    let mut command = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "-i",
+            "-a",
+            "claude",
+            "graph",
+            "proof",
+        ],
+    );
+    command.env("PATH", path);
+    let owner = fixture.owner(command);
+    let first = fixture.launches(1)[0].clone();
+    let capture = first.split(':').nth(2).unwrap();
+    let mut viewer = fixture.viewer(&owner, true);
+    viewer.input("next\n");
+    fixture.launches(2);
+    let sql = fixture.sql();
+    let (completed, outcome): (bool, String) = sql
+        .query_row(
+            "SELECT agent.completed_at IS NOT NULL, launcher.outcome
+         FROM session_events e
+         JOIN agent_sessions s ON s.id=e.session_id
+         JOIN processes agent ON agent.id=s.agent_process_id
+         JOIN processes launcher ON launcher.id=e.lf_process_id
+         WHERE e.kind='captured' AND e.receipt_key=?1",
+            [capture],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(
+        completed,
+        "the first provider's exit waited for the Graph to end"
+    );
+    assert_eq!(outcome, "succeeded");
+    viewer.input("done\n");
+    viewer.finish();
+    fixture.ends(&owner);
+}
+
 /// A restart kills every owner and provider without recording an exit. `lf resume
 /// --all` reopens exactly those conversations from saved history, once; one the
 /// person left stays stopped.

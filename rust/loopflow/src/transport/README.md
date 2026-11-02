@@ -66,7 +66,17 @@ continues draining.
 An execution command delegates to a detached owner, which holds its PTY or pipes
 and records an ordinary Process. Loopflow launches that owner itself; it has no
 public command. Session rows name that Process; viewer tokens and
-terminal bytes remain in memory. Native clients retain their original provider
+terminal bytes remain in memory. A Claude conversation keeps one lf owner
+and one relay per terminal showing it. The process that resolves a Session
+(`lf resume`, `lf session connect`) execs into `lf session attach OWNER`, which
+opens no store and parses no commands. A Claude launcher under an owner hands
+the owner what it would record at exit, then execs into the provider, so Claude
+is the owner's direct child and no `lf -i` waits beside it; the owner records
+the provider's exit, settles its capture and reports where the conversation
+moved. Graph steps keep their launcher so each step settles before the Graph
+continues. Codex and OpenCode keep their launcher, which relays to a private server.
+The owner sleeps in `poll` on its sockets, its child's output and a wake pipe
+that a blocking child wait and the lifetime policy write to. Native clients retain their original provider
 channels, including pending request identities. Graph steps share their Graph's
 terminal owner through explicit child handoff, retaining their own Process results.
 

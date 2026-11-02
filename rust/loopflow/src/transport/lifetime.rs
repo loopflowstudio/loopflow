@@ -9,7 +9,9 @@
 //! `lf resume` reopens the conversation from provider history and
 //! `lf resume --all` leaves it alone.
 
+use std::io::Write;
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -27,7 +29,10 @@ const EXECUTABLE_PAUSE: Duration = Duration::from_secs(2);
 /// Record viewer changes sent on the first channel. Once the executable is gone
 /// or the owner has gone unviewed past its limit, send the second channel what
 /// to tell attached viewers; the serve loop delivers it and ends the owner.
-pub(super) fn spawn(owner: LfProcessId) -> (mpsc::Sender<bool>, mpsc::Receiver<Option<String>>) {
+pub(super) fn spawn(
+    owner: LfProcessId,
+    waker: UnixStream,
+) -> (mpsc::Sender<bool>, mpsc::Receiver<Option<String>>) {
     let executable = Executable::current();
     let (viewers, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
@@ -35,6 +40,8 @@ pub(super) fn spawn(owner: LfProcessId) -> (mpsc::Sender<bool>, mpsc::Receiver<O
         if let Err(error) = watch(&owner, executable.as_ref(), &changes, &end) {
             tracing::warn!(%error, %owner, "Session owner policy stopped");
         }
+        // The serve loop sleeps on descriptors; tell it the policy has spoken.
+        let _ = (&waker).write_all(&[1]);
     });
     (viewers, ending)
 }

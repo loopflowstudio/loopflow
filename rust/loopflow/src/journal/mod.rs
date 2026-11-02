@@ -504,6 +504,15 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
     );
 }
 
+/// Complete this Process before it execs into another program. The image that
+/// replaces it keeps the PID but is not this command; its exit is recorded by
+/// whoever waits on it.
+pub fn finish_before_exec() {
+    if let Some(context) = current_context() {
+        finish_runtime(&context.cwd, &Ok::<(), anyhow::Error>(()));
+    }
+}
+
 fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {
     let code = command_exit_code(result);
     emit(

@@ -58,32 +58,36 @@ fn create(repo: &Path, home: &Path, wave: &str) -> String {
         .into()
 }
 
-struct Watch(Child);
-impl Watch {
+/// Desktop's planning clock, quickened: `lf wave status --sync` again and
+/// again until dropped. A refresh that fails (the remote is gone) is retried.
+struct Refresh {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+impl Refresh {
     fn start(repo: &Path, home: &Path) -> Self {
-        let output = File::create(home.join("watch.jsonl")).unwrap();
-        let errors = File::create(home.join("watch.stderr")).unwrap();
-        let child = command(repo, home)
-            .args(["planning", "status", "--json", "--watch"])
-            .stdin(Stdio::piped())
-            .stdout(output)
-            .stderr(errors)
-            .spawn()
-            .unwrap();
-        Self(child)
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (repo, home, stopped) = (repo.to_owned(), home.to_owned(), stop.clone());
+        let thread = std::thread::spawn(move || {
+            while !stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = command(&repo, &home)
+                    .args(["wave", "status", "--sync", "--json"])
+                    .stdin(Stdio::null())
+                    .output();
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        Self {
+            stop,
+            thread: Some(thread),
+        }
     }
 }
-impl Drop for Watch {
+impl Drop for Refresh {
     fn drop(&mut self) {
-        self.0.stdin.take();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while self.0.try_wait().unwrap().is_none() {
-            if Instant::now() >= deadline {
-                self.0.kill().unwrap();
-                self.0.wait().unwrap();
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(20));
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
         }
     }
 }
@@ -223,7 +227,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     let before = execution(&conn, fixture.task.id.as_str());
     let placement = fixture.task.worktree.clone();
     assert!(status(&runtime, &fixture.store, source_key, &binding).pending_local);
-    // Short commands exchange without a watcher, and identical create requests
+    // Short commands exchange without a refresh, and identical create requests
     // remain different intentions, unlike repeated delivery of the same journal.
     let first = create(&source, left.path(), "task-pr-tests");
     let second = create(&source, left.path(), "task-pr-tests");
@@ -254,8 +258,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         .block_on(worker.get_task(&first.parse().unwrap()))
         .unwrap()
         .is_some());
-    let source_watch = Watch::start(&source, left.path());
-    let worker_watch = Watch::start(&target, right.path());
+    let source_refresh = Refresh::start(&source, left.path());
+    let worker_refresh = Refresh::start(&target, right.path());
     wait_for(|| {
         runtime
             .block_on(worker.get_task(&fixture.task.id))
@@ -402,8 +406,8 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             && a.publication_state.as_deref() == Some("confirmed")
             && b.publication_state.as_deref() == Some("confirmed")
     });
-    drop(source_watch);
-    drop(worker_watch);
+    drop(source_refresh);
+    drop(worker_refresh);
     assert_eq!(execution(&conn, fixture.task.id.as_str()), before);
     assert_eq!(
         runtime
@@ -509,7 +513,7 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
         git.publish(&invalid.revision).unwrap(),
         PlanningPublication::Confirmed
     );
-    let watch = Watch::start(&repo_path, home.path());
+    let refresh = Refresh::start(&repo_path, home.path());
     wait_for(|| {
         status(&runtime, &store, repo_key, &binding)
             .acquisition_error
@@ -522,7 +526,7 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
     );
     assert!(status.imported_revision.is_none());
     assert!(status.publication_revision.is_none());
-    drop(watch);
+    drop(refresh);
 }
 
 #[cfg(unix)]

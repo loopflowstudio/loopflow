@@ -50,6 +50,9 @@ pub enum SkillOutcome {
     Decided(GraphVerdict),
     Routed(String),
     Blocked(String),
+    /// The step merges, and someone stopped shipping the Task: the Graph
+    /// stops before it, at this name, until `lf ship` approves it again.
+    Unapproved(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,8 +61,8 @@ pub enum GraphOutcome {
     Waiting,
     Interrupted,
     Blocked(String),
-    /// The runner stopped before this interactive step, where a person takes
-    /// part; everything before it is complete.
+    /// The runner stopped before this step, where a person takes part or
+    /// approves a merge; everything before it is complete.
     StoppedAt(String),
 }
 
@@ -167,6 +170,7 @@ impl<E: SkillExecutor> GraphRunner<E> {
             SkillOutcome::Waiting => Ok(Some(GraphOutcome::Waiting)),
             SkillOutcome::Interrupted => Ok(Some(GraphOutcome::Interrupted)),
             SkillOutcome::Blocked(reason) => Ok(Some(GraphOutcome::Blocked(reason))),
+            SkillOutcome::Unapproved(step) => Ok(Some(GraphOutcome::StoppedAt(step))),
             SkillOutcome::Decided(verdict) => {
                 cursor.leaf_mut().progress.verdict = Some(verdict);
                 Ok(None)

@@ -75,23 +75,14 @@ struct DesktopPerformanceTests {
         let environment = ProcessInfo.processInfo.environment
         let output = URL(fileURLWithPath: try #require(environment["LF_DESKTOP_PERF_WRITE_OUTPUT"]))
         let samples = try #require(Int(environment["LF_DESKTOP_PERF_SAMPLES"] ?? "20"))
-        let lf = try #require(environment["LF_DESKTOP_PERF_LF"])
         let home = try #require(environment["LF_DESKTOP_PERF_HOME"])
         let repo = try #require(environment["LF_DESKTOP_PERF_REPO"])
         let journal = try PerformanceJournal(url: output)
         let store = PerformanceStore(database: home + "/loopflow.db")
-        var child = environment.filter { !$0.key.hasPrefix("LF_") && !$0.key.hasPrefix("LOOPFLOW_") }
-        child["LF_HOME"] = home
-        let reader = child
+        // The window under measurement reads in this process, as Desktop does.
+        setenv("LF_HOME", home, 1)
         let query = RegistryQuery(watchWork: {
-            try LocalWorkObservation.start(process: { args, cwd in
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: lf)
-                process.arguments = args
-                process.environment = reader
-                if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-                return process
-            }, configurationChanged: { false })
+            try WorkWatches.observe(launch: LoopflowLibrary.watch)
         }) { args, _ in
             // The window under measurement reads through its one reader.
             throw RegistryQueryError("write-to-visible ran lf \(args.joined(separator: " "))")
@@ -1121,7 +1112,7 @@ private final class PerformanceReader {
         self.continuation = continuation
         return WorkObservation(frames: stream, request: { request in
             Task { @MainActor in await self.answer(request) }
-        }, cancel: { continuation.finish() }, copy: nil)
+        }, cancel: { continuation.finish() })
     }
 
     private func answer(_ request: WorkRequest) async {
@@ -1471,7 +1462,7 @@ actor SnapshotReads {
         defer { active -= 1 }
         do {
             let verb = args.prefix(2).joined(separator: " ")
-            if let fixture, verb == "session connect" || verb == "session attach" || verb == "machine id"
+            if let fixture, verb == "session resume" || verb == "machine id"
                 || args.contains(fixture.issue) || args.contains(fixture.taskId) {
                 return .success(try await fixture.read(args))
             }

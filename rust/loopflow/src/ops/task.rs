@@ -180,6 +180,19 @@ pub struct TaskSnapshot {
     /// freshly confirmed.
     pub observation: Observation,
     pub actions: TaskActionModel,
+    /// Who started the Task's latest Graph.
+    pub started_by: Option<crate::process::Starter>,
+    /// Who approved Auto-Ship and when, while the Task is approved.
+    pub ship_approval: Option<ShipMark>,
+    /// The stop that keeps a run from approving Auto-Ship, until `lf ship`.
+    pub ship_stop: Option<ShipMark>,
+}
+
+/// When someone approved or stopped Auto-Ship, and who.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ShipMark {
+    pub at: i64,
+    pub by: crate::process::Starter,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -366,6 +379,7 @@ async fn task_store() -> OpsResult<SharedStore> {
 /// Durable placement for a Task checkout forked from another Task's PR.
 #[derive(Debug, Clone)]
 pub struct StackedSync {
+    /// The recorded base, or the parent's merge commit once HEAD holds it.
     pub fork_base: String,
     pub child: Task,
     /// The live parent branch, or `None` once the parent has merged.
@@ -412,12 +426,24 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
                 parent.branch
             )));
         }
+        // A child rebased onto the default branch after its parent landed holds
+        // the parent's work through the merge commit, not the recorded parent
+        // tip. That commit is its base now; one missing both is refused later.
+        let fork_base = match parent.merge_commit.as_deref() {
+            Some(merge) if contains_commit(worktree, merge)? => merge.to_string(),
+            _ => task.base_commit.clone(),
+        };
         Ok(Some(StackedSync {
-            fork_base: task.base_commit.clone(),
+            fork_base,
             child: *task,
             parent_branch: (!merged).then_some(parent.branch),
         }))
     })
+}
+
+fn contains_commit(worktree: &Path, commit: &str) -> OpsResult<bool> {
+    Ok(crate::git::commit_exists(worktree, commit)?
+        && crate::git::is_ancestor(worktree, commit, "HEAD")?)
 }
 
 /// Return a stacked child only after its parent has merged. Landing before that
@@ -594,11 +620,38 @@ pub(crate) fn task_graph_default(store: &Store, task: &Task) -> OpsResult<(Strin
         Some(id) => store.sqlite.get_wave(id).map_err(task_error)?,
         None => None,
     };
-    let layers = crate::config::config_layers(Some(&repo), wave.as_ref().map(|w| w.slug()))
-        .map_err(task_error)?;
+    scope_graph_default(&repo, wave.as_ref().map(|w| w.slug()))
+}
+
+/// The graph a new Task in this Wave, or the repository when `wave` is `None`,
+/// takes up. `lf wave graph show` reads it before any Task exists.
+pub(crate) fn scope_graph_default(
+    repo: &Path,
+    wave: Option<&str>,
+) -> OpsResult<(String, SetupSource)> {
+    let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
     let (name, layer) = crate::config::graph_setting(&layers).map_err(task_error)?;
-    let source = layer.map_or(SetupSource::Default, SetupSource::from);
-    Ok((name, source))
+    Ok((name, layer.map_or(SetupSource::Default, SetupSource::from)))
+}
+
+/// Load `name` from `repo`, or name the graphs it could have been;
+/// `source` prefixes the error with which setting chose it.
+pub(crate) fn load_graph(
+    name: &str,
+    source: &str,
+    repo: &Path,
+) -> OpsResult<crate::task_graph::CapturedGraph> {
+    crate::task_graph::CapturedGraph::load(name, repo)
+        .map_err(task_error)?
+        .ok_or_else(|| {
+            let available = crate::graph::available_graph_names(repo)
+                .map(|names| names.join(", "))
+                .unwrap_or_default();
+            task_error(format!(
+                "{source}{}. Available: {available}",
+                crate::task_graph::missing_graph(name)
+            ))
+        })
 }
 
 /// The graph a Task takes up when nothing else selects one.
@@ -611,37 +664,18 @@ pub(crate) fn select_task_run(
     requested: Option<&str>,
     from: Option<&str>,
 ) -> OpsResult<TaskRunSelection> {
-    use crate::task_graph::{CapturedGraph, END, START};
+    use crate::task_graph::{END, START};
     let issue = &task.identifier;
-    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Deferred
-    {
-        return Err(task_error(format!(
-            "Task is deferred; use `lf task resume {issue}` before running a Graph"
-        )));
-    }
     let current = store.sqlite.task_graph_row(&task.id).map_err(task_error)?;
-    let load = |name: &str, source: &str, repo: &Path| {
-        CapturedGraph::load(name, repo)
-            .map_err(task_error)?
-            .ok_or_else(|| {
-                let available = crate::graph::available_graph_names(repo)
-                    .map(|names| names.join(", "))
-                    .unwrap_or_default();
-                task_error(format!(
-                    "{source}{}. Available: {available}",
-                    crate::task_graph::missing_graph(name)
-                ))
-            })
-    };
     let (graph, row) = match (current, requested) {
         (Some(row), None) => (row.graph.clone(), Some(row)),
         (Some(row), Some(name)) if name == row.graph.name => (row.graph.clone(), Some(row)),
-        (_, Some(name)) => (load(name, "", checkout)?, None),
+        (_, Some(name)) => (load_graph(name, "", checkout)?, None),
         (None, None) => {
             let (name, source) = task_graph_default(store, task)?;
             let repo = repository_for_task(store, task)?;
             (
-                load(&name, &format!("{} default ", source.as_str()), &repo)?,
+                load_graph(&name, &format!("{} default ", source.as_str()), &repo)?,
                 None,
             )
         }
@@ -674,16 +708,20 @@ pub(crate) fn select_task_run(
                 graph.describe_steps()
             )))
         }
-        (None, None) => {
-            let place = graph.interactive_step(step).ok_or_else(|| {
-                task_error(format!(
-                    "Task {issue} is at {step:?}, which graph {} no longer names; `lf task run {issue} --from <step>` chooses where to go on. Steps: {}",
-                    graph.name,
-                    graph.describe_steps()
-                ))
-            })?;
-            graph.after(&place)
-        }
+        // Waiting at a step that merges, the Task starts at it again.
+        (None, None) => match graph.landing_step(step) {
+            Some(landing) => Some(landing),
+            None => {
+                let place = graph.interactive_step(step).ok_or_else(|| {
+                    task_error(format!(
+                        "Task {issue} is at {step:?}, which graph {} no longer names; `lf task run {issue} --from <step>` chooses where to go on. Steps: {}",
+                        graph.name,
+                        graph.describe_steps()
+                    ))
+                })?;
+                graph.after(&place)
+            }
+        },
     };
     Ok(TaskRunSelection {
         graph,
@@ -1436,8 +1474,16 @@ pub fn task_create(
     wave: Option<&str>,
     title: Option<String>,
     report: Option<String>,
+    regressed_in: Option<String>,
 ) -> OpsResult<Task> {
     let input = resolve_task_create_input(title.as_deref(), report.as_deref())?;
+    let regression = regressed_in.map(|version| crate::work::task::TaskUpdate {
+        regressed_in: Some(version),
+        ..Default::default()
+    });
+    if let Some(update) = &regression {
+        validate_task_edit_input(update)?;
+    }
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = super::planning_sync::planning_store().await?;
@@ -1486,6 +1532,12 @@ pub fn task_create(
             )
             .await
             .map_err(task_error)?;
+        if let Some(update) = &regression {
+            store
+                .edit_task(&task.id, task.revision, update)
+                .await
+                .map_err(task_error)?;
+        }
         super::planning_sync::sync_after_save(&store, &main.to_string_lossy()).await;
         store
             .get_task(&task.id)
@@ -1880,24 +1932,6 @@ pub fn task_complete(repo: &Path, issue: &str, note: Option<&str>) -> OpsResult<
     })
 }
 
-pub fn task_defer(issue: &str, deferred: bool) -> OpsResult<()> {
-    block_on_task(async {
-        let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
-        store
-            .sqlite
-            .set_task_deferred(&task.id, deferred)
-            .map_err(task_error)?;
-        let repo = repository_for_task(&store, &task)?;
-        super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
-        Ok(())
-    })
-}
-
 pub fn task_reopen(issue: &str, note: Option<&str>) -> OpsResult<Task> {
     block_on_task(async {
         let store = task_store().await?;
@@ -2202,10 +2236,6 @@ pub(crate) async fn reconcile_task_completion(
     store: &SharedStore,
     task: &mut Task,
 ) -> OpsResult<()> {
-    if store.sqlite.task_state(&task.id).map_err(task_error)? == crate::durable::TaskState::Deferred
-    {
-        return Ok(());
-    }
     match task_work_status(store, task).await? {
         WorkStatus::Done => {
             return Ok(());
@@ -2233,7 +2263,7 @@ pub struct TaskEdit {
 pub(crate) fn validate_task_edit_input(update: &crate::work::task::TaskUpdate) -> OpsResult<()> {
     if *update == crate::work::task::TaskUpdate::default() {
         return Err(task_error(
-            "task edit requires --title, --notes, --rank, --assignee or --unassign",
+            "task edit requires --title, --notes, --rank, --assignee or --regressed-in",
         ));
     }
     if update
@@ -2242,6 +2272,13 @@ pub(crate) fn validate_task_edit_input(update: &crate::work::task::TaskUpdate) -
         .is_some_and(|title| title.trim().is_empty())
     {
         return Err(task_error("Task title cannot be empty"));
+    }
+    if let Some(version) = &update.regressed_in {
+        if crate::work::task::release_version(version).as_ref() != Some(version) {
+            return Err(task_error(format!(
+                "--regressed-in {version:?} is not a release version like v0.15.3"
+            )));
+        }
     }
     Ok(())
 }
@@ -2379,12 +2416,30 @@ pub(crate) fn append_task_comment(
                 )
             })
             .unwrap_or_default();
+        // An agent's steer is its Session's, written for the person.
+        let session = crate::journal::agent_caller().map(|caller| caller.session_id.to_string());
+        let marker = session
+            .as_ref()
+            .map(|session| {
+                format!(
+                    "\n\n{}{session} -->",
+                    crate::work::task::comment::SESSION_MARKER
+                )
+            })
+            .unwrap_or_default();
+        let author = match session {
+            Some(session_id) => crate::work::task::comment::TaskCommentAuthor::Session {
+                session_id,
+                requester: name,
+            },
+            None => crate::work::task::comment::TaskCommentAuthor::Person { name },
+        };
         (
             format!(
-                "{}{requester}\n\n<!-- loopflow-steer:{id} -->",
+                "{}{requester}{marker}\n\n<!-- loopflow-steer:{id} -->",
                 message.trim()
             ),
-            crate::work::task::comment::TaskCommentAuthor::Person { name },
+            author,
         )
     };
     store

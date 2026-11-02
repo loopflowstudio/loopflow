@@ -257,8 +257,8 @@ Hook-declaration fixtures likewise need a disposable `LF_HOME` and explicit
 `LF_BIN`, even when they never execute the declared hook. When changing executable
 selection, run these fixtures with installed `lf` directories removed from PATH.
 
-After Project ownership or uniqueness changes, run the Task-planning consumers
-against CI's materialized schema. Planning sync already creates the local Project;
+After Project ownership or uniqueness changes, run the Task-planning consumers.
+Planning sync already creates the local Project;
 registered-Task fixtures must reuse it rather than insert a second owner.
 
 Planning-owner changes must cover context/catalog reads, Wave relocation, Task
@@ -275,13 +275,13 @@ exercise acquisition in a different order from Task creation. Process-sensitive
 cleanup fixtures must observe child readiness before inspecting live executables.
 
 ```bash
-uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow --lib -E 'test(ops::linear::task_planning_tests::)' --no-fail-fast
+cargo nextest run -p loopflow --lib -E 'test(ops::linear::task_planning_tests::)' --no-fail-fast
 ```
 
 Every CLI fixture must select an explicit disposable `LF_HOME` and pin
 `LF_BIN` to the compiled test CLI. Clear inherited `LF_*` execution authority.
-Without an explicit experiment a source CLI forwards to the installed CLI and
-main Machine. Children use the same Machine and executable; PATH cannot choose a
+Without an explicit private Home a source CLI works on the main Machine's store.
+Children use the same Machine and executable; PATH cannot choose a
 second store. A Machine's database is always `$LF_HOME/loopflow.db`.
 
 When editing the repeated Task body, exercise every step on two passes and
@@ -388,27 +388,19 @@ Changes to builtin `LOOPFLOW.md` affect every prompt golden. Regenerate and
 review them before gate. The `skill_launch` checks above cover terminal launches.
 Keep prose contracts in builtin tests; launch tests should prove that the
 canonical document is included.
-For migration regressions, use the materialized Rust
-test path above: inspect historical fields at their migration boundary, then
-finish the upgrade and verify the current schema. When chapter triggers change,
-include Task consumers: durable work reservation retains its ownership claim
-after failure. Use CI's materialized migration graph for trigger
-changes; an ordinary draft build may omit the trigger. Experimental Machines hold
-this build's exact schema: use a fresh Machine after changing it. Preserve
-populated historical fixtures for published migration coverage. A Task's draft is
-edited in place, so test the released frontier against the finished draft and
-write no test for a schema that existed only between two edits.
+For migration regressions, inspect historical fields at their migration boundary
+(`apply_before_migration`), then finish the upgrade and verify the current schema.
+When chapter triggers change, include Task consumers: durable work reservation
+retains its ownership claim after failure. A private Home that applied an edited
+unmerged migration fails its checksum: use a fresh one. Preserve populated
+historical fixtures for merged migration coverage. A Task's migration is edited
+in place, so test the merged frontier against the finished migration and write
+no test for a schema that existed only between two edits.
 
-For manual migration check in a shared checkout, materialize only in a disposable
-source copy that includes the current tracked and untracked inputs. Materialization
-can change package versions, the lockfile, registry and migration files; another
-execution can commit those temporary changes before cleanup. Keep the assigned checkout
-on its authoring schema and leave the live Machine untouched. A copy without Git
-metadata must set `LOOPFLOW_BUILD_PROVENANCE=development` when exercising
-source behavior; otherwise the build defaults to release provenance. It also
-cannot prove fixtures that require `git rev-parse HEAD`: run those in
-the assigned checkout when its schema suffices, and report that separate check.
-Do not count a fixture setup failure as a passing materialized test.
+A source copy without Git metadata must set `LOOPFLOW_BUILD_PROVENANCE=development`
+when exercising source behavior, and `LOOPFLOW_MIGRATION_ORDER` when it carries
+slug migrations; it also cannot prove fixtures that require `git rev-parse HEAD`.
+Leave the live Machine untouched.
 
 After adding, renaming or removing a public command owner or concept, run
 `uv run python scripts/check_architecture.py`;
@@ -436,7 +428,7 @@ provider/GitHub tests. Known live-check limits belong in Infrastructure memory.
 Landing changes also affect release finalization and Linear completion recovery:
 
 ```bash
-uv run python scripts/materialize_rust_tests.py -- cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::linear::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
+cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::linear::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
 ```
 
 Detached repair proofs enter through the compiled CLI so admission records its
@@ -475,7 +467,7 @@ this installation-boundary proof.
 Fixtures that stop at an interactive step use bare `task run` and wait for the
 recorded Graph outcome; `-b` executes that step headlessly and needs a provider.
 Every ordinary installation run first upgrades populated released planning and
-Task/PR fixtures through the combined drafts. Those checks retain zero/one/multiple
+Task/PR fixtures through every later migration. Those checks retain zero/one/multiple
 historical PRs, pending completion delivery, a running Process and its Workflow,
 and an associated Session; they never open an installed Home.
 The default container tracks stable Rust, matching the other CI Rust jobs, and
@@ -508,8 +500,8 @@ with the planning records those workflows resolve. Exercise unfinished work
 before confirmed removal; do not resurrect deleted Tasks by resetting only
 execution tables while retaining planning tombstones.
 
-This copies source into a disposable Linux container, materializes its draft
-migrations and builds the development CLI with two Cargo jobs. It checks
+This copies source into a disposable Linux container with its migration order
+and builds the development CLI with two Cargo jobs. It checks
 populated planning upgrades from the released schema. Intermediate branch
 schemas follow the current-state cutover policy and are not imported. Installation-copy succession is no longer a
 product contract; its two cross-store promotion/continuation cases were removed.
@@ -561,7 +553,7 @@ event contract, including durable final-answer receipts and usage checkpoints.
 After Session-history or schema changes, run `lf history list --json`, `lf usage --json`, and
 `lf doctor --json` against a disposable Machine with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
-Never use the installed store to prove a draft migration.
+Never use the installed store to prove an unmerged migration.
 
 ## Codex daemon account switching
 
@@ -580,8 +572,7 @@ and adoption after restart; configured Codex behavior remains demo/review eviden
 
 Current-state conversion preserves resumable conversations and current planning;
 it does not reconstruct finished history from retired owners. Keep these populated
-migration proofs when changing the three-owner schema, including in the disposable
-release-materialized source tree:
+migration proofs when changing the three-owner schema:
 
 ```bash
 cargo test -p loopflow --lib ownership_cutover_keeps_current_task_review_without_importing_history
@@ -681,10 +672,8 @@ accounts. Put managed homes below the fixture root so their sibling login locks
 cannot collide in the shared temporary directory.
 
 When changing Machine selection, run the affected fixtures with `LF_HOME` unset in
-the test runner; the materialization wrapper's shared test Machine can mask missing
-fixture setup. CLI fixtures must select their own disposable Machine. Upgrade proofs
-must use published migration authority against a temporary shared store; opening
-an existing experiment intentionally validates its schema without upgrading it.
+the test runner. CLI fixtures must select their own disposable Machine. Upgrade
+proofs open a temporary shared store through the promotion boundary.
 
 Machine command changes also require `cargo test -p loopflow --test global_commands`
 to preserve repository-independent commands and explicit Machine isolation.
@@ -692,7 +681,7 @@ When changing remote account-selection docs, run `cd website && uv run python
 dev.py test -k test_docs_subscriptions_page_owns_account_selection`; the rendered
 guide must retain the current invocation, laptop account selection, and target-resident login contract.
 
-The materializer and `test_network.py` clear all inherited `LF_*` authority.
+`scripts/test.py` and `test_network.py` clear all inherited `LF_*` authority.
 The prepared `LOOPFLOW_TEST_LF` candidate survives the network boundary; provider
 fixtures pin `LF_BIN` inside it. On macOS, set `TMPDIR=/private/tmp`: Wave/Task fixtures that
 register raw `/var/folders` paths otherwise disagree with canonical repository
@@ -752,7 +741,7 @@ before creating work. YAML binding imports belong to
 explicit activation tests; passive status reads do not import them. Keep readiness
 fields in inline Swift responses as well as shared DTO fixtures.
 
-Changes to Project selection or planning admission require the full materialized
+Changes to Project selection or planning admission require the full
 Rust suite and headless Swift tests, including Task consumers and status readers.
 Run the installation harness for migration changes; its released-source proof
 must retain Wave identity before projecting accepted Projects.

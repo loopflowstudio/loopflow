@@ -33,16 +33,12 @@ struct DesktopNativeSessionFixture: Decodable, Sendable {
     }
 
     func read(_ args: [String]) async throws -> String {
-        if args.prefix(2) == ["session", "connect"] || args.prefix(2) == ["session", "attach"] {
-            guard args == ["session", "connect", sessionId, "--prepare", "--json", "--try"]
-                || args == ["session", "attach", sessionId, "--if-free", "--prepare", "--json"] else {
-                throw RegistryQueryError("Only the owned Session may connect")
+        if args.prefix(2) == ["session", "resume"] {
+            guard args == ["session", "resume", sessionId, "--prepare", "--json"] else {
+                throw RegistryQueryError("Only the owned Session may resume")
             }
             let output = try await Task.detached { try capture([cli] + args) }.value
-            // Attach prints `null` when nothing is running to attach to.
-            guard var record = try JSONSerialization.jsonObject(with: Data(output.utf8), options: .fragmentsAllowed) as? [String: Any] else {
-                return output
-            }
+            var record = try #require(try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any])
             let argv = try #require(record["open_argv"] as? [String])
             record["open_argv"] = isolatedCommand(argv)
             return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)

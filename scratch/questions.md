@@ -51,3 +51,14 @@ Implementation assumptions (2026-10-28, implement step), reversible:
 - **Relocation collisions now always refuse** ("<name> already exists; remove or
   rename it first"), including registration-only shadows that relocation used
   to retire; `lf wave remove` the shadow first. Its old test was deleted.
+- **Merge with main (sync, 2026-11-02):** main's in-process Desktop write path
+  (`Write`/`ServedWrite`) still named `lf wave ensure`, which this branch
+  deletes. `WaveEnsure` became `WaveAdd { wave, objective }` running
+  `ops::wave_lifecycle::add`; Desktop's `addWave` goes through that write, so
+  it records a Process as `lf wave add` would. `renameWave`/`removeWave` still
+  launch `lf` (`run`); folding them into `Write` is a follow-up, not a merge
+  concern. The `drafts/` migration layout is gone on main: `wave_removal.sql`
+  moved to `src/store/migrations/` as a slug migration and its upgrade test
+  uses `apply_before_migration`/`apply_pending_migrations`. The served-write
+  equivalence fixture adds its Wave once through `lf` first, since a first
+  `add` commits the seeded authored files and a repeat prints `unchanged`.

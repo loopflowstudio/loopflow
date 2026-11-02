@@ -7,13 +7,10 @@ uv run python scripts/loopflow-dev.py run-debug    # launch with logs visible
 uv run python scripts/loopflow-dev.py test         # run Swift tests
 ```
 
-The development app's main-Machine commands forward to the installed CLI.
-Select a private `LF_HOME` to use this checkout's bundled CLI with separate data.
-For populated data, use [offline data clones](../docs/data-clones.md):
-`lf clone run` selects the clone's pinned helper, confines Desktop and its embedded
-terminals, preserves source checkouts read-only, and reports copied Sessions'
-continuation limits. A bare SQLite copy provides no filesystem, provider or client
-isolation.
+The development app runs its bundled CLI on the main Machine's store, which it
+reads but never migrates. Only an install advances the store's schema:
+`lf install --dev` for a green main build, `lf install` for your stream's release.
+With a private `LF_HOME`, an explicit `LF_BIN` selects the CLI instead.
 Repository selectors list only Git main checkouts. Linked worktrees stay visible
 only through the Task Work that owns them.
 
@@ -24,10 +21,8 @@ opening a Session wait for the fresh read. The Portfolio window opens from the
 same saved workspace. A failed refresh keeps what is shown under one
 **Couldn't update** line. Repeated identical Session errors leave the displayed
 reading unchanged; failed per-Wave or truncated replacements keep previously readable planning,
-including its saved copy. A new error or recovery updates it.
-The bundled helper cannot migrate the installed store: schema changes require a
-published release installed through `lf install`. Delete the file to start
-from **Loading workspace…**.
+including its saved copy. A new error or recovery updates it. Delete the file to start from
+**Loading workspace…**.
 
 ```sh
 uv run python scripts/benchmarks/desktop-performance/timings.py   # how long your launches took
@@ -36,6 +31,22 @@ uv run python scripts/benchmarks/desktop-performance/timings.py   # how long you
 Each launch records when its first frame, saved workspace and fresh workspace
 arrived, and how long each `lf` read took, under `desktop-cache/timings/` in
 the Machine. Durations and command names only; the files stay on this machine.
+
+```sh
+lf doctor                  # desktop-exit: how each bundle's last launch ended
+```
+
+When Desktop goes away, its launch journal says how: a quit and who asked, an
+`exit()` and the frame that called it, a signal, or an uncaught exception. A
+launch with no record ended by SIGKILL, a crash the handlers missed, or power
+loss; doctor then asks the system log over the window since Desktop's last
+5-minute heartbeat. Stacks, vitals, hangs, memory pressure and failed `lf` reads
+go to `~/.lf/logs/lf.log` (`LF_HOME` selects another). To search the system log
+yourself, call `/usr/bin/log`, since zsh's builtin `log` shadows it:
+
+```sh
+/usr/bin/log show --last 1h --predicate 'process == "runningboardd" AND eventMessage CONTAINS "loopflow" AND eventMessage CONTAINS "termination reported by launchd"'
+```
 
 Working Tasks lists every started, uncompleted Task, on any Machine this store
 records, in the repository plan's order (waiting first, then rank). It is the
@@ -200,7 +211,7 @@ provider has not saved a transcript yet, the current terminal stays open; finish
 its first turn and retry the switch. A failed status observer reconnects on the
 next status event without replacing the conversation.
 Repository, Wave, Task and exact Session
-preparation all use `lf connect --prepare`; reset uses `--fresh` for its scope.
+preparation all use `lf resume --prepare`; reset uses `lf session new` for its scope.
 
 Shell panes with Ghostty shell integration group each completed command and its
 output into a full-width block. A command that exited non-zero has a red
@@ -646,6 +657,12 @@ launching. This checks repository registration, not all Desktop actions. Schema
 compatibility is checked by the store; ordinary commands cannot migrate the main
 database. Private `LF_HOME` experiments remain disposable and explicit.
 
+Only `/Applications/Loopflow.app` updates itself (`AppUpdater`, Sparkle): it
+reads its stream from `~/.lf/config.yaml`, asks its bundled
+`lf install can-open` before installing, and runs `lf install adopt` on the first
+launch of a new version. Dev builds, and a Machine recording `dev` (which has no
+appcast), never check for updates.
+
 | Command | What it does |
 | --- | --- |
 | `uv run python scripts/loopflow-dev.py run` | Build and launch |
@@ -673,7 +690,7 @@ xcodebuild -project LoopflowSwift.xcodeproj \
   build
 ```
 
-The generated app target builds a validation-only `lf` helper from
+The generated app target builds an `lf` helper from
 the same checkout into `Loopflow.app/Contents/MacOS`. A runnable app never
 borrows a different `lf` from PATH.
 
@@ -719,11 +736,23 @@ The repository-wide gate is `uv run python scripts/test.py --all`.
 lf desktop plan --all --json --watch       # the plan: Waves, Projects, open Tasks as Desktop shows them
 lf desktop task LOO-1 --json --watch       # the shown Task: work, Graphs, comments
 lf desktop sessions --json --watch         # the repository's Sessions as Desktop lists them
-lf planning status --json --watch          # sync receipts; keeps planning exchanged
+lf planning status --json --watch          # stored sync receipts
 ```
 
-A window runs `--watch` reads, one process per part, through
-`RegistryQuery.watchWork()`: the plan, the repository's Dashboard plans
+A window serves these `--watch` reads inside the app, one subscription per
+part, through `RegistryQuery.watchWork()` and Loopflow's Rust library
+(`rust/loopflow-ffi/include/loopflow.h`): no `lf` process runs. Each part names
+its `ServedRead`, the `lf` command above that prints the same frames. Task
+file and diff reads, the Wave list, this Machine's identity, the portfolio, a
+Work's saved panes, Task owners and the Graph catalog are `ServedRead`s too,
+read once and served the same way, so opening a window starts no `lf`.
+Completing, reopening, deferring, moving and editing a Task, saving a Task
+file, renaming or binding a Session, ensuring a Wave's Project, the planning
+refresh, and Dashboard, Task-order and pane arrangement are `ServedWrite`s: the
+library calls the function their `lf` command calls and records the same
+Process; arrangement records none, as its command does. Other writes, the
+commands that start work (`task create --run`, `task run`, `ship`, `resume`,
+`session connect`) and other Machines' reads still run the bundled `lf`. The parts: the plan, the repository's Dashboard plans
 (`lf desktop plans`), Sessions (`lf desktop sessions`) and planning status, the shown Task's status, its
 activity (`lf history`) and live call trees (`lf monitor ps`). Each watch is
 internally consistent; panes do not share one snapshot. Changing what the window
@@ -743,9 +772,7 @@ the checkpoint follows once all have, even when nothing visibly changed. Session
 commands confirm only the Sessions watch. Explicit Retry and recovery after sleep
 ask every watch to read again. If a watch ends, the window reopens all of them;
 the last readings stay on screen marked unavailable until new ones arrive. Every
-frame names its Loopflow home, and a build with unreleased migration drafts names
-its preview copy; the breadcrumbs then end with a **Preview** chip whose tooltip
-gives the path.
+frame names its Loopflow home.
 
 Task actions distinguish the running command from confirmation of its updated
 reading. Confirmation expires after ten seconds; an accepted command is never
@@ -941,6 +968,7 @@ for optional hosted execution and cleanup.
 
 ```bash
 cargo build -p loopflow --bin lf # Real CLI transport proofs
+uv run python scripts/loopflow-dev.py ffi # The Rust library the app links; test_desktop.sh builds it too
 scripts/test_desktop.sh -Xswiftc -gnone # Headless Swift tests
 swift test --package-path swift --filter CatalogTests  # Catalog DTO / used-by coverage
 swift test --package-path swift --filter SomeTestClass  # Filtered

@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import Loopflow
-import os
 
 private func enrichProcessPathForGUILaunch() {
     let existing = ProcessInfo.processInfo.environment
@@ -32,7 +31,13 @@ struct LoopflowApp: App {
         Perf.begin(Perf.coldStart, "launch", id: "launch",
                    detail: "pre_main_ms=\(Int(Perf.millisecondsSinceProcessStart() ?? -1))")
         Perf.begin(Perf.workspaceCurrent, "launch", id: "launch")
-        if AppTestMode.current() == nil { LaunchJournal.home.begin() }
+        if AppTestMode.current() == nil {
+            DesktopLog.home.begin()
+            LaunchJournal.home.begin()
+            LaunchJournal.recordExits()
+            DesktopVitals.home.start()
+            AppUpdates.adoptIfUpdated()
+        }
         bootstrapLoopflowApp()
         _workspaces = State(initialValue: RepositoryWorkspaces(
             localMachineId: AppTestMode.shouldBypassRegistry ? nil : WorkCache.home.load()?.machineId))
@@ -46,8 +51,7 @@ struct LoopflowApp: App {
                 do {
                     try await RegistryQueryLocal.shared.resumeInterrupted()
                 } catch {
-                    Logger(subsystem: "studio.loopflow", category: "sessions")
-                        .error("Resuming interrupted Sessions failed: \(String(describing: error), privacy: .public)")
+                    DesktopLog.home.error("Resuming interrupted Sessions failed", ["error": String(describing: error)])
                 }
             }
         }
@@ -56,6 +60,7 @@ struct LoopflowApp: App {
         _appearance = State(initialValue: AppearanceStore.shared)
         if AppTestMode.current() == nil {
             _desktopServer = State(initialValue: DesktopServer.start())
+            AppUpdater.shared.start()
         }
     }
 
@@ -231,6 +236,8 @@ struct LoopflowApp: App {
             openWindow(id: "portfolio")
         case "sessions" where url.path.isEmpty:
             NotificationCenter.default.post(name: .openSessions, object: nil)
+        case "update" where url.path.isEmpty:
+            AppUpdater.shared.checkForUpdates()
         default:
             taskLinks.receiveAddress { isLatest in
                 do {

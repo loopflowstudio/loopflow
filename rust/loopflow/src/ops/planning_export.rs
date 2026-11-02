@@ -34,7 +34,8 @@ pub(crate) async fn sync_repository_exports(store: &Store, repo: &str) -> OpsRes
 }
 
 pub(crate) async fn sync_export(store: &Store, repo: &Path, work: &WorkRef) -> OpsResult<()> {
-    export(store, repo, work, false).await
+    // Creations spend the reserved Linear budget so they never fail behind sync.
+    crate::linear::urgent(export(store, repo, work, false)).await
 }
 
 pub(crate) async fn retry_task_export(
@@ -42,7 +43,7 @@ pub(crate) async fn retry_task_export(
     repo: &Path,
     task: &crate::durable::TaskId,
 ) -> OpsResult<()> {
-    export(store, repo, &WorkRef::Task(task.clone()), true).await
+    crate::linear::urgent(export(store, repo, &WorkRef::Task(task.clone()), true)).await
 }
 
 async fn export(store: &Store, repo: &Path, work: &WorkRef, retry_creation: bool) -> OpsResult<()> {

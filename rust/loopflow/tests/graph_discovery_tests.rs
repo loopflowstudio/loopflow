@@ -253,7 +253,7 @@ fn graph_catalog_and_wave_selection_read_the_same_graphs() {
     );
     let shown = run(&["wave", "graph", "show", "proof", "--json"]);
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap()["graph"],
+        serde_json::from_slice::<serde_json::Value>(&shown.stdout).unwrap()["default"]["name"],
         "feature"
     );
     std::fs::write(&definition, "invalid: true\n").unwrap();

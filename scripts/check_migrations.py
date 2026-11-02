@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Verify the migration set before it can be released.
+"""Verify the migration set before it merges.
 
-Fails when a migration is malformed, newly canonicalized behind the active package
-namespace, namespaced ahead of the package version,
-collides with another id, is not registered in Rust (or is registered under a
-different id or name), diverges from current main, or — the rule that matters —
-when a migration that already shipped has been edited, renamed, or deleted.
+A migration on origin/main is immutable: stores have already run it, so changing
+it changes their history, not their schema. Repair a merged schema with a new
+forward migration.
 
-A shipped migration is immutable: databases in the wild have already run it, so
-changing it changes their history, not their schema. Repair a shipped schema with
-a new forward migration.
+- Released batches (`<major>.<minor>[.<patch>].<NNN>_<name>.sql`) are frozen
+  history: none is added, edited, renamed or deleted.
+- Every later migration is `<slug>.sql`. `build.rs` orders slugs by the
+  first-parent commit on origin/main that added them; a Task keeps one and
+  edits it in place until it merges (`scripts/new_migration.py`).
+- Runtime SQL names its columns, so an older lf can write a store a newer one
+  extended.
 
     uv run python scripts/check_migrations.py
 
-Stdlib only, so `lf release` can run it directly without a Python environment.
+Stdlib only, so CI can run it without a Python environment.
 """
 
 from __future__ import annotations
@@ -24,346 +26,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from canonicalize_migrations import _order, _read_drafts, breaking_drafts
-
 REPO_ROOT = Path(__file__).parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "rust/loopflow/src/store/migrations"
-DRAFTS_DIR = MIGRATIONS_DIR / "drafts"
-MIGRATIONS_RS = REPO_ROOT / "rust/loopflow/src/store/migration_catalog.rs"
-MIGRATION_NAME = re.compile(r"^(\d+)\.(\d+)\.(?:(\d+)\.)?(\d{3})_([a-z0-9_]+)\.sql$")
-# A draft file is `<name>.sql`; the filename is the draft's identity.
-DRAFT_FILE = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
-# `[ \t]` rather than `\s`: `\s` matches newlines, so an empty `-- depends_on:`
-# value would swallow the newline and capture the next SQL line.
-DRAFT_HEADER_DEPENDS = re.compile(r"^--[ \t]*depends_on:[ \t]*(.*)$", re.MULTILINE)
+RELEASED = re.compile(r"^\d+\.\d+\.(?:\d+\.)?\d{3}_[a-z0-9_]+\.sql$")
+SLUG = re.compile(r"^([a-z][a-z0-9_]*)\.sql$")
 DRAFT_MARKER = re.compile(r"^--[ \t]*draft:[ \t]*([a-z][a-z0-9_]*)[ \t]*$", re.MULTILINE)
-VERSION_LINE = re.compile(r'^version = "([^"]+)"', re.MULTILINE)
-MigrationKey = tuple[int, int, int, int]
-
-# One `Migration { .. }` entry of the MIGRATIONS registry in migration_catalog.rs.
-REGISTRY_ENTRY = re.compile(
-    r"""Migration\s*\{\s*
-        id:\s*MigrationId\s*\{\s*
-            major:\s*(?P<major>\d+),\s*
-            minor:\s*(?P<minor>\d+),\s*
-            patch:\s*(?P<patch>None|Some\((?P<patch_number>\d+)\)),\s*
-            ordinal:\s*(?P<ordinal>\d+),?\s*
-        \},\s*
-        name:\s*"(?P<name>[a-z0-9_]+)",\s*
-        sql:\s*include_str!\("migrations/(?P<file>[^"]+)"\),?\s*
-        (?:reader_floor:\s*(?:None|Some\("[^"]+"\)),?\s*)?
-    \}""",
-    re.VERBOSE,
-)
-
-
-def _package_version() -> tuple[int, int, int]:
-    """The active package version, from the one version both manifests agree on."""
-    versions = {}
-    for manifest in ("Cargo.toml", "pyproject.toml"):
-        match = VERSION_LINE.search((REPO_ROOT / manifest).read_text())
-        if not match:
-            _fail(f"{manifest} has no version line")
-        versions[manifest] = match.group(1)
-
-    if len(set(versions.values())) != 1:
-        _fail(f"manifest versions disagree: {versions}")
-
-    version = next(iter(versions.values()))
-    parts = version.split(".")
-    if len(parts) != 3 or not all(part.isdigit() for part in parts):
-        _fail(f"version {version!r} is not major.minor.patch")
-    return int(parts[0]), int(parts[1]), int(parts[2])
-
-
-def _migration(match: re.Match[str]) -> tuple[MigrationKey, str]:
-    major, minor, patch, ordinal, name = match.groups()
-    patch_number = -1 if patch is None else int(patch)
-    return (int(major), int(minor), patch_number, int(ordinal)), name
-
-
-def _identity(key: MigrationKey) -> str:
-    major, minor, patch, ordinal = key
-    if patch < 0:
-        return f"{major}.{minor}.{ordinal:03d}"
-    return f"{major}.{minor}.{patch}.{ordinal:03d}"
-
-
-def _filename(key: MigrationKey, name: str) -> str:
-    return f"{_identity(key)}_{name}.sql"
-
-
-def _registry() -> list[tuple[MigrationKey, str, str]]:
-    """The MIGRATIONS registry in Rust, as `(id, name, file)` in declaration order.
-
-    Read from the source rather than from a build, so the release gate needs no
-    toolchain — and so a migration file that nobody registered, which would never
-    run, is caught here rather than shipping as a silent no-op.
-    """
-    source = MIGRATIONS_RS.read_text()
-    start = source.find("const MIGRATIONS: &[Migration] = &[")
-    if start == -1:
-        _fail(f"{MIGRATIONS_RS.name} declares no MIGRATIONS registry")
-    end = source.find("];", start)
-    if end == -1:
-        _fail(f"the MIGRATIONS registry in {MIGRATIONS_RS.name} is unterminated")
-
-    entries = []
-    for match in REGISTRY_ENTRY.finditer(source[start:end]):
-        key = (
-            int(match.group("major")),
-            int(match.group("minor")),
-            -1 if match.group("patch") == "None" else int(match.group("patch_number")),
-            int(match.group("ordinal")),
-        )
-        entries.append((key, match.group("name"), match.group("file")))
-    return entries
-
-
-def _check_registry(files: dict[MigrationKey, str]) -> None:
-    """The registry and the directory must name the same migrations, identically."""
-    entries = _registry()
-
-    registered: dict[MigrationKey, str] = {}
-    for key, name, file in entries:
-        expected = _filename(key, name)
-        if file != expected:
-            _fail(
-                f"registry entry {expected} includes {file} "
-                "— the id, the name, and the file must agree"
-            )
-        if not (MIGRATIONS_DIR / file).is_file():
-            _fail(f"registry entry {file} has no file in {MIGRATIONS_DIR.name}/")
-        if key in registered:
-            _fail(f"registry entry {file} collides with {registered[key]} at {_identity(key)}")
-        registered[key] = file
-
-    for key, name in sorted(files.items()):
-        if key not in registered:
-            _fail(
-                f"{name} is not in the MIGRATIONS registry in {MIGRATIONS_RS.name} "
-                "— an unregistered migration never runs"
-            )
-
-    order = [key for key, _, _ in entries]
-    if order != sorted(order):
-        _fail(f"the MIGRATIONS registry in {MIGRATIONS_RS.name} is not in id order")
-
-
-def _last_release_tag() -> str | None:
-    result = subprocess.run(
-        ["git", "describe", "--tags", "--abbrev=0"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() or None
-
-
-def _shipped_migrations(tag: str) -> dict[str, bytes]:
-    """Every release-scoped migration in `tag`, keyed by file name.
-
-    Searched by name across the whole tree rather than under today's directory:
-    an id is shipped no matter where the file sat, so moving the directory cannot
-    quietly void the immutability check.
-    """
-    listed = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", tag],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-    shipped = {}
-    for path in listed.stdout.split():
-        name = Path(path).name
-        if not MIGRATION_NAME.match(name):
-            continue
-        blob = subprocess.run(
-            ["git", "show", f"{tag}:{path}"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            check=True,
-        )
-        shipped[name] = blob.stdout
-    return shipped
-
-
-def _migrations_at_ref(ref: str) -> dict[MigrationKey, tuple[str, bytes]]:
-    exists = subprocess.run(
-        ["git", "rev-parse", "--verify", "--quiet", ref],
-        cwd=REPO_ROOT,
-        capture_output=True,
-    )
-    if exists.returncode != 0:
-        return {}
-    listed = subprocess.run(
-        [
-            "git",
-            "ls-tree",
-            "-r",
-            "--name-only",
-            ref,
-            "--",
-            str(MIGRATIONS_DIR.relative_to(REPO_ROOT)),
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    migrations = {}
-    for relative in listed.stdout.splitlines():
-        name = Path(relative).name
-        match = MIGRATION_NAME.match(name)
-        if not match:
-            continue
-        key, _name = _migration(match)
-        content = subprocess.run(
-            ["git", "show", f"{ref}:{relative}"],
-            cwd=REPO_ROOT,
-            capture_output=True,
-            check=True,
-        ).stdout
-        migrations[key] = (name, content)
-    return migrations
-
-
-def _check_current_main(local: dict[MigrationKey, str]) -> None:
-    """Main is already durable history even before its next release tag."""
-    canonical = _migrations_at_ref("origin/main")
-    if not canonical:
-        if os.environ.get("LOOPFLOW_REQUIRE_ORIGIN_MAIN") == "1":
-            _fail("origin/main is unavailable in CI; the integration-history check cannot run")
-        print("origin/main unavailable — skipping the integration-history check")
-        return
-    for key, (canonical_name, canonical_content) in canonical.items():
-        local_name = local.get(key)
-        if local_name is None:
-            _fail(f"{canonical_name} exists on origin/main but is missing from this branch")
-        if local_name != canonical_name:
-            _fail(
-                f"{local_name} collides with {canonical_name} on origin/main at "
-                f"{_identity(key)}; "
-                "rebase and allocate a new migration"
-            )
-        if (MIGRATIONS_DIR / local_name).read_bytes() != canonical_content:
-            _fail(f"{local_name} differs from origin/main and is already durable history")
-
-
-def _check_new_canonical_namespaces(
-    local: dict[MigrationKey, str],
-    active: tuple[int, int, int],
-    tag: str | None,
-) -> None:
-    """Only known history may use legacy ids or precede the active release."""
-    canonical = _migrations_at_ref("origin/main")
-    if not canonical:
-        canonical = _migrations_at_ref("main")
-    known = set(canonical)
-    if tag is not None:
-        for name in _shipped_migrations(tag):
-            match = MIGRATION_NAME.match(name)
-            if match:
-                key, _name = _migration(match)
-                known.add(key)
-
-    for key, name in sorted(local.items()):
-        if key in known:
-            continue
-        if key[2] < 0:
-            _fail(
-                f"new canonical migration {name} uses the legacy three-part format; "
-                "author an ordinal-free draft and let the release cut assign its full "
-                "package version"
-            )
-        if key[:3] < active:
-            _fail(
-                f"new canonical migration {name} is namespaced behind the active package "
-                f"namespace {active[0]}.{active[1]}.{active[2]}; author an "
-                "ordinal-free draft and let the release cut assign its namespace"
-            )
-
-
-def _draft_cycle(drafts: dict[str, list[str]]) -> list[str] | None:
-    """A dependency cycle among drafts as a node path, or None. Ordinals are
-    assigned at the release cut by a topological sort, so a cycle has no order
-    and must fail before any release rather than pick one arbitrarily."""
-    white, gray, black = 0, 1, 2
-    color = {name: white for name in drafts}
-    stack: list[str] = []
-
-    def visit(node: str) -> list[str] | None:
-        color[node] = gray
-        stack.append(node)
-        for dependency in drafts.get(node, []):
-            if color.get(dependency) == gray:
-                return stack[stack.index(dependency) :] + [dependency]
-            if color.get(dependency) == white:
-                found = visit(dependency)
-                if found:
-                    return found
-        stack.pop()
-        color[node] = black
-        return None
-
-    for name in sorted(drafts):
-        if color[name] == white:
-            found = visit(name)
-            if found:
-                return found
-    return None
-
-
-def _check_drafts(released_names: set[str]) -> None:
-    """Each Task keeps one draft, named by its file and carrying no ordinal. The
-    release cut assigns canonical ids; this only proves the drafts are
-    well-formed and orderable before then."""
-    if not DRAFTS_DIR.is_dir():
-        return
-
-    drafts: dict[str, list[str]] = {}
-    for path in sorted(DRAFTS_DIR.iterdir()):
-        if path.is_dir() or path.suffix != ".sql":
-            continue
-        match = DRAFT_FILE.match(path.name)
-        if not match:
-            _fail(
-                f"draft {path.name} is not `<snake_case_name>.sql` — run scripts/new_migration.py"
-            )
-        name = match.group(1)
-        text = path.read_text()
-        if DRAFT_MARKER.search(text):
-            _fail(f"draft {path.name} uses reserved `-- draft:` release provenance")
-        if name in released_names:
-            _fail(f"draft {name} collides with a released migration of the same name")
-        depends = DRAFT_HEADER_DEPENDS.search(text)
-        dependencies: list[str] = []
-        if depends:
-            raw = depends.group(1).strip()
-            if raw and raw.lower() != "none":
-                dependencies = [part.strip() for part in raw.split(",") if part.strip()]
-        drafts[name] = dependencies
-
-    for name, dependencies in drafts.items():
-        for dependency in dependencies:
-            if dependency == name:
-                _fail(f"draft {name} depends on itself")
-            # A dependency resolves against another draft or an already-released
-            # migration (a released upstream is ordered before the whole cut).
-            if dependency not in drafts and dependency not in released_names:
-                _fail(
-                    f"draft {name} depends on {dependency!r}, which is neither a draft "
-                    "nor a released migration"
-                )
-
-    cycle = _draft_cycle(drafts)
-    if cycle:
-        _fail(f"draft dependencies form a cycle: {' -> '.join(cycle)}")
-
-    if drafts:
-        print(f"{len(drafts)} draft migration(s): {', '.join(sorted(drafts))}")
 
 
 def _fail(message: str) -> None:
@@ -371,9 +38,83 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def _migrations_at(ref: str) -> dict[str, bytes] | None:
+    """Every migration file on `ref`, by file name; None when `ref` is unknown."""
+    exists = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", ref],
+        cwd=REPO_ROOT,
+        capture_output=True,
+    )
+    if exists.returncode != 0:
+        return None
+    listed = subprocess.run(
+        ["git", "ls-tree", "--name-only", ref, "--", f"{MIGRATIONS_DIR.relative_to(REPO_ROOT)}/"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    migrations = {}
+    for relative in listed.stdout.splitlines():
+        if not relative.endswith(".sql"):
+            continue
+        migrations[Path(relative).name] = subprocess.run(
+            ["git", "show", f"{ref}:{relative}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=True,
+        ).stdout
+    return migrations
+
+
+def _local_migrations() -> dict[str, bytes]:
+    if not MIGRATIONS_DIR.is_dir():
+        _fail(f"{MIGRATIONS_DIR.relative_to(REPO_ROOT)} is missing")
+    local = {}
+    for path in sorted(MIGRATIONS_DIR.iterdir()):
+        if path.is_dir():
+            _fail(f"{path.name}/ — migrations live directly in {MIGRATIONS_DIR.name}/")
+        if path.suffix != ".sql":
+            continue
+        if not RELEASED.match(path.name) and not SLUG.match(path.name):
+            _fail(f"{path.name} is not a `<snake_case_slug>.sql` — run scripts/new_migration.py")
+        local[path.name] = path.read_bytes()
+    if not local:
+        _fail("no migrations found")
+    return local
+
+
+def _released_names(local: dict[str, bytes]) -> set[str]:
+    names = set()
+    for name, content in local.items():
+        if RELEASED.match(name):
+            names.add(name.split("_", 1)[1].removesuffix(".sql"))
+            names.update(DRAFT_MARKER.findall(content.decode()))
+    return names
+
+
+def _check_against_main(local: dict[str, bytes]) -> list[str]:
+    """Merged bytes are durable history; returns this branch's unmerged slugs."""
+    main = _migrations_at("origin/main")
+    if main is None:
+        if os.environ.get("LOOPFLOW_REQUIRE_ORIGIN_MAIN") == "1":
+            _fail("origin/main is unavailable in CI; the integration-history check cannot run")
+        print("origin/main unavailable — skipping the integration-history check")
+        return []
+    for name, content in main.items():
+        if name not in local:
+            _fail(f"{name} is on origin/main but missing here — a merged migration is never deleted")
+        if local[name] != content:
+            _fail(f"{name} differs from origin/main — add a forward migration instead")
+    for name in local:
+        if RELEASED.match(name) and name not in main:
+            _fail(f"{name} adds a released batch; new migrations are `<slug>.sql`")
+    return sorted(name for name in local if name not in main)
+
+
 def _check_runtime_sql() -> None:
-    """An older lf writes a store a newer release extended additively, so runtime
-    SQL names its columns: no positional INSERT, no `SELECT *`."""
+    """An older lf writes a store a newer one extended additively, so runtime SQL
+    names its columns: no positional INSERT, no `SELECT *`."""
     positional = re.compile(r"\bINSERT(?:\s+OR\s+\w+)?\s+INTO\s+\w+\s+VALUES\b", re.IGNORECASE)
     wildcard = re.compile(r"\bSELECT\s+(?:\w+\.)?\*", re.IGNORECASE)
     for path in sorted((REPO_ROOT / "rust/loopflow/src").rglob("*.rs")):
@@ -386,103 +127,16 @@ def _check_runtime_sql() -> None:
 
 
 def main() -> None:
-    active = _package_version()
-    tag = _last_release_tag()
-
-    if not MIGRATIONS_DIR.is_dir():
-        _fail(f"{MIGRATIONS_DIR.relative_to(REPO_ROOT)} is missing")
-
-    ids: dict[MigrationKey, str] = {}
-    for path in sorted(MIGRATIONS_DIR.iterdir()):
-        if path.is_dir():
-            # `drafts/` holds unordered draft migrations, checked separately.
-            continue
-        match = MIGRATION_NAME.match(path.name)
-        if not match:
-            _fail(
-                f"{path.name} is not a legacy `<major>.<minor>.<ordinal:03>_<name>.sql` "
-                "or release `<major>.<minor>.<patch>.<ordinal:03>_<name>.sql` "
-                "— run scripts/new_migration.py"
-            )
-        key, name = _migration(match)
-
-        if key in ids:
-            _fail(f"{path.name} collides with {ids[key]}")
-        if key[2] < 0 and key[:2] > active[:2]:
-            _fail(
-                f"{path.name} is namespaced ahead of the package version "
-                f"{active[0]}.{active[1]}.{active[2]}"
-            )
-        if key[2] >= 0:
-            if key[:3] > active:
-                _fail(
-                    f"{path.name} is namespaced ahead of the package version "
-                    f"{active[0]}.{active[1]}.{active[2]}"
-                )
-            if key[3] < 1 or name != "release":
-                _fail(
-                    f"{path.name} is not a `<version>.<ordinal>_release.sql` "
-                    "canonical batch for its package release"
-                )
-        ids[key] = path.name
-
-    if not ids:
-        _fail("no migrations found")
-
-    _check_registry(ids)
-    _check_current_main(ids)
-    _check_new_canonical_namespaces(ids, active, tag)
-
-    released_names = set()
-    for key, filename in ids.items():
-        match = MIGRATION_NAME.match(filename)
-        if match is None:
-            continue
-        if key[2] < 0:
-            released_names.add(match.group(5))
-            continue
-        markers = DRAFT_MARKER.findall((MIGRATIONS_DIR / filename).read_text())
-        if not markers:
-            _fail(f"{filename} carries no `-- draft:` provenance markers")
-        for marker in markers:
-            if marker in released_names:
-                _fail(f"released draft identity {marker!r} appears more than once")
-            released_names.add(marker)
-    _check_drafts(released_names)
+    local = _local_migrations()
+    released = _released_names(local)
+    for name in local:
+        slug = SLUG.match(name)
+        if slug and slug.group(1) in released:
+            _fail(f"{name} reuses the released migration name {slug.group(1)!r}")
+    unmerged = _check_against_main(local)
     _check_runtime_sql()
-    drafts = _order(_read_drafts())
-    if drafts:
-        breaking = breaking_drafts(drafts)
-        print(f"reader floor raised by: {', '.join(breaking) if breaking else '(none)'}")
-
-    # Deterministic order across namespaces is the numeric tuple, never the string:
-    # `0.10.001` sorts before `0.9.001` lexically.
-    print("migration order:")
-    for key in sorted(ids):
-        print(f"  {ids[key]}")
-
-    if tag is None:
-        print("no release tag yet — skipping the immutability check")
-        return
-
-    shipped = _shipped_migrations(tag)
-    for name, content in shipped.items():
-        current = MIGRATIONS_DIR / name
-        if not current.exists():
-            _fail(
-                f"{name} shipped in {tag} but is now missing "
-                "— a released migration is never renamed or deleted"
-            )
-        if current.read_bytes() != content:
-            _fail(f"{name} shipped in {tag} and has been edited — add a forward migration instead")
-
-    if not shipped:
-        # True exactly once: the store's migrations postdate the last tag, so no
-        # release-scoped id has shipped yet and there is nothing to hold immutable.
-        print(f"no release-scoped migrations shipped in {tag} — nothing to hold immutable")
-        return
-
-    print(f"{len(shipped)} shipped migration(s) unchanged since {tag}")
+    # A merge-queue group may carry several Tasks' migrations at once.
+    print(f"unmerged: {', '.join(unmerged)}" if unmerged else "no unmerged migration")
 
 
 if __name__ == "__main__":

@@ -406,6 +406,35 @@ struct DashboardWorkspaceTests {
         #expect(workspace.persistenceError == nil)
     }
 
+    @Test func editAfterDebounceElapsesSupersedesSaveWithoutError() async throws {
+        let source = fixtureWork(fixtureWorkspace("/task"))
+        let location = try #require(source.location)
+        let server = IntentReading(source.portableLayout())
+        // Like the real runner, a cancelled caller's write fails with CancellationError.
+        let query = RegistryQuery(runWithInput: { _, _, input in
+            try Task.checkCancellation()
+            return try await server.write(input)
+        }) { args, _ in
+            if args.starts(with: ["desktop", "layout"]) { return await server.read() }
+            throw RegistryQueryError("Unexpected execution")
+        }
+        let workspace = fixtureWork(location)
+        workspace.startPersistence(query: query, repoPath: "/repo")
+        await server.waitForRead()
+        try await server.release()
+        try await eventually { !workspace.isRestoringIntent }
+        let loaded = workspace.portableLayout().revision
+        workspace.multiplexer.newShell(command: ["first"], location: location)
+        try await Task.sleep(for: .milliseconds(50))
+        // The first debounce fires while the main actor is busy; the second edit's
+        // cancellation reaches that task before it resumes into its save.
+        workspace.multiplexer.newShell(command: ["second"], location: location)
+        usleep(400_000)  // Block the main actor; Task.sleep would yield it.
+        try await eventually { workspace.persistenceError != nil || workspace.portableLayout().revision > loaded }
+        #expect(workspace.persistenceError == nil)
+        #expect(await server.saved == workspace.portableLayout())
+    }
+
     private func eventually(_ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(5)
         while !condition(), ContinuousClock.now < deadline { await Task.yield() }

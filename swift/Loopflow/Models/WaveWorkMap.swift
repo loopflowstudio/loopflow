@@ -79,6 +79,8 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     public let state: String?
     public let completedAt: String?
     public let dueDate: String?
+    /// The release this bug regressed in; `stable` stays below it until the fix ships.
+    public let regressedIn: String?
     public let assignee: String?
 
     enum CodingKeys: String, CodingKey {
@@ -88,6 +90,7 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
         case linearId = "linear_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
+        case regressedIn = "regressed_in"
     }
 
     public var terminalLabel: String? {
@@ -219,6 +222,12 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
         case shipping
         case nextMove = "next_move"
     }
+
+    /// A started Task nobody owns: nothing moves it until someone claims it.
+    public var isUnassigned: Bool {
+        guard let runtime else { return false }
+        return runtime.owner == nil && runtime.status != .unstarted && !runtime.status.isTerminal
+    }
 }
 
 /// What a shipped Task is doing, derived in Rust; nothing here waits on a person.
@@ -228,7 +237,7 @@ public struct ShippingSnapshot: Decodable, Sendable, Hashable {
     public let reason: String
 
     public enum State: String, Decodable, Sendable, Hashable {
-        case building, landing, repairing, restarting, deferred
+        case building, landing, repairing, restarting, unassigned
     }
 
     public var label: String {
@@ -237,7 +246,7 @@ public struct ShippingSnapshot: Decodable, Sendable, Hashable {
         case .landing: "Landing"
         case .repairing: "Repairing"
         case .restarting: "Restarting"
-        case .deferred: "Deferred"
+        case .unassigned: "Unassigned"
         }
     }
 
@@ -267,7 +276,7 @@ public enum TaskConditionState: String, Decodable, Sendable, Hashable {
 /// The lifecycle actions Task Work can take. Mirrors the Rust
 /// `TaskAction`; the server computes which are legal, clients never re-derive.
 public enum TaskAction: String, Codable, Sendable, Hashable {
-    case resume
+    case run
     case openPr = "open_pr"
     case noAction = "no_action"
 }

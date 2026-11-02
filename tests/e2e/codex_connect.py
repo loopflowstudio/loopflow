@@ -462,9 +462,9 @@ def _provider_entry() -> None:
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
     if "--remote" not in sys.argv:
         if "resume" in sys.argv and os.environ.get("LF_PROBE_CLIENT"):
-            raise RuntimeError("public connect bypassed the retained provider relay")
+            raise RuntimeError("public resume bypassed the retained provider relay")
         os.execv(os.environ["LF_PROBE_CODEX"], [os.environ["LF_PROBE_CODEX"], *sys.argv[1:]])
-    # A controlled native-protocol client exercises public lf connect. This is
+    # A controlled native-protocol client exercises public lf resume. This is
     # deliberately not evidence of the rendered Codex TUI or Desktop.
     remote = sys.argv[sys.argv.index("--remote") + 1].removeprefix("unix://")
     thread = sys.argv[-1]
@@ -566,7 +566,7 @@ def _public_connection_contract(
         control = work.parent / f"{session}-{label}"
         control.mkdir()
         controls.append((control, count()))
-        argv = [str(binary), "session", "connect", session]
+        argv = [str(binary), "session", "resume", session]
         if replace:
             argv.append("--replace")
         processes.append(
@@ -670,7 +670,7 @@ def _public_connection_contract(
                 "p.attached_lf_process_id,p.attachment_token,p.endpoint,s.provider_thread,p.id",
             )
         prepared = _command(
-            [str(binary), "session", "connect", session, "--replace", "--json"],
+            [str(binary), "session", "resume", session, "--replace", "--json"],
             work,
             env,
             timeout=15,
@@ -1189,7 +1189,7 @@ def _shared_provider_home_contract(
 
     # A provider's id names the same Session as Loopflow's own.
     def session(id: str) -> dict:
-        return json.loads(lf("session", "connect", id, "--json"))
+        return json.loads(lf("session", "resume", id, "--json"))
 
     def history(id: str) -> list:
         return json.loads(lf("session", "history", id, "--json"))
@@ -1257,7 +1257,7 @@ def _shared_provider_home_contract(
     # attributed to no Task, and opens it in the native home.
     def resumed(id: str) -> dict:
         before = len(launches())
-        lf("session", "connect", id)
+        lf("session", "resume", id)
         resumes = [launch for launch in launches()[before:] if "resume" in launch["argv"]]
         assert len(resumes) == 1 and resumes[0]["argv"][-1] == id, resumes
         return resumes[0]
@@ -1270,7 +1270,7 @@ def _shared_provider_home_contract(
     assert session(admitted["id"])["title"] == "Plain conversation"
     assert shared([resumed(theirs)]) and login(native) == "first@example.com"
     unknown = _command(
-        [str(binary), "session", "connect", ours[:-4] + "0000", "--json"], work, env, 30
+        [str(binary), "session", "resume", ours[:-4] + "0000", "--json"], work, env, 30
     )
     assert unknown.returncode != 0 and "was not found" in unknown.stderr, unknown
     results["provider_ids_name_sessions"] = [conversations()[ours], admitted["id"]]

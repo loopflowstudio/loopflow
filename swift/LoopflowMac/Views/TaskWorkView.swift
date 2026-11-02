@@ -22,8 +22,8 @@ struct TaskWorkflowHeader: View {
                         .foregroundStyle(task.task.isSuccessful ? palette.success : palette.failure)
                         .accessibilityIdentifier("task-lifecycle-status")
                 }
-                if task.runtime?.status == .deferred {
-                    Text("Deferred").foregroundStyle(palette.textSecondary)
+                if task.isUnassigned {
+                    Text("Unassigned").foregroundStyle(palette.textSecondary)
                 } else if task.task.terminalLabel == nil, let state = task.task.state {
                     Text(state.capitalized).foregroundStyle(palette.textSecondary)
                         .accessibilityIdentifier("task-lifecycle-status")
@@ -82,11 +82,11 @@ struct TaskWorkflowHeader: View {
                     Button("Complete") { Task { await model.completeTask(task) } }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-complete")
-                    Button(task.runtime?.status == .deferred ? "Resume" : "Defer") {
-                        Task { await model.deferTask(task, deferred: task.runtime?.status != .deferred) }
+                    Button(task.runtime?.owner == nil ? "Claim" : "Unassign") {
+                        Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
                     }
                     .disabled(acting || readingUnavailable != nil)
-                    .accessibilityIdentifier("task-defer-resume")
+                    .accessibilityIdentifier("task-claim-unassign")
                     Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                         .disabled(acting || readingUnavailable != nil)
                         .accessibilityIdentifier("task-abandon")
@@ -134,7 +134,7 @@ struct TaskWorkflowHeader: View {
                     .padding(.vertical, 6)
             }
             .accessibilityIdentifier("task-overview")
-            TaskDueDateView(task: task)
+            TaskPlanningFactsView(task: task)
             // Completion may fail after the Workflow has already arrived.
             if let conflict = task.runtime?.completionPending {
                 HStack(spacing: Spacing.sm) {
@@ -166,7 +166,7 @@ struct TaskWorkflowHeader: View {
                 Task { await model.abandonTask(task) }
             }
         } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Defer instead to keep its work for later.")
+            Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
         }
         .font(Typography.body(12))
         .padding(.horizontal, 14)
@@ -273,15 +273,15 @@ struct TaskShipControl: View {
                 HStack(spacing: Spacing.sm) {
                     // Hovering Auto-Ship offers the other ways out of this Task.
                     if hovered {
-                        let deferred = task.runtime?.status == .deferred
-                        Button(deferred ? "Resume" : "Defer") {
-                            Task { await model.deferTask(task, deferred: !deferred) }
+                        let owned = task.runtime?.owner != nil
+                        Button(owned ? "Unassign" : "Claim") {
+                            Task { await model.assignTask(task, claimed: !owned) }
                         }
                         .buttonStyle(WorkOutlineButtonStyle())
                         .disabled(acting || readingUnavailable != nil)
-                        .help(deferred ? "lf task resume: let it run again"
-                                     : "lf task defer: hold it, keeping its checkout, PR and interactive step")
-                        .accessibilityIdentifier("task-defer")
+                        .help(owned ? "lf task unassign: nobody owns it, so nothing moves it; its checkout, PR and history stay"
+                                    : "lf task claim: you own it on this Machine")
+                        .accessibilityIdentifier("task-unassign")
                         Button("Abandon…", role: .destructive) { confirmingAbandon = true }
                             .buttonStyle(WorkOutlineButtonStyle(destructive: true))
                             .disabled(acting || readingUnavailable != nil)
@@ -302,7 +302,7 @@ struct TaskShipControl: View {
                 Task { await model.abandonTask(task) }
             }
         } message: {
-            Text("Cancels the Task, closes its PRs and deletes its branches. Defer instead to keep its work for later.")
+            Text("Cancels the Task, closes its PRs and deletes its branches. Unassign it instead to keep its work for later.")
         }
     }
 }
@@ -415,9 +415,24 @@ struct TaskWorkflowBar: View {
         work.value?.graph.map { Self.stages($0, shipping: task.shipping != nil) } ?? []
     }
 
-    /// What is happening now, in one line.
+    /// What is happening now, in one line: shipping and who approved it, or
+    /// the stop that keeps it from shipping.
     var live: String {
-        if let shipping = task.shipping { return shipping.reason }
+        let execution = model.taskExecution[task.id].value
+        if let shipping = task.shipping {
+            guard let approval = execution?.shipApproval else { return shipping.reason }
+            return "\(shipping.reason) · approved by \(approval.by.label)"
+        }
+        guard let stop = execution?.shipStop else { return position }
+        return "\(Self.notShipping(stop, issue: task.task.identifier)) · \(position)"
+    }
+
+    static func notShipping(_ stop: ShipMark, issue: String) -> String {
+        let when = Date(timeIntervalSince1970: TimeInterval(stop.at)).formatted(date: .abbreviated, time: .shortened)
+        return "Not shipping: \(stop.by.label) stopped it \(when) · lf ship \(issue) approves it again"
+    }
+
+    private var position: String {
         guard let workflow = work.value?.graph else {
             if let error = work.errorMessage { return "Workflow could not be read: \(error)" }
             if work.value == nil { return "Reading workflow…" }
@@ -542,7 +557,6 @@ struct TaskHeading: View {
     /// now reads in the Workflow bar.
     var state: String {
         switch task.runtime?.status {
-        case .deferred: return "Deferred"
         case .idle: return "Idle"
         case .active: return "Active"
         case .moving: return "Moving"
@@ -631,8 +645,8 @@ struct TaskActionItems: View {
             Button("Reopen Task") { Task { await model.reopenTask(task) } }.disabled(unavailable)
         } else {
             Button("Complete Task") { Task { await model.completeTask(task) } }.disabled(unavailable)
-            Button(task.runtime?.status == .deferred ? "Resume Task" : "Defer Task") {
-                Task { await model.deferTask(task, deferred: task.runtime?.status != .deferred) }
+            Button(task.runtime?.owner == nil ? "Claim Task" : "Unassign Task") {
+                Task { await model.assignTask(task, claimed: task.runtime?.owner == nil) }
             }.disabled(unavailable)
         }
         if let wave { Button("Open owning Wave") { model.select(.wave(id: wave.id)) } }
@@ -664,8 +678,8 @@ struct TaskActionItems: View {
 }
 
 
-/// The Task due date stays beside the conversation and in Task details.
-struct TaskDueDateView: View {
+/// The Task's due date and regression mark stay beside the conversation and in Task details.
+struct TaskPlanningFactsView: View {
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
@@ -673,6 +687,11 @@ struct TaskDueDateView: View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             if let due = task.task.dueDate {
                 Text("Due \(due)")
+                    .font(Typography.body(12.5))
+                    .foregroundStyle(palette.textSecondary)
+            }
+            if let version = task.task.regressedIn {
+                Text("Regressed in \(version)")
                     .font(Typography.body(12.5))
                     .foregroundStyle(palette.textSecondary)
             }
@@ -709,7 +728,9 @@ struct GraphProcessLog: View {
                 if let graphs = captured?.map(\.entry) ?? (readsWindow ? reading?.value?.graphProcesses : nil) {
                     ForEach(Array(graphs.reversed().enumerated()), id: \.element.id) { index, graph in
                         if index > 0 { Divider().overlay(palette.border.opacity(0.6)) }
-                        GraphProcessView(model: model, graph: graph, run: captured?.first { $0.entry.id == graph.id } ?? (readsWindow ? model.graphProcesses[graph.id] : nil))
+                        // Status names who started the Task's latest Graph: the newest row.
+                        GraphProcessView(model: model, graph: graph, run: captured?.first { $0.entry.id == graph.id } ?? (readsWindow ? model.graphProcesses[graph.id] : nil),
+                                         startedBy: index == 0 && readsWindow ? task.flatMap { model.taskExecution[$0.id].value?.startedBy } : nil)
                     }
                     if graphs.isEmpty {
                         Text("No Graph has run.").padding(.vertical, 6)
@@ -785,7 +806,7 @@ struct TaskWorkView: View {
             WorkSectionHeading(title: "Work") {
                 Button("Refresh") { model.rescanWork() }
             }
-            if let work = model.taskDiagnostics[task.id].value {
+            if let work = model.taskExecution[task.id].value?.work {
                 ForEach(work.sessions) { session in
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
@@ -798,7 +819,7 @@ struct TaskWorkView: View {
                     Text("No recorded work.")
                 }
             }
-            if let error = model.taskDiagnostics[task.id].errorMessage {
+            if let error = model.taskExecution[task.id].errorMessage {
                 Text("Work could not be read: \(error)")
                 Button("Retry") { model.rescanWork() }
             }
@@ -828,6 +849,7 @@ struct GraphProcessView: View {
     let model: WorkModel
     let graph: GraphProcessInventoryEntry
     let run: GraphProcessDetail?
+    var startedBy: Starter? = nil
     private var expanded: Bool { model.navigation.expandedGraphProcesses.contains(graph.id) }
     @State private var inspected: UInt32?
     @Environment(\.palette) private var palette
@@ -857,6 +879,11 @@ struct GraphProcessView: View {
                     Text(graph.state == .current ? "running" : graph.state.rawValue)
                         .foregroundStyle(tone?.ink(in: palette) ?? palette.textSecondary)
                     Spacer()
+                    if let startedBy {
+                        Text("started by \(startedBy.label)").lineLimit(1).truncationMode(.middle)
+                            .help("started by \(startedBy.label)")
+                            .accessibilityIdentifier("graph-process-started-by-\(graph.id)")
+                    }
                     Text(Date(timeIntervalSince1970: TimeInterval(started))
                         .formatted(date: .abbreviated, time: .shortened))
                     if let ended = graph.endedAt {

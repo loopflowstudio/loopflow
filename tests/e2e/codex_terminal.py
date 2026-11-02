@@ -600,7 +600,7 @@ trust_level="trusted"
         check=True,
     )
     status = _terminal(
-        [str(lf), "session", "connect", session_id],
+        [str(lf), "session", "resume", session_id],
         env,
         root,
         root / "resume.txt",

@@ -6,12 +6,36 @@ import subprocess
 import tarfile
 import time
 import urllib.error
+import xml.etree.ElementTree as ElementTree
+from base64 import b64decode, b64encode
 from pathlib import Path
 
 import pytest
-from botocore.exceptions import ClientError
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
 
 from scripts import deploy_website, publish_release, release_install_smoke
+
+
+@pytest.fixture
+def sparkle_key(monkeypatch: pytest.MonkeyPatch) -> Ed25519PrivateKey:
+    key = Ed25519PrivateKey.generate()
+    seed = key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
+    monkeypatch.setenv("SPARKLE_ED_PRIVATE_KEY", b64encode(seed).decode())
+    return key
+
+
+def _offered_release(appcast: bytes, key: Ed25519PrivateKey, dmg: bytes) -> str:
+    """The version an appcast offers, after checking its signature covers `dmg`."""
+    sparkle = f"{{{publish_release.SPARKLE_NAMESPACE}}}"
+    item = ElementTree.fromstring(appcast).find("channel/item")
+    enclosure = item.find("enclosure")
+    signature = b64decode(enclosure.get(f"{sparkle}edSignature"))
+    key.public_key().verify(signature, dmg)
+    assert enclosure.get("length") == str(len(dmg))
+    version = item.findtext(f"{sparkle}version")
+    assert enclosure.get("url") == f"{publish_release.DOWNLOADS_URL}/Loopflow-{version}.dmg"
+    return version
 
 
 def _native_artifacts(directory: Path) -> None:
@@ -22,6 +46,7 @@ def _native_artifacts(directory: Path) -> None:
         package_dir.mkdir()
         with tarfile.open(package_dir / f"lf-{target}.tar.gz", "w:gz") as package:
             package.add(binary, arcname="lf")
+        (package_dir / "reader-catalog.txt").write_text("v0.14.0\nwave_setup\n")
 
 
 def test_publisher_requires_the_complete_native_matrix(tmp_path: Path):
@@ -59,7 +84,6 @@ def test_publisher_extracts_the_arm_cli(tmp_path: Path):
 @pytest.mark.parametrize(
     ("code", "output", "error"),
     [
-        (0, '{"candidate":{"authority":"validation_only"}}', "validation-only"),
         (
             1,
             '{"candidate":{"authority":"published"},"verdict":{"kind":"reject"}}',
@@ -88,7 +112,7 @@ def test_publisher_rejects_invalid_candidate_preflight(
 
 @pytest.mark.parametrize("rejection", [None, "prepare", "reuse", "cleanup", "unavailable"])
 def test_publisher_prepares_exact_artifacts_before_marking_release_published(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejection: str | None
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rejection: str | None, sparkle_key
 ):
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
@@ -153,6 +177,8 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     monkeypatch.setattr(publish_release, "_run", fake_run)
     monkeypatch.setattr(publish_release, "_publish_crate", lambda: None)
     monkeypatch.setattr(publish_release, "_upload_dmg", lambda *args: None)
+    appcasts: dict[str, str] = {}
+    monkeypatch.setattr(publish_release, "_upload_appcast", appcasts.__setitem__)
     monkeypatch.setenv("LF_RELEASE_MAIN_REPO", str(tmp_path))
     monkeypatch.setenv("LF_RELEASE_WORKFLOW_RUN_ID", "42")
 
@@ -198,14 +224,18 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         "github_draft_staged",
         "crate_published",
         "versioned_dmg_uploaded",
+        "preview_appcast_uploaded",
         "website_deployed",
-        "latest_dmg_uploaded",
         "github_release_published",
     )
+    assert set(appcasts) == {"preview"}
+    dmg = (prepared_dir / "Loopflow.dmg").read_bytes()
+    assert _offered_release(appcasts["preview"].encode(), sparkle_key, dmg) == "1.2.3"
     assert set(receipt.artifact_sha256) == {
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
+        "reader-catalog.txt",
         "SHA256SUMS",
     }
     checksum_lines = (prepared_dir / "SHA256SUMS").read_text().splitlines()
@@ -213,7 +243,10 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
+        "reader-catalog.txt",
     }
+    assert (prepared_dir / "reader-catalog.txt").read_text() == "v0.14.0\nwave_setup\n"
+
     retained = json.loads((tmp_path / ".lf/logs/release.v1.2.3.json").read_text())
     assert retained["artifact_sha256"] == receipt.artifact_sha256
     prepared = json.loads((tmp_path / ".lf/logs/release.v1.2.3.candidate.json").read_text())
@@ -226,11 +259,20 @@ def test_publisher_prepares_exact_artifacts_before_marking_release_published(
     assert deploy[-2:] == ["--repo", str(tmp_path)]
 
 
+def test_publisher_refuses_targets_that_disagree_on_the_reader_catalog(tmp_path: Path):
+    _native_artifacts(tmp_path)
+    (tmp_path / publish_release.TARGETS[0] / "reader-catalog.txt").write_text("v0.14.0\n")
+
+    with pytest.raises(RuntimeError, match="disagree"):
+        publish_release._find_reader_catalog(tmp_path)
+
+
 def test_public_artifact_hashes_reject_modified_and_missing_assets(tmp_path: Path):
     names = {
         *(f"lf-{target}.tar.gz" for target in publish_release.TARGETS),
         "Loopflow.dmg",
         "install.sh",
+        "reader-catalog.txt",
         "SHA256SUMS",
     }
     for name in names:
@@ -246,7 +288,7 @@ def test_public_artifact_hashes_reject_modified_and_missing_assets(tmp_path: Pat
 
 
 @pytest.fixture
-def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sparkle_key):
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     body = (
@@ -265,6 +307,7 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             package.addfile(info, io.BytesIO(body))
     (artifacts / "Loopflow.dmg").write_bytes(b"notarized artifact")
     (artifacts / "install.sh").write_text("#!/bin/sh\nexit 1\n")
+    (artifacts / "reader-catalog.txt").write_text("v0.14.0\n")
     publish_release._write_checksums(tuple(artifacts.iterdir()), artifacts / "SHA256SUMS")
     hashes = {p.name: publish_release._sha256(p) for p in artifacts.iterdir()}
     monkeypatch.setenv("LF_RELEASE_MAIN_REPO", str(tmp_path))
@@ -284,6 +327,7 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             "https://loopflow.studio/healthz": b'{"status":"ok","release":"v1.2.3"}',
             "https://crates.io/api/v1/crates/loopflow/1.2.3": b'{"version":{"num":"1.2.3"}}',
             "github-latest": b"v1.2.3",
+            "github-newest": b"v1.2.3",
         }
     )
     run = publish_release._run
@@ -296,6 +340,10 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         if command == ["gh", "release", "view", "--json", "tagName"]:
             return subprocess.CompletedProcess(
                 command, 0, json.dumps({"tagName": remote["github-latest"].decode()}), ""
+            )
+        if command[:3] == ["gh", "release", "list"]:
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps([{"tagName": remote["github-newest"].decode()}]), ""
             )
         if command[:3] == ["gh", "release", "view"]:
             return subprocess.CompletedProcess(
@@ -338,6 +386,13 @@ def public_release(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     monkeypatch.setattr(publish_release, "_download", download)
     monkeypatch.setattr(publish_release, "_upload_dmg", upload)
+    monkeypatch.setattr(
+        publish_release,
+        "_upload_appcast",
+        lambda stream, appcast: remote.__setitem__(
+            f"{publish_release.DOWNLOADS_URL}/appcast-{stream}.xml", appcast.encode()
+        ),
+    )
     monkeypatch.setattr(publish_release, "_deploy_website", deploy)
     monkeypatch.setattr(publish_release, "_publish_crate", publish_crate)
     return remote, hashes
@@ -379,6 +434,38 @@ def test_public_proof_requires_latest_dmg(tmp_path: Path, public_release, latest
     )
 
 
+def test_preview_release_proof_leaves_the_stable_dmg_alone(tmp_path: Path, public_release):
+    remote, _ = public_release
+    remote["github-latest"] = b"v1.2.2"
+    remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"] = b"stable release"
+    before = dict(remote)
+    result = publish_release.verify_release("v1.2.3", repair=True)
+    assert remote == before
+    assert "latest_dmg_verified" not in result.completed_stages
+    assert "website_release_verified" in result.completed_stages
+
+
+def test_promote_points_the_stable_dmg_and_appcast_at_the_published_release(
+    public_release, sparkle_key
+):
+    remote, _ = public_release
+    remote[publish_release.LATEST_DMG_URL] = b"stable release"
+    publish_release.promote_release("v1.2.3")
+    assert remote[publish_release.LATEST_DMG_URL] == b"notarized artifact"
+    appcast = remote[f"{publish_release.DOWNLOADS_URL}/appcast-stable.xml"]
+    assert _offered_release(appcast, sparkle_key, b"notarized artifact") == "1.2.3"
+
+
+def test_promote_refuses_a_dmg_that_differs_from_its_checksums(public_release):
+    remote, _ = public_release
+    remote[publish_release.LATEST_DMG_URL] = b"stable release"
+    remote["https://public/Loopflow.dmg"] = b"substituted"
+    with pytest.raises(RuntimeError, match="differs from SHA256SUMS"):
+        publish_release.promote_release("v1.2.3")
+    assert remote[publish_release.LATEST_DMG_URL] == b"stable release"
+    assert f"{publish_release.DOWNLOADS_URL}/appcast-stable.xml" not in remote
+
+
 def test_reconcile_repairs_missing_publication_stages_from_exact_artifacts(
     tmp_path: Path, public_release
 ):
@@ -409,8 +496,9 @@ def test_reconcile_preserves_publication_when_repair_is_unsafe(
     remote, _ = public_release
     del remote["https://downloads.loopflow.studio/Loopflow-latest.dmg"]
     if damage == "newer_release":
-        remote["github-latest"] = b"v1.2.4"
-        expected_error = "latest release is v1.2.4"
+        remote["github-newest"] = b"v1.2.4"
+        remote["https://loopflow.studio/healthz"] = b'{"status":"ok","release":"v1.2.4"}'
+        expected_error = "newest release is v1.2.4"
     elif damage == "immutable_conflict":
         remote["https://downloads.loopflow.studio/Loopflow-1.2.3.dmg"] = b"conflict"
         expected_error = "versioned public DMG differs"
@@ -562,74 +650,6 @@ def test_direct_publisher_stage_cannot_bypass_the_owning_release_operation(
         monkeypatch.setenv("LF_WORKTREE_LEASE_FD", str(lease.fileno()))
         with pytest.raises(RuntimeError, match="invoke lf release run"):
             publish_release.main()
-
-
-@pytest.mark.parametrize("publication", ["absent", "github", "crate", "dmg", "unknown"])
-def test_source_replacement_requires_known_publication_state(
-    monkeypatch: pytest.MonkeyPatch, publication: str
-):
-    def run(command, **kwargs):
-        if command[0] == "git":
-            return subprocess.CompletedProcess(command, 0, "drafts/remove_ask.sql\n", "")
-        if publication == "github":
-            return subprocess.CompletedProcess(command, 0, '{"isDraft":true}', "")
-        error = "authentication failed" if publication == "unknown" else "release not found"
-        return subprocess.CompletedProcess(command, 1, "", error)
-
-    def urlopen(*args, **kwargs):
-        if publication == "crate":
-            return io.BytesIO(b"{}")
-        raise urllib.error.HTTPError("https://crates.io", 404, "missing", {}, None)
-
-    class Downloads:
-        def head_object(self, **kwargs):
-            if publication != "dmg":
-                raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
-            return {}
-
-    monkeypatch.setattr(publish_release, "_run", run)
-    monkeypatch.setattr(publish_release.urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(publish_release, "_r2_client", Downloads)
-    if publication == "unknown":
-        with pytest.raises(RuntimeError, match="authentication failed"):
-            publish_release.inspect_source("exact-commit", "v0.12.30", check_publication=True)
-    else:
-        result = publish_release.inspect_source("exact-commit", "v0.12.30", check_publication=True)
-        assert result["preparation_required"] == ["drafts/remove_ask.sql"]
-        assert bool(result["publications"]) == (publication != "absent")
-
-
-def test_source_inspection_uses_the_commit_not_the_working_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    def run(command, **kwargs):
-        return subprocess.run(command, cwd=tmp_path, text=True, capture_output=True, check=True)
-
-    monkeypatch.setattr(publish_release, "_run", run)
-    run(["git", "init"])
-    run(["git", "config", "user.name", "Release test"])
-    run(["git", "config", "user.email", "release@example.test"])
-    drafts = tmp_path / "rust/loopflow/src/store/migrations/drafts"
-    drafts.mkdir(parents=True)
-    (drafts / "README.md").write_text("Drafts\n")
-    run(["git", "add", "."])
-    run(["git", "commit", "-m", "Prepared source"])
-    prepared = run(["git", "rev-parse", "HEAD"]).stdout.strip()
-    (drafts / "incoming.sql").write_text("SELECT 1;\n")
-    run(["git", "add", "."])
-    run(["git", "commit", "-m", "Concurrent migration"])
-    integrated = run(["git", "rev-parse", "HEAD"]).stdout.strip()
-    (drafts / "incoming.sql").unlink()
-
-    assert publish_release.inspect_source(prepared, "v1.2.3", check_publication=False) == {
-        "preparation_required": [],
-        "publications": None,
-    }
-    observed = publish_release.inspect_source(integrated, "v1.2.3", check_publication=False)
-    assert observed["preparation_required"] == [
-        "rust/loopflow/src/store/migrations/drafts/incoming.sql"
-    ]
-    assert observed["publications"] is None
 
 
 @pytest.mark.parametrize("damage", [None, "bytes", "version", "manifest"])

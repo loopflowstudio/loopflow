@@ -2,8 +2,9 @@
 //! `end` with no one at hand, as `lf -b task run` runs it: interactive steps
 //! headless, standing in for the person. The approval is stored; the Task reads
 //! shipping while this Machine's ship process carries it there, and idle when
-//! that process exited. Defer holds it, Stop withdraws the approval, and a ship
-//! process that died is started again.
+//! that process exited. Unassigning the Task stops the ship, Stop withdraws the
+//! approval until the next `lf ship` (no run into `end` approves it meanwhile),
+//! and a ship process that died is started again.
 
 use serde::{Deserialize, Serialize};
 
@@ -25,17 +26,9 @@ pub enum ShipStart {
     /// This process now ships the Task.
     Begun(Box<Task>),
     /// A live process already ships it.
-    AlreadyShipping {
-        issue: String,
-        process: LfProcessId,
-    },
-    Deferred {
-        issue: String,
-    },
+    AlreadyShipping { issue: String, process: LfProcessId },
     /// The Task already stands at `end`.
-    AtEnd {
-        issue: String,
-    },
+    AtEnd { issue: String },
 }
 
 /// The next thing the ship process runs.
@@ -43,10 +36,9 @@ pub enum ShipStart {
 pub enum ShipStep {
     /// Run the rest of the graph headless: from the interactive step the Task
     /// waits at, standing in for the person, or on from where it stands.
-    Run {
-        from: Option<String>,
-    },
-    Deferred,
+    Run { from: Option<String> },
+    /// Someone unassigned the Task; nothing moves it until it is claimed.
+    Unassigned,
     /// Someone stopped shipping; the approval is withdrawn.
     Stopped,
     /// The Task reached `end`, completed, or was abandoned.
@@ -72,7 +64,7 @@ pub enum ShippingState {
     Landing,
     Repairing,
     Restarting,
-    Deferred,
+    Unassigned,
 }
 
 async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
@@ -83,12 +75,18 @@ async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))
 }
 
-/// The configured participant's name, or `fallback` when none is set.
-fn participant_or(fallback: &str) -> String {
-    crate::config::participant_name()
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| fallback.into())
+/// Who started `process`, read from its ancestry, with the person named as
+/// in `repo`; no process leaves attribution unresolved.
+pub(crate) fn starter(
+    sqlite: &crate::store::sqlite::SqliteStore,
+    repo: &std::path::Path,
+    process: Option<&LfProcessId>,
+) -> crate::store::StoreResult<crate::process::Starter> {
+    let Some(process) = process else {
+        return Ok(crate::process::Starter::Person { name: None });
+    };
+    let person = crate::config::participant_name_in(repo).ok().flatten();
+    sqlite.process_starter(process, person.as_deref())
 }
 
 /// Whether the process carrying a shipping Task has exited. Unknown evidence
@@ -120,12 +118,12 @@ fn carrier_failure(
     }
 }
 
-/// The Task's shipping, when it is shipping. `alive` is the ship process's
-/// liveness and `failure` when it failed and why.
+/// The Task's shipping, when it is shipping. `owned` is whether anyone owns
+/// it, `alive` the ship process's liveness and `failure` when it failed and why.
 pub(crate) fn shipping_snapshot(
     graph: Option<&TaskGraph>,
     shipping: &TaskShipping,
-    status: TaskState,
+    (status, owned): (TaskState, bool),
     alive: ProcessIdentityEvidence,
     failure: Option<&(i64, String)>,
     landing: Option<&PrLanding>,
@@ -141,10 +139,10 @@ pub(crate) fn shipping_snapshot(
             reason,
         })
     };
-    if status == TaskState::Deferred {
+    if !owned {
         return shipping(
-            ShippingState::Deferred,
-            "Deferred; resume it to keep shipping".into(),
+            ShippingState::Unassigned,
+            "Unassigned; `lf task claim` and `lf ship` keep it shipping".into(),
         );
     }
     if alive == ProcessIdentityEvidence::Dead {
@@ -211,7 +209,7 @@ pub(crate) fn read_shipping(
     Ok(shipping_snapshot(
         graph,
         &shipping,
-        status,
+        (status, sqlite.task_owned(task)?),
         alive,
         failure.as_ref(),
         landing.as_ref(),
@@ -229,7 +227,6 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         let task = task_by_issue(&store, issue).await?;
         let issue = task.identifier.clone();
         match store.sqlite.task_state(&task.id).map_err(task_error)? {
-            TaskState::Deferred => return Ok(ShipStart::Deferred { issue }),
             TaskState::Done => return Err(task_error(format!("Task {issue} is complete"))),
             TaskState::Abandoned => {
                 return Err(task_error(format!(
@@ -276,13 +273,19 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         ) {
             return Ok(ShipStart::AtEnd { issue });
         }
-        let by = participant_or("someone");
+        let repo = super::repository_for_task(&store, &task)?;
+        let by = starter(&store.sqlite, &repo, Some(&process)).map_err(task_error)?;
         let mut handoff = format!("{by} shipped it");
         if let Some(graph) = graph {
             handoff.push_str(&format!(" with {graph}"));
         }
         if let Some(note) = note {
             handoff.push_str(&format!(": {note}"));
+        }
+        // Shipping claims an unowned Task, as `lf task run` would; unassigning
+        // it later is what stops shipping.
+        if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
+            store.sqlite.claim_task(&task.id).map_err(task_error)?;
         }
         store
             .sqlite
@@ -293,23 +296,56 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
 }
 
 /// Withdraw a Task's Auto-Ship approval: stop its ship process and take back any
-/// merge request Loopflow armed on GitHub. Returns false when it was not shipping.
+/// merge request Loopflow armed on GitHub. The stop stands until `lf ship`: a
+/// run reaching `end` no longer approves it. Returns false when it was not shipping.
 pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
+    let process = crate::journal::current_lf_process_id()
+        .ok_or_else(|| task_error("lf ship --stop requires a registered Process"))?;
+    withdraw(issue, Withdrawal::Stop { process, note })
+}
+
+/// Withdraw the approval from inside the ship process when every attempt of its
+/// run failed with one error: restarting it would only repeat the failure. This
+/// is no person's stop, so a relaunch that reaches `end` may approve it again.
+pub fn ship_halt(issue: &str, cause: &str) -> OpsResult<bool> {
+    withdraw(issue, Withdrawal::Halt { cause })
+}
+
+enum Withdrawal<'a> {
+    Stop {
+        process: LfProcessId,
+        note: Option<&'a str>,
+    },
+    Halt {
+        cause: &'a str,
+    },
+}
+
+fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
+    let current = crate::journal::current_lf_process_id();
     let (task, stopped) = block_on_task(async {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
-        let by = participant_or("someone");
-        let note = match note {
-            Some(note) => format!("{by}: {note}"),
-            None => by,
+        let (note, stopped_by) = match &withdrawal {
+            Withdrawal::Stop { process, note } => {
+                let repo = super::repository_for_task(&store, &task)?;
+                let by = starter(&store.sqlite, &repo, Some(process)).map_err(task_error)?;
+                let note = match note {
+                    Some(note) => format!("{by}: {note}"),
+                    None => by.to_string(),
+                };
+                (note, Some(process))
+            }
+            Withdrawal::Halt { cause } => (format!("Loopflow: {cause}"), None),
         };
         let stopped = store
             .sqlite
-            .stop_shipping(&task.id, &note)
+            .stop_shipping(&task.id, &note, stopped_by)
             .map_err(task_error)?;
         if let Some(process) = stopped
             .as_ref()
             .and_then(|shipping| shipping.process.as_ref())
+            .filter(|process| current.as_ref() != Some(*process))
         {
             if crate::journal::process_evidence(&store.sqlite, process)
                 == ProcessIdentityEvidence::Live
@@ -351,7 +387,7 @@ pub fn ship_branch_task(repo: &std::path::Path, wave: Option<&str>) -> OpsResult
         .next()
         .unwrap_or(&branch)
         .replace(['-', '_'], " ");
-    let task = super::task_create(repo, wave, Some(title), None)?;
+    let task = super::task_create(repo, wave, Some(title), None, None)?;
     super::prepare_task(
         repo,
         &task.identifier,
@@ -449,10 +485,13 @@ pub fn ship_next(issue: &str) -> OpsResult<ShipStep> {
     block_on_task(async {
         let store = task_store().await?;
         let task = task_by_issue(&store, issue).await?;
-        match store.sqlite.task_state(&task.id).map_err(task_error)? {
-            TaskState::Deferred => return Ok(ShipStep::Deferred),
-            TaskState::Done | TaskState::Abandoned => return Ok(ShipStep::Finished),
-            _ => {}
+        if let TaskState::Done | TaskState::Abandoned =
+            store.sqlite.task_state(&task.id).map_err(task_error)?
+        {
+            return Ok(ShipStep::Finished);
+        }
+        if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
+            return Ok(ShipStep::Unassigned);
         }
         if store
             .sqlite
@@ -493,7 +532,7 @@ pub fn ship_progressed(task: &crate::work::task::TaskId) -> OpsResult<()> {
 }
 
 /// Start `lf --task ISSUE ship` again for each shipping Task checked out on
-/// this Machine whose ship process has exited. Deferred and finished Tasks wait.
+/// this Machine whose ship process has exited. Unassigned and finished Tasks wait.
 /// After a failure the restart waits, longer each time in a row; a process
 /// that ended without failing (killed, interrupted) restarts at once.
 pub(crate) fn restart_ships() -> OpsResult<()> {
@@ -503,7 +542,7 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
             let state = store.sqlite.task_state(&id).map_err(task_error)?;
             if state.is_terminal()
-                || state == TaskState::Deferred
+                || !store.sqlite.task_owned(&id).map_err(task_error)?
                 || carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead
             {
                 continue;
@@ -564,6 +603,7 @@ mod tests {
     fn a_failed_ship_restarts_later_each_time_and_says_why() {
         let mut handoff = TaskShipping {
             shipped_at: 5,
+            approved_by: None,
             process: Some(LfProcessId::new()),
             restarts: 0,
         };
@@ -583,7 +623,7 @@ mod tests {
             shipping_snapshot(
                 None,
                 &handoff,
-                TaskState::Shipping,
+                (TaskState::Shipping, true),
                 ProcessIdentityEvidence::Dead,
                 failure,
                 None,
@@ -641,11 +681,12 @@ mod tests {
         });
         let handoff = TaskShipping {
             shipped_at: 5,
+            approved_by: None,
             process: Some(LfProcessId::new()),
             restarts: 0,
         };
         let read = |status, alive, landing: Option<&PrLanding>| {
-            shipping_snapshot(Some(&graph), &handoff, status, alive, None, landing).unwrap()
+            shipping_snapshot(Some(&graph), &handoff, (status, true), alive, None, landing).unwrap()
         };
         let building = read(TaskState::Shipping, ProcessIdentityEvidence::Live, None);
         assert_eq!(building.shipped_at, 5);
@@ -661,8 +702,17 @@ mod tests {
             ShippingState::Restarting
         );
         assert_eq!(
-            read(TaskState::Deferred, ProcessIdentityEvidence::Dead, None).state,
-            ShippingState::Deferred
+            shipping_snapshot(
+                Some(&graph),
+                &handoff,
+                (TaskState::Shipping, false),
+                ProcessIdentityEvidence::Dead,
+                None,
+                None
+            )
+            .unwrap()
+            .state,
+            ShippingState::Unassigned
         );
 
         let mut landing = PrLanding::new(
@@ -698,7 +748,7 @@ mod tests {
         assert!(shipping_snapshot(
             Some(&graph),
             &handoff,
-            TaskState::Done,
+            (TaskState::Done, true),
             ProcessIdentityEvidence::Live,
             None,
             None

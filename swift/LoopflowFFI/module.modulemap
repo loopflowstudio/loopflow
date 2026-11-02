@@ -1,0 +1,7 @@
+// Loopflow's Rust library, linked into the macOS app. `scripts/loopflow-dev.py
+// ffi` builds it into the Cargo target directory Package.swift searches.
+module LoopflowFFI {
+    header "../../rust/loopflow-ffi/include/loopflow.h"
+    link "loopflow_ffi"
+    export *
+}

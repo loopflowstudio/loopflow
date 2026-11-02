@@ -52,7 +52,7 @@ async fn interrupted(store: &SharedStore) -> Result<Vec<crate::session::LfSessio
             Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
             None => false,
         };
-        if history && crate::data_clone::session_unavailable(&session.id)?.is_none() {
+        if history {
             sessions.push(session);
         }
     }
@@ -110,7 +110,7 @@ async fn start(
     let argv = [
         binary.to_string_lossy().into_owned(),
         "session".into(),
-        "connect".into(),
+        "resume".into(),
         session.id.as_str().to_owned(),
     ];
     let owner = crate::transport::start(&argv, true, &session.cwd, &|_| {})

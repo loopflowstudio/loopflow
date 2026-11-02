@@ -3,9 +3,6 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use crate::git;
-pub use crate::migration_drafts::MigrationDraft;
-
-include!(concat!(env!("OUT_DIR"), "/migration_draft_manifest.rs"));
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergedCommit {
@@ -104,13 +101,6 @@ pub enum BuildProvenance {
     Release,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MigrationAuthority {
-    Published,
-    ValidationOnly,
-}
-
 impl BuildProvenance {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -155,31 +145,11 @@ pub const BUILD_VERSION: &str = env!("LOOPFLOW_BUILD_VERSION");
 /// `lf --version`: the build version, then an unreleased build's label.
 pub const VERSION_LINE: &str = env!("LOOPFLOW_VERSION_LINE");
 
-/// What an unreleased build is, e.g. `hotfix e9b2c2eac on v0.14.16`; `None`
-/// for a release.
+/// What an unreleased build is, e.g. `build e9b2c2eac on v0.14.16`, or
+/// `schema work …` when it carries migrations origin/main has not added;
+/// `None` for a release.
 pub fn label() -> Option<&'static str> {
     Some(env!("LOOPFLOW_BUILD_LABEL")).filter(|label| !label.is_empty())
-}
-
-pub fn migration_authority() -> MigrationAuthority {
-    match env!("LOOPFLOW_COMPILED_MIGRATION_AUTHORITY") {
-        "published" => MigrationAuthority::Published,
-        "validation_only" => MigrationAuthority::ValidationOnly,
-        _ => unreachable!("build script validates migration authority"),
-    }
-}
-
-/// Ordered draft migrations embedded when this binary was compiled.
-pub fn migration_draft_manifest() -> &'static [MigrationDraft] {
-    MIGRATION_DRAFT_MANIFEST
-}
-
-/// Drafts present when this binary was compiled and therefore absent from its registry.
-pub fn pending_migration_drafts() -> Vec<&'static str> {
-    migration_draft_manifest()
-        .iter()
-        .map(|draft| draft.name)
-        .collect()
 }
 
 fn parse_provenance(value: &str) -> Option<BuildProvenance> {
@@ -214,10 +184,9 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        classify_revision, label, migration_authority, migration_draft_manifest, parse_provenance,
-        pending_migration_drafts, provenance, short_revision, source_identity_for, source_revision,
-        source_root, BuildFreshness, BuildProvenance, MigrationAuthority, BUILD_VERSION,
-        VERSION_LINE,
+        classify_revision, label, parse_provenance, provenance, short_revision,
+        source_identity_for, source_revision, source_root, BuildFreshness, BuildProvenance,
+        BUILD_VERSION, VERSION_LINE,
     };
 
     /// A throwaway `A -> B -> C` repo keeps classifier tests offline.
@@ -362,16 +331,6 @@ mod tests {
         );
         assert_eq!(parse_provenance("release"), Some(BuildProvenance::Release));
         assert_eq!(parse_provenance("other"), None);
-        assert!(matches!(
-            migration_authority(),
-            MigrationAuthority::Published | MigrationAuthority::ValidationOnly
-        ));
-        assert!(pending_migration_drafts()
-            .iter()
-            .all(|name| !name.is_empty()));
-        for draft in migration_draft_manifest() {
-            assert!(draft.sql.is_empty() || draft.sql.ends_with('\n'));
-        }
         assert!(!source_revision().is_empty());
         let package_version = env!("CARGO_PKG_VERSION");
         assert!(
@@ -381,10 +340,10 @@ mod tests {
         if source_revision() != "unknown" && BUILD_VERSION != package_version {
             assert!(BUILD_VERSION.contains(short_revision(source_revision())));
             let label = label().expect("an unreleased build is labeled");
-            let kind = if pending_migration_drafts().is_empty() {
-                "hotfix"
+            let kind = if crate::store::migrations::unmerged_migrations().is_empty() {
+                "build"
             } else {
-                "development"
+                "schema work"
             };
             assert!(
                 label

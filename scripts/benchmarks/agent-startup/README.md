@@ -6,7 +6,7 @@ CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p loopflow --bin lf
 cp target/release/lf /private/benchmark/lf-baseline
 # Build the candidate with the same options and retain a separate immutable copy.
 uv run python scripts/benchmarks/agent-startup/fixture.py \
-  --source ~/.lf/loopflow.db --home /private/benchmark/dense --apply-drafts
+  --source ~/.lf/loopflow.db --home /private/benchmark/dense
 uv run python scripts/benchmarks/agent-startup/native.py \
   --baseline /private/benchmark/lf-baseline --candidate /private/benchmark/lf-candidate \
   --home /private/benchmark/dense --repo /private/benchmark/repo \
@@ -19,12 +19,10 @@ in that Home's configuration. Keep builds and unrelated benchmarks out of the
 measurement window. Copy the binary before another build can overwrite it.
 
 `fixture.py` opens the source database read-only and uses SQLite backup. It creates
-a new private directory, copies no credential files, and optionally applies the
-checkout's ordered drafts **only to that copy**. Before any launch it removes
-copied managed-account routes and their absolute provider-home references; native
-providers use their ordinary authentication. The CLI subsequently validates
-its exact schema. Use `--apply-drafts` only for a released source snapshot that
-does not already contain them; compatible experimental snapshots need no flag.
+a new private directory and copies no credential files. Before any launch it
+removes copied managed-account routes and their absolute provider-home references;
+native providers use their ordinary authentication. The candidate CLI migrates the
+private Home on its first open.
 Supply the disposable checkout at `/private/benchmark/repo` before measuring.
 These scripts do not create a Git worktree or alter the installed Machine.
 

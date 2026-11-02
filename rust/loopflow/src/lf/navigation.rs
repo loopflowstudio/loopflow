@@ -48,9 +48,10 @@ pub fn resolve_child(
     let mut matches = Vec::new();
     if prefix.is_empty() {
         let owner = match name {
-            "resume" | "connect" => Some("session"),
+            "resume" => Some("session"),
             "comment" => Some("task"),
-            "sync" => Some("ops"),
+            // `lf release` stays the release command.
+            "sync" | "release" => Some("ops"),
             _ => None,
         };
         if let Some(owner) = owner.and_then(|name| command.find_subcommand(name)) {

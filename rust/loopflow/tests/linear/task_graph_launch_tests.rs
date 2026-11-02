@@ -220,101 +220,6 @@ for line in sys.stdin:
                 .unwrap()
         );
     }
-    let session: String = db
-        .query_row(
-            "SELECT id FROM agent_sessions WHERE skill='first' LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    // Connecting with another provider continues the same Session from a log;
-    // contextual resume reaches the same open.
-    let transcript = home
-        .path()
-        .join("accounts/claude/fixture/projects/fixture/agent-fixture.jsonl");
-    fs::create_dir_all(transcript.parent().unwrap()).unwrap();
-    fs::write(
-        &transcript,
-        [
-            serde_json::json!({"type":"user","userType":"external","message":{"content":"Rename the parser module"}}),
-            serde_json::json!({"type":"assistant","message":{"content":[
-                {"type":"text","text":"Renaming it now."},
-                {"type":"tool_use","id":"read","name":"Read","input":{"file_path":"src/parser.rs"}},
-                {"type":"tool_use","id":"move","name":"Bash","input":{"command":"git mv src/parser.rs src/syntax.rs"}}]}}),
-            serde_json::json!({"type":"user","userType":"external","toolUseResult":"done","message":{"content":[
-                {"type":"tool_result","tool_use_id":"read","content":"successful parser source"},
-                {"type":"tool_result","tool_use_id":"move","is_error":true,"content":"Permission to use Bash has been denied."}]}}),
-        ]
-        .map(|row| row.to_string())
-        .join("\n"),
-    )
-    .unwrap();
-    // The first Codex app-server crashes before the conversation opens.
-    fs::write(home.path().join("fail-server"), "").unwrap();
-    let crashed = command(
-        repo.path(),
-        home.path(),
-        &["session", "connect", &session, "-a", "codex"],
-    )
-    .output()
-    .unwrap();
-    assert!(!crashed.status.success());
-    // Retrying without -a relaunches Codex with the same continuation.
-    fs::remove_file(home.path().join("fail-server")).unwrap();
-    let imported = command(repo.path(), home.path(), &["session", "connect", &session])
-        .output()
-        .unwrap();
-    assert!(
-        imported.status.success(),
-        "{}",
-        String::from_utf8_lossy(&imported.stderr)
-    );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        6
-    );
-    assert_eq!(
-        db.query_row(
-            "SELECT provider FROM agent_sessions WHERE id=?1",
-            [&session],
-            |row| row.get::<_, String>(0)
-        )
-        .unwrap(),
-        "codex"
-    );
-    let turns: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(home.path().join("native-turns.json")).unwrap())
-            .unwrap();
-    let turn = turns[0]["items"][0]["content"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|input| input["text"].as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(turn.contains("began in claude"), "{turn}");
-    assert!(turn.contains("Rename the parser module"), "{turn}");
-    // The skill ran in the Claude conversation; the continuation does not re-send it.
-    assert!(!turn.contains("<lf:skill:first"), "{turn}");
-    let log_path = turn
-        .split_whitespace()
-        .find_map(|word| {
-            word.strip_suffix(";")
-                .filter(|path| path.ends_with("conversation.md"))
-        })
-        .unwrap_or_else(|| panic!("no log path in {turn}"));
-    let log = fs::read_to_string(log_path).unwrap();
-    for expected in [
-        "Rename the parser module",
-        "Renaming it now.",
-        "- tool: Bash",
-        "Permission to use Bash has been denied.",
-    ] {
-        assert!(log.contains(expected), "{expected} missing from {log}");
-    }
-    assert!(!log.contains("successful parser source"), "{log}");
 
     // A separate invocation with no -a keeps skill and step declarations.
     let unbound = TestRepo::new();
@@ -542,7 +447,6 @@ fn every_task_launch_runs_in_the_foreground_under_the_same_checks() {
         // The worker's entry points are gone; nothing restarts a Graph.
         for removed in [
             vec!["--task", "INF-123", "graph", "start", "proof"],
-            vec!["task", "create", "--run", "--title", "x"],
             vec!["task", "__worker", registered.task.id.as_str()],
         ] {
             assert!(
@@ -1488,6 +1392,91 @@ fn a_task_takes_up_its_waves_graph_else_the_repositorys_else_code() {
 }
 
 #[test]
+fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
+    let task = GraphTask::without_wave_graph(&[]);
+    // New Tasks branch from the remote's main, which carries the fixture Graphs.
+    assert!(Command::new("git")
+        .args(["push", "origin", "main"])
+        .current_dir(task.repo.path())
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let tasks = || -> i64 {
+        db.query_row("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap()
+    };
+    // An unknown graph is refused before any Task exists.
+    let before = tasks();
+    let refused = task.run(&["task", "create", "never filed", "--run", "--graph", "nope"]);
+    assert!(!refused.status.success());
+    assert_eq!(tasks(), before);
+
+    let request = "fix the flaky retry test\n\nIt fails one run in ten.";
+    let output = task.run(&[
+        "task", "create", request, "--run", "--graph", "feature", "--json",
+    ]);
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    let ran = task.ran(output);
+    assert!(ran.success(), "{}", ran.text);
+    let issue = receipt["task"]["identifier"].as_str().unwrap();
+    assert_eq!(receipt["task"]["title"], "fix the flaky retry test");
+    assert_eq!(receipt["task"]["description"], request);
+    assert_eq!(receipt["graph"], "feature");
+    let status = task.run(&["desktop", "task", issue, "--json"]);
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    let graph = &status["execution"]["work"]["graph"];
+    assert_eq!(graph["name"], "feature");
+    assert_eq!(graph["position"], at("review"));
+    // The admitted primary conversation opens with the request, word for word.
+    let session = receipt["session_id"].as_str().unwrap();
+    let first_turn: String = db
+        .query_row(
+            "SELECT request FROM agent_sessions WHERE id=?1",
+            [session],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_turn, request);
+    let primary: String = db
+        .query_row(
+            "SELECT primary_session_id FROM tasks WHERE id=?1",
+            [receipt["task"]["id"].as_str().unwrap()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(primary, session);
+
+    // `-b` runs to the end headless and admits no conversation.
+    let output = task.run(&[
+        "-b", "task", "create", "headless", "--run", "--graph", "proof", "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(receipt["session_id"].is_null(), "{receipt}");
+    assert_eq!(receipt["graph"], "proof");
+
+    // A run that fails still reports the filed Task, so nothing files it twice.
+    let before = tasks();
+    let output = task.run(&[
+        "-b", "task", "create", "fails", "--run", "--graph", "gate", "--json",
+    ]);
+    assert!(!output.status.success());
+    let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    assert_eq!(receipt["task"]["title"], "fails");
+    assert!(receipt["graph"].is_null(), "{receipt}");
+    assert!(receipt["session_id"].is_null(), "{receipt}");
+    assert_eq!(tasks(), before + 1);
+}
+
+#[test]
 fn a_run_explanation_includes_interactive_steps_inside_its_first_xor() {
     let task = GraphTask::new();
     fs::write(
@@ -1772,10 +1761,22 @@ fn interrupting_an_idle_task_records_nothing_and_says_so() {
 #[test]
 fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_stop() {
     let task = GraphTask::new();
+    // A commit held in its pre-commit hook: an open Process that changes Work
+    // in the Task's checkout, with no Graph running.
+    let hooks = task.repo.path().join(".git/hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("pre-commit");
+    fs::write(
+        &hook,
+        "#!/bin/sh\nwhile [ ! -e \"$LF_HOME/release\" ]; do sleep 0.05; done\n",
+    )
+    .unwrap();
+    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    task.repo.create_file("held.txt", "held\n");
     let mut waiter = command(
         task.repo.path(),
         task.home.path(),
-        &["task", "wait", "INF-123", "--timeout", "60s"],
+        &["commit", "-m", "Held in its hook"],
     )
     .stdin(std::process::Stdio::null())
     .stdout(std::process::Stdio::null())
@@ -1788,7 +1789,7 @@ fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_s
             .ok()
             .and_then(|conn| {
                 conn.query_row(
-                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"wait\"%'",
+                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"commit\"%'",
                     [],
                     |row| row.get(0),
                 )
@@ -1802,7 +1803,7 @@ fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_s
     }
     let before = interrupt_rows(task.home.path());
     let output = task.run(&["task", "interrupt", "INF-123"]);
-    waiter.kill().unwrap();
+    fs::write(task.home.path().join("release"), "").unwrap();
     waiter.wait().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -2354,15 +2355,8 @@ fn task_ship_stands_in_at_the_step_the_task_waits_at() {
 }
 
 #[test]
-fn task_ship_holds_while_paused_and_defers_to_a_live_ship() {
+fn task_ship_defers_to_a_live_ship() {
     let task = shipping_task();
-    task.ok(&["task", "defer", "INF-123"]);
-    let deferred = task.run(&["-b", "--task", "INF-123", "ship"]);
-    assert!(deferred.status.success());
-    assert!(String::from_utf8_lossy(&deferred.stdout).contains("INF-123 is deferred"));
-    assert!(task.graph().is_null());
-    task.ok(&["task", "resume", "INF-123"]);
-
     // The first ship holds at its stand-in; a second one finds it live.
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
@@ -2410,6 +2404,71 @@ fn task_ship_stop_withdraws_the_approval_and_ends_its_ship() {
     assert!(!first.wait().unwrap().success());
     fs::remove_file(task.home.path().join("hold")).unwrap();
     // Approval withdrawn, its run stopped where it stood.
+    assert_ne!(task.state(), "shipping");
+    let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    let again = String::from_utf8_lossy(&again.stdout);
+    assert!(again.contains("INF-123 is not shipping"), "{again}");
+}
+
+#[test]
+fn task_ship_stop_sticks_through_a_headless_relaunch() {
+    let task = shipping_task();
+    task.repo.create_file(
+        ".lf/graphs/landing.yaml",
+        "- graph: proof\n- cmd: pr land\n",
+    );
+    // A person stops shipping; the stop stands though nothing was shipping.
+    let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
+    assert!(stopped.status.success());
+    // A run with nothing interactive ahead would approve Auto-Ship and merge;
+    // under the stop it waits at the landing step instead.
+    let ran = task.task_run(&["task", "run", "INF-123", "landing"]);
+    assert!(ran.success(), "{}", ran.text);
+    assert!(
+        ran.text
+            .contains("Waiting at pr land: not approved to merge"),
+        "{}",
+        ran.text
+    );
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert_ne!(task.state(), "shipping");
+    // Relaunched headless from its first step, it still never ships.
+    let again = task.run(&["-b", "task", "run", "INF-123", "--from", "proof"]);
+    assert!(
+        again.status.success(),
+        "{}",
+        String::from_utf8_lossy(&again.stderr)
+    );
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert_ne!(task.state(), "shipping");
+    assert!(handoffs(&task).is_empty());
+    let status = task.status();
+    assert!(status["ship_approval"].is_null());
+    assert_eq!(status["ship_stop"]["by"]["kind"], "person");
+    assert_eq!(status["started_by"]["kind"], "person");
+    // Standing at the landing step, a plain relaunch waits there again.
+    let waiting = task.task_run(&["task", "run", "INF-123"]);
+    assert!(waiting.success(), "{}", waiting.text);
+    assert_eq!(task.graph()["position"], at("pr land"));
+    assert!(
+        task.text_status().contains("Not shipping: "),
+        "{}",
+        task.text_status()
+    );
+}
+
+#[test]
+fn task_ship_stops_shipping_when_its_run_fails_the_same_way_every_attempt() {
+    let task = shipping_task();
+    // `gate` refuses identically until the repository defines `late`.
+    let output = task.run(&["-b", "--task", "INF-123", "ship", "--graph", "gate"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("failed 3 times with the same error"),
+        "{stderr}"
+    );
+    // The approval is withdrawn, so no restart repeats the refusal.
     assert_ne!(task.state(), "shipping");
     let again = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let again = String::from_utf8_lossy(&again.stdout);
@@ -2495,6 +2554,40 @@ fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
     });
     // The restart carries the same handoff; it is not shipped a second time.
     assert_eq!(handoffs(&task).len(), 1);
+}
+
+#[test]
+fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
+    let task = shipping_task();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "--task", "INF-123", "ship"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    task.ok(&["task", "unassign", "INF-123"]);
+    first.kill().unwrap();
+    first.wait().unwrap();
+    // Nobody owns it, so no read of this Machine's Tasks starts its ship again.
+    task.ok(&["task", "list"]);
+    let shown = task.run(&["wave", "show", "--json"]);
+    let shown = String::from_utf8_lossy(&shown.stdout);
+    assert!(
+        shown.contains("Unassigned; `lf task claim` and `lf ship` keep it shipping"),
+        "{shown}"
+    );
+    // Unassigning stops the ship, not the step already running.
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    wait_for("the running step to finish", || {
+        task.graph()["position"] == at("end")
+    });
+    assert_eq!(stand_ins(&task).len(), 1);
 }
 
 /// A Claude stand-in that records its first turn and fails at once, the way an

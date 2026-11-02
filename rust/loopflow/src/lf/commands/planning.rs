@@ -8,16 +8,23 @@ use crate::lf::PlanningCommand;
 use crate::store::{RegistryUnavailable, Store};
 
 pub fn run(cmd: &PlanningCommand) -> Result<()> {
-    // A Work folder without Git still has stored planning status.
-    let repo = match super::util::find_repo_root() {
-        Ok(root) => crate::git::worktrees::main_repo_root(&root)?,
-        Err(_) => std::env::current_dir()?,
-    };
+    let repo = status_repository(&std::env::current_dir()?)?;
     if let PlanningCommand::Status { watch: true, .. } = cmd {
-        return watch_status(&repo);
+        return watch_status(&repo, super::watch::Transport::Stdio).map(drop);
     }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(run_async(&repo, cmd))
+}
+
+/// The repository whose planning `directory` reads. A Work folder without Git
+/// still has stored planning status.
+pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> {
+    Ok(
+        match crate::repo::discover_repo_root(directory).ok().flatten() {
+            Some(root) => crate::git::worktrees::main_repo_root(&root)?,
+            None => directory.to_owned(),
+        },
+    )
 }
 
 /// Whether the repository containing `checkout` plans through a Git ref.
@@ -37,9 +44,11 @@ pub fn refresh(checkout: &Path) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
         let repo_key = repo.to_string_lossy();
-        // Publication acquires first, so one exchange brings teammates' changes
-        // in and sends this Machine's pending ones out.
+        // Acquisition records its own failure, and proceeds while another
+        // process holds publication; publication then sends pending changes out.
+        let acquired = crate::ops::planning_sync::acquire_repository(&store, &repo_key).await;
         crate::ops::planning_sync::publish_repository(&store, &repo_key).await?;
+        acquired?;
         let destinations = crate::ops::planning_sync::peer_status(&store, &repo_key).await?;
         let Some(active) = destinations.into_iter().find(|d| d.active) else {
             return Err(anyhow!(
@@ -99,79 +108,92 @@ async fn run_async(repo: &Path, cmd: &PlanningCommand) -> Result<()> {
 /// Transport selection lives in config, so it changes without a store write.
 const STATUS_CLOCK: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// `lf planning status --watch`: the repository's planning is exchanged while
-/// the watch runs, and `lf planning status --json` printed now and each time it
-/// changes. Exchanges commit to the store and wake the watch like any writer.
-fn watch_status(repo: &Path) -> Result<()> {
+/// `lf planning status --watch`: `lf planning status --json` now and each time
+/// it changes. The watch reads stored status; `lf wave status --sync` and
+/// foreground providers exchange planning.
+pub(crate) fn watch_status(
+    repo: &Path,
+    transport: super::watch::Transport,
+) -> Result<Option<super::watch::Subscription>> {
     let repo_key = repo.to_string_lossy().into_owned();
-    let runtime = tokio::runtime::Runtime::new()?;
-    let database = crate::store::database_path_from_env()?;
-    // Nothing here creates a store; without one there is nothing to exchange.
-    let _sync = database
-        .exists()
-        .then(|| {
-            runtime.block_on(async {
-                let store = std::sync::Arc::new(
-                    crate::store::open_store(&crate::store::StorageConfig::sqlite(database))
-                        .await?,
-                );
-                crate::ops::planning_sync::PlanningSync::start_watch(store, repo_key.clone())
-                    .map_err(anyhow::Error::from)
-            })
-        })
-        .transpose()
-        .inspect_err(|error| tracing::warn!(%error, "cannot start repository planning sync"))
-        .ok()
-        .flatten();
-    super::watch::run(
+    super::watch::start(
         (),
         super::watch::Watched::every(STATUS_CLOCK),
-        |store, ()| {
+        move |store, ()| {
             let repo_key = repo_key.clone();
-            async move {
-                let config =
-                    crate::config::load_config(Some(Path::new(&repo_key)))?.unwrap_or_default();
-                if let Some(provider) = config.planning_transport().remote_name() {
-                    return Ok(remote_status(provider));
-                }
-                let destinations = match store {
-                    Some(store) => {
-                        crate::ops::planning_sync::peer_status(&store, &repo_key).await?
-                    }
-                    None => Vec::new(),
-                };
-                Ok(serde_json::json!({"transport": "git", "destinations": destinations}))
-            }
+            async move { Ok(status(store.as_deref(), &repo_key).await?.to_json()) }
         },
+        transport,
     )
 }
 
-fn remote_status(provider: &str) -> serde_json::Value {
-    serde_json::json!({"transport": provider.to_ascii_lowercase(), "destinations": []})
+/// Where a repository's planning is exchanged.
+enum Status {
+    /// The tracker its config names; local saves wait while it is unavailable.
+    Remote(&'static str),
+    Git(Vec<crate::store::PeerPlanningStatus>),
 }
 
-async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
-    let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
-    if let Some(provider) = config.planning_transport().remote_name() {
-        if json {
-            println!("{}", remote_status(provider));
-        } else {
-            println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
+impl Status {
+    /// What `lf planning status --json` prints.
+    fn to_json(&self) -> serde_json::Value {
+        match self {
+            Self::Remote(provider) => serde_json::json!({
+                "transport": provider.to_ascii_lowercase(),
+                "destinations": [],
+            }),
+            Self::Git(destinations) => {
+                serde_json::json!({"transport": "git", "destinations": destinations})
+            }
         }
-        return Ok(());
     }
+}
+
+fn remote_transport(repo: &str) -> Result<Option<&'static str>> {
+    let config = crate::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
+    Ok(config.planning_transport().remote_name())
+}
+
+/// What `lf --cwd <directory> config planning status --json` prints.
+pub(crate) fn status_json(directory: &Path) -> Result<String> {
+    let repo = status_repository(directory)?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = open_store().await?;
+        Ok(serde_json::to_string(
+            &status(Some(&store), &repo.to_string_lossy())
+                .await?
+                .to_json(),
+        )?)
+    })
+}
+
+/// Stored status only: an exchange binds the configured destination.
+async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
+    if let Some(provider) = remote_transport(repo)? {
+        return Ok(Status::Remote(provider));
+    }
+    Ok(Status::Git(match store {
+        Some(store) => crate::ops::planning_sync::peer_status(store, repo).await?,
+        None => Vec::new(),
+    }))
+}
+
+/// The command binds the configured destination first, so a changed
+/// selection shows at once; the in-app read and the watch show stored status.
+async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     crate::ops::planning_sync::configured_destination(store, repo).await?;
-    let destinations = crate::ops::planning_sync::peer_status(store, repo).await?;
+    let status = status(Some(store), repo).await?;
     if json {
-        println!(
-            "{}",
-            serde_json::to_string(&serde_json::json!({
-                "transport":"git",
-                "destinations": destinations,
-            }))?
-        );
+        println!("{}", serde_json::to_string(&status.to_json())?);
         return Ok(());
     }
+    let destinations = match status {
+        Status::Remote(provider) => {
+            println!("Planning: {provider}. Unavailable transport leaves local saves pending.");
+            return Ok(());
+        }
+        Status::Git(destinations) => destinations,
+    };
     if !destinations.iter().any(|d| d.active) {
         println!("Planning: Git (configured remote; local saves wait when unavailable)");
     }

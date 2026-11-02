@@ -8,15 +8,15 @@ Move the Task forward as far as possible through its authored Loopflow process.
 You are this Task's operator: with no live Graph process, nobody else takes its next
 step. Resolve routine decisions autonomously and ask for needed judgment in the
 present conversation, then continue. Headless, exit when blocked or completed. An
-already satisfied Task needs no new execution. A Task whose shared status is
-Deferred stays held: inspect or discuss it, but do not launch work or resume it
-automatically. `lf task resume <issue>` clears the hold without starting execution.
+already satisfied Task needs no new execution. An unassigned Task (no owner in
+status) is nobody's to move: inspect or discuss it, but do not launch, ship or
+claim it automatically; `lf task claim <issue>` is the person's choice.
 
 Finish with one disposition and its evidence: **moving** (a live Graph process was
 observed and left alone), **acted** (you continued, recovered or delivered it
 and reread status), **available** (the review, demo, choice or merge click the
 person can take up, with its conversation link or PR), **dependency or capacity**,
-**deferred** (an explicit hold or instruction), or **unknown** (the missing read
+**unassigned** (nobody owns it, or the person said to stop), or **unknown** (the missing read
 or liveness evidence; never a reason to start a second Graph process). “Ready” or
 “needs reconciliation” is not a disposition. A PR that conflicts with or
 trails its base is not available to a person: run `lf sync`, resolve the
@@ -69,11 +69,14 @@ conflicts, verify and push, then reread status.
    complete the Task. Ask about consequential scope
    or direction conflicts; when judgment is unavailable, name the exact decision.
 
-3. **Advance the work.** `lf task run <issue>` runs the Task's graph in its
-   worktree until the next interactive step and returns once it is running.
-   `lf task status <issue>` follows it. `-b` runs every step headless, straight
-   past interactive steps, and waits for the end: use it only when no one needs
-   to take part. Check installed
+3. **Advance the work.** `lf task run <issue>` launches: it runs the Task's
+   graph in its worktree until the next interactive step and returns once it
+   is running. `lf task status <issue>` follows it. Launching is not approving.
+   `lf -b task run` and `lf ship` run headless past every interactive step to
+   `end`, and a run reaching `end` approves Auto-Ship, which may merge the PR.
+   Use them only when the person explicitly asks to ship or land. After someone
+   stops shipping, a relaunch continues the work and never ships it; only
+   `lf ship`, when they ask for it, approves it again. Check installed
    help first. Leave a live Graph process running. After a stopped or failed Graph,
    launch only the work that remains; never relaunch merely to bypass a blocker.
    When judgment is needed, ask here if interactive; never open another Session

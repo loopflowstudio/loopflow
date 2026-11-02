@@ -1,0 +1,18 @@
+name: Packages (main)
+
+# Every green main commit gets native `lf` packages, so `lf self install --main`
+# can install it without a release. The artifacts expire; releases stay the
+# durable channel.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  packages:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    uses: ./.github/workflows/package-build.yml
+    with:
+      revision: ${{ github.event.workflow_run.head_sha || github.sha }}

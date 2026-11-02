@@ -15,10 +15,9 @@ first token as:
 
 If no input is provided, default to `patch`.
 
-`minor` completes a closing patch when unreleased changes exist, or reuses the
-latest completed patch when it already contains the release snapshot. The minor
-publishes that same product state with new version metadata and cycle notes
-against the preceding `.0` tag. Patch notes retain their incremental baseline.
+`minor` cuts from current main like any release, including changes merged
+since the latest patch. Its notes cover the cycle since the preceding `.0` tag;
+patch notes retain their incremental baseline.
 
 ## Workflow
 
@@ -39,6 +38,10 @@ That command is responsible for:
 - preparing and signing the publisher's exact artifact set
 - tagging that commit only after its workflow and publisher preparation succeed
 - waiting for the target's configured completion evidence
+- for a `github-release` target, moving GitHub's Latest marker (the `stable`
+  pointer) forward to the newest release published at least 7 days ago that no
+  regression Task (`lf task create --regressed-in <version>`) covers, even
+  when there was nothing to release
 
 The repository owns `verify` and `prepare` commands, the selected candidate
 workflow, and the publisher under `release.targets` in `.lf/config.yaml`. Keep
@@ -51,10 +54,6 @@ publication, deployment, and secret handling in the publisher.
 interruptions. An unpublished preparation commit does not consume a version.
 Correct it with another commit under the same version; do not bump the version
 to escape a failed build, late migration, or interrupted publication.
-
-A minor run records its selected patch, minor version, and source snapshot in
-`.lf/releases/minor-<target>.json`. Retry `lf release run minor` to complete that
-pair; a published patch is reused even when no unreleased commits remain.
 
 Process death does not make generated release state temporary. Re-entry owns:
 

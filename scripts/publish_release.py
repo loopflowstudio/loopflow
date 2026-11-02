@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import email.utils
 import fcntl
 import hashlib
 import json
@@ -21,7 +23,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import boto3
-from botocore.exceptions import ClientError
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 CONTROL_ROOT = Path(__file__).resolve().parent.parent
 ROOT = Path(os.environ.get("LF_RELEASE_SOURCE_REPO", CONTROL_ROOT))
@@ -40,7 +42,23 @@ REQUIRED_SECRETS = (
     "R2_ACCESS_KEY_ID",
     "R2_ACCOUNT_ID",
     "R2_SECRET_ACCESS_KEY",
+    "SPARKLE_ED_PRIVATE_KEY",
 )
+READER_CATALOG = "reader-catalog.txt"
+# Every GitHub Release carries exactly these assets.
+RELEASE_ASSETS = frozenset(
+    {
+        *(f"lf-{target}.tar.gz" for target in TARGETS),
+        "Loopflow.dmg",
+        "install.sh",
+        READER_CATALOG,
+        "SHA256SUMS",
+    }
+)
+DOWNLOADS_URL = "https://downloads.loopflow.studio"
+LATEST_DMG_URL = f"{DOWNLOADS_URL}/Loopflow-latest.dmg"
+# Loopflow.app's updater reads appcast-<stream>.xml for the stream ~/.lf/config.yaml names.
+SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 CANDIDATE_STAGES = (
     "artifacts_verified",
     "installer_verified",
@@ -55,6 +73,7 @@ class ReleaseArtifacts:
     native_archives: tuple[Path, ...]
     dmg: Path
     installer: Path
+    reader_catalog: Path
     checksums: Path
 
 
@@ -164,6 +183,16 @@ def _find_native_archives(artifact_dir: Path) -> tuple[Path, ...]:
     return tuple(archives)
 
 
+def _find_reader_catalog(artifact_dir: Path) -> Path:
+    # Every target's package job writes the same catalog from the same source.
+    catalogs = sorted(artifact_dir.rglob(READER_CATALOG))
+    if not catalogs:
+        raise RuntimeError(f"hosted build produced no {READER_CATALOG}")
+    if len({catalog.read_bytes() for catalog in catalogs}) != 1:
+        raise RuntimeError(f"hosted targets disagree on {READER_CATALOG}")
+    return catalogs[0]
+
+
 def _extract_binary(archives: tuple[Path, ...], output_dir: Path, target: str) -> Path:
     archive = next(path for path in archives if path.name == f"lf-{target}.tar.gz")
     with tarfile.open(archive, "r:gz") as package:
@@ -189,64 +218,14 @@ def _validate_release_candidate(archives: tuple[Path, ...]) -> None:
         )
     try:
         preview = json.loads(result.stdout)
-        candidate = preview["candidate"]
-    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
         raise RuntimeError("release candidate did not emit a promotion identity") from exc
-    if candidate.get("authority") != "published":
-        raise RuntimeError("release candidate has validation-only migration authority")
+    if not isinstance(preview, dict) or "candidate" not in preview:
+        raise RuntimeError("release candidate did not emit a promotion identity")
     verdict = preview.get("verdict", {})
     if result.returncode != 0 or verdict.get("kind") not in {"promote", "promote_and_migrate"}:
         reasons = "; ".join(verdict.get("reasons", [])) or result.stderr.strip()
         raise RuntimeError(f"release candidate cannot install into a fresh Machine: {reasons}")
-
-
-def inspect_source(commit: str, tag: str, *, check_publication: bool) -> dict[str, object]:
-    """Inspect immutable source; external uncertainty never means unpublished."""
-    files = _run(
-        [
-            "git",
-            "ls-tree",
-            "-r",
-            "--name-only",
-            commit,
-            "--",
-            "rust/loopflow/src/store/migrations/drafts",
-        ],
-        capture=True,
-    ).stdout.splitlines()
-    drafts = [name for name in files if name.endswith(".sql")]
-    publications: list[str] | None = None
-    if drafts and check_publication:
-        publications = []
-        release = _run(
-            ["gh", "release", "view", tag, "--json", "isDraft"],
-            capture=True,
-            check=False,
-        )
-        if release.returncode == 0:
-            publications.append("GitHub Release (draft or published)")
-        elif release.stderr.strip() != "release not found":
-            raise RuntimeError(
-                f"cannot establish GitHub publication state: {release.stderr.strip()}"
-            )
-        version = tag.removeprefix("v")
-        request = urllib.request.Request(
-            f"https://crates.io/api/v1/crates/loopflow/{version}",
-            headers={"User-Agent": "loopflow-release"},
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=30):
-                publications.append("crates.io")
-        except urllib.error.HTTPError as error:
-            if error.code != 404:
-                raise
-        try:
-            _r2_client().head_object(Bucket="downloads", Key=f"Loopflow-{version}.dmg")
-            publications.append("versioned DMG")
-        except ClientError as error:
-            if error.response["Error"]["Code"] not in {"404", "NoSuchKey", "NotFound"}:
-                raise
-    return {"preparation_required": drafts, "publications": publications}
 
 
 def _sha256(path: Path) -> str:
@@ -275,6 +254,7 @@ def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
         *artifacts.native_archives,
         artifacts.dmg,
         artifacts.installer,
+        artifacts.reader_catalog,
         artifacts.checksums,
     ):
         command.extend(["--asset", str(asset)])
@@ -309,6 +289,48 @@ def _upload_dmg(dmg: Path, key: str, cache_control: str) -> None:
             "ContentType": "application/x-apple-diskimage",
             "CacheControl": cache_control,
         },
+    )
+
+
+def _appcast(stream: str, tag: str, dmg: Path) -> str:
+    """A one-item Sparkle feed offering `dmg`, signed with the publisher's EdDSA key."""
+    seed = base64.b64decode(os.environ["SPARKLE_ED_PRIVATE_KEY"].strip())
+    signature = base64.b64encode(
+        Ed25519PrivateKey.from_private_bytes(seed[:32]).sign(dmg.read_bytes())
+    ).decode()
+    version = tag.removeprefix("v")
+    published = email.utils.formatdate(usegmt=True)
+    enclosure = (
+        f'url="{DOWNLOADS_URL}/Loopflow-{version}.dmg" length="{dmg.stat().st_size}" '
+        f'type="application/octet-stream" sparkle:edSignature="{signature}"'
+    )
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="{SPARKLE_NAMESPACE}">
+<channel>
+<title>Loopflow {stream}</title>
+<item>
+<title>Loopflow {version}</title>
+<pubDate>{published}</pubDate>
+<sparkle:version>{version}</sparkle:version>
+<sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+<sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+<sparkle:releaseNotesLink>https://github.com/loopflowstudio/loopflow/releases/tag/{tag}</sparkle:releaseNotesLink>
+<enclosure {enclosure}/>
+</item>
+</channel>
+</rss>
+"""
+
+
+def _upload_appcast(stream: str, appcast: str) -> None:
+    key = f"appcast-{stream}.xml"
+    print(f"Uploading {key} to R2", flush=True)
+    _r2_client().put_object(
+        Bucket="downloads",
+        Key=key,
+        Body=appcast.encode(),
+        ContentType="application/rss+xml",
+        CacheControl="public, max-age=60",
     )
 
 
@@ -369,13 +391,7 @@ def _verify_candidate_receipt(
     workflow_run_id = os.environ.get("LF_RELEASE_WORKFLOW_RUN_ID")
     if workflow_run_id and receipt.workflow_run_id != workflow_run_id:
         raise RuntimeError("prepared release candidate came from a different workflow run")
-    expected_artifacts = {
-        *(f"lf-{target}.tar.gz" for target in TARGETS),
-        "Loopflow.dmg",
-        "install.sh",
-        "SHA256SUMS",
-    }
-    if set(receipt.artifact_sha256) != expected_artifacts:
+    if set(receipt.artifact_sha256) != RELEASE_ASSETS:
         raise RuntimeError("prepared release candidate artifact set is incomplete")
     if receipt.completed_stages != CANDIDATE_STAGES:
         raise RuntimeError("prepared release candidate proof is incomplete")
@@ -401,6 +417,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
             return receipt
 
     archives = _find_native_archives(artifact_dir)
+    reader_catalog = _find_reader_catalog(artifact_dir)
     installer = ROOT / "release" / "install.sh"
     if not installer.is_file():
         raise RuntimeError(f"installer not found: {installer}")
@@ -416,7 +433,6 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
             **os.environ,
             "LF_RELEASE_BINARY": str(arm_binary),
             "LOOPFLOW_BUILD_PROVENANCE": "release",
-            "LOOPFLOW_MIGRATION_AUTHORITY": "published",
             "RELEASE_TAG": tag,
             # Survives cleanup of the generated preparation checkout on timeout.
             "LF_RELEASE_NOTARIZATION_DIR": str(
@@ -441,6 +457,7 @@ def prepare_release(tag: str, artifact_dir: Path, output_dir: Path) -> ArtifactR
             shutil.copy2(archive, prepared / archive.name)
         shutil.copy2(dmg, prepared / dmg.name)
         shutil.copy2(installer, prepared / installer.name)
+        shutil.copy2(reader_catalog, prepared / READER_CATALOG)
         paths = tuple(
             sorted(
                 (path for path in prepared.iterdir() if path.is_file()),
@@ -478,8 +495,9 @@ def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     _validate_release_candidate(archives)
     dmg = artifact_dir / "Loopflow.dmg"
     installer = artifact_dir / "install.sh"
+    reader_catalog = artifact_dir / READER_CATALOG
     checksums = artifact_dir / "SHA256SUMS"
-    artifacts = ReleaseArtifacts(tag, archives, dmg, installer, checksums)
+    artifacts = ReleaseArtifacts(tag, archives, dmg, installer, reader_catalog, checksums)
     stages = list(candidate.completed_stages)
     _stage_github_release(artifacts)
     stages.append("github_draft_staged")
@@ -490,17 +508,17 @@ def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     version = tag.removeprefix("v")
     _upload_dmg(dmg, f"Loopflow-{version}.dmg", "public, max-age=31536000, immutable")
     stages.append("versioned_dmg_uploaded")
+    _upload_appcast("preview", _appcast("preview", tag, dmg))
+    stages.append("preview_appcast_uploaded")
 
     _deploy_website(tag)
     stages.append("website_deployed")
 
-    _upload_dmg(dmg, "Loopflow-latest.dmg", "public, max-age=60")
-    stages.append("latest_dmg_uploaded")
-
+    # Loopflow-latest.dmg follows the stable pointer; `promote` moves it.
     _run(["lf", "release", "publish", tag, "--finalize"])
     stages.append("github_release_published")
 
-    paths = (*archives, dmg, installer, checksums)
+    paths = (*archives, dmg, installer, reader_catalog, checksums)
     receipt = ArtifactReceipt(
         tag=tag,
         source_commit=source_commit,
@@ -542,13 +560,7 @@ def _download_if_present(url: str, destination: Path) -> bool:
 
 
 def _check_public_hashes(directory: Path, expected: dict[str, str]) -> None:
-    required = {
-        *(f"lf-{target}.tar.gz" for target in TARGETS),
-        "Loopflow.dmg",
-        "install.sh",
-        "SHA256SUMS",
-    }
-    if set(expected) != required:
+    if set(expected) != RELEASE_ASSETS:
         raise RuntimeError("public release proof lacks the complete artifact manifest")
     for name, digest in expected.items():
         artifact = directory / name
@@ -644,6 +656,8 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
     names = {asset["name"] for asset in release["assets"]}
     if names != set(proof.artifact_sha256):
         raise RuntimeError("public release asset set differs from prepared candidate")
+    # Loopflow-latest.dmg belongs to the stable release; the website to the newest.
+    is_stable = _stable_tag() == tag
     version = tag.removeprefix("v")
     smoke_versions: dict[str, str] = {}
     with tempfile.TemporaryDirectory() as temp:
@@ -658,9 +672,8 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
         if versioned_present and _sha256(versioned_dmg) != proof.artifact_sha256["Loopflow.dmg"]:
             raise RuntimeError("versioned public DMG differs from prepared artifact")
         latest_dmg = scratch / "latest.dmg"
-        latest_url = "https://downloads.loopflow.studio/Loopflow-latest.dmg"
-        latest_matches = (
-            _download_if_present(latest_url, latest_dmg)
+        latest_matches = not is_stable or (
+            _download_if_present(LATEST_DMG_URL, latest_dmg)
             and _sha256(latest_dmg) == proof.artifact_sha256["Loopflow.dmg"]
         )
         health = scratch / "health.json"
@@ -686,13 +699,10 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
         if missing:
             if not repair:
                 raise RuntimeError(f"incomplete public release stages: {', '.join(missing)}")
-            # Mutable endpoints must never roll back a newer release while an
-            # older opportunity is being reconciled. Unknown authority is fatal.
-            current = json.loads(
-                _run(["gh", "release", "view", "--json", "tagName"], capture=True).stdout
-            )
-            if current["tagName"] != tag:
-                raise RuntimeError(f"cannot repair {tag}: latest release is {current['tagName']}")
+            # The website must never roll back a newer release while an older
+            # opportunity is being reconciled. Unknown authority is fatal.
+            if not website_matches and (newest := _newest_tag()) != tag:
+                raise RuntimeError(f"cannot repair {tag}: newest release is {newest}")
             dmg = scratch / "Loopflow.dmg"
             if not crate_present:
                 _publish_crate()
@@ -708,12 +718,13 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
                 proof = _record_repaired_stage(proof, "latest_dmg_uploaded")
             # Successful mutation commands do not prove public availability.
             _download(versioned_url, versioned_dmg)
-            _download(latest_url, latest_dmg)
+            if is_stable:
+                _download(LATEST_DMG_URL, latest_dmg)
             _download(health_url, health)
             _download(crate_url, crate)
             if (
                 _sha256(versioned_dmg) != proof.artifact_sha256["Loopflow.dmg"]
-                or _sha256(latest_dmg) != proof.artifact_sha256["Loopflow.dmg"]
+                or (is_stable and _sha256(latest_dmg) != proof.artifact_sha256["Loopflow.dmg"])
                 or json.loads(health.read_text()) != {"status": "ok", "release": tag}
                 or json.loads(crate.read_text())["version"]["num"] != version
             ):
@@ -740,7 +751,7 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
         platform=f"{platform.system()} {platform.machine()}",
         smoke_versions=smoke_versions,
         versioned_dmg_url=f"https://downloads.loopflow.studio/Loopflow-{version}.dmg",
-        latest_dmg_url="https://downloads.loopflow.studio/Loopflow-latest.dmg",
+        latest_dmg_url=LATEST_DMG_URL,
         tag=tag,
         source_commit=source_commit,
         workflow_run_id=proof.workflow_run_id,
@@ -751,7 +762,7 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
                     *proof.completed_stages,
                     "public_artifacts_verified",
                     "versioned_dmg_verified",
-                    "latest_dmg_verified",
+                    *(["latest_dmg_verified"] if is_stable else []),
                     "website_release_verified",
                     "crate_version_verified",
                     "exact_tag_smoke_passed",
@@ -763,14 +774,64 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
     return verified
 
 
+def _stable_tag() -> str:
+    """GitHub's Latest marker, which `lf release run` moves as the stable pointer."""
+    return json.loads(_run(["gh", "release", "view", "--json", "tagName"], capture=True).stdout)[
+        "tagName"
+    ]
+
+
+def _newest_tag() -> str:
+    newest = json.loads(
+        _run(
+            ["gh", "release", "list", "--exclude-drafts", "--limit", "1", "--json", "tagName"],
+            capture=True,
+        ).stdout
+    )
+    return newest[0]["tagName"] if newest else ""
+
+
+def promote_release(tag: str) -> None:
+    """Point Loopflow-latest.dmg and the stable appcast at a release, before it becomes stable."""
+    release = json.loads(
+        _run(
+            ["gh", "release", "view", tag, "--json", "tagName,isDraft,assets"], capture=True
+        ).stdout
+    )
+    if release["tagName"] != tag or release["isDraft"]:
+        raise RuntimeError(f"cannot promote {tag}: release is absent or a draft")
+    urls = {asset["name"]: asset["url"] for asset in release["assets"]}
+    with tempfile.TemporaryDirectory() as temp:
+        scratch = Path(temp)
+        for name in ("Loopflow.dmg", "SHA256SUMS"):
+            if name not in urls:
+                raise RuntimeError(f"cannot promote {tag}: release lacks {name}")
+            # Never send publisher credentials to downloaded code or asset URLs.
+            _download(urls[name], scratch / name)
+        sums = {
+            name: digest
+            for digest, name in (
+                line.split(maxsplit=1) for line in (scratch / "SHA256SUMS").read_text().splitlines()
+            )
+        }
+        dmg = scratch / "Loopflow.dmg"
+        if sums.get("Loopflow.dmg") != _sha256(dmg):
+            raise RuntimeError(f"cannot promote {tag}: Loopflow.dmg differs from SHA256SUMS")
+        _upload_dmg(dmg, "Loopflow-latest.dmg", "public, max-age=60")
+        latest = scratch / "latest.dmg"
+        _download(LATEST_DMG_URL, latest)
+        if _sha256(latest) != sums["Loopflow.dmg"]:
+            raise RuntimeError(f"Loopflow-latest.dmg did not read back as {tag}")
+        _upload_appcast("stable", _appcast("stable", tag, dmg))
+    print(
+        f"Loopflow-latest.dmg and the stable appcast now serve {tag}", file=sys.stderr, flush=True
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Publish a Loopflow release from the cron host")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("check")
-    inspect = subparsers.add_parser("inspect")
-    inspect.add_argument("--commit", required=True)
-    inspect.add_argument("--tag", required=True)
-    inspect.add_argument("--check-publication", action="store_true")
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--tag", required=True)
     prepare.add_argument("--artifacts", type=Path, required=True)
@@ -782,29 +843,12 @@ def main() -> None:
     verify.add_argument("--tag", required=True)
     reconcile = subparsers.add_parser("reconcile")
     reconcile.add_argument("--tag", required=True)
+    promote = subparsers.add_parser("promote")
+    promote.add_argument("--tag", required=True)
     args = parser.parse_args()
-
-    if args.command == "inspect":
-        print(
-            json.dumps(
-                inspect_source(args.commit, args.tag, check_publication=args.check_publication)
-            )
-        )
-        return
 
     if args.command == "check":
         check_release_host()
-        return
-    if args.command == "inspect":
-        print(
-            json.dumps(
-                inspect_source(
-                    args.commit,
-                    args.tag,
-                    check_publication=args.check_publication,
-                )
-            )
-        )
         return
 
     if "LF_RELEASE_LOCK_FD" not in os.environ or not _release_fds():
@@ -819,6 +863,9 @@ def main() -> None:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise RuntimeError("another release publisher is already running") from error
+        if args.command == "promote":
+            promote_release(args.tag)
+            return
         if args.command == "prepare":
             receipt = prepare_release(args.tag, args.artifacts, args.output)
         elif args.command == "publish":

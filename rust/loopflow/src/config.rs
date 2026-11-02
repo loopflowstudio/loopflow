@@ -27,8 +27,9 @@ struct UserConfig {
     name: Option<String>,
 }
 
-/// Resolve a display name from personal Loopflow configuration or Git's user.name.
-fn load_user_name() -> Result<Option<String>, LoadError> {
+/// Resolve a display name from personal Loopflow configuration or Git's
+/// user.name in `directory`.
+fn load_user_name(directory: &Path) -> Result<Option<String>, LoadError> {
     if let Some(config) = load_yaml_file(&global_config_path())? {
         if let Some(user) = config.get("user").filter(|value| !value.is_null()) {
             let user: UserConfig = serde_yaml_ng::from_value(user.clone()).map_err(|error| {
@@ -40,6 +41,8 @@ fn load_user_name() -> Result<Option<String>, LoadError> {
         }
     }
     let Some(output) = Command::new("git")
+        .arg("-C")
+        .arg(directory)
         .args(["config", "--get", "user.name"])
         .output()
         .ok()
@@ -52,14 +55,36 @@ fn load_user_name() -> Result<Option<String>, LoadError> {
         .and_then(normalize_user_name))
 }
 
+/// A boolean this Machine sets for itself in `config.yaml` under `home`, such
+/// as `logs.linear_requests`; never read from a repository. Absent, unreadable
+/// or not a boolean is off.
+pub(crate) fn machine_flag(home: &Path, path: &[&str]) -> bool {
+    let Ok(Some(mut value)) = load_yaml_file(&home.join("config.yaml")) else {
+        return false;
+    };
+    for key in path {
+        match value.get(*key) {
+            Some(child) => value = child.clone(),
+            None => return false,
+        }
+    }
+    value.as_bool().unwrap_or(false)
+}
+
 /// Resolve a direct invocation's participant before execution moves Machines.
 pub fn participant_name() -> Result<Option<String>, LoadError> {
+    participant_name_in(Path::new("."))
+}
+
+/// The participant as `lf` would name them running in `directory`: an app
+/// resolves a repository's Git name from that repository, not where it stands.
+pub fn participant_name_in(directory: &Path) -> Result<Option<String>, LoadError> {
     match std::env::var(USER_NAME_ENV) {
         Ok(name) => match normalize_user_name(&name) {
             Some(name) => Ok(Some(name)),
-            None => load_user_name(),
+            None => load_user_name(directory),
         },
-        Err(std::env::VarError::NotPresent) => load_user_name(),
+        Err(std::env::VarError::NotPresent) => load_user_name(directory),
         Err(error) => Err(LoadError::InvalidGraph(format!(
             "Invalid {USER_NAME_ENV}: {error}"
         ))),
@@ -101,10 +126,28 @@ pub fn yolo_override() -> bool {
 
 pub const AGENT_OVERRIDE_ENV: &str = "LF_AGENT_OVERRIDE";
 
+thread_local! {
+    static CALL_AGENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
 pub fn agent_override() -> Option<String> {
-    std::env::var(AGENT_OVERRIDE_ENV)
-        .ok()
+    CALL_AGENT
+        .with(|agent| agent.borrow().clone())
+        .or_else(|| std::env::var(AGENT_OVERRIDE_ENV).ok())
         .filter(|value| !value.is_empty())
+}
+
+/// Select `agent` for one call on this thread, as `lf --agent` selects it for
+/// its whole process through `LF_AGENT_OVERRIDE`.
+pub fn with_agent_override<T>(agent: Option<&str>, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<String>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            CALL_AGENT.with(|agent| *agent.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(CALL_AGENT.with(|current| current.replace(agent.map(str::to_owned))));
+    run()
 }
 
 /// How a recorded conversation continues under the invocation's agent choice.
@@ -1013,17 +1056,44 @@ pub fn repository_root() -> Result<Option<PathBuf>, LoadError> {
     })
 }
 
-/// Persist a Machine-local configuration mapping without exposing partial YAML.
-pub(crate) fn write_global_config_at(
-    path: &Path,
-    value: &serde_yaml_ng::Value,
-) -> anyhow::Result<()> {
-    let parent = path.parent().expect("config path has a parent");
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    file.write_all(serde_yaml_ng::to_string(value)?.as_bytes())?;
+/// Read a Machine-local configuration mapping; absent or empty is an empty mapping.
+pub(crate) fn read_global_config_at(path: &Path) -> anyhow::Result<serde_yaml_ng::Value> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(anyhow::Error::new(error).context(format!("Read {}", path.display())))
+        }
+    };
+    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text)? {
+        serde_yaml_ng::Value::Null => Ok(serde_yaml_ng::Value::Mapping(Default::default())),
+        value if value.is_mapping() => Ok(value),
+        _ => anyhow::bail!("{} must contain a configuration mapping", path.display()),
+    }
+}
+
+/// Change `home`'s config.yaml under its lock, persisting it only when `change`
+/// succeeds, without exposing partial YAML.
+pub(crate) fn update_global_config_at<T>(
+    home: &Path,
+    change: impl FnOnce(&mut serde_yaml_ng::Value) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    fs::create_dir_all(home)?;
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(home.join("config.lock"))?;
+    fs2::FileExt::lock_exclusive(&lock)?;
+    let path = home.join("config.yaml");
+    let mut value = read_global_config_at(&path)?;
+    let result = change(&mut value)?;
+    let mut file = tempfile::NamedTempFile::new_in(home)?;
+    file.write_all(serde_yaml_ng::to_string(&value)?.as_bytes())?;
     file.as_file().sync_all()?;
-    file.persist(path)?;
-    Ok(())
+    file.persist(&path)?;
+    Ok(result)
 }
 
 fn global_config_path() -> PathBuf {

@@ -1,10 +1,12 @@
 //! Delete branches Loopflow can tie to finished work, on origin and locally.
 //!
-//! A branch copy is deleted only with evidence at its exact head: a merged or
-//! closed PR, a finished Task whose work reached the default branch, or a
-//! release candidate whose tag exists. Protections come first and override
-//! evidence. Missing GitHub facts stop the whole run before anything is
-//! deleted, because no answer cannot rule out an open PR.
+//! A branch copy is deleted only with evidence at its exact head: a merged PR,
+//! a closed PR of a finished Task, a finished Task whose work reached the
+//! default branch, or a release candidate whose tag exists. A closed PR alone
+//! is not abandonment: GitHub closes a stacked PR when its base is deleted.
+//! Protections come first and override evidence. Missing GitHub facts stop the
+//! whole run before anything is deleted, because no answer cannot rule out an
+//! open PR.
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::path::Path;
@@ -83,6 +85,10 @@ pub(crate) enum Retention {
         number: u64,
         state: PullRequestState,
     },
+    /// Closed without merge, and no finished Task names it.
+    ClosedPullRequest {
+        number: u64,
+    },
     /// A finished Task names it, but its head is not in the default branch.
     UnmergedTaskWork,
     NoEvidence,
@@ -146,6 +152,9 @@ impl fmt::Display for Retention {
                 "head moved past {} PR #{number}",
                 pull_request_state_name(*state)
             ),
+            Self::ClosedPullRequest { number } => {
+                write!(f, "closed PR #{number} without a finished Task")
+            }
             Self::UnmergedTaskWork => {
                 write!(f, "finished Task has commits outside the default branch")
             }
@@ -226,13 +235,18 @@ fn decide(
             number: open.number,
         });
     }
+    let finished_task = facts.tasks.finished.contains(branch);
     if let Some(node) = head_pull_request(nodes, head) {
+        if node.state == PullRequestState::Closed && !finished_task {
+            return Outcome::Retain(Retention::ClosedPullRequest {
+                number: node.number,
+            });
+        }
         return Outcome::Delete(Evidence::PullRequest {
             number: node.number,
             state: node.state,
         });
     }
-    let finished_task = facts.tasks.finished.contains(branch);
     if finished_task && is_ancestor(head) {
         return Outcome::Delete(Evidence::FinishedTask);
     }
@@ -538,7 +552,13 @@ mod tests {
 
     #[test]
     fn finished_pull_requests_at_the_head_are_evidence() {
-        let mut facts = facts(&[("merged", "m"), ("closed", "c"), ("moved", "new")]);
+        let mut facts = facts(&[
+            ("merged", "m"),
+            ("closed", "c"),
+            ("abandoned", "a"),
+            ("moved", "new"),
+        ]);
+        facts.tasks.finished = HashSet::from(["abandoned".to_string()]);
         facts.pull_requests = HashMap::from([
             (
                 "merged".to_string(),
@@ -547,6 +567,10 @@ mod tests {
             (
                 "closed".to_string(),
                 vec![pr(2, "c", PullRequestState::Closed)],
+            ),
+            (
+                "abandoned".to_string(),
+                vec![pr(8, "a", PullRequestState::Closed)],
             ),
             (
                 "moved".to_string(),
@@ -561,10 +585,15 @@ mod tests {
                 state: PullRequestState::Merged
             })
         );
+        // GitHub closes a stacked PR whose base is deleted; that is not abandonment.
         assert_eq!(
             outcome(&facts, "closed"),
+            Outcome::Retain(Retention::ClosedPullRequest { number: 2 })
+        );
+        assert_eq!(
+            outcome(&facts, "abandoned"),
             Outcome::Delete(Evidence::PullRequest {
-                number: 2,
+                number: 8,
                 state: PullRequestState::Closed
             })
         );

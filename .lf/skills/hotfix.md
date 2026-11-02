@@ -127,7 +127,7 @@ a rollover command, move only what is safe to stop by hand:
 - Sessions that are available (`lf session list --available --all --json`) and
   have no running Graph can be stopped: `kill` the stale `lf session serve`
   process that hosts them. They resume on the new binary with
-  `lf session connect`.
+  `lf resume`.
 - Leave busy Sessions and running Graphs alone. They pick up the fix when they
   exit. List them in the report with their binary.
 - Quit and reopen Desktop only when the person using it agrees.

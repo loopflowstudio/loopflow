@@ -2,7 +2,8 @@
 //! `lf -b task run` runs it: every step headless, an interactive step standing
 //! in for the person who would be there. A bare ship inside its execution owner
 //! returns once it is shipping and carries on in its log; `-b` stays until the
-//! end. It is started again if it dies while the Task is shipping.
+//! end. It is started again if it dies while the Task is shipping, unless every
+//! attempt of its run failed with one error: then it stops shipping with it.
 
 use std::path::Path;
 
@@ -10,9 +11,19 @@ use anyhow::Result;
 
 use crate::lf::Cli;
 use crate::ops::task::ship::{
-    ship_begin, ship_next, ship_progressed, ship_settle_merge, ShipMerge, ShipStart, ShipStep,
+    ship_begin, ship_halt, ship_next, ship_progressed, ship_settle_merge, ship_stop, ShipMerge,
+    ShipStart, ShipStep,
 };
 use crate::ops::task::{TaskProcessOptions, TaskRunStart};
+
+/// `lf ship --stop`: withdraw the Task's Auto-Ship approval and say what it was.
+pub fn stop(issue: &str, reason: Option<&str>) -> Result<String> {
+    Ok(if ship_stop(issue, reason)? {
+        format!("{issue} stopped shipping\n")
+    } else {
+        format!("{issue} is not shipping; no run ships it until `lf ship {issue}`\n")
+    })
+}
 
 pub fn run(
     cli: &Cli,
@@ -25,10 +36,6 @@ pub fn run(
         ShipStart::Begun(task) => task,
         ShipStart::AlreadyShipping { issue, process } => {
             println!("{issue} is already shipping (process {process})");
-            return Ok(());
-        }
-        ShipStart::Deferred { issue } => {
-            println!("{issue} is deferred; `lf task resume {issue}` before shipping it");
             return Ok(());
         }
         ShipStart::AtEnd { issue } => {
@@ -74,7 +81,12 @@ pub fn run(
         )?;
         if let TaskRunStart::Run(step) = start {
             // This ship has already let its launcher go, or keeps it to the end.
-            super::graph::run_task_graph_for(&headless, &task, &step, false)?;
+            if let Err(error) = super::graph::run_task_graph_for(&headless, &task, &step, false) {
+                if let Some(repeated) = error.downcast_ref::<super::graph::RepeatedRunFailure>() {
+                    ship_halt(&issue, &repeated.cause)?;
+                }
+                return Err(error);
+            }
             crate::ops::task::task_run_finished(&task)?;
             ship_progressed(&task.id)?;
         }
@@ -101,12 +113,12 @@ fn merged(issue: &str) -> ShipMerge {
     }
 }
 
-/// Say why shipping ends here: deferred, stopped or finished.
+/// Say why shipping ends here: unassigned, stopped or finished.
 fn halt(issue: &str, step: &ShipStep) -> Result<()> {
     match step {
-        ShipStep::Deferred => {
+        ShipStep::Unassigned => {
             println!(
-                "{issue} is deferred; `lf task resume {issue}` and `lf ship` continue shipping"
+                "{issue} is unassigned; `lf task claim {issue}` and `lf ship` continue shipping"
             )
         }
         ShipStep::Stopped => println!("{issue} stopped shipping"),

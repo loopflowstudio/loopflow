@@ -149,10 +149,6 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
-      - name: Materialize draft migrations for tests
-        run: |
-          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"
@@ -218,11 +214,8 @@ jobs:
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
+      - run: uv sync
       - uses: taiki-e/install-action@nextest
-      - name: Materialize the archived source's migration inputs
-        run: |
-          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - uses: actions/download-artifact@v8
         with:
           name: rust-${{ matrix.suite }}
@@ -339,10 +332,6 @@ jobs:
         run: git config --global user.email ci@loopflow.invalid && git config --global user.name "Loopflow CI"
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v7
-      - name: Materialize draft migrations for tests
-        run: |
-          VERSION=$(uv run python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["package"]["version"])')
-          uv run python scripts/canonicalize_migrations.py "$VERSION" --materialize-for-tests
       - name: Fingerprint workspace build profiles
         id: rust-profiles
         run: uv run python scripts/rust_profile_cache_key.py >> "$GITHUB_OUTPUT"

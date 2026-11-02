@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
@@ -31,7 +31,11 @@ impl Fixture {
         }
     }
     fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
+        self.command_from(Path::new(env!("CARGO_BIN_EXE_lf")), args)
+    }
+    /// `command` run from another lf executable, such as a removable copy.
+    fn command_from(&self, program: &Path, args: &[&str]) -> Command {
+        let mut command = Command::new(program);
         for (key, _) in std::env::vars_os() {
             // An inherited cmux workspace would receive the fixture Session's name.
             if ["LF_", "LOOPFLOW_", "CMUX_"]
@@ -80,7 +84,7 @@ impl Fixture {
     fn start(&self, argv: &[&str]) -> String {
         self.owner(self.serve(true, argv))
     }
-    /// A Session row naming `owner`, so the public attach command resolves it.
+    /// A Session row naming `owner`, so `lf session resume` attaches to it.
     fn session(&self, owner: &str) -> String {
         let session = "session_5e55105e000040008000000000000001";
         let sql = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
@@ -127,6 +131,12 @@ impl Fixture {
         ))
     }
     fn viewer(&self, id: &str, control: bool) -> Viewer {
+        self.attach(
+            id,
+            json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}),
+        )
+    }
+    fn attach(&self, id: &str, request: Value) -> Viewer {
         let socket = UnixStream::connect(self.endpoint(id)).unwrap_or_else(|e| {
             panic!(
                 "{}: {e}; home {}",
@@ -141,11 +151,101 @@ impl Fixture {
             socket: BufReader::new(socket),
             token: None,
         };
-        viewer.send(json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}));
+        viewer.send(request);
         let attached = viewer.read();
         assert_eq!(attached["kind"], "attached");
         viewer.token = attached["token"].as_str().map(str::to_owned);
         viewer
+    }
+    fn sql(&self) -> rusqlite::Connection {
+        rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
+    }
+    /// Put a `claude` stand-in that logs each launch to `launches` and waits on
+    /// its terminal first on a PATH, returned.
+    fn waiting_provider(&self) -> String {
+        let bin = self.home.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let provider = bin.join("claude");
+        std::fs::write(
+            &provider,
+            r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
+stty -echo < /dev/tty
+printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+read -r answer < /dev/tty
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+        format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        )
+    }
+    /// The first `count` lines `waiting_provider` logged, once they exist.
+    fn launches(&self, count: usize) -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let text =
+                std::fs::read_to_string(self.home.path().join("launches")).unwrap_or_default();
+            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
+            if lines.len() >= count {
+                return lines;
+            }
+            assert!(Instant::now() < deadline, "{count} launches; saw {lines:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    fn session_of_owner(&self, owner: &str) -> String {
+        self.sql()
+            .query_row(
+                "SELECT id FROM agent_sessions WHERE transport_lf_process_id=?1",
+                [owner],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    /// Record a turn in progress for `session`.
+    fn mark_working(&self, session: &str) {
+        self.sql()
+            .execute(
+                r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
+                   SELECT id,0,1,0,0,agent_process_id,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}' FROM agent_sessions WHERE id=?1"#,
+                [session],
+            )
+            .unwrap();
+    }
+    fn running(&self, owner: &str) -> bool {
+        self.sql()
+            .query_row(
+                "SELECT completed_at IS NULL FROM processes WHERE id=?1",
+                [owner],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+    fn ends(&self, owner: &str) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while self.running(owner) {
+            assert!(
+                Instant::now() < deadline,
+                "{owner} kept running; logs: {:?}",
+                std::fs::read_to_string(self.home.path().join("logs/transport.log"))
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    /// Signal an owner the test leaves running.
+    fn stop(&self, owner: &str) {
+        let pid: i64 = self
+            .sql()
+            .query_row("SELECT pid FROM processes WHERE id=?1", [owner], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        // SAFETY: test-owned owner PID recorded by this fixture's store.
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
     }
     fn wait_file(&self, name: &str) -> String {
         let deadline = Instant::now() + Duration::from_secs(30);
@@ -176,6 +276,19 @@ impl Viewer {
         let mut line = String::new();
         self.socket.read_line(&mut line).unwrap();
         serde_json::from_str(&line).unwrap()
+    }
+    /// Every hint received until the owner closes this connection.
+    fn hints(&mut self) -> Vec<String> {
+        let mut hints = Vec::new();
+        let mut line = String::new();
+        while matches!(self.socket.read_line(&mut line), Ok(1..)) {
+            let value: Value = serde_json::from_str(&line).unwrap();
+            if value["kind"] == "input_hint" {
+                hints.push(value["hint"].as_str().unwrap().to_owned());
+            }
+            line.clear();
+        }
+        hints
     }
     fn input(&mut self, text: &str) {
         self.send(json!({"kind":"input","token":self.token,"bytes":text.as_bytes()}));
@@ -212,21 +325,22 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     let pid = fixture.wait_file("pid");
     assert_eq!(fixture.wait_file("job"), "detached");
     let mut first = fixture.viewer(&owner, true);
-    let second = fixture.viewer(&owner, true);
-    first.input("stale\n");
+    let second = fixture.attach(
+        &owner,
+        json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80,
+            "moved":"This conversation moved to tmux %4: lf resume s1"}),
+    );
+    // The replaced viewer is told where the conversation went, then let go.
+    let moved = read_until(&mut first, "moved");
+    assert_eq!(
+        moved.last().unwrap()["notice"],
+        "This conversation moved to tmux %4: lf resume s1"
+    );
+    let mut rest = String::new();
+    assert_eq!(first.socket.read_line(&mut rest).unwrap(), 0);
     let mut observer = fixture.viewer(&owner, false);
     assert!(observer.token.is_none());
     observer.send(json!({"kind":"input","token":second.token,"bytes":b"passive\n"}));
-    let old = first.token.clone();
-    first.send(json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80}));
-    let claimed = loop {
-        let frame = first.read();
-        if frame["kind"] == "attached" {
-            break frame;
-        }
-    };
-    assert_ne!(claimed["token"].as_str(), old.as_deref());
-    first.input("stale-after-reclaim\n");
     drop(observer);
     drop(first);
     drop(second); // zero viewers while the same read remains pending
@@ -376,7 +490,7 @@ fn pipe_eof_delivers_all_input_before_the_command_exits() {
     let owner = fixture.owner(fixture.serve(false, &["/bin/sh", "-c", "cat; printf final >&2"]));
     let session = fixture.session(&owner);
     let mut viewer = fixture
-        .command(&["session", "attach", &session])
+        .command(&["session", "resume", &session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -470,7 +584,7 @@ enum SilentOwner {
 }
 
 #[test]
-fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
+fn acknowledged_viewer_remains_attached_past_handshake_deadline() {
     let fixture = Fixture::new();
     let owner = fixture.owner(fixture.serve(
         false,
@@ -482,12 +596,9 @@ fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
     ));
     let session = fixture.session(&owner);
     let mut viewers = Vec::new();
-    for observe in [false, true] {
-        let mut command = fixture.command(&["session", "attach", &session]);
-        if observe {
-            command.arg("--observe");
-        }
-        let mut viewer = command
+    {
+        let mut viewer = fixture
+            .command(&["session", "resume", &session])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -503,8 +614,8 @@ fn acknowledged_control_and_observe_remain_attached_past_handshake_deadline() {
         assert_eq!(&ready, b"ready");
         viewers.push(viewer);
     }
-    // Both the controller and a nonterminal observer (no input token) have
-    // acknowledged. Only the handshake is bounded, not their connection.
+    // The controller has acknowledged. Only the handshake is bounded, not
+    // its connection.
     std::thread::sleep(Duration::from_secs(6));
     for viewer in &mut viewers {
         assert!(viewer.try_wait().unwrap().is_none());
@@ -544,7 +655,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     let listener = UnixListener::bind(&endpoint).unwrap();
     listener.set_nonblocking(true).unwrap();
     let mut viewer = fixture
-        .command(&["session", "attach", session])
+        .command(&["session", "resume", session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -560,9 +671,32 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
         });
     }
     let started = Instant::now();
-    let socket = loop {
+    // This owner answers whether a viewer holds control, then never
+    // acknowledges the attachment itself.
+    let mut socket = loop {
         match listener.accept() {
-            Ok((socket, _)) => break socket,
+            Ok((socket, _)) => {
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .unwrap();
+                let mut socket = BufReader::new(socket);
+                let mut request = String::new();
+                socket.read_line(&mut request).unwrap();
+                match serde_json::from_str::<Value>(&request).unwrap()["kind"]
+                    .as_str()
+                    .unwrap()
+                {
+                    "controlled" => writeln!(
+                        socket.get_mut(),
+                        "{}",
+                        json!({"kind":"controlled","held":false})
+                    )
+                    .unwrap(),
+                    "attach" => break socket,
+                    other => panic!("unexpected request {other}"),
+                }
+            }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 assert!(started.elapsed() < Duration::from_secs(10));
                 std::thread::sleep(Duration::from_millis(20));
@@ -573,17 +707,6 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     std::fs::remove_file(&endpoint).unwrap();
     std::fs::rename(retained, endpoint).unwrap();
     drop(listener);
-    socket.set_nonblocking(false).unwrap();
-    socket
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
-    let mut socket = BufReader::new(socket);
-    let mut request = String::new();
-    socket.read_line(&mut request).unwrap();
-    assert_eq!(
-        serde_json::from_str::<Value>(&request).unwrap()["kind"],
-        "attach"
-    );
     if silent == SilentOwner::Cancelled {
         // SAFETY: signal only this test's live viewer, never the owner/provider.
         assert_eq!(unsafe { libc::kill(viewer.id() as i32, libc::SIGINT) }, 0);
@@ -670,27 +793,15 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
         .unwrap();
     let attachment: (String, String) = sql.query_row("SELECT id,attachment_token FROM processes WHERE agent_session_id=?1 AND kind='agent' AND completed_at IS NULL", [&session], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     let prepared = fixture
-        .command(&[
-            "session",
-            "attach",
-            &session,
-            "--if-free",
-            "--prepare",
-            "--json",
-        ])
+        .command(&["session", "resume", &session, "--prepare", "--json"])
         .output()
         .unwrap();
     assert!(prepared.status.success(), "{prepared:?}");
     let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
     let argv = prepared["open_argv"].as_array().unwrap();
     assert_eq!(
-        &argv[argv.len() - 4..],
-        &[
-            json!("session"),
-            json!("attach"),
-            json!(session),
-            json!("--if-free")
-        ]
+        &argv[argv.len() - 3..],
+        &[json!("session"), json!("resume"), json!(session)]
     );
     assert_eq!(fixture.wait_file("launches"), launched);
     let first = fixture.viewer(&owner, true);
@@ -708,7 +819,7 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
     assert!(!fixture.home.path().join("answer").exists());
     // The public Session operation resolves exactly the same retained owner.
     let mut replacement = fixture
-        .command(&["session", "attach", &session])
+        .command(&["session", "resume", &session])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -757,38 +868,7 @@ printf '%s:%s\n' "$$" "$answer" > "$HOME/answer"
 #[test]
 fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
     let fixture = Fixture::new();
-    let bin = fixture.home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let provider = bin.join("claude");
-    std::fs::write(
-        &provider,
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-stty -echo < /dev/tty
-printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
-read -r answer < /dev/tty
-"#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!(
-        "{}:{}",
-        bin.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-    let launches = |count: usize| -> Vec<String> {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            let text =
-                std::fs::read_to_string(fixture.home.path().join("launches")).unwrap_or_default();
-            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
-            if lines.len() >= count {
-                return lines;
-            }
-            assert!(Instant::now() < deadline, "{count} launches; saw {lines:?}");
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    };
+    let path = fixture.waiting_provider();
     let mut owners = Vec::new();
     for input in ["first", "second", "left"] {
         let mut owner = fixture.serve(
@@ -804,7 +884,7 @@ read -r answer < /dev/tty
         );
         owner.env("PATH", &path);
         owners.push(fixture.owner(owner));
-        launches(owners.len());
+        fixture.launches(owners.len());
     }
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
     let session_of = |line: &str| -> String {
@@ -816,7 +896,7 @@ read -r answer < /dev/tty
         )
         .unwrap()
     };
-    let started = launches(3);
+    let started = fixture.launches(3);
     let sessions: Vec<String> = started.iter().map(|line| session_of(line)).collect();
     // The person leaves the third conversation through the provider's own exit.
     let mut viewer = fixture.viewer(&owners[2], true);
@@ -926,7 +1006,7 @@ read -r answer < /dev/tty
             "{resumed}"
         );
     }
-    let reopened = launches(5);
+    let reopened = fixture.launches(5);
     assert_eq!(reopened.len(), 5, "{reopened:?}");
     for line in &reopened[3..] {
         let (_, resumed) = line
@@ -937,7 +1017,7 @@ read -r answer < /dev/tty
     // Rerunning finds nothing to do and starts no provider.
     assert_eq!(resume_all(), json!([]));
     std::thread::sleep(Duration::from_millis(300));
-    let reopened = launches(5);
+    let reopened = fixture.launches(5);
     assert_eq!(reopened.len(), 5);
     // Resumed owners outlive the command; stop them with the fixture.
     for line in &reopened[3..] {
@@ -965,38 +1045,7 @@ fn detached_sessions_end_after_their_limit() {
         "session:\n  end_detached_after: 2s\n",
     )
     .unwrap();
-    let bin = fixture.home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let provider = bin.join("claude");
-    std::fs::write(
-        &provider,
-        r#"#!/bin/sh
-if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
-stty -echo < /dev/tty
-printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
-read -r answer < /dev/tty
-"#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let path = format!(
-        "{}:{}",
-        bin.display(),
-        std::env::var("PATH").unwrap_or_default()
-    );
-    let launches = |count: usize| -> Vec<String> {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            let text =
-                std::fs::read_to_string(fixture.home.path().join("launches")).unwrap_or_default();
-            let lines: Vec<String> = text.lines().map(str::to_owned).collect();
-            if lines.len() >= count {
-                return lines;
-            }
-            assert!(Instant::now() < deadline, "{count} launches; saw {lines:?}");
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    };
+    let path = fixture.waiting_provider();
     // Each starts viewed, so nothing ends while the fixture is arranged.
     let mut owners = Vec::new();
     let mut viewers = Vec::new();
@@ -1018,7 +1067,7 @@ read -r answer < /dev/tty
         owners.push(owner);
     }
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
-    launches(4);
+    fixture.launches(4);
     let session_of = |line: &str| -> String {
         sql.query_row(
             "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
@@ -1027,54 +1076,22 @@ read -r answer < /dev/tty
         )
         .unwrap()
     };
-    let session_of_owner = |owner: &str| -> String {
-        sql.query_row(
-            "SELECT id FROM agent_sessions WHERE transport_lf_process_id=?1",
-            [owner],
-            |r| r.get(0),
-        )
-        .unwrap()
-    };
-    let idle = session_of_owner(&owners[0]);
-    sql.execute(
-        r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
-           SELECT id,0,1,0,0,agent_process_id,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}' FROM agent_sessions WHERE id=?1"#,
-        [session_of_owner(&owners[2])],
-    )
-    .unwrap();
+    let idle = fixture.session_of_owner(&owners[0]);
+    fixture.mark_working(&fixture.session_of_owner(&owners[2]));
     sql.execute(
         "INSERT INTO graph_processes(lf_process_id,graph,compiled)
          SELECT id,'fixture','{}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1",
         [&owners[3]],
     )
     .unwrap();
-    let running = |owner: &str| -> bool {
-        sql.query_row(
-            "SELECT completed_at IS NULL FROM processes WHERE id=?1",
-            [owner],
-            |r| r.get(0),
-        )
-        .unwrap()
-    };
-    let ends = |owner: &str| {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while running(owner) {
-            assert!(
-                Instant::now() < deadline,
-                "{owner} kept running; logs: {:?}",
-                std::fs::read_to_string(fixture.home.path().join("logs/transport.log"))
-            );
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    };
     // Closing the window: the idle, busy and Graph owners lose their viewers.
     let viewed = viewers.remove(1);
     drop(viewers);
-    ends(&owners[0]);
+    fixture.ends(&owners[0]);
     // Several judgments later, everything else still runs.
     std::thread::sleep(Duration::from_secs(4));
     for owner in &owners[1..] {
-        assert!(running(owner), "{owner} ended");
+        assert!(fixture.running(owner), "{owner} ended");
     }
     let resumed = fixture
         .command(&["resume", "--all", "--json"])
@@ -1092,28 +1109,271 @@ read -r answer < /dev/tty
     );
     // Its last viewer leaving lets the viewed one end too.
     drop(viewed);
-    ends(&owners[1]);
+    fixture.ends(&owners[1]);
     // `lf resume` reopens the ended conversation from its saved history.
     let mut reopen = fixture.serve(
         true,
-        &[env!("CARGO_BIN_EXE_lf"), "session", "connect", &idle],
+        &[env!("CARGO_BIN_EXE_lf"), "session", "resume", &idle],
     );
     reopen.env("PATH", &path);
     let reopened = fixture.owner(reopen);
     let _viewer = fixture.viewer(&reopened, false);
-    let line = launches(5).pop().unwrap();
+    let line = fixture.launches(5).pop().unwrap();
     assert!(
         line.contains(" --resume ") && session_of(&line) == idle,
         "reopened without history: {line}"
     );
     for owner in [&owners[2], &owners[3], &reopened] {
-        let pid: i64 = sql
-            .query_row("SELECT pid FROM processes WHERE id=?1", [owner], |r| {
+        fixture.stop(owner);
+    }
+}
+
+/// A conversation whose lf executable is deleted or rebuilt ends once it waits
+/// for a person, even while viewed; a turn in progress finishes first. Swapping
+/// the symlink an owner launched through (as `lf install` does) ends nothing.
+#[test]
+fn sessions_end_when_their_lf_executable_goes() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let bin = fixture.home.path().join("bin");
+    let build = |name: &str| -> PathBuf {
+        let copy = bin.join(name);
+        std::fs::copy(env!("CARGO_BIN_EXE_lf"), &copy).unwrap();
+        copy
+    };
+    let installed = bin.join("lf");
+    std::os::unix::fs::symlink(build("lf-installed"), &installed).unwrap();
+    let executables = [
+        build("lf-idle"),
+        build("lf-replaced"),
+        build("lf-busy"),
+        installed.clone(),
+    ];
+    let mut owners = Vec::new();
+    let mut viewers = Vec::new();
+    for executable in &executables {
+        let lf = executable.to_str().unwrap();
+        let mut owner = fixture.command_from(executable, &["session", "serve", "--terminal"]);
+        owner
+            .args(["--", lf, "--interactive", "--agent", "claude", ":", "hello"])
+            .env("PATH", &path);
+        let owner = fixture.owner(owner);
+        viewers.push(fixture.viewer(&owner, false));
+        owners.push(owner);
+    }
+    fixture.launches(owners.len());
+    let busy = fixture.session_of_owner(&owners[2]);
+    fixture.mark_working(&busy);
+
+    // A worktree removed, a build relinked, `lf install` swapping its symlink.
+    std::fs::remove_file(&executables[0]).unwrap();
+    std::fs::remove_file(&executables[2]).unwrap();
+    let relinked = bin.join("lf-relinked");
+    std::fs::write(&relinked, "another build").unwrap();
+    std::fs::rename(&relinked, &executables[1]).unwrap();
+    let swapped = bin.join("lf-swapped");
+    std::os::unix::fs::symlink(build("lf-next"), &swapped).unwrap();
+    std::fs::rename(&swapped, &installed).unwrap();
+
+    fixture.ends(&owners[0]);
+    fixture.ends(&owners[1]);
+    // Their viewers learn why and how to return.
+    for (index, how) in [(0, "removed"), (1, "replaced")] {
+        let session = fixture.session_of_owner(&owners[index]);
+        assert_eq!(
+            viewers[index].hints(),
+            [format!(
+                "This Session's lf build was {how}; `lf resume {session}` reopens it."
+            )]
+        );
+    }
+    // Several judgments later, the busy and installed owners still run.
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(fixture.running(&owners[2]), "busy owner ended mid-turn");
+    assert!(
+        fixture.running(&owners[3]),
+        "installed owner ended on a symlink swap"
+    );
+    // Its turn settling lets the busy one end.
+    fixture
+        .sql()
+        .execute("DELETE FROM session_activity WHERE session_id=?1", [&busy])
+        .unwrap();
+    fixture.ends(&owners[2]);
+    drop(viewers);
+    fixture.stop(&owners[3]);
+}
+
+/// Desktop restarting after an lf upgrade leaves the conversation in an owner
+/// from the earlier build, which cannot write the advanced store, so its record
+/// still says the departed terminal shows it. Opening the Session asks the owner, reads
+/// `detached` and reattaches to it without starting anything new.
+#[test]
+fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &["/bin/sh", "-c", "read -r answer; printf '%s' \"$answer\""],
+    ));
+    let session = fixture.session(&owner);
+    fixture
+        .sql()
+        .execute(
+            "UPDATE agent_sessions SET provider='claude' WHERE id=?1",
+            [&session],
+        )
+        .unwrap();
+    let viewed = || -> bool {
+        fixture
+            .sql()
+            .query_row("SELECT viewed FROM processes WHERE id=?1", [&owner], |r| {
                 r.get(0)
             })
-            .unwrap();
-        // SAFETY: test-owned owner PIDs recorded by this fixture's store.
-        unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            .unwrap()
+    };
+    let desktop = fixture.viewer(&owner, true);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !viewed() {
+        assert!(Instant::now() < deadline, "owner never recorded its viewer");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Desktop quits.
+    desktop
+        .socket
+        .get_ref()
+        .shutdown(std::net::Shutdown::Both)
+        .unwrap();
+    drop(desktop);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while viewed() {
+        assert!(Instant::now() < deadline, "the viewer never left");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // An earlier build's owner cannot write the store a newer lf advanced, so
+    // its record keeps the viewer that left.
+    fixture
+        .sql()
+        .execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
+        .unwrap();
+
+    let prepared = fixture
+        .command(&["session", "resume", &session, "--prepare", "--json"])
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    assert_eq!(prepared["state"], "detached");
+    assert_eq!(
+        prepared["actions"],
+        json!([{"kind":"open","label":"Reconnect","help":"Show the running Session in this terminal","unavailable_reason":null}])
+    );
+    assert_eq!(prepared["terminal_ids"], json!([]));
+
+    let mut reopened = fixture
+        .command(&["session", "resume", &session])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    reopened
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"same conversation\n")
+        .unwrap();
+    let output = wait_for_viewer(reopened, Duration::from_secs(10));
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"same conversation");
+}
+
+/// An owner from an earlier lf can stay alive after an upgrade yet never answer
+/// its socket. Opening its Session neither waits on it nor gives up: the stale
+/// viewer record reads `detached`, and reconnecting stops its provider and
+/// continues the same provider thread in a new owner, without replaying input.
+#[test]
+fn opening_takes_over_from_an_owner_that_never_answers() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let mut owner = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "--interactive",
+            "--agent",
+            "claude",
+            ":",
+            "one original input",
+        ],
+    );
+    owner.env("PATH", &path);
+    let owner = fixture.owner(owner);
+    let launched = fixture.launches(1).remove(0);
+    let provider: libc::pid_t = launched.split(':').next().unwrap().parse().unwrap();
+    let session: String = fixture
+        .sql()
+        .query_row(
+            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+            [launched.split(':').nth(1).unwrap()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    // The owner keeps running, but its socket accepts and never replies, and
+    // its record still names the Desktop that quit.
+    let endpoint = fixture.endpoint(&owner);
+    std::fs::rename(&endpoint, endpoint.with_extension("retained")).unwrap();
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    std::thread::spawn(move || {
+        let held: Vec<UnixStream> = listener.incoming().map_while(Result::ok).collect();
+        drop(held);
+    });
+    fixture
+        .sql()
+        .execute("UPDATE processes SET viewed=1 WHERE id=?1", [&owner])
+        .unwrap();
+
+    let prepared = fixture
+        .command(&["session", "resume", &session, "--prepare", "--json"])
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    assert_eq!(prepared["state"], "detached", "{prepared}");
+    assert_eq!(prepared["actions"][0]["label"], "Reconnect", "{prepared}");
+
+    let reopened = fixture
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let launches = fixture.launches(2);
+    let (_, thread) = launches[1]
+        .split_once(" --resume ")
+        .unwrap_or_else(|| panic!("reopened without history: {launches:?}"));
+    assert!(!thread.contains(' '), "input replayed: {launches:?}");
+    assert!(launched.contains(thread), "another thread: {launches:?}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    // SAFETY: signal 0 only probes the fixture provider's PID.
+    while unsafe { libc::kill(provider, 0) } == 0 {
+        assert!(Instant::now() < deadline, "the old provider kept running");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let current: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_ne!(current, owner);
+    drop(wait_for_viewer(reopened, Duration::from_secs(10)));
+    for owner in [owner, current] {
+        if fixture.running(&owner) {
+            fixture.stop(&owner);
+        }
     }
 }
 
@@ -1312,7 +1572,7 @@ fn headless_graph_settles_its_original_step_after_creator_teardown() {
 }
 
 #[test]
-fn explicit_native_resume_interrupts_original_graph_without_replay() {
+fn resume_refuses_a_graph_step_and_leaves_it_running() {
     headless_graph(true);
 }
 
@@ -1360,39 +1620,16 @@ fn headless_graph(resume: bool) {
         .unwrap();
     assert!(outcome.is_none(), "viewer death settled the execution");
     if resume {
-        // Replace only the next native executable, leaving the running server intact.
-        std::fs::copy(&provider, bin.join("opencode-server.py")).unwrap();
-        std::fs::write(
-            &provider,
-            "#!/bin/sh\nif [ \"$1\" = serve ]; then exec python3 \"$(dirname \"$0\")/opencode-server.py\" \"$@\"; fi\nprintf '%s\\n' \"$@\" > \"$HOME/resumed-args\"\n",
-        )
-        .unwrap();
-        let output = fixture
-            .command(&["connect", &session, "--try"])
-            .env(
-                "PATH",
-                format!(
-                    "{}:{}",
-                    bin.display(),
-                    std::env::var("PATH").unwrap_or_default()
-                ),
-            )
-            .output()
-            .unwrap();
+        // A Run is never resumed or taken over: the step keeps its turn.
+        let output = fixture.command(&["resume", &session]).output().unwrap();
+        assert!(!output.status.success());
+        let error = String::from_utf8_lossy(&output.stderr);
         assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
+            error.contains("is a Run (proof · probe · running)"),
+            "{error}"
         );
-        let args = fixture.wait_file("resumed-args");
-        assert!(args.contains("--session\n"), "{args}");
-        assert!(
-            !args.contains("Do the fixture work."),
-            "input replayed: {args}"
-        );
-    } else {
-        std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
     }
+    std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let outcome: Option<String> = sql
@@ -1401,7 +1638,7 @@ fn headless_graph(resume: bool) {
             })
             .unwrap();
         if let Some(outcome) = outcome {
-            assert_eq!(outcome, if resume { "failed" } else { "succeeded" });
+            assert_eq!(outcome, "succeeded");
             break;
         }
         assert!(Instant::now() < deadline, "step did not settle");
@@ -1421,31 +1658,11 @@ fn headless_graph(resume: bool) {
             })
             .unwrap();
         if let Some(outcome) = outcome {
-            assert_eq!(outcome, if resume { "failed" } else { "succeeded" });
+            assert_eq!(outcome, "succeeded");
             break;
         }
         assert!(Instant::now() < deadline, "Graph did not settle");
         std::thread::sleep(Duration::from_millis(20));
-    }
-    if resume {
-        let step_code: i32 = sql
-            .query_row(
-                "SELECT exit_code FROM processes WHERE id=?1",
-                [&step],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let graph_code: i32 = sql
-            .query_row(
-                "SELECT exit_code FROM processes WHERE id=?1",
-                [&graph],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(step_code, 130);
-        assert_eq!(graph_code, 3, "held Graph must not request a retry");
-        let interrupted: i64 = sql.query_row("SELECT count(*) FROM session_events WHERE session_id=?1 AND payload LIKE '%terminal.json%' AND payload LIKE '%interrupted%'", [&session], |r| r.get(0)).unwrap();
-        assert_eq!(interrupted, 1);
     }
     let captures: i64 = sql
         .query_row(

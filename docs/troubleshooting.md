@@ -58,7 +58,7 @@ an incompatible store still reports readable Process evidence.
 
 Binary freshness compares against locally cached `origin/main`, without
 fetching. That reference may be stale, and merged source may be newer than the
-latest published release. `lf install` installs that published release; Doctor
+stable release. `lf install` installs that stable release; Doctor
 itself installs nothing.
 
 Contention reads the last day of `logs/lf.log`: `database is locked` failures
@@ -91,7 +91,7 @@ names the exact path and branch to restore before launching.
 ## The Task is idle, but waiting on something
 
 Task state says what the Task is doing (`idle`, `active`, `moving`, `shipping`,
-`deferred`, …). What it is waiting on (a child Task, review, CI, merge) is its
+…); whether anyone owns it is separate (`lf task claim`, `lf task unassign`). What it is waiting on (a child Task, review, CI, merge) is its
 `reason`; Desktop's condition, with the evidence behind it, is in `lf desktop task`:
 
 ```bash
@@ -160,8 +160,8 @@ lf monitor prune                   # only lf's records: dead Process rows and re
 The script prunes every repository under `~/src`: finished worktrees, completed
 Tasks' build output and merged branches through `lf wt prune`, and ignored
 build output (`target`, `node_modules`, `.venv`, `.build`, `DerivedData`) that no process
-holds and nothing wrote for 4 hours. In `~/.lf` it removes captures, logs, draft store
-copies and every database backup but the newest once untouched for a week. The
+holds and nothing wrote for 4 hours. In `~/.lf` it removes captures, logs
+and every database backup but the newest once untouched for a week. The
 database, account homes, Home material written in the last day and anything a
 process holds open are never removed; when `lsof` fails, neither is anything else
 that check protects.
@@ -175,21 +175,25 @@ each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
 ## Stale worktrees and branches
 
 ```bash
-lf wt prune --dry-run              # finished worktrees
-lf wt prune                        # remove them and their branches
+lf wt prune --dry-run              # every checkout, removed or kept, with the reason
+lf wt prune                        # remove the finished ones and their branches
+lf wt prune --all                  # remove every checkout no unfinished Task or process holds
 lf wt prune --branches --dry-run   # finished branches on origin and locally, with reasons
 ```
 
-Worktree pruning requires a merged or closed PR at the exact local head.
-Unpublished commits survive even when their remote branch is absent or their
-checkout has been idle for weeks. It removes only clean, unprotected checkouts
-and their local branch refs.
+A checkout goes when its PR merged or closed, its Task is done or abandoned,
+or it has no Task or PR and HEAD has not moved for a week. Changes under
+`scratch/` and `.lf/` never keep it; other uncommitted changes, an open PR and
+recent activity do, until `--all`. Unfinished Tasks' checkouts, persistent
+checkouts and any a running process holds are always kept. Unpushed commits
+and source changes are saved as `refs/lf/pruned/<branch>/<commit>` first.
 
-With `--branches`, a branch goes only with evidence at its exact head: a merged or closed PR, a
-finished Task already in the default branch, or a release candidate whose tag
-exists. An open PR, a worktree or an unfinished Task always keeps it. Prune
-always preserves uncommitted files; `lf wt delete <name> --force` is for when
-you mean to discard one.
+With `--branches`, a branch goes only with evidence at its exact head: a merged PR, a
+finished Task's closed PR, a finished Task already in the default branch, or a
+release candidate whose tag exists. An open PR, a worktree or an unfinished Task
+always keeps it. Open PRs based on a deleted branch move to the default branch
+first, so the PR above a landed one in a stack stays open. `lf wt delete <name> --force`
+discards a checkout without saving anything.
 
 A branch behind `main`:
 

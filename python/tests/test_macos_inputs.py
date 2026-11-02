@@ -45,7 +45,7 @@ def test_wire_fixtures_and_swift_scripts_run_swift_test(path: str) -> None:
     "path",
     [
         "rust/loopflow/src/app_process.rs",
-        "rust/loopflow/src/data_clone.rs",
+        "rust/loopflow/src/store/copy.rs",
         "rust/loopflow/src/lf/commands/install/published.rs",
     ],
 )

@@ -1,6 +1,7 @@
 import importlib.util
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,11 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "loopflow-dev.py"
 SPEC = importlib.util.spec_from_file_location("loopflow_dev", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 loopflow_dev = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(loopflow_dev)
+sys.path.insert(0, str(SCRIPT.parent))
+try:
+    SPEC.loader.exec_module(loopflow_dev)
+finally:
+    sys.path.pop(0)
 
 
 @pytest.mark.parametrize("debug", [False, True])

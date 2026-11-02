@@ -77,7 +77,7 @@ pub(crate) fn build_session_command(
         .unwrap_or_else(std::env::current_dir)?;
     let stream = matches!(invocation, ProviderInvocation::ClaudeStream { .. });
     if !stream && (config.max_turns.is_some() || config.output_schema.is_some()) {
-        bail!("turn limits and response schemas require a headless Session (-b)");
+        bail!("turn limits and response schemas require a headless Run (-b)");
     }
     if stream && harness != "claude" {
         bail!("stream-json command syntax belongs to Claude");
@@ -488,7 +488,7 @@ mod tests {
                     },
                 ] {
                     let error = build_session_command(&config, invocation, None).unwrap_err();
-                    assert!(error.to_string().contains("require a headless Session"));
+                    assert!(error.to_string().contains("require a headless Run"));
                 }
             }
         }

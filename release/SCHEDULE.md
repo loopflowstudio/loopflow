@@ -15,7 +15,7 @@ releases.
 Loopflow carries these release boundaries:
 
 ```text
-.github/workflows/nightly-packages.yml   # scheduled, credential-free package proof
+.github/workflows/main-packages.yml      # per-green-main, credential-free packages
 .github/workflows/release.yml            # tag-triggered, credential-free native matrix
 release-run                              # built-in daily entry point: lf release run patch
 scripts/publish_release.py               # credentialed publisher and completion receipt

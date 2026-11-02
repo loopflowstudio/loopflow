@@ -153,8 +153,9 @@ still carries both lf and agent rows during the AgentProcess cutover.
 `GraphCatalogEntry` carries the compiled graph and `GraphComposition`
 disclosure tree. Invalid sources remain visible with their error.
 
-`lf wave graph show/set` reads or changes the Wave's default graph,
-independently of Project history.
+`lf wave graph show [WAVE | --no-wave]` reads the graph a Wave's, or the
+repository's, new Tasks take up and which setting chose it, independently of
+Project history; `lf set graph` changes it.
 
 Task status and roadmap separate `graph_name` with its `graph_source`
 (`task`, `wave`, `repository` or `builtin`), `latest_graph_process`,
@@ -180,9 +181,9 @@ provider generation in caller provenance, turn origin and Program Status.
 | Owner | Authoritative fields and operations |
 | --- | --- |
 | `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
-| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, connect, bind and rename; historical feedback/completion retained |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
 | `tasks` | Project, issue, durable disposition and worktree/delivery facts |
-| `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`) with person, Machine and time; migration-only `recorded` entries are never delivered |
+| `task_ownership` | Append-only `claim`/`handoff`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, Machine and time; migration-only `recorded` entries are never delivered |
 | `projects` | Wave, stable Linear Project identity, status, shared chapter name, Graph and planning facts |
 | `waves` | Stable identity and repository address; objective, memory and instruments are read from checkout files |
 
@@ -234,22 +235,22 @@ completion nor Graph authority.
 A primary Session is the one ongoing conversation of a scope. It is an ordinary
 interactive conversation whose row names that scope; a repository and each
 Wave have at most one uncompleted primary. The repository's needs no Wave,
-Task or planning provider. `lf connect` finds or admits it, prepares its
+Task or planning provider. `lf resume` finds or admits it, prepares its
 workspace, reserves the first input and owns the foreground launch; `--prepare`
-stops before launch. Task primaries are admitted lazily on the owner Machine, on first connect;
+stops before launch. Task primaries are admitted lazily on the owner Machine, on first resume;
 explicit Wave admission also admits the repository conversation. A Session may
 have no current capture: metadata admission does not claim a Task, prepare
 a prompt or start a provider. The first captured input, or binding a previously
 captured conversation, starts work.
-`resume` is an alias. `connect --fresh` retires the predecessor as primary and
-admits the successor in one transaction, keeping the previous client and history.
-Scope locks serialize admission and fresh requests. Each explicit fresh request
-creates a new primary; ordinary connect recovers the current one. Primary grants no Graph, review or process authority, and
+A primary is never replaced: `lf session new` appends a fresh input to the same
+row, seeded with a log of its current AgentSession, which stays in its history.
+`lf resume --fork` admits a separate, non-primary Session from that log.
+Scope locks serialize admission. Primary grants no Graph, review or process authority, and
 the Wave's goal and memory reach it as ordinary Wave context.
 
 A Task's primary is one of its own conversations, named by
 `tasks.primary_session_id`; its row carries no scope mark and it stays a Task
-member. `lf connect --task ISSUE` keeps the chosen primary, else selects the
+member. `lf resume --task ISSUE` keeps the chosen primary, else selects the
 sole unfinished interactive conversation, else the most recently used by
 native human input, then last opening. It creates one when the Task has none.
 Opening an exact Session leaves the Task's primary unchanged.
@@ -341,8 +342,12 @@ completion are distinct: subsequent command work may fail after the agent succee
 
 ### Process lifetime and causality
 
-One actual lf process gets one LfProcess, including nested direct and agent-issued
-commands. In-process wrappers reuse it and cannot settle it early; each Graph
+One actual lf process that changes Work (Tasks, Waves, Projects, Sessions,
+Graphs, PRs, planning) gets one LfProcess, including nested direct and
+agent-issued commands. A read (status, list, show, diff, file, every `--watch`
+reader), Desktop navigation and pane or Dashboard arrangement record none, so
+they never wake a Work reader or join a Task's work; arrangement saves still
+persist. Input to a Session or shell is Work. `Commands::changes_work` classifies every command once, exhaustively. In-process wrappers reuse it and cannot settle it early; each Graph
 step is a child process with its own Process.
 The incoming `via_agent` bit describes the caller, not whether the command later
 launches an agent. Agent-issued children resolve stable Session/AgentProcess
@@ -353,7 +358,7 @@ Process outcomes are succeeded, failed or interrupted when observed. Unobserved
 completion, exit code and signal stay unknown. The outer command owns terminal
 settlement, including interruption. Bootstrap/installation logging must not open
 or migrate an incompatible installed store before its authority preflight.
-Help, parser errors and installation entry paths append process evidence
+Parser errors, `--version` and installation entry paths append process evidence
 only to an existing compatible ledger, without creating a Machine, seeding branch
 data or applying migrations. An attached ledger stays pinned through command
 completion. Missing or incompatible storage leaves an explicit recording gap;
@@ -396,7 +401,7 @@ Each step is the command a person would type, started as a child of the Graph pr
 ```text
 lf --batch [options] skill <name> [message]       # agent step
 lf <command> <args>                               # operation step
-lf -b connect <session> --message <message>     # correction of an answer
+lf -b resume <session> --message <message>     # correction of an answer
 ```
 
 Headless Session correction reserves the next captured input and claims its attachment

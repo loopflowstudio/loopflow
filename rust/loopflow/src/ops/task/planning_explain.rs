@@ -178,6 +178,7 @@ async fn read_planning(
                 ("description", update.description.is_some()),
                 ("rank", update.rank.is_some()),
                 ("assignee", update.assignee.is_some()),
+                ("regressed_in", update.regressed_in.is_some()),
             ]
             .into_iter()
             .filter(|(_, present)| *present)

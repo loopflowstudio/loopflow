@@ -210,7 +210,12 @@ struct ReleaseTarget {
 #[derive(Debug, Clone)]
 pub struct ReleaseStatusResult {
     pub target: String,
-    pub latest_tag: Option<String>,
+    /// The newest release tag, published or still completing.
+    pub preview_tag: Option<String>,
+    /// When `preview_tag` was published, for `completion: github-release` targets.
+    pub preview_published_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Where `stable` points and what holds it back, for `completion: github-release` targets.
+    pub stable: Option<StableStream>,
     pub notes_status: Option<ReleaseNotesStatus>,
     pub workflow_status: Option<String>,
     pub workflow_conclusion: Option<String>,
@@ -304,30 +309,6 @@ struct ReleaseCandidate {
     branch: String,
 }
 
-/// Pins a minor to its closing patch across publication interruptions.
-#[derive(Debug, Serialize, Deserialize)]
-struct MinorRelease {
-    version: String,
-    patch_version: String,
-    notes_base: String,
-    patch_commit: Option<String>,
-    prepared_tree: Option<String>,
-    completed: bool,
-}
-
-impl MinorRelease {
-    fn save(&self, repo: &Path, target: &ReleaseTarget) -> OpsResult<()> {
-        let json = serde_json::to_vec_pretty(self)
-            .map_err(|err| OpsError::Parse(format!("minor release receipt: {err}")))?;
-        write_atomic(&minor_receipt_path(repo, target), &json)
-    }
-}
-
-fn minor_receipt_path(repo: &Path, target: &ReleaseTarget) -> PathBuf {
-    repo.join(".lf/releases")
-        .join(format!("minor-{}.json", sanitize_ref_segment(&target.name)))
-}
-
 impl ReleaseCandidate {
     fn new(target: &ReleaseTarget, tag: &str, commit: &str) -> Self {
         let target_name = sanitize_ref_segment(&target.name);
@@ -393,29 +374,25 @@ pub fn generate_release(
 
 /// Parse `X.Y.Z` and bump the specified component.
 pub fn bump_version(current: &str, bump: &str) -> OpsResult<String> {
-    let clean = current.trim().trim_start_matches('v');
-    let parts: Vec<&str> = clean.split('.').collect();
-    if parts.len() != 3 {
-        return Err(OpsError::Parse(format!(
-            "invalid version format: {current}"
-        )));
-    }
-    let major: u32 = parts[0]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid major version: {}", parts[0])))?;
-    let minor: u32 = parts[1]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid minor version: {}", parts[1])))?;
-    let patch: u32 = parts[2]
-        .parse()
-        .map_err(|_| OpsError::Parse(format!("invalid patch version: {}", parts[2])))?;
-
+    let (major, minor, patch) = parse_version(current)
+        .ok_or_else(|| OpsError::Parse(format!("invalid version format: {current}")))?;
     match bump {
         "major" => Ok(format!("{}.0.0", major + 1)),
         "minor" => Ok(format!("{}.{}.0", major, minor + 1)),
         "patch" => Ok(format!("{}.{}.{}", major, minor, patch + 1)),
         _ => Err(OpsError::Parse(format!("unknown bump type: {bump}"))),
     }
+}
+
+/// `X.Y.Z`, with an optional leading `v`.
+fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .map(|part| part.parse().ok());
+    let triple = (parts.next()??, parts.next()??, parts.next()??);
+    parts.next().is_none().then_some(triple)
 }
 
 pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<ReleaseStatusResult> {
@@ -425,8 +402,8 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
 
     let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
 
-    let latest_tag = latest_tag_optional(&main_repo, &target)?;
-    let (notes_status, workflow, release_exists) = match latest_tag.as_deref() {
+    let preview_tag = latest_tag_optional(&main_repo, &target)?;
+    let (notes_status, workflow, release_exists) = match preview_tag.as_deref() {
         Some(tag) => {
             let candidate = release_candidate_for_tag(&main_repo, tag, &target)?;
             (
@@ -437,10 +414,28 @@ pub fn release_status(repo: &Path, target_name: Option<&str>) -> OpsResult<Relea
         }
         None => (None, None, false),
     };
+    let (preview_published_at, stable) = if target.completion == ReleaseCompletion::GithubRelease {
+        let releases = published_releases(&main_repo, &target)?;
+        (
+            releases
+                .iter()
+                .find(|release| preview_tag.as_deref() == Some(release.tag.as_str()))
+                .map(|release| release.published_at),
+            Some(stable_stream(
+                &releases,
+                &regressions(&main_repo)?,
+                chrono::Utc::now(),
+            )),
+        )
+    } else {
+        (None, None)
+    };
 
     Ok(ReleaseStatusResult {
         target: target.name,
-        latest_tag,
+        preview_tag,
+        preview_published_at,
+        stable,
         notes_status,
         workflow_status: workflow.as_ref().map(|run| run.status.clone()),
         workflow_conclusion: workflow.as_ref().and_then(|run| run.conclusion.clone()),
@@ -628,7 +623,7 @@ pub fn release_tag(repo: &Path, version: &str, target_name: Option<&str>) -> Ops
     tag_and_push_ref(&main_repo, &version, &target, None, &lock)
 }
 
-/// Stage assets on a draft GitHub Release or publish that draft as latest.
+/// Stage assets on a draft GitHub Release or publish that draft without marking it Latest.
 pub fn release_publish(
     repo: &Path,
     tag: &str,
@@ -669,7 +664,9 @@ pub fn release_publish(
             &lock,
             &main_repo,
             "gh",
-            &["release", "edit", tag, "--draft=false", "--latest"],
+            // GitHub's Latest marker is the `stable` pointer; only the release
+            // run moves it, once this release has soaked.
+            &["release", "edit", tag, "--draft=false", "--latest=false"],
         )?;
         return Ok(());
     }
@@ -751,531 +748,254 @@ pub fn release_publish(
 /// 5) build the merged commit under a provisional candidate ref
 /// 6) prepare the publisher's signed artifact set, when configured
 /// 7) tag the proven commit and publish those exact artifacts
+/// 8) move the `stable` pointer forward, for targets completing on a GitHub Release
 pub fn release_run(
     repo: &Path,
     version_input: &str,
     target_name: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<ReleaseRunOutcome> {
-    if version_input.trim() == "minor" || is_minor_version(version_input) {
-        return release_minor(repo, version_input, target_name, progress);
+    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
+    let lock = &ReleaseLock::acquire(&main_repo, &target.name)?;
+    if !command_exists("gh") {
+        return Err(OpsError::Message("gh CLI not found".into()));
     }
-    release_run_single(repo, version_input, target_name, progress)
+    let outcome = release_version(&main_repo, &target, version_input, progress, lock)?;
+    if target.completion == ReleaseCompletion::GithubRelease {
+        advance_stable(&main_repo, &target, progress, lock)?;
+    }
+    Ok(outcome)
 }
 
-fn release_minor(
-    repo: &Path,
+fn release_version(
+    main_repo: &Path,
+    target: &ReleaseTarget,
     version_input: &str,
-    target_name: Option<&str>,
     progress: &impl Progress,
+    lock: &ReleaseLock,
 ) -> OpsResult<ReleaseRunOutcome> {
-    let (repo, target) = resolve_repo_and_target(repo, target_name)?;
-    if version_input.trim() != "minor" {
-        let version = normalize_version(version_input);
-        if remote_tag_sha(&repo, &target_tag(&target, &version))?.is_some()
-            || latest_tag_optional(&repo, &target)?.is_none()
-        {
-            return release_run_single(&repo, &version, target_name, progress);
-        }
-    }
-    let lock = ReleaseLock::acquire(&repo, &target.name)?;
-    let receipt_path = minor_receipt_path(&repo, &target);
-    let _lease = acquire_worktree_lease(&repo, &receipt_path, "minor release")?;
-    let default_branch = get_default_branch(&repo)?;
+    let default_branch = get_default_branch(main_repo)?;
     fetch_inheriting(
-        &repo,
+        main_repo,
         "origin",
         &format!("+refs/heads/{default_branch}:refs/remotes/origin/{default_branch}"),
         &|command| lock.inherit(command),
     )?;
-    let source = rev_parse(&repo, &format!("origin/{default_branch}"))?;
-    let mut pair: Option<MinorRelease> = match fs::read(&receipt_path) {
-        Ok(bytes) => Some(
-            serde_json::from_slice(&bytes)
-                .map_err(|err| OpsError::Parse(format!("{}: {err}", receipt_path.display())))?,
-        ),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => return Err(err.into()),
-    };
-    let changes = collect_release_changes_at(&repo, &target, &source)?;
-    if let Some(pair) = pair.as_ref().filter(|pair| !pair.completed) {
-        if version_input.trim() != "minor" && normalize_version(version_input) != pair.version {
-            return Err(OpsError::Message(format!(
-                "minor {} is still pending; resume it with `lf release run minor` before selecting {version_input}",
-                pair.version
-            )));
-        }
-    }
-    if pair.as_ref().is_some_and(|pair| pair.completed) {
-        let completed = pair.as_ref().expect("completed receipt exists");
-        if changes.previous_tag.as_deref() == Some(&target_tag(&target, &completed.version))
-            && changes.commits.is_empty()
-        {
-            return Ok(ReleaseRunOutcome::NoChanges {
-                target: target.name,
-                latest_tag: changes.previous_tag,
-                origin_commit: source.clone(),
-            });
-        }
-        pair = None;
-    }
-    let mut pair = match pair {
-        Some(pair) => pair,
-        None => {
-            let previous_tag = changes.previous_tag.as_deref().ok_or_else(|| {
-                OpsError::Message("a minor release needs a preceding release cycle".into())
-            })?;
-            let previous_version = version_from_tag(previous_tag, &target)?;
-            if changes.commits.is_empty() && previous_version.ends_with(".0") {
-                return Ok(ReleaseRunOutcome::NoChanges {
-                    target: target.name,
-                    latest_tag: changes.previous_tag,
-                    origin_commit: source.clone(),
-                });
-            }
-            let version = resolve_version(Some(previous_tag), version_input, &target)?;
-            let notes_base = minor_notes_base(&repo, &version, &target)?;
-            let patch_version = if changes.commits.is_empty() {
-                previous_version
-            } else {
-                bump_version(&previous_version, "patch")?
-            };
-            let pair = MinorRelease {
-                version,
-                patch_version,
-                notes_base,
-                patch_commit: None,
-                prepared_tree: None,
-                completed: false,
-            };
-            pair.save(&repo, &target)?;
-            pair
-        }
-    };
+    let source_commit = rev_parse(main_repo, &format!("origin/{default_branch}"))?;
 
-    if pair.patch_commit.is_none() {
-        if let Some(tag) = changes.previous_tag.as_deref() {
-            let latest = version_from_tag(tag, &target)?;
-            if closing_patch_successor(&pair.patch_version, &latest) {
-                pair.patch_version = latest;
-                pair.save(&repo, &target)?;
-            }
-        }
-        let patch_tag = target_tag(&target, &pair.patch_version);
-        if let Some(commit) = remote_tag_sha(&repo, &patch_tag)? {
-            let complete = if target.publisher.is_empty() {
-                release_completion_satisfied(&repo, &patch_tag, &target)?
-            } else {
-                github_release_exists(&repo, &patch_tag)?
-            };
-            if complete {
-                progress.status(&format!("Reusing completed closing patch {patch_tag}..."));
-                pair.patch_commit = Some(commit);
-                pair.save(&repo, &target)?;
-            }
-        }
-    }
-    if pair.patch_commit.is_none() {
-        progress.status(&format!(
-            "Completing closing patch {}...",
-            pair.patch_version
-        ));
-        let outcome = release_run_inner(
-            &repo,
-            &pair.patch_version,
-            target_name,
-            progress,
-            &lock,
-            None,
-        )?;
-        let receipt = match outcome {
-            ReleaseRunOutcome::Released(receipt) | ReleaseRunOutcome::Resumed(receipt) => receipt,
-            ReleaseRunOutcome::NoChanges { .. } => {
-                return Err(OpsError::Message(format!(
-                    "closing patch {} has not been published; retry the minor release",
-                    pair.patch_version
-                )));
-            }
-        };
-        // A preceding incomplete release can be resumed by the single-release
-        // runner. Accept a corrected closing patch in this cycle, but keep the
-        // pair pending if the runner only completed an older release.
-        if !closing_patch_successor(&pair.patch_version, &receipt.version) {
-            return Err(OpsError::Message(format!(
-                "completed preceding release {}; retry `lf release run minor` to finish {} and {}",
-                receipt.tag, pair.patch_version, pair.version
-            )));
-        }
-        pair.patch_version = receipt.version;
-        pair.patch_commit = Some(receipt.commit);
-        pair.save(&repo, &target)?;
-    }
-    let version = pair.version.clone();
-    let result = release_run_inner(
-        &repo,
+    run_publisher_check(main_repo, target, progress)?;
+
+    let latest_tag = latest_tag_optional(main_repo, target)?;
+    let version = resolve_version(latest_tag.as_deref(), version_input, target)?;
+    verify_source(
+        main_repo,
+        &source_commit,
+        target,
         &version,
-        target_name,
+        latest_tag.as_deref(),
         progress,
-        &lock,
-        Some(&mut pair),
+        lock,
     )?;
-    match &result {
-        ReleaseRunOutcome::Released(receipt) | ReleaseRunOutcome::Resumed(receipt)
-            if receipt.version == pair.version => {}
-        _ => {
-            return Err(OpsError::Message(format!(
-                "minor {} remains pending; retry `lf release run minor` to finish the recorded pair",
-                pair.version
-            )));
-        }
-    }
-    pair.completed = true;
-    pair.save(&repo, &target)?;
-    Ok(result)
-}
 
-fn release_run_single(
-    repo: &Path,
-    version_input: &str,
-    target_name: Option<&str>,
-    progress: &impl Progress,
-) -> OpsResult<ReleaseRunOutcome> {
-    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
-    let lock = ReleaseLock::acquire(&main_repo, &target.name)?;
-    release_run_inner(
-        &main_repo,
-        version_input,
-        target_name,
-        progress,
-        &lock,
-        None,
-    )
-}
-
-fn release_run_inner(
-    repo: &Path,
-    version_input: &str,
-    target_name: Option<&str>,
-    progress: &impl Progress,
-    lock: &ReleaseLock,
-    mut minor: Option<&mut MinorRelease>,
-) -> OpsResult<ReleaseRunOutcome> {
-    if !command_exists("gh") {
-        return Err(OpsError::Message("gh CLI not found".into()));
-    }
-    let (main_repo, target) = resolve_repo_and_target(repo, target_name)?;
-    let default_branch = get_default_branch(&main_repo)?;
-    let mut requested_version = version_input.to_string();
-    let mut rejected_candidate: Option<String> = None;
-    loop {
-        let version_input = requested_version.as_str();
-        fetch_inheriting(
-            &main_repo,
-            "origin",
-            &format!("+refs/heads/{default_branch}:refs/remotes/origin/{default_branch}"),
-            &|command| lock.inherit(command),
-        )?;
-        let source_commit = rev_parse(&main_repo, &format!("origin/{default_branch}"))?;
-
-        run_publisher_check(&main_repo, &target, progress)?;
-
-        let latest_tag = latest_tag_optional(&main_repo, &target)?;
-        let verify_version = resolve_version(latest_tag.as_deref(), version_input, &target)?;
-        verify_source(
-            &main_repo,
-            &source_commit,
-            &target,
-            &verify_version,
-            latest_tag.as_deref(),
-            progress,
-            lock,
-        )?;
-
-        if let Some(tag) = latest_tag.as_deref() {
-            if !target.publisher.is_empty()
-                && github_release_state(&main_repo, tag)? != GitHubReleaseState::Published
-            {
-                let candidate = release_candidate_for_tag(&main_repo, tag, &target)?;
-                let inspection =
-                    inspect_release_source(&main_repo, &target, &candidate, true, lock)?;
-                if !inspection.preparation_required.is_empty() {
-                    inspection.ensure_unpublished(tag)?;
-                    return Err(OpsError::Message(format!(
-                        "unfinished tagged release {tag} needs preparation; recover that version before starting another"
-                    )));
-                } else {
-                    let run =
-                        find_workflow_run(&main_repo, &candidate, &target)?.ok_or_else(|| {
-                            OpsError::Message(format!(
-                        "latest release {tag} is incomplete and has no hosted build to resume"
-                    ))
-                        })?;
-                    let conclusion = run
-                        .conclusion
-                        .as_deref()
-                        .unwrap_or("unknown")
-                        .to_lowercase();
-                    if run.status == "completed" && conclusion != "success" {
-                        return Err(OpsError::Message(format!(
-                            "unfinished release {tag} build failed ({conclusion}); retry its build before starting another version"
-                        )));
-                    } else {
-                        progress.status(&format!("Resuming incomplete release {tag}..."));
-                        return resume_existing_release(&main_repo, tag, &target, progress, lock);
-                    }
-                }
-            } else if target.publisher.is_empty()
-                && matches!(version_input.trim(), "patch" | "minor" | "major")
-                && !release_completion_satisfied(&main_repo, tag, &target)?
-            {
-                progress.status(&format!("Resuming release completion for {tag}..."));
-                return resume_existing_release(&main_repo, tag, &target, progress, lock);
-            }
-        }
-
-        if !matches!(version_input.trim(), "patch" | "minor" | "major") {
-            let version = resolve_version(None, version_input, &target)?;
-            let tag = target_tag(&target, &version);
-            if remote_tag_sha(&main_repo, &tag)?.is_some() {
-                progress.status(&format!("Resuming release completion for {tag}..."));
-                return resume_existing_release(&main_repo, &tag, &target, progress, lock);
-            }
-        }
-
-        let changes = collect_release_changes_at(&main_repo, &target, &source_commit)?;
-        if changes.commits.is_empty() && minor.is_none() {
-            return Ok(ReleaseRunOutcome::NoChanges {
-                target: target.name,
-                latest_tag: changes.previous_tag,
-                origin_commit: source_commit,
-            });
-        }
-
-        let version = resolve_version(changes.previous_tag.as_deref(), version_input, &target)?;
-
-        let changes = if let Some(pair) = minor.as_deref() {
-            collect_changes_between(
-                &main_repo,
-                Some(&pair.notes_base),
-                pair.patch_commit
-                    .as_deref()
-                    .expect("closing patch completed"),
-                &target,
-            )?
-        } else {
-            changes
-        };
-        let new_tag = target_tag(&target, &version);
-        if remote_tag_sha(&main_repo, &new_tag)?.is_some() {
-            progress.status(&format!("Resuming release completion for {new_tag}..."));
-            return resume_existing_release(&main_repo, &new_tag, &target, progress, lock);
-        }
-
-        let latest_candidate = find_latest_candidate_workflow(&main_repo, &new_tag, &target)?;
-        let mut resumed_candidate = None;
-        let mut retry_after = rejected_candidate.clone();
-        if let Some(run) = latest_candidate.filter(|_| rejected_candidate.is_none()) {
-            let commit = run
-                .head_sha
-                .clone()
-                .expect("candidate workflow was selected with a head SHA");
+    if let Some(tag) = latest_tag.as_deref() {
+        if !target.publisher.is_empty()
+            && github_release_state(main_repo, tag)? != GitHubReleaseState::Published
+        {
+            let candidate = release_candidate_for_tag(main_repo, tag, target)?;
+            let run = find_workflow_run(main_repo, &candidate, target)?.ok_or_else(|| {
+                OpsError::Message(format!(
+                    "latest release {tag} is incomplete and has no hosted build to resume"
+                ))
+            })?;
             let conclusion = run
                 .conclusion
                 .as_deref()
                 .unwrap_or("unknown")
                 .to_lowercase();
-            let build_failed = run.status == "completed" && conclusion != "success";
-            let preparation_missing = run.status == "completed"
-                && conclusion == "success"
-                && !target.publisher.is_empty()
-                && !publisher_artifact_dir(&main_repo, &new_tag, &commit, run.database_id)
-                    .join("candidate.json")
-                    .is_file();
-            if !build_failed && !preparation_missing {
-                resumed_candidate = Some(commit);
+            if run.status == "completed" && conclusion != "success" {
+                return Err(OpsError::Message(format!(
+                    "unfinished release {tag} build failed ({conclusion}); retry its build before starting another version"
+                )));
             } else {
-                let main_ref = format!("origin/{default_branch}");
-                let current_main = run_stdout(&main_repo, "git", &["rev-parse", &main_ref])?;
-                if current_main == commit {
-                    if preparation_missing {
-                        resumed_candidate = Some(commit);
-                    } else {
-                        let url = run
-                            .url
-                            .unwrap_or_else(|| "workflow URL unavailable".to_string());
-                        return Err(OpsError::Message(format!(
-                        "release candidate for {new_tag} failed: {conclusion} ({url}); no merged fix is available"
-                    )));
-                    }
-                } else {
-                    let reason = if build_failed {
-                        format!("failed build ({conclusion})")
-                    } else {
-                        "incomplete publisher preparation".to_string()
-                    };
-                    progress.status(&format!(
-                        "Retrying {new_tag} after {reason} with merged fixes..."
-                    ));
-                    retry_after = Some(commit);
-                }
+                progress.status(&format!("Resuming incomplete release {tag}..."));
+                return resume_existing_release(main_repo, tag, target, progress, lock);
             }
+        } else if target.publisher.is_empty()
+            && matches!(version_input.trim(), "patch" | "minor" | "major")
+            && !release_completion_satisfied(main_repo, tag, target)?
+        {
+            progress.status(&format!("Resuming release completion for {tag}..."));
+            return resume_existing_release(main_repo, tag, target, progress, lock);
         }
+    }
 
-        let mut wt_name = release_worktree_name(&target, &version);
-        if let Some(commit) = retry_after.as_deref() {
-            let revision = commit.get(..9).unwrap_or(commit);
-            wt_name.push_str("-retry-");
-            wt_name.push_str(revision);
+    if !matches!(version_input.trim(), "patch" | "minor" | "major") {
+        let version = resolve_version(None, version_input, target)?;
+        let tag = target_tag(target, &version);
+        if remote_tag_sha(main_repo, &tag)?.is_some() {
+            progress.status(&format!("Resuming release completion for {tag}..."));
+            return resume_existing_release(main_repo, &tag, target, progress, lock);
         }
-        let branch = release_branch_name(&main_repo, &wt_name)?;
-        let existing_pr = find_release_pr(&main_repo, &branch)?;
-        let merged_commit = if let Some(commit) = resumed_candidate {
-            commit
-        } else if let Some(pr) = existing_pr {
-            match pr.state.as_str() {
-                "MERGED" => {
-                    let release_commit =
-                        pr.merge_commit.map(|commit| commit.oid).ok_or_else(|| {
-                            OpsError::Message(format!(
-                                "release PR #{} is merged but its merge commit is unavailable",
-                                pr.number
-                            ))
-                        })?;
-                    // No candidate was built yet, so the version is unspent: corrections
-                    // merged after the release PR ship under the same version.
-                    let main_ref = format!("origin/{default_branch}");
-                    let current_main = run_stdout(&main_repo, "git", &["rev-parse", &main_ref])?;
-                    // A minor publishes its patch's exact snapshot, never a later main.
-                    if minor.is_none()
-                        && current_main != release_commit
-                        && is_ancestor(&main_repo, &release_commit, &current_main)
-                    {
-                        progress.status(&format!(
-                            "Release PR #{} merged at {release_commit}; building {main_ref} at {current_main} with the fixes merged since...",
-                            pr.number
-                        ));
-                        current_main
-                    } else {
-                        release_commit
-                    }
-                }
-                "OPEN" => {
-                    let head_sha = pr.head_ref_oid.as_deref().ok_or_else(|| {
-                        OpsError::Message(format!(
-                            "open release PR #{} has no observable head commit",
-                            pr.number
-                        ))
-                    })?;
-                    progress.status(&format!("Resuming release PR #{}...", pr.number));
-                    arm_resumed_release(&main_repo, pr.number, head_sha, progress, lock)?;
-                    finish_release_pr(
-                        &main_repo,
-                        &wt_name,
-                        PreparedRelease {
-                            pr_number: pr.number,
-                            head_sha: head_sha.to_string(),
-                        },
-                        &target,
-                        &version,
-                        progress,
-                        lock,
-                    )?
-                }
-                _ => {
-                    let url = format!("PR #{}", pr.number);
+    }
+
+    let changes = collect_version_changes(main_repo, target, &version, &source_commit)?;
+    if changes.commits.is_empty() {
+        return Ok(ReleaseRunOutcome::NoChanges {
+            target: target.name.clone(),
+            latest_tag,
+            origin_commit: source_commit,
+        });
+    }
+
+    let new_tag = target_tag(target, &version);
+    if remote_tag_sha(main_repo, &new_tag)?.is_some() {
+        progress.status(&format!("Resuming release completion for {new_tag}..."));
+        return resume_existing_release(main_repo, &new_tag, target, progress, lock);
+    }
+
+    let latest_candidate = find_latest_candidate_workflow(main_repo, &new_tag, target)?;
+    let mut resumed_candidate = None;
+    let mut retry_after = None;
+    if let Some(run) = latest_candidate {
+        let commit = run
+            .head_sha
+            .clone()
+            .expect("candidate workflow was selected with a head SHA");
+        let conclusion = run
+            .conclusion
+            .as_deref()
+            .unwrap_or("unknown")
+            .to_lowercase();
+        let build_failed = run.status == "completed" && conclusion != "success";
+        let preparation_missing = run.status == "completed"
+            && conclusion == "success"
+            && !target.publisher.is_empty()
+            && !publisher_artifact_dir(main_repo, &new_tag, &commit, run.database_id)
+                .join("candidate.json")
+                .is_file();
+        if !build_failed && !preparation_missing {
+            resumed_candidate = Some(commit);
+        } else {
+            let main_ref = format!("origin/{default_branch}");
+            let current_main = run_stdout(main_repo, "git", &["rev-parse", &main_ref])?;
+            if current_main == commit {
+                if preparation_missing {
+                    resumed_candidate = Some(commit);
+                } else {
+                    let url = run
+                        .url
+                        .unwrap_or_else(|| "workflow URL unavailable".to_string());
                     return Err(OpsError::Message(format!(
-                    "{url} was closed without merging; remove or rename the release branch before retrying"
+                    "release candidate for {new_tag} failed: {conclusion} ({url}); no merged fix is available"
                 )));
                 }
-            }
-        } else {
-            progress.status(&format!("Creating release worktree {wt_name}..."));
-            let lease = acquire_worktree_lease(
-                &main_repo,
-                &worktree_path(&main_repo, &wt_name),
-                "release PR preparation",
-            )?;
-            let wt = create_named_worktree(
-                &main_repo,
-                &wt_name,
-                Some(
-                    minor
-                        .as_deref()
-                        .and_then(|pair| pair.patch_commit.as_deref())
-                        .unwrap_or(&source_commit),
-                ),
-                &|command| {
-                    lock.inherit(command);
-                    lease.inherit(command);
-                },
-            )?;
-            let wt_path = wt.path;
-            let wt_branch = wt.branch;
-
-            let prepared = prepare_release_in_worktree(
-                &wt_path,
-                &version,
-                &changes,
-                &target,
-                minor.as_deref_mut(),
-                progress,
-                lock,
-                &lease,
-            );
-            cleanup_release_worktree(&main_repo, &wt_path, &wt_branch, lease, progress, lock);
-            let prepared = prepared?;
-
-            progress.status("Waiting for release PR to merge...");
-            finish_release_pr(
-                &main_repo, &wt_name, prepared, &target, &version, progress, lock,
-            )?
-        };
-
-        if let Some(pair) = minor.as_deref() {
-            ensure_commit_local(&main_repo, &merged_commit, lock)?;
-            let observed = rev_parse(&main_repo, &format!("{merged_commit}^{{tree}}"))?;
-            if pair.prepared_tree.as_deref() != Some(&observed) {
-                let difference = match pair.prepared_tree.as_deref() {
-                    Some(expected) => {
-                        run_stdout(&main_repo, "git", &["diff", "--stat", expected, &observed])?
-                    }
-                    None => "prepared tree receipt is missing".to_string(),
+            } else {
+                let reason = if build_failed {
+                    format!("failed build ({conclusion})")
+                } else {
+                    "incomplete publisher preparation".to_string()
                 };
+                progress.status(&format!(
+                    "Retrying {new_tag} after {reason} with merged fixes..."
+                ));
+                retry_after = Some(commit);
+            }
+        }
+    }
+
+    let mut wt_name = release_worktree_name(target, &version);
+    if let Some(commit) = retry_after.as_deref() {
+        let revision = commit.get(..9).unwrap_or(commit);
+        wt_name.push_str("-retry-");
+        wt_name.push_str(revision);
+    }
+    let branch = release_branch_name(main_repo, &wt_name)?;
+    let existing_pr = find_release_pr(main_repo, &branch)?;
+    let merged_commit = if let Some(commit) = resumed_candidate {
+        commit
+    } else if let Some(pr) = existing_pr {
+        match pr.state.as_str() {
+            "MERGED" => {
+                let release_commit = pr.merge_commit.map(|commit| commit.oid).ok_or_else(|| {
+                    OpsError::Message(format!(
+                        "release PR #{} is merged but its merge commit is unavailable",
+                        pr.number
+                    ))
+                })?;
+                // No candidate was built yet, so the version is unspent: corrections
+                // merged after the release PR ship under the same version.
+                let main_ref = format!("origin/{default_branch}");
+                let current_main = run_stdout(main_repo, "git", &["rev-parse", &main_ref])?;
+                if current_main != release_commit
+                    && is_ancestor(main_repo, &release_commit, &current_main)
+                {
+                    progress.status(&format!(
+                        "Release PR #{} merged at {release_commit}; building {main_ref} at {current_main} with the fixes merged since...",
+                        pr.number
+                    ));
+                    current_main
+                } else {
+                    release_commit
+                }
+            }
+            "OPEN" => {
+                let head_sha = pr.head_ref_oid.as_deref().ok_or_else(|| {
+                    OpsError::Message(format!(
+                        "open release PR #{} has no observable head commit",
+                        pr.number
+                    ))
+                })?;
+                progress.status(&format!("Resuming release PR #{}...", pr.number));
+                arm_resumed_release(main_repo, pr.number, head_sha, progress, lock)?;
+                finish_release_pr(
+                    main_repo,
+                    &wt_name,
+                    PreparedRelease {
+                        pr_number: pr.number,
+                        head_sha: head_sha.to_string(),
+                    },
+                    target,
+                    &version,
+                    progress,
+                    lock,
+                )?
+            }
+            _ => {
+                let url = format!("PR #{}", pr.number);
                 return Err(OpsError::Message(format!(
-                "minor {} candidate {merged_commit} differs from its prepared patch {} snapshot; \
-                 no minor tag was published (receipt: {})\n{difference}",
-                pair.version,
-                pair.patch_version,
-                minor_receipt_path(&main_repo, &target).display()
+                "{url} was closed without merging; remove or rename the release branch before retrying"
             )));
             }
         }
-        let tag = target_tag(&target, &version);
-        let candidate = ReleaseCandidate::new(&target, &tag, &merged_commit);
-        if !target.publisher.is_empty() {
-            let inspection = inspect_release_source(&main_repo, &target, &candidate, true, lock)?;
-            if !inspection.preparation_required.is_empty() {
-                if minor.is_some() {
-                    return Err(OpsError::Message(format!(
-                        "minor snapshot {tag} still needs preparation: {}",
-                        inspection.preparation_required.join(", ")
-                    )));
-                }
-                inspection.ensure_unpublished(&tag)?;
-                if rejected_candidate.as_deref() == Some(&merged_commit) {
-                    return Err(OpsError::Message(format!(
-                        "corrected release {tag} still needs preparation at {merged_commit}: {}",
-                        inspection.preparation_required.join(", ")
-                    )));
-                }
-                progress.status(&format!("Repairing unpublished {tag} from {merged_commit} without changing its version..."));
-                requested_version = version;
-                rejected_candidate = Some(merged_commit);
-                continue;
-            }
-        }
-        return finish_candidate(&main_repo, &candidate, &target, progress, lock);
-    }
+    } else {
+        progress.status(&format!("Creating release worktree {wt_name}..."));
+        let lease = acquire_worktree_lease(
+            main_repo,
+            &worktree_path(main_repo, &wt_name),
+            "release PR preparation",
+        )?;
+        let wt = create_named_worktree(main_repo, &wt_name, Some(&source_commit), &|command| {
+            lock.inherit(command);
+            lease.inherit(command);
+        })?;
+        let wt_path = wt.path;
+        let wt_branch = wt.branch;
+
+        let prepared = prepare_release_in_worktree(
+            &wt_path, &version, &changes, target, progress, lock, &lease,
+        );
+        cleanup_release_worktree(main_repo, &wt_path, &wt_branch, lease, progress, lock);
+        let prepared = prepared?;
+
+        progress.status("Waiting for release PR to merge...");
+        finish_release_pr(
+            main_repo, &wt_name, prepared, target, &version, progress, lock,
+        )?
+    };
+
+    let tag = target_tag(target, &version);
+    let candidate = ReleaseCandidate::new(target, &tag, &merged_commit);
+    finish_candidate(main_repo, &candidate, target, progress, lock)
 }
 
 fn resume_existing_release(
@@ -1308,17 +1028,6 @@ fn finish_candidate(
     lock: &ReleaseLock,
 ) -> OpsResult<ReleaseRunOutcome> {
     let tagged = checked_candidate_tag(repo, candidate)?;
-    if !target.publisher.is_empty() {
-        let inspection = inspect_release_source(repo, target, candidate, false, lock)?;
-        if !inspection.preparation_required.is_empty() {
-            return Err(OpsError::Message(format!(
-                "release {} source {} still needs preparation: {}",
-                candidate.tag,
-                candidate.commit,
-                inspection.preparation_required.join(", ")
-            )));
-        }
-    }
     // Origin preflight cannot prove a resumed or newly merged candidate.
     verify_source(
         repo,
@@ -1612,60 +1321,6 @@ fn sanitize_ref_segment(value: &str) -> String {
         .collect()
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct ReleaseSourceInspection {
-    preparation_required: Vec<String>,
-    publications: Option<Vec<String>>,
-}
-
-impl ReleaseSourceInspection {
-    fn ensure_unpublished(&self, tag: &str) -> OpsResult<()> {
-        let publications = self.publications.as_ref().ok_or_else(|| {
-            OpsError::Message(format!("publication state for {tag} was not inspected"))
-        })?;
-        if publications.is_empty() {
-            return Ok(());
-        }
-        Err(OpsError::Message(format!(
-            "{tag} needs preparation but has publication evidence: {}; preserve it and reconcile publication before replacement",
-            publications.join(", ")
-        )))
-    }
-}
-
-fn inspect_release_source(
-    repo: &Path,
-    target: &ReleaseTarget,
-    candidate: &ReleaseCandidate,
-    check_publication: bool,
-    lock: &ReleaseLock,
-) -> OpsResult<ReleaseSourceInspection> {
-    ensure_commit_local(repo, &candidate.commit, lock)?;
-    let publisher = expand_publisher_command(repo, &target.publisher);
-    let (program, args) = publisher.split_first().expect("publisher is configured");
-    let mut cmd = Command::new(program);
-    cmd.args(args)
-        .args([
-            "inspect",
-            "--commit",
-            &candidate.commit,
-            "--tag",
-            &candidate.tag,
-        ])
-        .env("LF_RELEASE_SOURCE_REPO", repo)
-        .current_dir(repo);
-    if check_publication {
-        cmd.arg("--check-publication");
-    }
-    lock.inherit(&mut cmd);
-    let output = run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
-        command: err.command_line(),
-        stderr: err.stderr,
-    })?;
-    serde_json::from_slice(&output.stdout)
-        .map_err(|err| OpsError::Parse(format!("release source inspection: {err}")))
-}
-
 fn run_publisher_check(
     repo: &Path,
     target: &ReleaseTarget,
@@ -1683,18 +1338,6 @@ fn run_publisher_check(
         stderr: err.stderr,
     })?;
     Ok(())
-}
-
-fn closing_patch_successor(selected: &str, completed: &str) -> bool {
-    let (Some((selected_cycle, selected_patch)), Some((completed_cycle, completed_patch))) =
-        (selected.rsplit_once('.'), completed.rsplit_once('.'))
-    else {
-        return false;
-    };
-    matches!(
-        (selected_patch.parse::<u32>(), completed_patch.parse::<u32>()),
-        (Ok(selected), Ok(completed)) if selected_cycle == completed_cycle && completed >= selected
-    )
 }
 
 fn prepare_publisher(
@@ -1876,13 +1519,11 @@ struct PreparedRelease {
     head_sha: String,
 }
 
-#[allow(clippy::too_many_arguments)] // Exact release selection and both held mutation capabilities.
 fn prepare_release_in_worktree(
     wt_path: &Path,
     version: &str,
     changes: &ReleaseChangeSet,
     target: &ReleaseTarget,
-    minor: Option<&mut MinorRelease>,
     progress: &impl Progress,
     lock: &ReleaseLock,
     lease: &WorktreeLease,
@@ -1899,7 +1540,7 @@ fn prepare_release_in_worktree(
         lease.inherit(command);
     })?;
 
-    if !target.prepare.is_empty() && minor.is_none() {
+    if !target.prepare.is_empty() {
         progress.status("Running repository release preparation...");
         run_release_hooks(
             wt_path,
@@ -1930,18 +1571,6 @@ fn prepare_release_in_worktree(
             lease.inherit(command);
         },
     )?;
-
-    if let Some(pair) = minor {
-        let mut add = lock.command("git");
-        add.current_dir(wt_path).args(["add", "--all"]);
-        lease.inherit(&mut add);
-        command_stdout(&mut add)?;
-        let mut tree = lock.command("git");
-        tree.current_dir(wt_path).arg("write-tree");
-        lease.inherit(&mut tree);
-        pair.prepared_tree = Some(command_stdout(&mut tree)?);
-        pair.save(&main_repo_root(wt_path)?, target)?;
-    }
 
     progress.status("Committing release changes...");
     let _ = commit_workflow(
@@ -2086,14 +1715,6 @@ fn finish_release_pr(
                 return Ok(commit);
             }
             ReleasePrWait::NeedsIntegration => {
-                let pair_path = minor_receipt_path(main_repo, target);
-                if pair_path.exists() {
-                    let pair: MinorRelease = serde_json::from_slice(&fs::read(&pair_path)?)
-                        .map_err(|e| OpsError::Parse(e.to_string()))?;
-                    if pair.version == version && !pair.completed {
-                        return Err(OpsError::Message(format!("minor {version} is paired with patch {}; preserve its product snapshot before integrating (receipt: {})", pair.patch_version, pair_path.display())));
-                    }
-                }
                 progress.status(&format!(
                     "Release PR #{} needs current main; rebuilding on it...",
                     prepared.pr_number
@@ -2144,9 +1765,9 @@ fn finish_release_pr(
                     ]);
                     lease.inherit(&mut merge);
                     command_stdout(&mut merge)?;
-                    let changes = collect_release_changes_at(main_repo, target, &main_ref)?;
+                    let changes = collect_version_changes(main_repo, target, version, &main_ref)?;
                     prepare_release_in_worktree(
-                        &wt.path, version, &changes, target, None, progress, lock, &lease,
+                        &wt.path, version, &changes, target, progress, lock, &lease,
                     )
                 })();
                 cleanup_release_worktree(main_repo, &wt.path, &wt.branch, lease, progress, lock);
@@ -3620,43 +3241,22 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_string()
 }
 
+/// Minor notes cover the whole cycle since the preceding `.0`; other versions
+/// cover changes since the latest tag.
 fn notes_base(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<Option<String>> {
-    let version = normalize_version(version);
-    let _ = bump_version(&version, "patch")?;
+    let (major, minor, patch) = parse_version(version)
+        .ok_or_else(|| OpsError::Parse(format!("invalid version format: {version}")))?;
     let latest = latest_tag_optional(repo, target)?;
-    if latest.is_some() && is_minor_version(&version) {
-        minor_notes_base(repo, &version, target).map(Some)
-    } else {
-        Ok(latest)
+    if patch != 0 || minor == 0 || latest.is_none() {
+        return Ok(latest);
     }
-}
-
-fn is_minor_version(version: &str) -> bool {
-    let version = normalize_version(version);
-    let parts: Vec<&str> = version.split('.').collect();
-    parts.len() == 3
-        && parts[1] != "0"
-        && parts[2] == "0"
-        && bump_version(&version, "patch").is_ok()
-}
-
-fn minor_notes_base(repo: &Path, version: &str, target: &ReleaseTarget) -> OpsResult<String> {
-    let version = normalize_version(version);
-    let _ = bump_version(&version, "patch")?;
-    let parts: Vec<&str> = version.split('.').collect();
-    let minor: u32 = parts[1].parse().expect("version was validated");
-    let previous = minor.checked_sub(1).ok_or_else(|| {
-        OpsError::Message(format!(
-            "{version} has no preceding minor in its major series"
-        ))
-    })?;
-    let tag = target_tag(target, &format!("{}.{previous}.0", parts[0]));
+    let tag = target_tag(target, &format!("{major}.{}.0", minor - 1));
     if !ref_exists(repo, &format!("refs/tags/{tag}"))? {
         return Err(OpsError::Message(format!(
             "minor release notes require baseline tag {tag}; supply --prev-tag for a notes-only override"
         )));
     }
-    Ok(tag)
+    Ok(Some(tag))
 }
 
 fn version_from_tag(tag: &str, target: &ReleaseTarget) -> OpsResult<String> {
@@ -3712,16 +3312,18 @@ fn tag_glob(target: &ReleaseTarget) -> String {
 
 fn collect_release_changes(repo: &Path, target: &ReleaseTarget) -> OpsResult<ReleaseChangeSet> {
     let base = format!("origin/{}", get_default_branch(repo)?);
-    collect_release_changes_at(repo, target, &base)
+    let previous_tag = latest_tag_optional(repo, target)?;
+    collect_changes_between(repo, previous_tag.as_deref(), &base, target)
 }
 
-fn collect_release_changes_at(
+fn collect_version_changes(
     repo: &Path,
     target: &ReleaseTarget,
+    version: &str,
     source: &str,
 ) -> OpsResult<ReleaseChangeSet> {
-    let previous_tag = latest_tag_optional(repo, target)?;
-    collect_changes_between(repo, previous_tag.as_deref(), source, target)
+    let base = notes_base(repo, version, target)?;
+    collect_changes_between(repo, base.as_deref(), source, target)
 }
 
 fn collect_changes_between(
@@ -4634,6 +4236,280 @@ fn github_release_state(repo: &Path, tag: &str) -> OpsResult<GitHubReleaseState>
     })
 }
 
+// -- Streams ------------------------------------------------------------------
+//
+// `preview` is the newest published release. `stable` is GitHub's Latest
+// marker, which every install path reads (`releases/latest`): the release run
+// moves it to the newest release that has soaked for `STABLE_SOAK`, and never
+// back. `dev` is green main and has no pointer here.
+
+const STABLE_SOAK: chrono::TimeDelta = chrono::TimeDelta::days(7);
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhReleaseListEntry {
+    tag_name: String,
+    is_latest: bool,
+    is_draft: bool,
+    is_prerelease: bool,
+    published_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug)]
+struct PublishedRelease {
+    tag: String,
+    version: (u64, u64, u64),
+    published_at: chrono::DateTime<chrono::Utc>,
+    is_latest: bool,
+}
+
+fn published_releases(repo: &Path, target: &ReleaseTarget) -> OpsResult<Vec<PublishedRelease>> {
+    let json = run_stdout(
+        repo,
+        "gh",
+        &[
+            "release",
+            "list",
+            "--limit",
+            "100",
+            "--json",
+            "tagName,isLatest,isDraft,isPrerelease,publishedAt",
+        ],
+    )?;
+    let entries: Vec<GhReleaseListEntry> = serde_json::from_str(&json)
+        .map_err(|err| OpsError::Parse(format!("failed to parse GitHub Releases: {err}")))?;
+    Ok(entries
+        .into_iter()
+        .filter(|entry| !entry.is_draft && !entry.is_prerelease)
+        .filter_map(|entry| {
+            let version = parse_version(&version_from_tag(&entry.tag_name, target).ok()?)?;
+            Some(PublishedRelease {
+                tag: entry.tag_name,
+                version,
+                published_at: entry.published_at?,
+                is_latest: entry.is_latest,
+            })
+        })
+        .collect())
+}
+
+/// A regression Task as the stable rule reads it: releases from `version` on
+/// carry the bug, until the first release published after its fix landed.
+#[derive(Debug)]
+struct Regression {
+    task: String,
+    version: (u64, u64, u64),
+    fixed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl Regression {
+    fn covers(&self, release: &PublishedRelease) -> bool {
+        release.version >= self.version
+            && self
+                .fixed_at
+                .is_none_or(|fixed_at| release.published_at < fixed_at)
+    }
+}
+
+/// The repository's regression Tasks. A done Task whose completion time is
+/// unreadable keeps covering, so a stalled `stable` is the failure, not a bug.
+fn regressions(repo: &Path) -> OpsResult<Vec<Regression>> {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let store = runtime.block_on(crate::ops::planning_sync::planning_store())?;
+    let tasks = store
+        .sqlite
+        .regression_tasks(&repo.to_string_lossy())
+        .map_err(|error| OpsError::Message(format!("read regression Tasks: {error}")))?;
+    Ok(tasks
+        .into_iter()
+        .filter(|task| task.state.as_deref() != Some("canceled"))
+        .filter_map(|task| {
+            let fixed_at = if task.state.as_deref() == Some("completed") {
+                task.completed_at
+                    .as_deref()
+                    .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+                    .map(|at| at.with_timezone(&chrono::Utc))
+            } else {
+                None
+            };
+            Some(Regression {
+                version: parse_version(task.regressed_in.as_deref()?)?,
+                task: task.identifier,
+                fixed_at,
+            })
+        })
+        .collect())
+}
+
+/// The release `stable` should point at now, when that is ahead of where it
+/// points: the newest soaked release no regression covers.
+fn stable_advance<'a>(
+    releases: &'a [PublishedRelease],
+    regressions: &[Regression],
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<&'a PublishedRelease> {
+    let current = releases
+        .iter()
+        .find(|release| release.is_latest)
+        .map(|release| release.version);
+    releases
+        .iter()
+        .filter(|release| release.published_at + STABLE_SOAK <= now)
+        .filter(|release| {
+            !regressions
+                .iter()
+                .any(|regression| regression.covers(release))
+        })
+        .max_by_key(|release| release.version)
+        .filter(|candidate| current.is_none_or(|current| candidate.version > current))
+}
+
+/// One release as the stable stream names it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamRelease {
+    pub tag: String,
+    pub published_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<&PublishedRelease> for StreamRelease {
+    fn from(release: &PublishedRelease) -> Self {
+        Self {
+            tag: release.tag.clone(),
+            published_at: release.published_at,
+        }
+    }
+}
+
+/// Why releases newer than `stable` are not stable yet.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum StableHold {
+    Soaking {
+        tag: String,
+        until: chrono::DateTime<chrono::Utc>,
+    },
+    Regression {
+        task: String,
+        tags: Vec<String>,
+    },
+}
+
+impl std::fmt::Display for StableHold {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Soaking { tag, until } => {
+                write!(formatter, "{tag} soaks until {}", until.format("%Y-%m-%d"))
+            }
+            Self::Regression { task, tags } => {
+                write!(formatter, "{task} holds {}", tags.join(", "))
+            }
+        }
+    }
+}
+
+/// Where `stable` points, where the next release run moves it, and what holds
+/// every newer release back.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StableStream {
+    pub current: Option<StreamRelease>,
+    pub next: Option<StreamRelease>,
+    pub holds: Vec<StableHold>,
+}
+
+fn stable_stream(
+    releases: &[PublishedRelease],
+    regressions: &[Regression],
+    now: chrono::DateTime<chrono::Utc>,
+) -> StableStream {
+    let current = releases.iter().find(|release| release.is_latest);
+    let next = stable_advance(releases, regressions, now);
+    let floor = next.or(current).map(|release| release.version);
+    let mut newer: Vec<&PublishedRelease> = releases
+        .iter()
+        .filter(|release| floor.is_none_or(|floor| release.version > floor))
+        .collect();
+    newer.sort_by_key(|release| std::cmp::Reverse(release.version));
+    // Every newer release is held: one soaked and uncovered would be `next`.
+    let mut holds: Vec<StableHold> = regressions
+        .iter()
+        .filter_map(|regression| {
+            let tags: Vec<String> = newer
+                .iter()
+                .filter(|release| regression.covers(release))
+                .map(|release| release.tag.clone())
+                .collect();
+            (!tags.is_empty()).then(|| StableHold::Regression {
+                task: regression.task.clone(),
+                tags,
+            })
+        })
+        .collect();
+    holds.extend(
+        newer
+            .iter()
+            .filter(|release| {
+                !regressions
+                    .iter()
+                    .any(|regression| regression.covers(release))
+            })
+            .map(|release| StableHold::Soaking {
+                tag: release.tag.clone(),
+                until: release.published_at + STABLE_SOAK,
+            }),
+    );
+    StableStream {
+        current: current.map(StreamRelease::from),
+        next: next.map(StreamRelease::from),
+        holds,
+    }
+}
+
+/// Move `stable` forward. A configured publisher first points its own
+/// stable-only artifacts (the Mac app download) at the release, so the marker
+/// moves last and a failed promotion retries on the next run.
+fn advance_stable(
+    repo: &Path,
+    target: &ReleaseTarget,
+    progress: &impl Progress,
+    lock: &ReleaseLock,
+) -> OpsResult<()> {
+    let stable = stable_stream(
+        &published_releases(repo, target)?,
+        &regressions(repo)?,
+        chrono::Utc::now(),
+    );
+    for hold in &stable.holds {
+        progress.status(&hold.to_string());
+    }
+    let Some(next) = stable.next else {
+        return Ok(());
+    };
+    progress.status(&format!(
+        "Moving stable to {} (published {})...",
+        next.tag,
+        next.published_at.format("%Y-%m-%d")
+    ));
+    let publisher = expand_publisher_command(repo, &target.publisher);
+    if let Some((program, args)) = publisher.split_first() {
+        let mut cmd = lock.command(program);
+        cmd.args(args)
+            .args(["promote", "--tag", &next.tag])
+            .env("LF_RELEASE_MAIN_REPO", repo)
+            .current_dir(repo);
+        run_command(&mut cmd).map_err(|err| OpsError::CommandFailed {
+            command: err.command_line(),
+            stderr: err.stderr,
+        })?;
+    }
+    run_locked_stdout(
+        lock,
+        repo,
+        "gh",
+        &["release", "edit", &next.tag, "--latest"],
+    )?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)] // Hook expansion and the two independent ownership scopes.
 fn run_release_hooks(
     repo: &Path,
@@ -4703,6 +4579,119 @@ fn run_output(repo: &Path, command: &str, args: &[&str]) -> OpsResult<Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn published(tag: &str, days_ago: i64, is_latest: bool) -> PublishedRelease {
+        PublishedRelease {
+            tag: tag.to_string(),
+            version: parse_version(tag).unwrap(),
+            published_at: chrono::Utc::now() - chrono::TimeDelta::days(days_ago),
+            is_latest,
+        }
+    }
+
+    #[test]
+    fn stable_moves_to_the_newest_soaked_release_and_never_back() {
+        let now = chrono::Utc::now();
+        let releases = [
+            published("v0.16.1", 1, false),
+            published("v0.16.0", 8, false),
+            published("v0.15.9", 10, false),
+            published("v0.15.2", 30, true),
+        ];
+        assert_eq!(stable_advance(&releases, &[], now).unwrap().tag, "v0.16.0");
+
+        let at_stable = [
+            published("v0.16.1", 1, false),
+            published("v0.16.0", 8, true),
+        ];
+        assert!(stable_advance(&at_stable, &[], now).is_none());
+
+        // A pointer moved ahead by hand stays put until a newer release soaks.
+        let ahead = [
+            published("v0.16.1", 1, true),
+            published("v0.16.0", 8, false),
+        ];
+        assert!(stable_advance(&ahead, &[], now).is_none());
+        assert!(stable_advance(&[published("v0.16.0", 6, false)], &[], now).is_none());
+    }
+
+    fn regression(version: &str, fixed_days_ago: Option<i64>) -> Regression {
+        Regression {
+            task: "LOO-1".to_string(),
+            version: parse_version(version).unwrap(),
+            fixed_at: fixed_days_ago.map(|days| chrono::Utc::now() - chrono::TimeDelta::days(days)),
+        }
+    }
+
+    #[test]
+    fn an_open_regression_holds_stable_below_the_release_it_regressed_in() {
+        let now = chrono::Utc::now();
+        let releases = [
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.9", 20, false),
+            published("v0.15.2", 30, true),
+        ];
+        let open = [regression("v0.16.0", None)];
+        assert_eq!(
+            stable_advance(&releases, &open, now).unwrap().tag,
+            "v0.15.9"
+        );
+
+        let at_regressed = [regression("v0.15.9", None)];
+        assert!(stable_advance(&releases, &at_regressed, now).is_none());
+    }
+
+    #[test]
+    fn a_fixed_regression_releases_stable_at_the_fix_once_it_soaks() {
+        let now = chrono::Utc::now();
+        // Fixed 10 days ago: v0.16.1 (published 9 days ago) ships the fix.
+        let releases = [
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.2", 30, true),
+        ];
+        let fixed = [regression("v0.16.0", Some(10))];
+        assert_eq!(
+            stable_advance(&releases, &fixed, now).unwrap().tag,
+            "v0.16.1"
+        );
+
+        // The fix shipped in v0.16.1, still soaking; v0.16.0 still carries the bug.
+        let soaking = [
+            published("v0.16.1", 3, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.2", 30, true),
+        ];
+        assert!(stable_advance(&soaking, &[regression("v0.16.0", Some(4))], now).is_none());
+    }
+
+    #[test]
+    fn stable_stream_names_what_holds_each_newer_release() {
+        let now = chrono::Utc::now();
+        let releases = [
+            published("v0.16.2", 2, false),
+            published("v0.16.1", 9, false),
+            published("v0.16.0", 12, false),
+            published("v0.15.9", 20, false),
+            published("v0.15.2", 30, true),
+        ];
+        let stable = stable_stream(&releases, &[regression("v0.16.0", None)], now);
+
+        assert_eq!(stable.current.unwrap().tag, "v0.15.2");
+        assert_eq!(stable.next.unwrap().tag, "v0.15.9");
+        let holds: Vec<String> = stable.holds.iter().map(ToString::to_string).collect();
+        assert_eq!(holds, ["LOO-1 holds v0.16.2, v0.16.1, v0.16.0"]);
+
+        let soaking = stable_stream(&releases[..1], &[], now);
+        assert_eq!(
+            soaking.holds,
+            [StableHold::Soaking {
+                tag: "v0.16.2".to_string(),
+                until: releases[0].published_at + STABLE_SOAK,
+            }]
+        );
+    }
 
     #[test]
     fn merge_request_removals_decide_landing_and_release_alike() {
@@ -4998,60 +4987,20 @@ mod tests {
     }
 
     // ======================================================================
-    // Repo-owned preparation (the release cut is the publication authority)
+    // Repo-owned preparation
     // ======================================================================
 
-    fn python3_available() -> bool {
-        Command::new("python3")
-            .arg("--version")
-            .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false)
-    }
-
-    /// The release worktree — not a manual script invocation — turns drafts into
-    /// canonical migrations. This drives the production release sequence through
-    /// the target's `prepare` hook, so it is sabotage-sensitive: deleting hook
-    /// execution makes the drafts never freeze and the asserts below fail.
+    /// The release worktree runs the target's `prepare` hook before notes, so
+    /// what it writes is part of the release commit. Deleting hook execution
+    /// makes the asserts below fail.
     ///
     /// The bare temp worktree has no manifests (so the version bump is a no-op).
     /// A deliberate release-note archive collision then stops the workflow before
-    /// it launches an agent. Canonicalization runs first, so the tree is already
-    /// frozen by the time `prepare_release_in_worktree` returns that expected error.
+    /// it launches an agent; the hook has already run by then.
     #[test]
-    fn the_release_run_canonicalizes_drafts_into_the_committed_tree() {
-        let script =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/canonicalize_migrations.py");
-        if !script.is_file() || !python3_available() {
-            return;
-        }
-
+    fn the_release_run_runs_the_prepare_hook_in_the_release_worktree() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let migrations = root.join("rust/loopflow/src/store/migrations");
-        let drafts = migrations.join("drafts");
-        fs::create_dir_all(&drafts).unwrap();
-        fs::create_dir_all(root.join("scripts")).unwrap();
-        fs::copy(&script, root.join("scripts/canonicalize_migrations.py")).unwrap();
-        fs::write(
-            migrations.join("0.11.001_initial.sql"),
-            "CREATE TABLE waves (id TEXT);\n",
-        )
-        .unwrap();
-        let registry_rs = root.join("rust/loopflow/src/store/migration_catalog.rs");
-        fs::write(
-            &registry_rs,
-            "const MIGRATIONS: &[Migration] = &[\n    Migration {\n        \
-             id: MigrationId {\n            major: 0,\n            minor: 11,\n            \
-             patch: None,\n            ordinal: 1,\n        },\n        name: \"initial\",\n        \
-             sql: include_str!(\"migrations/0.11.001_initial.sql\"),\n    },\n];\n",
-        )
-        .unwrap();
-        fs::write(
-            drafts.join("add_wave_colour.sql"),
-            "ALTER TABLE waves ADD COLUMN colour TEXT;\n",
-        )
-        .unwrap();
         let unreleased = root.join("release/unreleased");
         let release_archive = root.join("release/v0.11.4");
         fs::create_dir_all(&unreleased).unwrap();
@@ -5059,8 +5008,6 @@ mod tests {
         fs::write(unreleased.join("collision.md"), "unreleased\n").unwrap();
         fs::write(release_archive.join("collision.md"), "archived\n").unwrap();
 
-        // A target with no manifests: the version bump is a no-op, the repo hook
-        // runs, then the deliberate archive collision stops the notes stage.
         let target = ReleaseTarget {
             name: "default".to_string(),
             area: Vec::new(),
@@ -5068,9 +5015,7 @@ mod tests {
             manifests: Vec::new(),
             workflow: None,
             verify: Vec::new(),
-            prepare: vec![
-                "python3 scripts/canonicalize_migrations.py {version} --release-cut".to_string(),
-            ],
+            prepare: vec!["printf {version} > prepared.txt".to_string()],
             completion: ReleaseCompletion::Tag,
             publisher: Vec::new(),
         };
@@ -5087,7 +5032,6 @@ mod tests {
             "0.11.4",
             &changes,
             &target,
-            None,
             &crate::ops::progress::NullProgress,
             &lock,
             &lease,
@@ -5096,24 +5040,10 @@ mod tests {
             result.is_err(),
             "release-note collision should stop release"
         );
-
-        // The draft is now a canonical, registered migration.
-        let canonical = migrations.join("0.11.4.001_release.sql");
-        assert!(canonical.is_file(), "canonical migration not written");
         assert_eq!(
-            fs::read_to_string(&canonical).unwrap(),
-            "-- draft: add_wave_colour\nALTER TABLE waves ADD COLUMN colour TEXT;\n"
+            fs::read_to_string(root.join("prepared.txt")).unwrap(),
+            "0.11.4"
         );
-        let registry = fs::read_to_string(&registry_rs).unwrap();
-        assert!(registry.contains("patch: Some(4)"), "patch not registered");
-        assert!(registry.contains("name: \"release\""), "not registered");
-        // The draft is consumed.
-        let remaining: Vec<_> = fs::read_dir(&drafts)
-            .unwrap()
-            .filter_map(Result::ok)
-            .filter(|e| e.file_name().to_string_lossy().ends_with(".sql"))
-            .collect();
-        assert!(remaining.is_empty(), "draft not consumed");
     }
 
     // ======================================================================

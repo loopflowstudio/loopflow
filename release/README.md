@@ -11,35 +11,39 @@ find release -maxdepth 2 -type f | sort
 ```
 
 ```bash
-scripts/bootstrap-cron-host.sh infrastructure  # preflight, crontab lines, one telemetry run
-crontab -l | grep loopflow:infrastructure
+scripts/bootstrap-cron-host.sh infrastructure  # preflight, schedules, one telemetry run
+launchctl list | grep loopflow.cron            # macOS: LaunchAgents; Linux: crontab -l
 ```
 
 ```bash
-lf install                                   # install the latest published release
+lf install                                   # your stream's newest build (stable by default)
+lf install --preview                         # switch to every release as it ships
 uv run python scripts/install.py local        # build only under local-bin/
 LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable experiment
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
 `scripts/install.py local` builds this worktree's `lf`
-and `Loopflow.app` into `<worktree>/local-bin/` with validation-only
-migration authority. Local builds never change the installed CLI or main Machine.
-Use an explicit disposable `LF_HOME` for experiments.
+and `Loopflow.app` into `<worktree>/local-bin/`. Local builds never change the
+installed CLI and never migrate the main Machine. Use an explicit disposable
+`LF_HOME` for schema work.
 
 Older installed CLIs still call `scripts/install.py refresh` after updating
 main. That upgrade entry point delegates to `release/install.sh`, which verifies
 the published artifacts and promotes them through the same transaction.
 
-Published promotion stops before compilation while draft migrations remain.
-Explicit experiments initialize the embedded schema in a fresh directory.
-Promotion also snapshots the shared store, applies candidate migrations to the
+Promotion refuses a candidate carrying migrations origin/main has not added.
+Explicit private Homes migrate themselves. Promotion also snapshots the shared store, applies candidate migrations to the
 copy, and expands every lifecycle reachable by placed open Work. An unresolved
 flow or skill rejects the candidate before the installed binaries move.
-Full installation restarts the replaced Desktop app and its bundled helpers.
-Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI without replacing or
-stopping Desktop and its clients. Promotion advances the shared store through
-the published migration boundary and retains the prior published artifacts;
+On a Mac with Loopflow.app, `~/.local/bin/lf` links to the app's bundled
+`Contents/MacOS/lf`, so the terminal and Desktop always run one build; elsewhere
+it links to the selected build under `~/.lf/bin`. `lf install` replaces a
+Loopflow.app that isn't running. A running app that updates itself is asked to
+update instead, and `lf` follows the new bundle; an older running app is quit,
+replaced and reopened. Use `LF_INSTALL_CLI_ONLY=1 lf install` to update the CLI
+without replacing or stopping Desktop and its clients. Promotion advances the shared store through
+the install switch and retains the prior published artifacts;
 it does not restart Tasks or Flows.
 
 Use `release/` to keep the rationale and notes for each shipped version close
@@ -77,7 +81,10 @@ the app is not a side artifact.
 | Artifact | Where | Versioned by |
 |----------|-------|--------------|
 | `lf-<target>.tar.gz` | GitHub Release | `Cargo.toml` |
-| `Loopflow-<version>.dmg`, `Loopflow-latest.dmg` | R2 `downloads/` + GitHub Release | tag |
+| `Loopflow-<version>.dmg` | R2 `downloads/` + GitHub Release | tag |
+| `Loopflow-latest.dmg` | R2 `downloads/` | the `stable` release |
+| `appcast-preview.xml`, `appcast-stable.xml` | R2 `downloads/` | that stream's release, EdDSA-signed |
+| `reader-catalog.txt` | GitHub Release | the reader floors this build opens |
 | `SHA256SUMS` | GitHub Release | release artifact bytes |
 | `loopflow` crate | crates.io | `Cargo.toml` |
 
@@ -85,15 +92,92 @@ the app is not a side artifact.
 the release version at build time (`RELEASE_TAG`), so the app reports the same
 version as `lf --version` — no separate manifest to bump or drift.
 
+## Streams
+
+| Stream | What it is | How it moves |
+|--------|------------|--------------|
+| `dev` | Newest green main build | Every green main |
+| `preview` | Newest published release | Every release |
+| `stable` | GitHub's Latest marker | The daily release run, to the newest release published at least 7 days ago that no regression covers |
+
+Publishing never marks a release Latest (`gh release edit --latest=false`).
+After each run, including one with nothing to release, `lf release run` moves
+`stable` forward for a target with `completion: github-release`. It never
+moves it back: a Latest set ahead by hand stays until a newer release soaks.
+Before moving the marker it runs the publisher's `promote --tag <tag>`, which
+points `Loopflow-latest.dmg` at that release's DMG after checking it against
+`SHA256SUMS`. A failed promotion leaves the marker for the next run.
+`releases/latest` and the website's download link serve `stable`.
+
+```bash
+lf install --dev        # follow green main (needs gh auth)
+lf install --preview    # follow every release
+lf install --stable     # back to the default
+curl -fsSL https://loopflow.studio/install.sh | sh -s -- --channel preview
+```
+
+A Machine follows one stream, recorded as `stream:` in `~/.lf/config.yaml`.
+A flag switches it; `lf install` with no flag, `lf schedule` and a rerun of
+`install.sh` follow it, `stable` when none is recorded. `install.sh` installs
+`stable` or `preview`; `dev` comes from CI artifacts through `lf install --dev`.
+Before downloading a release, `lf install` checks the release's
+`reader-catalog.txt` against this Machine's store. When a newer lf migrated the
+store past what that build reads, it keeps the installed lf and says so; the
+next run installs once the stream reaches a build that opens the store.
+Every install schedules `lf install` daily (launchd, or cron on Linux) unless a
+cadence is already installed, so a Machine stays on its stream unasked.
+
+The installed Loopflow.app updates itself through Sparkle from its stream's
+appcast; on `dev` it stays put while `lf install --dev` updates the CLI alone.
+Publishing writes `appcast-preview.xml`;
+`promote` writes `appcast-stable.xml`, both signed with the publisher's
+`SPARKLE_ED_PRIVATE_KEY` (Doppler) against the `SUPublicEDKey` in
+`swift/LoopflowMac/Info.plist`. Before installing, the app asks its bundled
+`lf install can-open <tag>` and skips a release that can't open the store. Its
+first launch after an update runs `lf install adopt`, which migrates the store
+and links `lf` into the new bundle without moving files.
+
+```bash
+lf task create --title "Sessions lose their name" --regressed-in v0.15.3
+lf task edit LOO-12 --regressed-in v0.15.3      # mark an existing bug
+```
+
+A regression is a bug Task marked with the release it regressed in. While it
+is open, `stable` stays below that release. Completing it (landing the fix)
+makes the first release published afterwards eligible once it soaks; releases
+in between still carry the bug and stay skipped. The run logs which Task holds
+`stable`. It reads the release Machine's Tasks, never Linear.
+
+## What we took from other projects
+
+Surveyed 2026-10-28 for LOO-669 (ideas only; no code taken).
+
+| Practice | Seen in | Here |
+|----------|---------|------|
+| Cut every release from main; no paired minor/patch snapshot | Docker, opencode, Codex alphas, Ghostty tip | Adopted: a minor is a bigger number cut from main like any release |
+| Stable is a pointer to a build that already shipped, moved forward, never rebuilt | Claude Code, Rust, Zed, Deno | Adopted: `stable` follows releases ≥ 7 days old |
+| Skip bad builds instead of yanking them | Claude Code, Rust's regression labels | Adopted: `--regressed-in` holds `stable` below a regression |
+| One appcast per stream, chosen by a setting | Ghostty | Adopted: `appcast-preview.xml` and `appcast-stable.xml` |
+| Signed, notarized builds of main (`tip`) | Ghostty, Deno canary | Not yet: `dev` is CLI-only until CI signs the app |
+| Refuse newer-format data and name which side to update | Rex, Firefox | Adopted: `can_open` before every install, never "delete the store" |
+| A channel switch never installs older | 1Password, Claude Code `minimumVersion` | Partly: the schedule never moves back; an explicit switch may, when the store allows it |
+| One install per machine; the app carries its CLI | Rex; Atuin's duplicate-install bugs | Adopted: `~/.local/bin/lf` links into Loopflow.app |
+| Separate data per channel | Zed, Warp, VS Code | Declined: the store is the work model, and Tasks must not split by stream |
+| Release branches and cherry-picks for hotfixes | Zed, Tailscale | Declined for now: fix forward on main; branch only when main can't carry the fix (Docker's rule) |
+| Notes accrue as work lands | Zed `Release Notes:`, VS Code | Already here: `release/unreleased/DECISIONS.md` |
+| Unsigned build jobs, signing only on attested artifacts | opencode | Already close: the cron host signs and publishes; CI builds |
+
+Evidence and links: `git show e03537f7ca:scratch/release-research.md`.
+
 ## Automation rhythm
 
 | Cadence | Workflow | What it does | Ships? |
 |---------|----------|--------------|--------|
-| Nightly | `Packages (nightly)` | Builds every native `lf` tarball, extracts each package, and smoke-tests `--version` | No — artifacts expire after 14 days |
+| Green main | `Packages (main)` | Builds every native `lf` tarball for the commit, extracts each package, and smoke-tests `--version` | `lf install --dev` installs it; artifacts expire after 14 days |
 | Daily | Loopflow host `release-run` crontab line | Checks host credentials, opens and lands a patch release when commits landed, waits for hosted builds, then publishes and deploys | Yes |
 | Tag | `Release build` | Builds and smoke-tests the four native tarballs on GitHub's target machines; stores workflow artifacts for the host publisher | No |
-| Local | `scripts/install.py local` | Build validation-only `lf` and `Loopflow.app` into `local-bin/` | No |
-| Local | `lf install` | Download, verify, and promote the latest published control plane and Mac app | Yes, installed Machine |
+| Local | `scripts/install.py local` | Build `lf` and `Loopflow.app` into `local-bin/` | No |
+| Local | `lf install` | Download, verify, and promote the stable control plane and Mac app | Yes, installed Machine |
 
 GitHub owns credential-free compilation. The maintained Loopflow host owns the
 credentialed boundary: DMG signing/notarization, crates.io, R2, Fly deployment,
@@ -167,12 +251,6 @@ Manual tag and publication commands record intervention on pending scheduled
 releases. Nested publisher calls reusing the active lock preserve the owning
 execution's provenance.
 
-An invalid untagged candidate is corrected under the same version after exact-source
-inspection confirms that preparation remains and GitHub, crates.io, and the
-versioned DMG are all unpublished. The corrected PR uses a retry branch derived
-from the rejected commit; earlier preparation commits remain in history.
-Unknown or partial publication blocks replacement. Release history retains the
-rejected candidate and inspection on the same opportunity's attempt.
 A valid interrupted candidate resumes unchanged. Cached packaged binaries must
 still pass candidate installation preflight before reuse or publication. Each
 check runs the exact packaged ARM64 Linux CLI in a new Ubuntu 24.04 container,
@@ -184,30 +262,22 @@ installation; native macOS packaging and smoke checks remain separate.
 Required headless Desktop checks remain in gate and CI; the optional UI-host
 exercise is not a publication prerequisite.
 The publisher retains candidate hashes and gate evidence before external writes.
-Its `verify --tag <tag>` mode checks the public asset set and hashes, both versioned
-and latest DMGs, website release identity, crate version, and installed `lf`
-version and selected bytes in a disposable Linux container. Scheduled settlement
-uses `reconcile --tag <tag>`:
+Its `verify --tag <tag>` mode checks the public asset set and hashes, the
+versioned DMG, the latest DMG when the tag is `stable`, website release identity,
+crate version, and installed `lf` version and selected bytes in a disposable
+Linux container. Scheduled settlement uses `reconcile --tag <tag>`:
 it repairs missing crate/versioned-DMG publication and stale website/latest-DMG
 stages from the exact source and verified public artifacts, then repeats read-back.
-Repair requires this tag to remain GitHub's latest release. Unavailable services
+Website repair requires this tag to remain the newest published release. Unavailable services
 and conflicting immutable bytes fail without overwriting them. A crash after
 publication does not require signing again or republishing GitHub assets just to
 obtain a receipt. Public assets do not substitute for required verification.
 
-After integration, the publisher inspects the exact merged source before the
-controller builds or tags it. A migration arriving after preparation causes a
-corrected cut at the same version, appending a canonical migration batch while
-preserving earlier batches. A failed build or publisher preparation likewise
-keeps the version. Tagged releases must finish or report their recovery blocker;
-the controller neither rewrites their tags nor skips ahead to another version.
-
-The configured publisher's read-only `inspect --commit SHA --tag TAG` emits JSON
-with `preparation_required` (a list of reasons) and `publications` (null when
-unchecked). `--check-publication` queries external publication when source needs
-preparation; only a successfully queried empty list permits replacement.
-Progress goes to stderr. The publisher owns repository-specific source and
-publication facts; the release controller owns version selection and retries.
+A failed build or publisher preparation keeps the version. Tagged releases must
+finish or report their recovery blocker; the controller neither rewrites their
+tags nor skips ahead to another version. Publisher progress goes to stderr. The
+publisher owns repository-specific source and publication facts; the release
+controller owns version selection and retries.
 The runner leases that tag's publisher worktree until the publisher exits, so
 concurrent re-entry and worktree cleanup cannot remove a checkout still in use.
 
@@ -218,22 +288,15 @@ Target areas still filter that history. Existing manifest versions need no reset
 the requested version owns the release. Notes and previews use the same initial
 range when no target tag exists, unless `--prev-tag` supplies a base.
 
-Subsequent minor releases summarize a completed patch cycle. When changes remain,
-`lf release run minor` publishes the next patch first. When the latest completed
-patch already contains everything, it reuses that patch. The minor uses the
-same product snapshot; version metadata and release notes change. Patch notes
-compare against the preceding release, while minor notes compare against the
-preceding `.0` tag. A missing cycle baseline is reported explicitly.
-An explicit minor version such as `lf release run 0.13.0` follows the same policy
-once the target has release history.
+A minor release cuts from current main like any other release and runs the
+target's `prepare` hooks. It may carry code merged after the latest patch; no
+closing patch is published first. Patch notes compare against the preceding
+release, while minor notes cover the whole cycle since the preceding `.0` tag.
+A missing cycle baseline is reported explicitly. `lf release run minor` and an
+explicit minor version such as `lf release run 0.13.0` behave the same.
 
-The selected pair and snapshot survive interruption in
-`.lf/releases/minor-<target>.json`. Retrying reuses a valid closing patch; replacing
-an unprepared candidate advances the closing patch within the same cycle. A
-completed successor is recovered even if publication finished before the pair
-was saved. A minor candidate whose merged tree differs from its
-prepared snapshot is stopped before tagging. Notes previews print Markdown to
-stdout and progress to stderr, without changing manifests or release archives.
+Notes previews print Markdown to stdout and progress to stderr, without
+changing manifests or release archives.
 For an existing version, previews end at its tag and read historical release
 context. Unreleased versions end at HEAD.
 

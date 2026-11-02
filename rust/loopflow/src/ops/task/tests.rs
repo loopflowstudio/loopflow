@@ -62,28 +62,6 @@ async fn task_fixture(identifier: &str) -> TaskFixture {
 }
 
 #[test]
-fn paused_snapshot_never_recommends_running_work() {
-    let _ledger = crate::journal::TestLedgerGuard::new();
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let repo = loopflow_test_support::TestRepo::new();
-    let fixture = runtime.block_on(task_fixture_at("DEFER-1", repo.path().into()));
-    fixture
-        .store
-        .sqlite
-        .set_task_deferred(&fixture.task.id, true)
-        .unwrap();
-    let snapshot = runtime
-        .block_on(super::read_task_snapshot(&fixture.store, fixture.task))
-        .unwrap();
-    assert_eq!(snapshot.status, crate::durable::TaskState::Deferred);
-    assert_eq!(
-        snapshot.actions.recommended,
-        Some(crate::ops::task_actions::TaskAction::NoAction)
-    );
-    assert!(snapshot.actions.reason.contains("lf task resume DEFER-1"));
-}
-
-#[test]
 fn task_decision_preserves_unknown_history_and_live_process_protection() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -615,6 +593,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         rank: 0,
         assignee: None,
         due_date: None,
+        regressed_in: None,
         state: None,
         completed_at: None,
         observation: Observation::NotRequired,
@@ -1697,10 +1676,13 @@ async fn steering_publication_resolves_empty_participant_from_config_or_git() {
     let _restore = EnvRestore::capture(&[
         "LF_HOME",
         "LF_USER_NAME",
+        "LF_AGENT_CALLER",
         "GIT_CONFIG_COUNT",
         "GIT_CONFIG_KEY_0",
         "GIT_CONFIG_VALUE_0",
     ]);
+    // A person's steer: no agent Session runs this publication.
+    std::env::remove_var("LF_AGENT_CALLER");
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = task_fixture_at("FIX-STEER", repo.path().canonicalize().unwrap()).await;
     std::env::set_var("LF_HOME", fixture._database.path());

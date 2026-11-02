@@ -25,6 +25,7 @@ pub struct TaskUpdate {
     pub assignee: Option<Option<String>>,
     pub title: Option<String>,
     pub description: Option<String>,
+    pub regressed_in: Option<String>,
 }
 
 /// The caller retains this identity across a retry; a separate create mints another.
@@ -36,6 +37,18 @@ pub struct NewTask {
     pub project_id: Option<crate::durable::ProjectId>,
     pub title: String,
     pub description: String,
+}
+
+/// A release version as `regressed_in` stores it, `v` and three numbers:
+/// `0.15.3` and `v0.15.3` both read as `v0.15.3`.
+pub fn release_version(text: &str) -> Option<String> {
+    let numbers = text.trim().strip_prefix('v').unwrap_or(text.trim());
+    let parts: Vec<&str> = numbers.split('.').collect();
+    (parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())))
+    .then(|| format!("v{numbers}"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -495,6 +508,9 @@ pub struct Task {
     pub rank: u32,
     pub assignee: Option<String>,
     pub due_date: Option<String>,
+    /// The release this bug regressed in (`v0.15.3`); `stable` skips releases
+    /// it covers until the release that ships the fix.
+    pub regressed_in: Option<String>,
     /// Linear's state type, `completed` once done; the lifecycle is `TaskState`.
     pub state: Option<String>,
     pub completed_at: Option<String>,
@@ -765,6 +781,7 @@ mod tests {
             rank: 0,
             assignee: None,
             due_date: None,
+            regressed_in: None,
             state: None,
             completed_at: None,
             observation: crate::work::task::Observation::NotRequired,

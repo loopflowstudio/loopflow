@@ -16,9 +16,9 @@ already use.
 **1. A Task is a conversation with a workflow behind it.**
 
 ```bash
-lf task create --title "fix the flaky retry test"   # prints the Task ID
-lf -b task run <ID>                                   # its worktree, its agents, its pull request
-lf resume --task <ID>                                 # its conversation, from any terminal
+lf task create "fix the flaky retry test" --run           # files it, starts its workflow, opens its conversation
+lf -b task create "fix the flaky retry test" --run --graph auto   # straight to a merged PR, no stops
+lf resume --task <ID>                                     # its conversation, from any terminal
 ```
 
 Each Task has:
@@ -113,6 +113,7 @@ You want to do something; here's how through `lf`.
 | rent a machine from Daytona, Modal, RunPod or AWS for one Task and give it back after | `lf task run <ID> --rent <template>` |
 | land when checks pass, with CI failures repaired for you | `lf land --wait-and-fix` |
 | see what agents cost, by Task, Wave or week | `lf history usage --weekly` |
+| see which commands spend your Linear rate limit (after `logs: {linear_requests: true}` in `~/.lf/config.yaml`) | `lf history linear` |
 | open work in Desktop, cmux, Herdr, tmux or a terminal | `lf open --task <ID>` |
 | plan in Git with no tracker, or in Linear | `lf task list` |
 | keep a longer objective moving with its own memory, plan and setup | `lf wave status` |

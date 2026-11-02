@@ -26,23 +26,6 @@ finally:
     sys.path.pop(0)
 
 
-def test_release_bundle_renames_swift_product_to_bundle_executable(tmp_path: Path) -> None:
-    build_dir = tmp_path / "build"
-    build_dir.mkdir()
-    (build_dir / "LoopflowMac").write_bytes(b"swift-product")
-
-    info_plist = tmp_path / "Info.plist"
-    with info_plist.open("wb") as file:
-        plistlib.dump({"CFBundleExecutable": "Loopflow"}, file)
-
-    app_macos_dir = tmp_path / "Loopflow.app" / "Contents" / "MacOS"
-    app_macos_dir.mkdir(parents=True)
-    release_loopflow._copy_app_executable(build_dir, info_plist, app_macos_dir)
-
-    assert (app_macos_dir / "Loopflow").read_bytes() == b"swift-product"
-    assert not (app_macos_dir / "LoopflowMac").exists()
-
-
 def test_release_bundle_carries_the_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     release_dir = tmp_path / "release"
     release_dir.mkdir()

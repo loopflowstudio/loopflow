@@ -22,10 +22,15 @@ pub fn open_url_checked(url: &str) -> std::io::Result<()> {
     }
 }
 
-/// Send SIGTERM to a process by PID.
+/// Send SIGTERM to a process by PID. Signals directly: ending a process must
+/// launch nothing, since the caller's own executable may already be gone.
 pub fn kill_process(pid: u32) {
-    let _ = Command::new("kill")
-        .arg("-TERM")
-        .arg(pid.to_string())
-        .status();
+    // Zero would signal the caller's whole process group.
+    let Some(pid) = libc::pid_t::try_from(pid).ok().filter(|pid| *pid > 0) else {
+        return;
+    };
+    // SAFETY: kill only sends a signal; an invalid or exited pid returns ESRCH.
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
 }

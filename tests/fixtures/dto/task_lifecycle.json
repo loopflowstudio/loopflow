@@ -548,7 +548,10 @@
           "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "started_by": null,
+        "ship_approval": null,
+        "ship_stop": null
       },
       "graph_processes": [
         {
@@ -1531,7 +1534,10 @@
           "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "started_by": null,
+        "ship_approval": null,
+        "ship_stop": null
       },
       "graph_processes": [
         {
@@ -2458,7 +2464,10 @@
           "sessions": []
         },
         "workspace_slug": "delivery",
-        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+        "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
+        "started_by": null,
+        "ship_approval": null,
+        "ship_stop": null
       },
       "graph_processes": [
         {

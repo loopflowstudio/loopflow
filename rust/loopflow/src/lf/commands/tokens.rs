@@ -43,7 +43,7 @@ pub struct CodeNode {
 }
 
 pub fn run(json: bool, days: Option<u32>) -> Result<()> {
-    let root = repo_root()?;
+    let root = repo_root(&std::env::current_dir()?)?;
 
     if let Some(days) = days {
         let history = history(&root, days)?;
@@ -55,8 +55,7 @@ pub fn run(json: bool, days: Option<u32>) -> Result<()> {
         return Ok(());
     }
 
-    let files = tracked_files(&root)?;
-    let tree = build_tree(&root, &files);
+    let tree = tree(&root)?;
     if json {
         println!("{}", serde_json::to_string(&tree)?);
         return Ok(());
@@ -321,9 +320,25 @@ fn print_history(snapshots: &[CodeSnapshot]) {
     }
 }
 
-fn repo_root() -> Result<PathBuf> {
+/// What `lf ops tokens --json` prints in `directory`: its repository's
+/// tree, or with `days`, how big it was on each day it changed.
+pub(crate) fn codebase(directory: &Path, days: Option<u32>) -> Result<String> {
+    let root = repo_root(directory)?;
+    Ok(match days {
+        Some(days) => serde_json::to_string(&history(&root, days)?)?,
+        None => serde_json::to_string(&tree(&root)?)?,
+    })
+}
+
+fn tree(root: &Path) -> Result<CodeNode> {
+    let files = tracked_files(root)?;
+    Ok(build_tree(root, &files))
+}
+
+fn repo_root(directory: &Path) -> Result<PathBuf> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
+        .current_dir(directory)
         .output()?;
     if !output.status.success() {
         return Err(anyhow!("not inside a git repository"));

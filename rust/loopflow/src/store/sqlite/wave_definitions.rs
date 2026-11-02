@@ -283,15 +283,15 @@ mod tests {
 
     #[test]
     fn released_waves_upgrade_and_removal_needs_no_successor() {
-        use crate::store::migrations::{apply_before_current_draft, apply_build_drafts};
+        use crate::store::migrations::{apply_before_migration, apply_pending_migrations};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "wave_removal");
+        apply_before_migration(&conn, "wave_removal");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/wave_removal_released.sql"
         ))
         .unwrap();
-        apply_build_drafts(&conn);
+        apply_pending_migrations(&conn);
 
         let old: (Option<String>, Option<String>) = conn
             .query_row(

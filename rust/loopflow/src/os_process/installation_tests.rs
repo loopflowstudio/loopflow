@@ -166,14 +166,20 @@ fn running_provider_uses_updated_install_for_commands_hooks_and_graph() {
         )
         .unwrap();
     assert_eq!(redelegated, 0);
-    let attributed: i64 = connection
-        .query_row(
-            "SELECT count(*) FROM processes WHERE caller_session_id=?1 AND via_agent=1",
-            [&session.id],
-            |row| row.get(0),
-        )
+    // Reads record no Process, so the provider's Graph launch carries attribution.
+    let attributed: Vec<String> = connection
+        .prepare("SELECT command FROM processes WHERE caller_session_id=?1 AND via_agent=1")
+        .unwrap()
+        .query_map([&session.id], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
         .unwrap();
-    assert!(attributed >= 2);
+    assert!(
+        attributed
+            .iter()
+            .any(|command| command.contains("entry-proof")),
+        "{attributed:?}"
+    );
     drop(connection);
     drop(store);
     fs::remove_dir_all(root).unwrap();

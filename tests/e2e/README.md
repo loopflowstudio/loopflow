@@ -65,9 +65,9 @@ uv run --no-project --python 3.14 /fixture/install_bootstrap.py
 
 Copy `tests/e2e/install_bootstrap.py`, `release/install.sh`, and a Linux candidate
 CLI to `/fixture/install_bootstrap.py`, `/fixture/install.sh`, and
-`/fixture/bin/lf`. Build the CLI in a separate disposable source snapshot
-after `canonicalize_migrations.py --materialize-for-tests`, using release
-provenance and published migration authority only in that isolated build.
+`/fixture/bin/lf`. Build the CLI with release provenance in a separate
+disposable source snapshot; a snapshot without Git history names its migration
+order with `LOOPFLOW_MIGRATION_ORDER` (see `scripts/test_task_installation.py`).
 The runtime container needs curl, OpenSSL, CA certificates, Git, useradd,
 runuser, and uv; run the check as root without host Machine mounts. Optionally copy
 a checksum-verified older released pair into `/fixture/prior` to exercise the

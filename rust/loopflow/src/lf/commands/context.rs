@@ -2,7 +2,7 @@
 
 pub mod preview;
 pub use crate::ops::human_session::{
-    OpenMode, SessionConnectAction, SessionConnectExplanation, SessionConnectIntent,
+    SessionResumeAction, SessionResumeExplanation, SessionResumeIntent,
 };
 
 use std::io::Read;
@@ -94,6 +94,17 @@ pub fn explain(
     session: Option<&str>,
     process: Option<&str>,
 ) -> Result<crate::ops::context::ContextExplanation> {
+    explain_in(&std::env::current_dir()?, wave, task, session, process)
+}
+
+/// [`explain`] as if run in `cwd`.
+pub(crate) fn explain_in(
+    cwd: &std::path::Path,
+    wave: Option<&str>,
+    task: Option<&str>,
+    session: Option<&str>,
+    process: Option<&str>,
+) -> Result<crate::ops::context::ContextExplanation> {
     anyhow::ensure!(
         (wave.is_some() || task.is_some()) as usize
             + session.is_some() as usize
@@ -101,7 +112,6 @@ pub fn explain(
             <= 1,
         "select Work, a Session, or a Process, not several independent targets"
     );
-    let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     Ok(runtime.block_on(async {
         use crate::ops::context::ContextExplanation;
@@ -109,7 +119,7 @@ pub fn explain(
             Ok(store) => {
                 crate::ops::context::explain_context(
                     &store,
-                    &cwd,
+                    cwd,
                     crate::ops::WorkSelection { task, wave },
                     session,
                     process,
@@ -161,30 +171,21 @@ fn read_registry() -> Result<crate::store::SharedStore> {
         .ok_or_else(|| anyhow!("Local registry is absent"))
 }
 
-/// Explain connection without admitting a provider conversation or acquiring its client.
-pub fn explain_session_connect(
+/// Explain resume without admitting a provider conversation or acquiring its client.
+pub fn explain_session_resume(
     target: crate::ops::human_session::SessionTarget<'_>,
-    takeover: bool,
-    try_open: bool,
+    fork: bool,
     prepare_only: bool,
-    fresh: bool,
-) -> Result<SessionConnectExplanation> {
+) -> Result<SessionResumeExplanation> {
     let cwd = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     Ok(runtime.block_on(async {
         match read_registry() {
             Ok(store) => {
-                crate::ops::human_session::explain_connect(
-                    &store,
-                    &cwd,
-                    target,
-                    OpenMode::from_flags(takeover, try_open),
-                    prepare_only,
-                    fresh,
-                )
-                .await
+                crate::ops::human_session::explain_resume(&store, &cwd, target, fork, prepare_only)
+                    .await
             }
-            Err(error) => SessionConnectExplanation::unavailable(error),
+            Err(error) => SessionResumeExplanation::unavailable(error),
         }
     }))
 }

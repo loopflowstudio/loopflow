@@ -27,6 +27,7 @@ def test_report_separates_saved_from_fresh_launches_and_counts_failures(tmp_path
             {**launch, "event": "first_frame", "ms": 300 + index},
             {**launch, "event": "usable", "ms": 500 + index, "source": "saved"},
             {**launch, "event": "fresh", "ms": 14000},
+            {**launch, "event": "exit", "at": "2026-10-29T16:00:00Z", "reason": "quit"},
         ]
     launches += [
         {"launch": "first", "app": "1.2.3", "event": "launch", "ms": 45},

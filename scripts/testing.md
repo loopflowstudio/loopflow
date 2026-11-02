@@ -32,9 +32,24 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
-run through the materializer, then `cargo clippy --all-targets -- -D warnings`.
+run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
+`binary(name)` matches only the standalone `[[test]]` binaries in
+`rust/loopflow/Cargo.toml`; suites inside `integration` take `test(name::)`, and
+an unknown binary name fails the whole filterset before anything runs.
+A filtered run covers `-p loopflow` only: run `cargo test -p loopflow-ffi`
+separately when the app's library changed. Substring filters such as
+`test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
+`local_planning`) and can exhaust the Rust phase's 1200 s budget; name modules.
+Changes to `swift/project.yml` reach the Xcode build: run `--loopflow`.
+The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
+with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
+and rerun.
 `--reuse-passing` returns at once for an identical tree and plan. A later pass
 narrows `--rust-filter` to what changed since the last pass.
+A filter reaching `ops::linear::` subtracts its four-to-five-minute fixtures
+(`- test(native_runner_is_quiet_until_its_turn_ends) - test(linear_on_demand_native_hooks_share_freshness_across_processes) - test(linear_on_demand_shares_checks_and_excludes_finished_tasks)`)
+unless the diff reaches them; together they exceed the 1200 s Rust budget, and
+CI's partitions run them.
 Omit `--rust-filter` (the whole workspace) only to reproduce a CI
 `rust-test` failure; CI's eight partitions own the full Rust matrix.
 
@@ -62,5 +77,5 @@ The checks a change must add live with the code they protect:
 | runner, network isolation, resources, installation harness | `scripts/README.md` (this directory) |
 | Swift, Desktop, Xcode | `swift/README.md` (Testing) |
 | website, `docs/` | `website/README.md` (Testing) |
-| CI workflows, caches, Dependabot | `.github/README.md` |
+| CI workflows, caches, Dependabot | `.github/CI.md` |
 | `tests/e2e/` | `tests/e2e/README.md` |

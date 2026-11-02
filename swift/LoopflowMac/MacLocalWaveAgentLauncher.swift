@@ -38,18 +38,16 @@ enum LocalWaveAgentLauncher {
         }
     }
 
-    /// Use the app's bundled CLI, or the pinned helper inside an offline clone.
+    /// Use the app's bundled CLI, or the explicit `LF_BIN` a private `LF_HOME` selects.
     static func controlLfPath(
         bundled: URL? = Bundle.main.url(forAuxiliaryExecutable: "lf"),
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> String {
-        if let root = environment["LF_CLONE_ROOT"] {
-            let helper = URL(fileURLWithPath: root).appendingPathComponent("bin/lf").path
-            guard environment["LF_HOME"] == root, environment["LF_BIN"] == helper,
-                  FileManager.default.isExecutableFile(atPath: helper) else {
-                throw LocalLfError(errorDescription: "Clone helper or Machine selection is unavailable; relaunch with lf clone run.")
+        if environment["LF_HOME"] != nil, let selected = environment["LF_BIN"] {
+            guard FileManager.default.isExecutableFile(atPath: selected) else {
+                throw LocalLfError(errorDescription: "LF_BIN \(selected) is not an executable lf.")
             }
-            return helper
+            return selected
         }
         guard let bundled, FileManager.default.isExecutableFile(atPath: bundled.path) else {
             throw LocalLfError(
@@ -66,7 +64,15 @@ enum LocalWaveAgentLauncher {
     /// by streaming a center. Throws on a spawn failure or a non-zero exit.
     static func queryLf(_ subargs: [String], cwd: String?, input: String? = nil) async throws -> String {
         let lfPath = try controlLfPath()
-        let result = try await run([lfPath] + subargs, cwd: cwd, input: input)
+        let result: (status: Int32, stdout: String, stderr: String)
+        do {
+            result = try await run([lfPath] + subargs, cwd: cwd, input: input)
+        } catch let error as LocalLfError {
+            // A spawn failure or the 30 s deadline; cancellation is counted as a kill.
+            DesktopLog.home.warn("lf read failed", ["verb": LaunchJournal.verb(subargs),
+                                                    "error": error.errorDescription ?? "unknown"])
+            throw error
+        }
         // `lf doctor --json` exits 1 when a check fails, but its stdout is the
         // report the telemetry dashboard must show. A red monitor cannot hide
         // itself behind the query runner's generic non-zero handling.
@@ -75,10 +81,14 @@ enum LocalWaveAgentLauncher {
         }
         guard result.status == 0 else {
             let detail = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            DesktopLog.home.warn("lf read failed", [
+                "verb": LaunchJournal.verb(subargs), "status": String(result.status),
+                "stderr": String((detail.split(separator: "\n").first ?? "").prefix(200)),
+            ])
             let message = detail.isEmpty
                 ? "lf \(subargs.joined(separator: " ")) failed (\(result.status))"
                 : detail
-            throw LocalLfError(errorDescription: message)
+            throw RegistryQueryError(message, stdout: result.stdout)
         }
         return result.stdout
     }
@@ -97,9 +107,6 @@ enum LocalWaveAgentLauncher {
     }
 
     static func queryGitHub(_ args: [String]) async throws -> String {
-        guard ProcessInfo.processInfo.environment["LF_CLONE_ROOT"] == nil else {
-            throw LocalLfError(errorDescription: "GitHub is unavailable in an offline data clone.")
-        }
         return try await runCheckedOutput(["gh"] + args, cwd: nil)
     }
 
@@ -152,6 +159,9 @@ enum LocalWaveAgentLauncher {
             // Kill only the child we launched. A Session owner is independent;
             // closing a query must not signal a provider or a process group.
             if process.isRunning {
+                if let lf = args.first, lf == "lf" || lf.hasSuffix("/lf") {
+                    LaunchJournal.home.killed(Array(args.dropFirst()))
+                }
                 _ = Darwin.kill(process.processIdentifier, SIGKILL)
                 // Not waitUntilExit: it parks this cooperative thread's run
                 // loop, which nothing wakes once the task has hopped threads.

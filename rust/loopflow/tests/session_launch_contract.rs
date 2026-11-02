@@ -234,7 +234,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let session = fixture.session();
     let resumed = fixture
         .command()
-        .args(["session", "connect", &session])
+        .args(["session", "resume", &session])
         .output()
         .unwrap();
     for (output, mode) in [(&first, "launch"), (&resumed, "resume")] {
@@ -380,7 +380,7 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
         }
         let session = fixture.session();
         fixture.settings(&format!("{provider}:current-model"), false, false);
-        let resumed = fixture.run(&["session", "connect", &session]);
+        let resumed = fixture.run(&["session", "resume", &session]);
         bypass(&resumed, provider, false);
         assert!(args(&resumed).contains(&token.as_str()));
         assert!(!args(&resumed)
@@ -402,7 +402,7 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
         }
         assert_eq!(fixture.session(), session);
         let override_resume =
-            fixture.run(&["--yolo", "--chrome", "on", "session", "connect", &session]);
+            fixture.run(&["--yolo", "--chrome", "on", "session", "resume", &session]);
         bypass(&override_resume, provider, true);
         if provider == "claude" {
             assert!(args(&override_resume).contains(&"--chrome"));
@@ -433,7 +433,7 @@ fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
 }
 
 #[test]
-fn headless_continuation_and_graph_keep_current_options_without_repeating_the_skill() {
+fn headless_launch_and_graph_keep_current_options() {
     let fixture = Fixture::new("claude:sonnet");
     fixture
         .repo
@@ -453,22 +453,7 @@ fn headless_continuation_and_graph_keep_current_options_without_repeating_the_sk
     pair(&first, "--json-schema", r#"{"type":"object"}"#);
     assert!(args(&first).contains(&"--chrome"));
     assert!(first["input"].to_string().contains("INITIAL_SKILL_ONLY"));
-    let session = fixture.session();
     fixture.settings("claude:haiku", false, false);
-    let resumed = fixture.run(&[
-        "-b",
-        "session",
-        "connect",
-        &session,
-        "--message",
-        "second turn",
-    ]);
-    pair(&resumed, "--resume", "stream-fixture");
-    pair(&resumed, "--model", "haiku");
-    assert!(args(&resumed).contains(&"--no-chrome"));
-    assert!(!args(&resumed).contains(&"--json-schema"));
-    assert!(!resumed["input"].to_string().contains("INITIAL_SKILL_ONLY"));
-    assert!(resumed["input"].to_string().contains("second turn"));
     fixture
         .repo
         .create_file(".lf/graphs/launch-probe.yaml", "- probe\n");
@@ -494,7 +479,7 @@ fn previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupporte
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Session"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Run"));
     assert!(!fixture.home.path().join("received.json").exists());
 
     fixture.run(&["-i", ":", "create history"]);
@@ -502,11 +487,11 @@ fn previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupporte
     fs::remove_file(fixture.home.path().join("received.json")).unwrap();
     let output = fixture
         .command()
-        .args(["--output-schema", "{}", "session", "connect", &session])
+        .args(["--output-schema", "{}", "session", "resume", &session])
         .output()
         .unwrap();
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Session"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("require a headless Run"));
     assert!(!fixture.home.path().join("received.json").exists());
     assert_eq!(fixture.session(), session);
 }
@@ -582,7 +567,7 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
         .unwrap()
         + 1];
     let session = remote.session();
-    let resumed = dispatch(&["session", "connect", &session]);
+    let resumed = dispatch(&["session", "resume", &session]);
     bypass(&resumed, "claude", false);
     pair(&resumed, "--resume", native);
     pair(&resumed, "--model", "remote-model");
@@ -594,7 +579,7 @@ fn machine_dispatch_resolves_destination_policy_and_forwards_launch_and_resume_o
         "-a",
         "claude:haiku",
         "session",
-        "connect",
+        "resume",
         &session,
     ]);
     bypass(&explicit, "claude", true);
@@ -650,7 +635,7 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
         .current_dir(unrelated.path())
         .args([
             "session",
-            "connect",
+            "resume",
             "--task",
             registered.task.id.as_str(),
             "--prepare",
@@ -664,7 +649,7 @@ fn task_conversation_preparation_is_passive_and_connect_uses_shared_launch_setti
     let id = prepared["id"].as_str().unwrap();
     let preview = fixture
         .command()
-        .args(["session", "connect", id, "--prepare", "--json"])
+        .args(["session", "resume", id, "--prepare", "--json"])
         .output()
         .unwrap();
     success(&preview);
@@ -728,7 +713,7 @@ fn native_codex_failed_bootstrap_preserves_account_and_pending_input() {
     let session = fixture.session();
     fs::remove_file(machine.join("fail-terminal")).unwrap();
     fixture.settings("codex:current-model", false, false);
-    let resumed = fixture.run(&["session", "connect", &session]);
+    let resumed = fixture.run(&["session", "resume", &session]);
     bypass(&resumed, "codex", false);
     assert_eq!(resumed["account"], "fixture");
     assert_eq!(resumed["params"]["model"], "current-model");
@@ -829,11 +814,11 @@ fn native_resume_preserves_the_selected_account_and_account_home_mode() {
         assert_eq!(Path::new(first["codex_home"].as_str().unwrap()), profile);
         let session = fixture.session();
         fixture.settings("codex", false, false);
-        let resumed = fixture.run(&["--isolate", "session", "connect", &session]);
+        let resumed = fixture.run(&["--isolate", "session", "resume", &session]);
         assert_eq!(resumed["account"], "fixture");
         assert_eq!(resumed["codex_home"], first["codex_home"]);
         bypass(&resumed, "codex", false);
-        let shared = fixture.run(&["--shared", "session", "connect", &session]);
+        let shared = fixture.run(&["--shared", "session", "resume", &session]);
         assert_eq!(shared["account"], "fixture");
         assert_eq!(Path::new(shared["codex_home"].as_str().unwrap()), profile);
     }
@@ -877,7 +862,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
             assert!(first["turns"][0].to_string().contains("--- literal prompt"));
         }
         let session = fixture.session();
-        let resumed = fixture.run(&["session", "connect", &session]);
+        let resumed = fixture.run(&["session", "resume", &session]);
         for received in [first, resumed] {
             let arguments = args(&received);
             let root = if provider == "codex" {
@@ -913,7 +898,7 @@ fn linked_worktree_metadata_is_accessible_on_launch_and_resume() {
 }
 
 #[test]
-fn codex_headless_start_and_resume_receive_current_policy_on_the_wire() {
+fn codex_headless_start_receives_current_policy_on_the_wire() {
     let fixture = Fixture::new("codex:first-model");
     let machine = fixture.home.path().join("machine");
     support::register_codex_account(&machine);
@@ -933,33 +918,24 @@ fn codex_headless_start_and_resume_receive_current_policy_on_the_wire() {
         .as_str()
         .unwrap()
         .contains("<lf:user>"));
-    let session = fixture.session();
-    fixture.settings("codex:current-model", false, false);
-    let resumed = fixture.run(&[
-        "-b",
-        "session",
-        "connect",
-        &session,
-        "--message",
-        "next turn",
-    ]);
-    assert_eq!(resumed["method"], "thread/resume");
-    assert_eq!(resumed["params"]["threadId"], "thread-test");
-    assert_eq!(resumed["params"]["model"], "current-model");
-    assert_eq!(resumed["params"]["sandbox"], "workspace-write");
-    assert_eq!(resumed["params"]["approvalPolicy"], "never");
 }
 
 #[test]
-fn headless_provider_switch_imports_history_with_current_policy() {
+fn provider_switch_imports_session_history_with_current_policy() {
     let fixture = Fixture::new("claude");
     fixture.create_wave();
-    fixture.run(&["-b", "--wave", "fixture", ":", "original request"]);
+    let first = fixture.run(&["-i", "--wave", "fixture", ":", "original request"]);
+    let native = args(&first)[args(&first)
+        .iter()
+        .position(|arg| *arg == "--session-id")
+        .unwrap()
+        + 1]
+    .to_owned();
     let session = fixture.session();
     let transcript = fixture
         .home
         .path()
-        .join(".claude/projects/fixture/stream-fixture.jsonl");
+        .join(format!(".claude/projects/fixture/{native}.jsonl"));
     fs::create_dir_all(transcript.parent().unwrap()).unwrap();
     fs::write(
         &transcript,
@@ -985,7 +961,7 @@ fn headless_provider_switch_imports_history_with_current_policy() {
     let imported = fixture.run(&[
         "-b",
         "session",
-        "connect",
+        "resume",
         &session,
         "-a",
         "codex:new-model",
@@ -1004,7 +980,7 @@ fn headless_provider_switch_imports_history_with_current_policy() {
 }
 
 #[test]
-fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
+fn opencode_headless_start_selects_the_model_and_permissions() {
     let fixture = Fixture::new("opencode:opencode/first-model");
     fixture.create_wave();
     let script = include_str!("support/opencode_server.py").replace("__WAIT__", "False").replace(
@@ -1022,29 +998,6 @@ fn opencode_headless_start_and_resume_preserve_history_and_reload_policy() {
         "first-model"
     );
     assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
-    let session = fixture.session();
-    fixture.settings("opencode:opencode/current-model", false, false);
-    let resumed = fixture.run(&[
-        "-b",
-        "session",
-        "connect",
-        &session,
-        "--message",
-        "next turn",
-    ]);
-    assert_eq!(resumed["session"], first["session"]);
-    assert_eq!(
-        serde_json::from_slice::<Value>(
-            &fs::read(fixture.home.path().join("native-model.json")).unwrap()
-        )
-        .unwrap()["id"],
-        "current-model"
-    );
-    assert!(resumed["config"]["permissions"].is_null());
-    assert!(!resumed["request"]["text"]
-        .to_string()
-        .contains("first turn"));
-    assert!(resumed["request"]["text"].to_string().contains("next turn"));
 }
 
 #[test]
@@ -1069,7 +1022,7 @@ fn native_resume_survives_missing_optional_capture_payload() {
         }
     }
     fixture.settings("claude:haiku", true, false);
-    let resumed = fixture.run(&["session", "connect", &session]);
+    let resumed = fixture.run(&["session", "resume", &session]);
     pair(&resumed, "--resume", &native);
     pair(&resumed, "--model", "haiku");
     bypass(&resumed, "claude", true);
@@ -1098,7 +1051,7 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     let first = fixture
         .command()
         .current_dir(other.path())
-        .args(["connect", "--wave", wave_id, "--prepare", "--json"])
+        .args(["resume", "--wave", wave_id, "--prepare", "--json"])
         .output()
         .unwrap();
     success(&first);
@@ -1106,29 +1059,27 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     let id = prepared["id"].as_str().unwrap();
     let saved = store.session(id).unwrap().unwrap();
     fs::create_dir(saved.cwd.join("nested")).unwrap();
-    for verb in ["connect", "resume"] {
-        let contextual = fixture
-            .command()
-            .current_dir(saved.cwd.join("nested"))
-            .args([verb, "--prepare", "--json"])
-            .output()
-            .unwrap();
-        success(&contextual);
-        assert_eq!(
-            serde_json::from_slice::<Value>(&contextual.stdout).unwrap()["id"],
-            id
-        );
-    }
+    let contextual = fixture
+        .command()
+        .current_dir(saved.cwd.join("nested"))
+        .args(["resume", "--prepare", "--json"])
+        .output()
+        .unwrap();
+    success(&contextual);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&contextual.stdout).unwrap()["id"],
+        id
+    );
     let again = fixture
         .command()
-        .args(["--wave", wave_id, "session", "connect", "--prepare"])
+        .args(["--wave", wave_id, "session", "resume", "--prepare"])
         .output()
         .unwrap();
     success(&again);
     assert!(String::from_utf8(again.stdout).unwrap().contains(id));
     let explicit = fixture
         .command()
-        .args(["session", "connect", id, "--prepare", "--json"])
+        .args(["session", "resume", id, "--prepare", "--json"])
         .output()
         .unwrap();
     success(&explicit);
@@ -1143,10 +1094,10 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     assert!(saved.artifact_key.is_none());
     let mut launched = None;
     for argv in [
-        vec!["session", "connect", "--wave", wave_id],
-        vec!["connect", "--wave", wave_id, "--json"],
+        vec!["session", "resume", "--wave", wave_id],
+        vec!["resume", "--wave", wave_id, "--json"],
         vec!["--wave", wave_id, "resume"],
-        vec!["connect", id, "--takeover"],
+        vec!["resume", id],
     ] {
         success(
             &fixture
@@ -1186,47 +1137,21 @@ fn wave_targets_prepare_reuse_and_open_in_the_selected_checkout_in_both_formats(
     pair(&continued, "--resume", &native);
     pair(&continued, "--model", "haiku");
     assert!(continued["input"].to_string().contains("next Wave turn"));
-    let takeover = fixture
+    // One prepared shape: the argv itself takes over whatever holds the conversation.
+    let prepared = fixture
         .command()
-        .args(["connect", id, "--takeover", "--prepare", "--json"])
+        .args(["resume", id, "--prepare", "--json"])
         .output()
         .unwrap();
-    success(&takeover);
-    let takeover: Value = serde_json::from_slice(&takeover.stdout).unwrap();
-    assert_eq!(takeover["id"], id);
-    assert!(takeover["open_argv"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|arg| arg == "--takeover"));
-    let next = fixture
-        .command()
-        .args([
-            "connect",
-            "--wave",
-            wave_id,
-            "--fresh",
-            "--prepare",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    success(&next);
-    let next: Value = serde_json::from_slice(&next.stdout).unwrap();
-    assert_ne!(next["id"], id);
-    assert!(store.session(id).unwrap().unwrap().completed_at.is_some());
-    assert_eq!(
-        store
-            .session(next["id"].as_str().unwrap())
-            .unwrap()
-            .unwrap()
-            .cwd,
-        saved.cwd
-    );
+    success(&prepared);
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    assert_eq!(prepared["id"], id);
+    let argv = prepared["open_argv"].as_array().unwrap();
+    assert_eq!(argv[argv.len() - 3..], ["session", "resume", id]);
 }
 
 #[test]
-fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
+fn contextual_resume_uses_scope_and_recovers_unassociated_checkouts() {
     let fixture = Fixture::new("claude:sonnet");
     fixture.repo.create_file(
         ".lf/skills/repo/session.md",
@@ -1246,7 +1171,7 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
         success(&output);
         serde_json::from_slice(&output.stdout).unwrap()
     };
-    let first = prepare(fixture.repo.path(), &["connect"]);
+    let first = prepare(fixture.repo.path(), &["resume"]);
     let store =
         loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("machine/loopflow.db"))
             .unwrap();
@@ -1266,7 +1191,7 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
     let alias = fixture.home.path().join("alias");
     std::os::unix::fs::symlink(saved.join("nested"), &alias).unwrap();
     for cwd in [fixture.repo.path(), saved, &saved.join("nested"), &alias] {
-        for command in [vec!["connect"], vec!["resume"], vec!["session", "resume"]] {
+        for command in [vec!["resume"], vec!["session", "resume"]] {
             assert_eq!(prepare(cwd, &command)["id"], id);
         }
     }
@@ -1288,7 +1213,8 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
     )
     .unwrap();
     let before = count();
-    for verb in ["connect", "resume"] {
+    {
+        let verb = "resume";
         let output = fixture
             .command()
             .current_dir(&linked)
@@ -1331,36 +1257,22 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
             |row| row.get(0),
         )
         .unwrap();
-    for verb in ["connect", "resume"] {
-        assert_eq!(prepare(&linked, &[verb])["id"], conversation);
-    }
+    assert_eq!(prepare(&linked, &["resume"])["id"], conversation);
     assert_eq!(count(), local);
     let before = local;
     let explanation = fixture
         .command()
-        .args(["--explain", "--json", "connect", "--fresh"])
+        .args(["--explain", "--json", "resume"])
         .output()
         .unwrap();
     success(&explanation);
     let explanation: Value = serde_json::from_slice(&explanation.stdout).unwrap();
-    assert_eq!(explanation["action"]["intent"], "start");
-    assert_eq!(explanation["resolution"]["checkout"]["value"], first["cwd"]);
+    assert_eq!(explanation["resolution"]["session"]["value"], id);
     assert_eq!(count(), before);
-    let fresh = prepare(saved, &["resume", "--fresh", "--takeover"]);
-    assert_ne!(fresh["id"], id);
-    assert_eq!(fresh["cwd"], first["cwd"]);
-    assert_eq!(
-        prepare(fixture.repo.path(), &["connect"])["id"],
-        fresh["id"]
-    );
-    assert_eq!(prepare(&linked, &["connect", id])["id"], id);
-    let another = prepare(saved, &["connect", "--fresh"]);
-    assert_ne!(another["id"], fresh["id"]);
-    assert_eq!(count(), before + 2);
+    assert_eq!(prepare(&linked, &["resume", id])["id"], id);
     for argv in [
-        vec!["connect", id, "--fresh"],
         vec!["resume", id, "--wave", "fixture"],
-        vec!["--task", "missing", "connect", id],
+        vec!["--task", "missing", "resume", id],
     ] {
         assert!(!fixture
             .command()
@@ -1369,7 +1281,7 @@ fn contextual_connect_and_resume_use_scope_and_preserve_fresh_history() {
             .unwrap()
             .status
             .success());
-        assert_eq!(count(), before + 2);
+        assert_eq!(count(), before);
     }
 }
 
@@ -1398,7 +1310,7 @@ exit 3
 "#,
     )
     .unwrap();
-    for argv in [["resume", &id], ["connect", &id]] {
+    for argv in [vec!["resume", &id], vec!["session", "resume", &id]] {
         let result = fixture.command().args(argv).output().unwrap();
         assert!(!result.status.success());
         assert!(String::from_utf8_lossy(&result.stderr).contains("Native history is missing"));
@@ -1485,7 +1397,7 @@ fn pi_fixture() -> Fixture {
 }
 
 #[test]
-fn pi_public_headless_skill_delivers_context_and_resumes_exact_history() {
+fn pi_public_headless_skill_delivers_context() {
     let fixture = pi_fixture();
     fixture.create_wave();
     fixture.repo.create_file(
@@ -1534,33 +1446,6 @@ fn pi_public_headless_skill_delivers_context_and_resumes_exact_history() {
         .contains("Pi context sentinel"));
     assert_eq!(received["caller"]["session_id"], fixture.session());
     assert_eq!(received["lf_bin"], env!("CARGO_BIN_EXE_lf"));
-    let token = fixture
-        .repo
-        .path()
-        .canonicalize()
-        .unwrap()
-        .join("pi-conversation.jsonl");
-    let output = fixture
-        .command()
-        .env(
-            "PI_FIXTURE_RECORD",
-            fixture.home.path().join("received.json"),
-        )
-        .args([
-            "-b",
-            "resume",
-            &fixture.session(),
-            "--message",
-            "Second Pi turn",
-        ])
-        .output()
-        .unwrap();
-    success(&output);
-    let received = fixture.received();
-    assert!(args(&received)
-        .windows(2)
-        .any(|a| a == ["--session", token.to_str().unwrap()]));
-    assert_eq!(fs::read_to_string(token).unwrap().lines().count(), 3);
 }
 
 #[test]

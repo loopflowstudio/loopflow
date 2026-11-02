@@ -13,6 +13,7 @@ pub mod graph_inventory;
 pub mod history;
 pub mod history_transcript;
 pub mod install;
+pub mod linear_requests;
 pub mod list;
 pub mod machine;
 mod machine_credentials;
@@ -22,6 +23,7 @@ pub mod ops;
 pub mod people;
 pub mod planning;
 pub mod profile;
+pub mod read;
 pub mod rental;
 pub mod replay;
 pub mod rollover;
@@ -32,6 +34,7 @@ pub mod session_move;
 pub mod setting;
 pub mod ship;
 pub mod ssh;
+pub mod task_create;
 pub mod task_row;
 pub mod tokens;
 pub mod top;
@@ -42,6 +45,7 @@ pub mod wave_rename;
 pub mod waves;
 pub(crate) mod work_catalog;
 pub mod work_route;
+pub mod write;
 
 /// One drill over the Wave → Project → Task Work hierarchy.
 #[derive(Debug, Clone, Copy, Default)]

@@ -68,14 +68,12 @@ impl Store {
     pub async fn ensure_primary_session(
         &self,
         scope: &crate::session::PrimaryScope,
-        replacing: Option<&str>,
         session: LfSession,
     ) -> StoreResult<LfSession> {
         let scope = scope.clone();
-        let replacing = replacing.map(str::to_string);
         let caller = crate::journal::current_lf_process_id();
         run_sqlite(&self.sqlite, move |store| {
-            store.ensure_primary_session(&scope, replacing.as_deref(), session, caller.as_ref())
+            store.ensure_primary_session(&scope, session, caller.as_ref())
         })
         .await
     }

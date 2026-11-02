@@ -65,7 +65,8 @@ struct WaveStandupTests {
             try task("SHIP", rank: 4, status: "shipping", owner: "Jack Heart"),
             // The roadmap files an unstarted Task under waiting; its state puts it in Backlog.
             try task("FRESH", section: "waiting", rank: 5),
-            try task("HELD", section: "later", rank: 0, status: "deferred"),
+            // Started, then unassigned: nothing moves it, so it waits in Backlog.
+            try task("HELD", section: "later", rank: 0, status: "idle"),
         ]
         let standup = standup(tasks, sessions: ["IDLE": .available, "SHIP": .busy])
         #expect(standup.done.map(\.id) == ["DONE-1"])
@@ -171,7 +172,9 @@ struct WaveStandupTests {
                                               title: "repo", location: nil)
         let view = WorkNavigation.Board.repository
         #expect(model.navigation.waveView == view)
-        // Nothing hidden: the board header has no Show… menu.
+        // The Tasks strip starts hidden; the board header's Show… brings it back.
+        #expect(model.desktopViewParts(repository: "repo").map(\.hidden) == [false, false, true])
+        try WaveStandupBoard(model: model, view: view).inspect().find(viewWithAccessibilityIdentifier: "show-pane-tiles").button().tap()
         #expect(throws: (any Error).self) {
             try WaveStandupBoard(model: model, view: view).inspect().find(viewWithAccessibilityIdentifier: "show-hidden-panes")
         }
@@ -214,6 +217,7 @@ struct WaveStandupTests {
                                                            args: args), model: model, workspaces: registry)
         }
         func parts() -> [DesktopViewPart] { model.desktopViewParts(repository: "repo") }
+        model.setHidden(.tiles, false, in: view)
         // The hover button and `lf desktop zoom -p board` share one zoom; the crumb names it.
         conversation.stripHover("wave-board").isHovered = true
         let board = HideablePart(part: .board, view: view, model: model, workspace: conversation) { Text("Board") }

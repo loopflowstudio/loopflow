@@ -686,6 +686,11 @@ pub(crate) async fn link_pr_async(
     request: &PrLinkRequest,
     prior: &PrLinkageIds,
 ) -> PrLinkageOutcome {
+    // PR links spend the reserved Linear budget so they never fail behind sync.
+    crate::linear::urgent(link_pr(repo, request, prior)).await
+}
+
+async fn link_pr(repo: &Path, request: &PrLinkRequest, prior: &PrLinkageIds) -> PrLinkageOutcome {
     let client = match linear_client(repo).await {
         Ok(client) => client,
         Err(error) => {
@@ -695,7 +700,7 @@ pub(crate) async fn link_pr_async(
             }
         }
     };
-    if let Err(error) = acquire_task(repo, &request.issue_id, LinearRefresh::Force).await {
+    if let Err(error) = acquire_task(repo, &request.issue_id, LinearRefresh::Auto).await {
         return PrLinkageOutcome {
             ids: prior.clone(),
             error: Some(error.to_string()),
@@ -794,7 +799,8 @@ pub(crate) async fn inspect_task_planning_async(
         || refresh == LinearRefresh::Never
         || (existing.state == PlanningState::Available
             && refresh == LinearRefresh::Auto
-            && age.is_some_and(|age| age < LINEAR_SOFT_STALE_SECS))
+            && (age.is_some_and(|age| age < LINEAR_SOFT_STALE_SECS)
+                || super::linear_observe::team_current(&store, &scope).await))
     {
         return Ok(TaskPlanningInspection {
             observation: existing,

@@ -10,6 +10,7 @@ pub mod config;
 pub mod context_block;
 pub mod context_usage;
 pub mod definition;
+pub(crate) mod desktop_exits;
 pub mod diagnostic_log;
 pub mod durable;
 pub mod error;
@@ -35,10 +36,8 @@ pub mod task_work;
 pub(crate) mod terminal_output;
 pub(crate) mod terminal_title;
 // Build-time parsing lives here so its golden tests compile against the exact parser.
-pub mod data_clone;
 pub mod linear;
 #[allow(dead_code)]
-pub(crate) mod migration_drafts;
 pub mod notion;
 pub mod ops;
 pub mod performance;

@@ -121,6 +121,8 @@ struct TaskCommentsView: View {
         switch author {
         case .person(let name): name ?? "Unnamed person"
         case .integration: "Integration"
+        case .session(let id, let requester):
+            requester.map { "Session \(id) for \($0)" } ?? "Session \(id)"
         }
     }
 

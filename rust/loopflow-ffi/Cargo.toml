@@ -1,0 +1,21 @@
+[package]
+name = "loopflow-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Loopflow inside an app: reads and writes through a C ABI carrying lf's JSON"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+loopflow = { path = "../loopflow" }
+serde = "1.0"
+serde_json = "1.0"
+
+[package.metadata.dist]
+dist = false
+
+[dev-dependencies]
+tempfile = "3.27"

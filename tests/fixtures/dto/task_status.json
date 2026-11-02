@@ -14,6 +14,7 @@
     "rank": 1,
     "assignee": null,
     "due_date": null,
+    "regressed_in": null,
     "state": "unstarted",
     "completed_at": null,
     "linear_id": "issue-gmail",

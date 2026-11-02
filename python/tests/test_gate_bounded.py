@@ -673,7 +673,9 @@ def test_build_and_test_commands_share_the_four_worker_budget():
 
     assert clippy.argv[clippy.argv.index("--jobs") + 1] == jobs
     assert jobs in tests.argv
-    assert "--prepare-cli" in tests.argv
+    cli = next(command for command in rust if command.label == "rust-cli")
+    assert cli.argv[cli.argv.index("--jobs") + 1] == jobs
+    assert any(argument.startswith("LOOPFLOW_TEST_LF=") for argument in tests.argv)
     for command in (command for command in swift if command.label in {"swift-cli", "swift"}):
         assert command.argv[command.argv.index("--jobs") + 1] == jobs
     xcodebuild = next(command for command in loopflow if command.label == "xcodebuild")
@@ -695,31 +697,6 @@ def test_rust_filter_runs_only_matching_tests_then_clippy():
     assert labels.index("rust") < labels.index("clippy")
     assert "--all" not in tests
     assert any("test(prompt::)" in argument for argument in tests)
-    assert "rust-clones" not in labels
-
-
-@pytest.mark.parametrize("nextest", [True, False])
-@pytest.mark.parametrize("macos_version", ["15.7", "26.0"])
-def test_macos_clones_run_under_their_own_sandbox(monkeypatch, nextest, macos_version):
-    monkeypatch.setattr(gate.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(gate.platform, "mac_ver", lambda: (macos_version, (), ""))
-    monkeypatch.setattr(gate.shutil, "which", lambda _: "/bin/nextest" if nextest else None)
-
-    commands = gate._rust_commands([])
-    ordinary = next(command.argv for command in commands if command.label == "rust")
-    clones = next(command.argv for command in commands if command.label == "rust-clones")
-    assert ("not test(data_clones::)" if nextest else "--skip") in ordinary
-    assert "--config" not in clones
-    assert "--prepare-cli" in clones
-    selector = next(argument for argument in clones if argument.startswith("data_clones::"))
-    assert selector == (
-        "data_clones::"
-        if macos_version == "26.0"
-        else (
-            "data_clones::"
-            "clone_creation_refuses_an_incompatible_parent_sandbox_before_copying_source"
-        )
-    )
 
 
 def test_ui_host_runs_only_when_named():

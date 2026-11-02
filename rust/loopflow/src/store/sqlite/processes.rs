@@ -38,7 +38,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id OR ship_approved_lf_process_id=p.id OR ship_stopped_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)";
 
@@ -332,6 +332,34 @@ impl SqliteStore {
         unfinished_processes(&self.conn.lock().expect("store mutex poisoned"))
     }
 
+    /// The unfinished rows not in `skip`, reading only the index for those in
+    /// it. `skip` forgets rows that are no longer unfinished.
+    pub(crate) fn unfinished_processes_except(
+        &self,
+        skip: &mut std::collections::HashSet<LfProcessId>,
+    ) -> StoreResult<Vec<LfProcess>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let ids = conn
+            .prepare(
+                "SELECT id FROM processes INDEXED BY processes_unfinished
+                 WHERE completed_at IS NULL ORDER BY started_at DESC,id",
+            )?
+            .query_map([], |row| row.get::<_, LfProcessId>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut read = conn.prepare(&format!("{PROCESS_SELECT} WHERE e.id=?1"))?;
+        let mut records = Vec::new();
+        let mut skipped = std::collections::HashSet::new();
+        for id in ids {
+            if skip.contains(&id) {
+                skipped.insert(id);
+            } else {
+                records.extend(read.query_row([&id], read_process).optional()?);
+            }
+        }
+        *skip = skipped;
+        Ok(records)
+    }
+
     pub fn processes_since(&self, since: i64) -> StoreResult<Vec<LfProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
@@ -439,6 +467,59 @@ impl SqliteStore {
                 read_process,
             )
             .optional()?)
+    }
+
+    /// Who started `id`: the first Session in its ancestry, else `person` at
+    /// its root. A chain missing rows leaves attribution unresolved.
+    pub(crate) fn process_starter(
+        &self,
+        id: &LfProcessId,
+        person: Option<&str>,
+    ) -> StoreResult<crate::process::Starter> {
+        use crate::process::Starter;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut current = Some(id.clone());
+        let mut seen = std::collections::HashSet::new();
+        while let Some(id) = current.take().filter(|id| seen.insert(id.clone())) {
+            let Some((parent, session)) = conn
+                .query_row(
+                    "SELECT parent_lf_process_id,caller_session_id FROM processes WHERE id=?1",
+                    [&id],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<LfProcessId>>(0)?,
+                            row.get::<_, Option<crate::id::LfSessionId>>(1)?,
+                        ))
+                    },
+                )
+                .optional()?
+            else {
+                return Ok(Starter::Person { name: None });
+            };
+            if let Some(session) = session {
+                let name = conn
+                    .query_row(
+                        "SELECT title FROM agent_sessions WHERE id=?1",
+                        [session.as_str()],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten()
+                    .filter(|title| !title.is_empty());
+                return Ok(Starter::Session {
+                    id: session,
+                    name,
+                    requester: person.map(str::to_owned),
+                });
+            }
+            if parent.is_none() {
+                return Ok(Starter::Person {
+                    name: person.map(str::to_owned),
+                });
+            }
+            current = parent;
+        }
+        Ok(Starter::Person { name: None })
     }
 
     /// When `id` failed, the time it ended and the error that caused it: the
@@ -1671,6 +1752,51 @@ mod discovery_tests {
     }
 
     #[test]
+    fn process_starter_names_the_nearest_session_else_the_root_person() {
+        use crate::process::Starter;
+        let dir = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
+        let root = insert_process(&store, 1, 1);
+        let agent = insert_process(&store, 2, 2);
+        let step = insert_process(&store, 3, 3);
+        let orphan = insert_process(&store, 4, 4);
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE processes SET parent_lf_process_id=?2,caller_session_id='session-a' WHERE id=?1",
+                params![agent, root],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE processes SET parent_lf_process_id=?2 WHERE id=?1",
+                params![step, agent],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE processes SET parent_lf_process_id='00000000-0000-0000-0000-0000000000ff' WHERE id=?1",
+                [&orphan],
+            )
+            .unwrap();
+        }
+        let starter = |id| store.process_starter(id, Some("Jack Heart")).unwrap();
+        assert_eq!(
+            starter(&step),
+            Starter::Session {
+                id: "session-a".into(),
+                name: None,
+                requester: Some("Jack Heart".into()),
+            }
+        );
+        assert_eq!(
+            starter(&root),
+            Starter::Person {
+                name: Some("Jack Heart".into())
+            }
+        );
+        assert_eq!(starter(&orphan), Starter::Person { name: None });
+    }
+
+    #[test]
     fn process_discovery_separates_literal_search_from_identity_resolution() {
         let dir = tempfile::tempdir().unwrap();
         let store = SqliteStore::open_ephemeral(&dir.path().join("store.db")).unwrap();
@@ -2293,9 +2419,9 @@ mod attachment_tests {
 
     #[test]
     fn attachment_migration_preserves_released_history_and_waiting_evidence() {
-        use crate::store::migrations::{apply_before_current_draft, current_draft_sql};
+        use crate::store::migrations::{apply_before_migration, migration_section_sql};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_current_draft(&conn, "agent_process");
+        apply_before_migration(&conn, "agent_process");
         conn.execute_batch(include_str!(
             "../../../tests/fixtures/migrations/agent_process_released.sql"
         ))
@@ -2318,12 +2444,12 @@ mod attachment_tests {
             .unwrap()
         };
         let before = history();
-        conn.execute_batch(&current_draft_sql("agent_process"))
+        conn.execute_batch(&migration_section_sql("agent_process"))
             .unwrap();
         assert_eq!(history(), before);
-        conn.execute_batch(&current_draft_sql("lf_process_ids"))
+        conn.execute_batch(&migration_section_sql("lf_process_ids"))
             .unwrap();
-        conn.execute_batch(&current_draft_sql("process_terminal"))
+        conn.execute_batch(&migration_section_sql("process_terminal"))
             .unwrap();
         let terminal: Option<String> = conn
             .query_row(

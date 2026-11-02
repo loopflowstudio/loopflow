@@ -155,13 +155,13 @@ struct ProgramStatusTests {
         """.utf8).write(to: helper)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
         let environment = ProcessInfo.processInfo.environment
-        for (key, value) in ["LF_CLONE_ROOT": directory.path, "LF_HOME": directory.path, "LF_BIN": helper.path] {
+        for (key, value) in ["LF_HOME": directory.path, "LF_BIN": helper.path] {
             setenv(key, value, 1)
         }
         let surface = ProgramStatusSurface()
         defer {
             surface.close()
-            for key in ["LF_CLONE_ROOT", "LF_HOME", "LF_BIN"] {
+            for key in ["LF_HOME", "LF_BIN"] {
                 if let value = environment[key] { setenv(key, value, 1) } else { unsetenv(key) }
             }
             try? FileManager.default.removeItem(at: directory)

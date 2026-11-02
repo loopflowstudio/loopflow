@@ -92,16 +92,6 @@ impl Provider {
     )
     _write(
         tmp_path,
-        "rust/loopflow/src/store/migration_catalog.rs",
-        """const MIGRATIONS: &[Migration] = &[
-    Migration {
-        sql: include_str!("migrations/0.1.001_initial.sql"),
-    },
-];
-""",
-    )
-    _write(
-        tmp_path,
         "rust/loopflow/src/store/migrations/0.1.001_initial.sql",
         "CREATE TABLE waves (id TEXT PRIMARY KEY);\n",
     )
@@ -121,9 +111,8 @@ def test_clean_fixture_has_no_unexplained_architecture(repo: Path) -> None:
 def test_new_durable_table_must_join_the_map(repo: Path) -> None:
     _write(
         repo,
-        "rust/loopflow/src/store/migrations/drafts/add_mirror.sql",
-        """-- depends_on: none
-CREATE TABLE mirrors (id TEXT);
+        "rust/loopflow/src/store/migrations/add_mirror.sql",
+        """CREATE TABLE mirrors (id TEXT);
 """,
     )
 

@@ -167,7 +167,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
         assert db.execute("SELECT * FROM session_events ORDER BY seq").fetchall() == history
     assert _captures(home) == before_reads, "public reads changed capture bytes or paths"
     _command(candidate, env, repo, "replay", capture)
-    _command(candidate, env, repo, "session", "connect", session)
+    _command(candidate, env, repo, "session", "resume", session)
     with sqlite3.connect(database) as db:
         assert (
             db.execute(
@@ -191,7 +191,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
     launches_before = (home / "launched").read_text().splitlines()
     with (root / "review.log").open("w+") as log:
         opened = subprocess.Popen(
-            [str(candidate), "session", "connect", review],
+            [str(candidate), "session", "resume", review],
             cwd=repo,
             env={**env, "LF_BIN": str(candidate)},
             stdin=subprocess.PIPE,

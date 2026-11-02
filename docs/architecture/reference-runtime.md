@@ -152,12 +152,12 @@ These examples use current command spellings; the lifecycle contract is above.
 ```bash
 lf -b implement
 lf session list --interactive false --task INF-123 --json
-lf session connect SESSION
+lf resume SESSION
 lf session rename SESSION "Migration review"
 lf session bind SESSION --task INF-123
 ```
 
-Every conversation has one LfSession regardless of launch surface. Connect
+Every conversation has one LfSession regardless of launch surface. Resume
 uses the existing AgentProcess where possible; client replacement retains its active
 turn. Name, feedback, native identity and history survive reconnect and recovery.
 A suggested title cannot overwrite a human-assigned title. CLI and Desktop use
@@ -192,7 +192,7 @@ including overlapping backward edges. Neither loop passes nor authored subgraphs
 create Graphs or lifecycles.
 
 Task and taskless execution use one Graph runner and need no synthetic
-planning records. The draft migration archives each earlier Graph row's name,
+planning records. A migration archives each earlier Graph row's name,
 state and last cursor as a `legacy_flow` observation on the Sessions it opened,
 then drops the Graph tables and the Session's Graph column. Configured acceptance
 and the machine's current-state cutover remain separate from schema verification.

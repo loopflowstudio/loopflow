@@ -48,7 +48,7 @@ struct WorkDestinationTests {
         let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args.contains("connect") { return encoded }
+            if args.prefix(2) == ["session", "resume"] { return encoded }
             if args.starts(with: ["desktop", "plan"]) { return planning }
             throw RegistryQueryError("Task entry cannot enumerate unrelated Sessions, launch a Workflow or take over a client")
         }
@@ -73,6 +73,108 @@ struct WorkDestinationTests {
         #expect(model.navigation.content == .terminals)
     }
 
+    @Test("New Task creates through one lf command, then shows its conversation")
+    func newTaskSelectsTheTaskAndOpensItsConversation() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let receipt = """
+        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
+         "graph": "code", "session_id": "\(record.id)"}
+        """
+        let created = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["task", "create"]) {
+                created.withLock { $0.append(args) }
+                return receipt
+            }
+            if args.prefix(2) == ["session", "resume"] { return encoded }
+            if args.starts(with: ["desktop", "plan"]) { return planning }
+            throw RegistryQueryError("New Task runs no separate start or connect sequence")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.navigation.palette = .newTask
+        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        #expect(created.withLock { $0 } == [["task", "create", "--no-wave", "--run", "--json", "--", "fix the flaky retry test"]])
+        #expect(model.navigation.palette == nil)
+        #expect(model.selection == .task(id: task.id))
+        #expect(installedSession(model, registry)?.id == record.id)
+    }
+
+    @Test("New Task selects the new Task before the window's other readings confirm")
+    func newTaskSelectsBeforeReadingsConfirm() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let receipt = """
+        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
+         "graph": "code", "session_id": "\(record.id)"}
+        """
+        let barrier = LinkedDestinationBarrier()
+        let held = OSAllocatedUnfairLock(initialState: true)
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["task", "create"]) { return receipt }
+            if args.prefix(2) == ["session", "resume"] { return encoded }
+            if args.starts(with: ["desktop", "plan"]) {
+                if held.withLock({ $0 }) { await barrier.wait("planning") }
+                return planning
+            }
+            throw RegistryQueryError("Unexpected New Task operation")
+        }
+        let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        let creating = Task { try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil) }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !(await barrier.contains("planning")), ContinuousClock.now < deadline { await Task.yield() }
+        #expect(model.selection == .task(id: task.id))
+        held.withLock { $0 = false }
+        await barrier.release("planning")
+        try await creating.value
+    }
+
+    @Test("A run that fails after New Task filed it selects the Task with the error; nothing is filed again")
+    func newTaskRunFailureSelectsTheFiledTask() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let receipt = """
+        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
+         "graph": null, "session_id": null}
+        """
+        let query = RegistryQuery { args, _ in
+            if args.starts(with: ["task", "create"]) {
+                throw RegistryQueryError("lf task run failed", stdout: receipt)
+            }
+            if args.starts(with: ["desktop", "plan"]) { return planning }
+            throw RegistryQueryError("A failed run opens no conversation")
+        }
+        let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        model.navigation.palette = .newTask
+        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        #expect(model.navigation.palette == nil)
+        #expect(model.selection == .task(id: task.id))
+        #expect(model.navigation.taskRunDrafts[task.id]?.error == "lf task run failed")
+    }
+
+    @Test("New Task keeps the sheet when nothing was filed")
+    func newTaskFailureBeforeFilingKeepsTheSheet() async throws {
+        let query = RegistryQuery { args, _ in
+            throw RegistryQueryError("not a repository")
+        }
+        let (model, _) = destinationModel(query: query, repoPath: "/repo")
+        model.navigation.palette = .newTask
+        await #expect(throws: RegistryQueryError.self) {
+            try await model.createTask(request: "fix it", wave: nil, graph: nil)
+        }
+        #expect(model.navigation.palette == .newTask)
+    }
+
     @Test func dashboardTileOpensConversationInPlace() async throws {
         let planning = try fixture()
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
@@ -80,7 +182,7 @@ struct WorkDestinationTests {
         let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
-            if args.contains("connect") { return encoded }
+            if args.prefix(2) == ["session", "resume"] { return encoded }
             if args.starts(with: ["desktop", "plan"]) { return planning }
             throw RegistryQueryError("Opening in a tile reads nothing else")
         }
@@ -110,17 +212,12 @@ struct WorkDestinationTests {
             work: .task(id: taskID))
         record.workspace = SessionWorkspace(machineId: "machine-local", worktree: "/src/task",
             taskId: taskID, unavailable: nil)
-        let encoded = try JSONEncoder().encode(record)
-        let active = String(decoding: encoded, as: UTF8.self)
-        var wire = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
-        // Preparation supplies a takeover command; the external client is still active.
-        wire["open_argv"] = ["lf", "session", "connect", record.id, "--takeover"]
-        let prepared = String(decoding: try JSONSerialization.data(withJSONObject: wire), as: UTF8.self)
-        let owner = ExternalConversationOwner(active: active, prepared: prepared)
+        // Every preparation reports the external client as still active.
+        let active = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["desktop", "plan"]) { return data }
             if args.starts(with: ["desktop", "sessions"]) { return #"{"entries":[\#(active)],"next":null}"# }
-            if ["connect", "attach"].contains(args.dropFirst().first), args.first == "session" { return try await owner.prepare(args) }
+            if args.prefix(2) == ["session", "resume"] { return active }
             throw RegistryQueryError("Unexpected Task conversation operation")
         }
         let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -136,7 +233,7 @@ struct WorkDestinationTests {
         #expect(workspace.conversationError == nil)
         #expect(model.taskOpening?.status == .usable)
         #expect(store.sessions.first?.state == .elsewhere)
-        #expect(await !owner.takeoverPrepared)
+        #expect(store.sessions.first?.surface == nil)
         // Inspect the production placeholder directly: ViewInspector cannot resolve
         // Observation environment objects while descending the workspace tree.
         let view = SessionPaneView(pane: workspace.multiplexer.focusedPane, isFocused: true,
@@ -152,8 +249,7 @@ struct WorkDestinationTests {
         while store.sessions.first?.state != .prepared, ContinuousClock.now < deadline { await Task.yield() }
         #expect(store.sessions.first?.state == .prepared)
         #expect(store.sessions.first?.surface?.id == record.id)
-        #expect(store.sessions.first?.launchArguments == ["lf", "session", "connect", record.id, "--takeover"])
-        #expect(await owner.takeoverPrepared)
+        #expect(store.sessions.first?.launchArguments == ["lf", "session", "resume", record.id])
         #expect(workspace.multiplexer.focusedPane.sessionId == record.id)
     }
 
@@ -173,7 +269,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
-            if args.starts(with: ["session", "connect", "--task"]) { await barrier.wait("prepare"); return encoded }
+            if args.starts(with: ["session", "resume", "--task"]) { await barrier.wait("prepare"); return encoded }
             if args.starts(with: ["desktop", "plan"]) { await barrier.wait("planning"); return data }
             throw RegistryQueryError("Unexpected opening operation")
         }
@@ -214,6 +310,59 @@ struct WorkDestinationTests {
         #expect(model.taskOpening?.status == .opening) // Native mount/input is separate.
     }
 
+    @Test("Open conversation opens whatever the pane names, held or not, even while native mount is pending")
+    func openConversationReplacesAPaneTheStoreDoesNotHold() async throws {
+        let data = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(data.utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        var record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        var wire = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
+        wire["actions"] = sessionActionFixture(state: "closed")
+        record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: wire))
+        record.workspace = try JSONDecoder().decode(SessionWorkspace.self, from: JSONSerialization.data(withJSONObject: [
+            "machine_id": "machine-local", "worktree": "/src/task", "task_id": task.runtime?.workId ?? task.id
+        ]))
+        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        let prepares = DestinationReadCounter()
+        let query = RegistryQuery { args, _ in
+            if args.contains("resume") { _ = await prepares.next(); return encoded }
+            if args.starts(with: ["desktop", "plan"]) { return data }
+            throw RegistryQueryError("Unexpected opening operation")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: wave.wave.repo)
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        // A saved layout restores a headless Run the window's Session inventory excludes.
+        let workspace = registry.workspace(for: model.workspaceKey(for: .task(id: task.id), repository: "repo"),
+            title: task.task.name, location: nil)
+        workspace.multiplexer.load(sessionId: "headless-run")
+
+        await model.openTaskConversation(task.id)
+        #expect(workspace.multiplexer.sessionPane?.sessionId == record.id)
+        #expect(model.taskOpening?.status == .opening)
+
+        workspace.multiplexer.load(sessionId: "headless-run")
+        await model.openTaskConversation(task.id)
+        #expect(workspace.multiplexer.sessionPane?.sessionId == record.id)
+        #expect(await prepares.next() == 3)
+    }
+
+    @Test func conversationHandedToAnotherRepositoryLeavesNoOpeningHere() async throws {
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(try fixture().utf8))
+        let wave = try #require(snapshot.waves.first)
+        let task = try #require(wave.tasks.items.first)
+        let query = RegistryQuery { _, _ in throw RegistryQueryError("The receiving window opens the conversation") }
+        let (model, _) = destinationModel(query: query, repoPath: "/origin")
+        var requests: [(String, LinkedWork?)] = []
+        model.openRepository = { requests.append(($0, $1)) }
+        model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+
+        await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, conversation: true),
+            expectedTaskID: task.id)
+        #expect(model.taskOpening == nil)
+        #expect(requests.last?.1 == .task(TaskLink(issue: task.task.identifier, repo: wave.wave.repo, conversation: true)))
+    }
+
     @Test(arguments: ["valid", "updated-inventory", "unavailable-inventory", "foreign-session", "missing-task", "unavailable-plan"])
     func ensuredTaskOpeningRetainsOtherSessionsAndValidation(outcome: String) async throws {
         let data = try fixture()
@@ -234,7 +383,7 @@ struct WorkDestinationTests {
                 if await reads.next() == 1 { return #"{"entries":[\#(other)],"next":null}"# }
                 if outcome == "updated-inventory" { return #"{"entries":[\#(updated)],"next":null}"# }
             }
-            if args.contains("connect") { return encoded }
+            if args.prefix(2) == ["session", "resume"] { return encoded }
             if args.starts(with: ["desktop", "plan"]) {
                 if outcome == "updated-inventory" { await barrier.wait("planning") }
                 if outcome == "unavailable-plan" { throw RegistryQueryError("Planning disconnected") }
@@ -375,7 +524,9 @@ struct WorkDestinationTests {
             "task_id": remoteID
         ]))
         var surface = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        surface["actions"] = sessionActionFixture(state: "closed")
+        // Its agent runs on the peer with no terminal showing it.
+        surface["state"] = "detached"
+        surface["actions"] = sessionActionFixture(state: "detached")
         surface["open_argv"] = ["ssh", "-tt", "peer", "owned-fixture"]
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: surface))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
@@ -397,7 +548,7 @@ struct WorkDestinationTests {
                 ]]), as: UTF8.self)
             }
             if command.starts(with: ["desktop", "sessions"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
-            if ["connect", "attach"].contains(command.dropFirst().first), command.first == "session" { return encoded }
+            if command.prefix(2) == ["session", "resume"] { return encoded }
             throw RegistryQueryError("No checkout, provider launch or transfer permitted")
         }
         let (model, workspaceRegistry) = destinationModel(query: query, repoPath: wave.wave.repo)
@@ -738,7 +889,8 @@ struct WorkDestinationTests {
             "machine_id": identity.machineId, "worktree": identity.worktree, "task_id": try #require(task.runtime?.workId)
         ]))
         var sessionJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as! [String: Any]
-        sessionJSON["actions"] = sessionActionFixture(state: "closed")
+        sessionJSON["state"] = "detached"
+        sessionJSON["actions"] = sessionActionFixture(state: "detached")
         record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: sessionJSON))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -747,7 +899,7 @@ struct WorkDestinationTests {
         let changes = String(decoding: try JSONSerialization.data(withJSONObject: #require(root["changes"])), as: UTF8.self)
         let query = RegistryQuery { args, _ in
             if args.starts(with: ["desktop", "sessions"]) { return #"{"entries":[\#(encoded)],"next":null}"# }
-            if ["connect", "attach"].contains(args.dropFirst().first), args.first == "session" {
+            if args.prefix(2) == ["session", "resume"] {
                 if outcome == "connection" { throw RegistryQueryError("Connection unavailable") }
                 return encoded
             }
@@ -774,7 +926,7 @@ struct WorkDestinationTests {
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
         let barrier = LinkedDestinationBarrier()
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            guard args.starts(with: ["session", "connect", "--task"]) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
+            guard args.starts(with: ["session", "resume", "--task"]) else { throw RegistryQueryError("Canceled preparation must not read or open another Task") }
             await barrier.wait("ensure")
             return encoded
         }, repoPath: wave.wave.repo)
@@ -901,7 +1053,7 @@ struct WorkDestinationTests {
         // Keep the Wave, but remove the historical Task from the current plan.
         let current = try oneTask(data, taskId: "absent")
         let (model, _) = destinationModel(query: RegistryQuery { args, _ in
-            if args.contains("connect") { return encoded }
+            if args.prefix(2) == ["session", "resume"] { return encoded }
             if args.contains("--task") { return exact }
             if args.prefix(2) == ["desktop", "plan"] { return current }
             if args.prefix(2) == ["desktop", "sessions"] { return #"{"entries":[\#(encoded)],"next":null}"# }
@@ -1886,28 +2038,5 @@ private actor LinkedDestinationBarrier {
 private actor DestinationReadCounter {
     private var count = 0
     func next() -> Int { count += 1; return count }
-}
-private actor ExternalConversationOwner {
-    let active: String
-    let prepared: String
-    private(set) var takeoverPrepared = false
-
-    init(active: String, prepared: String) {
-        self.active = active
-        self.prepared = prepared
-    }
-
-    func prepare(_ args: [String]) throws -> String {
-        if args.contains("--takeover") {
-            takeoverPrepared = true
-            return prepared
-        }
-        // A client outside any lf owner leaves nothing to attach to.
-        if args.contains("--if-free") { return "null" }
-        guard args.contains("--try") || args.contains("ensure") else {
-            throw RegistryQueryError("This Session is active in another terminal; use Move here to transfer it")
-        }
-        return active
-    }
 }
 #endif

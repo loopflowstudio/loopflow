@@ -3,7 +3,7 @@
 //!
 //! Hosts translate only documented caller context and open/focus operations.
 //! They never select a conversation: every terminal destination runs
-//! `lf session connect` for the resolved Work, whose admission and attachment
+//! `lf session resume` for the resolved Work, whose admission and attachment
 //! fences own reuse. Desktop resolves the same address through `--link --json`.
 
 use std::io::IsTerminal;
@@ -179,8 +179,8 @@ impl Resolved {
         }
     }
 
-    fn connect_argv(&self, lf: &str) -> Vec<String> {
-        let mut argv = vec![lf.to_string(), "session".into(), "connect".into()];
+    fn resume_argv(&self, lf: &str) -> Vec<String> {
+        let mut argv = vec![lf.to_string(), "session".into(), "resume".into()];
         match (&self.session, &self.url.target) {
             (Some(session), _) => argv.push(session.clone()),
             (None, WorkTarget::Task(id)) => argv.extend(["--task".into(), id.clone()]),
@@ -190,11 +190,11 @@ impl Resolved {
         argv
     }
 
-    /// The connect argv as one shell command line, for hosts that type it.
+    /// The resume argv as one shell command line, for hosts that type it.
     /// A host's new shell starts from the host's environment, so a private
     /// Home travels with the command.
-    fn connect_shell(&self, lf: &str) -> Result<String, RouteError> {
-        let mut argv = self.connect_argv(lf);
+    fn resume_shell(&self, lf: &str) -> Result<String, RouteError> {
+        let mut argv = self.resume_argv(lf);
         if crate::store::custom_home_selected() {
             let home = format!("LF_HOME={}", crate::store::lf_home_dir().display());
             argv.splice(0..0, ["env".to_owned(), home]);
@@ -212,7 +212,7 @@ impl Resolved {
 
     fn fallback_argv(&self) -> Vec<String> {
         if self.session.is_some() && !matches!(self.url.target, WorkTarget::Task(_)) {
-            return self.connect_argv("lf");
+            return self.resume_argv("lf");
         }
         vec!["lf".into(), "open".into(), self.url.to_string()]
     }
@@ -295,7 +295,12 @@ pub(crate) fn selected_context(
     cli: &crate::lf::Cli,
     session: Option<&str>,
 ) -> Result<ContextExplanation> {
-    let resolution = work_context(cli.task.as_deref(), cli.wave.as_deref(), session)?;
+    let resolution = work_context(
+        &std::env::current_dir()?,
+        cli.task.as_deref(),
+        cli.wave.as_deref(),
+        session,
+    )?;
     if cli.selects_repository() {
         if let ContextFact::Bound { value, .. } = &resolution.repository_path {
             anyhow::ensure!(
@@ -310,10 +315,11 @@ pub(crate) fn selected_context(
     Ok(resolution)
 }
 
-/// Work, its execution location and an optional exact Session, from the cwd.
-/// A plain Git repository opens before planning has ever been initialized;
-/// only an absent registry allows that.
+/// Work, its execution location and an optional exact Session, from
+/// `directory`. A plain Git repository opens before planning has ever been
+/// initialized; only an absent registry allows that.
 fn work_context(
+    directory: &Path,
     task: Option<&str>,
     wave: Option<&str>,
     session: Option<&str>,
@@ -323,7 +329,7 @@ fn work_context(
         && session.is_none()
         && crate::store::read_existing_registry()?.is_none()
     {
-        let repo = crate::repository::CanonicalRepo::current()?
+        let repo = crate::repository::CanonicalRepo::containing(directory)?
             .context("select a Git repository with --repo before opening it")?;
         let mut resolution = ContextExplanation::empty();
         resolution.repository_path = ContextFact::bound(repo, "local_locator");
@@ -332,9 +338,9 @@ fn work_context(
     // Without a Task, an exact Session selects the Work; a Wave must contain it.
     let mut resolution = match (task, session) {
         (None, Some(session)) => {
-            let selected = super::context::explain(None, None, Some(session), None)?;
+            let selected = super::context::explain_in(directory, None, None, Some(session), None)?;
             if let Some(wave) = wave {
-                let work = super::context::explain(Some(wave), None, None, None)?;
+                let work = super::context::explain_in(directory, Some(wave), None, None, None)?;
                 anyhow::ensure!(
                     matches!((&work.wave, &selected.wave),
                     (ContextFact::Bound { value: wave, .. }, ContextFact::Bound { value: session_wave, .. }) if wave == session_wave),
@@ -343,7 +349,7 @@ fn work_context(
             }
             selected
         }
-        _ => super::context::explain(wave, task, None, None)?,
+        _ => super::context::explain_in(directory, wave, task, None, None)?,
     };
     if let ContextFact::Bound { value, .. } = &resolution.task {
         let task = crate::durable::TaskId::parse(value)?;
@@ -364,7 +370,7 @@ fn work_context(
                 source: "explicit_session_on_execution_machine".into(),
             };
         } else {
-            let selected = super::context::explain(None, None, Some(session), None)?;
+            let selected = super::context::explain_in(directory, None, None, Some(session), None)?;
             anyhow::ensure!(
                 matches!((&resolution.task, &selected.task),
                 (ContextFact::Bound { value: task, .. }, ContextFact::Bound { value: session_task, .. }) if task == session_task),
@@ -572,7 +578,7 @@ fn folder_name(path: &Path) -> Option<&str> {
 
 /// Registered repositories whose folder has this name, collapsed by location
 /// and identity. Folder names locate; the registered identity decides.
-fn repository_for(store: Option<&Store>, url: &WorkUrl) -> Result<PathBuf> {
+fn repository_for(store: Option<&Store>, url: &WorkUrl, directory: &Path) -> Result<PathBuf> {
     let registered = registered(store)?;
     if let Some(qualifier) = &url.qualifier {
         return registered
@@ -599,7 +605,7 @@ fn repository_for(store: Option<&Store>, url: &WorkUrl) -> Result<PathBuf> {
         [repo] => Ok(repo.path.clone()),
         [] => {
             // The current checkout locates a plain repository before it has a plan.
-            let current = crate::repository::CanonicalRepo::current()
+            let current = crate::repository::CanonicalRepo::containing(directory)
                 .ok()
                 .flatten()
                 .map(|repo| repo.as_path().to_path_buf())
@@ -1199,23 +1205,14 @@ struct Live {
 fn elsewhere(target: &Resolved) -> Option<Live> {
     let id = target.conversation()?;
     let store = crate::store::read_existing_registry().ok().flatten()?;
-    let summary = store
-        .sqlite
-        .session_summary(id, time::OffsetDateTime::now_utc().unix_timestamp())
+    let summary = crate::ops::human_session::viewed_summary(&store.sqlite, id)
         .ok()
         .flatten()?;
-    if summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Live {
-        return None;
-    }
-    let unviewed = store
-        .sqlite
-        .session_transport(id)
-        .ok()
-        .flatten()
-        .is_some_and(|owner| crate::transport::controlled(&owner).is_ok_and(|held| !held));
-    (!unviewed).then(|| Live {
+    let viewed = summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
+        && !summary.unviewed;
+    viewed.then(|| Live {
         reason: format!(
-            "this conversation is already open in another client; move it here with `lf session connect {id} --takeover` (unsent text there is not transferred)"
+            "this conversation is already open in another client; move it here with `lf resume {id}` (unsent text there is not transferred)"
         ),
         placement: summary.terminal_id,
     })
@@ -1251,7 +1248,7 @@ fn open_desktop(
 }
 
 fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.connect_shell(lf)?;
+    let shell = target.resume_shell(lf)?;
     let mut command = Command::new("cmux");
     command
         .env("CMUX_QUIET", "1")
@@ -1278,7 +1275,7 @@ fn open_cmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteEr
 }
 
 fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.connect_shell(lf)?;
+    let shell = target.resume_shell(lf)?;
     let mut create = Command::new("herdr");
     create
         .args(["workspace", "create", "--cwd"])
@@ -1313,7 +1310,7 @@ fn open_herdr(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteE
 /// A new window right after the caller's, named for the Work. Its pane is the
 /// destination: pane IDs are unique for the server's life, unlike indexes.
 fn open_tmux(target: &Resolved, focus: bool, lf: &str) -> Result<Opened, RouteError> {
-    let shell = target.connect_shell(lf)?;
+    let shell = target.resume_shell(lf)?;
     let window = |after: Option<&str>| {
         let mut command = Command::new("tmux");
         command.arg("new-window");
@@ -1360,7 +1357,7 @@ fn open_terminal(
     in_place: bool,
     lf: &str,
 ) -> Result<Opened, RouteError> {
-    let argv = target.connect_argv(lf);
+    let argv = target.resume_argv(lf);
     if in_place {
         let status = Command::new(&argv[0])
             .args(&argv[1..])
@@ -1381,7 +1378,7 @@ fn open_terminal(
         "cd {} && exec {}",
         shlex::try_quote(&target.cwd().display().to_string())
             .map_err(|error| RouteError::Definite(error.to_string()))?,
-        target.connect_shell(lf)?
+        target.resume_shell(lf)?
     );
     if cfg!(target_os = "macos") {
         // Launch Services opens a .command in the default terminal, without
@@ -1555,17 +1552,7 @@ fn targets(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<Resolved>, Vec<
                 cli.task.is_none() && cli.wave.is_none(),
                 "select Work with either a link or --task/--wave, not both"
             );
-            let url = WorkUrl::parse(text)?;
-            let session = session.or_else(|| url.session.clone());
-            let diff = args.diff || url.diff;
-            let _cwd = Cwd::enter(&repository_for(store, &url)?)?;
-            let (task, wave) = match &url.target {
-                WorkTarget::Task(id) => (Some(id.as_str()), None),
-                WorkTarget::Wave(name) => (None, Some(name.as_str())),
-                WorkTarget::Repository => (None, None),
-            };
-            let context = work_context(task, wave, session.as_deref())?;
-            describe(store, &context, session, diff, None)?
+            url_target(store, &std::env::current_dir()?, text, session, args.diff)?
         }
         None => {
             let context = selected_context(cli, session.as_deref())?;
@@ -1573,6 +1560,34 @@ fn targets(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<(Vec<Resolved>, Vec<
         }
     };
     Ok((vec![resolved], Vec::new()))
+}
+
+/// The Work a link names, resolved as if `lf open` ran in `directory`.
+fn url_target(
+    store: Option<&Store>,
+    directory: &Path,
+    text: &str,
+    session: Option<String>,
+    diff: bool,
+) -> Result<Resolved> {
+    let url = WorkUrl::parse(text)?;
+    let session = session.or_else(|| url.session.clone());
+    let diff = diff || url.diff;
+    let repository = repository_for(store, &url, directory)?;
+    let (task, wave) = match &url.target {
+        WorkTarget::Task(id) => (Some(id.as_str()), None),
+        WorkTarget::Wave(name) => (None, Some(name.as_str())),
+        WorkTarget::Repository => (None, None),
+    };
+    let context = work_context(&repository, task, wave, session.as_deref())?;
+    describe(store, &context, session, diff, None)
+}
+
+/// What `lf --cwd <directory> open <url> --link --json` prints.
+pub fn url_links(directory: &Path, url: &str) -> Result<Vec<WorkLink>> {
+    let store = crate::store::read_existing_registry()?;
+    let target = url_target(store.as_ref(), directory, url, None, false)?;
+    Ok(vec![target.link(route(OpenHost::Auto))])
 }
 
 /// Read-only links for `--link` and `--explain`.
@@ -1704,23 +1719,6 @@ fn fallback_text(argv: &[String]) -> String {
 fn print_unknown(unknown: &[String]) {
     for item in unknown {
         println!("Unknown: {item}");
-    }
-}
-
-struct Cwd(PathBuf);
-
-impl Cwd {
-    fn enter(path: &Path) -> Result<Self> {
-        let previous = std::env::current_dir()?;
-        std::env::set_current_dir(path)
-            .with_context(|| format!("enter repository {}", path.display()))?;
-        Ok(Self(previous))
-    }
-}
-
-impl Drop for Cwd {
-    fn drop(&mut self) {
-        let _ = std::env::set_current_dir(&self.0);
     }
 }
 

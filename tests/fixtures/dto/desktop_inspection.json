@@ -186,7 +186,7 @@
         "roadmap_generated_at": "2026-10-08T19:00:00Z",
         "condition_observed_at": "2026-10-08T18:59:58Z",
         "actions": {
-          "recommended": "resume",
+          "recommended": "run",
           "reason": "Inspect earlier Graphs before continuing"
         },
         "run_control": {

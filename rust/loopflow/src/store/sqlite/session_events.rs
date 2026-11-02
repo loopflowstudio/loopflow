@@ -1527,6 +1527,85 @@ mod tests {
             .any(|session| session.id == "orphan"));
     }
 
+    /// `lf history` reads inputs by this bound and stops early, so an input
+    /// captured long ago whose completion is the newest fact still leads.
+    #[test]
+    fn no_decoded_time_follows_its_inputs_bound() {
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let old = crate::session_record::new_artifact_key();
+        let session = store.test_session("old", &old);
+        store.test_session("new", &crate::session_record::new_artifact_key());
+        store
+            .record_session_event(
+                "new",
+                &"thread".into(),
+                "turn",
+                SessionEventKind::Started,
+                &json!({}),
+            )
+            .unwrap();
+        // Captures are immutable and stamped now; later facts follow them.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE session_events SET observed_at=?1 WHERE session_id='new' AND kind='started'",
+                [now + 100],
+            )
+            .unwrap();
+        let ended_at = time::OffsetDateTime::from_unix_timestamp(now + 200).unwrap();
+        store
+            .retain_session_observation(
+                &session,
+                &crate::session::SessionObservation {
+                    artifact_key: old.clone(),
+                    source: "terminal.json".into(),
+                    observed_at: ended_at.unix_timestamp(),
+                    task_id: None,
+                    wave_id: None,
+                    payload: json!({"input_id": old, "source": "terminal.json",
+                    "evidence": crate::session_record::TerminalReceipt {
+                        schema_version: 1,
+                        outcome: "ok".into(),
+                        ended_at,
+                        result_ref: None,
+                    }}),
+                },
+            )
+            .unwrap();
+
+        let mut pending = store
+            .pending_conversation_history(None, None, None, 0, true)
+            .unwrap();
+        pending
+            .inputs
+            .sort_by_key(|input| std::cmp::Reverse(input.latest));
+        let histories: Vec<_> = pending
+            .inputs
+            .iter()
+            .map(|input| (input.latest, store.decode_history(&pending, input).unwrap()))
+            .collect();
+        assert_eq!(histories[0].1.artifact_key.as_deref(), Some(old.as_str()));
+        assert_eq!(histories[0].1.recorded_at, Some(now + 200));
+        for (latest, history) in histories {
+            let reported = [Some(history.observed_at), history.recorded_at]
+                .into_iter()
+                .chain(
+                    history
+                        .providers
+                        .iter()
+                        .flat_map(|provider| [provider.started_at, provider.completed_at]),
+                )
+                .flatten();
+            for at in reported {
+                assert!(at <= latest, "{at} follows its input's bound {latest}");
+            }
+        }
+    }
+
     #[test]
     fn completed_turn_does_not_complete_the_conversation() {
         let home = tempfile::tempdir().unwrap();

@@ -16,6 +16,7 @@ while [ "$#" -gt 0 ]; do
     *) shift ;;
   esac
 done
+cargo build --manifest-path "$ROOT/Cargo.toml" -p loopflow-ffi --lib
 swift build --build-tests --package-path "$ROOT/swift" ${build_args[@]+"${build_args[@]}"}
 exec uv run --no-sync python "$ROOT/scripts/swift_test_limit.py" \
   python "$ROOT/scripts/test_network.py" --desktop \

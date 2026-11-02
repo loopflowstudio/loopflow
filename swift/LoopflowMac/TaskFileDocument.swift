@@ -3,7 +3,6 @@ import AppKit
 import Combine
 import Loopflow
 import Observation
-import os
 
 /// One native buffer per Task/path. Its view, undo stack and selection outlive navigation.
 @MainActor
@@ -569,13 +568,11 @@ final class TaskFilesStore {
         do { return try await Task.detached { try Self.checkIgnore(candidates, in: cwd) }.value } catch {
             if !ignoreFailureLogged {
                 ignoreFailureLogged = true
-                Self.logger.warning("File observation keeps ignored paths: \(error.localizedDescription, privacy: .public)")
+                DesktopLog.home.warn("File observation keeps ignored paths", ["error": error.localizedDescription])
             }
             return []
         }
     }
-
-    private static let logger = Logger(subsystem: "studio.loopflow", category: "task-files")
 
     private nonisolated static func checkIgnore(_ paths: Set<String>, in checkout: String) throws -> Set<String> {
         let process = Process()

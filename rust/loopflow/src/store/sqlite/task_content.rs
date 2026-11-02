@@ -120,6 +120,16 @@ impl SqliteStore {
             edits.push(Edit::TaskAssignee(value.clone()));
         }
         PlanningChanges::Task(id).save(&tx, &edits)?;
+        // Linear has no field for it; it travels between Machines as local planning.
+        if let Some(value) = &patch.regressed_in {
+            super::planning_write::local(
+                &tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    id.as_str(),
+                    &[Edit::TaskRegressedIn(Some(value.clone()))],
+                ),
+            )?;
+        }
         if let Some(rank) = patch.rank {
             super::planning_order::reorder_in(&tx, &task, rank)?;
         }

@@ -43,7 +43,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
             None,
         ),
         (
-            key("deferred", WorkWorkspaceKind::Task),
+            key("unstarted", WorkWorkspaceKind::Task),
             Some(root.clone()),
             Some(true),
         ),
@@ -73,7 +73,7 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
         states: match key.id.as_str() {
             "backlog" => BTreeSet::from([SelectionState::Backlog]),
             "done" => BTreeSet::from([SelectionState::Done]),
-            "deferred" => BTreeSet::from([SelectionState::Deferred]),
+            "unstarted" => BTreeSet::from([SelectionState::Unstarted]),
             "idle" => BTreeSet::from([SelectionState::Idle]),
             _ => BTreeSet::new(),
         },
@@ -105,13 +105,13 @@ fn defaults_include_child_waves_and_working_wave_tasks() {
             .iter()
             .map(|member| member.work.id.as_str())
             .collect::<Vec<_>>(),
-        ["deferred", "idle"]
+        ["unstarted", "idle"]
     );
     assert_eq!(filtered.unavailable.len(), 1);
     let repo = node("root", SelectionExpression::Repository)
         .resolve("repo", &work, &BTreeMap::new())
         .unwrap();
-    assert_eq!(repo.members.len(), 2); // immediate Wave plus the idle Task; deferred isn't Working
+    assert_eq!(repo.members.len(), 2); // immediate Wave plus the idle Task; unstarted isn't Working
     let explicit = node(
         "backlog",
         SelectionExpression::Work {
@@ -551,7 +551,6 @@ fn working_tasks_are_idle_active_or_moving_and_shipping_has_its_own_query() {
         ("active", SelectionState::Active),
         ("moving", SelectionState::Moving),
         ("unstarted", SelectionState::Unstarted),
-        ("deferred", SelectionState::Deferred),
         ("shipping", SelectionState::Shipping),
     ]
     .into_iter()

@@ -12,7 +12,7 @@ This is the governing document of the loopflow codebase. Contributors and agents
 - A Task's work is every Session, Graph and Process in its checkout, plus explicit binds; no Graph is selected over another
 - A Task's workflow is the graph it took up and the step it stands at; workflows are ordinary graph files, never a second definition kind. An `interactive:` step is where a person takes part: `lf graph` runs it in place, `lf task run` stops before it (the Task waits in its conversation) and the next run continues after it; `--from <step>` starts anywhere; `-i`/`-b` choose for every step of a launch
 - Task completion, graph position and Process liveness are independent; reaching `end` requests completion, and a failed request retries without replaying the run
-- Task state = `unstarted · idle · active · moving · shipping · deferred · done · abandoned`, derived from checkout, graph position, a running Graph and the Auto-Ship approval; Session state (`available · busy`) is a separate axis. Working Tasks are idle, active or moving. `lf ship` or any run into `end` approves Auto-Ship, which may land the PR; `lf ship --stop` withdraws
+- Task state = `unstarted · idle · active · moving · shipping · done · abandoned`, derived from checkout, graph position, a running Graph and the Auto-Ship approval; Session state (`available · busy`) is a separate axis. Working Tasks are idle, active or moving. Ownership is separate: `lf task claim` assigns, `lf task unassign` clears the owner and Linear assignee, and nothing (ship, CI repair, Wave operators) moves an unassigned Task. `lf ship` or any run into `end` approves Auto-Ship, which may land the PR; `lf ship --stop` withdraws it until the next `lf ship`, and a stopped Task's run waits at its landing step. `lf task run` launches; `-b` approves like `lf ship`
 - Started unfinished Tasks move with identity, worktree, PR, and invocation intact
 - Unreviewed backlog stays in its Project until explicit disposition; uncertain evidence never auto-closes work
 - Current navigation is Wave → Task; chapter history retains each Wave's past plan
@@ -153,9 +153,9 @@ When editing docs in `scratch/`:
 - `lf pr submit` and `lf pr land` invoke `lf scratch clear`, removing added files while retaining existing files and edits
 
 When changing the SQLite schema:
-- Keep one draft per Task: `uv run python scripts/new_migration.py <name>` creates it or prints the one the branch already has
-- Edit that draft in place until landing; never add a draft that alters or drops what an unreleased draft created
-- Test the released frontier against the finished draft, not the steps between
+- Keep one migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the one the branch already has
+- Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix it forward
+- Test the merged frontier against the finished migration, not the steps between
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>`
   triggers to advance their domain in `store_revisions` inside the write.
 - Runtime migration preflights recognize draft markers inside release batches and
@@ -199,8 +199,8 @@ When editing Rust tests:
 - From an lf-launched shell, run `cargo test` with inherited `LF_*` unset and `< /dev/null`: capture fixtures follow `LF_HOME`, and `lf task create` reads a piped report from open stdin.
 - Claims name their person by the Task repository's Git `user.email` and fail without one; fixtures set a repository-local identity (`TestRepo` does), and CI test jobs set only a global fallback.
 - Library and integration fixtures that mutate process environment share `loopflow_test_support::env_lock`; per-suite locks cannot isolate library modules.
-- `SqliteStore::open_ephemeral` includes the build's draft migrations; do not replay
-  those drafts with `apply_migration_for_test`.
+- `SqliteStore::open_ephemeral` applies the build's whole migration catalog; do not
+  replay a migration with `apply_migration_for_test`.
 - Fake `gh` scripts route `api graphql` calls by query name; renaming a query means grepping `rust/loopflow/tests/` (standalone binaries included) for the old name.
 - Tests that redirect process-wide stdout/stderr descriptors run in isolated child processes, never in the shared test runner.
 - Native library fixtures use `TestLedgerGuard` so invocation and capture share a store. Pin blocking workers with `journal::with_test_ledger`; thread-local fixture selection does not follow `LF_HOME`.
@@ -273,7 +273,8 @@ competing plans remain unresolved. Preserve active Task identity, worktree, PR
 and execution. Preserve unreviewed backlog until explicit disposition; missing evidence is unknown.
 Current navigation stays Wave → Task and Linear retains past Projects.
 
-LfProcess is one actual lf process, including direct and agent-issued nested commands.
+LfProcess is one actual lf process that changes Work, including direct and agent-issued
+nested commands; reads, navigation and arrangement record none (`Commands::changes_work`).
 Its `id`, an `LfProcessId`, is durable Loopflow identity; `pid` is only the optional
 Unix PID and may collide across history. References are `<role>_lf_process_id`:
 `lf_process_id`, `parent_lf_process_id`. AgentProcess is the provider's OS process
@@ -328,7 +329,7 @@ When accepted work needs a developer tool the Machine lacks, install it
 missing tool is never a reason to defer. Keep Machine-only tools out of
 repository config CI also reads: sccache runs through `~/.cargo/config.toml`.
 `scripts/testing.md` holds the shared command list, and module READMEs
-(`rust/loopflow/tests/`, `scripts/`, `swift/`, `website/`, `.github/`) own
+(`rust/loopflow/tests/`, `scripts/`, `swift/`, `website/`) and `.github/CI.md` own
 their boundary checks.
 
 # Code Organization

@@ -133,6 +133,15 @@ pub fn list(repo: &Path, json: bool) -> Result<()> {
 /// How many times one `lf task run` starts its Graph before giving up.
 const TASK_RUN_ATTEMPTS: u32 = 3;
 
+/// A Task run whose every attempt failed with the same error. A shipped Task
+/// stops shipping on it rather than starting the run again later.
+#[derive(Debug, thiserror::Error)]
+#[error("the run of {run} failed {TASK_RUN_ATTEMPTS} times with the same error; this Task run stops here: {cause}")]
+pub struct RepeatedRunFailure {
+    pub run: String,
+    pub cause: String,
+}
+
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
 /// start it again while a Graph process fails. Each attempt records its own
 /// GraphProcess beneath this process. A Graph held for a person or a watcher, an
@@ -156,6 +165,8 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
         release && !cli.batch && !cli.interactive && crate::transport::current().is_some();
     let mut released = false;
     let mut attempt = 1;
+    // The error every failed attempt so far shared, if they all shared one.
+    let mut repeated: Option<String> = None;
     loop {
         let mark = store.process_mark(&process)?;
         let mut log = letting_go
@@ -192,17 +203,33 @@ pub fn run_task_graph_for(cli: &Cli, task: &Task, run: &str, release: bool) -> R
             return Err(crate::process::CommandExit(130).into());
         }
         // Only a Graph process that failed is started again.
-        let failed = status.code() == Some(1) && attempt_graph(store, &process, mark)?.is_some();
-        if failed {
+        let graph = match status.code() {
+            Some(1) => attempt_graph(store, &process, mark)?,
+            _ => None,
+        };
+        let failed = graph.is_some();
+        if let Some(graph) = &graph {
             if let Some(stash) = crate::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
                     "The run of {run} failed with the checkout's edits retained in stash {stash}; this Task run stops here. Restore them with `git stash apply --index {stash}`."
                 );
                 return Err(crate::process::CommandExit(1).into());
             }
+            let cause = store.failure_cause(graph)?.map(|(_, cause)| cause);
+            repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
         }
         if !failed || attempt == TASK_RUN_ATTEMPTS {
             if failed {
+                if let Some(cause) = repeated {
+                    // Render it here: a detached run's log closes when this
+                    // process records its exit, before `main` prints errors.
+                    let repeated = RepeatedRunFailure {
+                        run: run.to_string(),
+                        cause,
+                    };
+                    eprintln!("{repeated}");
+                    return Err(anyhow::Error::new(exit_of(status)).context(repeated));
+                }
                 eprintln!("The run of {run} failed {attempt} times; this Task run stops here.");
             }
             return Err(exit_of(status).into());
@@ -406,6 +433,7 @@ fn execute(
             launcher: cli,
             position: Mutex::new(start.clone()),
             task,
+            task_run: task_run.is_some(),
             interrupt,
         };
         // A chapter rotation moving this checkout's Task excludes new work in it.
@@ -493,9 +521,7 @@ fn report_outcome(outcome: GraphOutcome) -> Result<()> {
     match outcome {
         GraphOutcome::Completed => Ok(()),
         GraphOutcome::StoppedAt(step) => {
-            eprintln!(
-                "Stopped at {step}, an interactive step; the Task conversation takes it from here."
-            );
+            eprintln!("Stopped at {step}; the Task waits there for its conversation.");
             Ok(())
         }
         GraphOutcome::Interrupted => Err(crate::process::CommandExit(130).into()),
@@ -668,6 +694,8 @@ struct RunningGraph<'a> {
     /// Where the runner stands, as of its last checkpoint.
     position: Mutex<ExecutionCursor>,
     task: Option<crate::durable::TaskId>,
+    /// This Graph carries its Task's `lf task run`, which a stop keeps from merging.
+    task_run: bool,
     /// The Task's latest interrupt when its run began; a later one stops the Graph.
     interrupt: Option<i64>,
 }
@@ -717,6 +745,30 @@ impl RunningGraph<'_> {
         Ok(Some(step))
     }
 
+    /// Where a Task run waits instead of merging: the step about to run merges
+    /// and someone stopped shipping the Task. Read when the step is reached,
+    /// so a stop made mid-run counts; an unreadable stop fails the step.
+    fn stopped_landing(&self) -> Result<Option<String>> {
+        let Some(task) = self.task.as_ref().filter(|_| self.task_run) else {
+            return Ok(None);
+        };
+        let Some(step) = self
+            .current()
+            .as_ref()
+            .and_then(crate::task_graph::landing_name)
+        else {
+            return Ok(None);
+        };
+        let Some(stop) = self.store.sqlite.task_ship_stop(task)? else {
+            return Ok(None);
+        };
+        let by = crate::ops::task::ship::starter(&self.store.sqlite, self.cwd, stop.by.as_ref())?;
+        eprintln!(
+            "Waiting at {step}: not approved to merge ({by} stopped shipping). `lf ship` lands it."
+        );
+        Ok(Some(step))
+    }
+
     /// Whether someone interrupted this Graph's Task after its run began.
     fn interrupted(&self) -> bool {
         let (Some(task), Some(cursor)) = (&self.task, self.interrupt) else {
@@ -750,6 +802,7 @@ impl RunningGraph<'_> {
         let mut command = tokio::process::Command::new(crate::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
+        command.env(crate::journal::GRAPH_STEP_ENV, "1");
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");
@@ -904,6 +957,9 @@ impl SkillExecutor for &RunningGraph<'_> {
         skill: &ConcreteSkill,
         ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        if let Some(step) = self.stopped_landing()? {
+            return Ok(SkillOutcome::Unapproved(step));
+        }
         crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let name = &skill.skill.name;
         print_step_progress(ctx.progress, name);
@@ -993,7 +1049,7 @@ impl SkillExecutor for &RunningGraph<'_> {
                 "--output-schema".to_owned(),
                 output.schema().to_string(),
                 "session".to_owned(),
-                "connect".to_owned(),
+                "resume".to_owned(),
                 conversation,
                 "--message".to_owned(),
                 format!("The previous final output was invalid: {error}. Return a corrected value using the declared schema; preserve the preceding work.{}", output.instructions()),
@@ -1008,6 +1064,9 @@ impl SkillExecutor for &RunningGraph<'_> {
         ops: &crate::graph::ConcreteCommand,
         _ctx: ExecutionContext,
     ) -> Result<SkillOutcome> {
+        if let Some(step) = self.stopped_landing()? {
+            return Ok(SkillOutcome::Unapproved(step));
+        }
         crate::ops::linear_observe::sync_repository(&self.store, &self.cwd.to_string_lossy()).await;
         let label = ops.item.display_name();
         eprintln!("op: {label}");
@@ -1126,6 +1185,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: None,
+                task_run: false,
                 interrupt: None,
             };
             runtime.block_on(async {
@@ -1155,7 +1215,8 @@ mod tests {
                     }
                     .unwrap();
                     assert_eq!(outcome, SkillOutcome::Completed);
-                    assert_eq!(state.lock().await.requests, 1);
+                    // One delta, then the Project its changed issue names.
+                    assert_eq!(state.lock().await.requests, 2);
                 }
             });
         });
@@ -1205,6 +1266,7 @@ mod tests {
                 launcher: &cli,
                 position: Mutex::new(ExecutionCursor::default()),
                 task: Some(task.id.clone()),
+                task_run: false,
                 interrupt: Some(
                     runtime
                         .block_on(fixture.store.latest_interrupt_id(&work))

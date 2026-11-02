@@ -85,7 +85,7 @@ the CLI under [`lf/`](../../rust/loopflow/src/lf/).
 ```bash
 lf task claim LOO-123               # you, on this Machine
 lf task move LOO-123 --machine mini # same person, mini's Machine
-lf task unclaim LOO-123             # unowned, history intact
+lf task unassign LOO-123             # unowned, history intact
 lf desktop task LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
@@ -122,10 +122,10 @@ so single-Machine use needs no setup. `lf wave show`'s `machine` field reads the
 same resolver.
 
 Setting the Session Machine moves the Wave Session with its native provider
-history, as `lf --machine <machine> resume <session>` does. `lf session connect --wave <w>`,
-a bare connect resolving to a Wave or the repository, and Desktop's Wave Session
+history, as `lf --machine <machine> resume <session>` does. `lf resume --wave <w>`,
+a bare resume resolving to a Wave or the repository, and Desktop's Wave Session
 route to the Session Machine over `lf --machine`. `lf open` reads a primary on
-another of your Machines through that connect, never from this Machine's copy.
+another of your Machines through that resume, never from this Machine's copy.
 
 A Task's Machine is captured in its claim, not inherited. Changing the Wave Machine
 moves no existing Task; `lf task move <task> --machine <machine>` moves one. It
@@ -377,12 +377,12 @@ Private-Home development and tests retain explicit `LF_BIN` selection. Store
 schema validation and migration authority still apply to every build; ordinary
 main-Machine opens never initialize or advance its schema.
 
-`LF_HOME` explicitly selects an empty, disposable experiment. Its database is
+`LF_HOME` explicitly selects a private, disposable Home. Its database is
 always `$LF_HOME/loopflow.db`; no other variable selects a store. Every variable
-Loopflow sets or reads is listed in [Environment](environment.md). Its schema is
-initialized once and must match on subsequent opens. A schema mismatch requires
-a new experiment. Loopflow neither copies main data into it nor upgrades,
-repairs, restores or promotes its contents.
+Loopflow sets or reads is listed in [Environment](environment.md). A private Home
+migrates itself on open, including a branch's unmerged migration; editing that
+migration afterwards needs a fresh `LF_HOME`. Loopflow never copies main data into
+it or promotes its contents.
 
 Published installation verifies immutable artifacts, validates the candidate on
 a temporary database snapshot, and advances only the main database under the

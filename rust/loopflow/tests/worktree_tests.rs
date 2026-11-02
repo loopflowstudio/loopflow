@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use std::time::{Duration, SystemTime};
 use std::{fs, path::PathBuf};
@@ -6,7 +6,8 @@ use std::{fs, path::PathBuf};
 use loopflow::git::worktrees::{
     create_named_worktree, list_worktrees, main_repo_root, plan_placement, prune_worktrees,
     push_branch_with_upstream, schedule_upstream_sync, sibling_worktree_name_with_main,
-    PlacementStrategy, WorktreeSegment,
+    PlacementStrategy, WorktreeKeepReason, WorktreeOwnership, WorktreePruneReason,
+    WorktreePruneReport, WorktreePruneTarget, WorktreeSegment,
 };
 use loopflow::git::{is_clean, origin_branch, worktree_add, worktree_remove, WorktreeBranch};
 use loopflow_test_support::TestRepo;
@@ -471,66 +472,159 @@ fn worktree_state_detects_dirty() {
     assert!(!is_clean(&result.path).expect("is_clean"));
 }
 
+const EIGHT_DAYS: Duration = Duration::from_secs(8 * 24 * 60 * 60);
+
+fn prune(repo: &TestRepo, ownership: &WorktreeOwnership, all: bool) -> WorktreePruneReport {
+    prune_worktrees(repo.path(), repo.path(), ownership, all, false).expect("prune")
+}
+
+fn same_path(left: &std::path::Path, right: &std::path::Path) -> bool {
+    left.canonicalize().expect("canonical") == right.canonicalize().expect("canonical")
+}
+
+fn kept(report: &WorktreePruneReport, path: &std::path::Path) -> WorktreeKeepReason {
+    report
+        .retained
+        .iter()
+        .find(|retained| same_path(&retained.path, path))
+        .map(|retained| retained.reason.clone())
+        .expect("checkout retained")
+}
+
+fn removed(report: &WorktreePruneReport, path: &std::path::Path) -> WorktreePruneTarget {
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    assert!(!path.exists());
+    report
+        .removed
+        .iter()
+        .find(|target| report_parent(&target.path) == report_parent(path))
+        .cloned()
+        .expect("checkout removed")
+}
+
+// A removed checkout cannot be canonicalized; compare through its parent.
+fn report_parent(path: &std::path::Path) -> PathBuf {
+    path.parent()
+        .expect("parent")
+        .canonicalize()
+        .expect("canonical parent")
+        .join(path.file_name().expect("name"))
+}
+
 #[test]
-fn prune_retains_every_uncommitted_file() {
+fn prune_removes_old_checkout_whose_only_changes_are_notes() {
+    let repo = TestRepo::new();
+    let path = repo.create_named_worktree("prune-notes");
+    commit_worktree_at_age(&path, EIGHT_DAYS);
+    git_stdout(&path, &["push", "-u", "origin", "prune-notes"]);
+    for dir in ["scratch", ".lf"] {
+        fs::create_dir_all(path.join(dir)).expect("create notes dir");
+        fs::write(path.join(dir).join("notes.md"), "unsaved").expect("write notes");
+    }
+
+    let report = prune(&repo, &WorktreeOwnership::default(), false);
+
+    let target = removed(&report, &path);
+    assert_eq!(target.reason, WorktreePruneReason::Stale { days: 8 });
+    assert_eq!(target.saved_ref, None);
+}
+
+#[test]
+fn prune_keeps_source_changes_and_says_how_many() {
     let repo = TestRepo::new();
     let path = repo.create_named_worktree("prune-dirty-old");
-    commit_worktree_at_age(&path, Duration::from_secs(8 * 24 * 60 * 60));
-    fs::create_dir_all(path.join("scratch")).expect("create scratch");
-    fs::write(path.join("scratch/notes.md"), "unsaved").expect("write scratch");
+    commit_worktree_at_age(&path, EIGHT_DAYS);
+    fs::write(path.join("work.txt"), "unsaved").expect("edit source");
+    fs::write(path.join("new.rs"), "unsaved").expect("write source");
 
-    let report = prune_worktrees(repo.path(), repo.path(), &HashSet::new(), false).expect("prune");
+    let report = prune(&repo, &WorktreeOwnership::default(), false);
 
-    assert!(report.removed.is_empty());
-    assert_eq!(report.retained_dirty.len(), 1);
+    assert_eq!(kept(&report, &path), WorktreeKeepReason::Dirty { files: 2 });
+    assert_eq!(fs::read_to_string(path.join("new.rs")).unwrap(), "unsaved");
+}
+
+#[test]
+fn prune_retains_recent_branch_without_a_task_or_pr() {
+    let repo = TestRepo::new();
+    let path = repo.create_named_worktree("prune-recent");
+    commit_worktree_at_age(&path, Duration::ZERO);
+
+    let report = prune(&repo, &WorktreeOwnership::default(), false);
+
+    assert_eq!(kept(&report, &path), WorktreeKeepReason::Recent { days: 0 });
+}
+
+#[test]
+fn prune_saves_unpushed_commits_of_a_stale_checkout() {
+    let repo = TestRepo::new();
+    let path = repo.create_named_worktree("prune-unpushed");
+    commit_worktree_at_age(&path, EIGHT_DAYS);
+    let head = git_stdout(&path, &["rev-parse", "HEAD"]);
+
+    let report = prune(&repo, &WorktreeOwnership::default(), false);
+
+    let saved = removed(&report, &path).saved_ref.expect("saved ref");
+    assert_eq!(git_stdout(repo.path(), &["rev-parse", &saved]), head);
+}
+
+#[test]
+fn prune_follows_task_state() {
+    let repo = TestRepo::new();
+    let unfinished = repo.create_named_worktree("prune-unfinished");
+    let finished = repo.create_named_worktree("prune-finished");
+    let in_use = repo.create_named_worktree("prune-in-use");
+    for path in [&unfinished, &finished, &in_use] {
+        commit_worktree_at_age(path, Duration::ZERO);
+    }
+    let ownership = WorktreeOwnership {
+        unfinished_checkouts: HashMap::from([(unfinished.clone(), Some("LOO-1".to_string()))]),
+        finished_checkouts: HashMap::from([(finished.clone(), "LOO-2".to_string())]),
+        process_paths: HashSet::from([in_use.clone()]),
+        ..WorktreeOwnership::default()
+    };
+
+    let report = prune(&repo, &ownership, true);
+
     assert_eq!(
-        report.retained_dirty[0]
-            .canonicalize()
-            .expect("canonical retained path"),
-        path.canonicalize().expect("canonical worktree path")
+        kept(&report, &unfinished),
+        WorktreeKeepReason::UnfinishedTask {
+            task: Some("LOO-1".to_string())
+        }
     );
-    assert!(path.join("scratch/notes.md").exists());
+    assert_eq!(kept(&report, &in_use), WorktreeKeepReason::InUse);
+    assert_eq!(
+        removed(&report, &finished).reason,
+        WorktreePruneReason::FinishedTask {
+            task: Some("LOO-2".to_string())
+        }
+    );
 }
 
 #[test]
-fn prune_retains_recent_active_branch_without_a_pr() {
+fn prune_all_saves_source_changes_before_removing() {
     let repo = TestRepo::new();
-    let branch = "prune-recent";
-    let path = repo.create_named_worktree(branch);
+    let path = repo.create_named_worktree("prune-all");
     commit_worktree_at_age(&path, Duration::ZERO);
-    git_stdout(&path, &["push", "-u", "origin", branch]);
+    fs::write(path.join("draft.rs"), "half done").expect("write source");
 
-    let report = prune_worktrees(repo.path(), repo.path(), &HashSet::new(), false).expect("prune");
-
-    assert!(report.removed.is_empty());
+    let dry = prune_worktrees(
+        repo.path(),
+        repo.path(),
+        &WorktreeOwnership::default(),
+        true,
+        true,
+    )
+    .expect("dry run");
+    assert_eq!(dry.candidates[0].reason, WorktreePruneReason::Unowned);
     assert!(path.exists());
-}
 
-#[test]
-fn prune_retains_old_branch_without_terminal_evidence() {
-    let repo = TestRepo::new();
-    let branch = "prune-stale";
-    let path = repo.create_named_worktree(branch);
-    commit_worktree_at_age(&path, Duration::from_secs(8 * 24 * 60 * 60));
-    git_stdout(&path, &["push", "-u", "origin", branch]);
+    let report = prune(&repo, &WorktreeOwnership::default(), true);
 
-    let report = prune_worktrees(repo.path(), repo.path(), &HashSet::new(), false).expect("prune");
-
-    assert!(report.removed.is_empty());
-    assert!(path.exists());
-}
-
-#[test]
-fn prune_retains_never_pushed_unique_commits() {
-    let repo = TestRepo::new();
-    let path = repo.create_named_worktree("prune-remote-gone");
-    commit_worktree_at_age(&path, Duration::ZERO);
-
-    let report = prune_worktrees(repo.path(), repo.path(), &HashSet::new(), false).expect("prune");
-
-    assert!(report.removed.is_empty());
-    assert!(path.exists());
-    assert!(git_stdout(&path, &["rev-parse", "HEAD"]) != repo.head_sha());
+    let saved = removed(&report, &path).saved_ref.expect("saved ref");
+    assert_eq!(
+        git_stdout(repo.path(), &["show", &format!("{saved}:draft.rs")]),
+        "half done"
+    );
 }
 
 #[test]

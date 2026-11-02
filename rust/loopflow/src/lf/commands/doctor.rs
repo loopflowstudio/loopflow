@@ -26,14 +26,14 @@ pub struct Check {
 }
 
 impl Check {
-    fn ok(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn ok(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: Status::Ok,
             detail: detail.into(),
         }
     }
-    fn warn(name: &'static str, detail: impl Into<String>) -> Self {
+    pub(crate) fn warn(name: &'static str, detail: impl Into<String>) -> Self {
         Self {
             name,
             status: Status::Warn,
@@ -50,18 +50,19 @@ impl Check {
 }
 
 /// Exits non-zero when any check fails, so a caller can gate on it.
+/// What `lf doctor --json` prints.
 #[derive(Debug, serde::Serialize)]
-struct DoctorReport<'a> {
+pub struct DoctorReport {
     store: StoreReport,
     rows: usize,
-    checks: &'a [Check],
+    checks: Vec<Check>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 struct StoreReport {
     build_provenance: crate::build_info::BuildProvenance,
     build_label: Option<String>,
-    migration_authority: String,
+    unmerged_migrations: Vec<&'static str>,
     build_source_identity: String,
     build_source_root: Option<String>,
     build_source_revision: String,
@@ -72,6 +73,24 @@ struct StoreReport {
 }
 
 pub fn run(json: bool) -> Result<()> {
+    let report = report()?;
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
+    } else {
+        print_checks(&report.store, &report.checks, report.rows);
+    }
+    if report
+        .checks
+        .iter()
+        .any(|check| check.status == Status::Fail)
+    {
+        return Err(anyhow!("doctor checks failed"));
+    }
+    Ok(())
+}
+
+/// The store, Process evidence and installation checks `lf doctor` reports.
+pub fn report() -> Result<DoctorReport> {
     let database_path = crate::store::database_path_from_env()?;
     let store_report = inspect_store(&database_path);
     let mut checks = vec![match &store_report.migration_error {
@@ -111,23 +130,12 @@ pub fn run(json: bool) -> Result<()> {
         &crate::diagnostic_log::log_path(),
         time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string(&DoctorReport {
-                store: store_report,
-                rows,
-                checks: &checks,
-            })?
-        );
-    } else {
-        print_checks(&store_report, &checks, rows);
-    }
-
-    if checks.iter().any(|check| check.status == Status::Fail) {
-        return Err(anyhow!("doctor checks failed"));
-    }
-    Ok(())
+    checks.push(crate::desktop_exits::check());
+    Ok(DoctorReport {
+        store: store_report,
+        rows,
+        checks,
+    })
 }
 
 const RUNNING: &str = "lf-binaries";
@@ -253,7 +261,7 @@ fn check_binary_freshness() -> Check {
                 FRESHNESS,
                 format!(
                     "running lf is built from {} and is {} merged commit(s) behind cached {UPSTREAM} (not refreshed); \
-                     latest merged changes: {commits}. Run `lf install` to install the latest published release",
+                     latest merged changes: {commits}. Run `lf install` to install the stable release",
                     crate::build_info::short_revision(&revision),
                     missing.len(),
                 ),
@@ -299,21 +307,16 @@ fn inspect_store(path: &Path) -> StoreReport {
                     Ok(version) => latest_applied_migration = version,
                     Err(error) => migration_error = Some(error.to_string()),
                 }
-                let validation = if crate::store::custom_home_selected() {
-                    crate::store::migrations::validate_experimental_sqlite(
-                        &connection,
-                        crate::build_info::migration_draft_manifest(),
-                    )
-                } else {
-                    crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
-                        if let Some(pending) = crate::store::migrations::pending_shared_migration(&connection)? {
-                            return Err(crate::store::StoreError::InvalidData(format!(
-                                "selected database is missing {pending}; run `lf install` to install a published release"
-                            )));
-                        }
-                        Ok(())
-                    })
-                };
+                // A private home migrates itself on its next open.
+                let custom = crate::store::custom_home_selected();
+                let validation = crate::store::migrations::validate_sqlite(&connection).and_then(|()| {
+                    match crate::store::migrations::pending_shared_migration(&connection)? {
+                        Some(pending) if !custom => Err(crate::store::StoreError::InvalidData(format!(
+                            "selected database is missing {pending}; run `lf install` to finish installing this build"
+                        ))),
+                        _ => Ok(()),
+                    }
+                });
                 if let Err(error) = validation {
                     migration_error.get_or_insert_with(|| error.to_string());
                 }
@@ -322,16 +325,12 @@ fn inspect_store(path: &Path) -> StoreReport {
         }
     }
     if !path.exists() {
-        migration_error = Some(format!("selected database {} does not exist; run `lf install` to initialize a published installation", path.display()));
+        migration_error = Some(format!("selected database {} does not exist; run `lf self install` to initialize an installation", path.display()));
     }
     StoreReport {
         build_provenance: crate::build_info::provenance(),
         build_label: crate::build_info::label().map(str::to_string),
-        migration_authority: match crate::build_info::migration_authority() {
-            crate::build_info::MigrationAuthority::Published => "published",
-            crate::build_info::MigrationAuthority::ValidationOnly => "validation-only",
-        }
-        .to_string(),
+        unmerged_migrations: crate::store::migrations::unmerged_migrations(),
         build_source_identity: crate::build_info::source_identity(),
         build_source_root: crate::build_info::source_root().map(|root| root.display().to_string()),
         build_source_revision: crate::build_info::source_revision().to_string(),
@@ -519,10 +518,13 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
         .build_label
         .clone()
         .unwrap_or_else(|| store.build_provenance.to_string());
-    println!(
-        "build: {build} ({}) · migrations {}",
-        store.build_source_identity, store.migration_authority
-    );
+    println!("build: {build} ({})", store.build_source_identity);
+    if !store.unmerged_migrations.is_empty() {
+        println!(
+            "unmerged migrations: {}",
+            store.unmerged_migrations.join(", ")
+        );
+    }
     println!("revision: {}", store.build_source_revision);
     if let Some(root) = &store.build_source_root {
         println!("source: {root}");

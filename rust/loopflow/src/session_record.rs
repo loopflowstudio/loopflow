@@ -1115,7 +1115,7 @@ pub(crate) fn write_provider_session(
 }
 
 /// The resume reference: the newest one names the native conversation and
-/// account `lf session connect` reopens.
+/// account `lf resume` reopens.
 pub(crate) fn provider_session_observation(
     session: &crate::session::LfSession,
     input: &str,
@@ -1143,6 +1143,11 @@ pub(crate) fn current_terminal_id() -> Option<String> {
         .ok()
         .filter(|id| !id.is_empty())?;
     let expected = std::env::var("LF_TERMINAL_TTY").ok()?;
+    (stdin_tty()? == expected).then_some(id)
+}
+
+/// The device of this process's terminal, such as `/dev/ttys004`.
+pub(crate) fn stdin_tty() -> Option<String> {
     let mut name = [0 as libc::c_char; 1024];
     // SAFETY: name is a writable buffer of the supplied length. ttyname_r
     // writes a NUL-terminated name on success and retains no pointers.
@@ -1151,10 +1156,10 @@ pub(crate) fn current_terminal_id() -> Option<String> {
         return None;
     }
     // SAFETY: successful ttyname_r above terminated the buffer.
-    let actual = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }
+    unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }
         .to_str()
-        .ok()?;
-    (actual == expected).then_some(id)
+        .ok()
+        .map(str::to_owned)
 }
 
 /// Who chose a Session's current title. A human name is never replaced by a

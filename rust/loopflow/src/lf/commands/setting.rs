@@ -339,7 +339,7 @@ async fn move_primary_session(
     target: &MachineId,
 ) -> anyhow::Result<()> {
     if *target == store.sqlite.local_machine()?.id {
-        crate::ops::human_session::primary::ensure(store, repo, wave, false).await?;
+        crate::ops::human_session::primary::ensure(store, repo, wave).await?;
     } else if let Some(session) = store.sqlite.primary_session(primary)? {
         let machine = store
             .sqlite

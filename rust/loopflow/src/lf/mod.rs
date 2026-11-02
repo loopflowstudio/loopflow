@@ -153,7 +153,7 @@ pub struct Cli {
     #[arg(long, value_name = "PATH", conflicts_with = "wt")]
     pub cwd: Option<PathBuf>,
 
-    /// The conversation `lf -b connect ID --message TEXT` continues.
+    /// The conversation `lf -b resume ID --message TEXT` continues.
     #[arg(skip)]
     pub resume: Option<String>,
 }
@@ -162,6 +162,18 @@ impl Cli {
     /// The global `--repo` or `--repository` selector names a repository.
     pub fn selects_repository(&self) -> bool {
         self.repo.is_some() || self.repository.is_some()
+    }
+
+    /// The command merges a PR, or asks GitHub to merge it.
+    pub fn merges(&self) -> bool {
+        matches!(
+            &self.command,
+            Some(Commands::Ops {
+                cmd: OpsCommand::Pr {
+                    cmd: Some(PrCommand::Land { .. } | PrCommand::Arm { .. })
+                }
+            })
+        )
     }
 
     pub fn may_launch_agent(&self) -> bool {
@@ -178,7 +190,10 @@ impl Cli {
             Some(Commands::Task { cmd }) => matches!(cmd, TaskCommand::Run { .. }),
             Some(Commands::Session { cmd }) => matches!(
                 cmd,
-                SessionCommand::Connect {
+                SessionCommand::Resume {
+                    connection: SessionConnectionArgs { prepare: false, .. },
+                    ..
+                } | SessionCommand::New {
                     connection: SessionConnectionArgs { prepare: false, .. },
                     ..
                 }
@@ -221,13 +236,17 @@ impl Cli {
     /// Reject argument combinations the derive cannot express, as the usage
     /// errors they are, before anything runs.
     pub fn checked(mut self) -> Result<Self, clap::Error> {
-        if let Some(Commands::Session {
-            cmd: SessionCommand::Connect { id, connection, .. },
-        }) = &self.command
-        {
-            connection.target(&self, id.as_deref()).map_err(|error| {
-                clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
-            })?;
+        if let Some(Commands::Session { cmd }) = &self.command {
+            let selected = match cmd {
+                SessionCommand::Resume { id, connection, .. }
+                | SessionCommand::New { id, connection } => Some((id.as_deref(), connection)),
+                _ => None,
+            };
+            if let Some((id, connection)) = selected {
+                connection.target(&self, id).map_err(|error| {
+                    clap::Error::raw(clap::error::ErrorKind::ArgumentConflict, error.to_string())
+                })?;
+            }
         }
         // `lf ship ISSUE` selects its Task as `--task` does.
         if let Some(Commands::Ship { issue, .. }) = &mut self.command {
@@ -246,7 +265,7 @@ impl Cli {
         }
         // Work routing consumes the same explicit selector in either flag position.
         if let Some(Commands::Session {
-            cmd: SessionCommand::Connect { connection, .. },
+            cmd: SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. },
         }) = &mut self.command
         {
             if connection.task.is_some() {
@@ -420,7 +439,8 @@ pub enum Commands {
     /// Returns once the Task is shipping and runs on to its end (`-b` waits for
     /// it); `lf task status` follows it. A second `lf ship` while one runs exits 0.
     /// With no ISSUE, ships the checkout's Task, or a new one for its branch.
-    /// `--stop` withdraws the approval and takes back its merge request.
+    /// `--stop` withdraws the approval and takes back its merge request; the
+    /// stop stands, so no run ships the Task again until `lf ship`.
     Ship {
         issue: Option<String>,
         /// Take up this graph in place of the Task's remaining steps
@@ -429,7 +449,7 @@ pub enum Commands {
         /// Why, kept in the Task's history
         #[arg(long)]
         reason: Option<String>,
-        /// Stop Auto-Ship: end the ship process and disarm auto-merge it armed
+        /// Stop Auto-Ship until the next `lf ship`: end the ship process and disarm auto-merge it armed
         #[arg(long)]
         stop: bool,
     },
@@ -548,11 +568,6 @@ pub enum Commands {
         /// Inspect a Task's checkout and Wave context
         #[arg(long)]
         task: Option<String>,
-    },
-    /// Create and use an offline, isolated development data clone (macOS)
-    Clone {
-        #[command(subcommand)]
-        cmd: crate::data_clone::CloneCommand,
     },
     /// Select repositories for the Machine-local portfolio
     Portfolio {
@@ -728,7 +743,7 @@ pub enum DesktopCommand {
         #[arg(long)]
         after: Option<String>,
         /// Closed Tasks per page
-        #[arg(long, default_value_t = 50)]
+        #[arg(long, default_value_t = commands::waves::CLOSED_TASK_PAGE)]
         limit: usize,
         #[arg(long, required = true)]
         json: bool,
@@ -1036,6 +1051,326 @@ impl DesktopCommand {
     }
 }
 
+// ── Which commands change state ─────────────────────────────────────────────
+// Only a command that changes state records a Process. A read (status, list,
+// show, diff, file, every `--watch` reader) records none, so it never wakes a
+// Work reader or joins a Task's work. Every match below is exhaustive: a new
+// command chooses here.
+
+impl Commands {
+    /// Whether running this command changes state, and so records a Process.
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Task { cmd } => cmd.changes_work(),
+            Self::Wave { cmd } => cmd.changes_work(),
+            Self::Session { cmd } => cmd.changes_work(),
+            Self::Graph { cmd } => cmd.changes_work(),
+            Self::Skill { cmd } => cmd.changes_work(),
+            Self::History { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
+            Self::Desktop { cmd } => cmd.changes_work(),
+            Self::Monitor { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
+            Self::Ops { cmd } => cmd.changes_work(),
+            Self::Config { cmd } => cmd.changes_work(),
+            Self::Self_ { cmd } => cmd.changes_work(),
+            Self::Portfolio { cmd, .. } => cmd.is_some(),
+            Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
+            Self::Ship { .. }
+            | Self::Open(_)
+            | Self::Inline { .. }
+            | Self::Set { .. }
+            | Self::Unset { .. }
+            | Self::Scratch { .. }
+            | Self::Discord { .. }
+            | Self::ContextBlock { .. }
+            | Self::External(_) => true,
+        }
+    }
+}
+
+impl TaskCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::List { .. }
+            | Self::Location { .. }
+            | Self::WatchFiles { .. }
+            | Self::Status { .. }
+            | Self::Diff { .. }
+            | Self::Files { .. }
+            | Self::File { .. }
+            | Self::Wait { .. } => false,
+            Self::Comment { message, .. } => message.is_some(),
+            Self::Sweep { apply, .. } => *apply,
+            Self::Sync { .. }
+            | Self::Checkout { .. }
+            | Self::Run { .. }
+            | Self::Complete { .. }
+            | Self::Reopen { .. }
+            | Self::Create { .. }
+            | Self::Claim { .. }
+            | Self::Unassign { .. }
+            | Self::Shell { .. }
+            | Self::Save { .. }
+            | Self::Abandon { .. }
+            | Self::Delete { .. }
+            | Self::Edit { .. }
+            | Self::Move { .. }
+            | Self::Interrupt { .. } => true,
+        }
+    }
+}
+
+impl WaveCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Show { .. } | Self::Graph { .. } | Self::List { .. } => false,
+            Self::Status { sync, .. } => *sync,
+            Self::NewChapter { dry_run, .. } => !dry_run,
+            Self::Remove { preview, .. } => !preview,
+            Self::EditPlan { .. }
+            | Self::Add { .. }
+            | Self::BindProject { .. }
+            | Self::Rename { .. }
+            | Self::UpdatePlan { .. }
+            | Self::Connect { .. }
+            | Self::Reteam { .. } => true,
+        }
+    }
+}
+
+impl SessionCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::ObserveStatus { .. } | Self::History { .. } | Self::List { .. } => false,
+            Self::Steers { retry, .. } => retry.is_some(),
+            Self::Bind { dry_run, .. } => !dry_run,
+            Self::Serve { .. }
+            | Self::Resume { .. }
+            | Self::New { .. }
+            | Self::Steer { .. }
+            | Self::Rename { .. }
+            | Self::Send { .. }
+            | Self::Receive { .. } => true,
+        }
+    }
+}
+
+impl GraphCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            // Customizing copies a definition into the repository's files,
+            // as an editor would; `lf` admits no Process for it.
+            Self::List { .. } | Self::Show { .. } | Self::Customize { .. } => false,
+            Self::Run { .. } | Self::External(_) => true,
+        }
+    }
+}
+
+impl SkillCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Customize { .. } => false,
+            Self::External(_) => true,
+        }
+    }
+}
+
+impl DesktopCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::View { .. }
+            | Self::Plans { .. }
+            | Self::Plan { .. }
+            | Self::Done { .. }
+            | Self::Wave { .. }
+            | Self::Sessions { .. }
+            | Self::Task { .. }
+            | Self::Ls { .. }
+            | Self::State { .. }
+            | Self::Actions { .. }
+            | Self::Events { .. }
+            | Self::Wait { .. }
+            | Self::Capture { .. }
+            // Navigation, panes and Dashboard arrangement are not Work; their
+            // saves still persist, without a Process.
+            | Self::Layout { .. }
+            | Self::Query { .. }
+            | Self::Pin { .. }
+            | Self::Unpin { .. }
+            | Self::Back { .. }
+            | Self::Forward { .. }
+            | Self::Goto { .. }
+            | Self::Next { .. }
+            | Self::Previous { .. }
+            | Self::WorkingTasks { .. }
+            | Self::Enter { .. }
+            | Self::Zoom { .. }
+            | Self::Focus { .. }
+            | Self::Hide { .. }
+            | Self::Show { .. }
+            | Self::Move { .. }
+            | Self::Resize { .. }
+            | Self::Files { .. }
+            | Self::GraphLog { .. }
+            | Self::Browse { .. }
+            | Self::PageBack { .. }
+            | Self::PageForward { .. }
+            | Self::Reload { .. }
+            | Self::Switch { .. } => false,
+            // Renaming a Task changes Work; renaming a Dashboard is arrangement.
+            Self::Rename { target, .. } => target.starts_with("task:"),
+            // Input reaches a Session or shell, closing ends one, and an
+            // action named at runtime may do either.
+            Self::Do { .. }
+            | Self::Send { .. }
+            | Self::SendKey { .. }
+            | Self::Run { .. }
+            | Self::Close { .. }
+            | Self::Reopen { .. } => true,
+        }
+    }
+}
+
+impl OpsCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
+            Self::Release { cmd } => cmd.changes_work(),
+            Self::Wt { cmd } => cmd.changes_work(),
+            Self::Machine { cmd } => cmd.changes_work(),
+            Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
+            Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
+            Self::Commit { .. } | Self::Sync(_) => true,
+        }
+    }
+}
+
+/// Bare `lf pr` acts on the current branch's PR.
+fn pr_changes_work(cmd: Option<&PrCommand>) -> bool {
+    match cmd {
+        None => true,
+        Some(PrCommand::Checks { .. } | PrCommand::Reviews { .. }) => false,
+        Some(
+            PrCommand::Reconcile
+            | PrCommand::RequestReview { .. }
+            | PrCommand::Publish { .. }
+            | PrCommand::Open { .. }
+            | PrCommand::Submit { .. }
+            | PrCommand::Arm { .. }
+            | PrCommand::Land { .. }
+            | PrCommand::Abandon { .. },
+        ) => true,
+    }
+}
+
+/// Bare `lf account` refreshes access and capacity unless it reads the cache.
+fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
+    match cmd {
+        None => !cached,
+        Some(AccountCommand::Route { .. }) => false,
+        Some(
+            AccountCommand::Disconnect { .. }
+            | AccountCommand::Connect { .. }
+            | AccountCommand::Set { .. }
+            | AccountCommand::Token { .. }
+            | AccountCommand::RedeemReset { .. }
+            | AccountCommand::Use { .. },
+        ) => true,
+    }
+}
+
+impl ReleaseCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Check { .. } | Self::Status { .. } => false,
+            Self::Run { .. }
+            | Self::Notes { .. }
+            | Self::Bump { .. }
+            | Self::Tag { .. }
+            | Self::Publish { .. } => true,
+        }
+    }
+}
+
+impl WtCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Switch { .. } | Self::List { .. } | Self::Timing { .. } => false,
+            Self::Prune { dry_run, .. } => !dry_run,
+            Self::Create { .. } | Self::Delete { .. } => true,
+        }
+    }
+}
+
+impl MachineCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Id { .. } | Self::List { .. } | Self::Status { .. } => false,
+            Self::Credentials { cmd } => match cmd {
+                MachineCredentialCommand::Inspect { .. } => false,
+                MachineCredentialCommand::Receive => true,
+            },
+            Self::Pool { cmd } => match cmd {
+                PoolCommand::List { .. } => false,
+                PoolCommand::Add { .. }
+                | PoolCommand::Off { .. }
+                | PoolCommand::On { .. }
+                | PoolCommand::Remove { .. } => true,
+            },
+            Self::Ondemand { cmd } => match cmd {
+                OndemandCommand::List { .. } => false,
+                OndemandCommand::Add { .. }
+                | OndemandCommand::Max { .. }
+                | OndemandCommand::Rent { .. }
+                | OndemandCommand::Remove { .. } => true,
+            },
+            Self::Connect { .. }
+            | Self::Public { .. }
+            | Self::Add { .. }
+            | Self::Rename { .. }
+            | Self::Remove { .. }
+            | Self::End { .. } => true,
+        }
+    }
+}
+
+impl ConfigCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::User { .. } => false,
+            Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
+            Self::Planning { cmd } => match cmd {
+                PlanningCommand::Key { new, recover } => *new || recover.is_some(),
+                PlanningCommand::Status { .. } | PlanningCommand::Journal { .. } => false,
+            },
+        }
+    }
+}
+
+impl SelfCommand {
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Doctor { .. } => false,
+            Self::Install { cmd, .. } => match cmd {
+                Some(
+                    InstallCommand::Preflight { .. }
+                    | InstallCommand::ReaderCatalog
+                    | InstallCommand::CanOpen { .. },
+                ) => false,
+                None
+                | Some(
+                    InstallCommand::Schedule { .. }
+                    | InstallCommand::Adopt
+                    | InstallCommand::RecoverSwitch { .. }
+                    | InstallCommand::AdvanceSwitch { .. }
+                    | InstallCommand::Promote { .. }
+                    | InstallCommand::Rollback { .. },
+                ) => true,
+            },
+            Self::SyncSkills { .. } => true,
+        }
+    }
+}
+
 /// Which part of the view on screen a command acts on. `-p` is a path: a view part
 /// (`board`, `session`, `tiles` on a Wave view), a pane (`session`, `shell`,
 /// `browser`, `shell:2`), a Dashboard or Wave view tile (`3`, `LOO-519`), or `TILE/PANE`. `query:ID/TILE` and `working-tasks/TILE` name a
@@ -1111,7 +1446,11 @@ pub enum WaveGraphCommand {
     /// Show the graph the Wave's Tasks take up by default; select one with
     /// `graph:` in `.lf/wave/<name>/config.yaml`
     Show {
+        #[arg(conflicts_with = "no_wave")]
         wave: Option<String>,
+        /// Show the default for Tasks filed in the repository, without a Wave
+        #[arg(long)]
+        no_wave: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1163,16 +1502,13 @@ impl SessionMode {
     }
 }
 
-/// Shared selection, preparation and next-turn options for resume and connect.
+/// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
     pub wave: Option<String>,
-    /// Create a fresh primary in this scope, keeping the previous client and history
-    #[arg(long, conflicts_with = "id")]
-    pub fresh: bool,
     /// With `-b`: send the conversation its next turn
     #[arg(long)]
     pub message: Option<String>,
@@ -1264,20 +1600,6 @@ pub enum SessionCommand {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
         argv: Vec<String>,
     },
-    /// Attach to the current execution without restarting or submitting input
-    Attach {
-        id: String,
-        #[arg(long)]
-        observe: bool,
-        /// Refuse to replace another viewer's input control
-        #[arg(long, conflicts_with = "observe")]
-        if_free: bool,
-        /// Return an attach-only terminal command without acquiring control
-        #[arg(long)]
-        prepare: bool,
-        #[arg(long, requires = "prepare")]
-        json: bool,
-    },
     /// Save a steer for this Session, or without one for the current Wave's or
     /// repository's Sessions, without starting a turn
     #[command(allow_missing_positional = true)]
@@ -1321,27 +1643,35 @@ pub enum SessionCommand {
     },
     /// List Sessions
     List(SessionListArgs),
-    /// Open the ongoing conversation of this scope, or an exact Session
+    /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        visible_alias = "resume",
-        after_help = "Moves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Whatever holds the conversation, it continues here: a terminal showing it hands it over and says where it went; a provider client lf started stops; a dead one resumes from its history. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf resume --account <email> -a claude    keep this conversation on another login\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
-    Connect {
+    Resume {
         /// Session ID, Task identifier, or provider conversation ID
         #[arg(conflicts_with_all = ["task", "wave"])]
         id: Option<String>,
         #[command(flatten)]
         connection: SessionConnectionArgs,
-        /// Stop Loopflow-owned clients before resuming here
-        #[arg(long, conflicts_with = "try_open")]
-        takeover: bool,
-        /// Ask the provider to resume even when another client is active
-        #[arg(long = "try", conflicts_with = "takeover")]
-        try_open: bool,
+        /// Leave the other client running; continue in a new conversation forked from it
+        #[arg(long, conflicts_with = "message")]
+        fork: bool,
         /// Resume every conversation a restart or crash interrupted; never one
         /// someone left. Terminals attach when they open them.
-        #[arg(long, conflicts_with_all = ["id", "takeover", "try_open", "fresh", "message", "prepare"])]
+        #[arg(long, conflicts_with_all = ["id", "fork", "message", "prepare"])]
         all: bool,
+    },
+    /// Restart this scope's conversation on a fresh provider thread, seeded with
+    /// what the last thread knew; `-a` switches harness
+    #[command(
+        after_help = "The conversation keeps its name, Work and history; the old thread stays in `lf session history`.\n  lf session new -a claude      continue this scope's conversation on Claude"
+    )]
+    New {
+        /// Session ID, Task identifier, or provider conversation ID
+        #[arg(conflicts_with_all = ["task", "wave"])]
+        id: Option<String>,
+        #[command(flatten)]
+        connection: SessionConnectionArgs,
     },
     /// Rename a Session; a human name is never replaced by a suggestion
     Rename {
@@ -1585,7 +1915,7 @@ pub enum TaskCommand {
         #[arg(long, conflicts_with = "done")]
         project: Option<String>,
         /// Only Tasks in this state
-        #[arg(long, conflicts_with = "done", value_parser = ["deferred", "unstarted", "idle", "active", "moving", "shipping"])]
+        #[arg(long, conflicts_with = "done", value_parser = ["unstarted", "idle", "active", "moving", "shipping"])]
         state: Option<String>,
         #[arg(long)]
         json: bool,
@@ -1606,10 +1936,6 @@ pub enum TaskCommand {
         watch: bool,
     },
 
-    /// Defer future Task execution without stopping live processes
-    Defer { issue: String },
-    /// Resume a deferred Task without starting execution
-    Resume { issue: String },
     /// Synchronize a Task with its tracker; the change sent last wins
     Sync {
         issue: String,
@@ -1640,12 +1966,14 @@ pub enum TaskCommand {
         json: bool,
     },
     /// Run the Task's Graph in its worktree until the next interactive step;
-    /// returns once it runs (`-b` runs every step headless and waits for the end)
+    /// returns once it runs (`-b` runs every step headless to `end`, approving Auto-Ship)
     #[command(
         after_help = "A Task runs the graph it took up: its Wave's default, its repository's \
 `graph:`, or `code`. A run stops before each interactive step, where the Task waits for its \
 conversation; the next `lf task run` continues after it. `-i` runs every step with you in this \
-terminal instead."
+terminal instead. A run that reaches `end`, as `-b` does, approves Auto-Ship like `lf ship`, \
+which may merge the PR, unless someone stopped shipping; then it waits at the landing step \
+until `lf ship`."
     )]
     Run {
         issue: Option<String>,
@@ -1687,8 +2015,12 @@ terminal instead."
         #[arg(long)]
         reason: Option<String>,
     },
-    /// Create a planning Task without allocating a checkout or starting work
+    /// Create a planning Task; with --run, start it and open its conversation
     Create {
+        /// What you want, in your words: the Task's notes, its first line the title.
+        /// With --run, also the first turn of its conversation
+        #[arg(conflicts_with = "notes")]
+        request: Option<String>,
         /// Create without a Wave (the default)
         #[arg(long, conflicts_with = "wave")]
         no_wave: bool,
@@ -1701,6 +2033,15 @@ terminal instead."
         /// Description; defaults to a report read from stdin
         #[arg(long)]
         notes: Option<String>,
+        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
+        #[arg(long, value_name = "VERSION")]
+        regressed_in: Option<String>,
+        /// Start it as `lf task run` does, then open its conversation here
+        #[arg(long)]
+        run: bool,
+        /// The graph it takes up in place of the default
+        #[arg(long, requires = "run")]
+        graph: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -1710,8 +2051,9 @@ terminal instead."
         #[arg(long)]
         json: bool,
     },
-    /// Unclaim the Task; it is unowned again, with its history intact
-    Unclaim {
+    /// Unassign the Task: nobody owns it and Linear shows no assignee; nothing
+    /// moves it until someone claims or runs it. History stays intact
+    Unassign {
         issue: String,
         #[arg(long)]
         json: bool,
@@ -1826,10 +2168,11 @@ terminal instead."
         #[arg(long)]
         rank: Option<u32>,
         /// Assignee identity; provider user ID in connected plans
-        #[arg(long, conflicts_with = "unassign")]
-        assignee: Option<String>,
         #[arg(long)]
-        unassign: bool,
+        assignee: Option<String>,
+        /// Mark a bug as a regression from this release (v0.15.3); stable stays below it until the fix ships
+        #[arg(long, value_name = "VERSION")]
+        regressed_in: Option<String>,
         #[arg(short = 'w', long)]
         wave: Option<String>,
     },
@@ -1896,12 +2239,10 @@ impl TaskCommand {
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
-            | Self::Unclaim { issue, .. }
+            | Self::Unassign { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Defer { issue }
-            | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -1926,12 +2267,10 @@ impl TaskCommand {
             | Self::WatchFiles { issue, .. }
             | Self::Location { issue, .. }
             | Self::Claim { issue, .. }
-            | Self::Unclaim { issue, .. }
+            | Self::Unassign { issue, .. }
             | Self::Sync { issue, .. }
             | Self::Move { issue, .. }
             | Self::Complete { issue, .. }
-            | Self::Defer { issue }
-            | Self::Resume { issue }
             | Self::Reopen { issue, .. }
             | Self::Diff { issue, .. }
             | Self::Files { issue, .. }
@@ -1957,12 +2296,20 @@ pub enum InstallFrequency {
 
 #[derive(Subcommand, Debug)]
 pub enum InstallCommand {
-    /// Install the latest Loopflow at login and weekly by default (macOS launchd)
+    /// Run `lf install` on your stream on a schedule (launchd at login, or cron)
     Schedule {
-        /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time)
-        #[arg(value_enum, default_value = "weekly")]
-        frequency: InstallFrequency,
+        /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
+        /// Defaults to the installed schedule's, else daily.
+        #[arg(value_enum)]
+        frequency: Option<InstallFrequency>,
     },
+    /// Record this Loopflow.app, updated in place, as the install: migrate the
+    /// store and link `lf` into it. Moves no files.
+    #[command(hide = true)]
+    Adopt,
+    /// Exit 0 only when release TAG's build can open this Machine's store.
+    #[command(hide = true)]
+    CanOpen { tag: String },
     /// Continue one interrupted installation switch from its pinned candidate.
     #[command(hide = true)]
     RecoverSwitch {
@@ -1980,6 +2327,9 @@ pub enum InstallCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Print the reader floors this build knows, one per line.
+    #[command(hide = true)]
+    ReaderCatalog,
     /// Advance the receipt-selected store with this exact candidate's registry.
     #[command(hide = true)]
     AdvanceSwitch {
@@ -2141,7 +2491,7 @@ pub enum PlanningCommand {
     Status {
         #[arg(long)]
         json: bool,
-        /// Keep the repository's planning exchanged, printing a JSON line now and each time the status changes, until stdin closes
+        /// Print a JSON line now and each time the status changes, until stdin closes
         #[arg(long, requires = "json")]
         watch: bool,
     },
@@ -2164,8 +2514,22 @@ pub enum SelfCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Install the latest published Loopflow release from any directory
+    /// Install the newest Loopflow on your stream from any directory
+    #[command(
+        after_help = "Without a stream flag, follows the stream recorded in ~/.lf/config.yaml \
+(`stable` when none is recorded). A flag switches the stream and records it. \
+A stream whose build cannot open this Machine's store keeps the installed lf until it can."
+    )]
     Install {
+        /// Follow the newest green main build (needs `gh` auth)
+        #[arg(long, group = "stream")]
+        dev: bool,
+        /// Follow the newest release
+        #[arg(long, group = "stream")]
+        preview: bool,
+        /// Follow the newest release soaked 7 days with no open regression
+        #[arg(long, group = "stream")]
+        stable: bool,
         #[command(subcommand)]
         cmd: Option<InstallCommand>,
     },
@@ -2571,19 +2935,29 @@ pub enum WtCommand {
         json: bool,
     },
     /// Prune worktrees, completed build output, or finished branches
+    #[command(
+        after_help = "Removes checkouts whose PR merged or closed, whose Task finished, or that \
+                      have no Task or PR and sat untouched for a week, and names why each other \
+                      checkout is kept. Changes under scratch/ and .lf/ never keep a checkout. \
+                      Unpushed commits and source changes are saved under \
+                      refs/lf/pruned/<branch>/ before removal."
+    )]
     Prune {
+        /// Remove every checkout no unfinished Task or running process holds
+        #[arg(long, conflicts_with_all = ["builds", "branches"])]
+        all: bool,
         /// Show what would be pruned without removing anything
         #[arg(long)]
         dry_run: bool,
         /// Reclaim old generated output from completed Tasks; retain checkouts
         #[arg(long)]
         builds: bool,
-        /// Delete origin and local branches tied to merged or closed PRs,
-        /// finished Tasks, or published release candidates
+        /// Delete origin and local branches tied to merged PRs, finished
+        /// Tasks, or published release candidates
         #[arg(long, conflicts_with = "builds")]
         branches: bool,
-        /// Emit cleanup entries and allocated-byte receipts
-        #[arg(long, requires = "builds")]
+        /// Emit every checkout's verdict, or build cleanup receipts
+        #[arg(long, conflicts_with = "branches")]
         json: bool,
         /// Keep output modified within this many hours
         #[arg(long, requires = "builds", default_value_t = 24)]
@@ -2608,6 +2982,36 @@ pub enum WtCommand {
 mod tests {
     use super::*;
     use clap::CommandFactory;
+
+    #[test]
+    fn only_changes_to_work_record_a_process() {
+        let records = |args: &[&str]| {
+            Cli::try_parse_from(["lf"].iter().chain(args))
+                .unwrap()
+                .command
+                .is_some_and(|command| command.changes_work())
+        };
+        assert!(!records(&["desktop", "focus"]));
+        assert!(!records(&[
+            "desktop",
+            "rename",
+            "query:q",
+            "Mine",
+            "--revision",
+            "1"
+        ]));
+        assert!(records(&[
+            "desktop",
+            "rename",
+            "task:t",
+            "Mine",
+            "--revision",
+            "1"
+        ]));
+        assert!(records(&["desktop", "send", "hello"]));
+        assert!(records(&["task", "create", "--title", "x"]));
+        assert!(!records(&["task", "status", "x"]));
+    }
 
     #[test]
     fn retired_surface_flags_are_rejected_for_a_valid_skill_command() {
@@ -2724,14 +3128,13 @@ mod tests {
             assert!(Cli::try_parse_from(args.clone()).is_ok(), "{args:?}");
         }
         assert!(matches!(
-            Cli::try_parse_from(["lf", "task", "defer", "LOO-1"]).unwrap().command,
-            Some(Commands::Task { cmd: TaskCommand::Defer { issue } }) if issue == "LOO-1"
+            Cli::try_parse_from(["lf", "task", "unassign", "LOO-1"]).unwrap().command,
+            Some(Commands::Task { cmd: TaskCommand::Unassign { issue, .. } }) if issue == "LOO-1"
         ));
-        assert!(matches!(
-            Cli::try_parse_from(["lf", "task", "resume", "LOO-1"]).unwrap().command,
-            Some(Commands::Task { cmd: TaskCommand::Resume { issue } }) if issue == "LOO-1"
-        ));
-        for verb in ["recover", "enable", "disable", "prepare", "advance"] {
+        for verb in [
+            "recover", "enable", "disable", "prepare", "advance", "defer", "resume", "hold",
+            "release", "unclaim",
+        ] {
             assert!(Cli::try_parse_from(["lf", "task", verb, "LOO-1"]).is_err());
         }
         assert!(Cli::try_parse_from(["lf", "wave", "status", "--no-sync"]).is_err());
@@ -2768,13 +3171,33 @@ mod tests {
                 .unwrap()
                 .command,
             Some(Commands::Self_ {
-                cmd: crate::lf::SelfCommand::Install { cmd: None }
+                cmd: crate::lf::SelfCommand::Install {
+                    dev: false,
+                    preview: false,
+                    stable: false,
+                    cmd: None
+                }
             })
         ));
         assert!(Cli::try_parse_from(["lf", "ops", "machine", "install"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "schedule"]).is_ok());
         assert!(Cli::try_parse_from(["lf", "self", "install", "status"]).is_err());
         assert!(Cli::try_parse_from(["lf", "self", "install", "preflight"]).is_ok());
+        assert!(matches!(
+            Cli::try_parse_from(["lf", "self", "install", "--preview"])
+                .unwrap()
+                .command,
+            Some(Commands::Self_ {
+                cmd: crate::lf::SelfCommand::Install {
+                    dev: false,
+                    preview: true,
+                    stable: false,
+                    cmd: None
+                }
+            })
+        ));
+        assert!(Cli::try_parse_from(["lf", "self", "install", "--dev", "--stable"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "self", "install", "--main"]).is_err());
     }
 
     #[test]
@@ -3197,7 +3620,7 @@ mod tests {
             Some(Commands::External(_))
         ));
         assert!(Cli::try_parse_from(["lf", "task", "create", "--name", "placed"]).is_err());
-        assert!(Cli::try_parse_from(["lf", "task", "create", "--run"]).is_err());
+        assert!(Cli::try_parse_from(["lf", "task", "create", "--graph", "proof"]).is_err());
         assert!(
             Cli::try_parse_from(["lf", "graph", "start", "proof"]).is_ok_and(|cli| !matches!(
                 cli.command,
@@ -3380,17 +3803,17 @@ mod tests {
 
     #[test]
     fn session_work_flags_normalize_before_machine_routing() {
-        for command in ["resume", "connect"] {
-            let cli = Cli::try_parse_from(["lf", "session", command, "session-id"])
-                .unwrap()
-                .checked()
-                .unwrap();
-            assert!(matches!(
-                cli.command,
-                Some(Commands::Session {
-                    cmd: SessionCommand::Connect { id: Some(id), .. }
-                }) if id == "session-id"
-            ));
+        let cli = Cli::try_parse_from(["lf", "session", "resume", "session-id"])
+            .unwrap()
+            .checked()
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Session {
+                cmd: SessionCommand::Resume { id: Some(id), .. }
+            }) if id == "session-id"
+        ));
+        for command in ["resume", "new"] {
             for (flag, value) in [("--task", "LOO-1"), ("--wave", "infra")] {
                 for argv in [
                     vec!["lf", flag, value, "session", command, "--prepare"],
@@ -3410,7 +3833,7 @@ mod tests {
             }
         }
         for argv in [
-            vec!["lf", "--task", "LOO-1", "session", "connect", "session-id"],
+            vec!["lf", "--task", "LOO-1", "session", "resume", "session-id"],
             vec![
                 "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",
             ],
@@ -3431,29 +3854,28 @@ mod tests {
             assert!(Cli::try_parse_from(args).is_err());
         }
 
-        let open = Cli::try_parse_from(["lf", "session", "connect", "run_123", "--takeover"])
-            .expect("parse replacement open");
+        let open = Cli::try_parse_from(["lf", "session", "resume", "run_123", "--fork"])
+            .expect("parse forked open");
         assert!(matches!(
             open.command,
             Some(Commands::Session {
-                cmd: SessionCommand::Connect {
+                cmd: SessionCommand::Resume {
                     id,
-                    takeover: true,
-                    try_open: false,
+                    fork: true,
                     connection: SessionConnectionArgs { json: false, .. },
                     ..
                 }
             }) if id.as_deref() == Some("run_123")
         ));
-        assert!(Cli::try_parse_from([
-            "lf",
-            "session",
-            "connect",
-            "run_123",
-            "--takeover",
-            "--try",
-        ])
-        .is_err());
+        for removed in [
+            vec!["lf", "session", "connect", "run_123"],
+            vec!["lf", "session", "attach", "run_123"],
+            vec!["lf", "session", "resume", "run_123", "--takeover"],
+            vec!["lf", "session", "resume", "run_123", "--try"],
+            vec!["lf", "session", "resume", "--fresh"],
+        ] {
+            assert!(Cli::try_parse_from(removed.clone()).is_err(), "{removed:?}");
+        }
 
         let rename = Cli::try_parse_from([
             "lf",

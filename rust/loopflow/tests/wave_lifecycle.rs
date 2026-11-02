@@ -10,8 +10,7 @@ fn command(repo: &Path, home: &Path, args: &[&str]) -> Command {
     let mut command = Command::new(loopflow_test_support::lf_binary());
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
-        if name.starts_with("LF_") || name.starts_with("LOOPFLOW_") || name.starts_with("LINEAR_")
-        {
+        if name.starts_with("LF_") || name.starts_with("LOOPFLOW_") || name.starts_with("LINEAR_") {
             command.env_remove(name.as_ref());
         }
     }
@@ -77,7 +76,11 @@ fn committed(repo: &TestRepo, path: &str) -> bool {
 fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let added = lf(repo.path(), home.path(), &["wave", "add", "research", "--json"]);
+    let added = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "research", "--json"],
+    );
     assert!(committed(&repo, ".lf/wave/research/GOAL.md"));
 
     let preview = lf(
@@ -86,20 +89,48 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
         &["wave", "remove", "research", "--preview", "--json"],
     );
     assert_eq!(preview["summary"][0], "research has no Tasks or Sessions.");
-    assert!(repo.path().join(".lf/wave/research").exists(), "preview changes nothing");
+    assert!(
+        repo.path().join(".lf/wave/research").exists(),
+        "preview changes nothing"
+    );
 
-    let removed = lf(repo.path(), home.path(), &["wave", "remove", "research", "--json"]);
+    let removed = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "remove", "research", "--json"],
+    );
     assert_eq!(removed["id"], added["id"]);
     assert_eq!(removed["files"]["state"], "committed");
     assert!(!repo.path().join(".lf/wave/research").exists());
     assert!(!committed(&repo, ".lf/wave/research/GOAL.md"));
     assert!(live_waves(repo.path(), home.path()).is_empty());
+    assert_eq!(
+        removed["summary"][1],
+        "1 chapter stays readable in history."
+    );
+    let history = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "show", "research", "--json"],
+    );
+    assert_eq!(
+        history["waves"][0]["wave"]["id"], added["id"],
+        "its address still shows the history"
+    );
 
-    let again = lf(repo.path(), home.path(), &["wave", "remove", "research", "--json"]);
+    let again = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "remove", "research", "--json"],
+    );
     assert_eq!(again["already_removed"], true);
     assert_eq!(again["summary"][0], "research was already removed.");
 
-    let fresh = lf(repo.path(), home.path(), &["wave", "add", "research", "--json"]);
+    let fresh = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "research", "--json"],
+    );
     assert_eq!(fresh["created"], true);
     assert_ne!(fresh["id"], added["id"], "re-adding mints a fresh Wave");
 }
@@ -108,12 +139,20 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
 fn removing_a_wave_with_work_moves_open_tasks_and_keeps_history() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let desktop = lf(repo.path(), home.path(), &["wave", "add", "desktop", "--json"]);
+    let desktop = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "desktop", "--json"],
+    );
     let unstarted = create_task(repo.path(), home.path(), "desktop", "Backlog idea");
     let started = create_task(repo.path(), home.path(), "desktop", "Started work");
     let placed = lf(repo.path(), home.path(), &["checkout", &started, "--json"]);
     let closed = create_task(repo.path(), home.path(), "desktop", "Closed work");
-    lf(repo.path(), home.path(), &["task", "abandon", &closed, "--json"]);
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "abandon", &closed, "--json"],
+    );
 
     let preview = lf(
         repo.path(),
@@ -128,21 +167,47 @@ fn removing_a_wave_with_work_moves_open_tasks_and_keeps_history() {
         summary.contains("2 open Tasks move to the repository (1 started keeps its worktree"),
         "{summary}"
     );
-    assert!(summary.contains("1 completed Task and 1 chapter stay readable"), "{summary}");
+    assert!(
+        summary.contains("1 completed Task and 1 chapter stay readable"),
+        "{summary}"
+    );
 
     // An interrupted removal: one Task already moved by hand.
-    lf(repo.path(), home.path(), &["task", "move", &unstarted, "--no-wave"]);
-    let removed = lf(repo.path(), home.path(), &["wave", "remove", "desktop", "--json"]);
+    lf(
+        repo.path(),
+        home.path(),
+        &["task", "move", &unstarted, "--no-wave"],
+    );
+    let removed = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "remove", "desktop", "--json"],
+    );
     assert_eq!(removed["moved"].as_array().unwrap().len(), 1);
-    assert_eq!(wave_of(repo.path(), home.path(), &closed), desktop["id"], "closed work keeps its history");
+    assert_eq!(
+        wave_of(repo.path(), home.path(), &closed),
+        desktop["id"],
+        "closed work keeps its history"
+    );
     for task in [&unstarted, &started] {
-        assert!(wave_of(repo.path(), home.path(), task).is_null(), "{task} left the Wave");
+        assert!(
+            wave_of(repo.path(), home.path(), task).is_null(),
+            "{task} left the Wave"
+        );
     }
-    let after = lf(repo.path(), home.path(), &["desktop", "task", &started, "--json"]);
+    let after = lf(
+        repo.path(),
+        home.path(),
+        &["desktop", "task", &started, "--json"],
+    );
     assert_eq!(after["execution"]["worktree"], placed["worktree"]);
     assert!(live_waves(repo.path(), home.path()).is_empty());
 
-    let show = lf(repo.path(), home.path(), &["wave", "show", &removed["id"].as_str().unwrap().to_string(), "--json"]);
+    let show = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "show", removed["id"].as_str().unwrap(), "--json"],
+    );
     assert!(!show.is_null(), "the removed Wave stays readable by id");
 }
 
@@ -150,11 +215,26 @@ fn removing_a_wave_with_work_moves_open_tasks_and_keeps_history() {
 fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let product = lf(repo.path(), home.path(), &["wave", "add", "product", "--json"]);
-    lf(repo.path(), home.path(), &["wave", "add", "product/desktop", "--json"]);
+    let product = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "product", "--json"],
+    );
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "product/desktop", "--json"],
+    );
     let child = repo.path().join(".lf/wave/product/desktop");
     std::fs::write(child.join("MEMORY.md"), "Keep sidebars narrow.\n").unwrap();
-    std::fs::write(child.join("config.yaml"), format!("{}graph: auto\n", std::fs::read_to_string(child.join("config.yaml")).unwrap())).unwrap();
+    std::fs::write(
+        child.join("config.yaml"),
+        format!(
+            "{}graph: auto\n",
+            std::fs::read_to_string(child.join("config.yaml")).unwrap()
+        ),
+    )
+    .unwrap();
     let task = create_task(repo.path(), home.path(), "product/desktop", "Sidebar");
 
     let removed = lf(
@@ -165,7 +245,10 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     assert_eq!(removed["destination"], "product");
     assert_eq!(wave_of(repo.path(), home.path(), &task), product["id"]);
     let memory = std::fs::read_to_string(repo.path().join(".lf/wave/product/MEMORY.md")).unwrap();
-    assert!(memory.contains("## From product/desktop (removed "), "{memory}");
+    assert!(
+        memory.contains("## From product/desktop (removed "),
+        "{memory}"
+    );
     assert!(memory.contains("Keep sidebars narrow."), "{memory}");
     let config = std::fs::read_to_string(repo.path().join(".lf/wave/product/config.yaml")).unwrap();
     assert!(config.contains("graph: auto"), "{config}");
@@ -199,7 +282,11 @@ fn delete_backlog_deletes_only_unstarted_tasks() {
 fn rename_keeps_identity_moves_files_on_main_and_refuses_a_taken_name() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
-    let added = lf(repo.path(), home.path(), &["wave", "add", "product", "--json"]);
+    let added = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "add", "product", "--json"],
+    );
     lf(repo.path(), home.path(), &["wave", "add", "ops", "--json"]);
     std::fs::write(
         repo.path().join(".lf/wave/ops/MEMORY.md"),
@@ -208,11 +295,29 @@ fn rename_keeps_identity_moves_files_on_main_and_refuses_a_taken_name() {
     .unwrap();
     let task = create_task(repo.path(), home.path(), "product", "Keep me");
 
-    let taken = command(repo.path(), home.path(), &["wave", "rename", "product", "ops"])
-        .output()
-        .unwrap();
+    let taken = command(
+        repo.path(),
+        home.path(),
+        &["wave", "rename", "product", "ops"],
+    )
+    .output()
+    .unwrap();
     assert!(!taken.status.success());
     assert!(String::from_utf8_lossy(&taken.stderr).contains("ops already exists"));
+    std::fs::create_dir_all(repo.path().join(".lf/wave/stray")).unwrap();
+    let stray = command(
+        repo.path(),
+        home.path(),
+        &["wave", "rename", "product", "stray"],
+    )
+    .output()
+    .unwrap();
+    assert!(String::from_utf8_lossy(&stray.stderr).contains(".lf/wave/stray already exists"));
+    assert_eq!(
+        live_waves(repo.path(), home.path()),
+        ["ops", "product"],
+        "nothing moved"
+    );
 
     let renamed = lf(
         repo.path(),
@@ -229,7 +334,9 @@ fn rename_keeps_identity_moves_files_on_main_and_refuses_a_taken_name() {
         "See .lf/wave/prod/GOAL.md; product owns Desktop.\n",
         "paths follow; prose stays word for word"
     );
-    assert!(renamed["mentions"].to_string().contains(".lf/wave/ops/MEMORY.md:1"));
+    assert!(renamed["mentions"]
+        .to_string()
+        .contains(".lf/wave/ops/MEMORY.md:1"));
 
     let again = lf(
         repo.path(),

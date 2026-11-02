@@ -270,13 +270,56 @@ mod tests {
             )
             .unwrap();
         }
-        store.retire_waves(&[removed.clone()], "removed").unwrap();
+        store
+            .retire_waves(std::slice::from_ref(&removed), "removed")
+            .unwrap();
 
         assert_eq!(store.ensure_wave(root, "product").unwrap(), renamed);
         assert_eq!(store.get_wave(&renamed).unwrap().unwrap().name(), "prod");
         let fresh = store.ensure_wave(root, "archive").unwrap();
         assert_ne!(fresh, removed, "a removed identity is never re-created");
         assert!(store.get_wave(&removed).unwrap().unwrap().is_retired());
+    }
+
+    #[test]
+    fn released_waves_upgrade_and_removal_needs_no_successor() {
+        use crate::store::migrations::{apply_before_current_draft, apply_build_drafts};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_current_draft(&conn, "wave_removal");
+        conn.execute_batch(include_str!(
+            "../../../tests/fixtures/migrations/wave_removal_released.sql"
+        ))
+        .unwrap();
+        apply_build_drafts(&conn);
+
+        let old: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT superseded_by_wave_id, retirement_reason FROM waves WHERE id='wave-old'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(old, (Some("wave-live".into()), Some("relocated".into())));
+        let addresses: Vec<String> = conn
+            .prepare("SELECT slug FROM wave_addresses WHERE retired_at IS NULL ORDER BY slug")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(addresses, ["product", "product/desktop"]);
+
+        conn.execute("UPDATE waves SET retired_at=9 WHERE id='wave-child'", [])
+            .unwrap();
+        assert!(
+            conn.execute(
+                "UPDATE waves SET retirement_reason='removed' WHERE id='wave-live'",
+                []
+            )
+            .is_err(),
+            "a live Wave carries no retirement reason"
+        );
     }
 
     #[tokio::test]

@@ -211,10 +211,17 @@ public struct RegistryQuery: Sendable {
     /// `lf wave add`: registers the Wave, commits its files on the main checkout and
     /// ensures its first Project. Adding an existing Wave changes nothing, so this
     /// is also the explicit opening/retry operation; periodic reads stay observational.
-    public func addWave(name: String, objective: String? = nil, cwd: String) async throws {
+    /// Returns the Wave's id.
+    @discardableResult
+    public func addWave(name: String, objective: String? = nil, cwd: String) async throws -> String {
         var args = ["wave", "add", name, "--json"]
         if let objective, !objective.isEmpty { args += ["--objective", objective] }
-        _ = try await run(args, cwd)
+        return try Self.decode(WaveIdentity.self, from: await run(args, cwd)).id
+    }
+
+    /// `lf wave rename`: same Wave id, Tasks and chapters; its files move on main.
+    public func renameWave(wave: String, newName: String, cwd: String) async throws {
+        _ = try await run(["wave", "rename", wave, newName, "--json"], cwd)
     }
 
     /// `lf wave remove`: with `preview`, the consequences without changing anything.
@@ -631,6 +638,11 @@ public enum WorkMachineTarget: Sendable, Hashable {
 
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
 /// explicit (no serde defaults on the wire).
+/// The `id` every Wave lifecycle receipt carries.
+public struct WaveIdentity: Decodable, Sendable {
+    public let id: String
+}
+
 public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String

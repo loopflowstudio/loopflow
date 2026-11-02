@@ -77,7 +77,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
 
 pub fn render_added(added: &WaveAdded) -> String {
     let headline = if added.created {
-        format!("Added Wave {} ({})", added.name, added.project.name)
+        format!("Added Wave {}", added.name)
     } else {
         format!("{} already exists", added.name)
     };
@@ -382,9 +382,10 @@ pub fn remove(
     }
 
     for archive in &mut initiatives {
-        if let Err(error) =
-            runtime.block_on(super::linear::archive_initiative(&main, &archive.initiative))
-        {
+        if let Err(error) = runtime.block_on(super::linear::archive_initiative(
+            &main,
+            &archive.initiative,
+        )) {
             archive.error = Some(error.to_string());
         }
     }
@@ -449,7 +450,10 @@ fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<V
     if let Some(parent) = parent {
         let parent_dir = main.join(authored_path(parent));
         fold_memory(&directory, slug, &parent_dir.join("MEMORY.md"))?;
-        fold_config(&directory.join("config.yaml"), &parent_dir.join("config.yaml"))?;
+        fold_config(
+            &directory.join("config.yaml"),
+            &parent_dir.join("config.yaml"),
+        )?;
         changed.push(authored_path(parent));
         changed.extend(rewrite_references(main, slug, Some(parent))?);
     }
@@ -571,13 +575,20 @@ fn wave_documents(main: &Path, slug: &str) -> Vec<PathBuf> {
 }
 
 fn path_reference(slug: &str) -> regex::Regex {
-    regex::Regex::new(&format!(r"\.lf/wave/{}(?P<end>/|[^A-Za-z0-9_/-]|$)", regex::escape(slug)))
-        .expect("escaped Wave path is a valid pattern")
+    regex::Regex::new(&format!(
+        r"\.lf/wave/{}(?P<end>/|[^A-Za-z0-9_/-]|$)",
+        regex::escape(slug)
+    ))
+    .expect("escaped Wave path is a valid pattern")
 }
 
 /// Rewrite `.lf/wave/<slug>` paths in other Waves' documents to `replacement`,
 /// or leave them (and list them as mentions) when there is none.
-fn rewrite_references(main: &Path, slug: &str, replacement: Option<&str>) -> OpsResult<Vec<String>> {
+fn rewrite_references(
+    main: &Path,
+    slug: &str,
+    replacement: Option<&str>,
+) -> OpsResult<Vec<String>> {
     let Some(replacement) = replacement else {
         return Ok(Vec::new());
     };
@@ -587,8 +598,7 @@ fn rewrite_references(main: &Path, slug: &str, replacement: Option<&str>) -> Ops
         let Ok(text) = std::fs::read_to_string(&document) else {
             continue;
         };
-        let rewritten =
-            pattern.replace_all(&text, format!(".lf/wave/{replacement}$end").as_str());
+        let rewritten = pattern.replace_all(&text, format!(".lf/wave/{replacement}$end").as_str());
         if rewritten != text {
             std::fs::write(&document, rewritten.as_ref())
                 .map_err(|error| lifecycle_error(format!("{}: {error}", document.display())))?;
@@ -643,7 +653,11 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             "{} ({}) {} with it.",
             count(children, "child Wave", "child Waves"),
             removal.waves[1..].join(", "),
-            if removal.preview { "will be removed" } else { "were removed" }
+            if removal.preview {
+                "will be removed"
+            } else {
+                "were removed"
+            }
         ));
     }
     let open = removal.moved.len() + removal.deleted.len();
@@ -675,7 +689,11 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
         lines.push(format!(
             "{} {}: {}.",
             count(removal.deleted.len(), "unstarted Task", "unstarted Tasks"),
-            if removal.preview { "will be deleted" } else { "deleted" },
+            if removal.preview {
+                "will be deleted"
+            } else {
+                "deleted"
+            },
             removal
                 .deleted
                 .iter()
@@ -686,13 +704,25 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
     }
     let mut kept = Vec::new();
     if removal.completed_tasks > 0 {
-        kept.push(count(removal.completed_tasks, "completed Task", "completed Tasks"));
+        kept.push(count(
+            removal.completed_tasks,
+            "completed Task",
+            "completed Tasks",
+        ));
     }
     if removal.chapters > 0 {
         kept.push(count(removal.chapters, "chapter", "chapters"));
     }
     if !kept.is_empty() {
-        lines.push(format!("{} stay readable in history.", kept.join(" and ")));
+        let verb = if removal.completed_tasks + removal.chapters == 1 {
+            "stays"
+        } else {
+            "stay"
+        };
+        lines.push(format!(
+            "{} {verb} readable in history.",
+            kept.join(" and ")
+        ));
     }
     if removal.sessions > 0 {
         lines.push(format!(
@@ -702,7 +732,11 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             } else {
                 format!("{} Wave conversations", removal.sessions)
             },
-            if removal.sessions == 1 { "stays" } else { "stay" }
+            if removal.sessions == 1 {
+                "stays"
+            } else {
+                "stay"
+            }
         ));
     }
     if removal.has_files {
@@ -739,7 +773,10 @@ fn leftovers(removal: &WaveRemoval) -> Vec<String> {
         }
     }
     if let Some(AuthoredFiles::Uncommitted { reason }) = &removal.files {
-        lines.push(format!(".lf/wave/{} is not committed: {reason}.", removal.name));
+        lines.push(format!(
+            ".lf/wave/{} is not committed: {reason}.",
+            removal.name
+        ));
     }
     if !removal.mentions.is_empty() {
         lines.push(format!(
@@ -806,7 +843,9 @@ pub async fn rename(
             // Already renamed: the old address is free and the new one is live.
             if let Some(target) = &target {
                 let locator = WaveLocator::discover(&main, target).map_err(lifecycle_error)?;
-                if let Some(existing) = store.get_wave_at(&locator).await.map_err(lifecycle_error)? {
+                if let Some(existing) =
+                    store.get_wave_at(&locator).await.map_err(lifecycle_error)?
+                {
                     return Ok(WaveRenamed {
                         id: existing.id().clone(),
                         from: wave.to_string(),
@@ -825,11 +864,28 @@ pub async fn rename(
     let from = wave.slug().to_string();
     let to = target.clone().unwrap_or_else(|| from.clone());
     let moves = to != from || target_repo.is_some();
+    // Refuse before changing the store: the directory move would fail after it.
+    if to != from
+        && target_repo.is_none()
+        && main.join(authored_path(&from)).exists()
+        && main.join(authored_path(&to)).exists()
+    {
+        return Err(lifecycle_error(format!(
+            ".lf/wave/{to} already exists in {}; move or delete it first",
+            main.display()
+        )));
+    }
     let relocation = if moves {
         Some(
-            crate::work::wave::relocate::relocate_wave(&store, wave.id(), &main, target_repo, Some(&to))
-                .await
-                .map_err(lifecycle_error)?,
+            crate::work::wave::relocate::relocate_wave(
+                &store,
+                wave.id(),
+                &main,
+                target_repo,
+                Some(&to),
+            )
+            .await
+            .map_err(lifecycle_error)?,
         )
     } else {
         None
@@ -885,7 +941,11 @@ pub async fn rename(
     };
     Ok(WaveRenamed {
         id: wave.id().clone(),
-        mentions: if moves { prose_mentions(&main, &from) } else { Vec::new() },
+        mentions: if moves {
+            prose_mentions(&main, &from)
+        } else {
+            Vec::new()
+        },
         from,
         to,
         renamed: moves,
@@ -902,7 +962,10 @@ pub fn render_renamed(renamed: &WaveRenamed) -> String {
         format!("{} is already {}", renamed.from, renamed.to)
     }];
     if let AuthoredFiles::Uncommitted { reason } = &renamed.files {
-        lines.push(format!(".lf/wave/{} is not committed: {reason}", renamed.to));
+        lines.push(format!(
+            ".lf/wave/{} is not committed: {reason}",
+            renamed.to
+        ));
     }
     if let Some(InitiativeRename {
         initiative,
@@ -916,7 +979,10 @@ pub fn render_renamed(renamed: &WaveRenamed) -> String {
         ));
     }
     if !renamed.mentions.is_empty() {
-        lines.push(format!("Still mentioned in: {}", renamed.mentions.join(", ")));
+        lines.push(format!(
+            "Still mentioned in: {}",
+            renamed.mentions.join(", ")
+        ));
     }
     lines.join("\n")
 }

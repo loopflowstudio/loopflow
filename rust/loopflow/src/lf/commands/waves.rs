@@ -760,6 +760,21 @@ pub fn watch_show(
     )
 }
 
+/// The most recently removed Wave at an explicit address in this repository.
+fn removed_wave_at(
+    store: &SharedStore,
+    repo: Option<&Path>,
+    wave: Option<&str>,
+) -> Result<Option<crate::work::wave::Wave>> {
+    let (Some(repo), Some(wave)) = (repo, wave) else {
+        return Ok(None);
+    };
+    let locator = crate::work::wave::WaveLocator::discover(repo, wave)?;
+    Ok(store
+        .sqlite
+        .retired_wave_at(&locator.repo().to_string(), locator.slug())?)
+}
+
 /// What `lf wave show` prints. `observe` first asks the tracker about each
 /// repository read.
 async fn show_roadmap(
@@ -803,6 +818,13 @@ async fn show_roadmap(
     .await
     {
         Ok(wave) => vec![wave],
+        // A removed Wave's address still shows its history until a new Wave takes it.
+        Err(error @ crate::work::wave::context::WaveResolveError::UnknownExplicit(_)) => {
+            match removed_wave_at(store, repo.as_deref(), wave)? {
+                Some(removed) => vec![removed],
+                None => return Err(anyhow!(error)),
+            }
+        }
         Err(crate::work::wave::context::WaveResolveError::NoContext) => {
             let waves = store
                 .list_waves(None)

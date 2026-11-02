@@ -17,6 +17,7 @@ struct WorkNavigator: View {
     /// The Wave row just clicked, shown before its selection moves it.
     @State private var pressedScope: WorkNavigation.SidebarScope?
     @State private var removingWave: WaveSnapshot?
+    @State private var renamingWave: WaveSnapshot?
     /// Pointing at the Waves section reveals New Wave; only that row reads it.
     @State private var wavesHover = HoverFlag()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -153,6 +154,12 @@ struct WorkNavigator: View {
                 onCancel: { removingWave = nil }
             )
         }
+        .sheet(item: $renamingWave) { wave in
+            RenameWaveSheet(
+                model: model, id: wave.id, currentName: wave.name, repo: model.repoPath ?? wave.repo,
+                onDone: { renamingWave = nil }
+            )
+        }
     }
 
     private var waveList: some View {
@@ -179,6 +186,9 @@ struct WorkNavigator: View {
         waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
                 count: wave.tasks.items.count, unavailableReason: wave.tasks.unavailableReason)
             .contextMenu {
+                Button { renamingWave = wave.wave } label: {
+                    Label("Rename Wave…", systemImage: "pencil")
+                }
                 Button(role: .destructive) { removingWave = wave.wave } label: {
                     Label("Remove Wave…", systemImage: "trash")
                 }
@@ -316,6 +326,8 @@ extension WorkNavigator: Equatable {
 struct WorkBreadcrumbs: View {
     @Bindable var model: WorkModel
     @Environment(\.palette) private var palette
+    @State private var removingWave: WaveSnapshot?
+    @State private var renamingWave: WaveSnapshot?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -334,6 +346,22 @@ struct WorkBreadcrumbs: View {
         .font(Typography.strong(13))
         .foregroundStyle(palette.titlebarText, palette.titlebarSecondaryText)
         .accessibilityIdentifier("work-breadcrumbs")
+        .sheet(item: $removingWave) { wave in
+            RemoveWaveSheet(
+                model: model, name: wave.id, displayName: wave.displayName, repo: model.repoPath ?? wave.repo,
+                onRemoved: {
+                    if model.navigation.sidebarScope == .wave(wave.id) { model.select(nil) }
+                    removingWave = nil
+                },
+                onCancel: { removingWave = nil }
+            )
+        }
+        .sheet(item: $renamingWave) { wave in
+            RenameWaveSheet(
+                model: model, id: wave.id, currentName: wave.name, repo: model.repoPath ?? wave.repo,
+                onDone: { renamingWave = nil }
+            )
+        }
     }
 
     private func trail(showWave: Bool) -> some View {
@@ -398,6 +426,14 @@ struct WorkBreadcrumbs: View {
                 model.select(.wave(id: id))
                 model.navigation.content = .terminals
             }.lineLimit(1).fixedSize()
+            .contextMenu {
+                if let wave = model.wave(id: id)?.wave {
+                    Button { renamingWave = wave } label: { Label("Rename Wave…", systemImage: "pencil") }
+                    Button(role: .destructive) { removingWave = wave } label: {
+                        Label("Remove Wave…", systemImage: "trash")
+                    }
+                }
+            }
             WorkJumpSeparator(model: model, scope: .wave(id), label: "Tasks in \(name)")
         }
     }
@@ -545,6 +581,7 @@ private struct NewWaveRow: View {
     @Environment(\.palette) private var palette
     @State private var naming = false
     @State private var name = ""
+    @State private var objective = ""
     @State private var error: String?
 
     var body: some View {
@@ -566,6 +603,7 @@ private struct NewWaveRow: View {
     private var form: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
+            TextField("Objective (optional)", text: $objective).onSubmit(create).frame(width: 200)
             if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
             HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
         }.padding(12)
@@ -575,10 +613,12 @@ private struct NewWaveRow: View {
         guard let repoPath = model.repoPath else { return }
         Task {
             do {
-                try await model.addWave(name: name, repo: repoPath)
+                let id = try await model.addWave(name: name, objective: objective, repo: repoPath)
                 naming = false
                 name = ""
+                objective = ""
                 error = nil
+                model.select(.wave(id: id))
             } catch let failure {
                 error = failure.localizedDescription
             }

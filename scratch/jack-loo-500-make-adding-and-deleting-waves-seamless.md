@@ -51,8 +51,8 @@ empty, `desktop` with open/started/completed Tasks and a Wave conversation,
    1 chapter stay readable in history. The Wave conversation stays in
    history." → Remove → the three Tasks appear under the repository; the
    started one is still running.
-4. CLI: `lf wave list` agrees; `lf wave list --all-history` (or `lf wave show
-   desktop`) shows the removed Wave with its chapter history.
+4. CLI: `lf wave list` agrees; `lf wave show desktop` shows the removed Wave
+   with its chapter history.
 5. Re-run `lf wave remove desktop` → "desktop was already removed" exit 0.
    `lf wave add ops` again → "ops already exists" exit 0, no duplicate.
 
@@ -342,19 +342,27 @@ One PR, deletions first:
    authored directories by id first.
 3. Done: `lf wave rename <wave> <new-name>` over relocation plus directory move,
    reference rewrite and Initiative title.
-4. Partly done — Desktop: `RemoveWaveSheet` over `lf wave remove --preview
-   --json` (Rust `WaveRemoval` DTO, `tests/fixtures/dto/wave_removal.json`,
-   Swift mirror, view tests for preview and failure/Retry), reachable from the
-   sidebar Wave rows and `WavesView` rows as **Remove Wave…**. Remaining: the
-   Objective field in `NewWaveRow`/`CreateWaveSheet`; **Rename Wave…**; the
-   Wave workspace titlebar action; selecting the new Wave after add.
-5. Remaining — exchange reader tolerance for unknown planning fields (named
-   "written by a newer lf" diagnostic); the migration upgrade test; Linear sync
-   skipping retired Waves (verify); `PortfolioDiscovery.authoredWaves`
-   filesystem scan review; the lf-world `wave-lifecycle` demo.
+4. Done — Desktop: `RemoveWaveSheet` over `lf wave remove --preview --json`
+   (Rust `WaveRemoval` DTO, fixture, Swift mirror); `RenameWaveSheet` over
+   `lf wave rename <id> <new> --json`; both in the sidebar Wave row menu, the
+   Waves window rows (registered Waves only) and the titlebar Wave crumb's menu.
+   `NewWaveRow` and `CreateWaveSheet` take an optional Objective; the sidebar
+   selects the new Wave by the id `lf wave add --json` returns.
+5. Done — migration upgrade test from the released schema
+   (`wave_definitions::released_waves_upgrade_and_removal_needs_no_successor`);
+   Linear sync reads only live Waves (verified, no change); `lf wave show <name>`
+   falls back to the most recently removed Wave at that address; rename refuses
+   before any change when `.lf/wave/<new>` already exists on disk.
+   `PortfolioDiscovery.authoredWaves` reviewed: it only adds placeholders for
+   unregistered directories, which no longer arise from Desktop creation.
+   Not built: unknown-field tolerance in the exchange reader (see questions).
+
+Remaining: Desktop demo steps 1–3 need a display session (demo/review).
+CLI demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
 
 ## Checks
 
-- Implement: `cargo test -p loopflow --test integration wave_lifecycle` 5/5 pass;
-  `--lib` wave_definitions, planning_peers exchange, and edited local_planning
-  tests pass; broader related suites and Swift focused tests: see final notes.
+- 2026-11-02: `cargo test --test integration wave_lifecycle` 5/5; `--lib`
+  wave_definitions, planning_peers, wave_repository_ownership, migrations pass;
+  Swift `CreateWaveSheet|RemoveWaveSheet|ProjectActivation|WaveRow` pass;
+  `cargo clippy --all-targets -D warnings` clean. Affected suites → gate.

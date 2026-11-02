@@ -43,3 +43,11 @@ Implementation assumptions (2026-10-28, implement step), reversible:
   revives the retired identity.
 - **Archive failure keeps the files**: the Initiative id lives in
   `config.yaml`, so files stay until a re-run archives it.
+- **No unknown-edit tolerance in the exchange reader** (implement, 2026-11-02):
+  skipping unrecognized planning edits would let an older reader republish a
+  snapshot without them, silently dropping a newer peer's removals. The loud
+  failure Jack accepted is the safer skew, so the design's "skip unknown fields"
+  step was not built.
+- **Relocation collisions now always refuse** ("<name> already exists; remove or
+  rename it first"), including registration-only shadows that relocation used
+  to retire; `lf wave remove` the shadow first. Its old test was deleted.

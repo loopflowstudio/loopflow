@@ -657,21 +657,37 @@ mod tests {
         author.create_wave(&removed).unwrap();
         let route = destination(&author, "/repo", "shared");
         let before = author.export_peer_planning("/repo", &route).unwrap();
-        peer.import_peer_planning("/repo", &destination(&peer, "/repo", "shared"), "one", &before)
-            .unwrap();
+        peer.import_peer_planning(
+            "/repo",
+            &destination(&peer, "/repo", "shared"),
+            "one",
+            &before,
+        )
+        .unwrap();
         assert!(!peer.get_wave(removed.id()).unwrap().unwrap().is_retired());
 
-        author.retire_waves(&[removed.id().clone()], "removed").unwrap();
+        author
+            .retire_waves(&[removed.id().clone()], "removed")
+            .unwrap();
         let after = author.export_peer_planning("/repo", &route).unwrap();
         let retired: Vec<_> = after
             .changes
             .values()
             .filter(|change| matches!(change.edit.change, WorkValue::WaveRetired(_)))
             .collect();
-        assert_eq!(retired.len(), 1, "only the removed Wave exchanges a retirement");
+        assert_eq!(
+            retired.len(),
+            1,
+            "only the removed Wave exchanges a retirement"
+        );
         assert_eq!(retired[0].edit.target, removed.id().as_str());
-        peer.import_peer_planning("/repo", &destination(&peer, "/repo", "shared"), "two", &after)
-            .unwrap();
+        peer.import_peer_planning(
+            "/repo",
+            &destination(&peer, "/repo", "shared"),
+            "two",
+            &after,
+        )
+        .unwrap();
         assert!(peer.get_wave(removed.id()).unwrap().unwrap().is_retired());
         assert!(!peer.get_wave(live.id()).unwrap().unwrap().is_retired());
     }

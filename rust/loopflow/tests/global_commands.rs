@@ -2507,13 +2507,9 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
     let repo = TestRepo::new();
     for wave in ["source", "destination"] {
         success(
-            command(
-                home.path(),
-                repo.path(),
-                &["wave", "add", wave, "--json"],
-            )
-            .output()
-            .unwrap(),
+            command(home.path(), repo.path(), &["wave", "add", wave, "--json"])
+                .output()
+                .unwrap(),
         );
     }
     // Setup owns these locks; preview must not recreate them.

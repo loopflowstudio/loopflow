@@ -235,11 +235,7 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
     let mut predecessors = Vec::new();
     let successor = uuid::Uuid::new_v4().to_string();
     for name in ["first", "second"] {
-        lf(
-            repo.path(),
-            home.path(),
-            &["wave", "add", name, "--json"],
-        );
+        lf(repo.path(), home.path(), &["wave", "add", name, "--json"]);
         let wave = lf(
             repo.path(),
             home.path(),
@@ -2500,11 +2496,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 canonical.to_string(),
             );
             store.create_wave(&wave).unwrap();
-            lf(
-                repo.path(),
-                home.path(),
-                &["wave", "add", name, "--json"],
-            );
+            lf(repo.path(), home.path(), &["wave", "add", name, "--json"]);
             let mut project = store.list_projects(Some(wave.id())).unwrap().remove(0);
             if mapped {
                 // Bind through the writer so foreground Git exchange sees the same

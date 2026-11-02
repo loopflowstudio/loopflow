@@ -127,10 +127,7 @@ async fn plan_moves(
     root: Wave,
     target: WaveLocator,
 ) -> Result<Vec<PlannedWaveMove>> {
-    let mut moves = vec![PlannedWaveMove {
-        wave: root,
-        target,
-    }];
+    let mut moves = vec![PlannedWaveMove { wave: root, target }];
     // Parents precede children so the store can resolve each destination parent.
     let mut next = 0;
     while next < moves.len() {

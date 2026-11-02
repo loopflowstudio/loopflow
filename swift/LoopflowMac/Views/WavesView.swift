@@ -43,6 +43,7 @@ struct WavesView: View {
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
     @State private var removing: WaveViewModel?
+    @State private var renaming: WaveViewModel?
     @State private var didRestoreStickyRepo = false
 
     /// All waves across every repo: registry rows merged with Waves authored on
@@ -156,6 +157,15 @@ struct WavesView: View {
                 onCancel: { removing = nil }
             )
         }
+        .sheet(item: $renaming) { wave in
+            RenameWaveSheet(
+                model: model, id: wave.id, currentName: wave.name, repo: waveRepoPath(for: wave),
+                onDone: {
+                    renaming = nil
+                    Task { await syncRepoStates() }
+                }
+            )
+        }
         .sheet(isPresented: $isShowingCreate) {
             CreateWaveSheet(
                 repos: repos,
@@ -208,7 +218,9 @@ struct WavesView: View {
                                 isSelected: selectedWaveId == waveSelectionId(entry.wave),
                                 onSelect: { selectedWaveId = waveSelectionId(entry.wave) },
                                 indentLevel: entry.indent,
-                                onDelete: { removing = entry.wave }
+                                // Unregistered authored directories have no Wave to act on.
+                                onDelete: entry.wave.isRegistered ? { removing = entry.wave } : nil,
+                                onRename: entry.wave.isRegistered ? { renaming = entry.wave } : nil
                             )
                         }
                     }
@@ -458,8 +470,8 @@ struct WavesView: View {
         PortfolioRepoState.wavePlanKey(repoPath: repoPath, waveName: waveName)
     }
 
-    private func createWave(repoPath: String, name: String) async throws {
-        try await model.addWave(name: name, repo: repoPath)
+    private func createWave(repoPath: String, name: String, objective: String) async throws {
+        try await model.addWave(name: name, objective: objective, repo: repoPath)
         ensureRepoStates()
         await repoStates[repoPath]?.refresh()
     }
@@ -630,16 +642,17 @@ struct WavesView: View {
 
 /// Minimal create-wave graph: pick a target repo, name the wave, submit. Adds
 /// the Wave through `lf wave add`.
-private struct CreateWaveSheet: View {
+struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?
-    let onCreate: (_ repoPath: String, _ name: String) async throws -> Void
+    let onCreate: (_ repoPath: String, _ name: String, _ objective: String) async throws -> Void
     let onCancel: () -> Void
 
     @Environment(\.palette) private var palette
 
     @State private var selectedRepoPath: String = ""
     @State private var waveName = ""
+    @State private var objective = ""
     @State private var isCreating = false
     @State private var errorMessage: String?
     @FocusState private var isNameFocused: Bool
@@ -693,6 +706,23 @@ private struct CreateWaveSheet: View {
                     .disabled(isCreating)
             }
 
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text("Objective (optional)")
+                    .font(Typography.caption())
+                    .foregroundStyle(palette.textSecondary)
+
+                TextField("What this Wave is for", text: $objective)
+                    .accessibilityIdentifier("new-wave-objective")
+                    .textFieldStyle(.plain)
+                    .font(Typography.body())
+                    .foregroundStyle(palette.text)
+                    .padding(Spacing.md)
+                    .background(palette.surfaceMuted)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md))
+                    .onSubmit(submit)
+                    .disabled(isCreating)
+            }
+
             if let errorMessage {
                 Text(errorMessage)
                     .font(Typography.caption())
@@ -735,11 +765,12 @@ private struct CreateWaveSheet: View {
         errorMessage = nil
         let repoPath = selectedRepoPath
         let name = trimmedName
+        let objective = objective.trimmingCharacters(in: .whitespacesAndNewlines)
 
         Task {
             defer { isCreating = false }
             do {
-                try await onCreate(repoPath, name)
+                try await onCreate(repoPath, name, objective)
                 onCancel()
             } catch {
                 errorMessage = error.localizedDescription

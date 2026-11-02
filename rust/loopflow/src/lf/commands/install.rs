@@ -1362,7 +1362,7 @@ fn earlier_release_installs(target: &Path) -> Vec<PathBuf> {
     let Ok(home) = crate::installation::account_home() else {
         return Vec::new();
     };
-    let release_ids = ["com.loopflow.mac", "com.loopflow.concerto"];
+    let release_ids = [super::open::DESKTOP_BUNDLE, "com.loopflow.concerto"];
     ["Loopflow.app", "Concerto.app"]
         .into_iter()
         .map(|name| home.join("Applications").join(name))

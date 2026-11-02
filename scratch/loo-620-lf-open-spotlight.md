@@ -1,7 +1,7 @@
 # LOO-620: lf open, Spotlight and Finder reach only the installed Loopflow.app
 
 Status: implemented, compressed, synced onto main through #1792 and realigned (2026-11-02).
-Concept review (2026-11-02) sends one change back to implement, below; gate after it. Source: Task definition
+Concept review (2026-11-02) sent one change back; it landed (432eefbff3) and the compress pass found nothing more to cut. Gate next. Source: Task definition
 (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop database-mismatch incident).
 
 ## What exists
@@ -122,4 +122,4 @@ Not changed, and why:
   fails on main too (#1776's HOME-vs-account-home check, macOS-only); not this branch.
 - Demo on a Mac: `lf install` twice, then `ls -a /Applications`, `lf open`.
 
-Checks (2026-11-02 implement): `cargo test -p loopflow --lib -- open::tests::` 4 passed after the select change; earlier `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::` 36 passed; `cargo test --test integration -- available_conversations_need_no_question` and `--test global_commands -- open_delivers_exact_task_to_desktop` passed; clippy clean; Python suites unchanged since the last pass (35 passed), gate reruns them.
+Checks (2026-11-02 compress): `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests::` after the `DESKTOP_BUNDLE` constant replaced the literal in `earlier_release_installs` 12 passed, fmt and clippy clean; implement: `cargo test -p loopflow --lib -- open::tests::` 4 passed after the select change; earlier `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::` 36 passed; `cargo test --test integration -- available_conversations_need_no_question` and `--test global_commands -- open_delivers_exact_task_to_desktop` passed; clippy clean; Python suites unchanged since the last pass (35 passed), gate reruns them.

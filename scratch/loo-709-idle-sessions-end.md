@@ -82,10 +82,6 @@ the Session" branch.
   writes `<home>/snapshots/<owner>.ghostsnp` and adds `last_screen` to the
   Session DTO. Unresolved; must agree before either publishes. See
   `scratch/questions.md`.
-- Acceptance gap: no test shows an `lf -b … --message` Run surviving the
-  grace. It holds structurally (a pipe owner never learns a limit, and
-  `interactive=0` holds in `owner_waits_for_person`), but nothing proves it
-  under a short grace.
 - PR body: before/after numbers below, and point the 27 pre-rule owners at
   LOO-705's `lf monitor rollover`.
 
@@ -115,5 +111,10 @@ the Session" branch.
   errors. Three `lf session resume <id>` each relaunched
   `claude --resume <thread>` with no input replayed; the saved screen shows
   the Claude welcome and the pending prompt.
+- Run acceptance: `cargo test -p loopflow --test transport_tests -- headless
+  resume_refuses detached_sessions_end_after_their_limit` (4) pass; Graph and
+  plain `lf -b skill … --message` Runs hold their turn 4s past a 2s grace and
+  settle `succeeded`. The skill Run still passes with `s.interactive=0` removed
+  from `owner_waits_for_person`: the pipe owner never reads a limit.
 - The 27 pre-rule owners on Jack's machine are untouched; LOO-705's
   `lf monitor rollover` is the path for them.

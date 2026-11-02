@@ -12,6 +12,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use loopflow_test_support::TestRepo;
+use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -1651,16 +1652,28 @@ fn codex_original_request_channel_and_turn_survive_all_viewers() {
 
 #[test]
 fn headless_graph_settles_its_original_step_after_creator_teardown() {
-    headless_graph(false);
+    headless_run(&["graph", "proof"], false);
 }
 
 #[test]
 fn resume_refuses_a_graph_step_and_leaves_it_running() {
-    headless_graph(true);
+    headless_run(&["graph", "proof"], true);
 }
 
-fn headless_graph(resume: bool) {
+#[test]
+fn a_headless_run_outlives_the_detached_limit() {
+    headless_run(&["skill", "probe", "--message", "go"], false);
+}
+
+/// A headless Run whose creator is gone holds its conversation past
+/// `session.end_detached_after` and settles with its own outcome.
+fn headless_run(command: &[&str], resume: bool) {
     let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 2s\n",
+    )
+    .unwrap();
     let bin = fixture.home.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     let provider = bin.join("opencode");
@@ -1678,7 +1691,7 @@ fn headless_graph(resume: bool) {
         .create_file(".lf/graphs/proof.yaml", "- probe\n");
     std::fs::write(fixture.home.path().join("hold-turn"), "").unwrap();
     let mut creator = fixture
-        .command(&["-b", "--agent", "opencode", "graph", "proof"])
+        .command(&[&["-b", "--agent", "opencode"], command].concat())
         .env(
             "PATH",
             format!(
@@ -1712,6 +1725,17 @@ fn headless_graph(resume: bool) {
             "{error}"
         );
     }
+    // Unviewed well past the limit, the Run keeps its turn.
+    std::thread::sleep(Duration::from_secs(4));
+    let outcome: Option<String> = sql
+        .query_row("SELECT outcome FROM processes WHERE id=?1", [&step], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert!(
+        outcome.is_none(),
+        "the detached limit ended a Run: {outcome:?}"
+    );
     std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
@@ -1727,16 +1751,17 @@ fn headless_graph(resume: bool) {
         assert!(Instant::now() < deadline, "step did not settle");
         std::thread::sleep(Duration::from_millis(20));
     }
-    let graph: String = sql
+    let graph: Option<String> = sql
         .query_row(
             "SELECT graph_lf_process_id FROM graph_process_steps WHERE lf_process_id=?1",
             [&step],
             |r| r.get(0),
         )
+        .optional()
         .unwrap();
-    loop {
+    while let Some(graph) = &graph {
         let outcome: Option<String> = sql
-            .query_row("SELECT outcome FROM processes WHERE id=?1", [&graph], |r| {
+            .query_row("SELECT outcome FROM processes WHERE id=?1", [graph], |r| {
                 r.get(0)
             })
             .unwrap();

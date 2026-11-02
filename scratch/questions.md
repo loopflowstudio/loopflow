@@ -37,3 +37,7 @@
   no judgement. The test instead closes the dead owner rows the way retention
   does after a reboot (`completed_at` set, no `outcome`) and shows
   `lf resume --all` still resumes the viewed set.
+- **`s.interactive=0` in `owner_waits_for_person` may be redundant.** The
+  headless Run test passes without it because a pipe owner never reads a
+  limit. Left in place: a terminal owner holding a non-interactive Session
+  might still need it, and nothing here proves otherwise.

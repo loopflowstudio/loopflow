@@ -1,111 +1,211 @@
 //! When a Session owner ends itself.
 //!
-//! An owner whose lf executable is removed or replaced (a worktree deleted, a
-//! build relinked, Dev.app rebuilt) ends as soon as its Sessions wait for a
-//! person, viewers notwithstanding: it would otherwise run a vanished build
-//! indefinitely. Its attached viewers are told why and how to return. An owner
-//! nobody has viewed for `session.end_detached_after` ends the same way.
-//! Ending stops its agent and records its exit, so
-//! `lf resume` reopens the conversation from provider history and
-//! `lf resume --all` leaves it alone.
+//! A terminal owner nobody views ends after `session.end_detached_after` of
+//! quiet: no viewer, no output from its command, and nothing in the store
+//! holding it (a turn in progress, a running Graph, a headless Run). An owner
+//! whose lf executable is removed or replaced (a worktree deleted, a build
+//! relinked, Dev.app rebuilt) ends as soon as its Sessions wait for a person,
+//! viewers notwithstanding: it would otherwise run a vanished build
+//! indefinitely. Its attached viewers are told why and how to return. Ending
+//! writes the last screen, stops the agent and records the exit, so `lf resume`
+//! reopens the conversation from provider history and `lf resume --all` leaves
+//! it alone.
+//!
+//! The clock is wall time: a laptop asleep overnight ends its idle Sessions at
+//! the first poll after it wakes. A store that cannot be read is judged again
+//! next time; the policy never stops on an error.
 
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
-
-use anyhow::Result;
+use std::time::{Duration, SystemTime};
 
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
+use crate::store::sqlite::SqliteStore;
 
-/// The longest `recheck` pause.
-const LONGEST_PAUSE: Duration = Duration::from_secs(5 * 60);
-/// How often an owner looks at its executable.
-const EXECUTABLE_PAUSE: Duration = Duration::from_secs(2);
+/// How often an owner looks at the clock and its executable.
+const POLL: Duration = Duration::from_secs(2);
 
-/// Record viewer changes sent on the first channel. Once the executable is gone
-/// or the owner has gone unviewed past its limit, send the second channel what
-/// to tell attached viewers; the serve loop delivers it and ends the owner.
-pub(super) fn spawn(owner: LfProcessId) -> (mpsc::Sender<bool>, mpsc::Receiver<Option<String>>) {
+/// What the serve loop tells the policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Activity {
+    /// Whether any viewer is attached, sent on each change.
+    Viewed(bool),
+    /// The command wrote to its terminal: a turn is in progress as far as
+    /// the owner can see.
+    Output,
+}
+
+/// Record activity sent on the first channel. Once the executable is gone or
+/// the owner has gone unviewed and quiet past its limit, send the second
+/// channel what to tell attached viewers; the serve loop delivers it and ends
+/// the owner. Only a terminal owner (`terminal`) ends for want of viewers;
+/// a pipe owner is a headless Run.
+pub(super) fn spawn(
+    owner: LfProcessId,
+    terminal: bool,
+) -> (mpsc::Sender<Activity>, mpsc::Receiver<Option<String>>) {
     let executable = Executable::current();
-    let (viewers, changes) = mpsc::channel();
+    let (activity, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
     std::thread::spawn(move || {
-        if let Err(error) = watch(&owner, executable.as_ref(), &changes, &end) {
-            tracing::warn!(%error, %owner, "Session owner policy stopped");
-        }
+        watch(&owner, executable.as_ref(), terminal, &changes, &end);
     });
-    (viewers, ending)
+    (activity, ending)
+}
+
+/// When an unviewed, quiet owner is due to end, in wall time.
+#[derive(Debug)]
+struct Grace {
+    limit: Option<Duration>,
+    viewed: bool,
+    quiet_since: SystemTime,
+}
+
+impl Grace {
+    fn note(&mut self, activity: Activity, now: SystemTime) {
+        match activity {
+            Activity::Viewed(viewed) => {
+                self.viewed = viewed;
+                self.quiet_since = now;
+            }
+            Activity::Output => self.quiet_since = now,
+        }
+    }
+
+    fn due(&self) -> Option<SystemTime> {
+        self.limit
+            .filter(|_| !self.viewed)
+            .map(|limit| self.quiet_since + limit)
+    }
+
+    fn expired(&self, now: SystemTime) -> bool {
+        self.due().is_some_and(|due| due <= now)
+    }
 }
 
 fn watch(
     owner: &LfProcessId,
     executable: Option<&Executable>,
-    changes: &mpsc::Receiver<bool>,
+    terminal: bool,
+    changes: &mpsc::Receiver<Activity>,
     end: &mpsc::Sender<Option<String>>,
-) -> Result<()> {
-    let store = crate::journal::process_ledger()?;
-    let repo = store.process(owner)?.and_then(|process| process.repo);
-    let limit = limit(repo.as_deref());
-    let mut due: Option<Instant> = None;
+) {
+    let mut store = Store::default();
+    let mut grace = Grace {
+        limit: None,
+        viewed: false,
+        quiet_since: SystemTime::now(),
+    };
+    let mut configured = false;
+    // After a judgement that found the owner held, the next is no sooner than this.
+    let mut held_until: Option<SystemTime> = None;
     loop {
-        let wake = [due, executable.map(|_| Instant::now() + EXECUTABLE_PAUSE)]
-            .into_iter()
-            .flatten()
-            .min();
-        let change = match wake {
-            Some(wake) => changes.recv_timeout(wake.saturating_duration_since(Instant::now())),
-            None => changes
-                .recv()
-                .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
-        };
-        match change {
-            Ok(viewed) => {
-                // A store a newer lf has advanced refuses this write. The
-                // policy keeps running; readers ask this owner directly.
-                if let Err(error) = store.record_owner_viewers(owner, viewed) {
-                    tracing::warn!(%error, %owner, viewed, "cannot record Session viewers");
-                }
-                due = limit
-                    .filter(|_| !viewed)
-                    .map(|limit| Instant::now() + limit);
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                let now = Instant::now();
-                let expired = due.is_some_and(|due| due <= now);
-                let gone = executable
-                    .and_then(|executable| executable.gone().map(|how| (executable, how)));
-                if (gone.is_some() || expired) && store.owner_waits_for_person(owner)? {
-                    let hint = match gone {
-                        Some((executable, how)) => {
-                            tracing::warn!(
-                                %owner,
-                                path = %executable.path.display(),
-                                "ending a Session whose lf executable was {how}"
-                            );
-                            store.owner_sessions(owner)?.first().map(|session| {
-                                format!(
-                                    "This Session's lf build was {how}; `lf resume {session}` reopens it."
-                                )
-                            })
+        match changes.recv_timeout(POLL) {
+            Ok(activity) => {
+                grace.note(activity, SystemTime::now());
+                if let Activity::Viewed(viewed) = activity {
+                    // A store a newer lf has advanced refuses this write. The
+                    // policy keeps running; readers ask this owner directly.
+                    if let Some(store) = store.open(owner) {
+                        if let Err(error) = store.record_owner_viewers(owner, viewed) {
+                            tracing::warn!(%error, %owner, viewed, "cannot record Session viewers");
                         }
-                        None => {
-                            tracing::info!(%owner, "ending a Session nobody has viewed");
-                            None
-                        }
-                    };
-                    if end.send(hint).is_err() {
-                        crate::platform::kill_process(std::process::id());
                     }
-                    return Ok(());
-                }
-                if expired {
-                    due = limit.map(|limit| now + recheck(limit));
                 }
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
+        if terminal && !configured {
+            if let Some(store) = store.open(owner) {
+                let repo = store
+                    .process(owner)
+                    .ok()
+                    .flatten()
+                    .and_then(|process| process.repo);
+                grace.limit = limit(repo.as_deref());
+                configured = true;
+            }
+        }
+        let now = SystemTime::now();
+        let gone = executable.and_then(|executable| executable.gone().map(|how| (executable, how)));
+        if gone.is_none() && !grace.expired(now) {
+            continue;
+        }
+        if held_until.is_some_and(|until| now < until) {
+            continue;
+        }
+        let Some(store) = store.open(owner) else {
+            continue;
+        };
+        match store.owner_waits_for_person(owner) {
+            Ok(true) => {}
+            Ok(false) => {
+                held_until = Some(now + grace.limit.map_or(POLL, recheck));
+                continue;
+            }
+            Err(error) => {
+                tracing::warn!(%error, %owner, "cannot judge whether the Session waits for a person");
+                continue;
+            }
+        }
+        let hint = match gone {
+            Some((executable, how)) => {
+                tracing::warn!(
+                    %owner,
+                    path = %executable.path.display(),
+                    "ending a Session whose lf executable was {how}"
+                );
+                store
+                    .owner_sessions(owner)
+                    .ok()
+                    .and_then(|sessions| sessions.into_iter().next())
+                    .map(|session| {
+                        format!(
+                            "This Session's lf build was {how}; `lf resume {session}` reopens it."
+                        )
+                    })
+            }
+            None => {
+                tracing::info!(%owner, "ending a Session nobody has viewed");
+                None
+            }
+        };
+        if end.send(hint).is_err() {
+            crate::platform::kill_process(std::process::id());
+        }
+        return;
+    }
+}
+
+/// The process ledger, opened when first needed and again after a failure.
+#[derive(Default)]
+struct Store {
+    open: Option<SqliteStore>,
+    failed: Option<String>,
+}
+
+impl Store {
+    fn open(&mut self, owner: &LfProcessId) -> Option<&SqliteStore> {
+        if self.open.is_none() {
+            match crate::journal::process_ledger() {
+                Ok(store) => {
+                    self.open = Some(store);
+                    self.failed = None;
+                }
+                Err(error) => {
+                    let text = error.to_string();
+                    // The same failure every poll is one line, not a flood.
+                    if self.failed.as_ref() != Some(&text) {
+                        tracing::warn!(%error, %owner, "Session owner cannot read the store; judging again later");
+                        self.failed = Some(text);
+                    }
+                }
+            }
+        }
+        self.open.as_ref()
     }
 }
 
@@ -153,23 +253,53 @@ fn identity(metadata: &std::fs::Metadata) -> (u64, u64, u64, i64, i64) {
     )
 }
 
-/// The detached limit configured for `repo`; `None` when it is off or the
-/// configuration is unreadable, so the owner never ends for want of viewers.
+/// The detached limit configured for `repo`; `None` when it is off. An
+/// unreadable configuration keeps the default rather than keeping the Session.
 fn limit(repo: Option<&str>) -> Option<Duration> {
-    match crate::config::load_config(repo.map(Path::new)) {
-        Ok(config) => match config.unwrap_or_default().session.end_detached_after {
-            DetachedLimit::After(limit) => Some(limit),
-            DetachedLimit::Off => None,
-        },
+    let configured = match crate::config::load_config(repo.map(Path::new)) {
+        Ok(config) => config.unwrap_or_default().session.end_detached_after,
         Err(error) => {
-            tracing::warn!(%error, ?repo, "keep detached Sessions: configuration unreadable");
-            None
+            tracing::warn!(%error, ?repo, "configuration unreadable; using the default detached limit");
+            DetachedLimit::default()
         }
+    };
+    match configured {
+        DetachedLimit::After(limit) => Some(limit),
+        DetachedLimit::Off => None,
     }
 }
 
 /// How long an owner past `limit` waits before looking again while a turn or
 /// Graph holds it.
 fn recheck(limit: Duration) -> Duration {
-    (limit / 12).clamp(Duration::from_secs(1), LONGEST_PAUSE)
+    (limit / 12).clamp(POLL, Duration::from_secs(5 * 60))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use super::{Activity, Grace};
+
+    #[test]
+    fn the_grace_runs_from_the_last_viewer_or_output_in_wall_time() {
+        let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
+        let mut grace = Grace {
+            limit: Some(Duration::from_secs(120)),
+            viewed: false,
+            quiet_since: start,
+        };
+        assert!(!grace.expired(start + Duration::from_secs(119)));
+        // A night asleep counts: the clock, not uptime, decides.
+        assert!(grace.expired(start + Duration::from_secs(8 * 3_600)));
+        grace.note(Activity::Output, start + Duration::from_secs(100));
+        assert!(!grace.expired(start + Duration::from_secs(200)));
+        assert!(grace.expired(start + Duration::from_secs(220)));
+        grace.note(Activity::Viewed(true), start + Duration::from_secs(300));
+        assert_eq!(grace.due(), None);
+        grace.note(Activity::Viewed(false), start + Duration::from_secs(400));
+        assert_eq!(grace.due(), Some(start + Duration::from_secs(520)));
+        grace.limit = None;
+        assert_eq!(grace.due(), None);
+    }
 }

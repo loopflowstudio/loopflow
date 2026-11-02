@@ -1,9 +1,12 @@
-//! `lf resume --all`: bring back every conversation a restart or crash cut off.
+//! `lf resume --all`: bring back what was on screen when a restart or crash
+//! cut it off.
 //!
-//! A Session is interrupted when its execution owner never recorded an exit and
-//! the OS shows it gone. Leaving with the provider's own exit, or detaching,
-//! never qualifies. Each Session resumes through the ordinary `lf resume` path
-//! in a new owner with no viewer; terminals attach when they show it.
+//! A Session is interrupted when its execution owner had a viewer, never
+//! recorded its own exit, and the OS shows it gone. Leaving with the
+//! provider's own exit, detaching, or idling out never qualifies, and a
+//! conversation nobody was viewing is left for `lf resume`. Each Session
+//! resumes through the ordinary `lf resume` path in a new owner with no
+//! viewer; terminals attach when they show it.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -40,7 +43,7 @@ pub enum ResumeOutcome {
 /// Interrupted Sessions on this machine, ordered by id.
 async fn interrupted(store: &SharedStore) -> Result<Vec<crate::session::LfSession>> {
     let mut sessions = Vec::new();
-    for (id, owner) in store.sqlite.unexited_session_owners()? {
+    for (id, owner) in store.sqlite.interrupted_session_owners()? {
         if owner_running(&store.sqlite, &owner)? {
             continue;
         }

@@ -22,23 +22,34 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 but never answers reads `detached` too; reattaching stops its provider and continues
 the same provider thread in a new owner, without replaying input.
 
-`lf resume --all` is the one automatic restart: it resumes Sessions whose owner
-never recorded an exit and is gone from the OS, as after a reboot, crash or kill.
-Leaving through the provider or detaching records an exit, so those never qualify.
-Each resumes through ordinary `lf resume` in a new owner with no viewer; its
-interrupted turn is flagged, not replayed. It reports each Session it resumes or
-skips. Desktop runs it at launch.
+`lf resume --all` is the one automatic restart: it resumes Sessions that were on
+screen when the machine went down, as after a reboot, crash or kill: their owner
+had a viewer, never recorded its own exit, and is gone from the OS. Leaving
+through the provider, detaching or idling out records an exit, so those never
+qualify, and a conversation nobody was viewing waits for `lf resume`. Dead PIDs,
+pre-boot start times and rows retention already closed read as gone and block
+nothing. Each resumes through ordinary `lf resume` in a new owner with no
+viewer; its interrupted turn is flagged, not replayed. It reports each Session
+it resumes or skips. Desktop runs it at launch.
 
-A Session nobody views ends after `session.end_detached_after` (default `24h`,
-`off` disables it), counted from when its last viewer left. A Session whose lf
-executable is removed or replaced (a deleted worktree, a relinked build, a rebuilt
-Dev.app) ends within seconds, viewed or not, and logs the path to `logs/lf.log`;
-an attached viewer prints why and the `lf resume <session>` that reopens it.
-A turn in progress or a Graph step keeps its owner running until it settles; a
-viewer keeps it only from the detached limit; headless Runs are never ended. Each
-owner judges only itself and ends by signaling itself, which stops its agent and
-records its exit. `lf resume` reopens the conversation from provider history under
-whichever lf runs it; `lf resume --all` skips it.
+An idle conversation costs nothing. A Session nobody views ends after
+`session.end_detached_after` (default `2m`, `off` disables it) of quiet, counted
+in wall time from when its last viewer left or its command last wrote to the
+terminal, so a laptop waking from sleep ends overnight idlers at once. Before
+it exits, the owner writes the Session's last screen to
+`$LF_HOME/screens/<session>.vt`: scrollback first, then the visible grid, as a
+fresh terminal paints it. A Session whose lf executable is removed or replaced
+(a deleted worktree, a relinked build, a rebuilt Dev.app) ends within seconds,
+viewed or not, and logs the path to `logs/lf.log`; an attached viewer prints
+why and the `lf resume <session>` that reopens it. A turn in progress or a
+step of a running Graph keeps its owner until it settles; a finished Graph
+holds nothing; a terminal's status report counts only while a viewer is
+attached to refresh it; headless Runs (pipe owners) are never ended for want
+of viewers. Each owner judges only itself and ends by signaling itself, which
+stops its agent and records its exit. A store it cannot read is judged again
+at the next poll; the policy never stops. `lf resume` reopens the conversation
+from provider history under whichever lf runs it, landing at the bottom with
+no new turn; `lf resume --all` skips it.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the
@@ -56,7 +67,7 @@ For commands using pipes, the controlling viewer forwards stdin EOF after all
 accepted input. Disconnecting the viewer alone leaves stdin open. Terminal
 attachments keep their PTY open; the running program interprets terminal EOF keys.
 
-Terminal snapshots retain a text grid and up to 2,000 scrollback rows. They restore
+Terminal snapshots, live or saved, retain a text grid and up to 2,000 scrollback rows. They restore
 alternate-screen state, application keys, bracketed paste and mouse modes supported
 by vt100. Images, hyperlinks, extended keyboard protocols and exact restoration of
 both screen buffers are not supported. Headless observation retains a bounded output

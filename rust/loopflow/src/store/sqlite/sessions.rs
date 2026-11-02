@@ -26,6 +26,12 @@ macro_rules! session_step {
     };
 }
 pub(super) const SESSION_GRAPH: &str = session_graph!();
+/// The Graph still running whose step captured session `s`'s current input;
+/// a finished Graph holds nothing.
+const RUNNING_SESSION_GRAPH: &str = "(SELECT gs.graph_lf_process_id FROM session_events captured
+    JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
+    JOIN processes g ON g.id=gs.graph_lf_process_id AND g.completed_at IS NULL
+    WHERE captured.seq=s.current_capture)";
 /// Session `s`'s current AgentProcess last reported work in progress rather
 /// than waiting for a person.
 const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
@@ -34,6 +40,21 @@ const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
         EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
             WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
     ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)";
+/// Session `s` has a turn in progress now. A terminal's status report is
+/// observed by a viewer, so it counts only while the Session's owner is
+/// viewed; a report nobody refreshes is history, not a turn. Otherwise the
+/// facts the provider's own attachment wrote decide: open tools or an
+/// unyielded turn. A row with neither says nothing is running.
+const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
+    JOIN processes p ON p.id=s.agent_process_id
+    WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
+    AND p.completed_at IS NULL
+    AND NOT CASE WHEN act.program_status IS NOT NULL
+            AND EXISTS(SELECT 1 FROM processes o WHERE o.id=s.transport_lf_process_id AND o.viewed=1) THEN
+        EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+            WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
+    ELSE act.attachment_token IS NOT p.attachment_token
+        OR act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)";
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
@@ -552,17 +573,20 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Unfinished interactive Sessions whose execution owner never recorded an
-    /// exit, with that owner. Leaving or detaching records one; a restart,
-    /// crash or kill does not. Liveness is the caller's observation.
-    pub(crate) fn unexited_session_owners(
+    /// Unfinished interactive Sessions whose execution owner last had a viewer
+    /// and never recorded its own exit, with that owner. Leaving, detaching
+    /// or idling records one; a restart, crash or kill does not, and a dead
+    /// row retention closed afterwards still has none. Liveness is the
+    /// caller's observation.
+    pub(crate) fn interrupted_session_owners(
         &self,
     ) -> StoreResult<Vec<(String, crate::id::LfProcessId)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT s.id, s.transport_lf_process_id FROM agent_sessions s
              JOIN processes o ON o.id=s.transport_lf_process_id
-             WHERE s.interactive=1 AND s.completed_at IS NULL AND o.completed_at IS NULL
+             WHERE s.interactive=1 AND s.completed_at IS NULL
+             AND o.outcome IS NULL AND o.viewed=1
              ORDER BY s.id",
         )?;
         let rows = query
@@ -608,20 +632,23 @@ impl SqliteStore {
     }
 
     /// Whether every Session execution owner `owner` holds is a standalone
-    /// interactive conversation waiting for a person. A Graph step, a headless
-    /// Run, or a turn in progress keeps it running.
+    /// interactive conversation waiting for a person. A step of a running
+    /// Graph, a headless Run, or a turn in progress keeps it running; a Graph
+    /// that finished holds nothing.
     pub(crate) fn owner_waits_for_person(
         &self,
         owner: &crate::id::LfProcessId,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A Graph started inside an owner, as from a terminal, holds its steps
-        // there. CROSS JOIN seeds the walk from the few Graphs, not every Process.
+        // A running Graph started inside an owner, as from a terminal, holds
+        // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
+        // every Process.
         Ok(conn.query_row(
             &format!(
                 "WITH RECURSIVE graph_ancestors(id) AS (
                      SELECT p.parent_lf_process_id FROM graph_processes f
                          CROSS JOIN processes p ON p.id=f.lf_process_id
+                         WHERE p.completed_at IS NULL
                      UNION SELECT p.parent_lf_process_id FROM processes p
                          JOIN graph_ancestors a ON p.id=a.id)
                  SELECT ?1 NOT IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
@@ -629,8 +656,8 @@ impl SqliteStore {
                      WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
                  AND NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1
-                     AND (s.interactive=0 OR {SESSION_GRAPH} IS NOT NULL
-                         OR (s.completed_at IS NULL AND {TURN_RUNNING})))"
+                     AND (s.interactive=0 OR {RUNNING_SESSION_GRAPH} IS NOT NULL
+                         OR (s.completed_at IS NULL AND {TURN_LIVE})))"
             ),
             [owner.as_str()],
             |row| row.get(0),

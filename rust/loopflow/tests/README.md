@@ -47,6 +47,11 @@ added CLI process pays connection and schema setup costs, including at exit.
 Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
 to preserve completion and interruption receipts after database contention.
 
+`session_activity` fixtures that stand for a provider's own facts (open tools,
+pending input, yielded) carry the AgentProcess's `attachment_token`; a row
+without one is a terminal's status observation, which an unviewed owner does
+not read as a turn (`transport_tests::detached_sessions_end_after_their_limit`).
+
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These
 cover startup cost and release retries that share the same Git operations.

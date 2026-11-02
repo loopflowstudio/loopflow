@@ -32,6 +32,7 @@ impl vt100::Callbacks for Queries {
     }
 }
 
+/// Bytes that paint the owner's visible screen on an attaching viewer.
 pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
     let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
     let mut history = screen.clone();
@@ -46,12 +47,45 @@ pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
         // Only the owner's visible screen is redrawn. The viewer's screen
         // scrolls into its own scrollback first, so nothing it showed is
         // erased: a screen's height of newlines blanks it from any cursor row.
-        for _ in 0..screen.size().0 {
-            bytes.extend(b"\r\n");
-        }
+        bytes.extend(blank(screen));
     }
     bytes.extend(screen.state_formatted());
     bytes
+}
+
+/// Bytes that paint the owner's last screen on a fresh terminal after the
+/// owner is gone: its scrollback, oldest row first, then the visible screen.
+/// The alternate screen keeps no scrollback.
+pub(super) fn last_screen(screen: &vt100::Screen) -> Vec<u8> {
+    let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
+    if screen.alternate_screen() {
+        bytes.extend(b"\x1b[?1049h");
+    } else {
+        let (rows, cols) = screen.size();
+        let mut history = screen.clone();
+        history.set_scrollback(usize::MAX);
+        // Scrolled back `offset` rows, the view starts `offset` rows above the
+        // screen; a screen's height at a time, oldest first.
+        let mut offset = history.scrollback();
+        while offset > 0 {
+            history.set_scrollback(offset);
+            let take = offset.min(usize::from(rows));
+            for row in history.rows_formatted(0, cols).take(take) {
+                bytes.extend(row);
+                bytes.extend(b"\r\n");
+            }
+            offset -= take;
+        }
+        bytes.extend(blank(screen));
+    }
+    bytes.extend(screen.state_formatted());
+    bytes
+}
+
+/// A screen's height of newlines: whatever the terminal shows scrolls into
+/// its scrollback before the redraw clears the screen.
+fn blank(screen: &vt100::Screen) -> Vec<u8> {
+    b"\r\n".repeat(usize::from(screen.size().0))
 }
 
 /// A screen the owner has not drawn on: no history, nothing visible, cursor home.
@@ -195,6 +229,31 @@ mod tests {
             "{scrollback}"
         );
         assert!(!scrollback.contains("owner 0\n"), "{scrollback}");
+    }
+
+    #[test]
+    fn the_last_screen_replays_scrollback_and_the_grid_on_a_fresh_terminal() {
+        let mut owner = vt100::Parser::new(4, 20, 2000);
+        for line in 0..10 {
+            owner.process(format!("line {line}\r\n").as_bytes());
+        }
+        owner.process(b"\x1b[1mprompt>\x1b[0m ");
+        let mut fresh = vt100::Parser::new(4, 20, 2000);
+        fresh.process(&super::last_screen(owner.screen()));
+        assert_eq!(fresh.screen().contents(), owner.screen().contents());
+        assert_eq!(fresh.screen().cursor_position(), (3, 8));
+        assert!(fresh.screen().cell(3, 0).unwrap().bold());
+        fresh.screen_mut().set_scrollback(usize::MAX);
+        let scrollback = fresh.screen().contents();
+        assert!(
+            scrollback.starts_with("line 0\nline 1\nline 2\nline 3"),
+            "{scrollback}"
+        );
+        let mut untouched = vt100::Parser::new(4, 20, 2000);
+        untouched.process(&super::last_screen(
+            vt100::Parser::new(4, 20, 2000).screen(),
+        ));
+        assert_eq!(untouched.screen().contents().trim(), "");
     }
 
     #[test]

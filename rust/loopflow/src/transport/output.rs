@@ -45,6 +45,15 @@ impl Output {
         }
     }
 
+    /// What a fresh terminal shows to paint this owner's last screen; `None`
+    /// for pipes.
+    pub fn last_screen(&self) -> Option<Vec<u8>> {
+        match self {
+            Self::Terminal(terminal) => Some(terminal::last_screen(terminal.parser.screen())),
+            Self::Pipes { .. } => None,
+        }
+    }
+
     pub fn resize(&mut self, rows: u16, cols: u16) {
         if let Self::Terminal(terminal) = self {
             terminal.parser.screen_mut().set_size(rows, cols);

@@ -160,8 +160,10 @@ impl Fixture {
     fn sql(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
     }
-    /// Put a `claude` stand-in that logs each launch to `launches` and waits on
-    /// its terminal first on a PATH, returned.
+    /// Put a `claude` stand-in that logs each launch to `launches`, prints a
+    /// ready line and waits on its terminal first on a PATH, returned. Launched
+    /// with `talking` in its input it redraws every half second, as a provider
+    /// mid-turn does, until `hush` exists in the home.
     fn waiting_provider(&self) -> String {
         let bin = self.home.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
@@ -172,6 +174,8 @@ impl Fixture {
 if [ "$1" = --version ]; then echo '2.1.302'; exit; fi
 stty -echo < /dev/tty
 printf '%s:%s:%s\n' "$$" "$LF_CAPTURE_KEY" "$*" >> "$HOME/launches"
+case "$*" in *talking*) while [ ! -e "$HOME/hush" ]; do printf 'tick\r\n'; sleep 0.5; done;; esac
+printf 'ready for %s\r\n' "$*"
 read -r answer < /dev/tty
 "#,
         )
@@ -206,15 +210,36 @@ read -r answer < /dev/tty
             )
             .unwrap()
     }
-    /// Record a turn in progress for `session`.
+    /// Record a turn in progress for `session`: its provider has a tool open.
     fn mark_working(&self, session: &str) {
         self.sql()
             .execute(
-                r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
-                   SELECT id,0,1,0,0,agent_process_id,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}' FROM agent_sessions WHERE id=?1"#,
+                "INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,attachment_token)
+                 SELECT s.id,0,1,0,0,s.agent_process_id,p.attachment_token
+                 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
                 [session],
             )
             .unwrap();
+    }
+    /// Record a terminal's last status report for `session`, `working`, with
+    /// no terminal left to refresh it.
+    fn mark_stale_working(&self, session: &str) {
+        self.sql()
+            .execute(
+                r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
+                   SELECT id,0,0,0,0,agent_process_id,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}' FROM agent_sessions WHERE id=?1"#,
+                [session],
+            )
+            .unwrap();
+    }
+    /// The screen a terminal owner left for `session`, parsed as a fresh
+    /// 24x80 terminal would show it.
+    fn last_screen(&self, session: &str) -> vt100::Parser {
+        let bytes = std::fs::read(self.home.path().join(format!("screens/{session}.vt")))
+            .unwrap_or_else(|error| panic!("no last screen for {session}: {error}"));
+        let mut parser = vt100::Parser::new(24, 80, 2000);
+        parser.process(&bytes);
+        parser
     }
     fn running(&self, owner: &str) -> bool {
         self.sql()
@@ -870,7 +895,7 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
     let fixture = Fixture::new();
     let path = fixture.waiting_provider();
     let mut owners = Vec::new();
-    for input in ["first", "second", "left"] {
+    for input in ["first", "second", "left", "unseen"] {
         let mut owner = fixture.serve(
             true,
             &[
@@ -896,8 +921,29 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
         )
         .unwrap()
     };
-    let started = fixture.launches(3);
+    let started = fixture.launches(4);
     let sessions: Vec<String> = started.iter().map(|line| session_of(line)).collect();
+    // The first two are on screen; nobody opened the fourth.
+    let viewers: Vec<Viewer> = owners[..2]
+        .iter()
+        .map(|owner| fixture.viewer(owner, false))
+        .collect();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    for owner in &owners[..2] {
+        while !sql
+            .query_row("SELECT viewed FROM processes WHERE id=?1", [owner], |r| {
+                r.get::<_, Option<bool>>(0)
+            })
+            .unwrap()
+            .unwrap_or(false)
+        {
+            assert!(
+                Instant::now() < deadline,
+                "{owner} never recorded its viewer"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
     // The person leaves the third conversation through the provider's own exit.
     let mut viewer = fixture.viewer(&owners[2], true);
     viewer.input("exit\n");
@@ -917,6 +963,12 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    // Its exit left the last screen for whoever opens it next.
+    assert!(fixture
+        .last_screen(&sessions[2])
+        .screen()
+        .contents()
+        .contains("ready for"));
     // A restart: the owner, its lf and the provider die without a word.
     let crash = |owner: &str, line: &str| {
         let receipt: Value = serde_json::from_slice(
@@ -951,7 +1003,16 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
     for (owner, line) in owners.iter().zip(&started).take(2) {
         crash(owner, line);
     }
+    crash(&owners[3], &started[3]);
+    drop(viewers);
     std::thread::sleep(Duration::from_millis(200));
+    // Retention after the reboot closed the first dead row from its pre-boot
+    // start time; the owner still never recorded an exit of its own.
+    sql.execute(
+        "UPDATE processes SET completed_at=strftime('%s','now') WHERE id=?1",
+        [&owners[0]],
+    )
+    .unwrap();
     // The first was mid-turn when the machine went down; the second was waiting.
     sql.execute(
         r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
@@ -1006,9 +1067,9 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
             "{resumed}"
         );
     }
-    let reopened = fixture.launches(5);
-    assert_eq!(reopened.len(), 5, "{reopened:?}");
-    for line in &reopened[3..] {
+    let reopened = fixture.launches(6);
+    assert_eq!(reopened.len(), 6, "{reopened:?}");
+    for line in &reopened[4..] {
         let (_, resumed) = line
             .split_once(" --resume ")
             .unwrap_or_else(|| panic!("reopened without history: {line}"));
@@ -1017,10 +1078,10 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
     // Rerunning finds nothing to do and starts no provider.
     assert_eq!(resume_all(), json!([]));
     std::thread::sleep(Duration::from_millis(300));
-    let reopened = fixture.launches(5);
-    assert_eq!(reopened.len(), 5);
+    let reopened = fixture.launches(6);
+    assert_eq!(reopened.len(), 6);
     // Resumed owners outlive the command; stop them with the fixture.
-    for line in &reopened[3..] {
+    for line in &reopened[4..] {
         let owner: String = sql
             .query_row(
                 "SELECT s.transport_lf_process_id FROM agent_sessions s JOIN session_events e
@@ -1034,9 +1095,12 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
 }
 
 /// Closing every view of a conversation ends its agent once
-/// `session.end_detached_after` passes. A viewer, a turn in progress or a Graph
-/// keeps it running. The ended conversation reopens from saved history and
-/// stays out of `lf resume --all`.
+/// `session.end_detached_after` of quiet passes, leaving its last screen. A
+/// viewer, a turn in progress, a provider still drawing or a running Graph
+/// keeps it; a Graph that finished, or a status report no terminal can refresh,
+/// does not (the two ways the 24-hour rule kept owners alive for days). The
+/// ended conversation reopens from saved history and stays out of
+/// `lf resume --all`.
 #[test]
 fn detached_sessions_end_after_their_limit() {
     let fixture = Fixture::new();
@@ -1049,7 +1113,7 @@ fn detached_sessions_end_after_their_limit() {
     // Each starts viewed, so nothing ends while the fixture is arranged.
     let mut owners = Vec::new();
     let mut viewers = Vec::new();
-    for input in ["idle", "viewed", "busy", "graph"] {
+    for input in ["idle", "viewed", "busy", "graph", "stale", "talking"] {
         let mut owner = fixture.serve(
             true,
             &[
@@ -1067,7 +1131,7 @@ fn detached_sessions_end_after_their_limit() {
         owners.push(owner);
     }
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
-    fixture.launches(4);
+    fixture.launches(6);
     let session_of = |line: &str| -> String {
         sql.query_row(
             "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
@@ -1078,19 +1142,24 @@ fn detached_sessions_end_after_their_limit() {
     };
     let idle = fixture.session_of_owner(&owners[0]);
     fixture.mark_working(&fixture.session_of_owner(&owners[2]));
-    sql.execute(
-        "INSERT INTO graph_processes(lf_process_id,graph,compiled)
-         SELECT id,'fixture','{}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1",
-        [&owners[3]],
-    )
-    .unwrap();
-    // Closing the window: the idle, busy and Graph owners lose their viewers.
+    let graph: String = sql
+        .query_row(
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled)
+             SELECT id,'fixture','{}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1
+             RETURNING lf_process_id",
+            [&owners[3]],
+            |r| r.get(0),
+        )
+        .unwrap();
+    fixture.mark_stale_working(&fixture.session_of_owner(&owners[4]));
+    // Closing the window: every owner but the viewed one loses its viewers.
     let viewed = viewers.remove(1);
     drop(viewers);
     fixture.ends(&owners[0]);
+    fixture.ends(&owners[4]);
     // Several judgments later, everything else still runs.
     std::thread::sleep(Duration::from_secs(4));
-    for owner in &owners[1..] {
+    for owner in [&owners[1], &owners[2], &owners[3], &owners[5]] {
         assert!(fixture.running(owner), "{owner} ended");
     }
     let resumed = fixture
@@ -1107,9 +1176,23 @@ fn detached_sessions_end_after_their_limit() {
         serde_json::from_slice::<Value>(&resumed.stdout).unwrap(),
         json!([])
     );
-    // Its last viewer leaving lets the viewed one end too.
+    // The idle owner left what its terminal showed when it ended.
+    let screen = fixture.last_screen(&idle);
+    assert!(
+        screen.screen().contents().contains("ready for"),
+        "{:?}",
+        screen.screen().contents()
+    );
+    // Its last viewer leaving lets the viewed one end too; its Graph
+    // finishing lets the Graph owner end; falling quiet lets the talking one.
     drop(viewed);
+    sql.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&graph])
+        .unwrap();
+    std::fs::write(fixture.home.path().join("hush"), "").unwrap();
     fixture.ends(&owners[1]);
+    fixture.ends(&owners[3]);
+    fixture.ends(&owners[5]);
+    assert!(fixture.running(&owners[2]), "busy owner ended mid-turn");
     // `lf resume` reopens the ended conversation from its saved history.
     let mut reopen = fixture.serve(
         true,
@@ -1118,12 +1201,12 @@ fn detached_sessions_end_after_their_limit() {
     reopen.env("PATH", &path);
     let reopened = fixture.owner(reopen);
     let _viewer = fixture.viewer(&reopened, false);
-    let line = fixture.launches(5).pop().unwrap();
+    let line = fixture.launches(7).pop().unwrap();
     assert!(
         line.contains(" --resume ") && session_of(&line) == idle,
         "reopened without history: {line}"
     );
-    for owner in [&owners[2], &owners[3], &reopened] {
+    for owner in [&owners[2], &reopened] {
         fixture.stop(owner);
     }
 }

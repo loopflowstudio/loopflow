@@ -29,6 +29,8 @@ const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
+/// Continuous output tells the lifetime policy once per pause, not per read.
+const OUTPUT_ACTIVITY_PAUSE: Duration = Duration::from_secs(1);
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 
 #[derive(Debug)]
@@ -488,8 +490,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
-    let (viewing, ending) = lifetime::spawn(id.clone());
+    let (activity, ending) = lifetime::spawn(id.clone(), terminal);
     let mut viewed = None;
+    let mut output_told: Option<Instant> = None;
     loop {
         let mut replaced = None;
         while let Ok((socket, _)) = listener.accept() {
@@ -688,12 +691,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 }
                 let _ = viewer.flush();
             }
+            save_last_screen(&id, &output);
             crate::platform::kill_process(std::process::id());
         }
         let now_viewed = viewers.iter().any(|v| v.attached);
         if viewed != Some(now_viewed) {
             viewed = Some(now_viewed);
-            let _ = viewing.send(now_viewed);
+            let _ = activity.send(lifetime::Activity::Viewed(now_viewed));
         }
         let detached = !viewers
             .iter()
@@ -746,6 +750,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     &ready,
                     detached,
                 );
+                if !ready.is_empty()
+                    && output_told.is_none_or(|told| told.elapsed() >= OUTPUT_ACTIVITY_PAUSE)
+                {
+                    output_told = Some(Instant::now());
+                    let _ = activity.send(lifetime::Activity::Output);
+                }
             }
         }
         readers.retain(|(stream, _)| !drained.contains(stream));
@@ -841,6 +851,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 && (at.elapsed() > Duration::from_secs(2)
                     || (attached && viewers.iter().all(|viewer| viewer.output.is_empty())))
             {
+                save_last_screen(&id, &output);
                 group.disarm();
                 let _ = std::fs::remove_file(path);
                 return if code == 0 {
@@ -851,6 +862,35 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Where a terminal owner leaves `session`'s last screen when it exits:
+/// the bytes that paint it on a fresh terminal, scrollback first. Desktop and
+/// `lf resume` readers show it before the provider is back.
+pub fn last_screen_path(home: &Path, session: &str) -> PathBuf {
+    home.join("screens").join(format!("{session}.vt"))
+}
+
+/// Keep the Session's last screen for its next viewer. Pipes keep none; a
+/// failure is logged, never fatal, since the exit is already underway.
+fn save_last_screen(owner: &LfProcessId, output: &output::Output) {
+    let Some(bytes) = output.last_screen() else {
+        return;
+    };
+    let saved = (|| -> Result<()> {
+        let session = crate::journal::process_ledger()?
+            .transport_session(owner)?
+            .context("owner holds no Session")?;
+        let path = last_screen_path(&crate::store::lf_home_dir(), &session);
+        std::fs::create_dir_all(path.parent().expect("screens directory"))?;
+        let draft = path.with_extension("vt.draft");
+        std::fs::write(&draft, &bytes)?;
+        std::fs::rename(&draft, &path)?;
+        Ok(())
+    })();
+    if let Err(error) = saved {
+        tracing::warn!(%error, %owner, "cannot keep the Session's last screen");
     }
 }
 

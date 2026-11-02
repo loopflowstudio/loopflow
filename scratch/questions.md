@@ -1,7 +1,8 @@
 # LOO-693 plan: running steps and conversations survive a store upgrade
 
-Reconciled 2026-11-02 against HEAD `677ffca2b7`; origin/main has not moved
-past the base `d30b3a8ca`.
+Reconciled 2026-11-02 against HEAD `51251496b3`; code unchanged since
+`677ffca2b7`. origin/main moved to `39defd0e22` (#1795) with no file in
+common with this branch.
 
 ## Exists (proved on this branch)
 

@@ -5,8 +5,10 @@ mod lifetime;
 mod native;
 mod output;
 mod terminal;
+mod wire;
 
 use std::collections::VecDeque;
+use std::ffi::CStr;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
@@ -19,16 +21,20 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::id::LfProcessId;
+use wire::{Decoder, Event, Incoming, Outgoing, Own, Reply, Request, Resume, Scanner, Tag};
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const LIMIT: usize = 4 * 1024 * 1024;
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a dropped viewer's stream waits for a byte-counted resume.
+const GRACE: Duration = Duration::from_secs(60);
+/// Stream bytes retained per viewer for resume.
+const SPOOL: u64 = 1024 * 1024;
 static HANDOFF: OnceLock<Handoff> = OnceLock::new();
 
 #[derive(Debug)]
@@ -66,93 +72,6 @@ impl Handoff {
             .env(PARENT_ENV, parent.to_string())
             .env(CONTROL_ENV, &self.key);
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum Request {
-    Attach {
-        control: bool,
-        replace: bool,
-        rows: u16,
-        cols: u16,
-        /// What a controlling viewer this attachment replaces prints as it leaves.
-        moved: Option<String>,
-    },
-    Input {
-        token: String,
-        bytes: Vec<u8>,
-    },
-    EndInput {
-        token: String,
-    },
-    Resize {
-        token: String,
-        rows: u16,
-        cols: u16,
-    },
-    DetachViewers {
-        key: String,
-    },
-    Status {
-        key: String,
-        id: String,
-        state: crate::program_status::State,
-        progress: Option<u8>,
-    },
-    /// The direct child's native client began. `exit` replaces the client's own
-    /// exit text; a detaching viewer prints `detach`.
-    NativeStarted {
-        key: String,
-        exit: String,
-        detach: String,
-    },
-    /// The native client exited; acknowledged once its exit line is delivered.
-    NativeEnded {
-        key: String,
-    },
-    /// What a controlling viewer can type, shown when it attaches and while the
-    /// registering connection stays open.
-    InputHint {
-        key: String,
-        hint: String,
-    },
-    /// Whether some viewer holds input control, asked before opening another.
-    Controlled,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum Response {
-    Attached {
-        token: Option<String>,
-        terminal: bool,
-        bytes: Vec<u8>,
-    },
-    Output {
-        stream: u8,
-        bytes: Vec<u8>,
-    },
-    Exit {
-        code: u8,
-    },
-    Detached,
-    /// Another viewer took input control; this one prints `notice` and leaves.
-    Moved {
-        notice: Option<String>,
-    },
-    Busy,
-    /// How a viewer that detaches can return.
-    Return {
-        detach: String,
-    },
-    NativeEnded,
-    InputHint {
-        hint: String,
-    },
-    Controlled {
-        held: bool,
-    },
 }
 
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
@@ -342,32 +261,178 @@ pub(crate) fn resize(fd: RawFd, rows: u16, cols: u16) -> io::Result<()> {
     Ok(())
 }
 
+/// The last `SPOOL` bytes of one viewer's stream, so a resume continues from
+/// the exact byte without a snapshot.
+#[derive(Debug, Default)]
+struct Spool {
+    chunks: VecDeque<(Tag, Vec<u8>)>,
+    /// Stream offset of the first retained byte.
+    base: u64,
+    /// Stream offset after the last byte.
+    total: u64,
+}
+
+impl Spool {
+    fn push(&mut self, tag: Tag, bytes: &[u8]) {
+        self.total += bytes.len() as u64;
+        self.chunks.push_back((tag, bytes.to_vec()));
+        while self.total - self.base > SPOOL {
+            let (_, front) = self.chunks.pop_front().expect("spool exceeds its limit");
+            self.base += front.len() as u64;
+        }
+    }
+
+    fn holds(&self, byte: u64) -> bool {
+        (self.base..=self.total).contains(&byte)
+    }
+
+    /// The stream from byte `from` on; `from` must be held.
+    fn replay(&self, from: u64) -> impl Iterator<Item = (Tag, &[u8])> {
+        let mut at = self.base;
+        self.chunks.iter().filter_map(move |(tag, bytes)| {
+            let start = at;
+            at += bytes.len() as u64;
+            (at > from).then(|| (*tag, &bytes[from.saturating_sub(start) as usize..]))
+        })
+    }
+}
+
+#[derive(Debug)]
+enum Connection {
+    Open(UnixStream),
+    /// Lost at this instant; the stream waits for a resume until `GRACE` passes.
+    Dropped(Instant),
+}
+
+impl Connection {
+    fn open(&mut self) -> Option<&mut UnixStream> {
+        match self {
+            Self::Open(socket) => Some(socket),
+            Self::Dropped(_) => None,
+        }
+    }
+
+    fn is_open(&self) -> bool {
+        matches!(self, Self::Open(_))
+    }
+
+    fn expired(&self) -> bool {
+        matches!(self, Self::Dropped(at) if at.elapsed() >= GRACE)
+    }
+}
+
 #[derive(Debug)]
 struct Viewer {
-    socket: UnixStream,
-    input: Vec<u8>,
+    connection: Connection,
+    decoder: Decoder,
+    /// Encoded frames not yet written.
     output: VecDeque<u8>,
+    spool: Spool,
+    /// Public identity, named to others when it takes ownership.
+    id: String,
+    /// Secret a resume presents.
+    reconnect: String,
+    /// Tags this viewer's events; a program printing the same bytes lacks it.
+    nonce: String,
+    /// The input claim, while this connection may type.
     token: Option<String>,
     attached: bool,
-    ending: bool,
+    seq: u64,
+    /// Events awaiting a sequence boundary in the stream.
+    events: Vec<Vec<u8>>,
+    size: (u16, u16),
+    name: Option<String>,
+    leaving: bool,
+    /// A resume this connection sent, moved onto the dropped viewer's stream.
+    resuming: Option<(u64, Resume)>,
+    /// The `native_ended` request awaiting its acknowledgement.
+    ending: Option<u64>,
     input_hint: Option<String>,
 }
 
 impl Viewer {
-    fn queue(&mut self, response: &Response) -> Result<()> {
-        let mut bytes = serde_json::to_vec(response)?;
-        bytes.push(b'\n');
-        anyhow::ensure!(
-            self.output.len() + bytes.len() <= LIMIT,
-            "Viewer fell behind"
-        );
-        self.output.extend(bytes);
+    fn new(socket: UnixStream) -> Self {
+        let token = || uuid::Uuid::new_v4().simple().to_string();
+        Self {
+            connection: Connection::Open(socket),
+            decoder: Decoder::default(),
+            output: VecDeque::new(),
+            spool: Spool::default(),
+            id: token()[..12].to_owned(),
+            reconnect: token(),
+            nonce: token()[..16].to_owned(),
+            token: None,
+            attached: false,
+            seq: 0,
+            events: Vec::new(),
+            size: (24, 80),
+            name: None,
+            leaving: false,
+            resuming: None,
+            ending: None,
+            input_hint: None,
+        }
+    }
+
+    fn live(&self) -> bool {
+        self.attached && self.connection.is_open() && !self.leaving
+    }
+
+    /// Append `bytes` to this viewer's stream; a dropped viewer only spools them.
+    fn stream(&mut self, tag: Tag, bytes: &[u8]) -> io::Result<()> {
+        for chunk in bytes.chunks(wire::CHUNK) {
+            self.spool.push(tag, chunk);
+            if self.connection.is_open() {
+                wire::encode(tag, chunk, &mut self.output);
+            }
+        }
+        if self.output.len() > LIMIT {
+            return Err(io::Error::other("Viewer fell behind"));
+        }
         Ok(())
     }
 
+    fn event(&mut self, event: Event) {
+        self.seq += 1;
+        self.events.push(wire::event(&self.nonce, self.seq, &event));
+    }
+
+    /// Place queued events on the stream.
+    fn flush_events(&mut self) -> io::Result<()> {
+        for bytes in std::mem::take(&mut self.events) {
+            self.stream(Tag::Out, &bytes)?;
+        }
+        Ok(())
+    }
+
+    fn reply(&mut self, answers: u64, reply: Reply) {
+        let json = serde_json::to_vec(&Outgoing {
+            answers,
+            seq: self.seq,
+            reply,
+        })
+        .expect("replies serialize");
+        wire::encode(Tag::Reply, &json, &mut self.output);
+    }
+
+    fn attached_reply(&self, owner: Option<&str>, terminal: bool) -> Reply {
+        Reply::Attached {
+            viewer: self.id.clone(),
+            reconnect: self.reconnect.clone(),
+            nonce: self.nonce.clone(),
+            token: self.token.clone(),
+            terminal,
+            grace_ms: GRACE.as_millis() as u64,
+            owner: owner.map(str::to_owned),
+        }
+    }
+
     fn flush(&mut self) -> io::Result<()> {
+        let Some(socket) = self.connection.open() else {
+            return Ok(());
+        };
         while !self.output.is_empty() {
-            match self.socket.write(self.output.as_slices().0) {
+            match socket.write(self.output.as_slices().0) {
                 Ok(0) => return Err(io::ErrorKind::BrokenPipe.into()),
                 Ok(n) => {
                     self.output.drain(..n);
@@ -379,21 +444,158 @@ impl Viewer {
         Ok(())
     }
 
-    fn requests(&mut self) -> Result<Vec<Request>> {
+    /// Frames the viewer sent; its close is `UnexpectedEof`.
+    fn read(&mut self) -> io::Result<Vec<(Tag, Vec<u8>)>> {
+        let Some(socket) = self.connection.open() else {
+            return Ok(Vec::new());
+        };
         let mut bytes = [0; 8192];
-        match self.socket.read(&mut bytes) {
-            Ok(0) => bail!("Viewer disconnected"),
-            Ok(n) => self.input.extend_from_slice(&bytes[..n]),
+        match socket.read(&mut bytes) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(n) => self.decoder.extend(&bytes[..n])?,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         }
-        anyhow::ensure!(self.input.len() <= LIMIT, "Viewer request too large");
-        let mut requests = Vec::new();
-        while let Some(end) = self.input.iter().position(|b| *b == b'\n') {
-            requests.push(serde_json::from_slice(&self.input[..end])?);
-            self.input.drain(..=end);
+        let mut frames = Vec::new();
+        while let Some(frame) = self.decoder.next()? {
+            frames.push(frame);
         }
-        Ok(requests)
+        Ok(frames)
+    }
+
+    /// Lose the connection and every claim; keep the stream for a resume.
+    fn drop_connection(&mut self) {
+        self.connection = Connection::Dropped(Instant::now());
+        self.output.clear();
+        self.decoder = Decoder::default();
+        self.token = None;
+    }
+
+    /// Continue on `socket` from byte `received`, replying to request `answers`.
+    fn resume(
+        &mut self,
+        socket: UnixStream,
+        answers: u64,
+        received: u64,
+        owner: Option<&str>,
+        terminal: bool,
+    ) {
+        self.connection = Connection::Open(socket);
+        self.decoder = Decoder::default();
+        self.output.clear();
+        self.reply(answers, self.attached_reply(owner, terminal));
+        for (tag, bytes) in self.spool.replay(received) {
+            wire::encode(tag, bytes, &mut self.output);
+        }
+    }
+}
+
+/// Whether a viewer whose connection failed stays for a resume: only a lost
+/// connection qualifies, never a protocol error or a viewer that fell behind.
+fn survive(viewer: &mut Viewer, error: &io::Error) -> bool {
+    let lost = matches!(
+        error.kind(),
+        io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+    );
+    if lost && viewer.live() {
+        viewer.drop_connection();
+        return true;
+    }
+    false
+}
+
+/// Whether a viewer stays after a stream write.
+fn keep(viewer: &mut Viewer, written: io::Result<()>) -> bool {
+    match written {
+        Ok(()) => true,
+        Err(error) => survive(viewer, &error),
+    }
+}
+
+/// Whose size and colors the terminal takes, and who waits for that.
+#[derive(Debug, Default)]
+struct Ownership {
+    owner: Option<Owner>,
+    requests: VecDeque<String>,
+}
+
+#[derive(Debug, Clone)]
+struct Owner {
+    id: String,
+    name: Option<String>,
+}
+
+impl Owner {
+    fn of(viewer: &Viewer) -> Self {
+        Self {
+            id: viewer.id.clone(),
+            name: viewer.name.clone(),
+        }
+    }
+}
+
+impl Ownership {
+    fn id(&self) -> Option<&str> {
+        self.owner.as_ref().map(|owner| owner.id.as_str())
+    }
+
+    fn held_by(&self, viewer: &Viewer) -> bool {
+        self.id() == Some(&viewer.id)
+    }
+
+    /// Apply a viewer's claim; whether the owner changed. `take` replaces the
+    /// owner; `request` becomes owner when there is none, else waits in line.
+    fn claim(&mut self, mode: Option<Own>, viewer: &Viewer) -> bool {
+        match mode {
+            Some(Own::Take) if !self.held_by(viewer) => {}
+            Some(Own::Request) if self.owner.is_none() => {}
+            Some(Own::Request) if !self.held_by(viewer) && !self.requests.contains(&viewer.id) => {
+                self.requests.push_back(viewer.id.clone());
+                return false;
+            }
+            _ => return false,
+        }
+        self.owner = Some(Owner::of(viewer));
+        true
+    }
+
+    /// Ownership follows live viewers: a dropped or departed owner passes to
+    /// the first waiting request. Whether the owner changed.
+    fn settle(&mut self, viewers: &[Viewer]) -> bool {
+        let find = |id: &str| {
+            viewers
+                .iter()
+                .find(|viewer| viewer.id == id && viewer.live())
+        };
+        self.requests.retain(|id| find(id).is_some());
+        let mut changed = false;
+        if self
+            .owner
+            .as_ref()
+            .is_some_and(|owner| find(&owner.id).is_none())
+        {
+            self.owner = None;
+            changed = true;
+        }
+        if self.owner.is_none() {
+            if let Some(next) = self.requests.pop_front().and_then(|id| find(&id)) {
+                self.owner = Some(Owner::of(next));
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// What `viewer` is told about who owns.
+    fn event(&self, viewer: &Viewer) -> Event {
+        Event::Owner {
+            viewer: self.owner.as_ref().map(|owner| owner.id.clone()),
+            name: self.owner.as_ref().and_then(|owner| owner.name.clone()),
+            held: self.held_by(viewer),
+        }
     }
 }
 
@@ -478,7 +680,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let _ = writeln!(io::stdout(), "{id}");
     let _ = io::stdout().flush();
     let mut viewers: Vec<Viewer> = Vec::new();
+    // Who may type.
     let mut control: Option<String> = None;
+    let mut ownership = Ownership::default();
+    let mut theme: Option<serde_json::Value> = None;
+    let mut size = (24, 80);
     let mut pending_input = VecDeque::new();
     let mut output = output::Output::new(terminal);
     let mut exit: Option<(u8, Instant)> = None;
@@ -492,29 +698,44 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut viewed = None;
     loop {
         let mut replaced = None;
+        let mut owner_change = false;
+        let mut new_size = None;
+        let mut theme_change = false;
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
-            viewers.push(Viewer {
-                socket,
-                input: Vec::new(),
-                output: VecDeque::new(),
-                token: None,
-                attached: false,
-                ending: false,
-                input_hint: None,
-            });
+            viewers.push(Viewer::new(socket));
         }
-        viewers.retain_mut(|viewer| {
+        let mut results = Vec::with_capacity(viewers.len());
+        for viewer in viewers.iter_mut() {
             let result = (|| -> Result<()> {
-                for request in viewer.requests()? {
+                for (tag, payload) in viewer.read()? {
+                    let request = match tag {
+                        Tag::Input => {
+                            // Stale and passive viewers cannot write.
+                            if viewer.token.is_some() && viewer.token == control && !end_input {
+                                anyhow::ensure!(
+                                    pending_input.len() + payload.len() <= LIMIT,
+                                    "Provider input is busy"
+                                );
+                                pending_input.extend(payload);
+                            }
+                            continue;
+                        }
+                        Tag::Request => serde_json::from_slice::<Incoming>(&payload)?,
+                        _ => bail!("unexpected frame from viewer"),
+                    };
+                    let Incoming {
+                        id: answers,
+                        request,
+                    } = request;
                     match request {
                         Request::Status {
                             key,
-                            id,
+                            program,
                             state,
                             progress,
                         } if key == control_key => {
-                            output.report(id, state, progress);
+                            output.report(program, state, progress);
                         }
                         Request::DetachViewers { key } if key == control_key => {
                             detach = true;
@@ -522,28 +743,33 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         Request::NativeStarted { key, exit, detach }
                             if key == control_key && terminal =>
                         {
-                            returning = Some(Response::Return {
+                            returning = Some(Event::Return {
                                 detach: detach.clone(),
                             });
                             client = Some(native::NativeClient::new(exit, detach, cooked));
                         }
                         Request::NativeEnded { key } if key == control_key => {
-                            viewer.ending = true;
+                            viewer.ending = Some(answers);
                         }
                         Request::InputHint { key, hint } if key == control_key => {
                             viewer.input_hint = Some(hint);
                             hint_due = true;
                         }
                         Request::Controlled => {
-                            viewer.queue(&Response::Controlled {
-                                held: control.is_some(),
-                            })?;
+                            viewer.reply(
+                                answers,
+                                Reply::Controlled {
+                                    held: control.is_some(),
+                                },
+                            );
                         }
                         Request::Attach {
                             control: wants_control,
                             replace,
+                            own,
                             rows,
                             cols,
+                            name,
                             moved,
                         } => {
                             if wants_control
@@ -551,11 +777,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 && control.is_some()
                                 && viewer.token != control
                             {
-                                viewer.queue(&Response::Busy)?;
+                                viewer.reply(answers, Reply::Busy);
                                 continue;
                             }
                             attached = true;
-                            let (rows, cols) = dimensions(rows, cols);
+                            viewer.size = dimensions(rows, cols);
+                            viewer.name = name;
                             if wants_control {
                                 hint_due = true;
                                 if viewer.token != control {
@@ -564,17 +791,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 let token = uuid::Uuid::new_v4().to_string();
                                 control = Some(token.clone());
                                 viewer.token = Some(token);
-                                if terminal {
-                                    resize(
-                                        input
-                                            .as_ref()
-                                            .expect("terminal input stays open")
-                                            .as_raw_fd(),
-                                        rows,
-                                        cols,
-                                    )?;
-                                    output.resize(rows, cols);
-                                }
                             } else {
                                 if viewer.token.is_some() && viewer.token == control {
                                     control = None;
@@ -582,115 +798,208 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 viewer.token = None;
                             }
                             viewer.attached = true;
-                            output.attach(viewer)?;
-                            if let Some(client) = &client {
-                                viewer.queue(&Response::Return {
-                                    detach: client.detach.clone(),
-                                })?;
+                            owner_change |= ownership.claim(own, viewer);
+                            viewer.reply(answers, viewer.attached_reply(ownership.id(), terminal));
+                            if let Some(snapshot) = output.snapshot()? {
+                                viewer.stream(Tag::Snapshot, &snapshot)?;
                             }
-                            if terminal && wants_control {
-                                // Resizing to the same dimensions sends no signal.
-                                // Ask the actual foreground program to repaint too.
-                                // SAFETY: the descriptor is our PTY; only its current
-                                // foreground group receives the nonterminating signal.
-                                unsafe {
-                                    let foreground = libc::tcgetpgrp(
-                                        input
-                                            .as_ref()
-                                            .expect("terminal input stays open")
-                                            .as_raw_fd(),
-                                    );
-                                    if foreground > 1 {
-                                        libc::kill(-foreground, libc::SIGWINCH);
-                                    }
-                                }
+                            for (stream, bytes) in output.tail() {
+                                viewer.stream(Tag::stream(stream), bytes)?;
+                            }
+                            // Every stream opens: snapshot, size, colors, owner.
+                            // A change of owner this pass sizes and names it below.
+                            if !owner_change {
+                                viewer.event(Event::Resize {
+                                    rows: size.0,
+                                    cols: size.1,
+                                });
+                            }
+                            if let Some(theme) = &theme {
+                                viewer.event(Event::Theme {
+                                    theme: theme.clone(),
+                                });
+                            }
+                            if !owner_change {
+                                let event = ownership.event(viewer);
+                                viewer.event(event);
+                            }
+                            if let Some(client) = &client {
+                                viewer.event(Event::Return {
+                                    detach: client.detach.clone(),
+                                });
                             }
                             if announced {
                                 if let Some((code, _)) = exit {
-                                    viewer.queue(&Response::Exit { code })?;
+                                    viewer.event(Event::ChildExited { code });
+                                    viewer.flush_events()?;
                                 }
                             }
                         }
-                        Request::Input { token, bytes }
-                            if control.as_ref() == Some(&token)
-                                && viewer.token.as_ref() == Some(&token)
-                                && !end_input =>
-                        {
-                            anyhow::ensure!(
-                                pending_input.len() + bytes.len() <= LIMIT,
-                                "Provider input is busy"
-                            );
-                            pending_input.extend(bytes);
+                        Request::Resume(resume) => {
+                            viewer.resuming = Some((answers, resume));
                         }
-                        Request::EndInput { token }
-                            if !terminal
-                                && control.as_ref() == Some(&token)
-                                && viewer.token.as_ref() == Some(&token) =>
+                        Request::EndInput
+                            if !terminal && viewer.token.is_some() && viewer.token == control =>
                         {
                             end_input = true;
                         }
-                        Request::Resize { token, rows, cols }
-                            if terminal
-                                && control.as_ref() == Some(&token)
-                                && viewer.token.as_ref() == Some(&token) =>
-                        {
-                            let (rows, cols) = dimensions(rows, cols);
-                            resize(
-                                input
-                                    .as_ref()
-                                    .expect("terminal input stays open")
-                                    .as_raw_fd(),
-                                rows,
-                                cols,
-                            )?;
-                            output.resize(rows, cols);
+                        Request::Resize { rows, cols } => {
+                            viewer.size = dimensions(rows, cols);
+                            if ownership.held_by(viewer) {
+                                new_size = Some(viewer.size);
+                            }
                         }
-                        _ => {} // stale and passive viewers cannot write or release another claim
+                        Request::Own { mode } if viewer.attached => {
+                            owner_change |= ownership.claim(Some(mode), viewer);
+                        }
+                        Request::Theme { theme: colors } if ownership.held_by(viewer) => {
+                            theme = Some(colors);
+                            theme_change = true;
+                        }
+                        Request::Leave => {
+                            viewer.leaving = true;
+                        }
+                        _ => {} // stale and passive viewers cannot release another claim
                     }
                 }
                 viewer.flush()?;
                 Ok(())
             })();
-            result.is_ok()
-        });
-        // The viewer that held control learns where it went and leaves, so it
-        // neither mirrors output nor swallows keystrokes.
-        if let Some((token, notice)) = replaced {
-            viewers.retain_mut(|v| {
-                if v.token.as_ref() != Some(&token) {
-                    return true;
-                }
-                let _ = v.queue(&Response::Moved {
-                    notice: notice.clone(),
-                });
-                let _ = v.flush();
-                false
-            });
+            results.push(result);
         }
-        if let Some(response) = returning.take() {
-            viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
+        let mut results = results.into_iter();
+        viewers.retain_mut(
+            |viewer| match results.next().expect("one result per viewer") {
+                Ok(()) => !viewer.leaving,
+                Err(error) => error
+                    .downcast_ref()
+                    .is_some_and(|error| survive(viewer, error)),
+            },
+        );
+        // A resume moves its connection onto the dropped viewer's stream.
+        for index in 0..viewers.len() {
+            let Some((answers, resume)) = viewers[index].resuming.take() else {
+                continue;
+            };
+            let target = viewers.iter().position(|viewer| {
+                !viewer.connection.is_open()
+                    && viewer.reconnect == resume.reconnect
+                    && viewer.spool.holds(resume.received)
+            });
+            let Some(target) = target else {
+                viewers[index].reply(answers, Reply::ReconnectRequired);
+                let _ = viewers[index].flush();
+                continue;
+            };
+            let Connection::Open(socket) = std::mem::replace(
+                &mut viewers[index].connection,
+                Connection::Dropped(Instant::now()),
+            ) else {
+                unreachable!("a resuming connection is open")
+            };
+            viewers[index].leaving = true;
+            let viewer = &mut viewers[target];
+            viewer.size = dimensions(resume.rows, resume.cols);
+            if resume.control && control.is_none() {
+                let token = uuid::Uuid::new_v4().to_string();
+                control = Some(token.clone());
+                viewer.token = Some(token);
+                hint_due = true;
+            }
+            owner_change |= ownership.claim(resume.own, viewer);
+            viewer.resume(socket, answers, resume.received, ownership.id(), terminal);
+        }
+        viewers.retain(|viewer| !viewer.leaving && !viewer.connection.expired());
+        owner_change |= ownership.settle(&viewers);
+        if owner_change {
+            new_size = viewers
+                .iter()
+                .find(|viewer| ownership.held_by(viewer))
+                .map(|viewer| viewer.size);
+        }
+        if let Some((rows, cols)) = new_size {
+            size = (rows, cols);
+            if terminal {
+                let fd = input
+                    .as_ref()
+                    .expect("terminal input stays open")
+                    .as_raw_fd();
+                resize(fd, rows, cols)?;
+                output.resize(rows, cols);
+                // Resizing to the same dimensions sends no signal. Ask the actual
+                // foreground program to repaint too.
+                // SAFETY: the descriptor is our PTY; only its current foreground
+                // group receives the nonterminating signal.
+                unsafe {
+                    let foreground = libc::tcgetpgrp(fd);
+                    if foreground > 1 {
+                        libc::kill(-foreground, libc::SIGWINCH);
+                    }
+                }
+            }
+            for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+                viewer.event(Event::Resize { rows, cols });
+            }
+        }
+        if owner_change {
+            for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+                let event = ownership.event(viewer);
+                viewer.event(event);
+            }
+        }
+        if theme_change {
+            if let Some(theme) = &theme {
+                for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+                    viewer.event(Event::Theme {
+                        theme: theme.clone(),
+                    });
+                }
+            }
+        }
+        // The viewer that held control learns where it went; LOO-618's viewer
+        // leaves on that, a shared viewer may stay.
+        if let Some((token, notice)) = replaced {
+            for viewer in viewers
+                .iter_mut()
+                .filter(|viewer| viewer.token.as_ref() == Some(&token))
+            {
+                viewer.token = None;
+                viewer.event(Event::Control {
+                    held: false,
+                    notice: notice.clone(),
+                    successor: None,
+                });
+            }
+        }
+        if let Some(event) = returning.take() {
+            for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+                viewer.event(event.clone());
+            }
         }
         // The controls reach the one controlling viewer when it attaches or
         // when the execution registers them, whichever comes later.
         if std::mem::take(&mut hint_due) {
             let hint = viewers.iter().rev().find_map(|v| v.input_hint.clone());
             if let Some(hint) = hint {
-                viewers.retain_mut(|v| {
-                    !(v.attached && v.token.is_some() && v.token == control)
-                        || v.queue(&Response::InputHint { hint: hint.clone() }).is_ok()
-                });
+                for viewer in viewers
+                    .iter_mut()
+                    .filter(|v| v.attached && v.token.is_some() && v.token == control)
+                {
+                    viewer.event(Event::Hint { text: hint.clone() });
+                }
             }
         }
         if let Ok(hint) = ending.try_recv() {
             for viewer in viewers.iter_mut().filter(|v| v.attached) {
                 if let Some(hint) = &hint {
-                    let _ = viewer.queue(&Response::InputHint { hint: hint.clone() });
+                    viewer.event(Event::Hint { text: hint.clone() });
                 }
+                let _ = viewer.flush_events();
                 let _ = viewer.flush();
             }
             crate::platform::kill_process(std::process::id());
         }
-        let now_viewed = viewers.iter().any(|v| v.attached);
+        let now_viewed = viewers.iter().any(|v| v.live());
         if viewed != Some(now_viewed) {
             viewed = Some(now_viewed);
             let _ = viewing.send(now_viewed);
@@ -701,9 +1010,15 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if detached {
             control = None;
         }
-        if let Some(response) = output.take_reports() {
-            viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
+        if let Some(reports) = output.take_reports() {
+            viewers.retain_mut(|viewer| {
+                !viewer.attached || {
+                    let written = viewer.stream(Tag::Out, &reports);
+                    keep(viewer, written)
+                }
+            });
         }
+        place_events(&mut output, &mut viewers, announced);
         if let Some(input) = input.as_mut().filter(|_| !pending_input.is_empty()) {
             match input.write(pending_input.as_slices().0) {
                 Ok(n) => {
@@ -753,7 +1068,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         if detach {
             control = None;
             for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                let _ = viewer.queue(&Response::Detached);
+                viewer.event(Event::Detached);
+                let _ = viewer.flush_events();
                 let _ = viewer.flush();
             }
             // The execution's own control connections outlive its viewers.
@@ -772,7 +1088,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         // The client has exited and its parent waits for acknowledgement, so
         // everything it printed is already readable.
-        if viewers.iter().any(|viewer| viewer.ending) {
+        if viewers.iter().any(|viewer| viewer.ending.is_some()) {
             if let Some(mut ended) = client.take() {
                 for (stream, reader) in &mut readers {
                     let mut bytes = [0; 16384];
@@ -801,9 +1117,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     detached,
                 );
             }
-            for viewer in viewers.iter_mut().filter(|viewer| viewer.ending) {
-                viewer.ending = false;
-                let _ = viewer.queue(&Response::NativeEnded);
+            for viewer in viewers.iter_mut() {
+                let Some(answers) = viewer.ending.take() else {
+                    continue;
+                };
+                viewer.reply(answers, Reply::NativeEnded);
                 let _ = viewer.flush();
             }
         }
@@ -830,8 +1148,10 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         if let Some((code, at)) = exit {
             if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
-                for viewer in &mut viewers {
-                    let _ = viewer.queue(&Response::Exit { code });
+                for viewer in viewers.iter_mut().filter(|v| v.attached) {
+                    viewer.event(Event::ChildExited { code });
+                    let _ = viewer.flush_events();
+                    let _ = viewer.flush();
                 }
                 announced = true;
             }
@@ -854,6 +1174,21 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     }
 }
 
+/// Events enter a stream only between complete terminal sequences, so a viewer
+/// feeding the raw stream to a terminal never sees one split. After the
+/// execution has ended nothing more completes, so they go at once.
+fn place_events(output: &mut output::Output, viewers: &mut Vec<Viewer>, announced: bool) {
+    if !(output.ready() || announced) {
+        return;
+    }
+    viewers.retain_mut(|viewer| {
+        viewer.events.is_empty() || {
+            let written = viewer.flush_events().and_then(|()| viewer.flush());
+            keep(viewer, written)
+        }
+    });
+}
+
 fn deliver(
     output: &mut output::Output,
     viewers: &mut Vec<Viewer>,
@@ -869,17 +1204,15 @@ fn deliver(
     if pending_input.len() + replies.len() <= LIMIT {
         pending_input.extend(replies);
     }
-    let response = Response::Output {
-        stream,
-        bytes: bytes.to_vec(),
-    };
     viewers.retain_mut(|viewer| {
-        !viewer.attached
-            || viewer
-                .queue(&response)
-                .and_then(|_| Ok(viewer.flush()?))
-                .is_ok()
+        !viewer.attached || {
+            let written = viewer
+                .stream(Tag::stream(stream), bytes)
+                .and_then(|()| viewer.flush());
+            keep(viewer, written)
+        }
     });
+    place_events(output, viewers, false);
 }
 
 fn size() -> (u16, u16) {
@@ -968,16 +1301,42 @@ impl Drop for RawTerminal {
     }
 }
 
-fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
-    let mut bytes = serde_json::to_vec(request)?;
-    bytes.push(b'\n');
+fn send(socket: &mut UnixStream, request: Request) -> Result<()> {
+    let bytes = serde_json::to_vec(&Incoming { id: 1, request })?;
+    send_frame(socket, Tag::Request, &bytes)
+}
+
+fn send_frame(socket: &mut UnixStream, tag: Tag, payload: &[u8]) -> Result<()> {
     // A write timeout reports EAGAIN on macOS, which names no cause.
-    socket.write_all(&bytes).map_err(|error| match error.kind() {
-        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => anyhow::anyhow!(
-            "Execution owner stopped reading requests; outcome is unknown and later input was not delivered"
-        ),
-        _ => error.into(),
-    })
+    socket
+        .write_all(&wire::frame(tag, payload))
+        .map_err(|error| match error.kind() {
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => anyhow::anyhow!(
+                "Execution owner stopped reading requests; outcome is unknown and later input was not delivered"
+            ),
+            _ => error.into(),
+        })
+}
+
+/// This viewer's terminal device, named to others when it takes ownership.
+fn tty_name() -> Option<String> {
+    // SAFETY: ttyname returns null or a pointer to a static NUL-terminated name.
+    unsafe {
+        let name = libc::ttyname(0);
+        (!name.is_null()).then(|| CStr::from_ptr(name).to_string_lossy().into_owned())
+    }
+}
+
+fn write_stream(terminal: &mut Option<RawTerminal>, stream: u8, bytes: &[u8]) -> io::Result<()> {
+    if let Some(terminal) = terminal {
+        terminal.write(stream, bytes)
+    } else if stream == 2 {
+        io::stderr().write_all(bytes)?;
+        io::stderr().flush()
+    } else {
+        io::stdout().write_all(bytes)?;
+        io::stdout().flush()
+    }
 }
 
 /// Attach this terminal with input control, taking it from any other viewer;
@@ -991,18 +1350,22 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     let (rows, cols) = size();
     send(
         &mut socket,
-        &Request::Attach {
+        Request::Attach {
             control: true,
             replace: true,
+            own: Some(Own::Take),
             rows,
             cols,
+            name: tty_name(),
             moved,
         },
     )?;
+    let mut decoder = Decoder::default();
+    let mut scanner: Option<Scanner> = None;
     let mut terminal = None;
     let mut token = None;
+    let mut owned = false;
     let mut returning = None;
-    let mut buffer = Vec::new();
     let mut stdin_open = true;
     let mut previous_size = (rows, cols);
     let mut title = crate::terminal_title::ViewerTitle::new(id);
@@ -1036,63 +1399,97 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
             let mut bytes = [0; 16384];
             let n = socket.read(&mut bytes)?;
             anyhow::ensure!(n != 0, "Execution owner disconnected; outcome is unknown");
-            buffer.extend_from_slice(&bytes[..n]);
-            anyhow::ensure!(buffer.len() <= LIMIT, "Transport response too large");
-            while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
-                let response: Response = serde_json::from_slice(&buffer[..end])?;
-                buffer.drain(..=end);
-                match response {
-                    Response::Attached {
-                        token: claim,
-                        terminal: is_terminal,
-                        bytes,
-                    } => {
-                        acknowledgement_deadline = None;
-                        token = claim;
-                        if is_terminal {
-                            terminal = Some(RawTerminal::enter()?);
+            decoder.extend(&bytes[..n])?;
+            while let Some((tag, payload)) = decoder.next()? {
+                let pieces = match tag {
+                    Tag::Reply => {
+                        let reply: Outgoing = serde_json::from_slice(&payload)?;
+                        match reply.reply {
+                            Reply::Attached {
+                                viewer,
+                                nonce,
+                                token: claim,
+                                terminal: is_terminal,
+                                owner,
+                                ..
+                            } => {
+                                acknowledgement_deadline = None;
+                                token = claim;
+                                owned = owner.as_ref() == Some(&viewer);
+                                scanner = Some(Scanner::new(&nonce));
+                                if is_terminal && terminal.is_none() {
+                                    terminal = Some(RawTerminal::enter()?);
+                                }
+                            }
+                            Reply::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
+                            Reply::ReconnectRequired => {
+                                anyhow::bail!("Execution owner no longer holds this viewer's stream")
+                            }
+                            Reply::Controlled { .. } | Reply::NativeEnded => {}
                         }
-                        if let Some(terminal) = &mut terminal {
-                            terminal.write(1, &bytes)?;
-                        } else {
-                            io::stdout().write_all(&bytes)?;
-                            io::stdout().flush()?;
-                        }
+                        continue;
                     }
-                    Response::Output { stream, bytes } => {
-                        if let Some(terminal) = &mut terminal {
-                            terminal.write(stream, &bytes)?;
-                        } else if stream == 2 {
-                            io::stderr().write_all(&bytes)?;
-                            io::stderr().flush()?;
-                        } else {
-                            io::stdout().write_all(&bytes)?;
-                            io::stdout().flush()?;
+                    Tag::Snapshot | Tag::Out => scanner
+                        .as_mut()
+                        .context("Execution owner streamed before acknowledging attachment")?
+                        .scan(&payload),
+                    Tag::Err => vec![wire::Piece::Bytes(payload)],
+                    Tag::Request | Tag::Input => anyhow::bail!("unexpected transport frame"),
+                };
+                let stream = if tag == Tag::Err { 2 } else { 1 };
+                for piece in pieces {
+                    let event = match piece {
+                        wire::Piece::Bytes(bytes) => {
+                            write_stream(&mut terminal, stream, &bytes)?;
+                            continue;
                         }
-                    }
-                    Response::Exit { code } => {
-                        return if code == 0 {
-                            Ok(())
-                        } else {
-                            Err(crate::process::CommandExit(code).into())
+                        wire::Piece::Event(_, event) => event,
+                    };
+                    match event {
+                        Event::Resize { .. } | Event::Theme { .. } => {}
+                        Event::Owner { name, viewer, held } => {
+                            if owned && !held {
+                                let who =
+                                    name.or(viewer).unwrap_or_else(|| "another viewer".into());
+                                write_stream(
+                                    &mut terminal,
+                                    2,
+                                    format!("\r\nSize and colors now follow {who}.\r\n").as_bytes(),
+                                )?;
+                            }
+                            owned = held;
                         }
-                    }
-                    Response::Detached => return Ok(()),
-                    Response::Moved { notice } => {
-                        drop(terminal.take());
-                        if let Some(notice) = notice {
-                            eprintln!("\n{notice}");
+                        Event::Control { held: true, .. } => {}
+                        Event::Control {
+                            held: false,
+                            notice,
+                            successor,
+                        } => {
+                            drop(terminal.take());
+                            if let Some(notice) = notice {
+                                eprintln!("\n{notice}");
+                            }
+                            let _ = send(&mut socket, Request::Leave);
+                            // LOO-705 lands the rerun through `successor`; until
+                            // that rebase the viewer leaves as before.
+                            let _ = successor;
+                            return Ok(());
                         }
-                        return Ok(());
-                    }
-                    Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
-                    Response::Return { detach } => returning = Some(detach),
-                    Response::NativeEnded | Response::Controlled { .. } => {}
-                    Response::InputHint { hint } => {
-                        if let Some(terminal) = &mut terminal {
-                            write!(terminal.output.stderr, "\r\n{hint}\r\n")?;
-                        } else {
-                            eprintln!("{hint}");
+                        Event::ChildExited { code } => {
+                            return if code == 0 {
+                                Ok(())
+                            } else {
+                                Err(crate::process::CommandExit(code).into())
+                            }
+                        }
+                        Event::Detached => return Ok(()),
+                        Event::Return { detach } => returning = Some(detach),
+                        Event::Hint { text } => {
+                            if let Some(terminal) = &mut terminal {
+                                write!(terminal.output.stderr, "\r\n{text}\r\n")?;
+                            } else {
+                                eprintln!("{text}");
+                            }
                         }
                     }
                 }
@@ -1103,47 +1500,32 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
             let n = io::stdin().read(&mut bytes)?;
             if n == 0 {
                 stdin_open = false;
-                if terminal.is_none() {
-                    if let Some(token) = &token {
-                        send(
-                            &mut socket,
-                            &Request::EndInput {
-                                token: token.clone(),
-                            },
-                        )?;
-                    }
+                if terminal.is_none() && token.is_some() {
+                    send(&mut socket, Request::EndInput)?;
                 }
             } else if terminal.is_some() && bytes[..n].contains(&0x1d) {
                 // Restore the terminal before saying how to return.
                 drop(terminal.take());
+                let _ = send(&mut socket, Request::Leave);
                 if let Some(detach) = &returning {
                     // An inline client can leave the cursor mid-line.
                     eprintln!("\n{detach}");
                 }
                 return Ok(());
-            } else if let Some(token) = &token {
-                send(
-                    &mut socket,
-                    &Request::Input {
-                        token: token.clone(),
-                        bytes: bytes[..n].to_vec(),
-                    },
-                )?;
+            } else if token.is_some() {
+                send_frame(&mut socket, Tag::Input, &bytes[..n])?;
             }
         }
         let current_size = size();
         if terminal.is_some() && current_size != previous_size {
             previous_size = current_size;
-            if let Some(token) = &token {
-                send(
-                    &mut socket,
-                    &Request::Resize {
-                        token: token.clone(),
-                        rows: current_size.0,
-                        cols: current_size.1,
-                    },
-                )?;
-            }
+            send(
+                &mut socket,
+                Request::Resize {
+                    rows: current_size.0,
+                    cols: current_size.1,
+                },
+            )?;
         }
     }
 }
@@ -1154,12 +1536,20 @@ pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
     let mut socket = UnixStream::connect(endpoint(id)?)?;
     socket.set_read_timeout(Some(Duration::from_secs(1)))?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
-    send(&mut socket, &Request::Controlled)?;
-    let mut line = String::new();
-    BufReader::new(socket).read_line(&mut line)?;
-    match serde_json::from_str(&line)? {
-        Response::Controlled { held } => Ok(held),
-        other => bail!("unexpected transport reply {other:?}"),
+    send(&mut socket, Request::Controlled)?;
+    let mut decoder = Decoder::default();
+    let mut bytes = [0; 4096];
+    loop {
+        let n = socket.read(&mut bytes)?;
+        anyhow::ensure!(n != 0, "Execution owner closed before answering");
+        decoder.extend(&bytes[..n])?;
+        if let Some((Tag::Reply, payload)) = decoder.next()? {
+            let reply: Outgoing = serde_json::from_slice(&payload)?;
+            return match reply.reply {
+                Reply::Controlled { held } => Ok(held),
+                other => bail!("unexpected transport reply {other:?}"),
+            };
+        }
     }
 }
 
@@ -1171,7 +1561,7 @@ pub(crate) fn detach_viewers() -> Result<()> {
     let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
     send(
         &mut socket,
-        &Request::DetachViewers {
+        Request::DetachViewers {
             key: handoff.key.clone(),
         },
     )
@@ -1192,7 +1582,7 @@ pub(crate) fn native_client(exit: String, detach: String) -> Option<NativeClient
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
-            &Request::NativeStarted {
+            Request::NativeStarted {
                 key: handoff.key.clone(),
                 exit,
                 detach,
@@ -1217,7 +1607,7 @@ impl Drop for NativeClient {
         let ended = (|| -> Result<()> {
             send(
                 &mut self.socket,
-                &Request::NativeEnded {
+                Request::NativeEnded {
                     key: self.key.clone(),
                 },
             )?;
@@ -1248,7 +1638,7 @@ pub(crate) fn input_hint(hint: String) -> Option<InputHint> {
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
-            &Request::InputHint {
+            Request::InputHint {
                 key: handoff.key.clone(),
                 hint,
             },
@@ -1289,7 +1679,7 @@ pub(crate) fn report(state: crate::program_status::State, step: bool, progress: 
     else {
         return;
     };
-    let id = format!(
+    let program = format!(
         "lf/{}{}",
         process.as_str().replace('-', ""),
         if step { "/step" } else { "" }
@@ -1299,9 +1689,9 @@ pub(crate) fn report(state: crate::program_status::State, step: bool, progress: 
         socket.set_write_timeout(Some(Duration::from_secs(1)))?;
         send(
             &mut socket,
-            &Request::Status {
+            Request::Status {
                 key: handoff.key.clone(),
-                id,
+                program,
                 state,
                 progress,
             },

@@ -133,10 +133,19 @@ impl Fixture {
     fn viewer(&self, id: &str, control: bool) -> Viewer {
         self.attach(
             id,
-            json!({"kind":"attach","control":control,"replace":true,"rows":24,"cols":80}),
+            json!({"kind":"attach","control":control,"replace":true,
+                "own":control.then_some("take"),"rows":24,"cols":80}),
         )
     }
     fn attach(&self, id: &str, request: Value) -> Viewer {
+        let mut viewer = self.connect(id);
+        viewer.request(request);
+        let attached = viewer.until_reply();
+        assert_eq!(attached["kind"], "attached", "{attached}");
+        viewer.accept(&attached);
+        viewer
+    }
+    fn connect(&self, id: &str) -> Viewer {
         let socket = UnixStream::connect(self.endpoint(id)).unwrap_or_else(|e| {
             panic!(
                 "{}: {e}; home {}",
@@ -147,15 +156,17 @@ impl Fixture {
         socket
             .set_read_timeout(Some(Duration::from_secs(15)))
             .unwrap();
-        let mut viewer = Viewer {
-            socket: BufReader::new(socket),
+        Viewer {
+            socket,
+            buffer: Vec::new(),
             token: None,
-        };
-        viewer.send(request);
-        let attached = viewer.read();
-        assert_eq!(attached["kind"], "attached");
-        viewer.token = attached["token"].as_str().map(str::to_owned);
-        viewer
+            id: String::new(),
+            reconnect: String::new(),
+            nonce: String::new(),
+            received: 0,
+            wire: 0,
+            ids: 0,
+        }
     }
     fn sql(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
@@ -264,44 +275,165 @@ read -r answer < /dev/tty
         }
     }
 }
+const REPLY: u8 = 0x01;
+const SNAPSHOT: u8 = 0x02;
+const OUT: u8 = 0x03;
+const ERR: u8 = 0x04;
+const REQUEST: u8 = 0x11;
+const INPUT: u8 = 0x12;
+
+fn frame(tag: u8, payload: &[u8]) -> Vec<u8> {
+    let mut bytes = vec![tag];
+    bytes.extend((payload.len() as u32).to_be_bytes());
+    bytes.extend(payload);
+    bytes
+}
+
+/// The next frame from `reader`, or `None` at EOF.
+fn read_frame(reader: &mut impl Read, buffer: &mut Vec<u8>) -> Option<(u8, Vec<u8>)> {
+    loop {
+        if buffer.len() >= 5 {
+            let length = u32::from_be_bytes(buffer[1..5].try_into().unwrap()) as usize;
+            if buffer.len() >= 5 + length {
+                let payload = buffer[5..5 + length].to_vec();
+                let tag = buffer[0];
+                buffer.drain(..5 + length);
+                return Some((tag, payload));
+            }
+        }
+        let mut bytes = [0; 65536];
+        match reader.read(&mut bytes) {
+            Ok(0) => return None,
+            Ok(n) => buffer.extend_from_slice(&bytes[..n]),
+            Err(error) => panic!("read frame: {error}"),
+        }
+    }
+}
+
+/// What a viewer receives: replies to its requests, stream bytes, and the
+/// events riding in stream 1 under its nonce.
+#[derive(Debug, Clone, PartialEq)]
+enum Item {
+    Reply(Value),
+    Snapshot(Vec<u8>),
+    Out(Vec<u8>),
+    Err(Vec<u8>),
+    Event(Value),
+}
+
 struct Viewer {
-    socket: BufReader<UnixStream>,
+    socket: UnixStream,
+    buffer: Vec<u8>,
     token: Option<String>,
+    id: String,
+    reconnect: String,
+    nonce: String,
+    /// Stream bytes received, as a resume reports them.
+    received: u64,
+    /// Every byte read from the socket, headers included.
+    wire: u64,
+    ids: u64,
 }
 impl Viewer {
-    fn send(&mut self, value: Value) {
-        writeln!(self.socket.get_mut(), "{value}").unwrap();
+    fn request(&mut self, mut value: Value) -> u64 {
+        self.ids += 1;
+        value["id"] = json!(self.ids);
+        self.socket
+            .write_all(&frame(REQUEST, value.to_string().as_bytes()))
+            .unwrap();
+        self.ids
     }
-    fn read(&mut self) -> Value {
-        let mut line = String::new();
-        self.socket.read_line(&mut line).unwrap();
-        serde_json::from_str(&line).unwrap()
+    fn accept(&mut self, attached: &Value) {
+        self.token = attached["token"].as_str().map(str::to_owned);
+        self.id = attached["viewer"].as_str().unwrap().to_owned();
+        self.reconnect = attached["reconnect"].as_str().unwrap().to_owned();
+        self.nonce = attached["nonce"].as_str().unwrap().to_owned();
+    }
+    /// The next item, or `None` once the owner closes this connection.
+    fn next(&mut self) -> Option<Item> {
+        let (tag, payload) = read_frame(&mut self.socket, &mut self.buffer)?;
+        self.wire += 5 + payload.len() as u64;
+        if tag != REPLY {
+            self.received += payload.len() as u64;
+        }
+        Some(match tag {
+            REPLY => Item::Reply(serde_json::from_slice(&payload).unwrap()),
+            SNAPSHOT => Item::Snapshot(payload),
+            ERR => Item::Err(payload),
+            OUT => {
+                let prefix = format!("\x1b_lf1;{};", self.nonce).into_bytes();
+                match payload.strip_prefix(prefix.as_slice()) {
+                    Some(body) if body.ends_with(b"\x1b\\") => {
+                        Item::Event(serde_json::from_slice(&body[..body.len() - 2]).unwrap())
+                    }
+                    _ => Item::Out(payload),
+                }
+            }
+            other => panic!("unexpected frame tag {other:#x}"),
+        })
+    }
+    fn until_reply(&mut self) -> Value {
+        loop {
+            match self.next().expect("owner closed before replying") {
+                Item::Reply(reply) => return reply,
+                _ => continue,
+            }
+        }
+    }
+    /// Everything up to and including the first event of `kind`.
+    fn until_event(&mut self, kind: &str) -> Vec<Item> {
+        until(
+            self,
+            |items| matches!(items.last(), Some(Item::Event(event)) if event["type"] == kind),
+        )
     }
     /// Every hint received until the owner closes this connection.
     fn hints(&mut self) -> Vec<String> {
         let mut hints = Vec::new();
-        let mut line = String::new();
-        while matches!(self.socket.read_line(&mut line), Ok(1..)) {
-            let value: Value = serde_json::from_str(&line).unwrap();
-            if value["kind"] == "input_hint" {
-                hints.push(value["hint"].as_str().unwrap().to_owned());
+        while let Some(item) = self.next() {
+            if let Item::Event(event) = item {
+                if event["type"] == "hint" {
+                    hints.push(event["text"].as_str().unwrap().to_owned());
+                }
             }
-            line.clear();
         }
         hints
     }
     fn input(&mut self, text: &str) {
-        self.send(json!({"kind":"input","token":self.token,"bytes":text.as_bytes()}));
+        self.socket
+            .write_all(&frame(INPUT, text.as_bytes()))
+            .unwrap();
     }
     fn finish(&mut self) {
-        loop {
-            let value = self.read();
-            if value["kind"] == "exit" {
-                assert_eq!(value["code"], 0);
-                break;
-            }
-        }
+        let items = self.until_event("child_exited");
+        let Some(Item::Event(exit)) = items.last() else {
+            unreachable!()
+        };
+        assert_eq!(exit["code"], 0, "{items:?}");
     }
+}
+
+/// Stream 1 bytes among `items`, concatenated.
+fn out(items: &[Item]) -> Vec<u8> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Out(bytes) | Item::Snapshot(bytes) => Some(bytes.as_slice()),
+            _ => None,
+        })
+        .flatten()
+        .copied()
+        .collect()
+}
+
+fn events<'a>(items: &'a [Item], kind: &str) -> Vec<&'a Value> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Event(event) if event["type"] == kind => Some(event),
+            _ => None,
+        })
+        .collect()
 }
 
 #[test]
@@ -327,31 +459,36 @@ fn zero_viewers_preserve_shell_jobs_and_fence_replaced_input_claims() {
     let mut first = fixture.viewer(&owner, true);
     let second = fixture.attach(
         &owner,
-        json!({"kind":"attach","control":true,"replace":true,"rows":24,"cols":80,
+        json!({"kind":"attach","control":true,"replace":true,"own":"take","rows":24,"cols":80,
             "moved":"This conversation moved to tmux %4: lf resume s1"}),
     );
-    // The replaced viewer is told where the conversation went, then let go.
-    let moved = read_until(&mut first, "moved");
+    // The replaced viewer is told where the conversation went and who sizes
+    // the terminal now; it stays attached until it leaves.
+    let moved = first.until_event("control");
+    let Some(Item::Event(control)) = moved.last() else {
+        unreachable!()
+    };
+    assert_eq!(control["held"], false);
     assert_eq!(
-        moved.last().unwrap()["notice"],
+        control["notice"],
         "This conversation moved to tmux %4: lf resume s1"
     );
-    let mut rest = String::new();
-    assert_eq!(first.socket.read_line(&mut rest).unwrap(), 0);
+    assert!(
+        events(&moved, "owner")
+            .iter()
+            .any(|event| event["viewer"] == second.id && event["held"] == false),
+        "{moved:?}"
+    );
     let mut observer = fixture.viewer(&owner, false);
     assert!(observer.token.is_none());
-    observer.send(json!({"kind":"input","token":second.token,"bytes":b"passive\n"}));
+    observer.input("passive\n");
     drop(observer);
     drop(first);
     drop(second); // zero viewers while the same read remains pending
     let mut replacement = fixture.viewer(&owner, true);
     let mut passive = fixture.viewer(&owner, false);
-    passive.send(json!({"kind":"attach","control":false,"replace":true,"rows":24,"cols":80}));
-    loop {
-        if passive.read()["kind"] == "attached" {
-            break;
-        }
-    }
+    passive.request(json!({"kind":"attach","control":false,"replace":true,"rows":24,"cols":80}));
+    assert_eq!(passive.until_reply()["kind"], "attached");
     drop(passive); // observer disconnect cannot release the controller's claim
     replacement.input("accepted\n");
     replacement.finish();
@@ -375,12 +512,8 @@ fn automatic_attachment_preserves_an_existing_viewers_control() {
     ]);
     let mut controller = fixture.viewer(&owner, true);
     let mut waiting = fixture.viewer(&owner, false);
-    waiting.send(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
-    loop {
-        if waiting.read()["kind"] == "busy" {
-            break;
-        }
-    }
+    waiting.request(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
+    assert_eq!(waiting.until_reply()["kind"], "busy");
     controller.input("original-controller\n");
     controller.finish();
     assert_eq!(fixture.wait_file("answer"), "original-controller");
@@ -399,20 +532,14 @@ fn automatic_attachment_claims_control_after_the_previous_viewer_disconnects() {
     // SHUT_WR lets the owner observe EOF before it accepts the next viewer.
     controller
         .socket
-        .get_ref()
         .shutdown(std::net::Shutdown::Both)
         .unwrap();
     drop(controller);
     let mut waiting = fixture.viewer(&owner, false);
-    waiting.send(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
-    loop {
-        let frame = waiting.read();
-        assert_ne!(frame["kind"], "busy");
-        if frame["kind"] == "attached" {
-            waiting.token = frame["token"].as_str().map(str::to_owned);
-            break;
-        }
-    }
+    waiting.request(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
+    let attached = waiting.until_reply();
+    assert_eq!(attached["kind"], "attached");
+    waiting.accept(&attached);
     assert_ne!(waiting.token, token);
     waiting.input("reconnected\n");
     waiting.finish();
@@ -422,7 +549,7 @@ fn automatic_attachment_claims_control_after_the_previous_viewer_disconnects() {
 /// Stands in for a Task step: registers its live controls with the owner, then
 /// handles `detach` like `/detach` and exits on `done`.
 const INPUT_HINT_STEP: &str = r#"
-import hashlib, json, os, socket, sys
+import hashlib, json, os, socket, struct, sys
 home = os.path.realpath(os.environ["LF_HOME"])
 digest = hashlib.sha256(home.encode()).hexdigest()[:16]
 path = f"{os.path.realpath('/tmp')}/lf-{os.geteuid()}-{digest}/{os.environ['LF_TRANSPORT_OWNER']}.sock"
@@ -430,7 +557,8 @@ key = os.environ["LF_TRANSPORT_CONTROL"]
 def request(value):
     s = socket.socket(socket.AF_UNIX)
     s.connect(path)
-    s.sendall((json.dumps(dict(value, key=key)) + "\n").encode())
+    body = json.dumps(dict(value, key=key, id=1)).encode()
+    s.sendall(struct.pack(">BI", 0x11, len(body)) + body)
     return s
 hint = request({"kind": "input_hint", "hint": "type here"})
 print("working", flush=True)
@@ -442,18 +570,6 @@ for line in sys.stdin:
         break
 "#;
 
-fn read_until(viewer: &mut Viewer, kind: &str) -> Vec<Value> {
-    let mut frames = Vec::new();
-    loop {
-        let frame = viewer.read();
-        let done = frame["kind"] == kind;
-        frames.push(frame);
-        if done {
-            return frames;
-        }
-    }
-}
-
 #[test]
 fn only_controlling_viewers_see_live_input_controls() {
     let fixture = Fixture::new();
@@ -461,27 +577,21 @@ fn only_controlling_viewers_see_live_input_controls() {
     fixture.wait_file("registered");
 
     let mut controller = fixture.viewer(&owner, true);
-    let hint = json!({"kind":"input_hint","hint":"type here"});
-    assert!(read_until(&mut controller, "input_hint").contains(&hint));
+    let items = controller.until_event("hint");
+    assert_eq!(events(&items, "hint")[0]["text"], "type here");
 
     // Detaching viewers keeps the step's registration for the next one.
     controller.input("detach\n");
-    read_until(&mut controller, "detached");
+    controller.until_event("detached");
     let mut returning = fixture.viewer(&owner, true);
-    read_until(&mut returning, "input_hint");
+    returning.until_event("hint");
     let mut observer = fixture.viewer(&owner, false);
     returning.input("done\n");
     returning.finish();
 
-    let frames = read_until(&mut observer, "exit");
-    assert!(!frames.contains(&hint), "{frames:?}");
-    let tail: String = frames
-        .iter()
-        .filter(|frame| frame["kind"] == "output")
-        .flat_map(|frame| frame["bytes"].as_array().unwrap().clone())
-        .map(|byte| byte.as_u64().unwrap() as u8 as char)
-        .collect();
-    assert_eq!(tail, "working\n");
+    let items = observer.until_event("child_exited");
+    assert!(events(&items, "hint").is_empty(), "{items:?}");
+    assert_eq!(out(&items), b"working\n");
 }
 
 #[test]
@@ -521,26 +631,22 @@ fn slow_observer_does_not_block_output_or_final_exit() {
     let mut stdout_bytes = 0;
     let mut stderr = Vec::new();
     loop {
-        let frame = active.read();
-        match frame["kind"].as_str().unwrap() {
-            "output" => {
-                let bytes: Vec<u8> = serde_json::from_value(frame["bytes"].clone()).unwrap();
-                if frame["stream"] == 1 {
-                    stdout_bytes += bytes.len();
-                    // Pace the producer with the active consumer, while the
-                    // observer accumulates enough unread output to disconnect.
-                    if stdout_bytes < 4 * 1024 * 1024 && stdout_bytes % 65536 == 0 {
-                        active.input("next\n");
-                    }
-                } else {
-                    stderr.extend(bytes);
+        match active.next().unwrap() {
+            Item::Out(bytes) => {
+                stdout_bytes += bytes.len();
+                // Pace the producer with the active consumer, while the
+                // observer accumulates enough unread output to disconnect.
+                if stdout_bytes < 4 * 1024 * 1024 && stdout_bytes % 65536 == 0 {
+                    active.input("next\n");
                 }
             }
-            "exit" => {
-                assert_eq!(frame["code"], 0);
+            Item::Err(bytes) => stderr.extend(bytes),
+            Item::Event(event) if event["type"] == "child_exited" => {
+                assert_eq!(event["code"], 0);
                 break;
             }
-            kind => panic!("unexpected frame: {kind}"),
+            Item::Event(_) => {}
+            other => panic!("unexpected item: {other:?}"),
         }
     }
     assert_eq!(stdout_bytes, 4 * 1024 * 1024);
@@ -675,24 +781,24 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     // acknowledges the attachment itself.
     let mut socket = loop {
         match listener.accept() {
-            Ok((socket, _)) => {
+            Ok((mut socket, _)) => {
                 socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(10)))
                     .unwrap();
-                let mut socket = BufReader::new(socket);
-                let mut request = String::new();
-                socket.read_line(&mut request).unwrap();
-                match serde_json::from_str::<Value>(&request).unwrap()["kind"]
-                    .as_str()
-                    .unwrap()
-                {
-                    "controlled" => writeln!(
-                        socket.get_mut(),
-                        "{}",
-                        json!({"kind":"controlled","held":false})
-                    )
-                    .unwrap(),
+                let mut buffer = Vec::new();
+                let (tag, payload) = read_frame(&mut socket, &mut buffer).unwrap();
+                assert_eq!(tag, REQUEST);
+                let request: Value = serde_json::from_slice(&payload).unwrap();
+                match request["kind"].as_str().unwrap() {
+                    "controlled" => socket
+                        .write_all(&frame(
+                            REPLY,
+                            json!({"answers":request["id"],"seq":0,"kind":"controlled","held":false})
+                                .to_string()
+                                .as_bytes(),
+                        ))
+                        .unwrap(),
                     "attach" => break socket,
                     other => panic!("unexpected request {other}"),
                 }
@@ -713,10 +819,14 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
     }
     if silent == SilentOwner::Stalled {
         socket
-            .get_mut()
-            .write_all(
-                b"{\"kind\":\"attached\",\"token\":\"claim\",\"terminal\":false,\"bytes\":[]}\n",
-            )
+            .write_all(&frame(
+                REPLY,
+                json!({"answers":1,"seq":0,"kind":"attached","viewer":"v","reconnect":"r",
+                    "nonce":"00","token":"claim","terminal":false,"grace_ms":60000,
+                    "owner":null})
+                .to_string()
+                .as_bytes(),
+            ))
             .unwrap();
         let output = wait_for_viewer(viewer, Duration::from_secs(8));
         assert!(!output.status.success());
@@ -735,8 +845,8 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
         assert!(error.contains("did not acknowledge attachment"), "{error}");
         assert!(error.contains("outcome is unknown"), "{error}");
     }
-    let mut remaining = String::new();
-    socket.read_to_string(&mut remaining).unwrap();
+    let mut remaining = Vec::new();
+    socket.read_to_end(&mut remaining).unwrap();
     assert!(
         remaining.is_empty(),
         "viewer submitted input before acknowledgement"
@@ -1238,11 +1348,7 @@ fn opening_reattaches_an_owner_whose_viewer_record_went_stale() {
         std::thread::sleep(Duration::from_millis(20));
     }
     // Desktop quits.
-    desktop
-        .socket
-        .get_ref()
-        .shutdown(std::net::Shutdown::Both)
-        .unwrap();
+    desktop.socket.shutdown(std::net::Shutdown::Both).unwrap();
     drop(desktop);
     let deadline = Instant::now() + Duration::from_secs(10);
     while viewed() {
@@ -1673,4 +1779,242 @@ fn headless_graph(resume: bool) {
         .unwrap();
     assert_eq!(captures, 1);
     assert_eq!(fixture.wait_file("launched"), launched);
+}
+
+/// A shell that echoes each line it reads, so viewers can make it print on demand.
+const ECHO_LINES: &str = r#"
+stty -echo -onlcr
+printf 'drawn\r\n'
+printf 1 > "$HOME/drawn"
+while read -r line; do
+    case "$line" in
+        done) exit 0 ;;
+        size) stty size ;;
+        burst) dd if=/dev/zero bs=65536 count=32 2>/dev/null ;;
+        fake) printf '\033_lf1;deadbeef;{"seq":9,"type":"resize","rows":1,"cols":1}\033\\' ;;
+        *) printf 'line %s\r\n' "$line" ;;
+    esac
+done
+"#;
+
+fn until_out(viewer: &mut Viewer, text: &str) -> Vec<Item> {
+    until(viewer, |items| {
+        String::from_utf8_lossy(&out(items)).contains(text)
+    })
+}
+
+/// Items up to the first that satisfies `done` over everything so far.
+fn until(viewer: &mut Viewer, done: impl Fn(&[Item]) -> bool) -> Vec<Item> {
+    let mut items = Vec::new();
+    loop {
+        let item = viewer
+            .next()
+            .unwrap_or_else(|| panic!("owner closed first: {items:?}"));
+        items.push(item);
+        if done(&items) {
+            return items;
+        }
+    }
+}
+
+/// Items up to the owner event naming `id`.
+fn until_owner(viewer: &mut Viewer, id: &str) -> Vec<Item> {
+    until(viewer, |items| {
+        events(items, "owner")
+            .last()
+            .is_some_and(|event| event["viewer"] == id)
+    })
+}
+
+#[test]
+fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    std::thread::sleep(Duration::from_millis(100));
+    let mut first = fixture.viewer(&owner, true);
+    let mut second = fixture.viewer(&owner, false);
+    for viewer in [&mut first, &mut second] {
+        let items = viewer.until_event("owner");
+        let Item::Snapshot(snapshot) = &items[0] else {
+            panic!("stream does not begin with the snapshot: {items:?}");
+        };
+        assert!(String::from_utf8_lossy(snapshot).contains("drawn"));
+        assert_eq!(events(&items, "resize")[0]["rows"], 24);
+    }
+    first.input("hello\n");
+    for viewer in [&mut first, &mut second] {
+        let items = until_out(viewer, "line hello");
+        assert!(items.iter().all(|item| !matches!(item, Item::Snapshot(_))));
+    }
+    first.input("done\n");
+    first.finish();
+    second.finish();
+}
+
+#[test]
+fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    let mut first = fixture.viewer(&owner, true);
+    first.input("one\n");
+    until_out(&mut first, "line one\r\n");
+    let received = first.received;
+    let reconnect = first.reconnect.clone();
+    // The connection is lost mid-stream: no leave, no close from the owner.
+    first.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    drop(first);
+    let mut second = fixture.viewer(&owner, true);
+    second.input("two\n");
+    until_out(&mut second, "line two\r\n");
+    // Three bytes short of what it had: the stream resumes with exactly them.
+    let mut resumed = fixture.connect(&owner);
+    resumed.request(
+        json!({"kind":"resume","reconnect":reconnect,"received":received - 3,
+        "control":false,"own":null,"rows":24,"cols":80}),
+    );
+    let reply = resumed.until_reply();
+    assert_eq!(reply["kind"], "attached", "{reply}");
+    resumed.accept(&reply);
+    let items = until_out(&mut resumed, "line two\r\n");
+    assert!(
+        items.iter().all(|item| !matches!(item, Item::Snapshot(_))),
+        "{items:?}"
+    );
+    assert_eq!(out(&items), b"e\r\nline two\r\n", "{items:?}");
+    second.input("done\n");
+    second.finish();
+    resumed.finish();
+}
+
+#[test]
+fn a_resume_past_the_spool_is_refused_and_a_fresh_attach_repaints() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    let mut first = fixture.viewer(&owner, true);
+    first.until_event("owner");
+    let received = first.received;
+    let reconnect = first.reconnect.clone();
+    first.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    drop(first);
+    let mut second = fixture.viewer(&owner, true);
+    second.input("burst\n");
+    let mut seen = 0;
+    while seen < 2 * 1024 * 1024 {
+        if let Item::Out(bytes) = second.next().unwrap() {
+            seen += bytes.len();
+        }
+    }
+    let mut back = fixture.connect(&owner);
+    back.request(
+        json!({"kind":"resume","reconnect":reconnect,"received":received,
+        "control":false,"own":null,"rows":24,"cols":80}),
+    );
+    assert_eq!(back.until_reply()["kind"], "reconnect_required");
+    back.request(
+        json!({"kind":"attach","control":false,"replace":true,"own":null,"rows":24,"cols":80}),
+    );
+    let attached = back.until_reply();
+    assert_eq!(attached["kind"], "attached");
+    back.accept(&attached);
+    assert!(matches!(back.next(), Some(Item::Snapshot(_))));
+    second.input("done\n");
+    second.finish();
+}
+
+#[test]
+fn resize_reaches_every_viewer_as_its_own_event_and_program_bytes_do_not() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    let mut sizer = fixture.viewer(&owner, true);
+    let mut observer = fixture.viewer(&owner, false);
+    observer.until_event("owner");
+    sizer.request(json!({"kind":"resize","rows":30,"cols":100}));
+    let items = observer.until_event("resize");
+    let resize = events(&items, "resize");
+    assert_eq!(resize.last().unwrap()["cols"], 100);
+    sizer.input("size\n");
+    until_out(&mut observer, "30 100");
+    sizer.input("fake\n");
+    let items = until_out(&mut observer, "deadbeef");
+    assert!(events(&items, "resize").is_empty(), "{items:?}");
+    // Event sequence numbers are gapless per viewer and replies carry the latest.
+    sizer.input("size\n");
+    let items = until_out(&mut sizer, "30 100");
+    let all: Vec<u64> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Event(event) => event["seq"].as_u64(),
+            _ => None,
+        })
+        .collect();
+    assert!(all.windows(2).all(|pair| pair[1] == pair[0] + 1), "{all:?}");
+    sizer.request(json!({"kind":"controlled"}));
+    let reply = sizer.until_reply();
+    assert_eq!(reply["kind"], "controlled");
+    assert!(reply["seq"].as_u64().unwrap() >= *all.last().unwrap());
+    sizer.input("done\n");
+    sizer.finish();
+}
+
+#[test]
+fn ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    let mut typist = fixture.viewer(&owner, true);
+    let mut waiting = fixture.attach(
+        &owner,
+        json!({"kind":"attach","control":false,"replace":true,"own":"request","rows":30,"cols":90,"name":"pane 2"}),
+    );
+    let mut taker = fixture.attach(
+        &owner,
+        json!({"kind":"attach","control":false,"replace":true,"own":"take","rows":40,"cols":120,"name":"tmux %4"}),
+    );
+    taker.until_event("owner");
+    let items = until_owner(&mut typist, &taker.id);
+    let lost = events(&items, "owner");
+    assert!(
+        lost.iter().any(|event| event["viewer"] == taker.id
+            && event["name"] == "tmux %4"
+            && event["held"] == false),
+        "{items:?}"
+    );
+    typist.input("size\n");
+    until_out(&mut typist, "40 120");
+    // The taker leaves: the queued request is granted and sizes the terminal.
+    taker.request(json!({"kind":"leave"}));
+    drop(taker);
+    let waiting_id = waiting.id.clone();
+    let items = until_owner(&mut waiting, &waiting_id);
+    assert_eq!(events(&items, "owner").last().unwrap()["held"], true);
+    typist.input("size\n");
+    until_out(&mut typist, "30 90");
+    typist.input("done\n");
+    typist.finish();
+}
+
+#[test]
+fn a_megabyte_burst_costs_within_ten_percent_on_the_wire() {
+    let fixture = Fixture::new();
+    let owner = fixture.owner(fixture.serve(
+        false,
+        &[
+            "/bin/sh",
+            "-c",
+            "read -r go; dd if=/dev/zero bs=65536 count=16 2>/dev/null",
+        ],
+    ));
+    let mut viewer = fixture.viewer(&owner, true);
+    viewer.input("go\n");
+    let items = viewer.until_event("child_exited");
+    assert_eq!(out(&items).len(), 1024 * 1024);
+    assert!(
+        viewer.wire < 1024 * 1024 * 11 / 10,
+        "{} bytes on the wire",
+        viewer.wire
+    );
 }

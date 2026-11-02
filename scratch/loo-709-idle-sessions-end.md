@@ -60,7 +60,7 @@ fidelity (sibling Task) stay out.
 - **The last screen survives.** Before a terminal owner exits (idle end,
   executable gone, or its command exiting) it writes
   `$LF_HOME/screens/<session>.vt`: the vt100 scrollback rows followed by the
-  visible grid redraw, the same bytes a viewer receives on attach. The file is
+  visible grid redraw (live attach redraws only the visible grid). The file is
   keyed by Session because that is what a returning reader knows; one
   conversation has one last screen, overwritten by each owner's end. This
   branch delivers the writer and its test; the reader (`lf resume` painting
@@ -75,28 +75,35 @@ fidelity (sibling Task) stay out.
   owners are not resumed; their cut-off turn is not replayed anyway.
 - **Closing is the same as idling.** No new command.
 
-Deleted: `lifetime::LONGEST_PAUSE`/`recheck`/`held_until` pacing (a held
+## Delete — do not maintain
+
+Replaced the executable-gone path’s store-only exit judgment in `lifetime::watch`
+with a judgment that also preserves recent command output. Keep its quiet-provider,
+active-turn and installed-symlink coverage on the same path. No schema change.
+
+Already deleted: `lifetime::LONGEST_PAUSE`/`recheck`/`held_until` pacing (a held
 judgement restarts the grace instead) and `limit()`'s "unreadable config keeps
-the Session" branch.
+the Session" branch. `Grace::due` is removed too: the policy needs only whether
+the grace expired. Keep the output-only clock separate from the detached grace;
+viewer changes must not extend the executable-gone quiet interval. Lifetime
+fixtures name owners by their role so the preservation assertions stay readable.
 
 ## Concept review (2026-11-02, headless)
 
 Reviewed the accepted experience against the implemented change. No new
 concept for the person: the setting keeps its name, `lf resume` is unchanged,
-`lf resume --all` narrows, closing and idling are one thing. One mismatch
-between the contract and the code:
+`lf resume --all` narrows, closing and idling are one thing. The review found
+one mismatch, repaired in the following implement pass:
 
-- **Both exit causes judge "waits for a person" the same way.** The idle exit
-  treats the command's recent terminal output as a turn in progress (a native
-  Claude mid-turn leaves no store fact; its spinner does). The executable-gone
-  exit consults only the store, so an unviewed Claude mid-turn whose lf build
-  is replaced is cut, while the README promises a turn in progress keeps its
-  owner until it settles. Next implement direction: `lifetime::watch` ends a
-  gone owner only once the command has been quiet for at least one poll, from
-  a `last_output` the gone path reads and viewer changes do not reset
-  (viewers never hold a vanished build). A turn is finite, so the vanished
-  build still ends; the turn's work reaches provider history first.
-  `sessions_end_when_their_lf_executable_goes` keeps its quiet provider.
+- **Both exit causes preserve recent command output.** The executable-gone
+  path now waits until the command has been quiet for one poll (2s), in
+  addition to the shared store judgment. Its `last_output` clock changes only
+  on command output; viewer changes cannot prolong a vanished build. The
+  regression extends `sessions_end_when_their_lf_executable_goes` with an
+  unviewed native turn that draws without a store activity record, survives
+  removal, then falls quiet and ends even after a viewer reconnects. Existing
+  quiet-provider, active-turn and installed-symlink cases remain. The new
+  regression failed before the repair and passed after it.
 
 Consequences recorded, no change needed:
 
@@ -123,7 +130,6 @@ Consequences recorded, no change needed:
   `terminal::last_screen`) and rewrites the `transport_tests` decode to
   `.ghostsnp`. Jack Heart's steer asked the two Tasks to agree before either
   publishes; they have.
-- The gone-path direction above.
 - PR body: before/after numbers below; point the 27 pre-rule owners at
   LOO-705's `lf monitor rollover`; say that painting the last screen on return
   arrives with LOO-710's reader, this PR writes it.
@@ -141,11 +147,7 @@ Consequences recorded, no change needed:
 
 ## Check results
 
-- Tree `a3160bd07b` (no code change since): `cargo test -p loopflow --lib --
-  transport::` (15) and `--test transport_tests` (20, incl. `headless`,
-  `resume_refuses`, `detached_sessions_end_after_their_limit`,
-  `resume_all_restores`) pass; `cargo fmt` and
-  `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
+- `cargo test -p loopflow --lib transport::lifetime::` (1) and `cargo test -p loopflow --test transport_tests sessions_end_` (2) pass; `cargo fmt --check`, `git diff --check` and `lf context` pass; macOS linker warns about the large test binary’s unwind table; gate owns broader affected suites and Clippy.
 - Live, 2026-11-02, branch debug build in a throwaway `LF_HOME`, real Claude
   Code 2.1.316, this worktree as checkout: 20 conversations opened, each
   viewed once and detached at 13:53:07. Before: 60 processes (20 owners, 20

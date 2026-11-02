@@ -1133,6 +1133,8 @@ fn detached_sessions_end_after_their_limit() {
     }
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
     fixture.launches(6);
+    let [idle_owner, viewed_owner, busy_owner, graph_owner, stale_owner, talking_owner] =
+        <[String; 6]>::try_from(owners).unwrap();
     let session_of = |line: &str| -> String {
         sql.query_row(
             "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
@@ -1141,26 +1143,26 @@ fn detached_sessions_end_after_their_limit() {
         )
         .unwrap()
     };
-    let idle = fixture.session_of_owner(&owners[0]);
-    fixture.mark_working(&fixture.session_of_owner(&owners[2]));
+    let idle = fixture.session_of_owner(&idle_owner);
+    fixture.mark_working(&fixture.session_of_owner(&busy_owner));
     let graph: String = sql
         .query_row(
             "INSERT INTO graph_processes(lf_process_id,graph,compiled)
              SELECT id,'fixture','{}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1
              RETURNING lf_process_id",
-            [&owners[3]],
+            [&graph_owner],
             |r| r.get(0),
         )
         .unwrap();
-    fixture.mark_stale_working(&fixture.session_of_owner(&owners[4]));
+    fixture.mark_stale_working(&fixture.session_of_owner(&stale_owner));
     // Closing the window: every owner but the viewed one loses its viewers.
     let viewed = viewers.remove(1);
     drop(viewers);
-    fixture.ends(&owners[0]);
-    fixture.ends(&owners[4]);
+    fixture.ends(&idle_owner);
+    fixture.ends(&stale_owner);
     // Several judgments later, everything else still runs.
     std::thread::sleep(Duration::from_secs(4));
-    for owner in [&owners[1], &owners[2], &owners[3], &owners[5]] {
+    for owner in [&viewed_owner, &busy_owner, &graph_owner, &talking_owner] {
         assert!(fixture.running(owner), "{owner} ended");
     }
     let resumed = fixture
@@ -1190,10 +1192,10 @@ fn detached_sessions_end_after_their_limit() {
     sql.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&graph])
         .unwrap();
     std::fs::write(fixture.home.path().join("hush"), "").unwrap();
-    fixture.ends(&owners[1]);
-    fixture.ends(&owners[3]);
-    fixture.ends(&owners[5]);
-    assert!(fixture.running(&owners[2]), "busy owner ended mid-turn");
+    fixture.ends(&viewed_owner);
+    fixture.ends(&graph_owner);
+    fixture.ends(&talking_owner);
+    assert!(fixture.running(&busy_owner), "busy owner ended mid-turn");
     // `lf resume` reopens the ended conversation from its saved history.
     let mut reopen = fixture.serve(
         true,
@@ -1207,7 +1209,7 @@ fn detached_sessions_end_after_their_limit() {
         line.contains(" --resume ") && session_of(&line) == idle,
         "reopened without history: {line}"
     );
-    for owner in [&owners[2], &reopened] {
+    for owner in [&busy_owner, &reopened] {
         fixture.stop(owner);
     }
 }
@@ -1232,26 +1234,35 @@ fn sessions_end_when_their_lf_executable_goes() {
         build("lf-replaced"),
         build("lf-busy"),
         installed.clone(),
+        build("lf-talking"),
     ];
     let mut owners = Vec::new();
     let mut viewers = Vec::new();
-    for executable in &executables {
+    for (executable, message) in executables
+        .iter()
+        .zip(["hello", "hello", "hello", "hello", "talking"])
+    {
         let lf = executable.to_str().unwrap();
         let mut owner = fixture.command_from(executable, &["session", "serve", "--terminal"]);
         owner
-            .args(["--", lf, "--interactive", "--agent", "claude", ":", "hello"])
+            .args(["--", lf, "--interactive", "--agent", "claude", ":", message])
             .env("PATH", &path);
         let owner = fixture.owner(owner);
         viewers.push(fixture.viewer(&owner, false));
         owners.push(owner);
     }
     fixture.launches(owners.len());
-    let busy = fixture.session_of_owner(&owners[2]);
+    let [removed_owner, replaced_owner, busy_owner, installed_owner, talking_owner]: [String; 5] =
+        owners.try_into().unwrap();
+    let busy = fixture.session_of_owner(&busy_owner);
     fixture.mark_working(&busy);
+    // A native turn leaves only terminal output, with no store activity or viewer.
+    drop(viewers.pop());
 
     // A worktree removed, a build relinked, `lf install` swapping its symlink.
     std::fs::remove_file(&executables[0]).unwrap();
     std::fs::remove_file(&executables[2]).unwrap();
+    std::fs::remove_file(&executables[4]).unwrap();
     let relinked = bin.join("lf-relinked");
     std::fs::write(&relinked, "another build").unwrap();
     std::fs::rename(&relinked, &executables[1]).unwrap();
@@ -1259,13 +1270,16 @@ fn sessions_end_when_their_lf_executable_goes() {
     std::os::unix::fs::symlink(build("lf-next"), &swapped).unwrap();
     std::fs::rename(&swapped, &installed).unwrap();
 
-    fixture.ends(&owners[0]);
-    fixture.ends(&owners[1]);
+    fixture.ends(&removed_owner);
+    fixture.ends(&replaced_owner);
     // Their viewers learn why and how to return.
-    for (index, how) in [(0, "removed"), (1, "replaced")] {
-        let session = fixture.session_of_owner(&owners[index]);
+    for (viewer, (owner, how)) in viewers
+        .iter_mut()
+        .zip([(&removed_owner, "removed"), (&replaced_owner, "replaced")])
+    {
+        let session = fixture.session_of_owner(owner);
         assert_eq!(
-            viewers[index].hints(),
+            viewer.hints(),
             [format!(
                 "This Session's lf build was {how}; `lf resume {session}` reopens it."
             )]
@@ -1273,9 +1287,13 @@ fn sessions_end_when_their_lf_executable_goes() {
     }
     // Several judgments later, the busy and installed owners still run.
     std::thread::sleep(Duration::from_secs(4));
-    assert!(fixture.running(&owners[2]), "busy owner ended mid-turn");
+    assert!(fixture.running(&busy_owner), "busy owner ended mid-turn");
     assert!(
-        fixture.running(&owners[3]),
+        fixture.running(&talking_owner),
+        "native turn ended while drawing"
+    );
+    assert!(
+        fixture.running(&installed_owner),
         "installed owner ended on a symlink swap"
     );
     // Its turn settling lets the busy one end.
@@ -1283,9 +1301,13 @@ fn sessions_end_when_their_lf_executable_goes() {
         .sql()
         .execute("DELETE FROM session_activity WHERE session_id=?1", [&busy])
         .unwrap();
-    fixture.ends(&owners[2]);
+    fixture.ends(&busy_owner);
+    // Once the native turn is quiet, a viewer cannot keep a vanished build.
+    let _viewer = fixture.viewer(&talking_owner, false);
+    std::fs::write(fixture.home.path().join("hush"), "").unwrap();
+    fixture.ends(&talking_owner);
     drop(viewers);
-    fixture.stop(&owners[3]);
+    fixture.stop(&installed_owner);
 }
 
 /// Desktop restarting after an lf upgrade leaves the conversation in an owner

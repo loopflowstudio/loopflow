@@ -4,8 +4,9 @@
 //! quiet: no viewer, no output from its command, and nothing in the store
 //! holding it (a turn in progress, a running Graph, a headless Run). An owner
 //! whose lf executable is removed or replaced (a worktree deleted, a build
-//! relinked, Dev.app rebuilt) ends as soon as its Sessions wait for a person,
-//! viewers notwithstanding: it would otherwise run a vanished build
+//! relinked, Dev.app rebuilt) ends once its Sessions wait for a person and its
+//! command has been quiet for one poll, viewers notwithstanding: it would
+//! otherwise run a vanished build
 //! indefinitely. Its attached viewers are told why and how to return. Ending
 //! writes the last screen, stops the agent and records the exit, so `lf resume`
 //! reopens the conversation from provider history and `lf resume --all` leaves
@@ -73,15 +74,11 @@ impl Grace {
         self.quiet_since = now;
     }
 
-    fn due(&self) -> Option<SystemTime> {
-        match self.limit {
-            Some(DetachedLimit::After(limit)) if !self.viewed => Some(self.quiet_since + limit),
-            _ => None,
-        }
-    }
-
     fn expired(&self, now: SystemTime) -> bool {
-        self.due().is_some_and(|due| due <= now)
+        match self.limit {
+            Some(DetachedLimit::After(limit)) if !self.viewed => now >= self.quiet_since + limit,
+            _ => false,
+        }
     }
 }
 
@@ -93,15 +90,20 @@ fn watch(
     end: &mpsc::Sender<Option<String>>,
 ) {
     let mut store = Store::default();
+    let mut last_output = SystemTime::now();
     let mut grace = Grace {
         limit: None,
         viewed: false,
-        quiet_since: SystemTime::now(),
+        quiet_since: last_output,
     };
     loop {
         match changes.recv_timeout(POLL) {
             Ok(activity) => {
-                grace.note(activity, SystemTime::now());
+                let now = SystemTime::now();
+                grace.note(activity, now);
+                if activity == Activity::Output {
+                    last_output = now;
+                }
                 if let Activity::Viewed(viewed) = activity {
                     // A store a newer lf has advanced refuses this write. The
                     // policy keeps running; readers ask this owner directly.
@@ -127,7 +129,13 @@ fn watch(
         }
         let now = SystemTime::now();
         let gone = executable.and_then(|executable| executable.gone().map(|how| (executable, how)));
-        if gone.is_none() && !grace.expired(now) {
+        // Native turns may leave only terminal output. Viewers never prolong a
+        // vanished build, so their activity cannot reset this quiet interval.
+        let quiet = match gone {
+            Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
+            None => grace.expired(now),
+        };
+        if !quiet {
             continue;
         }
         let Some(store) = store.open(owner) else {
@@ -281,12 +289,13 @@ mod tests {
         assert!(!grace.expired(start + Duration::from_secs(200)));
         assert!(grace.expired(start + Duration::from_secs(220)));
         grace.note(Activity::Viewed(true), start + Duration::from_secs(300));
-        assert_eq!(grace.due(), None);
+        assert!(!grace.expired(start + Duration::from_secs(1_000)));
         grace.note(Activity::Viewed(false), start + Duration::from_secs(400));
-        assert_eq!(grace.due(), Some(start + Duration::from_secs(520)));
+        assert!(!grace.expired(start + Duration::from_secs(519)));
+        assert!(grace.expired(start + Duration::from_secs(520)));
         grace.limit = Some(DetachedLimit::Off);
-        assert_eq!(grace.due(), None);
+        assert!(!grace.expired(start + Duration::from_secs(1_000)));
         grace.limit = None;
-        assert_eq!(grace.due(), None);
+        assert!(!grace.expired(start + Duration::from_secs(1_000)));
     }
 }

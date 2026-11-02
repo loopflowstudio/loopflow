@@ -39,8 +39,9 @@ terminal, so a laptop waking from sleep ends overnight idlers at once. Before
 it exits, the owner writes the Session's last screen to
 `$LF_HOME/screens/<session>.vt`: scrollback first, then the visible grid, as a
 fresh terminal paints it. A Session whose lf executable is removed or replaced
-(a deleted worktree, a relinked build, a rebuilt Dev.app) ends within seconds,
-viewed or not, and logs the path to `logs/lf.log`; an attached viewer prints
+(a deleted worktree, a relinked build, a rebuilt Dev.app) ends once its command
+has been quiet for two seconds and no turn or running Graph holds it, viewed
+or not, and logs the path to `logs/lf.log`; an attached viewer prints
 why and the `lf resume <session>` that reopens it. A turn in progress or a
 step of a running Graph keeps its owner and restarts the grace; a finished
 Graph holds nothing; a terminal's status report counts only while a viewer is

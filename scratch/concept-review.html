@@ -33,14 +33,14 @@
 <main>
 <header>
   <p>Task LOO-693 · step concept-review · 2026-11-02</p>
-  <p>Built from scratch/questions.md, rust/loopflow/src/store/mod.rs, rust/loopflow/src/store/migrations.rs, rust/loopflow/src/lf/commands/graph.rs, rust/loopflow/src/store/sqlite.rs (frontier_tests), rust/loopflow/src/ops/task/delivery.rs, rust/loopflow/tests/doctor_tests.rs, rust/loopflow/tests/task_pr_authority_tests.rs</p>
+  <p>Built from scratch/questions.md, rust/loopflow/src/store/mod.rs, rust/loopflow/src/store/migrations.rs, rust/loopflow/src/lf/commands/graph.rs, rust/loopflow/src/store/sqlite.rs (frontier_tests), rust/loopflow/src/ops/task/delivery.rs, rust/loopflow/tests/doctor_tests.rs, rust/loopflow/tests/task_pr_authority_tests.rs, rust/loopflow/src/provider_auth/mod.rs, rust/loopflow/src/lf/commands/run.rs</p>
   <p>Second pass, after compress and realign</p>
 </header>
 
 <h1>Running steps and conversations survive a store upgrade by a newer lf</h1>
 
 <div class="decision">
-<p><strong>Decision needed: none.</strong> The implemented change matches Jack Heart's decisions of 2026-11-02 and leaves no product choice open. This pass found one surface the first did not look at: the Task PR entry point's refusal names two fixes. That is settled by the accepted decision and recorded as the next implement direction, below. The rest of the page stands as before.</p>
+<p><strong>Decision needed: none.</strong> Third pass. The one-fix refusal from the second pass has landed; this pass audited every caller of the one opener against "name the fix" and found none that appends a second one. The implemented change matches Jack Heart's decisions of 2026-11-02 and leaves no product choice open.</p>
 </div>
 
 <h2>What Jack does</h2>
@@ -52,7 +52,7 @@
 <tr><td>Running step, <code>-- breaks:</code> migration</td><td class="was">Same stop, same message</td><td>The step's row is recorded; the Graph stops naming the migration it lacks and <code>run `lf install`</code>, exit nonzero.</td></tr>
 <tr><td>Agent runs <code>lf task status</code> on the older lf</td><td class="was">"no Loopflow registry on this machine", exit 0, empty status</td><td>The skew and <code>lf install</code> on stderr, nothing on stdout, exit nonzero.</td></tr>
 <tr><td>Any refusal text</td><td class="was">"delete loopflow.db and rerun" (gone at the base; cited by the Task)</td><td>"keep loopflow.db … or run <code>lf install</code>". No message says delete.</td></tr>
-<tr><td><code>lf pr submit</code> from a Task worktree on the older lf</td><td class="was">Refused with a three-variant reason enum; "Run <code>lf doctor</code>"</td><td>Refused; today the store's "run <code>lf install</code>" is followed by "Run <code>lf doctor</code>". <b>Proposed:</b> one fix, the store's.</td></tr>
+<tr><td><code>lf pr submit</code> from a Task worktree on the older lf</td><td class="was">Refused with a three-variant reason enum; "Run <code>lf doctor</code>"</td><td>Refused with one fix, the store's: "Task PR authority refused: the shared Loopflow registry … cannot be opened: … run <code>lf install</code>".</td></tr>
 </table>
 
 <h2>The concepts</h2>
@@ -87,15 +87,11 @@ this Loopflow database's migration history or schema differs from lf &lt;build&g
 keep loopflow.db: it was last migrated by lf &lt;build&gt;. Open it with that build, or run `lf install`</pre>
 
 <div class="mismatch">
-<p><strong>The one mismatch this pass found.</strong> Every caller on the branch prefixes who refused and passes the store's error through, except the Task PR entry point. <code>task_registry_error</code> guesses the cause and appends a second fix:</p>
-<div class="was"><pre>Task PR authority refused: the shared Loopflow registry ~/.lf/loopflow.db is present but
-inaccessible or schema-incompatible: this store needs an lf that knows 0097_x (it has …);
-run `lf install`. Run `lf doctor`.</pre></div>
-<div class="proposed"><p><b>Proposed</b> (next implement direction, settled by "name the fix"):</p>
+<p><strong>Found on the second pass, landed since.</strong> The Task PR entry point guessed the cause and appended "Run <code>lf doctor</code>" after the store's own "run <code>lf install</code>". Now <code>authority_store</code> (<code>rust/loopflow/src/ops/task/delivery.rs</code>) is the one open both Task PR entry points use:</p>
 <pre>Task PR authority refused: the shared Loopflow registry ~/.lf/loopflow.db cannot be opened:
 this store needs an lf that knows 0097_x (it has …); run `lf install`</pre>
-<p>The store names the fix when there is one; <code>lf doctor</code> cannot install anything. For a corrupt or unreadable file the SQLite text stands, as it does for every other caller. <code>missing_task_registry</code> keeps "Run <code>lf doctor</code>": no store is not skew. The authority test that asserts the word <code>incompatible</code>, which only the wrapper supplied, asserts the store's own text instead.</p>
-</div>
+<p><code>missing_task_registry</code> keeps "Run <code>lf doctor</code>": no store is not skew. <code>task_pr_authority_tests</code> asserts the store's own text for a corrupt and an inaccessible registry.</p>
+<p><strong>Third-pass audit.</strong> Twenty-five callers open the store. Each one either propagates the error with <code>?</code> or prefixes who refused (<code>Machine registry cannot be opened:</code>, <code>failed to open Wave registry:</code>, <code>cannot resolve &lt;selector&gt;:</code>) and passes it through. None adds a fix after it. One caller swallows it: the stored-credential lookup at agent launch logs a warning and injects no credentials. Held, below.</p>
 </div>
 
 <div class="mismatch">
@@ -112,10 +108,12 @@ this store needs an lf that knows 0097_x (it has …); run `lf install`</pre>
 <h2>Counterexample held, not acted on</h2>
 <p>A step's own long-lived connection that meets a <code>-- breaks:</code> migration mid-write fails with a raw SQLite error rather than the skew text. Every fresh lf the agent runs inside that step names the skew, and so does the Graph at the step boundary. Wrapping every write in a revalidate would add machinery for a case <code>-- breaks:</code> exists to make rare. Kept in the working design so a later reader does not mistake the gap for an oversight.</p>
 
+<p>The stored-credential lookup at launch (<code>apply_provider_env_to_command</code>, <code>rust/loopflow/src/provider_auth/mod.rs</code>) warns and injects nothing when the store cannot be opened. Under skew it is unreachable for a Work launch: <code>implicit_binding</code> (<code>rust/loopflow/src/lf/commands/run.rs</code>) and the selector path propagate the store error first, so the launch has already exited with the skew. Its other callers are <code>lf auth</code> flows. A second refusal on a path that already refused would be machinery, not clarity.</p>
+
 <p>Private <code>LF_HOME</code> stores still refuse any newer tail, additive or not, because they self-migrate. Running steps live in <code>~/.lf</code>; a developer pointing two builds at one private store sees the refusal with <code>lf install</code>.</p>
 
 <h2>Questions</h2>
-<p>None for this step. The design changed in one place: the Task PR refusal passes the store's error through and names no second fix. Recorded under Remains in scratch/questions.md for implement; no code was changed here.</p>
+<p>None for this step. Nothing changed in the design; the one finding from the second pass is landed and verified. Recorded in scratch/questions.md; no code was changed here.</p>
 </main>
 </body>
 </html>

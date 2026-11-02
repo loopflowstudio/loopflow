@@ -59,12 +59,14 @@ Nothing.
 
 Check: `cargo test -p loopflow --test task_pr_authority_tests` 12 passed after the compress fold (`authority_store`), clippy clean; `--lib store::sqlite::frontier_tests::` 11 passed and `--test integration -- doctor_tests::status_reads` passed earlier on unchanged code; gate owns the affected suites.
 
-## Concept review (2026-11-02, headless; second pass after compress and realign)
+## Concept review (2026-11-02, headless; third pass after the one-fix refusal landed)
 
 Reviewed the implemented change against Jack Heart's decisions of 2026-11-02.
-Page: `scratch/concept-review.html`. The second pass found one surface the
-first did not inspect: the Task PR entry point's wrapper, now fixed and
-recorded under Exists and under Settled below.
+Page: `scratch/concept-review.html`. The second pass found the Task PR
+wrapper's second fix, now landed (`040c41ab79`, `cf6f2a0c6e`). The third pass
+audited every `open_existing_store` caller against "name one fix": each
+prefixes who refused and passes the store's error through; none appends a
+fix after it. Nothing to change; no open choice.
 
 **Accepted experience.** Jack installs a newer lf while steps and conversations
 run on the older one. Nothing he does changes: the install migrates `~/.lf`,
@@ -105,6 +107,13 @@ tail; `incompatible()` for a diverged history). No new record, flag or state.
   the skew text. Every fresh lf the agent runs inside the step, and the Graph
   at the step boundary, name the skew. Wrapping every write in a revalidate
   would be machinery for a case `-- breaks:` is designed to make rare.
+- Held counterexample, no change: the stored-credential lookup at agent
+  launch (`apply_provider_env_to_command`) warns and injects nothing when the
+  store cannot be opened. Under skew it is unreachable for Work launches:
+  `implicit_binding` (`run.rs`) and the selector path (`bin/lf.rs`) propagate
+  the store error first, so the launch exits with the skew before credentials
+  are read. Its other callers are `lf auth` flows, not launches of Work.
+  Making it fail would add a second refusal on a path that already refused.
 - Private `LF_HOME` stores refuse any newer tail because they self-migrate;
   running steps live in `~/.lf`, so the rule stays. Developers sharing one
   private store between two builds see the refusal with `lf install`.

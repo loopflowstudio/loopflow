@@ -51,7 +51,7 @@
 <main>
 <header>
   <p>LOO-705 · One way for long-lived Loopflow processes to move onto the installed lf</p>
-  <p>Step: concept-review (headless), second pass after realign · 2026-11-02</p>
+  <p>Step: concept-review (headless), third pass after implement and realign · 2026-11-02</p>
   <p>Built from <code>scratch/loo-705.md</code>, <code>scratch/questions.md</code>, and the branch diff in <code>rust/loopflow/src/{installation.rs, transport.rs, transport/lifetime.rs, ops/human_session.rs, lf/commands/rollover.rs}</code></p>
 </header>
 
@@ -59,7 +59,7 @@
 
 <p class="lead">That is the one decision this review needs from Jack. Everything else here is either already settled by the accepted design or an implementation direction it implies. The branch builds the minimum Jack asked for ("at a minimum when necessary"); the page shows what "perhaps always" would change.</p>
 
-<p>Second pass: the first pass's three directions are built. This pass found one more, in the callout below: <code>lf resume</code> still cuts a running turn on a superseded owner, while the owner and rollover wait for the idle boundary. It goes back to implement; no new decision is needed for it.</p>
+<p>Third pass: the second pass's boundary direction is built and matches the design. This pass found one more, in the first callout below: a viewer follows the entry only when its owner is <em>superseded</em>; a <em>removed</em> or <em>replaced</em> owner's viewer is told to type <code>lf resume</code> instead. The accepted outcome says one path for every kind of change, so it goes back to implement; no new decision is needed for it.</p>
 
 <p><span class="mark existing">existing</span> is behavior on <code>main</code> today. <span class="mark proposed">proposed</span> is what this branch does or should do next. <span class="mark call">choice</span> is Jack's.</p>
 
@@ -75,12 +75,12 @@
 <tr>
   <td><code>lf resume LOO-618</code></td>
   <td><span class="mark existing">existing</span> On a 0.15.0 owner: "Execution owner did not acknowledge attachment; outcome is unknown". Kill the PID by hand.</td>
-  <td><span class="mark proposed">proposed</span> An idle old owner is ended the way its own policy ends it; the conversation reopens from provider history on the installed lf. A busy one that answers is attached to: you watch the turn end, then the pane follows. A busy one nobody can watch is ended and you are told the turn was cut off. <span class="muted">Branch today: every busy owner is cut.</span></td>
+  <td><span class="mark proposed">proposed</span> An idle old owner is ended the way its own policy ends it; the conversation reopens from provider history on the installed lf. A busy one that answers is attached to: you watch the turn end, then the pane follows. A busy one nobody can watch is ended and you are told the turn was cut off.</td>
 </tr>
 <tr>
   <td>A terminal, cmux pane or Desktop pane showing a Session</td>
   <td><span class="mark existing">existing</span> Owner removed or replaced: pane prints a hint, leaves. Owner merely out of date: pane keeps running the old lf indefinitely.</td>
-  <td><span class="mark proposed">proposed</span> Once the Session waits for a person, the owner ends and the pane reruns its own invocation through the installed entry. Nobody types.</td>
+  <td><span class="mark proposed">proposed</span> Once the Session waits for a person, the owner ends and the pane reruns its own invocation through the entry. Nobody types. <span class="muted">Branch today: only when the owner is superseded; a removed or replaced owner's pane prints a hint and leaves.</span></td>
 </tr>
 <tr>
   <td>An idle Session nobody is looking at</td>
@@ -90,7 +90,7 @@
 <tr>
   <td><code>lf monitor rollover</code></td>
   <td><span class="mark existing">existing</span> Moves idle, <em>unviewed</em>, resumable owners; "a terminal is attached" blocks the rest. Moved none of the 31 stale owners.</td>
-  <td><span class="mark proposed">proposed</span> Moves every idle resumable owner; viewers follow. A busy owner that answers stays until its turn ends; one that cannot answer is ended and reported, since "turn in progress" is a claim it can no longer prove. The viewed rule and <code>owner_viewed</code> are deleted. Graph runners are left alone, as before. <span class="muted">Branch today: every busy owner stays.</span></td>
+  <td><span class="mark proposed">proposed</span> Moves every idle resumable owner; viewers follow. A busy owner that answers stays until its turn ends; one that cannot answer is ended and reported, since "turn in progress" is a claim it can no longer prove. The viewed rule and <code>owner_viewed</code> are deleted. Graph runners are left alone, as before.</td>
 </tr>
 </table>
 
@@ -99,10 +99,10 @@
 <table>
 <tr><th>Concept</th><th>Meaning</th></tr>
 <tr><td>Entry</td><td><span class="mark existing">existing</span> What a launch runs: the install gate, the Desktop helper, or <code>LF_BIN</code> in a private Home (<code>resolve_lf_binary()</code>).</td></tr>
-<tr><td>Superseded</td><td><span class="mark proposed">proposed</span> An owner whose entry no longer runs its executable. Joins <em>removed</em> and <em>replaced</em>. Judged from files and symlinks; no store read, no version numbers, no probe of the other process.</td></tr>
+<tr><td>Superseded</td><td><span class="mark proposed">proposed</span> An owner whose entry no longer runs its executable. Joins <em>removed</em> and <em>replaced</em>: three ways of noticing one fact, that a launch now runs another build. Judged from files and symlinks; no store read, no version numbers, no probe of the other process.</td></tr>
 <tr><td>Ends at idle</td><td><span class="mark existing">existing</span> The lifetime policy: once its Sessions wait for a person, the owner stops its agent and records its exit. <code>lf resume</code> reopens from provider history. Superseded is one more trigger.</td></tr>
 <tr><td>Takeover</td><td><span class="mark proposed">proposed</span> <code>lf resume</code> never negotiates with an owner on another build; it ends it at the idle boundary and reopens. Same build: attach as today.</td></tr>
-<tr><td>Follow</td><td><span class="mark proposed">proposed</span> A viewer told a successor reruns its argv through it. Reverses the "replacement viewers are removed" half of LOO-502; pinning and probing stay removed.</td></tr>
+<tr><td>Follow</td><td><span class="mark proposed">proposed</span> A viewer told a successor reruns its argv through it, whatever became of the owner's file. Reverses the "replacement viewers are removed" half of LOO-502; pinning and probing stay removed.</td></tr>
 </table>
 
 <h2>The APIs that change their state</h2>
@@ -120,8 +120,13 @@ human_session::end_owner(store, owner, pid)                // shared by resume a
 rollover::owner_disposition: Moves | NextStep | Stays      // viewed rule gone</code></pre>
 
 <div class="callout">
+<p><strong>The consequential mismatch, third pass.</strong> <code>lifetime.rs</code> has three names for what became of an owner's executable and two consequences. <em>Superseded</em>: viewers get the entry as <code>successor</code> and follow it. <em>Removed</em> or <em>replaced</em>: viewers get "<code>lf resume &lt;id&gt;</code> reopens it" and leave. The first pass reasoned that "nothing follows" a removed or replaced build. But the entry exists whatever happened to the owner's own file: Dev.app rebuilt (the LOO-693 class the Task names) is <em>replaced</em>, and its entry is the rebuilt helper; a rebuilt <code>LF_BIN</code> build in a private Home is <em>replaced</em>, and its entry is the new file; an install artifact deleted under a gate-launched owner is <em>removed</em>, and the gate dispatches the next one. The person's next action is the same in every case, so the distinction teaches nothing, and "app bundle" is one of the change kinds the accepted outcome says needs no case of its own.</p>
+<p><span class="mark proposed">proposed</span> Every <code>Change</code> sends <code>successor = resolve_lf_binary()</code> and one notice: "This Session's lf was {change}; reopening it as <code>lf resume &lt;id&gt;</code>", so the hint survives when the follow fails. It fails only when the entry <em>is</em> the dead file (a worktree build viewing itself), and then loudly, after the notice. <code>Change</code> stays as the word in the log. Two match arms and a conditional go. Settled by the accepted outcome; it iterates to implement.</p>
+</div>
+
+<div class="callout">
 <p><strong>The consequential mismatch, second pass.</strong> Three places move an owner, and they do not share a boundary. The owner ends itself only once its Sessions wait for a person. Rollover moves only such owners. <code>lf resume</code> ends a superseded owner whatever it is doing and prints "its last turn was cut off; ask again" (<code>human_session::attaches</code>, then <code>taken_over</code>). The Task's accepted outcome is "moves … at a safe boundary", and Jack's constraint is never to cut a turn silently; being told afterwards is the letter, not the boundary.</p>
-<p><span class="mark proposed">proposed</span> One boundary for all three. Idle: end and reopen. Busy and the owner answers its socket: attach, as a same-build open does; the owner ends itself when the turn ends and the viewer follows. Busy and it does not answer: it cannot be watched and cannot be trusted to report idle, so end it and report the cut turn. Rollover gives the same two answers for busy owners. Nothing new is built: <code>answering</code> and <code>owner_waits_for_person</code> exist, and the "cut off" message narrows to the one case nobody can watch. Settled by the accepted design; it iterates to implement.</p>
+<p><span class="mark proposed">proposed</span> One boundary for all three. Idle: end and reopen. Busy and the owner answers its socket: attach, as a same-build open does; the owner ends itself when the turn ends and the viewer follows. Busy and it does not answer: it cannot be watched and cannot be trusted to report idle, so end it and report the cut turn. Rollover gives the same two answers for busy owners. Nothing new is built: <code>answering</code> and <code>owner_waits_for_person</code> exist, and the "cut off" message narrows to the one case nobody can watch. <span class="mark existing">done</span> Implemented 2026-11-02: <code>attaches</code> watches a busy owner that answers; rollover's <code>owner_disposition</code> moves a non-answering busy one and reports <code>turn_cut_off</code>.</p>
 </div>
 
 <div class="callout">
@@ -133,9 +138,11 @@ rollover::owner_disposition: Moves | NextStep | Stays      // viewed rule gone</
 
 <p><strong>Normal path.</strong> Jack has a Session open in a cmux pane on 0.15.1. <code>lf install</code> settles 0.15.2 into the gate. Within two seconds the owner sees the gate no longer runs its file. The agent is mid-turn, so nothing happens yet. The turn finishes; the owner sends the pane <code>Moved { notice, successor: gate }</code>, stops the agent, records its exit. The pane prints the notice and reruns its own invocation through the gate, flags and all. The conversation reopens on 0.15.2 with history intact.</p>
 
-<p><strong>The same path from another terminal.</strong> While that turn is still running, Jack types <code>lf resume &lt;id&gt;</code> elsewhere. Today the branch ends the owner mid-turn and says so. After this pass it attaches: Jack watches the turn end, the owner ends itself, and this terminal follows the gate too. Only an owner that never answers its socket, the Oct 28 0.15.0 kind, is ended while busy.</p>
+<p><strong>The same path from another terminal.</strong> While that turn is still running, Jack types <code>lf resume &lt;id&gt;</code> elsewhere. The branch attaches: Jack watches the turn end, the owner ends itself, and this terminal follows the gate too. Only an owner that never answers its socket, the Oct 28 0.15.0 kind, is ended while busy. One more transitional case: a 0.15.0 owner that does answer mid-turn is watched, but predates the policy and never ends itself when the turn settles; the next <code>lf resume</code> finds it idle and takes it over.</p>
 
 <p><strong>Failure.</strong> The install also advanced the store past 0.15.1's reader floor. The owner knows it is superseded (that is a file read) but <code>owner_waits_for_person</code> fails (that is a store read). It logs and judges again next tick, forever. The pane sits on the old lf. <span class="mark existing">existing</span> Staged migrations keep old readers working for about 30 days, so this needs an owner older than that.</p>
+
+<p><strong>The same failure for a Graph runner.</strong> A runner on the old build is left running; its steps launch through the entry, so the Graph's next step runs on the new lf. The runner's own store reads between steps hit the same floor, and it dies with the step unrecorded. GraphProcess already holds the compiled graph and each step row, so a successor runner could pick up the cursor without new state if this recurs. Recorded, not scheduled.</p>
 
 <p><strong>Recovery.</strong> Jack types <code>lf resume &lt;id&gt;</code> anywhere, or runs <code>lf monitor rollover</code>. Both run on the new lf, which reads the store, so both end the owner and reopen. No PID by hand. The deeper fix, if this class recurs: the owner judges idleness from the harness signals it writes itself rather than reading them back. Recorded in the design as a known limit, not scheduled.</p>
 
@@ -145,7 +152,8 @@ rollover::owner_disposition: Moves | NextStep | Stays      // viewed rule gone</
 
 <table>
 <tr><th>Finding</th><th>Direction</th></tr>
-<tr><td>Notice copy</td><td><span class="mark proposed">proposed</span> With a successor the pane says "<code>lf resume X</code> reopens it" and then reopens it itself. Say "reopening on the installed lf" when a successor is sent; keep the hint when none is. <span class="mark existing">done</span> Only a superseded owner sends a successor.</td></tr>
+<tr><td>Notice copy</td><td><span class="mark proposed">proposed</span> One notice for every change, naming the change and the command the pane is now running for you. The first pass's "reopening on the installed lf" wording was wrong for a Desktop pane, whose entry is the bundle, and the superseded-only split it came with is the third-pass callout.</td></tr>
+<tr><td>Three wordings for one event</td><td><span class="mark proposed">proposed</span> The owner's notice, <code>attaches</code>'s "Moved X off Y; continuing on the installed lf", and rollover's report line each say the move differently. Not a concept problem; implement may align them when it touches the notice.</td></tr>
 <tr><td>CLI renames</td><td><span class="mark existing">done</span> <code>follow</code> replays the viewer's invocation as typed, which keeps flags and works for <code>lf resume &lt;task&gt;</code> and Desktop's prepared commands. The <code>session connect</code> → <code>resume</code> rename is out of scope: keeping old spellings as aliases is old-peer support, and saved commands in cmux workspaces are not viewers. The design says so now.</td></tr>
 <tr><td><code>Response::Moved</code> doing three jobs</td><td><span class="mark existing">existing</span> Another viewer took input; owner superseded; owner unviewed too long. Kept: a new variant would break every older peer, and the field tells them apart.</td></tr>
 </table>

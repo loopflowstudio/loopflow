@@ -33,7 +33,9 @@ LOO-672 audit (2026-11-02) and `lf.log`:
    migrations, and no "ending a Session nobody has viewed" line ever.
 5. **A stale status report reads as a turn forever.** `TURN_RUNNING` counts a
    terminal `program_status` with no idle/blocked/done record as running, so
-   a provider that stopped reporting made its owner immortal.
+   a provider that stopped reporting made its owner immortal. The owner now
+   judges by `TURN_LIVE`; `TURN_RUNNING` remains only for `lf resume`'s
+   "a turn was cut" report (`session_turn_was_running`).
 
 Also observed: `limit()` returns `None` when the repo config fails to load, so
 an unreadable config silently disables the rule.
@@ -75,7 +77,7 @@ Deleted: `lifetime::LONGEST_PAUSE`/`recheck`/`held_until` pacing (a held
 judgement restarts the grace instead) and `limit()`'s "unreadable config keeps
 the Session" branch.
 
-## Remaining
+## Remaining (realigned 2026-11-02: code and plan agree)
 
 - **Decision (Jack Heart / LOO-710): one last-screen path and reader.** This
   branch writes `$LF_HOME/screens/<session>.vt` with no DTO field; LOO-710
@@ -89,19 +91,20 @@ the Session" branch.
 
 - `cargo test -p loopflow --test transport_tests` covers: finished Graph and
   finished step membership no longer hold an owner; a stale status report
-  does not hold one; a turn and fresh terminal output do; viewed-only `resume --all`
-  after a crash, including rows retention already closed; screen file written
-  at idle end and at command exit.
+  does not hold one; a turn and fresh terminal output do; a headless Graph
+  step and a plain `lf -b skill … --message` Run outlive a 2s grace and settle
+  `succeeded`; viewed-only `resume --all` after a crash, including rows
+  retention already closed; screen file written at idle end and at command exit.
 - Live check on this machine: open 20 terminal conversations, detach, wait the
   grace; `footprint`/`ps` show none; `lf resume` reopens each at the bottom.
 
 ## Check results
 
-- `cargo test -p loopflow --test transport_tests` (20 tests) and
-  `cargo test -p loopflow --lib -- transport:: detached_sessions_end rollover restore human_session::tests`
-  pass; `cargo fmt`, `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
-- Compress: `cargo test -p loopflow --lib -- transport::` (15), `--test transport_tests
-  detached_sessions_end_after_their_limit resume_all_restores` (2), clippy clean.
+- Tree `a3160bd07b` (no code change since): `cargo test -p loopflow --lib --
+  transport::` (15) and `--test transport_tests` (20, incl. `headless`,
+  `resume_refuses`, `detached_sessions_end_after_their_limit`,
+  `resume_all_restores`) pass; `cargo fmt` and
+  `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
 - Live, 2026-11-02, branch debug build in a throwaway `LF_HOME`, real Claude
   Code 2.1.316, this worktree as checkout: 20 conversations opened, each
   viewed once and detached at 13:53:07. Before: 60 processes (20 owners, 20
@@ -111,12 +114,5 @@ the Session" branch.
   errors. Three `lf session resume <id>` each relaunched
   `claude --resume <thread>` with no input replayed; the saved screen shows
   the Claude welcome and the pending prompt.
-- Run acceptance: `cargo test -p loopflow --test transport_tests -- headless
-  resume_refuses detached_sessions_end_after_their_limit` (4) pass; Graph and
-  plain `lf -b skill … --message` Runs hold their turn 4s past a 2s grace and
-  settle `succeeded`. `s.interactive=0` in `owner_waits_for_person` is for the
-  executable-gone path, not the limit (`scratch/questions.md`).
-- Compress 2: `cargo test -p loopflow --lib -- transport::` and `--test
-  transport_tests headless resume_refuses` pass; `cargo fmt`, clippy clean.
 - The 27 pre-rule owners on Jack's machine are untouched; LOO-705's
   `lf monitor rollover` is the path for them.

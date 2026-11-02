@@ -51,6 +51,26 @@ assigned or not (`task claim/unassign`, no deferred state). Scope still comes fr
 recency; preparation launches no provider. LOO-499 history:
 `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, its heading.
 
+## Idle owners end (LOO-709, 2026-11-02)
+
+Jack Heart's goal: a closed or idle conversation costs nothing. A terminal owner
+nobody views and nothing uses ends after `session.end_detached_after` (default
+`2m`; Jack named 2m and 30m, the choice stays his) of quiet, writes
+`$LF_HOME/screens/<session>.vt`, stops the agent and records its exit;
+`lf resume` reopens from provider history, and `lf resume --all` restores only
+Sessions whose owner had a viewer and died without recording an exit. This
+supersedes LOO-415's "viewer loss never transitions". Why the 24h rule never
+fired on Jack's Mac: finished Graphs held their owner forever (no completion
+filter on the ancestry walk), the limit counted awake time, one store error
+ended the policy thread, a stale terminal status report read as a turn, and
+pre-rule builds had no policy. Lessons: a turn, a running
+Graph or a headless Run holds an owner and a finished Graph does not; long
+deadlines use `SystemTime`; a policy thread logs and judges again rather than
+exiting; a terminal status report is evidence only while someone views it.
+Open with LOO-710: one last-screen path and reader (`screens/<session>.vt`
+against `snapshots/<owner>.ghostsnp` with a DTO field). LOO-705's
+`lf monitor rollover` ends pre-rule owners.
+
 ## Waited landing (LOO-503, 2026-10-17)
 
 Jack Heart requires no elapsed-time termination or synthetic reruns in
@@ -267,10 +287,9 @@ LOO-489 integrates it.
 Application retention now keeps repository registries across window closure;
 headless tests cover twelve Work layouts/drafts, not twelve live providers.
 Known scenes render before lookup; fresh resolution still owns new link delivery.
-App death destroys Desktop runtime state: durable identity, native history and
-repaint alone cannot restore live input or exact scrollback. Exact renderer recovery
-and layout replication across Desktop installations remain unresolved. The owner
-retains bounded vt100 text state, not a complete native terminal snapshot.
+App death destroys Desktop runtime state; the owner retains bounded vt100 text,
+which LOO-709 saves as the last screen, not a native terminal snapshot. Exact
+renderer recovery across Desktop installations remains unresolved.
 
 Admission is not execution: Task filing and explicit Wave admission now commit
 uncaptured primary Sessions; explicit execution reserves input and claims the
@@ -281,13 +300,9 @@ Finite Desktop requests must propagate cancellation through the actual worker,
 drain input/output together and bound inherited pipes after child exit. Kill only
 the exact query child; a timed-out mutation remains unknown, never retried blindly.
 
-LOO-497 owns durable intent; Jack Heart's October 17 LOO-489 slice narrows to built-in
-query views. That handoff supplies no durable restoration commitment. Full LOO-416
-acceptance still requires saved-state integration and measured native continuity.
-
-Release's operation-entry lesson applies: prove reopening through its public
-router, then native remount and provider survival separately. Neither retained
-models nor successful surface construction proves editable provider readiness.
+Prove reopening through its public router, then native remount and provider
+survival separately; retained models prove no editable provider readiness.
+LOO-416's saved-state integration and measured native continuity remain open.
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
@@ -394,7 +409,7 @@ shell and Flow execution. LOO-415 owns transport; LOO-416 owns lifecycle/readine
 #1581 merged as `28dc141671`.
 No shared server or automatic turn/Flow replay. Explicit native resume may restart
 when necessary, preserving Session/history without resubmitting input. Viewer loss
-never transitions; native-only Flow execution remains unselected.
+starts LOO-709's grace and nothing else; native-only Flow execution remains unselected.
 
 The owner retains execution, capture and native client; viewer tokens leave
 provider attachment unchanged. Passive viewing takes no claim. Acknowledgement
@@ -458,15 +473,11 @@ this heading. Five Python gate cases await CI; installation remains unproved.
 
 ## Terminal conversation recovery (curated 2026-10-18)
 
-Jack Heart authorized landing. LOO-409/lf-8fed729 evidence:
-`28dc1416712c59203ac89d0d4128eb0e7f79b085:.lf/wave/infrastructure/MEMORY.md`,
+LOO-409/lf-8fed729 evidence: `28dc141671:.lf/wave/infrastructure/MEMORY.md`,
 this heading. LOO-499 supersedes ensure/replace.
 LOO-512: fenced captured-input receipts and drained startup replies prevent replay.
 Candidate, 0.14.5 and 0.14.6 PTY faults preserve exact drafts/history, proving no
-original-reset repair. Incident records lack its initiating error; installed
-recovery remains unproved.
-Live/unknown providers grant no duplicate launch or signaling.
-LOO-416: admission prepares no capture; connect reserves the first input and launches.
+original-reset repair. Live/unknown providers grant no duplicate launch or signaling.
 
 ## Storage footprint (LOO-390, 2026-10-07)
 

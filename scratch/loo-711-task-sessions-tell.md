@@ -1,162 +1,127 @@
 # LOO-711 · Task Sessions tell you what their background work is doing
 
-Status: implementation stopped at delivery design, 2026-11-02. Requested by Jack Heart.
+Status: accepted product direction; production implementation and focused checks complete;
+authored demo and gate remain. Reconciled 2026-11-02. Requested by Jack Heart.
 
-## Current direction after prototype review
+## Accepted outcome
 
-Jack asked to combine worker messages into the Task Session with a separate
-activity view, offering a minimal default and expanded detail. This supersedes
-the kickoff's wait-only proposal and its exclusion of Desktop changes.
+Jack selected worker posts into the existing Task Session **plus** a separate,
+minimal run page with expandable detail. His closest prototype is screen 2 in
+`scratch/prototype-screens.html`: “2 is probably the closest.” Combine position
+and readiness, avoid repeated facts, and let Files own the diff. Missing prose
+summaries, costs and file counts stay absent; the HTML uses simulated data.
 
-Jack's latest preference is screen 2, the run page in
-`scratch/prototype-screens.html`: "2 is probably the closest." It groups history
-by loop, with expandable steps and short summaries.
+Jack's November 2 steer authorized implementation under the existing feature
+Graph, retaining demo review and excluding publication or merge. His request to
+restart this Task worker on Codex did not restrict the product's providers.
+Temporal was a presentation reference, not a request for durable replay.
 
-Jack subsequently requested restarting the Task worker on Codex if necessary.
-Continue the existing feature Graph from explore into pursue with this direction,
-reconciling the kickoff proposal before implementing. Preserve the authored demo
-review; this request does not authorize shipping or merging.
-
-Constraints from the review:
-
-- Combine position and readiness in one representation.
-- Reduce noise and repeated facts; the earlier tiles, path, readiness ladder,
-  timeline and table repeated too much.
-- Files owns the diff. The activity view links there rather than repeating it.
-- Keep worker posts and the additional view together in the design.
-
-Still to settle: the minimal run-page composition, which events deserve a
-Session turn, the source of per-step summaries, and cross-provider delivery.
-The HTML screens use simulated data; they do not establish that all displayed
-per-step costs, file counts, summaries or proof are available from current APIs.
-Temporal was discussed as a reference for execution history and its presentation;
-Jack has not requested adopting Temporal or adding durable replay.
-
-Source: the continued Session's Claude conversation log at
+Source: the continued Claude conversation at
 `/Users/jack/.lf/runs/f1/f15d2a56a6b84df2b6427996a923fad0/conversation.md`.
+Original exploration and superseded wait-only design:
+`5f658180d9:scratch/loo-711-task-sessions-tell.md`. The prototype HTML remains here.
 
-## Implementation reconciliation (2026-11-02)
+## Delivery design and implementation · 2026-11-02
 
-Jack Heart's selected outcome remains **worker posts into the Session plus the
-run page**. Neither a Desktop status badge nor a next-prompt context injection
-alone meets it. The archived kickoff is not the implementation contract.
+`harness/task_updates.rs` reads existing Task/Graph/Process facts. Only interactive,
+unfinished Sessions receive reports; worker Runs are excluded. The first reading
+establishes a baseline. Later changes settle for one second; the separate exit
+and next-start commits coalesce. Busy Sessions keep the latest reading. The
+cadence is a reversible implementation assumption for Jack's demo review, not
+an attributed product choice.
 
-The code inspection found no existing worker-to-native-Session posting operation.
-This is a missing delivery design, not evidence that native delivery is impossible.
-In particular, the kickoff's blanket statement about Codex is too strong:
+The native owner delivers into its selected provider conversation. There is no
+terminal input injection, new conversation, worker launch, Graph cursor, authored
+steer or notification table. A progress post asks for a brief report and explicitly
+grants no review, launch, publication or merge authority. The task-session skill
+recognizes this observation separately from user direction.
 
-- `lf/commands/util.rs::serve_codex_native` bootstraps a `CodexHarness` with
-  `ApprovalPolicy::NativeClient`, closes the bootstrap connection, then runs a
-  `CodexConnection` relay for the native terminal. That relay is the existing
-  owner to extend for Codex delivery. A second `Harness::send_input` caller is
-  not already connected to an interactive Session.
-- `harness/codex_connection.rs` fences native writes and retains uncertain
-  dispatch. Worker delivery needs to fit that ownership and receipt path,
-  including busy turns, client reconnect and attachment transfer. Connecting a
-  separate sender does not by itself prove that the native UI receives the
-  turn or retains approval handling correctly.
-- Claude's SendMessage probe in `research-harnesses.md` establishes a useful
-  provider primitive. No production Claude session-bus transport or stable
-  address mapping exists in this checkout. A new model invocation per delivery
-  is not established as the product mechanism by that probe.
-- `transport.rs::Request::Input` accepts bytes from the controlling viewer.
-  Typing a worker message there would be input into Jack's draft. It is not a
-  safe substitute for provider-level delivery.
-- Steer callbacks deliver at provider boundaries; they do not supply an idle
-  wake. Reusing authored steers for mechanical step exits would also duplicate
-  the GraphProcess record rather than establish the missing transport.
+Existing Session history holds baseline/dispatched/accepted/rejected receipts
+keyed by the observed facts. One atomic insert claims each reading before provider
+bytes; the existing unique receipt index prevents overlapping relays from both
+sending. Native fences still validate authority. A latest-key query excludes late
+acknowledgements without loading the receipt history. Reconnect never replays an
+uncertain dispatch. A changed reading can produce a new report. No schema migration.
 
-The architecture decision still needed is the supported native delivery path:
-extend each existing provider owner, including receipt and reconnect semantics,
-or explicitly accept a narrower provider scope. Treating an app-owned card next
-to the terminal as a post *into the Session* would change the selected outcome.
-No such substitution or provider restriction is recorded as Jack's decision.
+- **Codex:** the existing `CodexConnection` relay sends `turn/start` on the native
+  client's subscribed connection and selected thread, with native approval routing
+  intact. It waits for turn completion, retains replies, and fences overlapping
+  reconnects/takeover with the existing attachment. Disconnected clients receive
+  the latest changed facts when their native relay reconnects.
+- **Claude:** asynchronous SessionStart/Stop hooks observe through the launch's
+  provider capability. The hook is a provider descendant and uses the inbox and
+  ephemeral child token Claude supplies in its environment. Native inbox messages
+  name the selected thread and use next priority. Tokens never leave process memory.
+  The socket supplies no consumption acknowledgement: a write remains uncertain.
+  Observer locks include native thread identity so clear/resume can replace an old
+  observer without transferring its messages. Availability of this provider inbox
+  in the configured Claude build remains a demo prerequisite to verify; absence
+  produces no terminal-input substitute or invented delivery receipt.
+- **OpenCode:** the existing native server owner observes on its event loop and
+  posts through the existing authenticated prompt endpoint and request/stream
+  owner. Native turn events hold delivery while busy; HTTP success records native
+  acceptance, not a claim that a person read the report.
+- **Pi:** the existing launch-local extension owns an observer child and receives
+  bounded newline frames. Its native `sendMessage` uses `triggerTurn` and follow-up
+  delivery, preserving the editor. Session changes reject delayed foreign frames;
+  shutdown ends the observer. Pipe delivery has no consumption acknowledgement,
+  so it also retains uncertainty instead of replaying.
 
-### Run page: implementation shape supported by existing data
+Native identity and provider authority remain with their existing owners. Receipt
+history is delivery evidence, never permission to operate the Task. The configured
+provider/draft experience is not established by the simulated transports below.
 
-The run page can replace the existing presentation rather than create another
-activity surface. `swift/LoopflowMac/Views/TaskWorkView.swift::GraphProcessLog`
-already reads every Task Graph; `WorkObservation` supplies live local details and
-`RegistryQuery.taskGraphProcesses` supplies explicitly refreshed remote details.
-The latter is not a live subscription, so automatic remote updates remain work.
+## Run page
 
-- Minimal: the Task's current execution/position in one line, the latest run,
-  and a Files action. The Task execution projection owns readiness; a completed
-  Graph process does not prove that the Task reached `end` or passed review.
-- Expanded: newest runs first, then contiguous groups of recorded loop
-  positions, then expandable steps. Use the whole nested `iterations` value;
-  one loop counter would mislabel nested loops and repeated nodes.
-- Each step initially shows its recorded label, duration and process exit.
-  `GraphStepProcess` has no prose summary, cost, changed-file count or proof
-  field. Those prototype values must not be fabricated. A later prose summary
-  must come from the Session turn captured by that exact step Process and
-  remain distinguishable from its mechanical result.
-- Files retains the diff. Existing Task navigation, run controls, remote
-  location selection and Session surfaces retain their current owners.
+`GraphProcessLog` replaces the old default diagram/flat list. Its compact header
+combines current Task position and readiness, then shows the latest run and Files.
+Earlier runs, contiguous whole nested-loop positions, and individual steps expand.
+All historical steps retain IDs, timestamps and actual exits; repeated nodes and
+returned loop positions are distinct. Process history reads the exact step ID on
+its content Machine. No prose summary is synthesized from success/failure.
+
+The Task's workflow position owns review readiness. A completed historical Graph
+never means the Task completed or authorizes advancing review. Definition diagrams
+stay in the graph-definition surface. Local pages reuse WorkObservation; remote
+pages use the same `desktop task --watch` reading, with recorded-owner validation
+on every changed frame. Failed reads retain visible history and name the error.
+Files and Session panes retain their existing owners and drafts.
 
 ### Delete — do not maintain
 
-- Replace `GraphProcessView.detail`'s default diagram plus flat step list with
-  grouped run history. Preserve every recorded step, nested loop position,
-  process identity, timestamps and exit evidence. Keep `GraphDiagram` for the
-  graph-definition surface; it is not itself obsolete.
-- Replace the run header's bare `graph.state.rawValue` where current Task
-  readiness is intended. Preserve historical run outcomes independently of
-  current Task state; do not relabel all completed runs as Task completion.
-- Replace the task-session skill's between-turn contract only when the chosen
-  native delivery path exists. No instruction may promise a wake from a
-  next-prompt steer.
-- Do not delete `ops::task::task_wait` or change its output as part of the
-  current target merely because the superseded kickoff proposed it.
+- Removed `GraphProcessView.detail`'s default graph diagram and flat step list;
+  grouped history preserves every recorded step and exit. `GraphDiagram` remains
+  for definition inspection.
+- Removed `RegistryQuery.taskGraphProcesses`'s inventory-plus-detail fanout and
+  exclusive fixture. One store-driven Task reading supplies readiness and history.
+- Replaced the task-session skill's “nothing schedules your next one” contract
+  with native progress observations and their explicit authority limits.
+- Removed the four provider-local receipt scans and `task_updates::{receipt,
+  retain}` wrappers. `SqliteStore::{record_task_update,latest_task_update}` owns
+  receipt admission and reading; provider tests retain transport coverage.
+- Removed stored `GraphStepGroup.iterations`; the first step supplies the group's
+  position. The run page selects one content source before rendering, including
+  read failures alongside retained history.
+- `task_wait` remains unchanged; the superseded wait-only proposal is not revived.
 
-### Remaining acceptance
+## Remaining acceptance
 
-1. Native delivery and its receipt/reconnect semantics for the selected provider
-   scope. Idle, busy, draft-present, detached, takeover and unknown-delivery
-   cases must preserve the same Session and avoid replaying uncertain input.
-2. Worker updates read existing Graph/Process facts, exclude worker Runs as
-   recipients, coalesce a step exit and next start, and never imply permission
-   to advance an interactive review or launch another Graph.
-3. The run page and Session posts agree on those same facts; nested loops and
-   failed/stopped runs remain inspectable; missing summaries stay missing.
-4. Focused provider/relay tests and headless production-view tests, followed by
-   the authored feature Graph demo. Publication and merge remain outside this
-   request.
+- Gate owns affected suites and static checks: `harness::{task_updates,
+  claude_updates,codex_connection,opencode}`, `context_block`,
+  `lf::commands::context`, Session-event reads, and direct native launch callers.
+  Boundary suites include `agent_startup_tests`, `session_cli_tests`,
+  `session_steers`, `session_lifecycle_tests`, and
+  `explicit_launch_policy_survives_task_workflow_nested_graphs_and_provider_children`.
+  Keep the Rust filter explicit; architecture checks, clippy and the broader Swift
+  suite also belong to gate. No configured-provider usability claim follows.
+- Preserve the authored demo: leave a Task Session idle in Desktop or terminal
+  with an unsent draft, run its Graph, and observe a report without typing. Show
+  failure/process-history navigation and an interactive stop without advancing it;
+  inspect the same run in the page. Verify draft and Session identity survive,
+  reconnect does not replay uncertain delivery, and judge reporting cadence.
+- Demo must identify a build containing this diff. The branch contains upstream
+  `4e9ade2d04` (merge `fb382a7d45`), whose installed-app routing means ordinary
+  `lf open` and the prototype HTML prove neither this UI nor native delivery.
+- Publication, merge and live-store migration remain outside this request.
 
-No production changes were made in this implementation pass. Building the view
-alone would leave the selected outcome incomplete; applying the old wait-only
-plan would implement the superseded alternative. The missing native delivery
-contract returns this design to review before dependent implementation.
-
-## Retained evidence and superseded proposal
-
-The original notes and all five HTML explorations are preserved at
-`5f658180d9:scratch/`. The wait-only proposal is in that commit's
-`loo-711-task-sessions-tell.md`, under **Kickoff proposal**. It proposed a
-watch-driven `task wait --until moved`, new output/timeout semantics and
-skill-owned re-arming. None was implemented or remains required by the selected
-design. Its provider exclusions and draft-colliding Desktop fallback must not
-be carried forward. The HTML files remain simulated review references.
-
-Reusable findings from that proposal (paths under `rust/loopflow/src/`):
-
-- `lf/commands/watch.rs` already streams Task status on store revisions and a
-  liveness clock. Graph/Process rows supply movement facts without an additional
-  event store. `ops/task.rs::task_wait` still polls for submitted/terminal.
-- `lf/commands/graph.rs::RunningGraph::spawn` records step start and exit in
-  separate commits. Coalesce exit/next-start updates rather than announcing the
-  transient between-steps state. A completed Graph may mean an interactive stop;
-  use the Task's position to distinguish that from reaching `end`.
-- Task steers fan out to worker Runs as well as interactive Sessions. Delivery
-  must select interactive recipients instead of feeding events back to workers.
-- Product memory's October 1 Ask-removal decision rejects a separate notification
-  queue or required handoff. Existing Graph facts remain the status authority.
-- Claude wake probes and their limitations are retained in
-  `research-harnesses.md`. They establish primitives, not production delivery.
-
-Demo remains: leave a Task Session idle in Desktop or a terminal with an unsent
-draft, run its Graph, and observe a report without typing. Show failure/log
-navigation and an interactive stop without advancing it; inspect the same run
-in the page. The draft and Session identity must survive.
-
-Check: `git diff --check` and `lf context` pass; notes only, no build/test needed. Native delivery acceptance remains unproved and belongs to implementation/demo.
+Check: `cargo test -p loopflow --lib task_update` (7 passed), `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'DesktopHeadlessTests/nestedRunHistory|DesktopHeadlessTests/runPositionReadiness|DesktopHeadlessTests/taskWorkFollowsTheStream'` (app built, 3 passed), `cargo fmt`, `git diff --check`, `lf context` (pass, under both budgets); existing linker/macOS-target and Swift nil-coalescing warnings remain, broader suites/static checks belong to gate, configured native delivery/drafts to demo.

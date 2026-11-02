@@ -262,20 +262,13 @@ and a miss ships with numbers. Later that day: no follow-up Tasks.
   new Task appear there; Jack kept the rule then (2026-10-05). LOO-505 now
   exposes unstarted standalone captures in repository inventory/navigation.
 
-## Workflow and Flow alignment (LOO-386, 2026-10-07)
+## Graph alignment (reconciled 2026-11-02)
 
-Jack Heart approved LOO-386/#1492, retaining Workflow/Flow and restart-to-start,
-then requested gate and Task-completing landing. Review/approval:
-`9669d67d5:scratch/workflow-review.md`; earlier detail: `97bf9dbcb`, this heading.
-
-Independent namespaces retain kind/name. Restart keeps the graph/history;
-Wave/repository defaults affect future take-up (LOO-505). Latest FlowProcessDetail
-grants no control authority; selection, execution and TaskRunControl stay separate.
-LOO-400's `e467ea995` supplies Process/LFID; old captures remain readable.
-Wave-owned commands supersede Project commands. A reset Task cannot advance
-from an older Flow's arrival. Catalog, gate failures/repairs and reruns:
-`a73198197:wave/product/MEMORY.md`, this heading. Approval proves no native,
-live-planning, configured-provider acceptance or chapter KR.
+AGENTS.md owns the current Graph/Task contract. Latest GraphProcessDetail grants
+no control authority; Task position, execution and TaskRunControl stay separate.
+Jack Heart's LOO-386 approval and superseded Workflow/Flow vocabulary remain at
+`fb382a7d45:.lf/wave/product/MEMORY.md`, **Workflow and Flow alignment**.
+That approval established no native/provider acceptance or chapter KR.
 
 ## Task conversation and Workflows (LOO-353, reconciled 2026-10-17)
 
@@ -992,6 +985,17 @@ October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
   LOO-251/284/291 retain native, shared-action and planning proof obligations.
 
 ### Task observation and retired Watch
+
+Jack Heart selected Session posts plus an expandable run page for LOO-711
+(2026-11-02): minimal default, combined position/readiness, Files owning the diff.
+The wait-only proposal is superseded; implementation and demo remain unproved.
+Graph/Process facts already record movement. Steers alone do not wake an idle
+Session, and the Codex native relay and Claude wake probes establish starting
+points, not production delivery. Provider restriction or a card beside the
+terminal is not an accepted substitute. Preserve drafts and Session identity;
+uncertain dispatch cannot authorize replay. Historical run completion does not
+prove Task completion. Prototype summaries/costs are simulated: prose must join
+the exact captured step, separate from its mechanical exit.
 
 Desktop launched two LOO-293 helpers while its worker still produced output.
 Missing `lf ps` rows or a finished launcher do not prove idle execution.

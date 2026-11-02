@@ -423,6 +423,7 @@ public struct RegistryQuery: Sendable {
     /// transport can, else run.
     private var write: @Sendable (ServedWrite) async throws -> String
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
+    private var observeRead: (@Sendable ([String], String?) async throws -> LineWatch)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
 
     public init(
@@ -432,6 +433,7 @@ public struct RegistryQuery: Sendable {
         serve: (@Sendable (ServedRead) async throws -> String)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
+        watchRead: (@Sendable ([String], String?) async throws -> LineWatch)? = nil,
         watchWork: (@Sendable () async throws -> WorkObservation)? = nil,
         run: @escaping RegistryRunner
     ) {
@@ -447,6 +449,7 @@ public struct RegistryQuery: Sendable {
         self.run = run
         self.observeFiles = watchFiles
         self.observeWork = watchWork
+        self.observeRead = watchRead
     }
 
     public func viewPlan(expression: String?, repoPath: String) async throws -> WorkViewPlan {
@@ -518,6 +521,9 @@ public struct RegistryQuery: Sendable {
         }, watchFiles: { [observeFiles] args, _ in
             guard let observeFiles else { throw RegistryQueryError("Live file observation is unavailable on this transport") }
             return try await observeFiles(prefix + args, nil)
+        }, watchRead: { [observeRead] args, _ in
+            guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
+            return try await observeRead(prefix + args, nil)
         }) { [run] args, _ in
             try await run(prefix + args, nil)
         }
@@ -565,6 +571,27 @@ public struct RegistryQuery: Sendable {
             let output = try await write(change)
             try await validate()
             return output
+        }
+        if let observeRead {
+            query.observeRead = { args, cwd in
+                try await validate()
+                let watch = try await observeRead(args, cwd)
+                let lines = AsyncThrowingStream<Data, any Error> { continuation in
+                    let reader = Task {
+                        do {
+                            for try await line in watch.lines {
+                                try await validate()
+                                try Task.checkCancellation()
+                                continuation.yield(line)
+                            }
+                            continuation.finish()
+                        } catch { continuation.finish(throwing: error) }
+                        await watch.cancel()
+                    }
+                    continuation.onTermination = { _ in reader.cancel() }
+                }
+                return LineWatch(lines: lines, send: watch.send, cancel: watch.cancel)
+            }
         }
         return query
     }
@@ -721,21 +748,15 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
-    /// Read a Task's captured Graphs through its content-owned transport.
-    public func taskGraphProcesses(task: String) async throws -> [GraphProcessDetail] {
-        struct Page: Decodable { let entries: [GraphProcessInventoryEntry]; let next: String? }
-        var after: String?
-        var result: [GraphProcessDetail] = []
-        repeat {
-            // Without a repository the inventory resolves from `/`, where the app runs.
-            let page = try Self.decode(Page.self, from: await serve(.graphProcesses(directory: "/", task: task, after: after)))
-            for entry in page.entries {
-                let detail = try Self.decode(GraphProcessDetail.self, from: await serve(.graphProcess(id: entry.id)))
-                result.append(detail)
-            }
-            after = page.next
-        } while after != nil
-        return result
+    public func processHistory(id: String) async throws -> String {
+        try await run(["history", "show", id], nil)
+    }
+
+    /// One store-driven reading keeps position, readiness and run history together.
+    public func watchTask(task: String) async throws -> LineWatch {
+        guard let observeRead else { throw RegistryQueryError("Live Task observation is unavailable on this transport") }
+        let read = ServedRead.desktopTask(directory: "/", issue: task)
+        return try await observeRead(read.argv + ["--watch"], read.cwd)
     }
 
     /// Every selectable Graph with the topology it would capture, via the shared loader.

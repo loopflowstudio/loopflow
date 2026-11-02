@@ -247,6 +247,46 @@ impl SqliteStore {
         Ok(None)
     }
 
+    /// A late provider acknowledgement must not rewind the last observed reading.
+    pub(crate) fn latest_task_update(&self, session: &str) -> StoreResult<Option<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT json_extract(payload,'$.key') FROM session_events
+             WHERE session_id=?1 AND kind='observed' AND json_valid(payload)
+               AND json_extract(payload,'$.source')='task_update'
+               AND json_extract(payload,'$.state') IN ('baseline','dispatched')
+             ORDER BY seq DESC LIMIT 1",
+                [crate::id::canonical_session(session)],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
+    /// Baseline and dispatch share a receipt: only one observer can claim a
+    /// reading, even across overlapping relays or a new captured input.
+    /// Call under the native owner's authority fence before writing provider bytes.
+    pub(crate) fn record_task_update(
+        &self,
+        session: &str,
+        key: &str,
+        state: &str,
+    ) -> StoreResult<bool> {
+        let phase = match state {
+            "baseline" | "dispatched" => "observed",
+            state => state,
+        };
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "INSERT INTO session_events(session_id,kind,receipt_key,task_id,wave_id,observed_at,payload,captured_event)
+             SELECT id,'observed',?2,task_id,wave_id,unixepoch(),?3,current_capture
+             FROM agent_sessions WHERE id=?1
+             ON CONFLICT DO NOTHING",
+            params![crate::id::canonical_session(session), format!("task_update:{key}:{phase}"),
+                serde_json::json!({"source":"task_update","key":key,"state":state}).to_string()],
+        )? != 0)
+    }
+
     pub(crate) fn retain_session_observation(
         &self,
         session: &crate::session::LfSession,

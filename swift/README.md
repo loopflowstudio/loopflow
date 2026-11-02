@@ -102,6 +102,14 @@ its result before retrying.
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
 
+Open a Task's **Graph processes** page to see its current position and readiness,
+then expand a run, loop position and step for recorded timing and exit evidence.
+Earlier runs stay collapsed. **Files** opens the diff; steps without a recorded
+summary show no invented summary. Local and remote run pages follow store changes.
+Open native Task Sessions also receive settled progress through their provider,
+without typing into the draft. Busy Sessions coalesce updates; uncertain delivery
+is retained instead of replayed after reconnect.
+
 Task rows show reported program status, Task IDs, stored PR links and the recorded
 remote Machine. Task IDs link to the issue when its URL is recorded; otherwise they
 remain plain text. Qualified Session excerpts show their source age; stale output

@@ -1,5 +1,6 @@
 import { createBashToolDefinition, createLocalBashOperations } from "@earendil-works/pi-coding-agent";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { closeSync, constants, mkdtempSync, openSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -50,6 +51,29 @@ export default function (pi) {
   let lastProgress = 0;
   let pendingInput = 0;
   let steering;
+  let updates;
+  const stopUpdates = () => { updates?.kill(); updates = undefined; };
+  const watchUpdates = (ctx) => {
+    stopUpdates();
+    if (!spec.native || !process.env.LF_CONTEXT_DELIVERY) return;
+    const session = ctx.sessionManager.getSessionFile();
+    const child = spawn(spec.executable, ["__context-block", "--moment", "task-updates"],
+      { stdio: ["pipe", "pipe", "ignore"] });
+    updates = child;
+    child.stdin.on("error", () => {});
+    child.on("error", (error) => ctx.ui.notify(`Task updates unavailable: ${error.message}`, "error"));
+    child.stdin.end(JSON.stringify({ session_id: session, hook_event_name: "PiTaskUpdates" }));
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      // A queued line from the previous selection must not reach a new Session.
+      if (updates !== child || ctx.sessionManager.getSessionFile() !== session) return;
+      try {
+        const update = JSON.parse(line);
+        if (update.session !== session) return;
+        pi.sendMessage({ customType: "loopflow-task-update", content: update.text, display: true },
+          { triggerTurn: true, deliverAs: "followUp" });
+      } catch (error) { ctx.ui.notify(`Task update failed: ${error.message}`, "error"); }
+    });
+  };
   const tools = new Set();
   const invoke = (command, payload, args = []) => execFileSync(spec.executable,
     [command, ...args], { input: JSON.stringify(payload), encoding: "utf8",
@@ -60,6 +84,7 @@ export default function (pi) {
   }, ["--moment", moment])).hookSpecificOutput.additionalContext;
   const shutdown = (ctx) => {
     clearInterval(steering);
+    stopUpdates();
     ctx.abort(); process.exitCode = 1; ctx.shutdown();
   };
   const report = (event, ctx, extra = {}) => {
@@ -79,6 +104,7 @@ export default function (pi) {
     }
     report({ type: "session_start" }, ctx);
     started = true;
+    watchUpdates(ctx);
   });
   pi.on("session_compact", async () => { refreshMoment = "compact"; });
   pi.on("before_agent_start", async () => { refreshMoment ??= "start"; });
@@ -146,7 +172,7 @@ export default function (pi) {
     pendingInput = Math.max(0, pendingInput - 1);
     report(event, ctx);
   });
-  pi.on("session_shutdown", async () => { clearInterval(steering); });
+  pi.on("session_shutdown", async () => { clearInterval(steering); stopUpdates(); });
   pi.on("agent_settled", async (event, ctx) => {
     clearInterval(steering);
     report(event, ctx, { events });

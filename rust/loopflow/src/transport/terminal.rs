@@ -2,6 +2,12 @@
 
 use crate::ghostty_vt::{Error, Terminal};
 
+/// Input modes a repaint or a program may have set in a viewer's terminal:
+/// Kitty keyboard flags, modifyOtherKeys, application keys, focus and mouse reporting, bracketed
+/// paste; then a visible cursor and plain style.
+pub(super) const RESET_MODES: &[u8] =
+    b"\x1b[<u\x1b[>4;0m\x1b[?1l\x1b>\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m";
+
 /// Scrollback rows a repaint carries at most. The whole repaint travels in one
 /// transport response, so the byte bound below wins when rows are wide or styled.
 const HISTORY_ROWS: usize = 2000;
@@ -14,7 +20,7 @@ pub(super) fn repaint(terminal: &Terminal) -> Result<Vec<u8>, Error> {
     let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
     // On the alternate screen the formatter re-enters it, which starts blank.
     if !terminal.alternate_screen() {
-        if untouched(terminal) {
+        if !terminal.received_output() {
             // Nothing to redraw: the viewer's terminal keeps its own history and
             // the owner's output flows from the cursor as any command's would.
             return Ok(bytes);
@@ -41,13 +47,6 @@ fn history(terminal: &Terminal) -> Result<Vec<u8>, Error> {
         }
         rows /= 2;
     }
-}
-
-/// A screen the owner has not drawn on: no history, nothing visible, cursor home.
-fn untouched(terminal: &Terminal) -> bool {
-    terminal.scrollback_rows() == 0
-        && terminal.cursor() == (0, 0)
-        && terminal.text().is_ok_and(|text| text.trim().is_empty())
 }
 
 /// Whether output written to a viewer's terminal left it on the alternate
@@ -95,11 +94,29 @@ mod tests {
     fn attaching_before_the_owner_draws_leaves_the_viewer_terminal_alone() {
         let fresh = Terminal::new(80, 24).unwrap();
         assert_eq!(repaint(&fresh).unwrap(), b"\x1b[0m\x1b[?25h");
+        let mut viewer = viewer_showing(b"shell prompt> ");
+        let cursor = viewer.cursor();
+        viewer.write(&repaint(&fresh).unwrap());
+        assert_eq!(viewer.text().unwrap().trim(), "shell prompt>");
+        assert_eq!(viewer.cursor(), cursor);
         let mut drawn = Terminal::new(80, 24).unwrap();
         drawn.write(b"Error: no stock\r\n");
         let restored = viewer_showing(&repaint(&drawn).unwrap());
         assert_eq!(restored.text().unwrap().trim(), "Error: no stock");
         assert_eq!(restored.cursor(), drawn.cursor());
+    }
+
+    #[test]
+    fn attaching_to_a_blank_screen_preserves_mode_only_output() {
+        let mut owner = Terminal::new(80, 24).unwrap();
+        owner.write(b"\x1b[?2004h\x1b[?1h\x1b[>5u");
+        assert!(owner.text().unwrap().trim().is_empty());
+        assert_eq!(owner.cursor(), (0, 0));
+        let mut viewer = viewer_showing(&repaint(&owner).unwrap());
+        let queries = b"\x1b[?2004$p\x1b[?1$p\x1b[?u";
+        owner.write(queries);
+        viewer.write(queries);
+        assert_eq!(viewer.take_replies(), owner.take_replies());
     }
 
     #[test]

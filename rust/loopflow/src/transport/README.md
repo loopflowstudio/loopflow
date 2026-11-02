@@ -70,7 +70,11 @@ Images and the owner's palette changes are not repainted.
 When an owner ends it writes `<Machine home>/screens/<session>.ghostsnp`: a header
 line naming the Ghostty revision, then Ghostty's snapshot stream with both screens,
 scrollback, styles, hyperlinks, modes and unfinished input. `lf resume` paints that
-screen before the provider is back. Snapshot format v1 promises no compatibility
+screen while the provider starts. The live owner takes over its display and input
+modes, including a blank screen. Startup failure or cancellation restores the
+terminal; resume the same Session again. A fresh owner without a saved preview
+leaves the viewer's existing screen in place; mode-only output is still restored.
+Snapshot format v1 promises no compatibility
 across revisions, so another revision's file reads as absent.
 Headless observation retains a bounded output tail and preserves stdout/stderr on
 delivery. Slow viewers disconnect; execution continues draining.

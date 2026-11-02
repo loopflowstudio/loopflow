@@ -41,6 +41,9 @@ import time
 import urllib.request
 from pathlib import Path
 
+import boto3
+import botocore.exceptions
+
 from app_bundle import install_app_executable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -445,10 +448,9 @@ def _ghostty_vt_archive_name(pin: dict, rust_target: str) -> str:
 
 
 def _write_ghostty_vt_archive(archive: Path, prefix: Path, source: Path) -> None:
-    """A tar.gz with fixed timestamps and ownership: nothing from the building
-    machine beyond Zig's output, which is itself not byte-reproducible."""
+    """Normalize archive metadata; Zig output itself is not byte-reproducible."""
 
-    def normalize(info: tarfile.TarInfo) -> tarfile.TarInfo:
+    def _normalize(info: tarfile.TarInfo) -> tarfile.TarInfo:
         info.mtime = 0
         info.uid = info.gid = 0
         info.uname = info.gname = ""
@@ -459,23 +461,15 @@ def _write_ghostty_vt_archive(archive: Path, prefix: Path, source: Path) -> None
         gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
         tarfile.open(fileobj=compressed, mode="w") as output,
     ):
-        output.add(prefix / "lib" / "libghostty-vt.a", arcname="libghostty-vt.a", filter=normalize)
-        output.add(prefix / "include" / "ghostty", arcname="include/ghostty", filter=normalize)
-        output.add(source / "LICENSE", arcname="LICENSE", filter=normalize)
+        output.add(prefix / "lib" / "libghostty-vt.a", arcname="libghostty-vt.a", filter=_normalize)
+        output.add(prefix / "include" / "ghostty", arcname="include/ghostty", filter=_normalize)
+        output.add(source / "LICENSE", arcname="LICENSE", filter=_normalize)
 
 
 def _publish_ghostty_vt_archive(archive: Path, name: str, sha256: str, base_url: str) -> str:
-    """Upload one archive to the `bin` R2 bucket and return the published checksum.
-
-    A published name is immutable: the edge caches it for a year, and caches a
-    404 for four hours, so existence is checked through the bucket API, never
-    the public URL. Zig output is not byte-reproducible, so a name the bucket
-    already holds keeps its stored checksum; a changed patch or flag needs a
-    new `artifact` generation.
-    """
-    import boto3
-    import botocore.exceptions
-
+    """Publish an immutable archive, retaining an existing name's checksum."""
+    # Check the bucket directly: the edge caches misses for four hours and
+    # published names for a year. Changed patches or flags need a new artifact.
     bucket = boto3.client(
         "s3",
         endpoint_url=f"https://{os.environ['R2_ACCOUNT_ID'].strip()}.r2.cloudflarestorage.com",

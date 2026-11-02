@@ -98,6 +98,7 @@ unsafe extern "C" fn device_attributes(
 pub struct Terminal {
     raw: ffi::Terminal,
     replies: Box<Replies>,
+    received_output: bool,
 }
 
 impl fmt::Debug for Terminal {
@@ -124,6 +125,7 @@ impl Terminal {
         let mut terminal = Self {
             raw,
             replies: Box::default(),
+            received_output: false,
         };
         terminal.configure()?;
         Ok(terminal)
@@ -177,8 +179,14 @@ impl Terminal {
         if bytes.is_empty() {
             return;
         }
+        self.received_output = true;
         // SAFETY: bytes is a readable slice for the duration of the call.
         unsafe { ffi::ghostty_terminal_vt_write(self.raw, bytes.as_ptr(), bytes.len()) }
+    }
+
+    /// Even output that leaves no text can change input modes or clear a screen.
+    pub fn received_output(&self) -> bool {
+        self.received_output
     }
 
     /// Replies the program is owed since the last call.
@@ -208,6 +216,7 @@ impl Terminal {
         (cols, rows)
     }
 
+    #[cfg(test)]
     pub fn cursor(&self) -> (u16, u16) {
         let x = self
             .data::<u16>(ffi::DATA_CURSOR_X, "cursor_x")
@@ -256,6 +265,7 @@ impl Terminal {
     }
 
     /// The active screen's visible rows as plain text, one line per row.
+    #[cfg(test)]
     pub fn text(&self) -> Result<String, Error> {
         let bytes = self.format(ffi::FORMAT_PLAIN, Range::Active, false)?;
         Ok(String::from_utf8_lossy(&bytes).into_owned())
@@ -443,6 +453,7 @@ impl Terminal {
         let mut terminal = Self {
             raw,
             replies: Box::default(),
+            received_output: true,
         };
         terminal.configure()?;
         Ok(terminal)
@@ -505,7 +516,9 @@ mod ffi {
 
     pub const DATA_COLS: i32 = 1;
     pub const DATA_ROWS: i32 = 2;
+    #[cfg(test)]
     pub const DATA_CURSOR_X: i32 = 3;
+    #[cfg(test)]
     pub const DATA_CURSOR_Y: i32 = 4;
     pub const DATA_ACTIVE_SCREEN: i32 = 6;
     pub const DATA_SCROLLBACK_ROWS: i32 = 15;
@@ -516,6 +529,7 @@ mod ffi {
     pub const DECODER_OPT_MAX_CONTINUATION_BYTES: i32 = 0;
     pub const DECODER_OPT_RETAIN_CONTINUATION: i32 = 1;
 
+    #[cfg(test)]
     pub const FORMAT_PLAIN: i32 = 0;
     pub const FORMAT_VT: i32 = 1;
 

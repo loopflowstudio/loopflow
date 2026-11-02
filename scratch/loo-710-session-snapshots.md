@@ -60,6 +60,11 @@ writes a Ghostty-format (`GHOSTSNP`) snapshot when it ends so `lf resume` and
 
 ## Remaining
 
+- **Gate and CI.** The concept-review repairs are implemented and focused PTY/CLI
+  proofs pass. Gate retains the affected transport and Session suites, including
+  `transport_tests`, `agent_startup_tests`, `session_cli_tests`, the interactive
+  Graph input proof and disposable installation proof named in the tests README.
+  Four-target package linking remains CI's obligation.
 - **Meeting LOO-709.** Its branch still writes `screens/<session>.vt` through
   `transport::save_last_screen`/`last_screen_path`, `Output::last_screen` and
   `terminal::last_screen(&vt100::Screen)`, and a `transport_tests` case decodes that
@@ -75,8 +80,14 @@ writes a Ghostty-format (`GHOSTSNP`) snapshot when it ends so `lf resume` and
 
 Done in this branch: `vt100` and `vte` dependencies, `transport/terminal.rs`'s
 `Queries`, `Boundary` and `snapshot(&vt100::Screen)` with their tests, and the
-README paragraph on vt100 limits. `AlternateScreen` stays: it tracks what a
-viewer's terminal was sent. Nothing further to remove.
+README paragraph on vt100 limits. The concept-review repair also removes
+`human_session::paint_last_screen` (unguarded stdout) and `terminal::untouched`
+(text-only freshness), preserving optional snapshot reading and truly fresh
+viewers. `AlternateScreen` stays: it tracks what a viewer's terminal was sent.
+The cleanup guard now owns output and modes together in `ViewerState`; no cloned
+stdout descriptor or unguarded input-hint writer remains. `ViewerTerminal` names
+both its cooked preview and raw attachment phases. The isolated fixtures reuse
+`transport::terminal_pair` instead of maintaining another `openpty` helper.
 
 ## Done when
 
@@ -94,3 +105,92 @@ and the draft-then-rename write; earlier on the same day `cargo test -p loopflow
 warnings` clean, `pytest python/tests/test_loopflow_dev.py` 10 passed, archives `lf3`
 downloaded by `build.rs` from `bin.loopflow.studio`. Package builds for the other
 three targets: CI `package-build`.
+
+## Concept review — 2026-11-02
+
+Implementation repair (2026-11-02): transport now owns the saved display before
+startup and carries its guard through live attachment. Drop and signal interruption
+share cleanup; input stays cooked until acknowledgement. The live owner clears
+the preview even when blank. Freshness now means no output received, preserving
+mode-only changes through the full formatter. The PTY proof caught application
+cursor keys surviving cleanup; explicit cursor-key/keypad resets repair that too.
+The CLI fixtures reopen a real fixture Session with a primary-screen provider and
+with the provider absent, preserving its title/history without replaying input.
+
+Recovery/compress check: `cargo test -p loopflow --lib -- transport::viewer_tests:: transport::terminal:: transport::native::` — 17 passed; `pytest python/tests/test_loopflow_dev.py -q` — 9 passed (both network-isolated); `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` passed; affected-suite gate and four-target package CI remain.
+
+**Outcome: design changed; next implement direction below. No unresolved product
+choice is needed for these repairs.** Jack Heart's accepted experience remains:
+reopen the same Session, see its last screen while the provider returns, then
+continue with the live owner's screen and input modes. An implementation
+assumption that Claude draws on the primary screen cannot narrow that contract.
+
+The person has one action, `lf resume SESSION`. The concepts remain Session
+(durable conversation), owner (live terminal and provider), viewer (temporary
+terminal control), and snapshot (the last display retained after an owner ends).
+There is no additional snapshot lifecycle to operate, no new DTO field, and no
+new CLI switch. `--prepare --json` remains preparation only; the command it returns
+uses the same resume path when Desktop executes it. This does not require a
+GhosttyKit decoder or a Desktop UI change.
+
+### Consequential mismatch: the preview changes a terminal nobody owns
+
+Existing: `human_session::open` calls `paint_last_screen` before
+`transport::delegate_current`. That helper writes the full live repaint straight
+to stdout, including alternate-screen and input modes. Later,
+`ViewerTerminal::enter` starts with an empty `AlternateScreen` tracker; it observes
+only subsequent transport output. Failure before attachment has no such guard at
+all. A saved alternate screen followed by a failed launch, or a provider that
+never toggles alternate-screen mode, can leave the shell on the saved alternate
+screen. The caveat in `questions.md` was an implementation concession, not an
+accepted product exception.
+
+Next implement direction (proposed implementation, implied by accepted behavior):
+transport owns both preview output and its handoff to live output. Establish
+cleanup before emitting the first preview byte; track every emitted mode change
+through that same ownership boundary. At handoff, the new owner's state becomes
+authoritative, including when it has drawn nothing yet. On cancellation, failed
+launch, detach or exit, restore the caller's usable terminal. Remove the separate
+raw stdout painting path rather than adding a second cleanup mechanism around
+it. Keep the snapshot reader and Session-keyed file shared with LOO-709. The
+preview must not seed the new owner's parser or replay an old continuation/input
+into the new provider; it is retained display, not resumed execution.
+
+Related live-state mismatch: `terminal::untouched` checks only text, cursor and
+scrollback. An owner can enable bracketed paste, application keys or Kitty
+keyboard state while its screen remains blank and its cursor remains home.
+`repaint` then returns only style/cursor resets and loses the accepted input
+state. Preserve the no-drawing behavior for a truly fresh owner while restoring
+mode-only changes. Do not infer an untouched terminal from blank text alone.
+
+### Normal path, failure, recovery and next proof
+
+- Normal: attach to a live owner, preserving text, links, history and input modes;
+  attach after mode changes but before text exists and get the same modes. A
+  truly fresh owner still preserves the viewer's prior screen/history.
+- Failure: leave an alternate-screen snapshot, then fail provider startup or
+  cancel before attachment acknowledgement. Returning to the shell must restore
+  terminal modes and leave alternate screen correctly; preview bytes must have
+  been inside the cleanup boundary even when no acknowledgement arrives.
+- Recovery: reopen that same Session again, paint its snapshot, and hand off to a
+  provider that draws on the primary screen without ever sending `?1049l`.
+  Its new output must appear on the primary screen, and subsequent detach/exit
+  must not revive the preview's modes. No provider input or Graph step is replayed.
+- Missing, corrupt or revision-mismatched snapshots remain optional display:
+  continue the ordinary resume path without changing Session/provider history.
+  Preserve the file and atomic replacement behavior; no migration or schema is
+  required. Snapshot errors must not acquire process-control authority.
+
+Prove these counterexamples through the actual resume/transport handoff and
+terminal-state assertions, with a fixture provider and isolated terminal. Existing
+formatter round trips do not cover that boundary. Retain existing fidelity and
+transport acceptance checks; do not rerun them in this documentation-only review.
+The four-target package matrix remains CI's proof obligation. Existing bounds
+(history size, palette/images, inactive-screen repaint) remain visible in the
+README; this review supplies no new waiver of Jack Heart's acceptance criteria.
+
+Proposed usage wording after implementation: “`lf resume SESSION` shows the saved
+screen while the provider starts. The live owner takes over its display and input
+modes. If startup fails, the terminal returns to its ordinary state; resume the
+same Session again.” Keep existing `--prepare` guidance unchanged. No skill
+instruction changes are needed because this adds no action or concept to learn.

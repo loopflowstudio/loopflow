@@ -60,7 +60,7 @@ fn write(session: &str, terminal: &Terminal) -> Result<PathBuf> {
 
 /// Bytes that show the Session's last screen in the terminal running this
 /// command, if its owner left a snapshot this lf can decode.
-pub(crate) fn last_screen(session: &str) -> Option<Vec<u8>> {
+pub(super) fn last_screen(session: &str) -> Option<Vec<u8>> {
     let path = path(session);
     let bytes = std::fs::read(&path).ok()?;
     let painted =

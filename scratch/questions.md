@@ -22,8 +22,11 @@
   the last screen through `lf resume` painting it, not by reading the file (LOO-672).
 - **Palette.** The repaint does not emit OSC 4 so a viewer's terminal keeps its
   theme; programs that changed palette entries lose those on reattach.
-- **Alternate-screen snapshot before the provider.** `lf resume` paints the
-  snapshot straight to stdout, outside the viewer's `AlternateScreen` tracking. A
-  snapshot taken on the alternate screen enters it in the person's terminal; a
-  provider that never toggles mode 1049 itself leaves the terminal there on exit.
-  Claude Code draws on the primary screen, so this is left as is.
+- **Alternate-screen preview ownership (resolved direction, 2026-11-02).** The
+  earlier assumption that Claude's primary-screen behavior justified leaving the
+  preview outside terminal cleanup is withdrawn. The accepted Session recovery
+  behavior already requires cleanup through launch failure and live handoff.
+  Transport now owns preview output and cleanup; a new owner supersedes the
+  preview's modes, including when it draws nothing. Isolated PTY and CLI resume
+  proofs cover failure, cancellation and handoff (see the plan). This is a repair
+  implied by Jack Heart's brief, not a new product approval.

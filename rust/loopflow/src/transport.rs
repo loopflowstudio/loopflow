@@ -4,8 +4,10 @@
 mod lifetime;
 mod native;
 mod output;
-pub(crate) mod snapshot;
+mod snapshot;
 mod terminal;
+#[cfg(test)]
+mod viewer_tests;
 
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
@@ -16,7 +18,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
@@ -171,13 +173,17 @@ pub(crate) fn current() -> Option<&'static LfProcessId> {
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 pub fn delegate_current(batch: bool) -> Result<bool> {
+    delegate_with_preview(batch, None)
+}
+
+pub(crate) fn delegate_with_preview(batch: bool, session: Option<&str>) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
     }
     // Library tests do not execute the CLI entry point.
     #[cfg(test)]
     {
-        let _ = batch;
+        let _ = (batch, session);
         Ok(false)
     }
     #[cfg(not(test))]
@@ -190,8 +196,9 @@ pub fn delegate_current(batch: bool) -> Result<bool> {
         // `lf -b … > file` typed at a terminal writes only the answer, never a
         // relayed screen; an interactive run keeps the terminal it reads from.
         let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
+        let preview = ViewerTerminal::preview(session)?;
         let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
-        attach(&owner, None)?;
+        attach_with_terminal(&owner, None, preview)?;
         Ok(true)
     }
 }
@@ -899,73 +906,133 @@ fn size() -> (u16, u16) {
     dimensions(size.ws_row, size.ws_col)
 }
 
-struct RawTerminal {
-    original: Option<libc::termios>,
-    // Drop restores terminal modes before output announces any diagnostics.
-    output: crate::terminal_output::TerminalOutput,
-    alternate: terminal::AlternateScreen,
+struct ViewerTerminal {
+    state: Arc<Mutex<ViewerState>>,
 }
-impl RawTerminal {
-    fn enter() -> Result<Self> {
-        let output = crate::terminal_output::TerminalOutput::enter()?;
-        if !io::stdin().is_terminal() {
-            return Ok(Self {
-                original: None,
-                output,
-                alternate: Default::default(),
-            });
+
+struct ViewerState {
+    // ViewerTerminal restores modes before this announces any diagnostics.
+    output: crate::terminal_output::TerminalOutput,
+    original: Option<libc::termios>,
+    alternate: terminal::AlternateScreen,
+    restored: bool,
+}
+
+impl ViewerState {
+    fn reset_display(&mut self) -> io::Result<()> {
+        // Kitty keyboard state belongs to each screen; reset both when leaving.
+        self.output.stdout.write_all(terminal::RESET_MODES)?;
+        if self.alternate.entered {
+            self.output.stdout.write_all(b"\x1b[?1049l")?;
+            self.alternate.entered = false;
+            self.output.stdout.write_all(terminal::RESET_MODES)?;
         }
-        // SAFETY: termios is initialized by tcgetattr before it is read.
-        let original = unsafe {
-            let mut value = std::mem::zeroed();
-            if libc::tcgetattr(0, &mut value) < 0 {
-                return Err(io::Error::last_os_error().into());
-            }
-            value
-        };
-        let restore = original;
-        crate::agent::register_interrupt_cleanup(move || {
+        // Restore the drawing state too; soft reset support varies by terminal.
+        self.output
+            .stdout
+            .write_all(b"\x1b[?6l\x1b[?7h\x1b[r\x1b(B\x1b)B\x0f\x1b]8;;\x1b\\")
+    }
+
+    fn restore(&mut self) {
+        if self.restored {
+            return;
+        }
+        self.restored = true;
+        if self.output.stdout.is_terminal() {
+            let _ = self.reset_display();
+        }
+        if let Some(original) = self.original {
+            // Discard input the viewer never forwarded, including terminal reports.
             // SAFETY: restores attributes previously read from stdin.
-            unsafe {
-                libc::tcsetattr(0, libc::TCSANOW, &restore);
+            unsafe { libc::tcsetattr(0, libc::TCSAFLUSH, &original) };
+        }
+    }
+}
+
+impl ViewerTerminal {
+    fn enter() -> Result<Self> {
+        let original = if io::stdin().is_terminal() {
+            // SAFETY: termios is initialized by tcgetattr before it is read.
+            Some(unsafe {
+                let mut value = std::mem::zeroed();
+                if libc::tcgetattr(0, &mut value) < 0 {
+                    return Err(io::Error::last_os_error().into());
+                }
+                value
+            })
+        } else {
+            None
+        };
+        let output = crate::terminal_output::TerminalOutput::enter()?;
+        let state = Arc::new(Mutex::new(ViewerState {
+            output,
+            original,
+            alternate: Default::default(),
+            restored: false,
+        }));
+        let cleanup = Arc::downgrade(&state);
+        crate::agent::register_interrupt_cleanup(move || {
+            if let Some(state) = cleanup.upgrade() {
+                state
+                    .lock()
+                    .expect("viewer terminal lock poisoned")
+                    .restore();
             }
         });
-        let mut raw = original;
-        // SAFETY: raw is initialized; these calls only change terminal attributes.
-        unsafe {
-            libc::cfmakeraw(&mut raw);
-            libc::tcsetattr(0, libc::TCSANOW, &raw);
+        Ok(Self { state })
+    }
+
+    fn preview(session: Option<&str>) -> Result<Option<Self>> {
+        if !io::stdout().is_terminal() {
+            return Ok(None);
         }
-        Ok(Self {
-            original: Some(original),
-            output,
-            alternate: Default::default(),
-        })
+        let Some(bytes) = session.and_then(snapshot::last_screen) else {
+            return Ok(None);
+        };
+        let mut terminal = Self::enter()?;
+        terminal.write(1, &bytes)?;
+        // Keep cooked input until acknowledgement, so Ctrl+C still cancels startup.
+        Ok(Some(terminal))
+    }
+
+    fn make_raw(&self) -> Result<()> {
+        let state = self.state.lock().expect("viewer terminal lock poisoned");
+        if let Some(mut raw) = state.original {
+            // SAFETY: raw was read from stdin; only terminal attributes change.
+            unsafe {
+                libc::cfmakeraw(&mut raw);
+                if libc::tcsetattr(0, libc::TCSANOW, &raw) < 0 {
+                    return Err(io::Error::last_os_error().into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handoff(&mut self) -> io::Result<()> {
+        let mut state = self.state.lock().expect("viewer terminal lock poisoned");
+        state.reset_display()?;
+        // The live owner is authoritative even when its first screen is blank.
+        state.output.stdout.write_all(b"\x1b[H\x1b[2J")
     }
 
     fn write(&mut self, stream: u8, bytes: &[u8]) -> io::Result<()> {
-        self.alternate.observe(bytes);
+        // An interrupt cannot restore the terminal midway through an output write.
+        let mut state = self.state.lock().expect("viewer terminal lock poisoned");
+        state.alternate.observe(bytes);
         if stream == 2 {
-            self.output.stderr.write_all(bytes)
+            state.output.stderr.write_all(bytes)
         } else {
-            self.output.stdout.write_all(bytes)
+            state.output.stdout.write_all(bytes)
         }
     }
 }
-impl Drop for RawTerminal {
+impl Drop for ViewerTerminal {
     fn drop(&mut self) {
-        if let Some(original) = self.original {
-            // Discard input the viewer never forwarded, such as mouse reports
-            // queued while it waited on the owner; the shell would run them.
-            // SAFETY: restores attributes previously read from stdin.
-            unsafe {
-                libc::tcsetattr(0, libc::TCSAFLUSH, &original);
-            }
-            let _ = self.output.stdout.write_all(native::RESET_MODES);
-            if self.alternate.entered {
-                let _ = self.output.stdout.write_all(b"\x1b[?1049l");
-            }
-        }
+        self.state
+            .lock()
+            .expect("viewer terminal lock poisoned")
+            .restore();
     }
 }
 
@@ -984,6 +1051,15 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
 /// Attach this terminal with input control, taking it from any other viewer;
 /// that viewer prints `moved` as it leaves.
 pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
+    attach_with_terminal(id, moved, None)
+}
+
+fn attach_with_terminal(
+    id: &LfProcessId,
+    moved: Option<String>,
+    mut terminal: Option<ViewerTerminal>,
+) -> Result<()> {
+    let mut preview = terminal.is_some();
     let mut socket = UnixStream::connect(endpoint(id)?).context(
         "Execution owner is unavailable; no provider was restarted and no input was replayed",
     )?;
@@ -1000,7 +1076,6 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
             moved,
         },
     )?;
-    let mut terminal = None;
     let mut token = None;
     let mut returning = None;
     let mut buffer = Vec::new();
@@ -1050,8 +1125,15 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                     } => {
                         acknowledgement_deadline = None;
                         token = claim;
+                        if preview {
+                            terminal.as_mut().expect("preview owns a terminal").handoff()?;
+                            preview = false;
+                        }
                         if is_terminal {
-                            terminal = Some(RawTerminal::enter()?);
+                            if terminal.is_none() {
+                                terminal = Some(ViewerTerminal::enter()?);
+                            }
+                            terminal.as_ref().expect("terminal entered").make_raw()?;
                         }
                         if let Some(terminal) = &mut terminal {
                             terminal.write(1, &bytes)?;
@@ -1091,7 +1173,7 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                     Response::NativeEnded | Response::Controlled { .. } => {}
                     Response::InputHint { hint } => {
                         if let Some(terminal) = &mut terminal {
-                            write!(terminal.output.stderr, "\r\n{hint}\r\n")?;
+                            terminal.write(2, format!("\r\n{hint}\r\n").as_bytes())?;
                         } else {
                             eprintln!("{hint}");
                         }

@@ -1119,12 +1119,9 @@ fn taken_over(
     let Some(executable) = crate::journal::OsProcess::executable(pid) else {
         return Ok(false);
     };
-    // The entry, not this viewer: a development build opening a conversation
-    // in the main Home relaunches through the installed lf anyway.
-    let relaunch = crate::os_process::resolve_lf_binary()
-        .and_then(|entry| crate::installation::entry_target(&entry))
-        .or_else(|_| crate::journal::current_executable().map_err(anyhow::Error::from))?;
-    if crate::installation::same_build(&executable, &relaunch) {
+    // Judged against the entry, not this viewer: a development build opening
+    // a conversation in the main Home relaunches through the installed lf.
+    if !crate::installation::superseded(&executable) {
         return Ok(false);
     }
     let turn_cut_off = store.session_turn_was_running(&session.id)?;
@@ -1135,14 +1132,13 @@ fn taken_over(
         )
     })?;
     eprintln!(
-        "Moved {} off {}; continuing on {}.{}",
+        "Moved {} off {}; continuing on the installed lf.{}",
         if session.title.is_empty() {
             session.id.as_str()
         } else {
             session.title.as_str()
         },
         executable.display(),
-        relaunch.display(),
         if turn_cut_off {
             " Its last turn was cut off; ask again."
         } else {

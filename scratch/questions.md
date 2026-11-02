@@ -23,8 +23,11 @@ Headless choices, 2026-11-02. Each is reversible; Jack decides.
   `lf resume` from the other side restarts the provider from history. The
   viewer compares the owner with what the entry launches, not with itself, so
   a development build in the main Home attaches rather than restarting
-  (realign, 2026-11-02). The owner's own judgement is path-only, since the
-  entry's target is content-addressed.
+  (realign, 2026-11-02). The owner, the takeover and the viewer's follow share
+  this judgement (`installation::superseded`, implement 2026-11-02), so an
+  owner on the same bytes as the entry's target never ends for supersession;
+  content hashing happens only when the two files differ in path but not in
+  length.
 - **Viewers following through the entry reverses part of LOO-502** (Jack,
   2026-10-17: "replacement viewers are removed"). The Task's outcome ("`lf
   resume` always lands you in the conversation on the installed lf, with no

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-705 concept review: moving onto the installed lf</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b675f; --rule: #d9d5cc;
+    --code-bg: #f0ede6; --proposed: #8a4b00; --proposed-bg: #fff3e0;
+    --existing: #2d5f3a; --existing-bg: #e9f3ea; --call: #7a1f1f; --call-bg: #fbe9e9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --fg: #e8e5de; --muted: #9b968b; --rule: #3a3833;
+      --code-bg: #22211e; --proposed: #f0b36b; --proposed-bg: #2e2416;
+      --existing: #8fcf9c; --existing-bg: #182619; --call: #f09a9a; --call-bg: #2e1818;
+    }
+  }
+  html { background: var(--bg); color: var(--fg); }
+  body { margin: 0; padding: 2.5rem 1.25rem 5rem; font: 16px/1.55 Georgia, "Iowan Old Style", serif; }
+  main { max-width: 42rem; margin: 0 auto; }
+  header { color: var(--muted); font-size: .9rem; border-bottom: 1px solid var(--rule); padding-bottom: 1rem; margin-bottom: 2rem; }
+  header p { margin: .2rem 0; }
+  h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 .5rem; font-weight: normal; }
+  h2 { font-size: 1.15rem; margin: 2.75rem 0 .75rem; font-weight: normal; border-top: 1px solid var(--rule); padding-top: 1.25rem; }
+  h3 { font-size: 1rem; margin: 1.75rem 0 .5rem; font-weight: normal; font-style: italic; }
+  p { margin: .75rem 0; }
+  code, pre { font: .86em/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: .05em .3em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: .9rem 1rem; border-radius: 4px; overflow-x: auto; margin: .75rem 0; }
+  pre code { background: none; padding: 0; }
+  .lead { font-size: 1.1rem; }
+  .mark { display: inline-block; font: .72rem/1 ui-monospace, Menlo, monospace; padding: .2em .45em; border-radius: 3px; vertical-align: .15em; margin-right: .35em; }
+  .existing { color: var(--existing); background: var(--existing-bg); }
+  .proposed { color: var(--proposed); background: var(--proposed-bg); }
+  .call { color: var(--call); background: var(--call-bg); }
+  .callout { border-left: 3px solid var(--call); background: var(--call-bg); padding: .75rem 1rem; margin: 1.25rem 0; }
+  .callout p:first-child { margin-top: 0; } .callout p:last-child { margin-bottom: 0; }
+  table { border-collapse: collapse; width: 100%; margin: .75rem 0 1.25rem; font-size: .95rem; }
+  th, td { text-align: left; vertical-align: top; padding: .5rem .6rem .5rem 0; border-bottom: 1px solid var(--rule); }
+  th { font-weight: normal; color: var(--muted); font-size: .85rem; }
+  td:first-child { white-space: nowrap; }
+  ol.q li { margin: .6rem 0; }
+  ol.q ol { list-style: lower-alpha; margin-top: .3rem; }
+  .muted { color: var(--muted); }
+  @media (max-width: 36rem) { td:first-child { white-space: normal; } body { font-size: 15px; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <p>LOO-705 · One way for long-lived Loopflow processes to move onto the installed lf</p>
+  <p>Step: concept-review (headless) · 2026-11-02</p>
+  <p>Built from <code>scratch/loo-705.md</code>, <code>scratch/questions.md</code>, and the branch diff in <code>rust/loopflow/src/{installation.rs, transport.rs, transport/lifetime.rs, ops/human_session.rs, lf/commands/rollover.rs}</code></p>
+</header>
+
+<h1>After <code>lf install</code>, do idle Sessions move, or wait to be looked at?</h1>
+
+<p class="lead">That is the one decision this review needs from Jack. Everything else here is either already settled by the accepted design or an implementation direction it implies. The branch builds the minimum Jack asked for ("at a minimum when necessary"); the page shows what "perhaps always" would change.</p>
+
+<p><span class="mark existing">existing</span> is behavior on <code>main</code> today. <span class="mark proposed">proposed</span> is what this branch does or should do next. <span class="mark call">choice</span> is Jack's.</p>
+
+<h2>What a person does</h2>
+
+<table>
+<tr><th>Action</th><th>Before this branch</th><th>After</th></tr>
+<tr>
+  <td><code>lf install</code></td>
+  <td><span class="mark existing">existing</span> Prints which running processes still run the old lf and points at <code>lf monitor rollover</code> as the way forward.</td>
+  <td><span class="mark proposed">proposed</span> Same inventory. Says each ends as its Session goes idle and <code>lf resume</code> brings it back; rollover moves the idle ones now.</td>
+</tr>
+<tr>
+  <td><code>lf resume LOO-618</code></td>
+  <td><span class="mark existing">existing</span> On a 0.15.0 owner: "Execution owner did not acknowledge attachment; outcome is unknown". Kill the PID by hand.</td>
+  <td><span class="mark proposed">proposed</span> The old owner is ended the way its own policy ends it; the conversation reopens from provider history on the installed lf. If a turn was running you are told it was cut off.</td>
+</tr>
+<tr>
+  <td>A terminal, cmux pane or Desktop pane showing a Session</td>
+  <td><span class="mark existing">existing</span> Owner removed or replaced: pane prints a hint, leaves. Owner merely out of date: pane keeps running the old lf indefinitely.</td>
+  <td><span class="mark proposed">proposed</span> Once the Session waits for a person, the owner ends and the pane reruns its own invocation through the installed entry. Nobody types.</td>
+</tr>
+<tr>
+  <td>An idle Session nobody is looking at</td>
+  <td><span class="mark existing">existing</span> Runs the old lf until <code>end_detached_after</code> (24h default) or until its executable file is removed or replaced.</td>
+  <td><span class="mark call">choice</span> Branch: ends at idle and comes back on the next <code>lf resume</code>. Alternative: comes back live on the new lf at install.</td>
+</tr>
+<tr>
+  <td><code>lf monitor rollover</code></td>
+  <td><span class="mark existing">existing</span> Moves idle, <em>unviewed</em>, resumable owners; "a terminal is attached" blocks the rest. Moved none of the 31 stale owners.</td>
+  <td><span class="mark proposed">proposed</span> Moves every idle resumable owner; viewers follow. The viewed rule and <code>owner_viewed</code> are deleted. Graph runners are left alone, as before.</td>
+</tr>
+</table>
+
+<h2>The few concepts behind them</h2>
+
+<table>
+<tr><th>Concept</th><th>Meaning</th></tr>
+<tr><td>Entry</td><td><span class="mark existing">existing</span> What a launch runs: the install gate, the Desktop helper, or <code>LF_BIN</code> in a private Home (<code>resolve_lf_binary()</code>).</td></tr>
+<tr><td>Superseded</td><td><span class="mark proposed">proposed</span> An owner whose entry no longer runs its executable. Joins <em>removed</em> and <em>replaced</em>. Judged from files and symlinks; no store read, no version numbers, no probe of the other process.</td></tr>
+<tr><td>Ends at idle</td><td><span class="mark existing">existing</span> The lifetime policy: once its Sessions wait for a person, the owner stops its agent and records its exit. <code>lf resume</code> reopens from provider history. Superseded is one more trigger.</td></tr>
+<tr><td>Takeover</td><td><span class="mark proposed">proposed</span> <code>lf resume</code> never negotiates with an owner on another build; it ends it and reopens. Same build: attach as today.</td></tr>
+<tr><td>Follow</td><td><span class="mark proposed">proposed</span> A viewer told a successor reruns its argv through it. Reverses the "replacement viewers are removed" half of LOO-502; pinning and probing stay removed.</td></tr>
+</table>
+
+<h2>The APIs that change their state</h2>
+
+<pre><code>installation::superseded(executable) -> bool  // the entry no longer runs this build (same file, or same bytes)
+
+lifetime::Change { Removed, Replaced, Superseded }   // owner judges itself every 2s
+Response::Moved { notice, successor: Option&lt;PathBuf&gt; } // Option field on an existing variant;
+                                                        // a 0.15.1 viewer reads it as None
+transport::follow(entry)                       // rerun argv through the successor
+
+human_session::taken_over(store, session, owner) -> bool   // lf resume ends an owner on another build
+human_session::end_owner(store, owner, pid)                // shared by resume and rollover
+
+rollover::owner_disposition: Moves | NextStep | Stays      // viewed rule gone</code></pre>
+
+<div class="callout">
+<p><strong>The consequential mismatch.</strong> The design has one heading, "The one judgement". The code has three. The owner compares <em>paths</em> against the entry's target. <code>lf resume</code> compares <em>content</em> with <code>same_build</code>. <code>follow</code> compares paths again, so a Desktop pane whose bundled lf is byte-identical to the installed CLI still reruns itself through the gate when its owner ends.</p>
+<p>One function fixes all three: <code>installation::superseded(executable) = !same_build(executable, entry_target(resolve_lf_binary()))</code>, used by the owner, the takeover and the follow. This is implied by the accepted design, not a new decision. <span class="mark existing">done</span> Implemented 2026-11-02; <code>entry_target</code> and <code>same_build</code> are private to it.</p>
+</div>
+
+<h2>Walking one interaction through, with recovery</h2>
+
+<p><strong>Normal path.</strong> Jack has a Session open in a cmux pane on 0.15.1. <code>lf install</code> settles 0.15.2 into the gate. Within two seconds the owner sees <code>entry_target(gate)</code> is no longer its file. The agent is mid-turn, so nothing happens yet. The turn finishes; the owner sends the pane <code>Moved { notice, successor: gate }</code>, stops the agent, records its exit. The pane prints the notice and runs <code>gate session resume &lt;id&gt;</code>. The conversation reopens on 0.15.2 with history intact.</p>
+
+<p><strong>Failure.</strong> The install also advanced the store past 0.15.1's reader floor. The owner knows it is superseded (that is a file read) but <code>owner_waits_for_person</code> fails (that is a store read). It logs and judges again next tick, forever. The pane sits on the old lf. <span class="mark existing">existing</span> Staged migrations keep old readers working for about 30 days, so this needs an owner older than that.</p>
+
+<p><strong>Recovery.</strong> Jack types <code>lf resume &lt;id&gt;</code> anywhere, or runs <code>lf monitor rollover</code>. Both run on the new lf, which reads the store, so both end the owner and reopen. No PID by hand. The deeper fix, if this class recurs: the owner judges idleness from the harness signals it writes itself rather than reading them back. Recorded in the design as a known limit, not scheduled.</p>
+
+<p><strong>What must survive.</strong> The saved provider conversation. It does; everything else is rebuilt from it. <strong>What deliberately changes.</strong> An unviewed idle owner now ends at install instead of at its 24h limit. <strong>Counterexample that would invalidate it.</strong> Something that needs the idle owner process itself, not its Session. Checked: steers and comments are stored and read at the next turn's context hook; nothing pushes input to an idle owner. An ended Session and an idle one answer a comment identically. Graph runners are never ended; each step launches through the entry.</p>
+
+<h2>Smaller directions the review settles</h2>
+
+<table>
+<tr><th>Finding</th><th>Direction</th></tr>
+<tr><td>Notice copy</td><td><span class="mark proposed">proposed</span> With a successor the pane says "<code>lf resume X</code> reopens it" and then reopens it itself. Say "reopening on the installed lf" when a successor is sent; keep the hint when none is. <span class="mark existing">done</span> Only a superseded owner sends a successor.</td></tr>
+<tr><td>CLI renames</td><td><span class="mark proposed">proposed</span> <code>follow</code> replays argv into a newer lf. A rename is covered only if the newer lf keeps the old spelling as a Clap alias, which is the existing alias rule. Note it on <code>follow</code>; no new machinery.</td></tr>
+<tr><td><code>Response::Moved</code> doing three jobs</td><td><span class="mark existing">existing</span> Another viewer took input; owner superseded; owner unviewed too long. Kept: a new variant would break every older peer, and the field tells them apart.</td></tr>
+</table>
+
+<h2>Questions for Jack</h2>
+
+<ol class="q">
+<li>After <code>lf install</code>, an idle Session nobody is looking at:
+  <ol>
+    <li>ends, and comes back on the next <code>lf resume</code> or when a pane shows it (branch; "at a minimum when necessary"; <code>lf monitor rollover</code> stays as the "move them all now" sweep), or</li>
+    <li>comes back live on the new lf right away ("perhaps always"); rollover folds into install and stops being a concept, and rollover must also resume Sessions that ended for supersession to beat the owners' own 2s ending.</li>
+  </ol>
+</li>
+<li>The below-floor owner that cannot tell it is idle:
+  <ol>
+    <li>leave it as the recorded limit; <code>lf resume</code> and rollover cover it, or</li>
+    <li>schedule the owner judging idleness from its own harness signals as the next slice of this Task.</li>
+  </ol>
+</li>
+</ol>
+
+<p class="muted">Decisions land in <code>scratch/loo-705.md</code>; headless assumptions are in <code>scratch/questions.md</code>.</p>
+</main>
+</body>
+</html>

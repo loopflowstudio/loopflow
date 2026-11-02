@@ -884,9 +884,19 @@ fn gate_artifact<'a>(
         })
 }
 
+/// Whether a launch through the entry now runs another build than
+/// `executable`: the one judgement behind a Session owner ending at idle,
+/// `lf resume` taking an owner over, and a viewer following the entry. An
+/// entry or executable nobody can read is not superseded; it is judged again.
+pub(crate) fn superseded(executable: &Path) -> bool {
+    crate::os_process::resolve_lf_binary()
+        .and_then(|entry| entry_target(&entry))
+        .is_ok_and(|target| !same_build(executable, &target))
+}
+
 /// The executable a launch through `entry` runs now: the gate's selected CLI
 /// artifact, else the file `entry` names after following symlinks.
-pub(crate) fn entry_target(entry: &Path) -> Result<PathBuf> {
+fn entry_target(entry: &Path) -> Result<PathBuf> {
     let canonical =
         fs::canonicalize(entry).with_context(|| format!("resolve lf entry {}", entry.display()))?;
     let root = root()?;
@@ -902,7 +912,7 @@ pub(crate) fn entry_target(entry: &Path) -> Result<PathBuf> {
 
 /// Whether two executables are one build: the same file, or the same bytes at
 /// different paths, as Desktop's bundled lf and the installed CLI artifact are.
-pub(crate) fn same_build(a: &Path, b: &Path) -> bool {
+fn same_build(a: &Path, b: &Path) -> bool {
     let (Ok(a), Ok(b)) = (fs::canonicalize(a), fs::canonicalize(b)) else {
         return false;
     };

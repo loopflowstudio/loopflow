@@ -95,13 +95,24 @@ fn watch(
                         Some(change) => {
                             tracing::warn!(%owner, %change, "ending a Session whose lf was {change}");
                             let session = store.owner_sessions(owner)?.into_iter().next();
-                            Response::Moved {
-                                notice: session.map(|session| {
+                            // Viewers of a superseded owner rerun their
+                            // invocation through the entry; a removed or
+                            // replaced build has no newer entry to follow.
+                            let successor = (change == Change::Superseded)
+                                .then(crate::os_process::resolve_lf_binary)
+                                .and_then(Result::ok);
+                            let notice = match (&successor, session) {
+                                (Some(_), _) => {
+                                    format!("{change}; reopening on the installed lf.")
+                                }
+                                (None, Some(session)) => {
                                     format!("{change}; `lf resume {session}` reopens it.")
-                                }),
-                                // Viewers rerun their invocation through the
-                                // entry, when one still resolves.
-                                successor: crate::os_process::resolve_lf_binary().ok(),
+                                }
+                                (None, None) => format!("{change}."),
+                            };
+                            Response::Moved {
+                                notice: Some(notice),
+                                successor,
                             }
                         }
                         None => {
@@ -180,9 +191,7 @@ impl Executable {
             }
             Err(_) => return None,
         }
-        let entry = crate::os_process::resolve_lf_binary().ok()?;
-        let target = crate::installation::entry_target(&entry).ok()?;
-        (target != self.path).then_some(Change::Superseded)
+        crate::installation::superseded(&self.path).then_some(Change::Superseded)
     }
 }
 

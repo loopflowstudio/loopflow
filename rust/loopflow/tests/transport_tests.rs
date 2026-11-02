@@ -1195,27 +1195,18 @@ fn sessions_end_when_their_lf_executable_goes() {
     let relinked = bin.join("lf-relinked");
     std::fs::write(&relinked, "another build").unwrap();
     std::fs::rename(&relinked, &executables[1]).unwrap();
+    let next = bin.join("lf-next");
+    other_build(&next);
     let swapped = bin.join("lf-swapped");
-    std::os::unix::fs::symlink(build("lf-next"), &swapped).unwrap();
+    std::os::unix::fs::symlink(&next, &swapped).unwrap();
     std::fs::rename(&swapped, &installed).unwrap();
 
     fixture.ends(&owners[0]);
     fixture.ends(&owners[1]);
     fixture.ends(&owners[3]);
-    // Their viewers learn why and which entry reopens the conversation.
-    for (index, how, successor) in [
-        (0, "build was removed", None),
-        (
-            1,
-            "build was replaced",
-            Some(executables[1].to_str().unwrap()),
-        ),
-        (
-            3,
-            "was superseded by the installed lf",
-            Some(installed.to_str().unwrap()),
-        ),
-    ] {
+    // Their viewers learn why; only the superseded one learns which entry
+    // reopens the conversation.
+    for (index, how) in [(0, "build was removed"), (1, "build was replaced")] {
         let session = fixture.session_of_owner(&owners[index]);
         assert_eq!(
             viewers[index].moves(),
@@ -1223,10 +1214,20 @@ fn sessions_end_when_their_lf_executable_goes() {
                 Some(format!(
                     "This Session's lf {how}; `lf resume {session}` reopens it."
                 )),
-                successor.map(str::to_owned)
+                None
             )]
         );
     }
+    assert_eq!(
+        viewers[3].moves(),
+        [(
+            Some(
+                "This Session's lf was superseded by the installed lf; reopening on the installed lf."
+                    .to_owned()
+            ),
+            Some(installed.to_str().unwrap().to_owned())
+        )]
+    );
     // The terminal showing the superseded conversation reran its invocation
     // through the entry: the conversation resumed on lf-next with its history.
     let line = fixture.launches(5).pop().unwrap();

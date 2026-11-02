@@ -1156,16 +1156,13 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
 
 /// Rerun this invocation through `entry`, the lf that now owns the work the
 /// ended owner held: `lf resume <id>` lands in the conversation on the
-/// installed lf. An entry that is this executable has nothing newer to run.
+/// installed lf. An entry that runs this build has nothing newer to run.
+/// The argv is replayed as typed, so a renamed command survives only while
+/// the newer lf keeps the old spelling as a Clap alias.
 fn follow(entry: &Path) -> Result<()> {
-    let same = match (
-        crate::installation::entry_target(entry),
-        crate::journal::current_executable(),
-    ) {
-        (Ok(target), Ok(current)) => target == current,
-        _ => true,
-    };
-    if same {
+    let superseded = crate::journal::current_executable()
+        .is_ok_and(|current| crate::installation::superseded(&current));
+    if !superseded {
         return Ok(());
     }
     let status = Command::new(entry)

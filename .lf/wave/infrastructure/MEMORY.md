@@ -51,6 +51,35 @@ assigned or not (`task claim/unassign`, no deferred state). Scope still comes fr
 recency; preparation launches no provider. LOO-499 history:
 `acd37dde71:.lf/wave/infrastructure/MEMORY.md`, its heading.
 
+## Session viewer wire (LOO-712, 2026-11-02)
+
+Jack Heart asked (2026-11-02) that the owner and its viewers adopt the parts of
+Rex's protocol worth copying; the design and evidence live in the LOO-712 plan
+and `transport/README.md`. Decisions: one binary frame type (`tag · len · payload`)
+replaces JSON lines; a stream opens with the owner's snapshot in whatever format
+the owner has, so LOO-710's format change touches no framing. Events ride the
+output stream as APC sequences tagged with the viewer's nonce and a gapless
+`seq`; replies carry the `seq` they were computed at, in `--watch`'s id/answers
+shape. Resume is byte-counted against a 1 MiB per-viewer spool kept 60 s after
+EOF; exhaustion answers `reconnect_required` and the viewer repaints.
+Ownership arbitrates size and colors only and is separate from input control,
+which keeps LOO-618's token/replace/Busy semantics.
+
+Deviations from Rex, with reasons: input control and ownership release at EOF,
+not after the grace window, because a Unix-socket drop is a dead process and
+LOO-618's automatic attach must not see Busy for it. Events ride stream 1 in pipe
+mode too (the viewer strips them, piped stdout stays byte-exact); a second
+control channel was rejected. Theme is relayed opaque; Desktop (LOO-672) owns
+colors. Lesson: `#[serde(flatten)]` of a struct with its own `id` onto the
+request envelope's `id` silently broke every status report, and the owner drops
+a connection whose frame fails to parse; a `wire.rs` unit test pins the key names.
+
+Land order per Jack Heart's comment: LOO-705 (successor on the Moved message)
+first, then LOO-708/LOO-709, then LOO-712 re-homes `successor` on the `control`
+event and the viewer reruns through it instead of leaving. Unproved: Desktop
+consuming the stream, a measured reconnect over SSH, and the 1 MB wire bound
+outside the test fixture.
+
 ## Waited landing (LOO-503, 2026-10-17)
 
 Jack Heart requires no elapsed-time termination or synthetic reruns in
@@ -390,8 +419,8 @@ Harness errors retain failed-result text for retries. CI owns the full matrix.
 ## Live conversation ownership (LOO-415, curated 2026-10-17)
 
 Jack Heart accepted per-conversation owners for nested CLI, headless, terminal,
-shell and Flow execution. LOO-415 owns transport; LOO-416 owns lifecycle/readiness.
-#1581 merged as `28dc141671`.
+shell and Flow execution. LOO-415 owned transport (LOO-712 now owns the viewer
+wire, below); LOO-416 owns lifecycle/readiness. #1581 merged as `28dc141671`.
 No shared server or automatic turn/Flow replay. Explicit native resume may restart
 when necessary, preserving Session/history without resubmitting input. Viewer loss
 never transitions; native-only Flow execution remains unselected.
@@ -852,58 +881,17 @@ LOO-291/300's performance limits are historical (targets retired October 7);
 
 ## Continuation, delivery and authority lessons (curated 2026-10-02)
 
-The detailed September 23–25 observations, historical schemas, test counts and
-counterexamples remain in [the pre-curation memory](https://github.com/loopflowstudio/loopflow/blob/d281370191844294ce0ad877752f2aa6a6402282/wave/infrastructure/MEMORY.md#continuation-and-recovery-lessons-curated-2026-09-25).
-The September 30 model/cutover decisions above supersede Run, Ask, Project-cursor
-and private-store mechanisms there; archiving proves no acceptance and authorizes
-no history deletion.
-
-- Capture all alternatives and human boundaries before execution; recover from
-  saved definitions after sources disappear. Invocation identity fences late
-  results independently of reusable versions/generations. Consume actual
-  successful completion evidence under the exact claim. Cursor settlement does
-  not prove external effects happened once. Serialize feedback/reopen writers,
-  persist completion before teardown and preserve published native identity.
-  A finished Flow does not complete its Task. Prove attachment and native handoff,
-  not only reducers, including another executable first on PATH.
-- Unknown custom/queued/nested history stays unresolved with bytes/order intact.
-  Inspection does not recompile or launch it. Causal ancestry, age, a missing
-  listener, finished launcher or absent display cannot grant process authority
-  or prove provider death. Preserve original dispositions and exact process
-  receipts, including hashed executable names and PID-reuse rejection.
-- One Task execution snapshot feeds status/actions/roadmap. Current execution
-  evidence wins over dirtiness or next-launch configuration errors. Missing
-  observation must not become idle capacity or a duplicate worker; the earlier
-  LOO-293 duplication came from split readers and that inference. Catalog joins
-  use stable identities and minimal schemas; current hierarchy filters do not
-  rewrite historical attribution. Fixtures isolate all ambient authority and
-  stop only their own identified provider children.
-- Preserve authored PR copy plus the managed Task block; publication alone does
-  not request settlement. Draft opening preserves readiness; promotion records
-  state only after provider success. Exact copy must survive release re-arming.
-  Same-SHA pending/passing/merged changes are progress without another commit.
-  Failed repair must surface its real blocker rather than loop indefinitely.
-- Queue cancellation is distinct from disabling auto-merge: gh 2.101.0 could
-  return success without dequeueing. Reobserve authoritative queue state before
-  replacing a head. Canceling an async waiter does not stop its blocking child;
-  keep the actual checkout lock and effect ownership until descendants finish.
-  Hosted interruption, orphan cleanup, green-unmergeable PRs and the Etude -c
-  discrepancy stayed unproved. An empty lease must still reject a branch created
-  after absence was read.
-- Rotation preserves started identities and freezes the boundary's membership,
-  metrics and evaluation time. Failed fresh reads cannot justify retirement;
-  retries consume the frozen boundary and verify uncertain writes at the provider.
-  Deduplicate stable Work IDs; renamed PM labels do not rewrite captured history.
-  LOO-278's integration did not transfer its registered checkout/PR ownership.
-  Historical archives remain outside live architecture discovery.
-
-LOO-296's restoration and unsuperseded LOO-286/287 configured continuity remain
-unproved. Exact obligations, deleted-stack counterexamples and unknown liveness
-removal cause: `71bbdb80d268e5e9eb6a84d5bc11f53c016e7c51:.lf/wave/infrastructure/MEMORY.md`,
-this heading. Current model/acceptance above supersedes old controllers without
-retroactive proof. Repair operation entry; UI observation is no scheduler.
+Retired to git history on 2026-11-02: the full September lessons are at
+`c7c6f995b5:.lf/wave/infrastructure/MEMORY.md`, this heading, and the
+pre-curation detail at `d281370191:wave/infrastructure/MEMORY.md`. What still
+binds: consume actual completion evidence under the exact claim; causal
+ancestry, age, a missing listener or absent display grant no process authority
+and prove no provider death; one execution snapshot feeds status/actions and
+missing observation never becomes idle capacity; reobserve authoritative queue
+state before replacing a head; rotation freezes boundary membership and failed
+fresh reads justify no retirement. LOO-296/286/287 continuity remains unproved.
 Current [delivery mechanics](../../../docs/architecture/delivery.md) and [CI](../../../.github/README.md) own
-their guidance; Wave learning stays with its identified owner.
+their guidance.
 
 ## Installation and command scope (curated 2026-10-11)
 

@@ -2,8 +2,9 @@
 
 Jack Heart asked (2026-11-02) for the owner (`lf session serve`) and its viewers
 to adopt the parts of Rex's protocol worth copying. Status: accepted design,
-implementing. Evidence: `scratch/research/rex-architecture.md` in the LOO-672
-checkout (read 2026-11-02).
+implemented on this branch (realigned 2026-11-02); landing waits on LOO-705.
+Evidence: `scratch/research/rex-architecture.md` in the LOO-672 checkout
+(read 2026-11-02).
 
 ## Wire
 
@@ -32,14 +33,18 @@ viewer counts them; the owner spools the last 1 MiB per viewer.
 
 **Attach:** `{"id":1,"kind":"attach","control":bool,"replace":bool,"own":"take"|"request"|null,"rows","cols","name","moved"}` →
 reply `attached {answers, seq, viewer, reconnect, nonce, token, terminal, grace_ms, owner}`,
-then snapshot frames, then a `resize` event, a `theme` event when known, then live
-out/err frames. Pipe mode has no snapshot: the retained tail is the start of the stream.
+then snapshot frames, then a `resize` event, a `theme` event when known, an
+`owner` event, a `return {detach}` event when the owner fronts a native client,
+then live out/err frames. A `take` on attach replaces the attach-time `resize`
+and `owner` with the ones every viewer gets for the new owner. Pipe mode has no
+snapshot: the retained tail is the start of the stream.
 
 **Events** travel in stream 1 as APC `ESC _ lf1;<nonce>;<json> ESC \` with
 gapless `seq` per viewer stream. A program printing the same bytes lacks the
 nonce and is passed through. Kinds: `resize {rows,cols}`, `theme {…}` (opaque,
-from the owner viewer), `owner {viewer,name,held}`, `control {held,notice}`
-(input control taken; LOO-618 keeps the loser leaving), `child_exited {code}`,
+from the owner viewer), `owner {viewer,name,held}`, `control {held,notice,successor}`
+(input control taken; LOO-618 keeps the loser leaving until LOO-705's successor
+lands), `child_exited {code}`,
 `detached`, `hint {text}`, `return {detach}`. Events are inserted only at
 terminal sequence boundaries, like OSC 7501 reports. Every reply carries the
 `seq` of the viewer's last queued event, in the shape `--watch` uses
@@ -73,19 +78,35 @@ request, silent owner), OSC 7501 reports, snapshot pending-prefix carry.
 
 ## Done when
 
-- Two viewers both start with the snapshot and both see live output and input.
-- Resume by byte count continues exactly; spool exhaustion refuses; fresh attach repaints.
-- Resize reaches every viewer as a nonce APC; a program printing the same bytes does not.
-- `request` behind `take` is granted on leave; `take` loser gets `owner held:false`.
-- 1 MB burst → wire within 10%.
-- `transport_tests`, `session_lifecycle_tests`, `session_launch_contract`, `golden_prompt` pass; README documents the stream.
+Each line names the `transport_tests` case that proves it (all passing at compress).
+
+- [x] Two viewers both start with the snapshot and both see live output and input
+  — `every_viewer_starts_with_the_snapshot_and_shares_live_output`.
+- [x] Resume by byte count continues exactly; spool exhaustion refuses; fresh attach
+  repaints — `a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot`,
+  `a_resume_past_the_spool_is_refused_and_a_fresh_attach_repaints`.
+- [x] Resize reaches every viewer as a nonce APC; a program printing the same bytes
+  does not — `resize_reaches_every_viewer_as_its_own_event_and_program_bytes_do_not`.
+- [x] `request` behind `take` is granted on leave; `take` loser gets `owner held:false`
+  — `ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it`.
+- [x] 1 MB burst → wire within 10% — `a_megabyte_burst_costs_within_ten_percent_on_the_wire`.
+- [x] `transport_tests` and `golden_prompt` pass; `transport/README.md` documents the stream.
+- [ ] `session_lifecycle_tests` and `session_launch_contract` pass — gate runs them.
 
 ## Remaining
 
-- LOO-705 has not landed on main (checked 2026-11-02): the `control` event
-  carries `successor`, and the viewer still leaves on `held:false`. When this
-  Task rebases over LOO-705, the viewer reruns its invocation through
-  `successor` instead of leaving, per Jack's steer.
+- **Land order** (Jack Heart, 2026-11-02, via the Task comment): LOO-705 first,
+  then LOO-708/LOO-709, then this Task. None of the three is on origin/main as of
+  2026-11-02 14:40; the branch is otherwise even with main.
+- **LOO-705 successor.** The `control` event already carries
+  `successor: Option<PathBuf>`; the owner sends `None` and the viewer's
+  `held: false` arm in `transport.rs` leaves as before. After the rebase over
+  LOO-705, the owner fills `successor` from LOO-705's Moved entry and that arm
+  runs the viewer's invocation through it (`session resume <id>` via the
+  installed lf) instead of returning.
+- **LOO-708 coordination.** Both Tasks edit `transport.rs`; this one owns the
+  wire format, LOO-708 which processes exist. Expect a conflict-bearing rebase.
 - `session_lifecycle_tests`, `session_launch_contract` and clippy are gate's.
 
 Check (compress, 2026-11-02): `cargo test -p loopflow --test transport_tests` 26 passed; `--lib transport::` 18 passed; `cargo clippy -p loopflow --all-targets -- -D warnings` clean; goldens unchanged since regeneration.
+Check (realign, 2026-11-02): no source change since compress; `git rev-list --count HEAD..origin/main` = 0; tests not rerun.

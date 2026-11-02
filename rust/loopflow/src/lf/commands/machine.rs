@@ -23,7 +23,7 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
 
 async fn existing_store() -> anyhow::Result<Store> {
     crate::store::open_existing_store()
-        .await
+        .await?
         .ok_or_else(|| anyhow!("machine commands need an initialized local store"))
 }
 

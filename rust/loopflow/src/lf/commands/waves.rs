@@ -595,7 +595,7 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
 
 /// `lf wave list`'s rows; `None` before this Machine has a registry.
 pub async fn list(all: bool, current: bool) -> Result<Option<Vec<WaveSnapshot>>> {
-    let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+    let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
         return Ok(None);
     };
     Ok(Some(wave_snapshots(&store, all, current).await?))
@@ -648,7 +648,7 @@ pub fn status(wave: Option<&str>, json: bool, shape: Shape) -> Result<()> {
         return Ok(());
     }
     tokio::runtime::Runtime::new()?.block_on(async {
-        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+        let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
             return no_registry(false, "null");
         };
         let wave = resolve_wave_in(&store, &directory, wave).await?;
@@ -663,7 +663,7 @@ pub fn status(wave: Option<&str>, json: bool, shape: Shape) -> Result<()> {
 /// What `lf --cwd <directory> wave status [<wave>] --json` prints.
 pub fn status_json(directory: &Path, wave: Option<&str>, shape: Shape) -> Result<String> {
     tokio::runtime::Runtime::new()?.block_on(async {
-        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+        let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
             return Ok("null".to_owned());
         };
         let wave = resolve_wave_in(&store, directory, wave).await?;
@@ -693,7 +693,7 @@ pub fn refreshed_status(directory: &Path, wave: Option<&str>) -> Result<String> 
 /// without a registry. Desktop refreshes planning through `lf wave status --sync`.
 pub fn desktop_status(directory: &Path, wave: &str) -> Result<Option<WaveDetailSnapshot>> {
     tokio::runtime::Runtime::new()?.block_on(async {
-        let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
+        let Some(store) = open_existing_store().await?.map(std::sync::Arc::new) else {
             return Ok(None);
         };
         let wave = resolve_wave_in(&store, directory, Some(wave)).await?;

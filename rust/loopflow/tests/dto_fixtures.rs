@@ -1246,6 +1246,19 @@ fn wave_removal_preview_round_trips() {
 }
 
 #[test]
+fn wave_renamed_receipt_round_trips_with_its_leftovers() {
+    use loopflow::ops::wave_lifecycle::WaveRenamed;
+    let json = include_str!("../../../tests/fixtures/dto/wave_renamed.json");
+    let renamed: WaveRenamed = serde_json::from_str(json).unwrap();
+    assert!(renamed.renamed);
+    assert_eq!(renamed.summary.len(), 2);
+    assert_eq!(
+        serde_json::to_value(&renamed).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
 fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
     let receipts: Vec<loopflow::lf::commands::task_create::TaskCreateReceipt> =

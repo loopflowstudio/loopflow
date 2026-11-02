@@ -62,3 +62,21 @@ Implementation assumptions (2026-10-28, implement step), reversible:
   uses `apply_before_migration`/`apply_pending_migrations`. The served-write
   equivalence fixture adds its Wave once through `lf` first, since a first
   `add` commits the seeded authored files and a repeat prints `unchanged`.
+
+Concept review assumption (2026-11-02), reversible:
+
+- **Desktop reads Waves from the store only.** The filesystem placeholder scan
+  (`PortfolioDiscovery.authoredWaves`) goes; a clone's authored Waves are
+  registered through `ensure_wave` (id-first, skipping retired ids) when the
+  repository joins the Desktop portfolio and by `lf wave add`/`connect --all`,
+  never by a plan read. The simpler safe choice; the design records why.
+- **Folder-mode portfolios register on the selection write** (implement,
+  2026-11-02): `lf portfolio folder <path>` registers the repositories it
+  discovers then; a clone that appears in the folder later registers on its
+  first `lf wave add`/`connect --all` or the next portfolio change, since reads
+  record no Work. The automatic walk skips a directory whose id is a removed
+  Wave entirely; an explicit `lf wave add <name>` there still mints a fresh Wave.
+- **Noticed, not changed:** `ensure_wave`'s id-first match does not check the
+  repository, so a second clone of an already-registered repository on the same
+  Machine attaches to the first clone's Wave rows (path-keyed listing then hides
+  them in the second clone). Pre-existing; a separate Task if it bites.

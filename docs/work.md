@@ -161,6 +161,10 @@ $EDITOR .lf/wave/billing/GOAL.md       # who benefits, and what improves
 lf task create --wave billing --title "Meter usage events"
 ```
 
+A clone's committed `.lf/wave/` directories register when the repository joins
+the Desktop portfolio, and on `lf wave add` or `lf wave connect --all`; Desktop
+and `lf wave list` read the same rows. A removed Wave's directory stays removed.
+
 ```markdown
 <!-- .lf/wave/billing/GOAL.md -->
 ## Objective

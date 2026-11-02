@@ -773,6 +773,9 @@ pub fn connect_wave(
     let progress = &CliProgress;
     let ambient_wave = |explicit| planning_wave(repo_root, explicit);
     let targets = if all {
+        // A clone's authored directories register before the store is listed.
+        tokio::runtime::Runtime::new()?
+            .block_on(crate::ops::wave_lifecycle::register_authored(repo_root))?;
         crate::ops::linear::list_local_waves(repo_root)?
     } else {
         let explicit = wave;

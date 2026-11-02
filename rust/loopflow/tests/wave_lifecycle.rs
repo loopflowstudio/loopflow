@@ -347,6 +347,14 @@ fn rename_keeps_identity_moves_files_on_main_and_refuses_a_taken_name() {
     assert!(renamed["mentions"]
         .to_string()
         .contains(".lf/wave/ops/MEMORY.md:1"));
+    assert!(
+        renamed["summary"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("Still mentioned in: .lf/wave/ops/MEMORY.md:1"),
+        "Desktop shows the same leftovers the CLI prints: {}",
+        renamed["summary"]
+    );
 
     let again = lf(
         repo.path(),
@@ -354,4 +362,56 @@ fn rename_keeps_identity_moves_files_on_main_and_refuses_a_taken_name() {
         &["wave", "rename", "product", "prod", "--json"],
     );
     assert_eq!(again["renamed"], false);
+}
+
+#[test]
+fn a_repository_joining_the_portfolio_registers_its_authored_waves_but_not_removed_ones() {
+    let origin = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let archive = lf(
+        origin.path(),
+        home.path(),
+        &["wave", "add", "archive", "--json"],
+    );
+    let clone_root = tempfile::tempdir().unwrap();
+    let clone = clone_root.path().join("clone");
+    let cloned = Command::new("git")
+        .args(["clone", "-q"])
+        .arg(origin.path())
+        .arg(&clone)
+        .output()
+        .unwrap();
+    assert!(cloned.status.success());
+    // The clone still has .lf/wave/archive; the store retires that id.
+    lf(
+        origin.path(),
+        home.path(),
+        &["wave", "remove", "archive", "--json"],
+    );
+    let research = clone.join(".lf/wave/research");
+    std::fs::create_dir_all(&research).unwrap();
+    std::fs::write(research.join("GOAL.md"), "## Objective\n\nResearch\n").unwrap();
+    assert!(
+        live_waves(&clone, home.path()).is_empty(),
+        "a read registers nothing"
+    );
+
+    lf(
+        home.path(),
+        home.path(),
+        &["portfolio", "add", clone.to_str().unwrap(), "--json"],
+    );
+    assert_eq!(live_waves(&clone, home.path()), ["research"]);
+    let listing = lf(&clone, home.path(), &["wave", "list", "--json"]);
+    assert!(
+        !listing
+            .to_string()
+            .contains(archive["id"].as_str().unwrap()),
+        "the removed Wave's directory stays removed"
+    );
+    assert!(
+        !committed(&origin, ".lf/wave/archive/GOAL.md")
+            && clone.join(".lf/wave/archive/GOAL.md").is_file(),
+        "only the clone still has the directory"
+    );
 }

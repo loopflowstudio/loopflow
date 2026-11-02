@@ -46,6 +46,11 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         .to_path_buf();
     let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
+    // A clone's authored Waves join the store with the first explicit write here.
+    store
+        .sqlite
+        .register_authored_waves(&main.to_string_lossy())
+        .map_err(lifecycle_error)?;
     let created = store
         .get_wave_at(&locator)
         .await
@@ -113,6 +118,19 @@ async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> 
         .project(&id)
         .map_err(lifecycle_error)?
         .ok_or_else(|| lifecycle_error("selected Project is missing"))
+}
+
+/// Register the authored Wave directories of `repo`'s main checkout that the
+/// planning store does not know yet. Desktop lists only what the store knows, so
+/// this runs when a repository joins the portfolio and before `lf wave connect
+/// --all`; a directory of a removed Wave stays removed.
+pub async fn register_authored(repo: &Path) -> OpsResult<Vec<WaveId>> {
+    let main = crate::repository::CanonicalRepo::discover(repo).map_err(lifecycle_error)?;
+    let store = super::planning_sync::planning_store().await?;
+    store
+        .sqlite
+        .register_authored_waves(&main.to_string())
+        .map_err(lifecycle_error)
 }
 
 fn authored_path(slug: &str) -> String {
@@ -740,7 +758,10 @@ fn leftovers(removal: &WaveRemoval) -> Vec<String> {
 
 // ── Rename ─────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize)]
+/// `lf wave rename --json`: the receipt Desktop and the CLI both show. `summary`
+/// holds what is left to do after the rename, one sentence per line; empty when
+/// nothing is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WaveRenamed {
     pub id: WaveId,
     pub from: String,
@@ -751,9 +772,10 @@ pub struct WaveRenamed {
     /// The connected Initiative's new title, or why Linear kept the old one.
     pub initiative: Option<InitiativeRename>,
     pub mentions: Vec<String>,
+    pub summary: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InitiativeRename {
     pub initiative: String,
     pub title: String,
@@ -806,6 +828,7 @@ pub async fn rename(
                         files: AuthoredFiles::Unchanged,
                         initiative: None,
                         mentions: Vec::new(),
+                        summary: Vec::new(),
                     });
                 }
             }
@@ -890,7 +913,7 @@ pub async fn rename(
         }
         _ => None,
     };
-    Ok(WaveRenamed {
+    let mut renamed = WaveRenamed {
         id: wave.id().clone(),
         mentions: if moves {
             prose_mentions(&main, &from)
@@ -903,18 +926,18 @@ pub async fn rename(
         relocation,
         files,
         initiative,
-    })
+        summary: Vec::new(),
+    };
+    renamed.summary = rename_summary(&renamed);
+    Ok(renamed)
 }
 
-pub fn render_renamed(renamed: &WaveRenamed) -> String {
-    let mut lines = vec![if renamed.renamed {
-        format!("Renamed Wave {} → {}", renamed.from, renamed.to)
-    } else {
-        format!("{} is already {}", renamed.from, renamed.to)
-    }];
+/// What the rename left for a person or agent to finish.
+fn rename_summary(renamed: &WaveRenamed) -> Vec<String> {
+    let mut lines = Vec::new();
     if let AuthoredFiles::Uncommitted { reason } = &renamed.files {
         lines.push(format!(
-            ".lf/wave/{} is not committed: {reason}",
+            ".lf/wave/{} is not committed: {reason}.",
             renamed.to
         ));
     }
@@ -931,9 +954,21 @@ pub fn render_renamed(renamed: &WaveRenamed) -> String {
     }
     if !renamed.mentions.is_empty() {
         lines.push(format!(
-            "Still mentioned in: {}",
+            "Still mentioned in: {}.",
             renamed.mentions.join(", ")
         ));
     }
-    lines.join("\n")
+    lines
+}
+
+pub fn render_renamed(renamed: &WaveRenamed) -> String {
+    let headline = if renamed.renamed {
+        format!("Renamed Wave {} → {}", renamed.from, renamed.to)
+    } else {
+        format!("{} is already {}", renamed.from, renamed.to)
+    };
+    std::iter::once(headline)
+        .chain(renamed.summary.iter().cloned())
+        .collect::<Vec<_>>()
+        .join("\n")
 }

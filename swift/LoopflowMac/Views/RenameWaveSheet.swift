@@ -1,19 +1,87 @@
 // Rename Wave: `lf wave rename <id> <new-name>`. The Wave keeps its id, Tasks and
-// chapters, so selection stays on it; a failure keeps the sheet open with the error.
+// chapters, so selection stays on it. A failure keeps the sheet open with the
+// error; a rename with leftovers (an Initiative that kept its title, prose that
+// still names the old address) keeps it open showing the receipt's lines.
 
 import SwiftUI
 import Loopflow
 
+enum RenameWavePhase: Equatable {
+    case editing(error: String?)
+    case renaming
+    /// Renamed, with `summary` lines a person still has to act on.
+    case leftovers(WaveRenamed)
+}
+
+/// The sheet's content for one phase; the owner runs the command.
+struct RenameWaveSheetContent: View {
+    let currentName: String
+    @Binding var newName: String
+    let phase: RenameWavePhase
+    let onRename: () -> Void
+    let onDone: () -> Void
+    @Environment(\.palette) private var palette
+
+    private var trimmed: String { newName.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.lg) {
+            switch phase {
+            case .leftovers(let renamed):
+                Text("Renamed \(renamed.from) → \(renamed.to)")
+                    .font(Typography.sectionTitle(20))
+                    .foregroundStyle(palette.text)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    ForEach(Array(renamed.summary.enumerated()), id: \.offset) { _, line in
+                        Text(line).font(Typography.body()).foregroundStyle(palette.textSecondary)
+                    }
+                }.accessibilityIdentifier("rename-wave-summary")
+                HStack(spacing: Spacing.md) {
+                    Spacer()
+                    Button("Done", action: onDone)
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("rename-wave-done")
+                }
+            case .editing, .renaming:
+                Text("Rename \(currentName)")
+                    .font(Typography.sectionTitle(20))
+                    .foregroundStyle(palette.text)
+                TextField("Wave name", text: $newName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(onRename)
+                    .disabled(phase == .renaming)
+                    .accessibilityIdentifier("rename-wave-name")
+                if case .editing(let error?) = phase {
+                    Text(error)
+                        .font(Typography.caption())
+                        .foregroundStyle(palette.failure)
+                        .accessibilityIdentifier("rename-wave-error")
+                }
+                HStack(spacing: Spacing.md) {
+                    Spacer()
+                    Button("Cancel", action: onDone).buttonStyle(.plain)
+                        .foregroundStyle(palette.textSecondary)
+                    Button("Rename", action: onRename)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(phase == .renaming || trimmed.isEmpty || trimmed == currentName)
+                        .accessibilityIdentifier("rename-wave-confirm")
+                }
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 440)
+    }
+}
+
+/// Owns the rename command for one Wave.
 struct RenameWaveSheet: View {
     let model: WorkModel
     let id: String
     let currentName: String
     let repo: String
     let onDone: () -> Void
-    @Environment(\.palette) private var palette
     @State private var newName: String
-    @State private var renaming = false
-    @State private var error: String?
+    @State private var phase: RenameWavePhase = .editing(error: nil)
 
     init(model: WorkModel, id: String, currentName: String, repo: String, onDone: @escaping () -> Void) {
         self.model = model
@@ -24,50 +92,25 @@ struct RenameWaveSheet: View {
         _newName = State(initialValue: currentName)
     }
 
-    private var trimmed: String { newName.trimmingCharacters(in: .whitespacesAndNewlines) }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("Rename \(currentName)")
-                .font(Typography.sectionTitle(20))
-                .foregroundStyle(palette.text)
-            TextField("Wave name", text: $newName)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(rename)
-                .disabled(renaming)
-                .accessibilityIdentifier("rename-wave-name")
-            if let error {
-                Text(error)
-                    .font(Typography.caption())
-                    .foregroundStyle(palette.failure)
-                    .accessibilityIdentifier("rename-wave-error")
-            }
-            HStack(spacing: Spacing.md) {
-                Spacer()
-                Button("Cancel", action: onDone).buttonStyle(.plain)
-                    .foregroundStyle(palette.textSecondary)
-                Button("Rename", action: rename)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(renaming || trimmed.isEmpty || trimmed == currentName)
-                    .accessibilityIdentifier("rename-wave-confirm")
-            }
-        }
-        .padding(Spacing.xl)
-        .frame(width: 400)
+        RenameWaveSheetContent(
+            currentName: currentName, newName: $newName, phase: phase, onRename: rename, onDone: onDone)
     }
 
     private func rename() {
-        guard !renaming, !trimmed.isEmpty, trimmed != currentName else { return }
-        renaming = true
-        error = nil
-        let name = trimmed
+        let name = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .editing = phase, !name.isEmpty, name != currentName else { return }
+        phase = .renaming
         Task {
-            defer { renaming = false }
             do {
-                try await model.renameWave(id: id, newName: name, repo: repo)
-                onDone()
+                let renamed = try await model.renameWave(id: id, newName: name, repo: repo)
+                if renamed.summary.isEmpty {
+                    onDone()
+                } else {
+                    phase = .leftovers(renamed)
+                }
             } catch let failure {
-                error = failure.localizedDescription
+                phase = .editing(error: failure.localizedDescription)
             }
         }
     }

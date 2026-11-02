@@ -105,6 +105,81 @@ impl SqliteStore {
         tx.commit()?;
         Ok(parent.expect("validated Wave has at least one component"))
     }
+
+    /// Register every authored Wave directory under `<checkout>/.lf/wave/`, matching
+    /// by `config.yaml` id first. A directory whose id names a removed Wave is left
+    /// alone with its subtree, so a clone or a checkout behind the planning store
+    /// never brings a removed Wave back. A directory that cannot be read or
+    /// registered is logged and skipped with its subtree; the rest still register.
+    pub fn register_authored_waves(&self, repo: &str) -> StoreResult<Vec<WaveId>> {
+        let checkout = Path::new(repo);
+        let root = checkout.join(".lf/wave");
+        let mut registered = Vec::new();
+        let mut pending = child_directories(&root, "");
+        while let Some(slug) = pending.pop() {
+            let directory = root.join(&slug);
+            if directory.join("GOAL.md").is_file() || directory.join("config.yaml").is_file() {
+                let authored = match crate::work::wave::config::try_read_wave_config(
+                    checkout, &slug,
+                ) {
+                    Ok(config) => config.and_then(|config| config.id),
+                    Err(error) => {
+                        tracing::warn!(slug, %error, "authored Wave directory was not registered");
+                        continue;
+                    }
+                };
+                let removed = authored
+                    .map(|id| self.get_wave(&id))
+                    .transpose()?
+                    .flatten()
+                    .is_some_and(|wave| wave.is_retired());
+                if removed {
+                    tracing::info!(
+                        slug,
+                        "skipping authored Wave directory whose Wave was removed"
+                    );
+                    continue;
+                }
+                match self.ensure_wave(repo, &slug) {
+                    Ok(wave) => registered.push(wave),
+                    Err(error) => {
+                        tracing::warn!(slug, %error, "authored Wave directory was not registered");
+                        continue;
+                    }
+                }
+            }
+            pending.extend(child_directories(&root, &slug));
+        }
+        Ok(registered)
+    }
+}
+
+/// The directories directly under `prefix`, as slugs. A directory without its own
+/// authored files still leads to nested Waves.
+fn child_directories(root: &Path, prefix: &str) -> Vec<String> {
+    let directory = if prefix.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(prefix)
+    };
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut slugs: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .filter(|name| !name.starts_with('.'))
+        .map(|name| {
+            if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            }
+        })
+        .collect();
+    slugs.sort();
+    slugs
 }
 
 impl SqliteStore {
@@ -279,6 +354,51 @@ mod tests {
         let fresh = store.ensure_wave(root, "archive").unwrap();
         assert_ne!(fresh, removed, "a removed identity is never re-created");
         assert!(store.get_wave(&removed).unwrap().unwrap().is_retired());
+    }
+
+    #[test]
+    fn registering_a_clones_directories_lists_them_and_skips_a_removed_wave() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let root = repo.path().to_str().unwrap();
+        // The clone carries a removed Wave's directory and two nobody registered.
+        let removed = store.ensure_wave(root, "archive").unwrap();
+        store
+            .retire_waves(std::slice::from_ref(&removed), "removed")
+            .unwrap();
+        for slug in ["research", "tools/parser"] {
+            let directory = repo.path().join(".lf/wave").join(slug);
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                directory.join("GOAL.md"),
+                format!("## Objective\n\n{slug}\n"),
+            )
+            .unwrap();
+        }
+        std::fs::create_dir_all(repo.path().join(".lf/wave/research/metrics")).unwrap();
+
+        let registered = store.register_authored_waves(root).unwrap();
+        let canonical = crate::repository::CanonicalRepo::discover(repo.path())
+            .unwrap()
+            .to_string();
+        let mut live: Vec<String> = store
+            .list_waves(Some(&canonical))
+            .unwrap()
+            .into_iter()
+            .filter(|wave| !wave.is_retired())
+            .map(|wave| wave.slug().to_string())
+            .collect();
+        live.sort();
+        assert_eq!(live, ["research", "tools", "tools/parser"]);
+        assert_eq!(registered.len(), 2, "tools registers through its child");
+        assert!(store.get_wave(&removed).unwrap().unwrap().is_retired());
+        store.register_authored_waves(root).unwrap();
+        assert_eq!(
+            store.list_waves(Some(&canonical)).unwrap().len(),
+            3,
+            "registering again changes nothing"
+        );
     }
 
     #[test]

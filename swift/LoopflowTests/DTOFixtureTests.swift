@@ -17,6 +17,15 @@ struct DTOFixtureTests {
         #expect(removal.summary.first?.hasPrefix("2 open Tasks move to the repository") == true)
     }
 
+    @Test func waveRenamedReceiptDecodesItsLeftovers() throws {
+        let renamed = try RegistryQuery.decode(
+            WaveRenamed.self, from: String(decoding: loadFixtureData("wave_renamed.json"), as: UTF8.self))
+        #expect(renamed.to == "prod")
+        #expect(renamed.files == .committed(commit: "0f3c2a1d"))
+        #expect(renamed.initiative?.error == "Linear: rate limited")
+        #expect(renamed.summary.count == 2)
+    }
+
     @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {
         let data = try loadFixtureData("task_files_frames.json")
         let frames = try JSONDecoder().decode([TaskFilesFrame].self, from: data)

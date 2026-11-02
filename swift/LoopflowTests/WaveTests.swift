@@ -17,26 +17,6 @@ struct WaveTests {
         #expect(wave.displayName == "OpenAI-tools")
         #expect(wave.repo == "/tmp/repo")
         #expect(wave.lens.color == .black)
-        #expect(wave.isRegistered)
-    }
-
-    @Test("authored waves can exist before runtime registration")
-    func authoredWaveHasNoRegistryRow() {
-        let wave = WaveViewModel(
-            api: Wave(
-                id: "authored:/tmp/repo#infrastructure",
-                name: "infrastructure",
-                repo: "/tmp/repo",
-                status: .ready
-            ),
-            isRegistered: false
-        )
-
-        #expect(!wave.isRegistered)
-        // No runtime reading exists yet, so the lens is unknown-with-reason —
-        // never a silent black and never a local-session guess.
-        #expect(wave.lens.color == .unknown)
-        #expect(!wave.lens.reason.isEmpty)
     }
 
     @Test("objective tagline uses the first authored line")

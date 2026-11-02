@@ -656,8 +656,9 @@ public struct RegistryQuery: Sendable {
     }
 
     /// `lf wave rename`: same Wave id, Tasks and chapters; its files move on main.
-    public func renameWave(wave: String, newName: String, cwd: String) async throws {
-        _ = try await run(["wave", "rename", wave, newName, "--json"], cwd)
+    /// The receipt's `summary` names anything left to finish.
+    public func renameWave(wave: String, newName: String, cwd: String) async throws -> WaveRenamed {
+        try Self.decode(WaveRenamed.self, from: await run(["wave", "rename", wave, newName, "--json"], cwd))
     }
 
     /// `lf wave remove`: with `preview`, the consequences without changing anything.

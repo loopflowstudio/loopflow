@@ -1,0 +1,21 @@
+{
+  "id": "5081a624-c095-4218-9a54-6d1a6711f282",
+  "from": "product",
+  "to": "prod",
+  "renamed": true,
+  "relocation": {
+    "wave_id": "5081a624-c095-4218-9a54-6d1a6711f282",
+    "from_repo": "/Users/jack/src/loopflow",
+    "from_name": "product",
+    "to_repo": "/Users/jack/src/loopflow",
+    "to_name": "prod",
+    "waves_moved": 1
+  },
+  "files": {"state": "committed", "commit": "0f3c2a1d"},
+  "initiative": {"initiative": "init_8f2c", "title": "Prod", "error": "Linear: rate limited"},
+  "mentions": [".lf/wave/ops/MEMORY.md:1"],
+  "summary": [
+    "Linear Initiative init_8f2c kept its title: Linear: rate limited. Run `lf wave rename prod --title <title>` to retry.",
+    "Still mentioned in: .lf/wave/ops/MEMORY.md:1."
+  ]
+}

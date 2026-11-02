@@ -34,10 +34,6 @@ struct WavesView: View {
         return portfolioService.repos
     }
 
-    /// Authored waves discovered on disk per repo path: `<repo>/.lf/wave/<name>/GOAL.md`.
-    /// Merged with registered waves so not-yet-launched waves are still listed.
-    @State private var authoredWavesByRepo: [String: [String]] = [:]
-    @State private var plansByWaveKey: [String: WavePlan] = [:]
 
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
@@ -46,23 +42,14 @@ struct WavesView: View {
     @State private var renaming: WaveViewModel?
     @State private var didRestoreStickyRepo = false
 
-    /// All waves across every repo: registry rows merged with Waves authored on
-    /// disk that have not been served yet.
+    /// All Waves the store knows across every repo. One stable alphabetical list
+    /// per repository — the row's lens carries state, so rows never reorder as
+    /// processes start and stop.
     private var allWaves: [WaveViewModel] {
-        repos.flatMap { mergedWaves(for: $0) }
-    }
-
-    /// Registered waves plus idle placeholders for authored GOAL.md files that
-    /// have not been served yet. One stable alphabetical list — the row's lens
-    /// carries state, so rows never reorder as processes start and stop.
-    private func mergedWaves(for repo: PortfolioRepo) -> [WaveViewModel] {
-        let live = repoStates[repo.path]?.waves ?? []
-        let liveNames = Set(live.map(\.name))
-        let placeholders = (authoredWavesByRepo[repo.path] ?? [])
-            .filter { !liveNames.contains($0) }
-            .map { authoredPlaceholder(repoPath: repo.path, waveName: $0) }
-        return (live + placeholders).sorted {
-            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        repos.flatMap { repo in
+            (repoStates[repo.path]?.waves ?? []).sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
         }
     }
 
@@ -72,17 +59,6 @@ struct WavesView: View {
     /// its parent with the same lens and selection behavior.
     private var outlinedWaves: [(wave: WaveViewModel, indent: Int)] {
         waveOutline(filteredWaves)
-    }
-
-    /// An idle, not-yet-launched row for a wave authored on disk.
-    private func authoredPlaceholder(repoPath: String, waveName: String) -> WaveViewModel {
-        WaveViewModel(api: Wave(
-            id: "\(repoPath)#\(waveName)",
-            name: waveName,
-            repo: repoPath,
-            status: .ready
-        ), plan: plansByWaveKey[Self.wavePlanKey(repoPath: repoPath, waveName: waveName)],
-        isRegistered: false)
     }
 
     private var filteredWaves: [WaveViewModel] {
@@ -133,16 +109,13 @@ struct WavesView: View {
         }
         .onChange(of: model.workScope) { _, _ in model.syncWorkScope() }
         .onChange(of: selectedWave?.id, initial: true) { _, _ in
-            if let wave = selectedWave, wave.isRegistered {
+            if let wave = selectedWave {
                 model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave))
             }
         }
         // Waves arrive with every planning frame.
         .onChange(of: model.planningSequence) { _, _ in
-            Task {
-                await syncRepoStates()
-                await refreshAuthoredWaves()
-            }
+            Task { await syncRepoStates() }
         }
         .sheet(item: $removing) { wave in
             RemoveWaveSheet(
@@ -178,14 +151,12 @@ struct WavesView: View {
         }
         .task {
             await refreshRepos()
-            await refreshAuthoredWaves()
             restoreStickyRepoSelectionIfNeeded()
             ensureRepoStates()
             await syncRepoStates()
         }
         .onChange(of: portfolioService.repos) { _, _ in
             Task {
-                await refreshAuthoredWaves()
                 ensureRepoStates()
                 await syncRepoStates()
             }
@@ -219,9 +190,8 @@ struct WavesView: View {
                                 isSelected: selectedWaveId == waveSelectionId(entry.wave),
                                 onSelect: { selectedWaveId = waveSelectionId(entry.wave) },
                                 indentLevel: entry.indent,
-                                // Unregistered authored directories have no Wave to act on.
-                                onDelete: entry.wave.isRegistered ? { removing = entry.wave } : nil,
-                                onRename: entry.wave.isRegistered ? { renaming = entry.wave } : nil
+                                onDelete: { removing = entry.wave },
+                                onRename: { renaming = entry.wave }
                             )
                         }
                     }
@@ -402,7 +372,7 @@ struct WavesView: View {
             WaveDetailPane(
                 wave: wave,
                 repoPath: waveRepoPath(for: wave),
-                streamed: wave.isRegistered ? model.waveDetail(id: wave.id) : nil,
+                streamed: model.waveDetail(id: wave.id),
                 isProjectActivationPending: model.isProjectActivationPending(id: wave.id),
                 transportError: model.projectCommandErrors[wave.id],
                 onActivateProject: { model.activateProject(id: wave.id, name: wave.name, repo: waveRepoPath(for: wave)) },
@@ -482,14 +452,6 @@ struct WavesView: View {
         await portfolioService.refresh()
     }
 
-    /// Enumerate each rail repo's authored waves — `<repo>/.lf/wave/<name>/GOAL.md`
-    /// directories — off the main thread, so the list can offer them as launchable
-    /// rows before they have a registry entry.
-    private func refreshAuthoredWaves() async {
-        if AppTestMode.shouldBypassRegistry { return }
-        authoredWavesByRepo = await PortfolioDiscovery.authoredWaves(in: repos)
-    }
-
     private func ensureRepoStates() {
         let desiredPaths = Set(repos.map(\.path))
 
@@ -523,7 +485,6 @@ struct WavesView: View {
                 waves = try await RegistryQueryLocal.shared.allWaves()
             }
             let plans = buildWavePlanCache(registryWaves: waves)
-            plansByWaveKey = plans
             for state in repoStates.values {
                 state.applyConnectedWaves(waves, plans: plans)
             }
@@ -571,17 +532,10 @@ struct WavesView: View {
     /// Each Wave's Projects arrive with the roadmap in every planning frame;
     /// only the authored objective is read here, from its GOAL.md.
     private func buildWavePlanCache(registryWaves: [Wave]) -> [String: WavePlan] {
-        let authored = authoredWavesByRepo
         var targets: [String: (repoPath: String, waveName: String)] = [:]
         for wave in registryWaves {
             let key = Self.wavePlanKey(repoPath: wave.repo, waveName: wave.name)
             targets[key] = (wave.repo, wave.name)
-        }
-        for (repoPath, waveNames) in authored {
-            for waveName in waveNames {
-                let key = Self.wavePlanKey(repoPath: repoPath, waveName: waveName)
-                targets[key] = (repoPath, waveName)
-            }
         }
         var projects: [String: WorkEvidence<ProjectPlanningSnapshot>] = [:]
         for roadmap in model.roadmap.value?.waves ?? [] {

@@ -3,12 +3,10 @@ import SwiftUI
 public struct WaveViewModel: Sendable, Identifiable, Hashable {
     public let api: Wave
     public let plan: WavePlan?
-    public let isRegistered: Bool
 
-    public init(api: Wave, plan: WavePlan? = nil, isRegistered: Bool = true) {
+    public init(api: Wave, plan: WavePlan? = nil) {
         self.api = api
         self.plan = plan
-        self.isRegistered = isRegistered
     }
 
     public var id: String { api.id }
@@ -26,20 +24,12 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     /// Open Tasks the registry counts as active for this Wave.
     public var openTaskCount: Int { api.activeTasks }
 
-    /// The operational lens for this row, in the shared green/red/blue/black grammar.
-    /// A registered Wave projects from the runtime `lf wave list` carries; an unregistered
-    /// Wave (authored on disk, never served) has no runtime reading, so it stays
-    /// unknown-with-reason rather than a silent black or a local-session guess.
+    /// The operational lens for this row, in the shared green/red/blue/black grammar,
+    /// projected from the runtime `lf wave list` carries.
     public var lens: WaveLens {
         if let retiredAt = api.retiredAt {
             let successor = api.supersededByWaveId.map { " · superseded by \($0)" } ?? ""
             return WaveLens(color: .black, reason: "Retired at \(retiredAt)\(successor)")
-        }
-        guard isRegistered else {
-            return WaveLens(
-                color: .unknown,
-                reason: "Not registered"
-            )
         }
         return WaveLens.forWave(
             activeTasks: api.activeTasks

@@ -2,7 +2,8 @@
 
 Status: implemented, synced onto main through #1792, realigned and compressed twice
 (2026-11-02). Concept review sent one change back; it landed (432eefbff3); the second
-pass found nothing to change and no open choice. Gate next.
+pass found nothing to change and no open choice. Published as #1798 (2026-11-02);
+demo, then gate, next.
 Source: Task definition (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop
 database-mismatch incident).
 

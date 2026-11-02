@@ -3,7 +3,7 @@
 Status: implemented, synced onto main through #1792, realigned and compressed twice
 (2026-11-02). Concept review sent one change back; it landed (432eefbff3); the second
 pass found nothing to change and no open choice. Published as #1798 (2026-11-02);
-demo, then gate, next.
+demoed headless on Jack's Mac (below); gate next.
 Source: Task definition (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop
 database-mismatch incident).
 
@@ -124,13 +124,43 @@ Not changed, and why:
   before it. The resumed app runs from the target, never from scratch, so the order
   is harmless; not worth a loop.
 
+## Demo (2026-11-02, headless, Jack's Mac, branch build at 2e913566a5 + rebuilt lf)
+
+Run by the Graph's demo step with no one present; Jack has not seen it. Page:
+`scratch/demo.html`. `open` was shimmed on PATH to record each Launch Services
+request and forward it, so A and B are real launches.
+
+| Caller | `LF_DESKTOP` | Request lf issued | Observed |
+| --- | --- | --- | --- |
+| A. terminal | unset | `open -a /Applications/Loopflow.app loopflow://loopflow/task/LOO-620` | status `opening`; the running installed Desktop (pid 91660, `LSBundlePath=/Applications/Loopflow.app`) stayed the only Loopflow process |
+| B. agent inside the installed Desktop | `com.loopflow.mac` | same `-a` path request | same; no `open -b com.loopflow.mac` anywhere (the incident command) |
+| C. agent inside Loopflow Dev | `com.loopflow.mac.dev` | `open -b com.loopflow.mac.dev …` | recorded only, not forwarded: launching Loopflow Dev unasked is out |
+
+Spotlight and Finder on the same Mac: `mdfind` on `com.loopflow.mac` lists exactly
+`/Applications/Loopflow.app`; `com.loopflow.mac.dev` lists `~/Applications/Loopflow Dev.app`;
+`com.loopflow.concerto` lists nothing. `ls -a /Applications ~/Applications` shows no
+`.promote.*`/`.superseded.*` orphan. `~/src/loopflow/local-bin` holds `lf` and `lfd`,
+no app bundle. `~/.local/bin/lf` resolves into `/Applications/Loopflow.app`.
+
+Not run: `lf install` twice. On this Mac it would download a release and swap
+`/Applications/Loopflow.app` and `~/.local/bin/lf` under a running Desktop, which
+happens only on Jack's say-so; its proof stays the acceptance test
+(`repeated_installs_leave_one_bundle_in_the_applications_folder`, planted orphan,
+`.noindex` scratch, two promotions, one bundle left). The post-land `verify` step
+meets it for real on the next `lf install`. Also not planted: a stale same-id copy
+(it would register one more `com.loopflow.mac` bundle on Jack's Mac, the pollution
+this Task removes); the path request in A/B is what makes that copy unreachable.
+
+Acceptance tests rerun on this tree: the two `open::tests::desktop_*` tests and the
+repeated-installs test (3 passed), `test_only_release_packaging_carries_the_installed_bundle_id`
+(1 passed). No design change came out of the demo.
+
 ## Remaining
 
 - Gate: affected suites (`global_commands`, `work_open_tests`, install lib tests,
   `test_release_loopflow.py`, `test_app_bundle.py`, `test_install_script.py`), clippy.
   `global_commands::scheduled_install_is_independent_of_the_invoking_checkout_and_reusable`
   fails on main too (#1776's HOME-vs-account-home check, macOS-only); not this branch.
-- Demo on a Mac: `lf install` twice, then `ls -a /Applications`, `lf open`.
 
 Checks: `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::`
 36 passed, `--test integration -- available_conversations_need_no_question` and

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-620 demo: lf open reaches only the installed Loopflow.app</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1b1b1b; --bg: #fff; --muted: #666; --line: #ddd; --ok: #2a7a2a; --note: #8a5a00; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6e6e6; --bg: #141414; --muted: #9a9a9a; --line: #333; --ok: #7fd47f; --note: #e0b24f; } }
+  body { margin: 0 auto; max-width: 42rem; padding: 2.5rem 1.25rem 4rem; font: 16px/1.55 -apple-system, system-ui, sans-serif; color: var(--fg); background: var(--bg); }
+  h1 { font-size: 1.5rem; line-height: 1.3; margin: 0 0 .5rem; }
+  h2 { font-size: 1.1rem; margin: 2.5rem 0 .75rem; }
+  header p { color: var(--muted); margin: .2rem 0; }
+  pre { padding: .75rem 1rem; border: 1px solid var(--line); border-radius: 6px; overflow-x: auto; font-size: .9rem; line-height: 1.45; }
+  code { font-size: .92em; }
+  table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+  th, td { text-align: left; vertical-align: top; padding: .5rem .5rem .5rem 0; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; }
+  .ok { color: var(--ok); }
+  .note { color: var(--note); }
+  .seen { min-height: 2.2rem; border: 1px dashed var(--line); border-radius: 6px; padding: .4rem .6rem; color: var(--muted); font-size: .9rem; }
+  ol li { margin: .4rem 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>lf open reaches only the installed Loopflow.app</h1>
+  <p>LOO-620 · demo step · 2026-11-02 · headless run on Jack's Mac, branch at 2e913566a5 (PR #1798)</p>
+  <p>Built from <code>rust/loopflow/src/lf/commands/open.rs</code> (<code>DesktopApp</code>), <code>install.rs</code> (<code>converge_release_app</code>), <code>scripts/release-loopflow.py</code>, <code>swift/project.yml</code>. Record: <code>scratch/loo-620-lf-open-spotlight.md</code>.</p>
+</header>
+
+<p><strong>Decision needed:</strong> none from the run itself. Every observed result matched the plan. The one thing not demonstrated live is a double <code>lf install</code>, which would swap the app under your running Desktop; question 1 below asks whether you want that on your next install or before landing.</p>
+
+<h2>What was run</h2>
+<p><code>open</code> was shimmed on PATH to record each Launch Services request and forward it to <code>/usr/bin/open</code>, so rows A and B are real launches. Row C recorded only: launching Loopflow Dev unasked is out.</p>
+
+<table>
+<tr><th>Action</th><th>Expected</th><th>Observed</th><th>Your view</th></tr>
+<tr>
+  <td>A. From a terminal: <code>lf open</code> in the LOO-620 worktree, <code>LF_DESKTOP</code> unset</td>
+  <td><code>open -a /Applications/Loopflow.app loopflow://loopflow/task/LOO-620</code></td>
+  <td class="ok">Exactly that request. Receipt status <code>opening</code>. The installed Desktop (pid 91660, <code>LSBundlePath=/Applications/Loopflow.app</code>) remained the only Loopflow process.</td>
+  <td><div class="seen"></div></td>
+</tr>
+<tr>
+  <td>B. From an agent inside the installed Desktop: <code>LF_DESKTOP=com.loopflow.mac lf open</code></td>
+  <td>Same <code>-a</code> path request; never <code>open -b com.loopflow.mac</code> (the 2026-11-02 incident command)</td>
+  <td class="ok">Same path request. No <code>-b com.loopflow.mac</code> was issued.</td>
+  <td><div class="seen"></div></td>
+</tr>
+<tr>
+  <td>C. From an agent inside Loopflow Dev: <code>LF_DESKTOP=com.loopflow.mac.dev lf open</code></td>
+  <td><code>open -b com.loopflow.mac.dev …</code> (routes back to its own Desktop)</td>
+  <td class="ok">Recorded <code>open -b com.loopflow.mac.dev loopflow://loopflow/task/LOO-620</code>; not forwarded.</td>
+  <td><div class="seen"></div></td>
+</tr>
+<tr>
+  <td>D. Spotlight: <code>mdfind "kMDItemCFBundleIdentifier == 'com.loopflow.mac'"</code></td>
+  <td>Only <code>/Applications/Loopflow.app</code></td>
+  <td class="ok">Only <code>/Applications/Loopflow.app</code>. The <code>.dev</code> id lists only <code>~/Applications/Loopflow Dev.app</code>; <code>com.loopflow.concerto</code> lists nothing.</td>
+  <td><div class="seen"></div></td>
+</tr>
+<tr>
+  <td>E. Finder: <code>ls -a /Applications ~/Applications</code></td>
+  <td>No <code>.Loopflow.app.promote.*</code> or <code>.superseded.*</code></td>
+  <td class="ok">Only <code>Loopflow.app</code> and <code>Loopflow Dev.app</code>.</td>
+  <td><div class="seen"></div></td>
+</tr>
+<tr>
+  <td>F. <code>lf install</code> twice, then <code>ls -a /Applications</code></td>
+  <td>One <code>Loopflow.app</code>, nothing staged beside it</td>
+  <td class="note">Not run: it would download a release and replace <code>/Applications/Loopflow.app</code> and <code>~/.local/bin/lf</code> under your running Desktop. Proof stays <code>repeated_installs_leave_one_bundle_in_the_applications_folder</code> (passed), which plants an earlier orphan and promotes twice.</td>
+  <td><div class="seen"></div></td>
+</tr>
+</table>
+
+<h2>Recorded requests</h2>
+<pre>open -a /Applications/Loopflow.app loopflow://loopflow/task/LOO-620
+open -a /Applications/Loopflow.app loopflow://loopflow/task/LOO-620
+open -b com.loopflow.mac.dev loopflow://loopflow/task/LOO-620</pre>
+
+<h2>Before and after</h2>
+<p>Before (main, the incident): <code>lf open</code> ran <code>open -b com.loopflow.mac</code>, and Launch Services picked any registered copy carrying that id, on 2026-11-02 a benchmark staging build.</p>
+<p>After (this branch): one Desktop destination. The installed app by path, found through <code>~/.local/bin/lf</code>, which on this Mac resolves into <code>/Applications/Loopflow.app</code>. A bundle id names only the non-release Desktop the caller runs inside. Release packaging alone stamps <code>com.loopflow.mac</code>; Xcode and <code>lf install local</code> builds are <code>com.loopflow.mac.dev</code>, and the local build stages under <code>app.noindex/</code> where Spotlight does not look.</p>
+
+<h2>Tests rerun on this tree</h2>
+<pre>cargo test -p loopflow --lib -- open::tests::desktop_launches_the_installed_app_by_path \
+  open::tests::desktop_inside_the_installed_app_reaches_it_by_path \
+  install::artifact_tests::repeated_installs_leave_one_bundle_in_the_applications_folder
+  → 3 passed
+uv run pytest python/tests/test_release_loopflow.py -k installed_bundle_id → 1 passed</pre>
+
+<h2>Questions</h2>
+<ol>
+  <li>The live double-install (row F): <b>a.</b> prove it on your next routine <code>lf install</code> after #1798 lands, in the verify step; <b>b.</b> run it before landing with you watching.</li>
+  <li>Stale same-id copy: <b>a.</b> accept the unit test plus the path request as proof; <b>b.</b> plant a throwaway <code>com.loopflow.mac</code> bundle on your Mac and run <code>lf open</code> against it (registers one more copy, then unregisters it).</li>
+</ol>
+</body>
+</html>

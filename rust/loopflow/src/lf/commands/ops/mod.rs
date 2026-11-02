@@ -32,7 +32,6 @@ use crate::prompt::process::ProcessPromptInput;
 use crate::prompt::Surface;
 use crate::skills::sync_skills;
 use crate::skills::SkillSyncOptions;
-use crate::store::RegistryUnavailable;
 use anyhow::{anyhow, Result};
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -1774,8 +1773,8 @@ fn task_ownership() -> Result<WorktreeOwnership> {
     };
     let mut named = Vec::new();
     let runtime = tokio::runtime::Runtime::new()?;
-    match runtime.block_on(crate::store::open_registry_for_authority()) {
-        Ok(store) => {
+    match runtime.block_on(crate::store::open_existing_store()) {
+        Ok(Some(store)) => {
             let tasks = runtime
                 .block_on(store.list_tasks(None))
                 .map_err(|error| anyhow!("cannot verify Task ownership before pruning: {error}"))?;
@@ -1808,16 +1807,10 @@ fn task_ownership() -> Result<WorktreeOwnership> {
                 }
             }
         }
-        Err(RegistryUnavailable::MissingFile { .. }) => {}
-        Err(RegistryUnavailable::Unresolved { error }) => {
+        Ok(None) => {}
+        Err(error) => {
             return Err(anyhow!(
                 "cannot verify Task ownership before pruning: {error}"
-            ));
-        }
-        Err(RegistryUnavailable::Incompatible { path, error }) => {
-            return Err(anyhow!(
-                "cannot verify Task ownership from {} before pruning: {error}",
-                path.display()
             ));
         }
     }

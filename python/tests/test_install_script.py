@@ -201,9 +201,12 @@ def test_local_dry_run_has_no_production_activation_path(
     monkeypatch.setattr(install, "LOCAL_BIN", root / "local-bin")
     monkeypatch.setattr(install, "default_bundle_spec", lambda: bundle_spec)
     monkeypatch.setattr(install, "read_release_version", lambda _root: "9.9.9")
+    # The app plan only prints on macOS; pin the host so Linux CI checks it too.
+    monkeypatch.setattr(install.platform, "system", lambda: "Darwin")
 
     install.local(dry_run=True, skip=[])
 
     output = capsys.readouterr().out
     assert "build under local-bin" in output
+    assert str(root / "local-bin" / "app.noindex") in output
     assert "promote" not in output.lower()

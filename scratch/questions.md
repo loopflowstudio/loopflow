@@ -57,7 +57,7 @@ Nothing.
   not: they self-migrate (`apply_sqlite_with_backup`). Only the shared `~/.lf`
   store admits additive newer tails, which is where running steps live.
 
-Check: `cargo test -p loopflow --test task_pr_authority_tests` 12 passed after the compress fold (`authority_store`), clippy clean; `--lib store::sqlite::frontier_tests::` 11 passed and `--test integration -- doctor_tests::status_reads` passed earlier on unchanged code; gate owns the affected suites.
+Check (gate, 2026-11-02): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(store::) | test(doctor_tests::) | binary(task_pr_authority_tests) | test(context_tests::) | test(wt_prune_branches::) | test(planning_setup_tests::) | test(machine_commands::) | test(work_open_tests::) | test(wave_setup_tests::)'` PASS: architecture, inventory, fmt, 501 Rust tests passed (one pre-existing SharedMachine fixture over 60 s, `task_work::tests::process_membership_does_not_read_events_that_name_no_process`), clippy clean; 623 s. CI owns the full Rust matrix.
 
 ## Concept review (2026-11-02, headless; third pass after the one-fix refusal landed)
 

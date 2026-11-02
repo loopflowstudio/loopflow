@@ -929,17 +929,17 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   provenance.
 - PM writes resolve stable provider edges, not names or Issue prefixes. Explicit Wave
   creation selects its current Project; standalone creation has none. Ordinary
-  Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;
+  Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity lives in `config.yaml`;
   repository configuration owns the Linear Team.
 - LOO-500 (Jack Heart, 2026-10-28): CLI/Desktop share `wave add|remove|rename`;
   unknown `connect` names use add first. Remove retires; open Tasks move to
   parent/repository, started Tasks always move, `--delete-backlog` deletes only
   unstarted Tasks. Live lists exclude retired Waves; `show` retains history.
-  Authored files commit on main; stale paths resolve by config id. November 2
-  isolated CLI failures show retry evidence must outlive retirement, rename and
-  directory deletion: live-child readers lose archive obligations, absent paths
-  hide pending commits, and a target name cannot prove a previous rename.
-  Recovery remains unresolved; preserve replacement Waves and unrelated edits.
+  Authored files commit on main; stale paths resolve by config id. November 2:
+  retries now retain original/subtree IDs, provider bindings and exact file images
+  in Machine SQLite. Live rows/paths lost obligations; target names proved no
+  prior rename. CLI regressions cover pending commits, replacement identities and
+  later edits; live Linear recovery and native interaction remain unproved.
 - `lf pm show --no-sync` is cache evidence, not proof of current provider state.
   `synced_at`, snapshot generation, and source freshness have different meanings.
   A rejected write can follow a successful provider mutation if readback failed;

@@ -65,7 +65,3 @@ The detailed implementation/review chronology remains at
 request names its saved operation even if its original address has been reused.
 Use the replacement's explicit ID for a new operation. Machine SQLite owns the
 local effect journal; completed records prove prior identity but never replay effects.
-
-Proposed Product memory update (read-only here): LOO-500 now retains rename/remove
-intent and effect completion in Machine SQLite, with identity-safe CLI retry
-regressions. Live Linear recovery and native interaction remain demo/review work.

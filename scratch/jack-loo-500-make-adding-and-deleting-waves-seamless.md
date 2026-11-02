@@ -1,8 +1,9 @@
 # LOO-500: Add and remove Waves seamlessly
 
-Status: accepted experience; retry repair implemented and focused checks passed (2026-11-02).
-Post-merge verification reproduced removal and rename retry failures; retained
-operation evidence now replaces the failed recovery paths below. Three concept reviews closed the alternate
+Status: accepted experience; retry repair extended on 2026-11-02 to reconcile
+the index after a successful commit and failed reset; focused regressions passed.
+Verification after integrating main reproduced removal and rename retry failures;
+retained operation evidence now replaces those recovery paths. Three concept reviews closed the alternate
 creation path (`lf wave connect <new-name>` adds first). Merged with main at
 `4e9ade2d04`. Happy-path CLI demo done; Desktop demo awaits a display session.
 Jack Heart filed LOO-500; exact controls,
@@ -122,9 +123,10 @@ Required sequence, with durable retry evidence described below:
    (Jack Heart, 2026-10-28), via a new `initiativeArchive` mutation beside
    `UPDATE_INITIATIVE_MUTATION` in `linear/mod.rs`. Runs after local
    retirement; a Linear failure leaves the Wave retired and the receipt says
-   the Initiative is still live, and re-running `lf wave remove` retries only
-   the archive. Keep its files until archival succeeds, since they hold the
-   Initiative binding. Unconnected repositories skip this step.
+   the Initiative is still live. Re-running `lf wave remove` retries outstanding
+   archives before finishing authored cleanup. Files stay until archival succeeds;
+   the saved operation retains every original descendant binding independently
+   of those files. Unconnected repositories skip this step.
 5. **Remove authored files** `.lf/wave/<name>/` from the main checkout and
    commit (`lf wave remove: <name>`), same rules as add.
 6. Receipt: what moved or was deleted, what was retired, what stayed, which
@@ -146,8 +148,9 @@ commit-on-main path as add/remove:
 2. Write the existing portable `WaveName` planning edit (exchange already
    carries it) — identity, Projects, Tasks, Sessions and history are
    untouched; only the address changes.
-3. `git mv .lf/wave/<name> .lf/wave/<new-name>` on the main checkout and
-   commit (`lf wave rename: <name> → <new-name>`), same selective-commit rule.
+3. Apply the saved file move and reference rewrites on the main checkout and
+   commit (`lf wave rename: <name>`) through the saved-image path below.
+   The private Git index excludes unrelated changes and preserves later edits.
 4. Required idempotency: already at `<new-name>` with the same id → exit 0
    after reporting or finishing pending effects. Saved operations establish
    the old identity; a live target alone never proves a prior rename.
@@ -248,12 +251,10 @@ this Task makes them work and adds nothing beside them):
   carry no successor/reason; retired rows may omit both. The upgrade test
   `wave_definitions::released_waves_upgrade_and_removal_needs_no_successor`
   seeds the released schema with a superseded retired row.
-- `ops::project::ensure` creates a Project for every Wave, so
-  `wave_retirement_blockers` makes retirement impossible for any real Wave —
-  it must go, not be extended.
-- Planning exchange only knows `WaveName`/`WaveParent`. Without a portable
-  retirement edit, a peer's Git exchange would re-assert the Wave. Adding the
-  `WaveRetired` edit is required. Finding: `WorkValue` is an internally tagged
+- The former `ops::project::ensure` created a Project for every Wave, making
+  `wave_retirement_blockers` refuse every real Wave. Both have been replaced.
+- Planning exchange now carries `WaveRetired` alongside `WaveName`/`WaveParent`,
+  preventing peers from re-asserting a removed Wave. Finding: `WorkValue` is an internally tagged
   enum with no `#[serde(other)]`, and `PlanningSnapshot` deserializes every
   change, so a released lf (≤ 0.15.0) reading a document that contains
   `wave_retired` fails the whole Git planning read. Decision: add the variant;
@@ -302,6 +303,15 @@ Removal/rename keep their saved-image commit path; its base/index reads select
 literal filenames and read the exact object returned by Git. The split-wave
 recipe uses the child's full address throughout and the first Project add creates.
 No obsolete lifecycle implementation remains to delete.
+
+The post-commit repair removes index reconciliation from `commit_images`'s
+commit-only branch. The operation's saved index/after images now reconcile all
+selected paths even when HEAD already matches, under the same mutation lock.
+Later staged edits and paths owned by replacement Waves remain untouched.
+Recovery selects files and pending commits with direct loops; retries no longer
+rewrite the saved `applied` state. The reset-failure helper only asserts the
+failure receipt, since neither caller consumes it. Removed the obsolete
+`scratch/concept-review.html`; its exact historical reference remains below.
 
 Previously removed with their exclusive tests:
 
@@ -358,6 +368,8 @@ operation evidence and has public CLI regressions for the four counterexamples,
 replacement identities, changed provider bindings and later staged/working edits.
 Provider failure tests use missing repository configuration, so they prove retained
 obligations, not successful recovery against live Linear.
+The focused suite exercises failed commits and post-commit reset failures, not process termination at every
+journal/file/provider boundary; source inspection alone is not that coverage.
 Desktop demo steps 1–3 need a display session (demo/review); CLI
 steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02). Headless view tests
 prove sheet content and actions, not the complete native interaction.
@@ -379,8 +391,9 @@ This is a local effect journal, not portable Wave state or another planning owne
 Retirement/name edits still use the existing planning writer and exchange.
 
 A repository lifecycle lock serializes add/remove/rename. Pending requests resolve
-by saved identity/address before live address lookup; completed rename evidence is
-used only when the old address no longer resolves. A fresh explicit ID addresses
+by saved identity/address before live address lookup. Completed rename evidence
+requires either an unresolved old address or the original ID still at its saved
+target; an unrelated target never proves a prior rename. A fresh explicit ID addresses
 a replacement. Completed effects never replay. Provider updates target captured
 IDs, never a later config binding. Authored edits are prepared off-checkout, then
 persisted before applying, so folds and reference rewrites survive interruption.
@@ -391,6 +404,10 @@ directory remain untouched and keep cleanup pending. Commits use the saved after
 independent index, preserving later working/index edits. Changed committed content
 is reported as pending rather than overwritten. Completed records retain identity
 evidence for repeated commands. Cross-repository file relocation remains manual.
+Index reconciliation is a separate unfinished effect: matching HEAD after-images
+skip commit creation, but still reconcile unchanged saved index entries. The
+operation becomes file-complete only after reconciliation and directory cleanup.
+No new journal field is needed; retained index/after images identify the residue.
 
 ## Retry design counterexamples (2026-11-02)
 
@@ -426,15 +443,23 @@ operations permit retry without presenting partial cleanup as success.
   summary while Git still showed three deleted `research` files and an
   untracked `ops` directory. The old-name lookup misses, so rename returns
   before file commit or provider reconciliation. This probe used the existing
-  `target/debug/lf`; source inspection confirms the same early return at HEAD.
+  `target/debug/lf`; source inspection confirmed the early return at that revision.
 - **An occupied target does not establish a previous rename.** In that same
   fixture, `lf wave rename never-existed ops --json` succeeded with the `ops`
   identity and `renamed = false`. No previous identity links those names.
   A retry must distinguish the original Wave from an unrelated or replacement
   Wave at the target; a live target alone cannot establish completion.
+- **Post-commit reset failure leaves staged residue.** The follow-up isolated CLI
+  probe against `6cb4adb010` failed `git reset` after removal committed. Retrying
+  returned `files.state = unchanged` and “already removed,” leaving all three
+  deleted files staged as additions (`AD`). Matching HEAD after-images bypassed
+  `commit_images` and its index reconciliation. The repair reconciles selected
+  index entries independently; public CLI regressions inject repeated reset
+  failures for removal and rename, preserving later staged/working edits and
+  replacement Waves without creating another commit.
 
-The accepted outcome stays unchanged. The design needs an explicit source of
-retry evidence that survives retirement, rename and directory deletion: retained
+The accepted outcome stays unchanged. These failures required retry evidence
+that survives retirement, rename and directory deletion: retained
 original/descendant identities, provider bindings and exact pending authored paths.
 This is not another Wave state flag. The Machine-local operation journal now
 retains this evidence in the Task's existing migration. Retry tests exercise
@@ -453,4 +478,4 @@ Linear recovery still belong to demo/review. This pass's affected owners are
 and lifecycle callers in `global_commands`, `served_reads` and
 `linear::local_planning`; no Swift or DTO shape changed in the retry repair.
 
-2026-11-02 compress: `cargo test -p loopflow --test integration wave_lifecycle::` passes 12/12 (inherited `LF_*` unset, stdin closed); `cargo fmt --check`, `git diff --check`, `lf context` pass; broader affected suites/migration upgrade/lint → gate, native interaction/live Linear recovery → demo/review.
+2026-11-02 compress: `TMPDIR=/private/tmp uv run python scripts/test_network.py cargo test -p loopflow --test integration wave_lifecycle:: < /dev/null` passed 14/14; `cargo fmt --all`, `git diff --check` and `lf context` pass; broader affected suites/migration upgrade/lint → gate, native interaction/live Linear recovery → demo/review.

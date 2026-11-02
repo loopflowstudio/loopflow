@@ -101,20 +101,17 @@ impl Operation {
                 replaced_roots.push(authored_path(slug) + "/");
             }
         }
-        let selected = self
-            .changes
-            .iter()
-            .filter(|change| {
-                !replaced_roots
-                    .iter()
-                    .any(|root| change.path.starts_with(root))
-            })
-            .filter_map(|change| match change.is_replaced(store, main) {
-                Ok(true) => None,
-                Ok(false) => Some(Ok(change)),
-                Err(error) => Some(Err(error)),
-            })
-            .collect::<OpsResult<Vec<_>>>()?;
+        let mut selected = Vec::new();
+        for change in &self.changes {
+            if replaced_roots
+                .iter()
+                .any(|root| change.path.starts_with(root))
+                || change.is_replaced(store, main)?
+            {
+                continue;
+            }
+            selected.push(change);
+        }
         if !self.applied {
             for change in &selected {
                 let current = Image::read(&main.join(&change.path))?;
@@ -129,23 +126,26 @@ impl Operation {
                 }
                 Image::write(change.after.as_ref(), &main.join(&change.path))?;
             }
+            // The last write may have preceded an interruption. The images above
+            // recognize it; recording this before committing preserves subsequent edits.
+            self.applied = true;
+            self.save(store)?;
         }
-        // The last write may have preceded an interruption. The images above
-        // recognize it; recording this before committing preserves subsequent edits.
-        self.applied = true;
-        self.save(store)?;
-        let pending = selected
-            .into_iter()
-            .filter_map(|change| match Image::at_head(main, &change.path) {
-                Ok(image) if image == change.after => None,
-                Ok(image) if image == change.base => Some(Ok(change)),
-                Ok(_) => Some(Err(lifecycle_error(format!(
+        let _mutation = crate::ops::task::lock_task_pr_mutation(main)?;
+        let mut pending = Vec::new();
+        for &change in &selected {
+            let head = Image::at_head(main, &change.path)?;
+            if head == change.after {
+                continue;
+            }
+            if head != change.base {
+                return Err(lifecycle_error(format!(
                     "{} has a later committed change; the lifecycle commit is still pending",
                     change.path
-                )))),
-                Err(error) => Some(Err(error)),
-            })
-            .collect::<OpsResult<Vec<_>>>()?;
+                )));
+            }
+            pending.push(change);
+        }
         let files = if pending.is_empty() {
             AuthoredFiles::Unchanged
         } else {
@@ -155,6 +155,9 @@ impl Operation {
                 &format!("lf wave {}: {}", self.kind, self.from),
             )?
         };
+        // A commit can succeed before index reconciliation fails. Retained
+        // images still identify its residue even when HEAD needs no new commit.
+        reconcile_index(main, &selected)?;
         let source_replaced = replaced_roots.contains(&(authored_path(&self.from) + "/"));
         if (self.kind == "remove" || self.from != self.to) && !source_replaced {
             let source = main.join(authored_path(&self.from));
@@ -410,7 +413,6 @@ fn commit_images(main: &Path, changes: &[&FileChange], message: &str) -> OpsResu
             main.display()
         )));
     }
-    let _mutation = crate::ops::task::lock_task_pr_mutation(main)?;
     let temporary = tempfile::tempdir()?;
     let index = temporary.path().join("index");
     let worktree = temporary.path().join("files");
@@ -424,13 +426,7 @@ fn commit_images(main: &Path, changes: &[&FileChange], message: &str) -> OpsResu
         crate::git::git_stdout_inheriting(main, args, &inherit).map_err(lifecycle_error)
     };
     run(&["read-tree", "HEAD"])?;
-    let mut refresh = Vec::new();
     for change in changes {
-        // Preserve a person's later staged edit as well as the working file.
-        let staged = Image::in_index(main, &change.path)?;
-        if staged == change.index || staged == change.after {
-            refresh.push(format!(":(literal){}", change.path));
-        }
         Image::write(change.after.as_ref(), &worktree.join(&change.path))?;
         if change.after.is_some() {
             run(&["add", "-f", "--", &format!(":(literal){}", change.path)])?;
@@ -439,13 +435,25 @@ fn commit_images(main: &Path, changes: &[&FileChange], message: &str) -> OpsResu
         }
     }
     crate::git::commit(main, message, &inherit).map_err(lifecycle_error)?;
+    let commit = crate::git::git_stdout(main, &["rev-parse", "HEAD"]).map_err(lifecycle_error)?;
+    Ok(AuthoredFiles::Committed {
+        commit: commit.trim().into(),
+    })
+}
+
+fn reconcile_index(main: &Path, changes: &[&FileChange]) -> OpsResult<()> {
+    let mut refresh = Vec::new();
+    for change in changes {
+        // Preserve a person's later staged edit as well as the working file.
+        let staged = Image::in_index(main, &change.path)?;
+        if staged != change.after && staged == change.index {
+            refresh.push(format!(":(literal){}", change.path));
+        }
+    }
     if !refresh.is_empty() {
         let mut args = vec!["reset", "-q", "HEAD", "--"];
         args.extend(refresh.iter().map(String::as_str));
         crate::git::git_stdout(main, &args).map_err(lifecycle_error)?;
     }
-    let commit = crate::git::git_stdout(main, &["rev-parse", "HEAD"]).map_err(lifecycle_error)?;
-    Ok(AuthoredFiles::Committed {
-        commit: commit.trim().into(),
-    })
+    Ok(())
 }

@@ -380,6 +380,137 @@ fn bind_initiative(lab: &Lab, wave: &str, initiative: &str) {
     .unwrap();
 }
 
+fn fail_index_reset(lab: &Lab, args: &[&str]) {
+    let shim = tempfile::tempdir().unwrap();
+    let path = std::env::var_os("PATH").unwrap();
+    let real_git = std::env::split_paths(&path)
+        .map(|dir| dir.join("git"))
+        .find(|candidate| candidate.is_file())
+        .unwrap();
+    let script = shim.path().join("git");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nfor arg do\n  if [ \"$arg\" = reset ]; then\n    echo 'injected index reset failure' >&2\n    exit 1\n  fi\ndone\nexec \"$TEST_REAL_GIT\" \"$@\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let search = std::iter::once(shim.path().to_path_buf()).chain(std::env::split_paths(&path));
+    let output = lab
+        .command(lab.path(), args)
+        .env("PATH", std::env::join_paths(search).unwrap())
+        .env("TEST_REAL_GIT", real_git)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    let receipt: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(receipt["files"]["state"], "uncommitted", "{receipt}");
+    assert!(receipt["files"]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("injected index reset failure"));
+}
+
+#[test]
+fn lifecycle_retry_reconciles_index_after_commit_preserving_later_edits() {
+    for args in [
+        vec!["wave", "remove", "research", "--json"],
+        vec!["wave", "rename", "research", "ops", "--json"],
+    ] {
+        let lab = Lab::new();
+        lab.lf(&["wave", "add", "research", "--json"]);
+        lab.lf(&["wave", "add", "notes", "--json"]);
+        let memory = ".lf/wave/notes/MEMORY.md";
+        std::fs::write(lab.path().join(memory), "See .lf/wave/research/GOAL.md\n").unwrap();
+        std::fs::write(lab.path().join("unrelated.txt"), "Keep staged.\n").unwrap();
+        git(&lab, &["add", "unrelated.txt"]);
+
+        fail_index_reset(&lab, &args);
+        let committed = git(&lab, &["rev-parse", "HEAD"]);
+        assert!(git(&lab, &["ls-tree", "HEAD", ".lf/wave/research/"]).is_empty());
+        assert_eq!(
+            git(&lab, &["status", "--porcelain", "--", ".lf/wave/research/"])
+                .lines()
+                .filter(|line| line.starts_with("AD "))
+                .count(),
+            3
+        );
+        // Even a second reset failure must leave the operation retryable.
+        fail_index_reset(&lab, &args);
+        std::fs::write(lab.path().join(memory), "Later staged thought.\n").unwrap();
+        git(&lab, &["add", memory]);
+        std::fs::write(lab.path().join(memory), "Later working thought.\n").unwrap();
+
+        let retry = lab.lf(&args);
+        assert_eq!(retry["files"]["state"], "unchanged", "{retry}");
+        assert_eq!(git(&lab, &["rev-parse", "HEAD"]), committed);
+        assert!(!lab.path().join(".lf/wave/research").exists());
+        assert_eq!(
+            git(&lab, &["diff", "--cached", "--name-only"]),
+            format!("{memory}\nunrelated.txt\n")
+        );
+        assert_eq!(
+            git(&lab, &["show", &format!(":{memory}")]),
+            "Later staged thought.\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(lab.path().join(memory)).unwrap(),
+            "Later working thought.\n"
+        );
+        assert_eq!(lab.lf(&args)["files"]["state"], "unchanged");
+    }
+}
+
+#[test]
+fn lifecycle_retry_reconciles_index_without_touching_replacement_waves() {
+    for args in [
+        vec!["wave", "remove", "research", "--json"],
+        vec!["wave", "rename", "research", "ops", "--json"],
+    ] {
+        let lab = Lab::new();
+        let original = lab.lf(&["wave", "add", "research", "--json"]);
+        lab.lf(&["wave", "add", "notes", "--json"]);
+        let memory = ".lf/wave/notes/MEMORY.md";
+        std::fs::write(lab.path().join(memory), "See .lf/wave/research/GOAL.md\n").unwrap();
+        fail_index_reset(&lab, &args);
+
+        let replacement = lab.lf(&[
+            "wave",
+            "add",
+            "research",
+            "--objective",
+            "Replacement",
+            "--json",
+        ]);
+        assert_ne!(original["id"], replacement["id"]);
+        let goal = ".lf/wave/research/GOAL.md";
+        std::fs::write(lab.path().join(goal), "Replacement staged thought.\n").unwrap();
+        git(&lab, &["add", goal]);
+        let replacement_index = git(&lab, &["ls-files", "--stage", "--", ".lf/wave/research/"]);
+        let committed = git(&lab, &["rev-parse", "HEAD"]);
+
+        let retry = lab.lf(&args);
+        assert_eq!(retry["id"], original["id"]);
+        assert_eq!(retry["files"]["state"], "unchanged", "{retry}");
+        assert_eq!(git(&lab, &["rev-parse", "HEAD"]), committed);
+        assert_eq!(
+            git(&lab, &["ls-files", "--stage", "--", ".lf/wave/research/"]),
+            replacement_index
+        );
+        assert_eq!(
+            git(&lab, &["diff", "--cached", "--name-only"]),
+            format!("{goal}\n")
+        );
+        assert_eq!(
+            std::fs::read_to_string(lab.path().join(goal)).unwrap(),
+            "Replacement staged thought.\n"
+        );
+        assert_eq!(
+            lab.lf(&["wave", "show", "research", "--json"])["waves"][0]["wave"]["id"],
+            replacement["id"]
+        );
+    }
+}
+
 #[test]
 fn removal_retry_retains_descendant_archive_bindings_after_retirement_and_replacement() {
     let lab = Lab::new();

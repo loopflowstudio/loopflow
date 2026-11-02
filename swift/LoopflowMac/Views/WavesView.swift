@@ -125,6 +125,7 @@ struct WavesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
         .task { await model.keepWorkCurrent() }
+        .task { await model.keepPlanningCurrent() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await refreshRepos() }
         }

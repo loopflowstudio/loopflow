@@ -3,6 +3,7 @@ use crate::work::selection::{WorkWorkspaceKey, WorkWorkspaceKind};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use super::watch::{Subscription, Transport};
 use super::waves::Shape;
 use crate::ops::human_session::SessionAction;
 use crate::ops::task_actions::TaskActionModel;
@@ -598,10 +599,19 @@ fn selection_repository(
     cli: &crate::lf::Cli,
     store: &crate::store::sqlite::SqliteStore,
 ) -> Result<crate::durable::RepositoryId> {
-    if let Some(repository) = &cli.repository {
+    repository_in(cli.repository.as_ref(), &std::env::current_dir()?, store)
+}
+
+/// `--repository` when given, else the repository containing `directory`.
+fn repository_in(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    store: &crate::store::sqlite::SqliteStore,
+) -> Result<crate::durable::RepositoryId> {
+    if let Some(repository) = selected {
         return Ok(repository.clone());
     }
-    let repo = crate::repository::CanonicalRepo::current()?
+    let repo = crate::repository::CanonicalRepo::containing(directory)?
         .context("select a repository with --repo or --repository")?;
     store
         .repository_id(&repo.to_string())?
@@ -612,52 +622,114 @@ fn selection_repository(
 /// `lf desktop task`: what the Task pane shows, from the same reading as
 /// `lf task status`.
 fn task_pane(issue: &str, watch: bool) -> Result<()> {
-    let repo = crate::ops::task::task_repository(&crate::repo::working_directory()?, Some(issue))?;
-    let status = crate::ops::task::task_status(&repo, Some(issue))?;
     if watch {
-        let task = status
-            .task
-            .context("only a registered Task can be watched")?;
-        return super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop);
+        return watch_task_pane(&std::env::current_dir()?, issue, Transport::Stdio).map(drop);
     }
+    let pane = read_task_pane(&std::env::current_dir()?, issue)?;
+    println!("{}", serde_json::to_string(&pane)?);
+    Ok(())
+}
+
+/// What `lf desktop task <issue> --json` prints from `directory`.
+pub(crate) fn read_task_pane(
+    directory: &std::path::Path,
+    issue: &str,
+) -> Result<super::waves::DesktopTaskPane> {
+    let repo = crate::ops::task::task_repository(
+        &crate::repo::working_directory_in(directory)?,
+        Some(issue),
+    )?;
+    let status = crate::ops::task::task_status(&repo, Some(issue))?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = crate::store::read_existing_registry()?
             .map(std::sync::Arc::new)
             .context("no Loopflow store exists on this Machine")?;
-        let pane = super::waves::task_pane(&store, status).await?;
-        println!("{}", serde_json::to_string(&pane)?);
-        Ok(())
+        super::waves::task_pane(&store, status).await
     })
+}
+
+/// `lf desktop task --watch` for the Task `issue` names from `directory`.
+pub(crate) fn watch_task_pane(
+    directory: &std::path::Path,
+    issue: &str,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    let repo = crate::ops::task::task_repository(directory, Some(issue))?;
+    let status = crate::ops::task::task_status(&repo, Some(issue))?;
+    let task = status
+        .task
+        .context("only a registered Task can be watched")?;
+    super::waves::watch_task_status(&repo, task.identifier, Shape::Desktop, transport)
 }
 
 /// `lf desktop plans`: every plan a repository window shows, the default and
 /// each saved Dashboard, as Desktop reads them.
 fn plans(cli: &crate::lf::Cli, watch: bool) -> Result<()> {
     if !watch {
-        let store = crate::store::read_existing_registry()?
-            .ok_or(crate::store::StoreError::NotFound)
-            .context("Work registry is unavailable")?;
-        let repository = selection_repository(cli, &store.sqlite)?;
-        println!(
-            "{}",
-            serde_json::to_string(&store.sqlite.selection_plans(&repository)?)?
-        );
+        let plans = read_plans(cli.repository.as_ref(), &std::env::current_dir()?)?;
+        println!("{}", serde_json::to_string(&plans)?);
         return Ok(());
     }
-    super::watch::run(
+    watch_plans(
+        cli.repository.clone(),
+        std::env::current_dir()?,
+        Transport::Stdio,
+    )
+    .map(drop)
+}
+
+/// What `lf desktop plans --json` prints for `--repository`, else the
+/// repository containing `directory`.
+pub(crate) fn read_plans(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+) -> Result<Vec<crate::work::selection::ViewPlan>> {
+    let store = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = repository_in(selected, directory, &store.sqlite)?;
+    Ok(store.sqlite.selection_plans(&repository)?)
+}
+
+/// `lf desktop plans --watch` for `--repository`, else the repository
+/// containing `directory`.
+pub(crate) fn watch_plans(
+    selected: Option<crate::durable::RepositoryId>,
+    directory: std::path::PathBuf,
+    transport: Transport,
+) -> Result<Option<Subscription>> {
+    super::watch::start(
         (),
         super::watch::Watched::every(super::watch::PLANNING_CLOCK),
-        |store, ()| {
+        move |store, ()| {
             let result = store
                 .ok_or(crate::store::StoreError::NotFound)
                 .context("Work registry is unavailable")
                 .and_then(|store| {
-                    let repository = selection_repository(cli, &store.sqlite)?;
+                    let repository = repository_in(selected.as_ref(), &directory, &store.sqlite)?;
                     Ok(store.sqlite.selection_plans(&repository)?)
                 });
             async move { result }
         },
+        transport,
     )
+}
+
+/// `lf desktop view [expression] --plan`: what a view shows, in `selected`
+/// or the repository containing `directory`.
+pub fn plan_view(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    expression: Option<&str>,
+) -> Result<crate::work::selection::ViewPlan> {
+    if let Some(expression) = expression {
+        crate::work::selection::Selection::parse(expression, None)?;
+    }
+    let store = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = repository_in(selected, directory, &store.sqlite)?;
+    Ok(store.sqlite.view_plan(&repository, expression)?)
 }
 
 fn view_plan(
@@ -666,16 +738,13 @@ fn view_plan(
     passive: bool,
     json: bool,
 ) -> Result<()> {
-    if let Some(expression) = expression {
-        crate::work::selection::Selection::parse(expression, None)?;
-    }
-    let store = crate::store::read_existing_registry()?
-        .ok_or(crate::store::StoreError::NotFound)
-        .context("Work registry is unavailable")?;
-    let repository = selection_repository(cli, &store.sqlite)?;
     // Explicit Work context selects the same default model without preparing a checkout.
     let plan = if expression.is_none() && (cli.task.is_some() || cli.wave.is_some()) {
         use crate::work::selection::{Selection, SelectionExpression, SelectionId};
+        let store = crate::store::read_existing_registry()?
+            .ok_or(crate::store::StoreError::NotFound)
+            .context("Work registry is unavailable")?;
+        let repository = selection_repository(cli, &store.sqlite)?;
         let resolution =
             super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None, None)?;
         let expression = if cli.task.is_some() {
@@ -699,7 +768,11 @@ fn view_plan(
             },
         )?
     } else {
-        store.sqlite.view_plan(&repository, expression)?
+        plan_view(
+            cli.repository.as_ref(),
+            &std::env::current_dir()?,
+            expression,
+        )?
     };
     if passive {
         println!(
@@ -759,7 +832,67 @@ fn work_key(repository: &crate::durable::RepositoryId, selector: &str) -> Result
     })
 }
 
-fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
+/// `lf desktop layout <work>`: the saved pane intent of a Work, or a
+/// Dashboard's slot layout, in `selected` or the repository containing `directory`.
+pub fn saved_layout(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    work: &str,
+) -> Result<String> {
+    use crate::work::selection::DashboardId;
+    let reader = crate::store::read_existing_registry()?
+        .ok_or(crate::store::StoreError::NotFound)
+        .context("Work registry is unavailable")?;
+    let repository = repository_in(selected, directory, &reader.sqlite)?;
+    Ok(match work.strip_prefix("query:") {
+        Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
+            &reader
+                .sqlite
+                .read_dashboard(&repository, &DashboardId(id.into()))?
+                .ok_or(crate::store::StoreError::NotFound)?
+                .saved,
+        ))?,
+        None => serde_json::to_string(&DesktopLayoutRecord::Work(
+            &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
+        ))?,
+    })
+}
+
+/// `lf desktop query|pin|unpin|rename|layout --save` and a saved tile's
+/// `hide|show|move|resize -p <board>/<tile>`: save the arrangement in
+/// `selected` or the repository containing `directory`, reading a layout from
+/// `input`, and return what the command prints. Renaming a Task is a Work
+/// change; the rest are arrangement and record no Process.
+pub fn save_arrangement(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    command: &crate::lf::DesktopCommand,
+    input: &mut dyn std::io::Read,
+) -> Result<String> {
+    use crate::lf::DesktopCommand;
+    if let DesktopCommand::Query { .. }
+    | DesktopCommand::Pin { .. }
+    | DesktopCommand::Unpin { .. }
+    | DesktopCommand::Rename { .. }
+    | DesktopCommand::Layout { save: true, .. } = command
+    {
+        return saved_intent(selected, directory, command, input);
+    }
+    let verb = Verb::parse(command)?;
+    if let VerbKind::Action { name, args } = &verb.kind {
+        if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
+            return edit_saved_tile(selected, directory, board, tile, name, args);
+        }
+    }
+    bail!("not a saved arrangement: name a tile as -p <board>/<tile>")
+}
+
+fn saved_intent(
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
+    command: &crate::lf::DesktopCommand,
+    input: &mut dyn std::io::Read,
+) -> Result<String> {
     use crate::lf::DesktopCommand;
     use crate::work::selection::{DashboardId, WorkPaneLayout};
     if let DesktopCommand::Query { expression, .. } = command {
@@ -768,26 +901,7 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
     let reader = crate::store::read_existing_registry()?
         .ok_or(crate::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
-    let repository = selection_repository(cli, &reader.sqlite)?;
-    if let DesktopCommand::Layout {
-        work, save: false, ..
-    } = command
-    {
-        let record = match work.strip_prefix("query:") {
-            Some(id) => serde_json::to_string(&DesktopLayoutRecord::Dashboard(
-                &reader
-                    .sqlite
-                    .read_dashboard(&repository, &DashboardId(id.into()))?
-                    .ok_or(crate::store::StoreError::NotFound)?
-                    .saved,
-            ))?,
-            None => serde_json::to_string(&DesktopLayoutRecord::Work(
-                &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
-            ))?,
-        };
-        println!("{record}");
-        return Ok(());
-    }
+    let repository = repository_in(selected, directory, &reader.sqlite)?;
     drop(reader);
     let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let dashboard_id = |id: &str| DashboardId(id.strip_prefix("query:").unwrap_or(id).into());
@@ -864,7 +978,7 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
                 )
             })?;
             let slots: Option<crate::work::selection::SlotLayout> =
-                serde_json::from_reader(std::io::stdin().lock())?;
+                serde_json::from_reader(&mut *input)?;
             serde_json::to_value(store.set_dashboard_slots(
                 &repository,
                 &dashboard_id(work),
@@ -875,7 +989,7 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
         DesktopCommand::Layout {
             work, save: true, ..
         } => {
-            let layout: WorkPaneLayout = serde_json::from_reader(std::io::stdin().lock())?;
+            let layout: WorkPaneLayout = serde_json::from_reader(&mut *input)?;
             if layout.work != work_key(&repository, work)? {
                 bail!("layout belongs to different Work");
             }
@@ -883,8 +997,7 @@ fn saved_intent(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Re
         }
         _ => unreachable!("saved intent command"),
     };
-    println!("{}", serde_json::to_string(&result)?);
-    Ok(())
+    Ok(serde_json::to_string(&result)?)
 }
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
@@ -894,11 +1007,27 @@ pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<
 fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
     use crate::lf::DesktopCommand;
     match command {
+        DesktopCommand::Layout {
+            work, save: false, ..
+        } => {
+            let record = saved_layout(cli.repository.as_ref(), &std::env::current_dir()?, work)?;
+            println!("{record}");
+            return Ok(());
+        }
         DesktopCommand::Query { .. }
         | DesktopCommand::Pin { .. }
         | DesktopCommand::Unpin { .. }
         | DesktopCommand::Rename { .. }
-        | DesktopCommand::Layout { .. } => return saved_intent(cli, command),
+        | DesktopCommand::Layout { .. } => {
+            let saved = save_arrangement(
+                cli.repository.as_ref(),
+                &std::env::current_dir()?,
+                command,
+                &mut std::io::stdin().lock(),
+            )?;
+            println!("{saved}");
+            return Ok(());
+        }
         DesktopCommand::View {
             expression,
             plan,
@@ -913,7 +1042,15 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
             ..
         } => {
             return if *watch {
-                super::waves::watch_show(wave.clone(), task.clone(), *all, Shape::Desktop)
+                super::waves::watch_show(
+                    std::env::current_dir()?,
+                    wave.clone(),
+                    task.clone(),
+                    *all,
+                    Shape::Desktop,
+                    Transport::Stdio,
+                )
+                .map(drop)
             } else {
                 super::waves::show(wave.as_deref(), task.as_deref(), true, *all, Shape::Desktop)
             };
@@ -948,7 +1085,16 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
     let verb = Verb::parse(command)?;
     if let VerbKind::Action { name, args } = &verb.kind {
         if let Some((board, tile)) = saved_tile(name, verb.target.pane.as_deref()) {
-            return edit_saved_tile(cli, board, tile, name, args);
+            let record = edit_saved_tile(
+                cli.repository.as_ref(),
+                &std::env::current_dir()?,
+                board,
+                tile,
+                name,
+                args,
+            )?;
+            println!("{record}");
+            return Ok(());
         }
     }
     require_supported()?;
@@ -1595,17 +1741,18 @@ fn saved_tile<'p>(name: &str, path: Option<&'p str>) -> Option<(TileBoard, &'p s
 }
 
 fn edit_saved_tile(
-    cli: &crate::lf::Cli,
+    selected: Option<&crate::durable::RepositoryId>,
+    directory: &std::path::Path,
     board: TileBoard,
     tile: &str,
     name: &str,
     args: &std::collections::BTreeMap<String, String>,
-) -> Result<()> {
+) -> Result<String> {
     let repository = {
         let reader = crate::store::read_existing_registry()?
             .ok_or(crate::store::StoreError::NotFound)
             .context("Work registry is unavailable")?;
-        selection_repository(cli, &reader.sqlite)?
+        repository_in(selected, directory, &reader.sqlite)?
     };
     let key = |selector: &str| work_key(&repository, selector);
     let request = TileRequest {
@@ -1614,11 +1761,7 @@ fn edit_saved_tile(
         edit: TileEdit::parse(name, args, key)?,
     };
     let record = edit_tiles(&repository, &request)?;
-    println!(
-        "{}",
-        serde_json::to_string(&DesktopTileOutput::Record(&record))?
-    );
-    Ok(())
+    Ok(serde_json::to_string(&DesktopTileOutput::Record(&record))?)
 }
 
 fn edit_shown_tile(

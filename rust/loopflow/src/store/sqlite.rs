@@ -589,7 +589,37 @@ impl SqliteStore {
     }
 
     fn open(path: &Path, advance: super::FrontierAdvance) -> StoreResult<Self> {
+        if super::serves_in_app() {
+            return Self::open_in_app(path);
+        }
         Self::open_with(path, &super::machine_home_dir(), advance)
+    }
+
+    /// An app's in-process reads and writes: the store `lf` prepared, at this
+    /// build's schema. It never creates or migrates one.
+    fn open_in_app(path: &Path) -> StoreResult<Self> {
+        if !std::fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0) {
+            return Err(StoreError::InvalidData(format!(
+                "store {} is not prepared; run `lf` once to create it",
+                path.display()
+            )));
+        }
+        let mut conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        crate::performance::observe_sqlite(&conn);
+        super::migrations::validate_sqlite_schema(&conn)?;
+        if let Some(pending) = super::migrations::pending_shared_migration(&conn)? {
+            return Err(StoreError::InvalidData(format!(
+                "store {} does not have migration {pending} yet; run `lf` once to migrate it",
+                path.display()
+            )));
+        }
+        configure_write_connection(&mut conn, path)?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
     }
 
     /// Open resolving the migration decision against an explicit machine home.

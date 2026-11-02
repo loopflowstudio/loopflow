@@ -68,7 +68,7 @@ struct SessionsStoreTests {
         let (requests, request) = AsyncStream<Void>.makeStream()
         let (responses, response) = AsyncStream<Bool>.makeStream()
         let store = SessionsStore(repoPath: "/tmp/repo", query: RegistryQuery { args, _ in
-            guard args.suffix(2) == ["--agent", "codex"] else {
+            guard args.starts(with: ["--agent", "codex"]) else {
                 throw RegistryQueryError("Transfer preparation did not select Codex")
             }
             request.yield(())

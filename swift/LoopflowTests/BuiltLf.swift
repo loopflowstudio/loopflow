@@ -35,14 +35,14 @@ struct BuiltLf: Sendable {
         return path
     }
 
-    /// Desktop's reads over this Machine, including its live Work stream.
+    /// Desktop's reads over this Machine. Its live Work stream is served in
+    /// this process by Loopflow's library, which reads this Machine's `LF_HOME`.
     var query: RegistryQuery {
         RegistryQuery(runWithInput: { args, cwd, input in
             try await run(args, cwd: cwd.map(URL.init(fileURLWithPath:)), input: input)
-        }, watchWork: {
-            try LocalWorkObservation.start(process: { args, cwd in
-                process(args, cwd: cwd.map(URL.init(fileURLWithPath:)))
-            }, configurationChanged: { false })
+        }, watchWork: { [environment] in
+            setenv("LF_HOME", environment["LF_HOME"] ?? "", 1)
+            return try WorkWatches.observe(launch: LoopflowLibrary.watch)
         }) { args, cwd in
             try await run(args, cwd: cwd.map(URL.init(fileURLWithPath:)))
         }

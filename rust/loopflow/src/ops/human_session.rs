@@ -807,6 +807,7 @@ pub(crate) async fn open(
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
                     && owner_running(&store.sqlite, &owner)?
+                    && answering(&owner)
                 {
                     // This viewer takes control, so the conversation is now
                     // shown where it runs, not where it was launched.
@@ -1100,10 +1101,24 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
+/// Whether a running owner answers its socket. One that does not, as an owner
+/// from an earlier lf may not after an upgrade, can never hand its terminal to
+/// a viewer, so opening takes the conversation over on the same provider thread.
+fn answering(owner: &crate::id::LfProcessId) -> bool {
+    match crate::transport::controlled(owner) {
+        Ok(_) => true,
+        Err(error) => {
+            tracing::warn!(%error, %owner, "Session owner does not answer; taking the conversation over");
+            false
+        }
+    }
+}
+
 /// One Session's summary, with its viewers confirmed by its execution owner.
 /// The owner records its own viewers, but an owner from an earlier lf cannot
 /// write a store a newer lf has advanced: after an upgrade and a Desktop
-/// restart its record still says viewed. Its controlling viewer is the truth.
+/// restart its record still says viewed. Its controlling viewer is the truth,
+/// and an owner that does not answer has no viewer anyone can reach.
 pub(crate) fn viewed_summary(
     store: &SqliteStore,
     id: &str,
@@ -1116,7 +1131,7 @@ pub(crate) fn viewed_summary(
         && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
         && store
             .session_transport(id)?
-            .is_some_and(|owner| crate::transport::controlled(&owner).is_ok_and(|held| !held));
+            .is_some_and(|owner| !matches!(crate::transport::controlled(&owner), Ok(true)));
     if released {
         summary.unviewed = true;
         summary.terminal_id = None;

@@ -75,23 +75,14 @@ struct DesktopPerformanceTests {
         let environment = ProcessInfo.processInfo.environment
         let output = URL(fileURLWithPath: try #require(environment["LF_DESKTOP_PERF_WRITE_OUTPUT"]))
         let samples = try #require(Int(environment["LF_DESKTOP_PERF_SAMPLES"] ?? "20"))
-        let lf = try #require(environment["LF_DESKTOP_PERF_LF"])
         let home = try #require(environment["LF_DESKTOP_PERF_HOME"])
         let repo = try #require(environment["LF_DESKTOP_PERF_REPO"])
         let journal = try PerformanceJournal(url: output)
         let store = PerformanceStore(database: home + "/loopflow.db")
-        var child = environment.filter { !$0.key.hasPrefix("LF_") && !$0.key.hasPrefix("LOOPFLOW_") }
-        child["LF_HOME"] = home
-        let reader = child
+        // The window under measurement reads in this process, as Desktop does.
+        setenv("LF_HOME", home, 1)
         let query = RegistryQuery(watchWork: {
-            try LocalWorkObservation.start(process: { args, cwd in
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: lf)
-                process.arguments = args
-                process.environment = reader
-                if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-                return process
-            }, configurationChanged: { false })
+            try WorkWatches.observe(launch: LoopflowLibrary.watch)
         }) { args, _ in
             // The window under measurement reads through its one reader.
             throw RegistryQueryError("write-to-visible ran lf \(args.joined(separator: " "))")

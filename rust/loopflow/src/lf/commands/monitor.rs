@@ -44,9 +44,21 @@ pub enum MonitorCommand {
     },
 }
 
+impl MonitorCommand {
+    /// Whether this command changes state, and so records a Process.
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::Ps { .. } | Self::Top => false,
+            Self::Rollover { dry_run, .. } | Self::Prune { dry_run, .. } => !dry_run,
+        }
+    }
+}
+
 pub fn run(command: &MonitorCommand) -> anyhow::Result<()> {
     match command {
-        MonitorCommand::Ps { watch: true, .. } => super::top::watch_ps(),
+        MonitorCommand::Ps { watch: true, .. } => {
+            super::top::watch_ps(super::watch::Transport::Stdio).map(drop)
+        }
         MonitorCommand::Ps { json, .. } => super::top::run_ps(*json),
         MonitorCommand::Top => super::top::run_top(),
         MonitorCommand::Rollover { dry_run, json } => super::rollover::run(*dry_run, *json),

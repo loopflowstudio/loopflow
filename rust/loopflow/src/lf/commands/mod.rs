@@ -23,6 +23,7 @@ pub mod ops;
 pub mod people;
 pub mod planning;
 pub mod profile;
+pub mod read;
 pub mod rental;
 pub mod replay;
 pub mod rollover;
@@ -44,6 +45,7 @@ pub mod wave_rename;
 pub mod waves;
 pub(crate) mod work_catalog;
 pub mod work_route;
+pub mod write;
 
 /// One drill over the Wave → Project → Task Work hierarchy.
 #[derive(Debug, Clone, Copy, Default)]

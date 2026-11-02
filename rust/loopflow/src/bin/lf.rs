@@ -881,8 +881,20 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             json,
             ..
         } => {
-            let rotation =
-                loopflow::ops::chapter::new_chapter(repo, name, plan, wave.as_deref(), *dry_run)?;
+            let rotation = loopflow::ops::chapter::new_chapter(
+                repo,
+                name,
+                &std::fs::read(plan)?,
+                wave.as_deref(),
+                *dry_run,
+            )?;
+            if let Some(provider) = loopflow::config::load_config_or_default(Some(repo))
+                .planning_transport()
+                .remote_name()
+                .filter(|_| !dry_run)
+            {
+                eprintln!("Saved locally; pending {provider} sync.");
+            }
             if *json {
                 println!("{}", serde_json::to_string_pretty(&rotation)?);
             } else {
@@ -1120,7 +1132,9 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                     repo,
                     task.identifier,
                     loopflow::lf::commands::waves::Shape::Tasks,
-                );
+                    loopflow::lf::commands::watch::Transport::Stdio,
+                )
+                .map(drop);
             }
             if *json {
                 loopflow::lf::commands::waves::print_task_detail(status)?;
@@ -1601,6 +1615,11 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow::process::CommandExit(code).into());
         }
     };
+    // Only a command that changes Work records a Process, and a Graph step
+    // always does: the Graph reads its result from it.
+    if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_work) {
+        journal::mark_read();
+    }
     if cli.harness_callback() {
         journal::harness_issued();
     }
@@ -2496,11 +2515,10 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         journal::admit_process(&std::env::current_dir()?, args);
         let issue = cli.task.clone().context("No Task selected")?;
         if *stop {
-            if loopflow::ops::task::ship::ship_stop(&issue, reason.as_deref())? {
-                println!("{issue} stopped shipping");
-            } else {
-                println!("{issue} is not shipping; no run ships it until `lf ship {issue}`");
-            }
+            print!(
+                "{}",
+                loopflow::lf::commands::ship::stop(&issue, reason.as_deref())?
+            );
             return Ok(());
         }
         let directory = loopflow::repo::working_directory()?;
@@ -2714,7 +2732,10 @@ fn execute_command(
             },
         }) => {
             let refreshed = if *sync {
-                loopflow::lf::commands::ops::refresh_status(wave.as_deref())?
+                loopflow::lf::commands::ops::refresh_status(
+                    &std::env::current_dir()?,
+                    wave.as_deref(),
+                )?
             } else {
                 None
             };
@@ -2744,12 +2765,19 @@ fn execute_command(
                     watch: true,
                     ..
                 },
-        }) => loopflow::lf::commands::waves::watch_show(
-            wave.clone(),
-            task.clone(),
-            *all,
-            loopflow::lf::commands::waves::Shape::Tasks,
-        ),
+        }) => std::env::current_dir()
+            .map_err(anyhow::Error::from)
+            .and_then(|directory| {
+                loopflow::lf::commands::waves::watch_show(
+                    directory,
+                    wave.clone(),
+                    task.clone(),
+                    *all,
+                    loopflow::lf::commands::waves::Shape::Tasks,
+                    loopflow::lf::commands::watch::Transport::Stdio,
+                )
+            })
+            .map(drop),
         Some(Commands::Wave {
             cmd:
                 WaveCommand::Show {

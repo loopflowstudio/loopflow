@@ -174,6 +174,20 @@ pub fn database_path_from_env() -> Result<PathBuf, std::io::Error> {
     Ok(default_db_path())
 }
 
+static IN_APP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// This process is an app serving Loopflow through its library: it opens only
+/// the store `lf` prepared at this build's schema, and never creates or
+/// migrates one. `lf` owns that, run once when the app starts. Set once by the
+/// app's library; never cleared.
+pub fn serve_in_app() {
+    IN_APP.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn serves_in_app() -> bool {
+    IN_APP.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Whether an open is the authorized owner of the shared migration frontier.
 ///
 /// Advancing `~/.lf/loopflow.db` past the frontier the installed `lf` knows must

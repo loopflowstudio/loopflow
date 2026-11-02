@@ -74,29 +74,21 @@ fn error(value: impl std::fmt::Display) -> OpsError {
     OpsError::Message(value.to_string())
 }
 
+/// Rotate to `plan`, the JSON `lf wave new-chapter --plan` reads.
 pub fn new_chapter(
     repo: &Path,
     name: &str,
-    plan: &Path,
+    plan: &[u8],
     wave: Option<&str>,
     dry_run: bool,
 ) -> OpsResult<ChapterRotation> {
-    let plan: ChapterPlan =
-        serde_json::from_slice(&std::fs::read(plan).map_err(error)?).map_err(error)?;
+    let plan: ChapterPlan = serde_json::from_slice(plan).map_err(error)?;
     if plan.name != name {
         return Err(error("chapter name must match the retained plan"));
     }
-    let rotation = tokio::runtime::Runtime::new()
+    tokio::runtime::Runtime::new()
         .map_err(error)?
-        .block_on(rotate(repo, &plan, wave, dry_run))?;
-    if let Some(provider) = crate::config::load_config_or_default(Some(repo))
-        .planning_transport()
-        .remote_name()
-        .filter(|_| !dry_run)
-    {
-        eprintln!("Saved locally; pending {provider} sync.");
-    }
-    Ok(rotation)
+        .block_on(rotate(repo, &plan, wave, dry_run))
 }
 
 pub(crate) async fn rotate(

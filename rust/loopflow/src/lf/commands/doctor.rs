@@ -50,11 +50,12 @@ impl Check {
 }
 
 /// Exits non-zero when any check fails, so a caller can gate on it.
+/// What `lf doctor --json` prints.
 #[derive(Debug, serde::Serialize)]
-struct DoctorReport<'a> {
+pub struct DoctorReport {
     store: StoreReport,
     rows: usize,
-    checks: &'a [Check],
+    checks: Vec<Check>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -72,6 +73,24 @@ struct StoreReport {
 }
 
 pub fn run(json: bool) -> Result<()> {
+    let report = report()?;
+    if json {
+        println!("{}", serde_json::to_string(&report)?);
+    } else {
+        print_checks(&report.store, &report.checks, report.rows);
+    }
+    if report
+        .checks
+        .iter()
+        .any(|check| check.status == Status::Fail)
+    {
+        return Err(anyhow!("doctor checks failed"));
+    }
+    Ok(())
+}
+
+/// The store, Process evidence and installation checks `lf doctor` reports.
+pub fn report() -> Result<DoctorReport> {
     let database_path = crate::store::database_path_from_env()?;
     let store_report = inspect_store(&database_path);
     let mut checks = vec![match &store_report.migration_error {
@@ -112,23 +131,11 @@ pub fn run(json: bool) -> Result<()> {
         time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
     checks.push(crate::desktop_exits::check());
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string(&DoctorReport {
-                store: store_report,
-                rows,
-                checks: &checks,
-            })?
-        );
-    } else {
-        print_checks(&store_report, &checks, rows);
-    }
-
-    if checks.iter().any(|check| check.status == Status::Fail) {
-        return Err(anyhow!("doctor checks failed"));
-    }
-    Ok(())
+    Ok(DoctorReport {
+        store: store_report,
+        rows,
+        checks,
+    })
 }
 
 const RUNNING: &str = "lf-binaries";

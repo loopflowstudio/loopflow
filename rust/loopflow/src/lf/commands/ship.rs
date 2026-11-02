@@ -11,10 +11,19 @@ use anyhow::Result;
 
 use crate::lf::Cli;
 use crate::ops::task::ship::{
-    ship_begin, ship_halt, ship_next, ship_progressed, ship_settle_merge, ShipMerge, ShipStart,
-    ShipStep,
+    ship_begin, ship_halt, ship_next, ship_progressed, ship_settle_merge, ship_stop, ShipMerge,
+    ShipStart, ShipStep,
 };
 use crate::ops::task::{TaskProcessOptions, TaskRunStart};
+
+/// `lf ship --stop`: withdraw the Task's Auto-Ship approval and say what it was.
+pub fn stop(issue: &str, reason: Option<&str>) -> Result<String> {
+    Ok(if ship_stop(issue, reason)? {
+        format!("{issue} stopped shipping\n")
+    } else {
+        format!("{issue} is not shipping; no run ships it until `lf ship {issue}`\n")
+    })
+}
 
 pub fn run(
     cli: &Cli,

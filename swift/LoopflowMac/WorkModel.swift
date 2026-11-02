@@ -1304,6 +1304,41 @@ final class WorkModel {
         }
     }
 
+    /// Desktop's planning clock. Each shown Wave's planning is refreshed in the
+    /// app, as `lf wave status --sync` refreshes it, every five minutes, every
+    /// 30 seconds while a saved change waits for delivery, and after a failure
+    /// (a provider rate limit, say) from 30 seconds doubling to five minutes.
+    /// The Work observation shows what each refresh wrote.
+    func keepPlanningCurrent() async {
+        guard !usesFixedFixture, query.streamsWork else { return }
+        var failures = 0
+        while !Task.isCancelled {
+            failures = await syncPlanning() ? 0 : failures + 1
+            let delay: Duration = failures > 0
+                ? min(.seconds(15) * (1 << min(failures, 5)), .seconds(300))
+                : planningPending ? .seconds(30) : .seconds(300)
+            do { try await Task.sleep(for: delay) } catch { return }
+        }
+    }
+
+    /// Sync each shown Wave's planning once; true when every refresh succeeded.
+    private func syncPlanning(_ waves: [WaveSnapshot]? = nil) async -> Bool {
+        var succeeded = true
+        for wave in waves ?? visibleRoadmaps.map(\.wave) {
+            guard !Task.isCancelled else { break }
+            do { try await query.syncPlanning(wave: wave.name, cwd: wave.repo) } catch { succeeded = false }
+        }
+        return succeeded
+    }
+
+    /// A saved Project or Task change has not reached its planning provider.
+    private var planningPending: Bool {
+        visibleRoadmaps.contains { roadmap in
+            roadmap.projects.items.contains { $0.sync.changes.contains { $0.state == .pending } }
+                || roadmap.tasks.items.contains { $0.task.sync.changes.contains { $0.state == .pending } }
+        }
+    }
+
     /// The window's one refresh owner: one reader process whose frames say
     /// what changed. Runs until cancelled, reopening the reader when it ends.
     func keepWorkCurrent() async {
@@ -1340,9 +1375,6 @@ final class WorkModel {
                     delay = .seconds(1)
                 }
                 if !Task.isCancelled { throw RegistryQueryError("Workspace observation ended") }
-            } catch WorkObservationError.configurationChanged {
-                // The installed `lf` or its Machine selection was replaced.
-                delay = .milliseconds(100)
             } catch {
                 if !Task.isCancelled { workUnavailable(error.localizedDescription) }
             }
@@ -1957,7 +1989,14 @@ final class WorkModel {
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
         if selection == nil { navigation.sidebarWaveID = nil }
-        if let selection, selection.kind == .wave { navigation.sidebarWaveID = selection.id }
+        if let selection, selection.kind == .wave {
+            navigation.sidebarWaveID = selection.id
+            // Opening a Wave refreshes its planning now, not at the next tick.
+            if !usesFixedFixture, query.streamsWork,
+               let wave = roadmap.value?.waves.first(where: { $0.wave.id == selection.id })?.wave {
+                Task { _ = await syncPlanning([wave]) }
+            }
+        }
         clearSelectionIfOutsideScope()
         openSelectedWorkspace()
     }
@@ -2073,13 +2112,13 @@ final class WorkModel {
 
     func loadSessionHistory(task: RoadmapTask) async {
         await loadTaskReading(\.sessionHistory, task: task.id) { [query] in
-            try await query.taskHistory(task: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.taskHistory(task: task.task.identifier)
         }
     }
 
     func loadTaskContext(task: RoadmapTask) async {
         await loadTaskReading(\.taskContext, task: task.id) { [query] in
-            try await query.taskContext(task: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+            try await query.taskContext(task: task.task.identifier)
         }
     }
 
@@ -2239,8 +2278,8 @@ final class WorkModel {
         }
     }
 
-    func machines(for target: WorkMachineTarget) async throws -> [Machine] {
-        try await query.machines(cwd: machineCwd(target))
+    func machines() async throws -> [Machine] {
+        try await query.machines()
     }
 
     /// Hand off the Task or set the Wave's default, then confirm the Work update
@@ -2347,13 +2386,13 @@ final class WorkModel {
     }
 
     func previewSessionBinding() async {
-        guard let repo = repoPath, let draft = navigation.binding, !draft.submitting else { return }
+        guard repoPath != nil, let draft = navigation.binding, !draft.submitting else { return }
         let owner = navigation
         owner.binding?.submitting = true
         owner.binding?.error = nil
         do {
             let preview = try await query.previewSessionBinding(
-                id: draft.sessionId, task: draft.selector.trimmingCharacters(in: .whitespacesAndNewlines), cwd: repo)
+                id: draft.sessionId, task: draft.selector.trimmingCharacters(in: .whitespacesAndNewlines))
             guard owner.binding?.id == draft.id else { return }
             owner.binding?.preview = preview
             owner.binding?.submitting = false

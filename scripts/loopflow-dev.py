@@ -38,6 +38,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from app_bundle import SWIFT_APP_PRODUCT, install_app_executable
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 DEV_APP = Path.home() / "Applications" / "Loopflow Dev.app"
@@ -166,10 +168,16 @@ def cmd_setup(install: bool = False, dry_run: bool = False) -> int:
     return run(cmd, cwd=REPO_ROOT, check=False).returncode
 
 
+def cmd_ffi(release: bool = False) -> int:
+    """Build the Rust library the app links, where Package.swift finds it."""
+    cargo = ["cargo", "build", "--locked", "-p", "loopflow-ffi", "--lib"]
+    return run(cargo + (["--release"] if release else []), cwd=REPO_ROOT, check=False).returncode
+
+
 def cmd_build() -> int:
     """Build the app."""
     print("Building Loopflow...")
-    return run(["swift", "build"], cwd=SWIFT_DIR, check=False).returncode
+    return cmd_ffi() or run(["swift", "build"], cwd=SWIFT_DIR, check=False).returncode
 
 
 def cmd_install() -> int:
@@ -185,6 +193,8 @@ def cmd_install() -> int:
 def cmd_test() -> int:
     """Build and run tests."""
     print("Building and testing...")
+    if built := cmd_ffi():
+        return built
     result = run(["swift", "build"], cwd=SWIFT_DIR, check=False)
     if result.returncode != 0:
         return result.returncode
@@ -586,34 +596,19 @@ def _ensure_dev_signing_identity() -> str:
     return identity
 
 
-def _bundle_executable_name(info_plist: Path) -> str:
-    """The binary macOS actually launches, per CFBundleExecutable."""
-    result = run_capture(
-        ["/usr/libexec/PlistBuddy", "-c", "Print :CFBundleExecutable", str(info_plist)]
-    )
-    name = (result.stdout or "").strip()
-    if result.returncode != 0 or not name:
-        raise RuntimeError(f"Could not read CFBundleExecutable from {info_plist}")
-    return name
-
-
 def _install_dev_app() -> None:
     """Install debug build to stable location for permissions persistence."""
     app_dir = DEV_APP / "Contents"
-    macos_dir = app_dir / "MacOS"
-    macos_dir.mkdir(parents=True, exist_ok=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    # `swift build` names the product LoopflowMac, but Info.plist declares
-    # CFBundleExecutable = Loopflow, so that is the name macOS launches. Copying
-    # the build under its own name leaves whatever `Loopflow` was already there
-    # to run forever: the app keeps starting a stale binary while the fresh one
-    # sits beside it, and codesigning bumps the stale mtime so it even looks new.
-    executable = _bundle_executable_name(SWIFT_DIR / "LoopflowMac" / "Info.plist")
-    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", macos_dir / executable)
-    stale = macos_dir / "LoopflowMac"
-    if stale.name != executable and stale.exists():
-        stale.unlink()
+    executable = install_app_executable(
+        SWIFT_DIR / ".build" / "debug", SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir
+    )
+    # Earlier dev installs copied the build under its product name; macOS launches
+    # CFBundleExecutable, so a leftover product binary only misleads.
+    stale = executable.parent / SWIFT_APP_PRODUCT
+    if stale != executable:
+        stale.unlink(missing_ok=True)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
@@ -700,6 +695,7 @@ def cmd_screenshots() -> int:
 
 COMMANDS = {
     "setup": (cmd_setup, "Install/check repo dev environment tools"),
+    "ffi": (cmd_ffi, "Build the Rust library the app links"),
     "build": (cmd_build, "Build the app"),
     "install": (cmd_install, "Build and install without launching"),
     "test": (cmd_test, "Build and run tests"),
@@ -751,6 +747,10 @@ def main() -> int:
                 action="store_true",
                 help="print what would be installed",
             )
+        if name == "ffi":
+            sub.add_argument(
+                "--release", action="store_true", help="build for `swift build -c release`"
+            )
         if name == "bundle-control-tools":
             sub.add_argument(
                 "--output",
@@ -771,6 +771,8 @@ def main() -> int:
         return func(install=args.install, dry_run=args.dry_run)
     if args.command == "bundle-control-tools":
         return func(output=args.output)
+    if args.command == "ffi":
+        return func(release=args.release)
     return func()
 
 

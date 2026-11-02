@@ -130,7 +130,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     });
     let completion_pending = completion_pending(store, &task)?;
     let starter = |process: Option<&crate::id::LfProcessId>| {
-        super::ship::starter(&store.sqlite, process).map_err(task_error)
+        super::ship::starter(&store.sqlite, &repo, process).map_err(task_error)
     };
     let mark = |at, by: Option<&crate::id::LfProcessId>| {
         Ok::<_, OpsError>(super::ShipMark {

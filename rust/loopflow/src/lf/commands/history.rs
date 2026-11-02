@@ -169,6 +169,22 @@ pub enum HistoryCommand {
     },
 }
 
+impl HistoryCommand {
+    /// Whether this command changes state, and so records a Process.
+    pub fn changes_work(&self) -> bool {
+        match self {
+            Self::List { .. }
+            | Self::Show { .. }
+            | Self::Retention { .. }
+            | Self::Search { .. }
+            | Self::Usage { .. }
+            | Self::Linear { .. }
+            | Self::Export { .. } => false,
+            Self::Replay { .. } => true,
+        }
+    }
+}
+
 fn export(since: &str) -> anyhow::Result<()> {
     let since = super::util::parse_since(since, time::OffsetDateTime::now_utc())?;
     let runtime = tokio::runtime::Runtime::new()?;

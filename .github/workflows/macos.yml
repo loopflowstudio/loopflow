@@ -60,6 +60,8 @@ jobs:
         run: uv run python scripts/swift_cache.py restore
       - name: Build CLI for Swift transport tests
         run: /usr/bin/time -l cargo build -p loopflow --bin lf
+      - name: Build the Rust library Desktop links
+        run: /usr/bin/time -l cargo build -p loopflow-ffi --lib
       - name: Test checkout observation's read-only sandbox
         run: uv run pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes
       - name: Build Desktop and its tests

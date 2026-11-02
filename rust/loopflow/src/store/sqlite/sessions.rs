@@ -462,6 +462,43 @@ fn ensure_primary_session_in(
     Ok(session)
 }
 
+/// The inputs a history read selected, before their history is decoded.
+#[derive(Debug)]
+pub(crate) struct PendingHistory {
+    /// Wave, Project and resolved Task the read is scoped to.
+    scope: (Option<String>, Option<String>, Option<String>),
+    pub(crate) inputs: Vec<PendingInput>,
+    pub(crate) truncated: bool,
+}
+
+/// One selected input: a captured input, or a native turn no input captured.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingInput {
+    session_id: String,
+    input: Option<String>,
+    caller: Option<String>,
+    started: i64,
+    task: Option<String>,
+    wave: Option<String>,
+    names: (Option<String>, Option<String>),
+    current_input: Option<i64>,
+    cwd: String,
+    repo: Option<String>,
+    skill: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+    interactive: bool,
+    truncated: bool,
+    work_source: Option<String>,
+    captured: Option<i64>,
+    thread: Option<AgentSessionId>,
+    turn: Option<String>,
+    /// The latest `observed_at` of any of its history rows. Every time its
+    /// decoded history reports is a row's `observed_at` or a payload time its
+    /// writer also stored as that row's `observed_at`, so none is later.
+    pub(crate) latest: i64,
+}
+
 impl SqliteStore {
     pub(crate) fn bind_session_transport(
         &self,
@@ -742,6 +779,47 @@ impl SqliteStore {
         Ok(serde_json::to_string(&live)?)
     }
 
+    /// What Session summaries read at `now` besides committed rows: each
+    /// unfinished AgentProcess's OS evidence, how many activity rows are quiet
+    /// enough to make a Session available, and which persistent checkouts
+    /// exist. Without a commit, summaries change only when this does.
+    pub(crate) fn session_observations(&self, now: i64) -> StoreResult<Vec<u8>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        // The agent-only index: ordering by id in SQL would walk every row.
+        let mut agents = conn
+            .prepare(
+                "SELECT id,pid,os_started_at,started_at FROM processes INDEXED BY agent_process_session
+                 WHERE kind='agent' AND completed_at IS NULL",
+            )?
+            .query_map([], |row| {
+                let evidence = crate::journal::agent_process_evidence(
+                    None,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    crate::journal::process_identity_evidence,
+                );
+                Ok(format!("{}:{evidence:?}\n", row.get::<_, String>(0)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        agents.sort_unstable();
+        let mut observed = agents.concat();
+        let quiet: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM session_activity WHERE observed_at<=?1",
+            [now - crate::session::AVAILABILITY_QUIET_SECONDS],
+            |row| row.get(0),
+        )?;
+        observed.push_str(&format!("quiet:{quiet}\n"));
+        let mut checkouts = conn.prepare(
+            "SELECT DISTINCT cwd FROM agent_sessions WHERE primary_scope IS NOT NULL ORDER BY cwd",
+        )?;
+        for cwd in checkouts.query_map([], |row| row.get::<_, String>(0))? {
+            let cwd = cwd?;
+            observed.push_str(&format!("{}:{cwd}\n", Path::new(&cwd).exists()));
+        }
+        Ok(observed.into_bytes())
+    }
+
     /// Each row's Available is judged at `now`.
     pub(crate) fn session_summaries(
         &self,
@@ -880,6 +958,44 @@ impl SqliteStore {
         window: (i64, bool, Option<usize>),
         input: Option<&str>,
     ) -> StoreResult<(Vec<crate::session_record::SessionHistory>, bool)> {
+        let pending = self.pending_inputs(wave, project, task, caller, window, input)?;
+        let histories = pending
+            .inputs
+            .iter()
+            .map(|input| self.decode_history(&pending, input))
+            .collect::<StoreResult<Vec<_>>>()?;
+        Ok((histories, pending.truncated))
+    }
+
+    /// The inputs [`Self::conversation_history`] reads, newest first, before
+    /// any history is decoded.
+    pub(crate) fn pending_conversation_history(
+        &self,
+        wave: Option<&str>,
+        project: Option<&str>,
+        task: Option<&str>,
+        since: i64,
+        include_finished: bool,
+    ) -> StoreResult<PendingHistory> {
+        self.pending_inputs(
+            wave,
+            project,
+            task,
+            None,
+            (since, include_finished, None),
+            None,
+        )
+    }
+
+    fn pending_inputs(
+        &self,
+        wave: Option<&str>,
+        project: Option<&str>,
+        task: Option<&str>,
+        caller: Option<&str>,
+        window: (i64, bool, Option<usize>),
+        input: Option<&str>,
+    ) -> StoreResult<PendingHistory> {
         let task_id = task
             .map(|selector| self.resolve_task_id(selector, None))
             .transpose()?
@@ -911,7 +1027,13 @@ impl SqliteStore {
                             SELECT MAX(done.observed_at) FROM session_events origin JOIN session_events done
                             ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
                             AND done.provider_turn=origin.provider_turn AND done.kind='completed'
-                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn
+                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn,
+                    MAX(i.observed_at,COALESCE(m.observed_at,0),
+                        COALESCE((SELECT MAX(o.observed_at) FROM session_events o WHERE o.captured_event=i.seq),0),
+                        COALESCE((SELECT MAX(d.observed_at) FROM session_events origin JOIN session_events d
+                            ON d.session_id=origin.session_id AND d.provider_thread=origin.provider_thread
+                            AND d.provider_turn=origin.provider_turn
+                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),0)) AS latest
                 FROM session_events i JOIN agent_sessions s ON s.id=i.session_id
                 LEFT JOIN session_events latest_turn ON latest_turn.seq=(
                     SELECT origin.seq FROM session_events origin WHERE origin.session_id=i.session_id
@@ -929,9 +1051,10 @@ impl SqliteStore {
                         AND origin.captured_event=i.seq AND origin.kind='started'))
                 UNION ALL
                 SELECT NULL,NULL,e.session_id,NULL,e.started,origin.task_id,origin.wave_id,
-                    COALESCE(MAX(attached.completed_at),e.completed),e.provider_thread,e.provider_turn
+                    COALESCE(MAX(attached.completed_at),e.completed),e.provider_thread,e.provider_turn,e.latest
                 FROM (SELECT session_id,provider_thread,provider_turn,MIN(observed_at) AS started,
-                        MAX(CASE WHEN kind='completed' THEN observed_at END) AS completed
+                        MAX(CASE WHEN kind='completed' THEN observed_at END) AS completed,
+                        MAX(observed_at) AS latest
                     FROM session_events WHERE ?7 IS NULL AND kind IN ('started','usage','completed','output')
                         AND captured_event IS NULL
                     GROUP BY session_id,provider_thread,provider_turn) e
@@ -942,7 +1065,7 @@ impl SqliteStore {
                 WHERE origin.captured_event IS NULL
                 GROUP BY e.session_id,e.provider_thread,e.provider_turn)
                 , eligible AS MATERIALIZED (
-                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn, SUM(ended IS NULL) OVER () AS unfinished,
+                SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest, SUM(ended IS NULL) OVER () AS unfinished,
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total
                 FROM inputs
@@ -967,7 +1090,7 @@ impl SqliteStore {
                     s.current_capture,s.cwd,s.repo,s.skill,s.provider,s.model,s.interactive,
                     total > MAX(?8,unfinished),COALESCE((SELECT json_extract(payload,'$.work_source') FROM session_events WHERE seq=eligible.captured),
                         CASE WHEN eligible.captured=s.current_capture AND s.bound_at IS NULL THEN s.work_source END),
-                    eligible.captured,eligible.thread,eligible.turn
+                    eligible.captured,eligible.thread,eligible.turn,eligible.latest
                 FROM eligible JOIN agent_sessions s ON s.id=eligible.session_id
                 WHERE (?8 IS NULL OR ended IS NULL OR ordinal<=MAX(?8-unfinished,0))
                 ORDER BY started DESC,eligible.input_id DESC,eligible.session_id,eligible.thread,eligible.turn")?;
@@ -1001,114 +1124,118 @@ impl SqliteStore {
                     })
                     .transpose()?
                     .flatten();
-                inputs.push((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, i64>(3)?,
+                inputs.push(PendingInput {
+                    session_id: row.get(0)?,
+                    input: row.get(1)?,
+                    caller: row.get(2)?,
+                    started: row.get(3)?,
                     task,
-                    row.get::<_, Option<String>>(5)?,
-                    (row.get::<_, Option<String>>(6)?, task_identifier),
-                    row.get::<_, Option<i64>>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, Option<String>>(10)?,
-                    row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<String>>(12)?,
-                    row.get::<_, bool>(13)?,
-                    row.get::<_, Option<bool>>(14)?.unwrap_or(false),
-                    row.get::<_, Option<String>>(15)?,
-                    row.get::<_, Option<i64>>(16)?,
-                    row.get::<_, Option<AgentSessionId>>(17)?,
-                    row.get::<_, Option<String>>(18)?,
-                ));
+                    wave: row.get(5)?,
+                    names: (row.get(6)?, task_identifier),
+                    current_input: row.get(7)?,
+                    cwd: row.get(8)?,
+                    repo: row.get(9)?,
+                    skill: row.get(10)?,
+                    provider: row.get(11)?,
+                    model: row.get(12)?,
+                    interactive: row.get(13)?,
+                    truncated: row.get::<_, Option<bool>>(14)?.unwrap_or(false),
+                    work_source: row.get(15)?,
+                    captured: row.get(16)?,
+                    thread: row.get(17)?,
+                    turn: row.get(18)?,
+                    latest: row.get(19)?,
+                });
             }
             inputs
         };
-        let truncated = inputs.iter().any(|row| row.14);
-        let scope = (wave, project, task);
-        let histories = inputs
-            .into_iter()
-            .map(
-                |(
-                    session_id,
-                    input,
-                    caller,
-                    started,
-                    task,
-                    wave,
-                    names,
-                    current_input,
-                    cwd,
-                    repo,
-                    skill,
-                    provider,
-                    model,
-                    interactive,
-                    _,
-                    work_source,
-                    captured,
-                    thread,
-                    turn,
-                )| {
-                    let input = input
-                        .as_deref()
-                        .map(crate::session_record::parse_artifact_key)
-                        .transpose()
-                        .map_err(invalid)?;
-                    let session = crate::session::HistoryCapture {
-                        captured,
-                        id: session_id.clone().into(),
-                        current_capture: current_input,
-                        caller_artifact_key: caller
-                            .as_deref()
-                            .map(crate::session_record::parse_artifact_key)
-                            .transpose()
-                            .map_err(invalid)?,
-                        task_id: task
-                            .as_deref()
-                            .map(TaskId::parse)
-                            .transpose()
-                            .map_err(invalid)?,
-                        wave_id: wave
-                            .as_deref()
-                            .map(crate::id::WaveId::parse)
-                            .transpose()
-                            .map_err(invalid)?,
-                        observed_at: started,
-                        cwd: cwd.into(),
-                        repo,
-                        skill,
-                        provider,
-                        model,
-                        interactive,
-                        work_source: work_source
-                            .map(|source| serde_json::from_value(serde_json::Value::String(source)))
-                            .transpose()?,
-                    };
-                    let history = match input.as_deref() {
-                        Some(input) => {
-                            self.summary_for_input_matching(&session_id, input, scope)?
-                        }
-                        None => self.orphaned_native_history(
-                            &session_id,
-                            scope,
-                            thread.as_ref(),
-                            turn.as_deref(),
-                        )?,
-                    };
-                    let snapshot = crate::session_record::project_input_history(
-                        &session,
-                        input.as_deref(),
-                        &history,
-                        names,
-                    )
-                    .map_err(invalid)?;
-                    Ok(snapshot)
-                },
-            )
-            .collect::<StoreResult<Vec<_>>>()?;
-        Ok((histories, truncated))
+        Ok(PendingHistory {
+            truncated: inputs.iter().any(|input| input.truncated),
+            scope: (
+                wave.map(str::to_owned),
+                project.map(str::to_owned),
+                task.map(str::to_owned),
+            ),
+            inputs,
+        })
+    }
+
+    /// One pending input's history, decoded.
+    pub(crate) fn decode_history(
+        &self,
+        pending: &PendingHistory,
+        input: &PendingInput,
+    ) -> StoreResult<crate::session_record::SessionHistory> {
+        let scope = (
+            pending.scope.0.as_deref(),
+            pending.scope.1.as_deref(),
+            pending.scope.2.as_deref(),
+        );
+        let PendingInput {
+            session_id,
+            input,
+            caller,
+            started,
+            task,
+            wave,
+            names,
+            current_input,
+            cwd,
+            repo,
+            skill,
+            provider,
+            model,
+            interactive,
+            truncated: _,
+            work_source,
+            captured,
+            thread,
+            turn,
+            latest: _,
+        } = input.clone();
+        let input = input
+            .as_deref()
+            .map(crate::session_record::parse_artifact_key)
+            .transpose()
+            .map_err(invalid)?;
+        let session = crate::session::HistoryCapture {
+            captured,
+            id: session_id.clone().into(),
+            current_capture: current_input,
+            caller_artifact_key: caller
+                .as_deref()
+                .map(crate::session_record::parse_artifact_key)
+                .transpose()
+                .map_err(invalid)?,
+            task_id: task
+                .as_deref()
+                .map(TaskId::parse)
+                .transpose()
+                .map_err(invalid)?,
+            wave_id: wave
+                .as_deref()
+                .map(crate::id::WaveId::parse)
+                .transpose()
+                .map_err(invalid)?,
+            observed_at: started,
+            cwd: cwd.into(),
+            repo,
+            skill,
+            provider,
+            model,
+            interactive,
+            work_source: work_source
+                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
+                .transpose()?,
+        };
+        let history = match input.as_deref() {
+            Some(input) => self.summary_for_input_matching(&session_id, input, scope)?,
+            None => {
+                self.orphaned_native_history(&session_id, scope, thread.as_ref(), turn.as_deref())?
+            }
+        };
+        crate::session_record::project_input_history(&session, input.as_deref(), &history, names)
+            .map_err(invalid)
     }
 
     pub fn session(&self, id: &str) -> StoreResult<Option<LfSession>> {

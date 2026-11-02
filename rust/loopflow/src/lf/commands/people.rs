@@ -1,16 +1,24 @@
 //! `lf ops people`: the people who own this repository's Tasks.
 use anyhow::{anyhow, Result};
 
-use crate::ops::people::repo_people;
+use std::path::Path;
 
-pub fn run(json: bool) -> Result<()> {
-    let repo = crate::repository::CanonicalRepo::current()?
+use crate::ops::people::{repo_people, RepoPerson};
+
+/// The owners of Tasks in the repository containing `directory`, with
+/// warnings for GitHub lookups that failed.
+pub fn people(directory: &Path) -> Result<(Vec<RepoPerson>, Vec<String>)> {
+    let repo = crate::repository::CanonicalRepo::containing(directory)?
         .ok_or_else(|| anyhow!("run `lf ops people` in a repository"))?;
     let runtime = tokio::runtime::Runtime::new()?;
     let store = runtime.block_on(crate::store::open_store(
         &crate::store::storage_config_from_env()?,
     ))?;
-    let (people, warnings) = repo_people(&store.sqlite, repo.as_path())?;
+    repo_people(&store.sqlite, repo.as_path())
+}
+
+pub fn run(json: bool) -> Result<()> {
+    let (people, warnings) = people(&std::env::current_dir()?)?;
     if json {
         println!("{}", serde_json::to_string(&people)?);
         return Ok(());

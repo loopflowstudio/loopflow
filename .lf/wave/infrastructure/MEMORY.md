@@ -927,8 +927,9 @@ remains review only. Earlier design/proofs:
 Source now carries the stable installed entry through providers, hooks, prepared
 Session commands and Flow children. The existing gate selects/verifies artifacts
 at execution. Main-Machine dispatch ignores inherited LF_BIN; explicit private
-Homes retain executable selection. Compatibility probing, installer-triggered
-native restart and replacement viewers are removed. Schema checks remain.
+Homes retain executable selection. Compatibility probing and installer-triggered
+native restart are removed; LOO-705 (below) brings viewers that follow the entry
+back. Schema checks remain.
 
 Disposable-account proof retries exit 42 after switching installation in one live
 fixture provider/checkout, retaining history, steers and attribution. Saved hooks
@@ -943,6 +944,30 @@ before selecting remaining work. No replay or invented exits.
 MTG-117's unknown exit is not proven upgrade-caused.
 #1583's locator repair remains separate. An empty legacy `active_runs` proves no
 liveness or continuity.
+
+## Moving onto the installed lf (LOO-705, 2026-11-02)
+
+Jack Heart asked (2026-11-02) that long-lived lf processes move onto the
+installed lf by one mechanism, deep enough that a new kind of skew needs no new
+case, after 0.15.0 owners refused 0.15.1 attaches and `lf monitor rollover`
+moved none of them. Headless choice, pending Jack: replacement from durable
+state, never negotiation. An owner is superseded when the entry it was launched
+through (`resolve_lf_binary()`, resolved by `installation::entry_target`) no
+longer dispatches to its executable; it ends once its Sessions wait for a
+person and tells viewers the successor entry, which they rerun their invocation
+through. `lf resume` ends an owner that is not the build the entry launches
+now and resumes from provider history; rollover is that sweep for every idle
+superseded owner, its viewed rule deleted. Graph runners are never stopped;
+each step already launches through the entry.
+
+Lessons: the transport crosses builds, so add `Option` fields to existing
+`Response` variants and never a new variant (the `moved` variant broke 0.15.0
+peers). Compare build identity against what a relaunch runs, not the viewer's
+own executable, or a development viewer restarts installed owners. Limits: an
+owner that cannot open an advanced store cannot judge idleness and keeps
+judging; Loopflow.app and the CLI on different builds restart each other's
+owners on `lf resume`; the Mac demo (`lf resume LOO-618`) and a Graph taking
+its next step on a newer lf are unproved by fixture.
 
 ## Shipped history
 

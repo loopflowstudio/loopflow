@@ -1102,11 +1102,12 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
-/// End a running owner from another build so the conversation resumes here:
-/// a viewer never negotiates with an owner whose lf is not its own. The owner
-/// ends the way its own lifetime policy ends it, stopping its agent and
-/// recording its exit; a turn it was running is reported, never cut silently.
-/// False when the owner is this build, or runs an executable nobody can read.
+/// End a running owner from another build so the conversation resumes on the
+/// lf the entry launches now: a viewer never negotiates with an owner whose lf
+/// is not that one. The owner ends the way its own lifetime policy ends it,
+/// stopping its agent and recording its exit; a turn it was running is
+/// reported, never cut silently. False when the owner already runs the build
+/// a relaunch would run, or an executable nobody can read.
 fn taken_over(
     store: &SqliteStore,
     session: &LfSession,
@@ -1118,7 +1119,12 @@ fn taken_over(
     let Some(executable) = crate::journal::OsProcess::executable(pid) else {
         return Ok(false);
     };
-    if crate::installation::same_build(&executable, &crate::journal::current_executable()?) {
+    // The entry, not this viewer: a development build opening a conversation
+    // in the main Home relaunches through the installed lf anyway.
+    let relaunch = crate::os_process::resolve_lf_binary()
+        .and_then(|entry| crate::installation::entry_target(&entry))
+        .or_else(|_| crate::journal::current_executable().map_err(anyhow::Error::from))?;
+    if crate::installation::same_build(&executable, &relaunch) {
         return Ok(false);
     }
     let turn_cut_off = store.session_turn_was_running(&session.id)?;
@@ -1129,13 +1135,14 @@ fn taken_over(
         )
     })?;
     eprintln!(
-        "Moved {} off {}; continuing on this lf.{}",
+        "Moved {} off {}; continuing on {}.{}",
         if session.title.is_empty() {
             session.id.as_str()
         } else {
             session.title.as_str()
         },
         executable.display(),
+        relaunch.display(),
         if turn_cut_off {
             " Its last turn was cut off; ask again."
         } else {

@@ -15,11 +15,20 @@ Headless choices, 2026-11-02. Each is reversible; Jack decides.
   `lf resume` or when viewed. If Jack wants every idle Session running again
   right after an install, rollover should also resume Sessions that ended
   for supersession (needs a recorded reason on the exit).
-- **Build identity for `lf resume` = canonical path, else content digest.**
-  Desktop's helper and the CLI artifact are different paths with the same
-  bytes; comparing content keeps Desktop and terminal from restarting the
-  provider at each other. The owner's own judgement is path-only, since the
+- **Build identity for `lf resume` = canonical path, else content digest,
+  owner against the entry's target.** Desktop's helper and the CLI artifact
+  are different paths with the same bytes; comparing content keeps Desktop and
+  terminal from restarting the provider at each other while they ship the same
+  lf. When Loopflow.app and the installed CLI are different builds, each
+  `lf resume` from the other side restarts the provider from history. The
+  viewer compares the owner with what the entry launches, not with itself, so
+  a development build in the main Home attaches rather than restarting
+  (realign, 2026-11-02). The owner's own judgement is path-only, since the
   entry's target is content-addressed.
+- **Viewers following through the entry reverses part of LOO-502** (Jack,
+  2026-10-17: "replacement viewers are removed"). The Task's outcome ("`lf
+  resume` always lands you in the conversation on the installed lf, with no
+  PID killing by hand") asks for it; pinning and probing stay removed.
 - **Tests make a different build by re-signing a copy (macOS) or appending a
   byte (Linux).** Copies of the test binary are byte-identical, so a takeover
   test needs a differing executable that still runs.

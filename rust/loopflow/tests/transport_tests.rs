@@ -1346,7 +1346,7 @@ fn resume_takes_over_an_owner_from_another_build() {
     let output = viewer.wait_with_output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Moved") && stderr.contains("continuing on this lf"),
+        stderr.contains("Moved") && stderr.contains("continuing on "),
         "{stderr}"
     );
     assert!(!stderr.contains("cut off"), "{stderr}");

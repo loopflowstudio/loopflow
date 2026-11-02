@@ -1,6 +1,6 @@
 # LOO-620: lf open, Spotlight and Finder reach only the installed Loopflow.app
 
-Status: implemented, compressed and synced onto main through #1792 (2026-11-02); gate next. Source: Task definition
+Status: implemented, compressed, synced onto main through #1792 and realigned (2026-11-02); gate next. Source: Task definition
 (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop database-mismatch incident).
 
 ## What exists
@@ -20,16 +20,14 @@ Status: implemented, compressed and synced onto main through #1792 (2026-11-02);
   other raw copies are dev apps without remembering anything.
 - **Promotion converges on one bundle.** Staged (`promote.*`) and superseded
   (`superseded.*`) copies live in `<Applications>/.Loopflow.app.noindex/`
-  (same volume, so commit stays a rename). `install::converge_release_app(target)` runs at
-  promotion start (clears an interrupted promotion's leftovers), after settlement,
-  and after switch recovery: it removes that directory and the sibling
+  (same volume, so commit stays a rename). `install::converge_release_app(target)` runs
+  once per promotion, after settlement, and again after switch recovery: it removes
+  that directory (including any copy an interrupted promotion left) and the sibling
   `.Loopflow.app.promote.*` / `.superseded.*` copies earlier lf left beside the
   target; for targets in `/Applications` or `~/Applications` it also unregisters
   (`lsregister -u`) what it removes, removes `~/Applications/{Loopflow,Concerto}.app`
   carrying `com.loopflow.mac`/`com.loopflow.concerto`, and registers the target
-  (`lsregister -f`). It runs once per promotion, after settlement, and after switch
-  recovery; a copy an interrupted promotion left waits in the scratch directory
-  until then. The legacy target stays with its existing owners
+  (`lsregister -f`). The legacy target stays with its existing owners
   (`settle_app_artifacts`, `recover_switch`).
 
 ## Tests

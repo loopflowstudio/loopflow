@@ -1857,7 +1857,7 @@ pub enum WaveCommand {
         #[arg(long)]
         plan: std::path::PathBuf,
     },
-    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
+    /// Connect a Wave to its Initiative and the repository's Team (Task prefix); a new name is added first
     Connect {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,

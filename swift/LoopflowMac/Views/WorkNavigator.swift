@@ -575,6 +575,8 @@ private struct NewTaskRow: View {
 }
 
 /// The last row of the Waves list while the pointer is over it; names and authors a Wave.
+/// An add with leftovers (its files uncommitted on main) keeps the popover open
+/// showing the receipt's lines; a clean add closes it.
 private struct NewWaveRow: View {
     let model: WorkModel
     let hover: HoverFlag
@@ -583,6 +585,7 @@ private struct NewWaveRow: View {
     @State private var name = ""
     @State private var objective = ""
     @State private var error: String?
+    @State private var leftovers: WaveAdded?
 
     var body: some View {
         HoverRevealed(flag: hover) {
@@ -600,27 +603,60 @@ private struct NewWaveRow: View {
         }
     }
 
+    @ViewBuilder
     private var form: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
-            TextField("Objective (optional)", text: $objective).onSubmit(create).frame(width: 200)
-            if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
-            HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
-        }.padding(12)
+        if let leftovers {
+            WaveAddedLeftovers(added: leftovers) {
+                self.leftovers = nil
+                naming = false
+            }.padding(12)
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Wave name", text: $name).onSubmit(create).frame(width: 200)
+                TextField("Objective (optional)", text: $objective).onSubmit(create).frame(width: 200)
+                if let error { Text(error).font(Typography.body(11)).foregroundStyle(palette.warning) }
+                HStack { Spacer(); Button("Create", action: create).keyboardShortcut(.defaultAction) }
+            }.padding(12)
+        }
     }
 
     private func create() {
         guard let repoPath = model.repoPath else { return }
         Task {
             do {
-                let id = try await model.addWave(name: name, objective: objective, repo: repoPath)
-                naming = false
+                let added = try await model.addWave(name: name, objective: objective, repo: repoPath)
                 name = ""
                 objective = ""
                 error = nil
-                model.select(.wave(id: id))
+                if added.summary.isEmpty { naming = false } else { leftovers = added }
+                model.select(.wave(id: added.id))
             } catch let failure {
                 error = failure.localizedDescription
+            }
+        }
+    }
+}
+
+/// An add receipt with lines a person still has to act on, and a Done button.
+struct WaveAddedLeftovers: View {
+    let added: WaveAdded
+    let onDone: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text(added.created ? "Added \(added.name)" : "\(added.name) already exists")
+                .font(Typography.body(13)).foregroundStyle(palette.text)
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                ForEach(Array(added.summary.enumerated()), id: \.offset) { _, line in
+                    Text(line).font(Typography.body(11)).foregroundStyle(palette.textSecondary)
+                }
+            }.accessibilityIdentifier("new-wave-summary")
+            HStack {
+                Spacer()
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("new-wave-done")
             }
         }
     }

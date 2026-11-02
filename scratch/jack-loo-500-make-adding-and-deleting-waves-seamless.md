@@ -410,29 +410,27 @@ One PR, deletions first:
     `supersededByWaveId`, `retirementReason` and the "Retired at" lens, which
     no listed row could reach once the list excludes removed Waves.
 
-11. Next (third concept review, 2026-11-02): `connect` never creates a Wave.
-    An explicit unregistered name runs `wave_lifecycle::add` first (main
-    checkout, first Project, selective commit) and then links; connect's own
-    `config.yaml` and `.lf/config.yaml` writes and their commit land on the
-    main checkout through the lifecycle's `commit_authored`, not
-    `commit_workflow { add: true }` on the invoking checkout. `reteam`'s
-    `ensure_wave_row` loop registers authored directories through
-    `register_authored`; `refresh_inventory` reads the connected Wave with
-    `get_wave_at`. Proof: `wave_lifecycle` test that `lf wave connect ops`
-    from a Task worktree (fake `gh`) lands `.lf/wave/ops/` committed on main
-    with a first Project, and that `lf wave list` and Desktop show the same
-    row. Same pass, smaller: `WaveAdded.summary` (one line when files are
-    uncommitted, Rust-built like the other two receipts, fixture
-    `wave_added.json`, Swift mirror replacing `WaveIdentity`); the New Wave
-    popover and `CreateWaveSheet` stay open with it and a Done button, as the
-    Rename and Remove sheets do. And the Remove preview names uncommitted
-    edits inside `.lf/wave/<name>` on main (`git status --porcelain -- <path>`),
-    since they are deleted with the directory and Git history does not keep
-    them.
+11. Done (2026-11-02): `connect` never creates a Wave. An explicit
+    unregistered name runs `wave_lifecycle::add` first (main checkout, first
+    Project, selective commit) and then links; connect's own `config.yaml` and
+    `.lf/config.yaml` writes commit on the main checkout through
+    `commit_authored`, never `commit_workflow { add: true }` on the invoking
+    checkout; `LinearInitResult.files` carries the result and the CLI prints an
+    uncommitted one. `reteam` registers authored directories through
+    `register_authored_waves`; `refresh_inventory` reads the connected Wave
+    with `get_wave_at`; `add` is the one lifecycle caller of `ensure_wave_row`. Proof:
+    `ops::linear::tests::connect_adds_an_unregistered_wave_on_main_before_linking_it`
+    (connect from a Task worktree lands `.lf/wave/ops/` committed on main with
+    a first Project and nothing on the Task branch). `WaveAdded.summary`
+    (Rust-built, fixture `wave_added.json`, Swift mirror replacing
+    `WaveIdentity`; Swift mirrors the Project's id and name only, since Desktop
+    reads Projects from the planning stream) keeps the New Wave popover and
+    `CreateWaveSheet` open with a Done button (`WaveAddedLeftovers`). The
+    Remove preview carries `uncommitted` (`git status --porcelain -- <path>` on
+    main) and says those edits are deleted with the directory.
 
-Remaining: slice 11; Desktop demo steps 1–3 need a display session
-(demo/review). CLI demo steps 4–5 ran on `lf-world wave-lifecycle`
-(2026-11-02).
+Remaining: Desktop demo steps 1–3 need a display session (demo/review). CLI
+demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
 
 ## Concept review (2026-11-02, headless) — resolved
 
@@ -598,3 +596,7 @@ awaits the planning refresh, so the row exists when selected.
   added `?` to `open_existing_store` calls): `cargo test -p loopflow --test
   integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9.
   Affected suites → gate.
+- 2026-11-02 slice 11: `--lib ops::linear::tests::connect_adds_an_unregistered_wave`
+  1/1; `--test integration -- wave_lifecycle dto_fixtures::wave_` 11/11;
+  `swift test --filter 'CreateWaveSheetTests|DTOFixtureTests|ProjectActivationTests|RemoveWaveSheetTests|RenameWaveSheetTests|WorkModelTests'`
+  94/94; clippy and fmt clean. Affected suites → gate.

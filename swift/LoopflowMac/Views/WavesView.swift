@@ -441,10 +441,11 @@ struct WavesView: View {
         PortfolioRepoState.wavePlanKey(repoPath: repoPath, waveName: waveName)
     }
 
-    private func createWave(repoPath: String, name: String, objective: String) async throws {
-        try await model.addWave(name: name, objective: objective, repo: repoPath)
+    private func createWave(repoPath: String, name: String, objective: String) async throws -> WaveAdded {
+        let added = try await model.addWave(name: name, objective: objective, repo: repoPath)
         ensureRepoStates()
         await repoStates[repoPath]?.refresh()
+        return added
     }
 
     private func refreshRepos() async {
@@ -596,11 +597,12 @@ struct WavesView: View {
 }
 
 /// Minimal create-wave graph: pick a target repo, name the wave, submit. Adds
-/// the Wave through `lf wave add`.
+/// the Wave through `lf wave add`. An add with leftovers (its files uncommitted
+/// on main) keeps the sheet open showing the receipt's lines; a clean add closes it.
 struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?
-    let onCreate: (_ repoPath: String, _ name: String, _ objective: String) async throws -> Void
+    let onCreate: (_ repoPath: String, _ name: String, _ objective: String) async throws -> WaveAdded
     let onCancel: () -> Void
 
     @Environment(\.palette) private var palette
@@ -610,6 +612,7 @@ struct CreateWaveSheet: View {
     @State private var objective = ""
     @State private var isCreating = false
     @State private var errorMessage: String?
+    @State private var leftovers: WaveAdded?
     @FocusState private var isNameFocused: Bool
 
     private var trimmedName: String {
@@ -617,6 +620,23 @@ struct CreateWaveSheet: View {
     }
 
     var body: some View {
+        Group {
+            if let leftovers {
+                WaveAddedLeftovers(added: leftovers, onDone: onCancel)
+            } else {
+                form
+            }
+        }
+        .padding(Spacing.xl)
+        .frame(width: 420)
+        .background(palette.background)
+        .onAppear {
+            selectedRepoPath = initialRepoPath ?? repos.first?.path ?? ""
+            isNameFocused = true
+        }
+    }
+
+    private var form: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("New wave")
                 .font(Typography.sectionTitle(20))
@@ -705,13 +725,6 @@ struct CreateWaveSheet: View {
                 .disabled(isCreating || trimmedName.isEmpty || selectedRepoPath.isEmpty)
             }
         }
-        .padding(Spacing.xl)
-        .frame(width: 420)
-        .background(palette.background)
-        .onAppear {
-            selectedRepoPath = initialRepoPath ?? repos.first?.path ?? ""
-            isNameFocused = true
-        }
     }
 
     private func submit() {
@@ -725,8 +738,8 @@ struct CreateWaveSheet: View {
         Task {
             defer { isCreating = false }
             do {
-                try await onCreate(repoPath, name, objective)
-                onCancel()
+                let added = try await onCreate(repoPath, name, objective)
+                if added.summary.isEmpty { onCancel() } else { leftovers = added }
             } catch {
                 errorMessage = error.localizedDescription
             }

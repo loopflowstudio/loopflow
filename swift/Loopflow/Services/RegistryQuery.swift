@@ -648,11 +648,11 @@ public struct RegistryQuery: Sendable {
     /// `lf wave add`: registers the Wave, commits its files on the main checkout and
     /// ensures its first Project. Adding an existing Wave changes nothing, so this
     /// is also the explicit opening/retry operation; periodic reads stay observational.
-    /// Returns the Wave's id.
+    /// The receipt's `summary` names anything left to finish.
     @discardableResult
-    public func addWave(name: String, objective: String? = nil, cwd: String) async throws -> String {
+    public func addWave(name: String, objective: String? = nil, cwd: String) async throws -> WaveAdded {
         let objective = objective.flatMap { $0.isEmpty ? nil : $0 }
-        return try Self.decode(WaveIdentity.self, from: await write(.waveAdd(directory: cwd, wave: name, objective: objective))).id
+        return try Self.decode(WaveAdded.self, from: await write(.waveAdd(directory: cwd, wave: name, objective: objective)))
     }
 
     /// `lf wave rename`: same Wave id, Tasks and chapters; its files move on main.
@@ -1080,11 +1080,6 @@ public struct Machine: Decodable, Sendable, Hashable {
 public enum WorkMachineTarget: Sendable, Hashable {
     case task(issue: String)
     case wave(id: String)
-}
-
-/// The `id` every Wave lifecycle receipt carries.
-public struct WaveIdentity: Decodable, Sendable {
-    public let id: String
 }
 
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals

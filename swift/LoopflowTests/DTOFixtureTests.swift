@@ -17,6 +17,15 @@ struct DTOFixtureTests {
         #expect(removal.summary.first?.hasPrefix("2 open Tasks move to the repository") == true)
     }
 
+    @Test func waveAddedReceiptDecodesItsLeftover() throws {
+        let added = try RegistryQuery.decode(
+            WaveAdded.self, from: String(decoding: loadFixtureData("wave_added.json"), as: UTF8.self))
+        #expect(added.created)
+        #expect(added.project.id == "proj_283eee0d35124e709d4bd0ecadce83f3")
+        #expect(added.files == .uncommitted(reason: "HEAD is detached"))
+        #expect(added.summary.count == 1)
+    }
+
     @Test func waveRenamedReceiptDecodesItsLeftovers() throws {
         let renamed = try RegistryQuery.decode(
             WaveRenamed.self, from: String(decoding: loadFixtureData("wave_renamed.json"), as: UTF8.self))

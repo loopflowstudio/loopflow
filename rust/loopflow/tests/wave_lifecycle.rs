@@ -83,12 +83,27 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     );
     assert!(committed(&repo, ".lf/wave/research/GOAL.md"));
 
+    // An edit nobody committed is deleted with the directory; the preview says so.
+    std::fs::write(
+        repo.path().join(".lf/wave/research/GOAL.md"),
+        "## Objective\n\nUnsaved thoughts\n",
+    )
+    .unwrap();
     let preview = lf(
         repo.path(),
         home.path(),
         &["wave", "remove", "research", "--preview", "--json"],
     );
     assert_eq!(preview["summary"][0], "research has no Tasks or Sessions.");
+    assert_eq!(preview["uncommitted"][0], ".lf/wave/research/GOAL.md");
+    assert_eq!(
+        preview["summary"][2],
+        ".lf/wave/research is deleted on the main checkout; Git history keeps its committed files."
+    );
+    assert_eq!(
+        preview["summary"][3],
+        "Uncommitted edits in .lf/wave/research are deleted with it: .lf/wave/research/GOAL.md."
+    );
     assert!(
         repo.path().join(".lf/wave/research").exists(),
         "preview changes nothing"

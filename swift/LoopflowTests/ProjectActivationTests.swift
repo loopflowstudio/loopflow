@@ -7,6 +7,8 @@ import ViewInspector
 @Suite("Project activation")
 @MainActor
 struct ProjectActivationTests {
+    private let waveAdded = String(decoding: try! loadFixtureData("wave_added.json"), as: UTF8.self)
+
     @Test("activation failure belongs to its Wave and retry preserves planning")
     func retry() async throws {
         let path = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto/roadmap_snapshot.json")
@@ -14,7 +16,7 @@ struct ProjectActivationTests {
         let result = ActivationResult()
         let model = WorkModel(query: RegistryQuery { _, _ in
             if await result.offline { throw RegistryQueryError("offline") }
-            return #"{"id":"wave"}"#  // `lf wave add --json`
+            return waveAdded  // `lf wave add --json`
         })
         model.applyFixture(roadmap: .available(roadmap), waves: .available([]),
             workActivity: .loading, repos: [])
@@ -38,7 +40,7 @@ struct ProjectActivationTests {
                 await response.wait()
                 throw RegistryQueryError("a failed")
             }
-            return #"{"id":"wave"}"#  // `lf wave add --json`
+            return waveAdded  // `lf wave add --json`
         })
         let old = model.activateProject(id: "a", name: "a", repo: "/repo")
         await response.started()

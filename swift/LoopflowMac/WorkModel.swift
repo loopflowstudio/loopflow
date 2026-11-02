@@ -1729,11 +1729,12 @@ final class WorkModel {
     }
 
     /// Add a Wave through `lf wave add`; the planning stream then delivers its row.
+    /// The receipt's `summary` names anything left to finish.
     @discardableResult
-    func addWave(name: String, objective: String? = nil, repo: String) async throws -> String {
-        let id = try await query.addWave(name: name, objective: objective, cwd: repo)
+    func addWave(name: String, objective: String? = nil, repo: String) async throws -> WaveAdded {
+        let added = try await query.addWave(name: name, objective: objective, cwd: repo)
         await refreshPlanning()
-        return id
+        return added
     }
 
     /// `lf wave rename`; the Wave keeps its id, so selection stays on it.

@@ -1246,6 +1246,20 @@ fn wave_removal_preview_round_trips() {
 }
 
 #[test]
+fn wave_added_receipt_round_trips_with_its_leftover() {
+    use loopflow::ops::wave_lifecycle::WaveAdded;
+    let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
+    let added: WaveAdded = serde_json::from_str(json).unwrap();
+    assert!(added.created);
+    assert_eq!(added.project.wave_id, added.id);
+    assert_eq!(added.summary.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&added).unwrap(),
+        serde_json::from_str::<serde_json::Value>(json).unwrap()
+    );
+}
+
+#[test]
 fn wave_renamed_receipt_round_trips_with_its_leftovers() {
     use loopflow::ops::wave_lifecycle::WaveRenamed;
     let json = include_str!("../../../tests/fixtures/dto/wave_renamed.json");

@@ -113,3 +113,14 @@ Third concept review (2026-11-02), reversible:
 - **Uncommitted edits in a removed Wave's directory are named, not guarded.**
   The preview adds one sentence; removal still deletes them with the
   directory, since the person chose to remove the Wave.
+
+Slice 11 assumptions (2026-11-02, implement), reversible:
+
+- **Swift `WaveAdded.project` mirrors id and name only.** The receipt's
+  Project is the full Rust `Project` (KRs, metric targets, Linear binding);
+  Desktop reads Projects from the planning stream and has no mirror of that
+  shape, so the fixture test checks the two fields Desktop could use. A full
+  mirror arrives with whatever first reads the rest.
+- **The Remove preview's files line says "Git history keeps its committed
+  files"** when uncommitted edits exist, and a second line names them; the
+  plain "Git history keeps it" line stays for a clean directory.

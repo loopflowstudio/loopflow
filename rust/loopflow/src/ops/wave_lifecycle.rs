@@ -27,7 +27,10 @@ pub enum AuthoredFiles {
     Uncommitted { reason: String },
 }
 
-#[derive(Debug, Clone, Serialize)]
+/// `lf wave add --json`: the receipt Desktop and the CLI both show. `summary`
+/// holds what is left to do after the add, one sentence per line; empty when
+/// nothing is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WaveAdded {
     pub id: WaveId,
     pub name: String,
@@ -35,6 +38,7 @@ pub struct WaveAdded {
     pub project: Project,
     pub main_checkout: PathBuf,
     pub files: AuthoredFiles,
+    pub summary: Vec<String>,
 }
 
 /// Register a Wave, seed its authored files on the main checkout, ensure its
@@ -70,14 +74,27 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
-    Ok(WaveAdded {
+    let mut added = WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),
         created,
         project,
         main_checkout: main,
         files,
-    })
+        summary: Vec::new(),
+    };
+    added.summary = uncommitted_summary(&added.name, &added.files);
+    Ok(added)
+}
+
+/// The one leftover an add or rename can have: files the main checkout did not take.
+fn uncommitted_summary(slug: &str, files: &AuthoredFiles) -> Vec<String> {
+    match files {
+        AuthoredFiles::Uncommitted { reason } => {
+            vec![format!(".lf/wave/{slug} is not committed: {reason}.")]
+        }
+        _ => Vec::new(),
+    }
 }
 
 pub fn render_added(added: &WaveAdded) -> String {
@@ -86,20 +103,19 @@ pub fn render_added(added: &WaveAdded) -> String {
     } else {
         format!("{} already exists", added.name)
     };
-    match &added.files {
+    let headline = match &added.files {
         AuthoredFiles::Committed { commit } => format!(
             "{headline}; committed .lf/wave/{} on {} ({})",
             added.name,
             added.main_checkout.display(),
             &commit[..commit.len().min(10)]
         ),
-        AuthoredFiles::Unchanged => headline,
-        AuthoredFiles::Uncommitted { reason } => format!(
-            "{headline}; .lf/wave/{} is uncommitted on {}: {reason}",
-            added.name,
-            added.main_checkout.display()
-        ),
-    }
+        _ => headline,
+    };
+    std::iter::once(headline)
+        .chain(added.summary.iter().cloned())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> OpsResult<Project> {
@@ -145,7 +161,7 @@ fn resolve_wave(store: &Store, main: &Path, name: &str) -> OpsResult<Option<Wave
     }
 }
 
-fn authored_path(slug: &str) -> String {
+pub(crate) fn authored_path(slug: &str) -> String {
     format!(".lf/wave/{slug}")
 }
 
@@ -163,7 +179,7 @@ fn write_objective(main: &Path, slug: &str, objective: &str) -> OpsResult<()> {
 /// Commit exactly `paths` on the main checkout, leaving every other change a
 /// person has there untouched. A checkout that cannot take the commit keeps
 /// the files as they are and says why.
-fn commit_authored(main: &Path, paths: &[String], message: &str) -> AuthoredFiles {
+pub(crate) fn commit_authored(main: &Path, paths: &[String], message: &str) -> AuthoredFiles {
     // A pathspec must match: keep paths on disk or in the index.
     let paths: Vec<String> = paths
         .iter()
@@ -248,6 +264,9 @@ pub struct WaveRemoval {
     pub sessions: usize,
     pub initiatives: Vec<InitiativeArchive>,
     pub has_files: bool,
+    /// Files under `.lf/wave/<name>` with edits nobody committed on the main
+    /// checkout; removal deletes them with the directory, and Git keeps no copy.
+    pub uncommitted: Vec<String>,
     /// `None` in a preview.
     pub files: Option<AuthoredFiles>,
     /// Prose that still names the Wave, as `path:line`; never rewritten.
@@ -366,6 +385,11 @@ pub fn remove(
         sessions,
         initiatives,
         has_files,
+        uncommitted: if has_files {
+            uncommitted_edits(&main, &authored_path(wave.slug()))
+        } else {
+            Vec::new()
+        },
         files: None,
         mentions: prose_mentions(&main, wave.slug()),
         summary: Vec::new(),
@@ -435,6 +459,19 @@ fn interrupted(
          {wave} is not removed yet; run `lf wave remove {wave}` again to continue.",
         task.identifier
     ))
+}
+
+/// Paths under `path` whose edits are not committed on `main`.
+fn uncommitted_edits(main: &Path, path: &str) -> Vec<String> {
+    crate::git::git_stdout(main, &["status", "--porcelain", "--", path])
+        .map(|status| {
+            status
+                .lines()
+                .filter_map(|line| line.get(3..))
+                .map(|path| path.trim_matches('"').to_string())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Delete the removed Wave's directory on main, first folding its memory and the
@@ -709,11 +746,21 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             Some(parent) if removal.preview => format!(
                 ".lf/wave/{name} folds its memory into {parent} and is deleted on the main checkout."
             ),
-            None if removal.preview => {
+            None if removal.preview && removal.uncommitted.is_empty() => {
                 format!(".lf/wave/{name} is deleted on the main checkout; Git history keeps it.")
             }
+            None if removal.preview => format!(
+                ".lf/wave/{name} is deleted on the main checkout; Git history keeps its committed files."
+            ),
             _ => format!(".lf/wave/{name} removed on the main checkout."),
         });
+        if !removal.uncommitted.is_empty() {
+            lines.push(format!(
+                "Uncommitted edits in .lf/wave/{name} {} deleted with it: {}.",
+                if removal.preview { "are" } else { "were" },
+                removal.uncommitted.join(", ")
+            ));
+        }
     }
     if removal.preview {
         for archive in &removal.initiatives {
@@ -917,13 +964,7 @@ pub async fn rename(
 
 /// What the rename left for a person or agent to finish.
 fn rename_summary(renamed: &WaveRenamed) -> Vec<String> {
-    let mut lines = Vec::new();
-    if let AuthoredFiles::Uncommitted { reason } = &renamed.files {
-        lines.push(format!(
-            ".lf/wave/{} is not committed: {reason}.",
-            renamed.to
-        ));
-    }
+    let mut lines = uncommitted_summary(&renamed.to, &renamed.files);
     if let Some(InitiativeRename {
         initiative,
         error: Some(error),

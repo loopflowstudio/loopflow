@@ -956,8 +956,9 @@ telemetry red; fresh failures join existing work.
 - **A bundle id reaches any registered copy** (LOO-620, 2026-11-02). Launch
   Services resolved `com.loopflow.mac` to a benchmark staging copy and Desktop showed
   a database mismatch. `lf open` launches the installed app by path (the OS account's
-  `~/.local/bin/lf` resolves into it); `LF_DESKTOP` names only the caller's own
-  Desktop, and fixtures set it so a Machine's real app never answers. Source and
+  `~/.local/bin/lf` resolves into it); `LF_DESKTOP` routes back by id only to a
+  dev Desktop, the release id also goes to the path, and fixtures set a test id so
+  a Machine's real app never answers. Source and
   every build carry `com.loopflow.mac.dev`; release packaging stamps the release id.
   Promotion stages in `<Applications>/.Loopflow.app.noindex/` and sweeps earlier
   sibling copies. Same-id copies already registered elsewhere stay registered;

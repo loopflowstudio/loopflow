@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::durable::TaskState;
 use crate::git::{current_branch, get_default_branch, is_clean, rev_parse};
 use crate::ops::error::{OpsError, OpsResult};
-use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
+use crate::store::{default_db_path, open_existing_store, SharedStore, StoreError};
 use crate::work::task::{
     CiCheck, CiObservation, CiState, GithubObservation, GithubObservationResult, GithubPr,
     Observation, PrMergeMode, PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task,
@@ -39,25 +39,24 @@ pub(super) enum ManagedTask {
     Managed { store: SharedStore, task: Box<Task> },
 }
 
-/// Turn a [`RegistryUnavailable`] into an actionable authority error. The
-/// message always names the recovery action so the operator can move.
-pub(super) fn task_registry_error(err: RegistryUnavailable) -> OpsError {
-    task_error(match err {
-        RegistryUnavailable::MissingFile { path } => format!(
-            "Task PR authority refused: the shared Loopflow registry {} is missing. \
-             Run `lf doctor` to inspect the registry.",
-            path.display()
-        ),
-        RegistryUnavailable::Unresolved { error } => format!(
-            "Task PR authority refused: the shared Loopflow registry path is not usable: {error}. \
-             Fix LF_HOME or run `lf doctor`."
-        ),
-        RegistryUnavailable::Incompatible { path, error } => format!(
-            "Task PR authority refused: the shared Loopflow registry {} is present but \
-             inaccessible or schema-incompatible: {error}. Run `lf doctor`.",
-            path.display()
-        ),
-    })
+/// A Task entry point refuses rather than degrading to generic PR behavior
+/// when the shared registry exists but cannot be opened: inaccessible, locked
+/// or schema-incompatible. The message names the recovery so the operator can move.
+pub(super) fn task_registry_error(error: StoreError) -> OpsError {
+    task_error(format!(
+        "Task PR authority refused: the shared Loopflow registry {} is present but \
+         inaccessible or schema-incompatible: {error}. Run `lf doctor`.",
+        default_db_path().display()
+    ))
+}
+
+/// A Task entry point with no registry at all has no authority to act on.
+pub(super) fn missing_task_registry() -> OpsError {
+    task_error(format!(
+        "Task PR authority refused: the shared Loopflow registry {} is missing. \
+         Run `lf doctor` to inspect the registry.",
+        default_db_path().display()
+    ))
 }
 
 /// Resolve the managed Task for a PR entry point at `repo`.
@@ -68,14 +67,12 @@ pub(super) fn task_registry_error(err: RegistryUnavailable) -> OpsError {
 ///   Missing records cannot recover checkout ownership or authorize inherited identity.
 /// - Registry present but unopenable → refuse.
 pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> {
-    let store = match open_registry_for_authority().await {
-        Ok(store) => Arc::new(store),
-        Err(RegistryUnavailable::MissingFile { .. })
-            if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_none() =>
-        {
+    let store = match open_existing_store().await.map_err(task_registry_error)? {
+        Some(store) => Arc::new(store),
+        None if std::env::var_os(crate::lf::WORK_DECLARATION_ENV).is_none() => {
             return Ok(ManagedTask::Unmanaged);
         }
-        Err(err) => return Err(task_registry_error(err)),
+        None => return Err(missing_task_registry()),
     };
     let binding = crate::ops::resolve_execution_binding(&store, repo).await?;
     let task = match binding.map(|binding| binding.work) {

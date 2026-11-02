@@ -7,7 +7,7 @@ use crate::git::current_branch;
 use crate::git::worktrees::main_repo_root;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
-use crate::store::{open_registry_for_authority, RegistryUnavailable, SharedStore};
+use crate::store::{open_existing_store, SharedStore};
 use crate::work::task::{Task, TaskPr};
 
 use super::{block_on_task, repository_for_task, task_error, task_store};
@@ -81,14 +81,13 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
 }
 
 async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore, Task)>> {
-    let store = match open_registry_for_authority().await {
-        Ok(store) => Arc::new(store),
-        Err(RegistryUnavailable::MissingFile { .. })
-            if crate::journal::agent_caller().is_none() =>
-        {
-            return Ok(None)
-        }
-        Err(error) => return Err(super::task_registry_error(error)),
+    let store = match open_existing_store()
+        .await
+        .map_err(super::task_registry_error)?
+    {
+        Some(store) => Arc::new(store),
+        None if crate::journal::agent_caller().is_none() => return Ok(None),
+        None => return Err(super::missing_task_registry()),
     };
     let Some(task) = historical_branch_task(&store, branch).await? else {
         return Ok(None);

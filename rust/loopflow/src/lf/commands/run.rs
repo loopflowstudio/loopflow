@@ -276,7 +276,7 @@ pub fn implicit_binding(cli: &Cli) -> Result<Option<crate::ops::WorkBinding>> {
     let repo = std::env::current_dir()?;
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
-        let Some(store) = crate::store::open_existing_store().await else {
+        let Some(store) = crate::store::open_existing_store().await? else {
             return Ok(None);
         };
         crate::ops::resolve_execution_binding(&std::sync::Arc::new(store), &repo)

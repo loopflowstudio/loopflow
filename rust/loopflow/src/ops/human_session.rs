@@ -806,9 +806,7 @@ pub(crate) async fn open(
         if session.interactive && moving.is_none() {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
-                    && owner_running(&store.sqlite, &owner)?
-                    && !taken_over(&store.sqlite, session, &owner)?
-                    && answering(&owner)
+                    && attaches(&store.sqlite, session, &owner)?
                 {
                     // This viewer takes control, so the conversation is now
                     // shown where it runs, not where it was launched.
@@ -1102,34 +1100,33 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
-/// End a running owner from another build so the conversation resumes on the
-/// lf the entry launches now: a viewer never negotiates with an owner whose lf
-/// is not that one. The takeover happens at the boundary the owner's own
-/// lifetime policy uses, once its Sessions wait for a person, and ends it the
-/// same way, stopping its agent and recording its exit. A turn in progress is
-/// watched instead when the owner can show it (false: this viewer attaches,
-/// the owner ends itself after the turn and the viewer follows); one the owner
-/// cannot show is cut and reported, never cut silently. False when the owner
-/// already runs the build a relaunch would run, or an executable nobody can read.
-fn taken_over(
+/// Whether opening attaches to `owner`, `session`'s running execution owner.
+/// An owner from another build is never negotiated with: once its Sessions
+/// wait for a person it is ended as its own lifetime policy ends it, stopping
+/// its agent and recording its exit, and the conversation resumes on the lf
+/// the entry launches now. A turn in progress is watched instead when the
+/// owner can show it (this viewer attaches, the owner ends itself after the
+/// turn and the viewer follows); one the owner cannot show is cut and
+/// reported, never cut silently. The build is judged against the entry, not
+/// this viewer, so a development build opening a conversation in the main
+/// Home relaunches through the installed lf.
+fn attaches(
     store: &SqliteStore,
     session: &LfSession,
     owner: &crate::id::LfProcessId,
 ) -> Result<bool> {
-    let Some(pid) = crate::journal::live_process_pid(store, owner) else {
-        return Ok(false);
-    };
-    let Some(executable) = crate::journal::OsProcess::executable(pid) else {
-        return Ok(false);
-    };
-    // Judged against the entry, not this viewer: a development build opening
-    // a conversation in the main Home relaunches through the installed lf.
-    if !crate::installation::superseded(&executable) {
+    if !owner_running(store, owner)? {
         return Ok(false);
     }
+    let superseded = crate::journal::live_process_pid(store, owner)
+        .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
+        .filter(|(_, executable)| crate::installation::superseded(executable));
+    let Some((pid, executable)) = superseded else {
+        return Ok(answering(owner));
+    };
     let turn_cut_off = !store.owner_waits_for_person(owner)?;
     if turn_cut_off && answering(owner) {
-        return Ok(false);
+        return Ok(true);
     }
     end_owner(store, owner, pid).with_context(|| {
         format!(
@@ -1151,7 +1148,7 @@ fn taken_over(
             ""
         }
     );
-    Ok(true)
+    Ok(false)
 }
 
 /// End the execution owner running as `pid` as its lifetime policy does: its

@@ -224,6 +224,15 @@ read -r answer < /dev/tty
             )
             .unwrap()
     }
+    fn owner_of(&self, session: &str) -> String {
+        self.sql()
+            .query_row(
+                "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
     /// Record a turn in progress for `session`.
     fn mark_working(&self, session: &str) {
         self.sql()
@@ -1233,17 +1242,7 @@ fn sessions_end_when_their_lf_executable_goes() {
         line.contains(" --resume ") && session_of(&fixture.sql(), &line) == followed,
         "reopened without history: {line}"
     );
-    let owner_of = |session: &str| -> String {
-        fixture
-            .sql()
-            .query_row(
-                "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-                [session],
-                |r| r.get(0),
-            )
-            .unwrap()
-    };
-    let reopened = owner_of(&followed);
+    let reopened = fixture.owner_of(&followed);
     assert_ne!(reopened, owners[2]);
     let executable: String = fixture
         .sql()
@@ -1285,7 +1284,7 @@ fn sessions_end_when_their_lf_executable_goes() {
         line.contains(" --resume ") && session_of(&fixture.sql(), &line) == busy,
         "reopened without history: {line}"
     );
-    let busy_reopened = owner_of(&busy);
+    let busy_reopened = fixture.owner_of(&busy);
     assert_ne!(busy_reopened, owners[3]);
     assert!(
         watching.try_wait().unwrap().is_none(),
@@ -1322,13 +1321,9 @@ fn other_build(path: &Path) {
     );
 }
 
-/// `lf resume` on a conversation whose owner runs another lf build never
-/// negotiates with it: the owner ends and the conversation resumes here from
-/// its saved history, as it does for the owners `lf install` leaves behind.
-#[test]
-fn resume_takes_over_an_owner_from_another_build() {
-    let fixture = Fixture::new();
-    let path = fixture.waiting_provider();
+/// A Session whose owner runs another lf build than this test binary, with
+/// that build as its entry: `(owner, session)`.
+fn owner_on_another_build(fixture: &Fixture, path: &str) -> (String, String) {
     let other = fixture.home.path().join("bin/lf-other");
     other_build(&other);
     let lf = other.to_str().unwrap();
@@ -1336,13 +1331,20 @@ fn resume_takes_over_an_owner_from_another_build() {
     owner
         .args(["--", lf, "--interactive", "--agent", "claude", ":", "hello"])
         .env("LF_BIN", lf)
-        .env("PATH", &path);
-    let previous = fixture.owner(owner);
+        .env("PATH", path);
+    let owner = fixture.owner(owner);
     fixture.launches(1);
-    let session = fixture.session_of_owner(&previous);
+    let session = fixture.session_of_owner(&owner);
+    (owner, session)
+}
+
+/// `lf resume` on `session`, held by `previous` on another build: the owner
+/// ends and the conversation resumes here from its saved history. Returns
+/// what the viewer told the person.
+fn takes_over(fixture: &Fixture, path: &str, previous: &str, session: &str) -> String {
     let mut viewer = fixture
-        .command(&["session", "resume", &session])
-        .env("PATH", &path)
+        .command(&["session", "resume", session])
+        .env("PATH", path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1353,15 +1355,8 @@ fn resume_takes_over_an_owner_from_another_build() {
         line.contains(" --resume ") && session_of(&fixture.sql(), &line) == session,
         "reopened without history: {line}"
     );
-    fixture.ends(&previous);
-    let current: String = fixture
-        .sql()
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
+    fixture.ends(previous);
+    let current = fixture.owner_of(session);
     assert_ne!(current, previous);
     assert!(
         viewer.try_wait().unwrap().is_none(),
@@ -1369,13 +1364,24 @@ fn resume_takes_over_an_owner_from_another_build() {
     );
     viewer.kill().unwrap();
     let output = viewer.wait_with_output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    fixture.stop(&current);
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// `lf resume` on a conversation whose owner runs another lf build never
+/// negotiates with it: the owner ends and the conversation resumes here from
+/// its saved history, as it does for the owners `lf install` leaves behind.
+#[test]
+fn resume_takes_over_an_owner_from_another_build() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let (previous, session) = owner_on_another_build(&fixture, &path);
+    let stderr = takes_over(&fixture, &path, &previous, &session);
     assert!(
         stderr.contains("Moved") && stderr.contains("continuing on "),
         "{stderr}"
     );
     assert!(!stderr.contains("cut off"), "{stderr}");
-    fixture.stop(&current);
 }
 
 /// A superseded owner mid-turn that does not answer its socket cannot be
@@ -1385,17 +1391,7 @@ fn resume_takes_over_an_owner_from_another_build() {
 fn resume_ends_a_busy_superseded_owner_that_never_answers() {
     let fixture = Fixture::new();
     let path = fixture.waiting_provider();
-    let other = fixture.home.path().join("bin/lf-other");
-    other_build(&other);
-    let lf = other.to_str().unwrap();
-    let mut owner = fixture.command_from(&other, &["session", "serve", "--terminal"]);
-    owner
-        .args(["--", lf, "--interactive", "--agent", "claude", ":", "hello"])
-        .env("LF_BIN", lf)
-        .env("PATH", &path);
-    let previous = fixture.owner(owner);
-    fixture.launches(1);
-    let session = fixture.session_of_owner(&previous);
+    let (previous, session) = owner_on_another_build(&fixture, &path);
     fixture.mark_working(&session);
     let endpoint = fixture.endpoint(&previous);
     std::fs::rename(&endpoint, endpoint.with_extension("retained")).unwrap();
@@ -1404,41 +1400,11 @@ fn resume_ends_a_busy_superseded_owner_that_never_answers() {
         let held: Vec<UnixStream> = listener.incoming().map_while(Result::ok).collect();
         drop(held);
     });
-    let mut viewer = fixture
-        .command(&["session", "resume", &session])
-        .env("PATH", &path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let line = fixture.launches(2).pop().unwrap();
-    assert!(
-        line.contains(" --resume ") && session_of(&fixture.sql(), &line) == session,
-        "reopened without history: {line}"
-    );
-    fixture.ends(&previous);
-    let current: String = fixture
-        .sql()
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_ne!(current, previous);
-    assert!(
-        viewer.try_wait().unwrap().is_none(),
-        "viewer left the conversation"
-    );
-    viewer.kill().unwrap();
-    let output = viewer.wait_with_output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = takes_over(&fixture, &path, &previous, &session);
     assert!(
         stderr.contains("Moved") && stderr.contains("cut off"),
         "{stderr}"
     );
-    fixture.stop(&current);
 }
 
 /// Desktop restarting after an lf upgrade leaves the conversation in an owner

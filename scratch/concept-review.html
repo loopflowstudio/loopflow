@@ -114,13 +114,13 @@ Response::Moved { notice, successor: Option&lt;PathBuf&gt; } // Option field on 
                                                         // a 0.15.1 viewer reads it as None
 transport::follow(entry)                       // rerun argv through the successor
 
-human_session::taken_over(store, session, owner) -> bool   // lf resume ends an owner on another build
+human_session::attaches(store, session, owner) -> bool     // lf resume ends an owner on another build instead of attaching
 human_session::end_owner(store, owner, pid)                // shared by resume and rollover
 
 rollover::owner_disposition: Moves | NextStep | Stays      // viewed rule gone</code></pre>
 
 <div class="callout">
-<p><strong>The consequential mismatch, second pass.</strong> Three places move an owner, and they do not share a boundary. The owner ends itself only once its Sessions wait for a person. Rollover moves only such owners. <code>lf resume</code> ends a superseded owner whatever it is doing and prints "its last turn was cut off; ask again" (<code>human_session::taken_over</code>). The Task's accepted outcome is "moves … at a safe boundary", and Jack's constraint is never to cut a turn silently; being told afterwards is the letter, not the boundary.</p>
+<p><strong>The consequential mismatch, second pass.</strong> Three places move an owner, and they do not share a boundary. The owner ends itself only once its Sessions wait for a person. Rollover moves only such owners. <code>lf resume</code> ends a superseded owner whatever it is doing and prints "its last turn was cut off; ask again" (<code>human_session::attaches</code>, then <code>taken_over</code>). The Task's accepted outcome is "moves … at a safe boundary", and Jack's constraint is never to cut a turn silently; being told afterwards is the letter, not the boundary.</p>
 <p><span class="mark proposed">proposed</span> One boundary for all three. Idle: end and reopen. Busy and the owner answers its socket: attach, as a same-build open does; the owner ends itself when the turn ends and the viewer follows. Busy and it does not answer: it cannot be watched and cannot be trusted to report idle, so end it and report the cut turn. Rollover gives the same two answers for busy owners. Nothing new is built: <code>answering</code> and <code>owner_waits_for_person</code> exist, and the "cut off" message narrows to the one case nobody can watch. Settled by the accepted design; it iterates to implement.</p>
 </div>
 

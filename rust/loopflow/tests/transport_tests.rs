@@ -1221,10 +1221,7 @@ fn sessions_end_when_their_lf_executable_goes() {
     assert_eq!(
         viewers[3].moves(),
         [(
-            Some(
-                "This Session's lf was superseded by the installed lf; reopening on the installed lf."
-                    .to_owned()
-            ),
+            Some("This Session's lf was superseded; reopening on the installed lf.".to_owned()),
             Some(installed.to_str().unwrap().to_owned())
         )]
     );

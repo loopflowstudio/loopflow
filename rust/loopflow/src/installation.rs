@@ -919,11 +919,11 @@ fn same_build(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    let len = |path: &Path| fs::metadata(path).map(|metadata| metadata.len()).ok();
-    len(&a).is_some_and(|len_a| Some(len_a) == len(&b))
-        && file_sha256(&a)
-            .ok()
-            .is_some_and(|digest| Some(digest) == file_sha256(&b).ok())
+    let same_len = match (fs::metadata(&a), fs::metadata(&b)) {
+        (Ok(a), Ok(b)) => a.len() == b.len(),
+        _ => false,
+    };
+    same_len && matches!((file_sha256(&a), file_sha256(&b)), (Ok(a), Ok(b)) if a == b)
 }
 
 pub fn read_state(root: &Path) -> Result<InstallationState> {

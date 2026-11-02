@@ -93,7 +93,7 @@ fn watch(
                 if waits {
                     let moved = match change {
                         Some(change) => {
-                            tracing::warn!(%owner, %change, "ending a Session whose lf was {change}");
+                            tracing::warn!(%owner, "ending a Session whose lf was {change}");
                             let session = store.owner_sessions(owner)?.into_iter().next();
                             // Viewers of a superseded owner rerun their
                             // invocation through the entry; a removed or
@@ -103,12 +103,13 @@ fn watch(
                                 .and_then(Result::ok);
                             let notice = match (&successor, session) {
                                 (Some(_), _) => {
-                                    format!("{change}; reopening on the installed lf.")
+                                    "This Session's lf was superseded; reopening on the installed lf."
+                                        .to_owned()
                                 }
-                                (None, Some(session)) => {
-                                    format!("{change}; `lf resume {session}` reopens it.")
-                                }
-                                (None, None) => format!("{change}."),
+                                (None, Some(session)) => format!(
+                                    "This Session's lf build was {change}; `lf resume {session}` reopens it."
+                                ),
+                                (None, None) => format!("This Session's lf build was {change}."),
                             };
                             Response::Moved {
                                 notice: Some(notice),
@@ -156,9 +157,9 @@ enum Change {
 impl std::fmt::Display for Change {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Change::Removed => "This Session's lf build was removed",
-            Change::Replaced => "This Session's lf build was replaced",
-            Change::Superseded => "This Session's lf was superseded by the installed lf",
+            Change::Removed => "removed",
+            Change::Replaced => "replaced",
+            Change::Superseded => "superseded",
         })
     }
 }

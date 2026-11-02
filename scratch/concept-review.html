@@ -119,7 +119,7 @@ rollover::owner_disposition: Moves | NextStep | Stays      // viewed rule gone</
 
 <div class="callout">
 <p><strong>The consequential mismatch.</strong> The design has one heading, "The one judgement". The code has three. The owner compares <em>paths</em> against the entry's target. <code>lf resume</code> compares <em>content</em> with <code>same_build</code>. <code>follow</code> compares paths again, so a Desktop pane whose bundled lf is byte-identical to the installed CLI still reruns itself through the gate when its owner ends.</p>
-<p>One function fixes all three: <code>installation::superseded(executable) = !same_build(executable, entry_target(resolve_lf_binary()))</code>, used by the owner, the takeover and the follow. This is implied by the accepted design, not a new decision. <span class="mark existing">done</span> Implemented 2026-11-02; <code>entry_target</code> and <code>same_build</code> are private to it.</p>
+<p>One function fixes all three: <code>installation::superseded(executable) = !same_build(executable, entry_target(resolve_lf_binary()))</code>, used by the owner and the takeover; the viewer's follow reruns the invocation on the owner's word. This is implied by the accepted design, not a new decision. <span class="mark existing">done</span> Implemented 2026-11-02; <code>entry_target</code> and <code>same_build</code> are private to it.</p>
 </div>
 
 <h2>Walking one interaction through, with recovery</h2>

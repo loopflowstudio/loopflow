@@ -86,22 +86,20 @@ and `lf open` ask one question (`DesktopApp::current`). Names map to the thing:
 `Installed(path)` is the app the account's `lf` resolves into, `Running(bundle)` the
 Desktop that launched the caller.
 
-**Next implement direction (implied by the accepted contract, not a new choice).**
-An agent inside the installed Desktop gets `LF_DESKTOP=com.loopflow.mac`, so its
-`lf open` still runs `open -b com.loopflow.mac`: the exact command from the
-2026-11-02 incident, which Launch Services resolves to any registered copy
-(questions.md keeps earlier same-id registrations in place). Only release
-packaging carries that id now, so the installed app *is* that caller's Desktop and
-the path names it more precisely than the id; `open -a <path>` activates the
-running instance just as `-b` does. Change `DesktopApp::select`: when `LF_DESKTOP`
-is `DESKTOP_BUNDLE` and `installed_app()` resolves, answer `Installed(path)`;
-keep `Running(bundle)` for every other id (Loopflow Dev routes back to itself)
-and as the fallback when nothing is installed (an older `~/.local/bin/lf` that is
-a plain binary). Add the unit test beside
-`desktop_inside_a_build_routes_back_to_it_by_bundle_id`. After this, no `lf`
-command spells `open -b com.loopflow.mac`. Consequence worth knowing: an agent
-launched by a stale same-id copy opens in the installed app rather than back in
-the copy that launched it, which is the Task's outcome, not a regression.
+**Concept-review follow-up (done 2026-11-02).** An agent inside the installed
+Desktop gets `LF_DESKTOP=com.loopflow.mac`, and `DesktopApp::select` used to answer
+`Running` for it, so its `lf open` ran `open -b com.loopflow.mac`: the 2026-11-02
+incident command, which Launch Services resolves to any registered copy. Only
+release packaging carries that id, so the installed app *is* that caller's Desktop
+and the path names it more precisely; `open -a <path>` activates the running
+instance just as `-b` does. `select` now answers `Installed(path)` for
+`DESKTOP_BUNDLE` when `installed_app()` resolves, `Running(bundle)` for every other
+id (Loopflow Dev routes back to itself) and as the fallback when nothing is
+installed (an older `~/.local/bin/lf` that is a plain binary). Covered by
+`desktop_inside_the_installed_app_reaches_it_by_path`. No `lf` command spells
+`open -b com.loopflow.mac` now. Consequence worth knowing: an agent launched by a
+stale same-id copy opens in the installed app rather than back in the copy that
+launched it, which is the Task's outcome, not a regression.
 
 Not changed, and why:
 
@@ -124,4 +122,4 @@ Not changed, and why:
   fails on main too (#1776's HOME-vs-account-home check, macOS-only); not this branch.
 - Demo on a Mac: `lf install` twice, then `ls -a /Applications`, `lf open`.
 
-Checks (2026-11-02 compress): `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::` 36 passed; `cargo test --test integration -- available_conversations_need_no_question` and `--test global_commands -- open_delivers_exact_task_to_desktop` passed; clippy clean; Python suites unchanged since the last pass (35 passed), gate reruns them.
+Checks (2026-11-02 implement): `cargo test -p loopflow --lib -- open::tests::` 4 passed after the select change; earlier `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::` 36 passed; `cargo test --test integration -- available_conversations_need_no_question` and `--test global_commands -- open_delivers_exact_task_to_desktop` passed; clippy clean; Python suites unchanged since the last pass (35 passed), gate reruns them.

@@ -859,11 +859,12 @@ fn named_bundle(desktop: Option<&str>) -> &str {
 }
 
 /// The Desktop an opening reaches. Launch Services resolves a bundle id to any
-/// registered copy, so only the caller's own running Desktop is named by id;
+/// registered copy, so only a caller's own non-release Desktop is named by id;
 /// everything else launches the installed app by path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum DesktopApp {
-    /// The Desktop this caller runs inside, named by `LF_DESKTOP`.
+    /// The Desktop this caller runs inside, named by `LF_DESKTOP`, when the
+    /// installed app is not it.
     Running(String),
     Installed(PathBuf),
 }
@@ -876,10 +877,14 @@ impl DesktopApp {
         )
     }
 
+    /// Only release packaging carries `DESKTOP_BUNDLE`, so a caller inside
+    /// that Desktop reaches it by the installed path, which names one copy
+    /// where the id names any registered one.
     fn select(desktop: Option<&str>, installed: Option<PathBuf>) -> Option<Self> {
-        match desktop.filter(|value| !value.is_empty()) {
-            Some(bundle) => Some(Self::Running(bundle.to_owned())),
-            None => installed.map(Self::Installed),
+        match (desktop.filter(|value| !value.is_empty()), installed) {
+            (Some(bundle), Some(app)) if bundle == DESKTOP_BUNDLE => Some(Self::Installed(app)),
+            (Some(bundle), _) => Some(Self::Running(bundle.to_owned())),
+            (None, installed) => installed.map(Self::Installed),
         }
     }
 
@@ -1789,6 +1794,21 @@ mod tests {
         assert_eq!(
             app.open_args(),
             ["-b".as_ref(), std::ffi::OsStr::new("com.loopflow.mac.dev")]
+        );
+    }
+
+    #[test]
+    fn desktop_inside_the_installed_app_reaches_it_by_path() {
+        // `open -b com.loopflow.mac` was the 2026-11-02 incident command: the
+        // release id resolves to any registered copy, the path to one.
+        let installed = PathBuf::from("/Applications/Loopflow.app");
+        let app = DesktopApp::select(Some(DESKTOP_BUNDLE), Some(installed.clone())).unwrap();
+        assert_eq!(app.open_args(), ["-a".as_ref(), installed.as_os_str()]);
+
+        let app = DesktopApp::select(Some(DESKTOP_BUNDLE), None).unwrap();
+        assert_eq!(
+            app.open_args(),
+            ["-b".as_ref(), std::ffi::OsStr::new(DESKTOP_BUNDLE)]
         );
     }
 }

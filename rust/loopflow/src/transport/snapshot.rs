@@ -51,7 +51,10 @@ fn write(session: &str, terminal: &Terminal) -> Result<PathBuf> {
     let mut bytes = format!("{HEADER}{}\n", ghostty_vt::REVISION).into_bytes();
     bytes.extend(terminal.encode().context("Encode the terminal snapshot")?);
     std::fs::create_dir_all(path.parent().expect("snapshot path has a parent"))?;
-    std::fs::write(&path, bytes).with_context(|| format!("Write {}", path.display()))?;
+    // Written whole: a reader never meets a half-written stream.
+    let draft = path.with_extension("ghostsnp.draft");
+    std::fs::write(&draft, bytes).with_context(|| format!("Write {}", draft.display()))?;
+    std::fs::rename(&draft, &path).with_context(|| format!("Write {}", path.display()))?;
     Ok(path)
 }
 

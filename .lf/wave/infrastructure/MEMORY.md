@@ -269,8 +269,11 @@ headless tests cover twelve Work layouts/drafts, not twelve live providers.
 Known scenes render before lookup; fresh resolution still owns new link delivery.
 App death destroys Desktop runtime state: durable identity, native history and
 repaint alone cannot restore live input or exact scrollback. Exact renderer recovery
-and layout replication across Desktop installations remain unresolved. The owner
-retains bounded vt100 text state, not a complete native terminal snapshot.
+and layout replication across Desktop installations remain unresolved. Since
+LOO-710 (2026-11-02) the owner keeps a libghostty-vt terminal, repaints viewers
+through Ghostty's VT formatter and leaves `screens/<session>.ghostsnp` at its end;
+the GHOSTSNP format promises nothing across Ghostty revisions, so every file names
+its revision and GhosttyKit still exposes no decoder for Desktop (LOO-672).
 
 Admission is not execution: Task filing and explicit Wave admission now commit
 uncaptured primary Sessions; explicit execution reserves input and claims the

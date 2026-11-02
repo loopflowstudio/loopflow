@@ -8,9 +8,10 @@
   for every target until this pass). Say so if a separate approval was wanted.
 - **Snapshot path and reader are shared with LOO-709.** Per Jack's 2026-11-02 steer,
   this branch keeps `<Machine home>/screens/<session>.ghostsnp` (LOO-709's directory
-  and key, this Task's format) and adds no DTO field; the reader is
-  `transport::snapshot::read` plus `repaint`, used by `lf resume`. A comment on
-  LOO-709 names both so its idle path calls `leave_snapshot` as the other ends do.
+  and key, this Task's format) and adds no DTO field; the writer is `transport::snapshot::leave` and the
+  reader `transport::snapshot::last_screen` (decode plus `repaint`), used by
+  `lf resume` when its stdout is a terminal. LOO-709's branch still carries its
+  own `.vt` writer for the second-landing branch to delete (see the plan).
 - **Owner ends not covered.** The snapshot is written on the lifetime policy's end
   (idle, executable removed or replaced) and when the program exits. A SIGTERM or
   SIGKILL from outside writes none; LOO-705's install supersession should end owners

@@ -1449,9 +1449,27 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Ensure the configured Project is active, or create one with a durable identity
-    Ensure {
+    /// Add a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
+    /// and start its first chapter. Adding an existing Wave changes nothing.
+    Add {
         wave: String,
+        /// Objective text for the new Wave's GOAL.md
+        #[arg(long)]
+        objective: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a Wave and its child Waves. Open Tasks move to the parent Wave, or the
+    /// repository; chapters, completed Tasks and Sessions stay readable in history.
+    #[command(after_help = "Run again to finish an interrupted removal.")]
+    Remove {
+        wave: String,
+        /// Show what removal does without changing anything
+        #[arg(long)]
+        preview: bool,
+        /// Delete unstarted Tasks instead of moving them; started Tasks always move
+        #[arg(long)]
+        delete_backlog: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1489,13 +1507,15 @@ pub enum WaveCommand {
         #[arg(long, requires = "json")]
         watch: bool,
     },
-    /// Rename or relocate an authored Wave and its provider mapping
+    /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
+    /// chapters and Sessions keep their identity
     Rename {
         wave: String,
+        /// The new name; omit to keep it while changing --repo or --title
+        new_name: Option<String>,
+        /// Move the Wave to another repository
         #[arg(long)]
         repo: Option<PathBuf>,
-        #[arg(long)]
-        name: Option<String>,
         /// Change the linked Initiative display title
         #[arg(long)]
         title: Option<String>,

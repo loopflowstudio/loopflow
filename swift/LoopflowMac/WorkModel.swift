@@ -1713,6 +1713,19 @@ final class WorkModel {
         projectCommands[id] != nil
     }
 
+    /// Add a Wave through `lf wave add`; the planning stream then delivers its row.
+    func addWave(name: String, objective: String? = nil, repo: String) async throws {
+        try await query.addWave(name: name, objective: objective, cwd: repo)
+        await refreshPlanning()
+    }
+
+    /// `lf wave remove`; a removal refreshes planning so the row disappears.
+    func removeWave(name: String, preview: Bool, repo: String) async throws -> WaveRemoval {
+        let removal = try await query.removeWave(name: name, preview: preview, cwd: repo)
+        if !preview { await refreshPlanning() }
+        return removal
+    }
+
     @discardableResult
     func activateProject(id: String, name: String, repo: String) -> Task<Void, Never>? {
         guard !usesFixedFixture else { return nil }
@@ -1720,7 +1733,7 @@ final class WorkModel {
         projectCommandErrors[id] = nil
         let command = Task {
             defer { projectCommands[id] = nil }
-            do { try await query.ensureProject(wave: name, cwd: repo) }
+            do { try await query.addWave(name: name, cwd: repo) }
             catch { projectCommandErrors[id] = error.localizedDescription }
         }
         projectCommands[id] = command

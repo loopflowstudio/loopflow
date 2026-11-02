@@ -858,7 +858,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
     let open = world.task(
         Some("desktop"),
         "Add a Wave from Desktop",
-        "Creating a Wave writes GOAL.md, but the Wave doesn't appear until `lf wave ensure`.",
+        "Creating a Wave writes GOAL.md, but the Wave doesn't appear until `lf wave add`.",
     )?;
     let open = world.checkout(&open)?;
     world.session(

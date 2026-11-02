@@ -1,0 +1,26 @@
+{
+  "id": "5081a624-c095-4218-9a54-6d1a6711f282",
+  "name": "desktop",
+  "preview": true,
+  "already_removed": false,
+  "destination": null,
+  "waves": ["desktop"],
+  "moved": [
+    {"id": "task_abcd1234400080000000000000000001", "identifier": "LOO-1", "title": "Backlog idea", "started": false},
+    {"id": "task_abcd1234400080000000000000000002", "identifier": "LOO-2", "title": "Started work", "started": true}
+  ],
+  "deleted": [],
+  "completed_tasks": 1,
+  "chapters": 1,
+  "sessions": 1,
+  "initiatives": [],
+  "has_files": true,
+  "files": null,
+  "mentions": [],
+  "summary": [
+    "2 open Tasks move to the repository (1 started keeps its worktree, PR and running Graph).",
+    "1 completed Task and 1 chapter stay readable in history.",
+    "The Wave conversation stays in history.",
+    ".lf/wave/desktop is deleted on the main checkout; Git history keeps it."
+  ]
+}

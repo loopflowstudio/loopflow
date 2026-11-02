@@ -388,10 +388,10 @@ impl World {
         Ok(env)
     }
 
-    /// Ensure a Wave and its current Project.
+    /// Add a Wave and its current Project, as `lf wave add` does.
     pub fn wave(&self, name: &str) -> Result<()> {
         self.runtime
-            .block_on(crate::ops::project::ensure(&self.repo, name))?;
+            .block_on(crate::ops::wave_lifecycle::add(&self.repo, name, None))?;
         Ok(())
     }
 

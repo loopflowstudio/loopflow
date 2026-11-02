@@ -208,9 +208,20 @@ public struct RegistryQuery: Sendable {
     }
 
 
-    /// Explicit opening/retry operation. Periodic status reads remain observational.
-    public func ensureProject(wave: String, cwd: String) async throws {
-        _ = try await run(["wave", "ensure", wave, "--json"], cwd)
+    /// `lf wave add`: registers the Wave, commits its files on the main checkout and
+    /// ensures its first Project. Adding an existing Wave changes nothing, so this
+    /// is also the explicit opening/retry operation; periodic reads stay observational.
+    public func addWave(name: String, objective: String? = nil, cwd: String) async throws {
+        var args = ["wave", "add", name, "--json"]
+        if let objective, !objective.isEmpty { args += ["--objective", objective] }
+        _ = try await run(args, cwd)
+    }
+
+    /// `lf wave remove`: with `preview`, the consequences without changing anything.
+    public func removeWave(name: String, preview: Bool, cwd: String) async throws -> WaveRemoval {
+        var args = ["wave", "remove", name, "--json"]
+        if preview { args.append("--preview") }
+        return try Self.decode(WaveRemoval.self, from: await run(args, cwd))
     }
 
     public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {

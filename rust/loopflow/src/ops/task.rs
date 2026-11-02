@@ -1456,7 +1456,7 @@ pub fn task_create(
                 .map_err(task_error)?
                 .is_none()
             {
-                super::project::ensure(repo, name).await?;
+                super::wave_lifecycle::add(repo, name, None).await?;
             }
         }
         let selected = select_task_creation_wave(&store, &main, wave).await?;

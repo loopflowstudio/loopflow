@@ -675,7 +675,7 @@ fn repo_selection_carries_scoped_task_prefix_through_reads_and_writes() {
         (other.path(), second, "Other"),
     ] {
         success(
-            command(home.path(), repo, &["wave", "ensure", "inbox", "--json"])
+            command(home.path(), repo, &["wave", "add", "inbox", "--json"])
                 .output()
                 .unwrap(),
         );
@@ -2510,7 +2510,7 @@ fn task_planning_explain_move_resolves_destination_and_retains_recorded_work() {
             command(
                 home.path(),
                 repo.path(),
-                &["wave", "ensure", wave, "--json"],
+                &["wave", "add", wave, "--json"],
             )
             .output()
             .unwrap(),

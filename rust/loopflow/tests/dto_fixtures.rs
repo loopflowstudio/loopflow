@@ -1230,3 +1230,15 @@ fn repo_people_keep_unresolved_github_identity_explicit() {
     missing.as_object_mut().unwrap().remove("email");
     assert!(serde_json::from_value::<RepoPerson>(missing).is_err());
 }
+
+#[test]
+fn wave_removal_preview_round_trips() {
+    use loopflow::ops::wave_lifecycle::WaveRemoval;
+    let json = include_str!("../../../tests/fixtures/dto/wave_removal.json");
+    let removal: WaveRemoval = serde_json::from_str(json).unwrap();
+    assert!(removal.moved[1].started);
+    assert_eq!(
+        serde_json::from_str::<WaveRemoval>(&serde_json::to_string(&removal).unwrap()).unwrap(),
+        removal
+    );
+}

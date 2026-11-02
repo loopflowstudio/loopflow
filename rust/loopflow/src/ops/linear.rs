@@ -1744,6 +1744,15 @@ pub(crate) async fn rename(
     })
 }
 
+/// Archive the Initiative of a removed Wave.
+pub(super) async fn archive_initiative(repo: &Path, initiative: &str) -> OpsResult<()> {
+    let ctx = resolve_repository_context(repo).await?;
+    ctx.client
+        .archive_wave(initiative)
+        .await
+        .map_err(linear_error)
+}
+
 pub fn list_local_waves(repo: &Path) -> OpsResult<Vec<String>> {
     let canonical = crate::repository::CanonicalRepo::discover(repo)
         .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1975,7 +1984,7 @@ fn validate_project_ownership(
     )
 }
 
-fn title_case(slug: &str) -> String {
+pub(super) fn title_case(slug: &str) -> String {
     slug.split(['-', '_', '/'])
         .filter(|part| !part.is_empty())
         .map(|word| {

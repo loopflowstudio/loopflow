@@ -267,7 +267,7 @@ The documented unconditional-update race remains a protocol limit.
 
 ```bash
 lf wave bind-project product <project-uuid> --json
-lf wave ensure product --json
+lf wave add product --json
 ```
 
 Validate one existing Project and select its accepted local record on the Wave's

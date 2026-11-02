@@ -7,6 +7,16 @@ import Testing
 /// the Mac app.
 @Suite("DTO Fixtures")
 struct DTOFixtureTests {
+    @Test func waveRemovalPreviewDecodesEveryField() throws {
+        let removal = try RegistryQuery.decode(
+            WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))
+        #expect(removal.name == "desktop")
+        #expect(removal.destination == nil)
+        #expect(removal.moved.filter(\.started).count == 1)
+        #expect(removal.files == nil)
+        #expect(removal.summary.first?.hasPrefix("2 open Tasks move to the repository") == true)
+    }
+
     @Test func pausedTaskStateIsUnfinished() throws {
         let state = try JSONDecoder().decode(TaskState.self, from: loadFixtureData("task_deferred.json"))
         #expect(state == .deferred)

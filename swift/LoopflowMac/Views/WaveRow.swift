@@ -73,7 +73,7 @@ struct WaveRow: View {
                 Button(role: .destructive) {
                     onDelete()
                 } label: {
-                    Label("Delete Wave", systemImage: "trash")
+                    Label("Remove Wave…", systemImage: "trash")
                 }
             }
         }

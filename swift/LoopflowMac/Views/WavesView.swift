@@ -42,6 +42,7 @@ struct WavesView: View {
     @State private var selection: RepoFilter = .all
     @State private var selectedWaveId: String?
     @State private var isShowingCreate = false
+    @State private var removing: WaveViewModel?
     @State private var didRestoreStickyRepo = false
 
     /// All waves across every repo: registry rows merged with Waves authored on
@@ -141,6 +142,20 @@ struct WavesView: View {
                 await refreshAuthoredWaves()
             }
         }
+        .sheet(item: $removing) { wave in
+            RemoveWaveSheet(
+                model: model,
+                name: wave.id,
+                displayName: wave.displayName,
+                repo: waveRepoPath(for: wave),
+                onRemoved: {
+                    if selectedWaveId == waveSelectionId(wave) { selectedWaveId = nil }
+                    removing = nil
+                    Task { await syncRepoStates() }
+                },
+                onCancel: { removing = nil }
+            )
+        }
         .sheet(isPresented: $isShowingCreate) {
             CreateWaveSheet(
                 repos: repos,
@@ -192,7 +207,8 @@ struct WavesView: View {
                                 wave: entry.wave,
                                 isSelected: selectedWaveId == waveSelectionId(entry.wave),
                                 onSelect: { selectedWaveId = waveSelectionId(entry.wave) },
-                                indentLevel: entry.indent
+                                indentLevel: entry.indent,
+                                onDelete: { removing = entry.wave }
                             )
                         }
                     }
@@ -443,11 +459,9 @@ struct WavesView: View {
     }
 
     private func createWave(repoPath: String, name: String) async throws {
+        try await model.addWave(name: name, repo: repoPath)
         ensureRepoStates()
-        guard let state = repoStates[repoPath] else {
-            throw PortfolioRepoError.unknownRepo(repoPath)
-        }
-        try await state.createWave(name: name)
+        await repoStates[repoPath]?.refresh()
     }
 
     private func refreshRepos() async {
@@ -614,8 +628,8 @@ struct WavesView: View {
     }
 }
 
-/// Minimal create-wave graph: pick a target repo, name the wave, submit. Creates
-/// the Wave files through `PortfolioRepoState.createWave`.
+/// Minimal create-wave graph: pick a target repo, name the wave, submit. Adds
+/// the Wave through `lf wave add`.
 private struct CreateWaveSheet: View {
     let repos: [PortfolioRepo]
     let initialRepoPath: String?

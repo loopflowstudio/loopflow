@@ -16,6 +16,7 @@ struct WorkNavigator: View {
     @State private var wavesHeight: CGFloat = 130
     /// The Wave row just clicked, shown before its selection moves it.
     @State private var pressedScope: WorkNavigation.SidebarScope?
+    @State private var removingWave: WaveSnapshot?
     /// Pointing at the Waves section reveals New Wave; only that row reads it.
     @State private var wavesHover = HoverFlag()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -142,6 +143,19 @@ struct WorkNavigator: View {
     /// Pinned below the Task list so any Wave is a click away however far the
     /// list scrolls; it starts about three rows tall and its divider drags.
     private var waveSection: some View {
+        waveList.sheet(item: $removingWave) { wave in
+            RemoveWaveSheet(
+                model: model, name: wave.id, displayName: wave.displayName, repo: model.repoPath ?? wave.repo,
+                onRemoved: {
+                    if model.navigation.sidebarScope == .wave(wave.id) { model.select(nil) }
+                    removingWave = nil
+                },
+                onCancel: { removingWave = nil }
+            )
+        }
+    }
+
+    private var waveList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
@@ -164,6 +178,11 @@ struct WorkNavigator: View {
     private func waveRow(_ wave: WaveRoadmap) -> some View {
         waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
                 count: wave.tasks.items.count, unavailableReason: wave.tasks.unavailableReason)
+            .contextMenu {
+                Button(role: .destructive) { removingWave = wave.wave } label: {
+                    Label("Remove Wave…", systemImage: "trash")
+                }
+            }
     }
 
     private func waveRow(scope: WorkNavigation.SidebarScope, name: String, icon: String?,
@@ -556,11 +575,10 @@ private struct NewWaveRow: View {
         guard let repoPath = model.repoPath else { return }
         Task {
             do {
-                try await PortfolioRepoState.createWave(name: name, repoPath: repoPath)
+                try await model.addWave(name: name, repo: repoPath)
                 naming = false
                 name = ""
                 error = nil
-                await model.refreshPlanning()
             } catch let failure {
                 error = failure.localizedDescription
             }

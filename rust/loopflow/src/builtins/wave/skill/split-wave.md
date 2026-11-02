@@ -54,6 +54,8 @@ Assign new work to one child. Existing active Tasks keep their owning Wave and d
      active Tasks retain the parent Wave and delivery identity until settled.
 
 4. Create the new waves
+   - `lf wave add <wave>/<child>` — register each child and commit its
+     `.lf/wave/<wave>/<child>/` files on the main checkout; then edit them there
    - `.lf/wave/<child>/GOAL.md` — fresh intent and process judgment for each child; draw scope boundaries between siblings
    - `.lf/wave/<child>/MEMORY.md` — the decisions and context this child inherits
    - `.lf/wave/<child>/metrics/*.md` — contracts allocated to that child

@@ -72,7 +72,6 @@ pub(crate) struct WaveLocatorUpdate {
     pub expected_repo: String,
     pub expected_slug: String,
     pub target: WaveLocator,
-    pub retire_collision: Option<WaveId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -475,22 +474,6 @@ impl Store {
 
     pub(crate) async fn relocate_waves(&self, updates: Vec<WaveLocatorUpdate>) -> StoreResult<()> {
         run_sqlite(&self.sqlite, move |store| store.relocate_waves(&updates)).await
-    }
-
-    pub(crate) async fn wave_retirement_blockers(
-        &self,
-        wave_id: &WaveId,
-    ) -> StoreResult<Vec<String>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.wave_retirement_blockers(&wave_id)
-        })
-        .await
-    }
-
-    pub async fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| store.delete_wave(&wave_id)).await
     }
 
     pub(crate) async fn provider_auth_snapshot(
@@ -3588,13 +3571,6 @@ mod tests {
             "ordinary Wave updates cannot bypass relocation"
         );
         assert_eq!(loaded.name(), wave.name());
-
-        store.delete_wave(wave.id()).await.expect("delete wave");
-        assert!(store
-            .get_wave(wave.id())
-            .await
-            .expect("get deleted wave")
-            .is_none());
     }
 
     #[tokio::test]

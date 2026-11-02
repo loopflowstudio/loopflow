@@ -881,15 +881,38 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             team_name.as_deref(),
         ),
         WaveCommand::Reteam { apply } => loopflow::lf::commands::ops::reteam(repo, *apply),
-        WaveCommand::Ensure { wave, json } => {
-            let result = tokio::runtime::Runtime::new()?.block_on(project::ensure(repo, wave))?;
+        WaveCommand::Add {
+            wave,
+            objective,
+            json,
+        } => {
+            let added = tokio::runtime::Runtime::new()?.block_on(
+                loopflow::ops::wave_lifecycle::add(repo, wave, objective.as_deref()),
+            )?;
             if *json {
-                println!("{}", serde_json::to_string_pretty(&result)?);
+                println!("{}", serde_json::to_string_pretty(&added)?);
             } else {
-                println!(
-                    "Wave {wave}: Project {} ({}) is active locally",
-                    result.name, result.id
-                );
+                println!("{}", loopflow::ops::wave_lifecycle::render_added(&added));
+            }
+            Ok(())
+        }
+        WaveCommand::Remove {
+            wave,
+            preview,
+            delete_backlog,
+            json,
+        } => {
+            let removal =
+                loopflow::ops::wave_lifecycle::remove(repo, wave, *preview, *delete_backlog)?;
+            if *json {
+                println!("{}", serde_json::to_string_pretty(&removal)?);
+            } else {
+                if !removal.preview && !removal.already_removed {
+                    println!("Removed Wave {}.", removal.name);
+                }
+                for line in &removal.summary {
+                    println!("{line}");
+                }
             }
             Ok(())
         }

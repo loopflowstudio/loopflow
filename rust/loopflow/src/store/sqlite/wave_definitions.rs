@@ -42,6 +42,35 @@ impl SqliteStore {
             let authored_id = crate::work::wave::config::try_read_wave_config(checkout, &prefix)
                 .map_err(|error| StoreError::InvalidData(error.to_string()))?
                 .and_then(|config| config.id);
+            // Authored directories match by id first: a checkout that has not yet
+            // rebased past a rename or removal neither renames the Wave back nor
+            // resurrects a removed identity.
+            let authored_live: Option<bool> = match &authored_id {
+                Some(id) => tx
+                    .query_row(
+                        "SELECT retired_at IS NULL FROM waves WHERE id=?1",
+                        [id],
+                        |row| row.get(0),
+                    )
+                    .optional()?,
+                None => None,
+            };
+            let authored_id = match authored_live {
+                Some(true) => {
+                    let wave = authored_id.expect("a live match has an authored id");
+                    seed_wave_files(&directory, &wave, &prefix)?;
+                    parent = Some(wave);
+                    continue;
+                }
+                Some(false) => {
+                    tracing::info!(
+                        directory = %directory.display(),
+                        "skipping authored Wave directory whose Wave was removed"
+                    );
+                    None
+                }
+                None => authored_id,
+            };
             let existing: Option<WaveId> = tx.query_row(
                 "SELECT id FROM waves WHERE repo=?1 AND name=?2 AND parent_wave_id IS ?3 AND retired_at IS NULL",
                 params![repo, part, parent], |row| row.get(0)).optional()?;
@@ -75,6 +104,76 @@ impl SqliteStore {
         }
         tx.commit()?;
         Ok(parent.expect("validated Wave has at least one component"))
+    }
+}
+
+impl SqliteStore {
+    /// Retire Waves together through the planning writer, so Git planning exchange
+    /// carries the removal. Rows, Projects, Tasks and Sessions stay readable;
+    /// an already retired Wave keeps its original retirement.
+    pub(crate) fn retire_waves(&self, waves: &[WaveId], reason: &str) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let at = crate::store::rows::now_unix();
+        for wave in waves {
+            let live: bool = tx.query_row(
+                "SELECT retired_at IS NULL FROM waves WHERE id=?1",
+                [wave],
+                |row| row.get(0),
+            )?;
+            if !live {
+                continue;
+            }
+            planning_write::local(
+                &tx,
+                &crate::work::edit::WorkEdit::for_target(
+                    wave.as_str(),
+                    &[Edit::WaveRetired(Some(at))],
+                ),
+            )?;
+            tx.execute(
+                "UPDATE waves SET retirement_reason=?2, work_state='abandoned',
+                     work_terminal_at=COALESCE(work_terminal_at, ?3)
+                 WHERE id=?1",
+                params![wave, reason, at],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The most recently retired Wave at this address, if any.
+    pub(crate) fn retired_wave_at(
+        &self,
+        repo: &str,
+        slug: &str,
+    ) -> StoreResult<Option<crate::work::wave::Wave>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.query_row(
+            "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
+                    retired_at, superseded_by_wave_id, retirement_reason, slug
+             FROM wave_addresses
+             WHERE repo=?1 AND slug=?2 AND retired_at IS NOT NULL
+             ORDER BY retired_at DESC LIMIT 1",
+            params![repo, slug],
+            |row| Ok(crate::store::rows::map_wave_row(row)),
+        )
+        .optional()?
+        .transpose()
+    }
+
+    /// Wave conversations (not Task Sessions) recorded for these Waves.
+    pub(crate) fn wave_session_count(&self, waves: &[WaveId]) -> StoreResult<usize> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut count = 0usize;
+        for wave in waves {
+            count += conn.query_row(
+                "SELECT COUNT(*) FROM agent_sessions WHERE wave_id=?1 AND task_id IS NULL",
+                [wave],
+                |row| row.get::<_, i64>(0),
+            )? as usize;
+        }
+        Ok(count)
     }
 }
 
@@ -148,6 +247,36 @@ mod tests {
             std::fs::read_to_string(directory.join("MEMORY.md")).unwrap(),
             "Edited directly.\n"
         );
+    }
+
+    #[test]
+    fn stale_checkouts_match_by_id_and_never_resurrect_a_removed_wave() {
+        let repo = loopflow_test_support::TestRepo::new();
+        let home = tempfile::tempdir().unwrap();
+        let store = SqliteStore::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let root = repo.path().to_str().unwrap();
+        let renamed = store.ensure_wave(root, "product").unwrap();
+        let removed = store.ensure_wave(root, "archive").unwrap();
+        // The store renames `product` and retires `archive`; this checkout still
+        // has both old directories.
+        {
+            let conn = store.conn.lock().unwrap();
+            super::super::planning_write::local(
+                &conn,
+                &crate::work::edit::WorkEdit::for_target(
+                    renamed.as_str(),
+                    &[crate::work::edit::WorkValue::WaveName("prod".into())],
+                ),
+            )
+            .unwrap();
+        }
+        store.retire_waves(&[removed.clone()], "removed").unwrap();
+
+        assert_eq!(store.ensure_wave(root, "product").unwrap(), renamed);
+        assert_eq!(store.get_wave(&renamed).unwrap().unwrap().name(), "prod");
+        let fresh = store.ensure_wave(root, "archive").unwrap();
+        assert_ne!(fresh, removed, "a removed identity is never re-created");
+        assert!(store.get_wave(&removed).unwrap().unwrap().is_retired());
     }
 
     #[tokio::test]

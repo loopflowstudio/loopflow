@@ -138,9 +138,10 @@ enum Response {
     },
     Detached,
     /// Another viewer took input control, or the owner is ending because its
-    /// lf is gone or superseded; this viewer prints `notice` and leaves. With
-    /// a `successor`, it reruns its invocation through that lf entry. Older
-    /// owners send no `successor`; serde reads the missing field as `None`.
+    /// lf was removed, replaced or superseded; this viewer prints `notice` and
+    /// leaves. With a `successor`, it reruns its invocation through that lf
+    /// entry; an ending owner sends the entry for every change. Older owners
+    /// send no `successor`; serde reads the missing field as `None`.
     Moved {
         notice: Option<String>,
         successor: Option<PathBuf>,

@@ -1146,12 +1146,14 @@ fn detached_sessions_end_after_their_limit() {
     }
 }
 
-/// A conversation whose lf executable is deleted or rebuilt ends once it waits
-/// for a person, even while viewed. One launched through the installed entry
-/// ends when the entry's target changes, as `lf install` changes it, and a
-/// terminal showing it follows through the entry onto the installed lf with
-/// the conversation's history. A turn in progress finishes first: `lf resume`
-/// on that owner watches it rather than cutting it, and follows when it ends.
+/// A conversation whose lf executable is deleted, rebuilt or superseded ends
+/// once it waits for a person, even while viewed, and a terminal showing it
+/// follows through its lf entry into the reopened conversation with its
+/// history: a deleted build through the entry that still dispatches, a rebuilt
+/// build through its own path, and one launched through the installed entry
+/// onto the build `lf install` selected. A turn in progress finishes first:
+/// `lf resume` on that owner watches it rather than cutting it, and follows
+/// when it ends.
 #[test]
 fn sessions_end_when_their_lf_executable_goes() {
     let fixture = Fixture::new();
@@ -1164,112 +1166,131 @@ fn sessions_end_when_their_lf_executable_goes() {
     };
     let installed = bin.join("lf");
     std::os::unix::fs::symlink(build("lf-installed"), &installed).unwrap();
-    let executables = [
-        build("lf-idle"),
-        build("lf-replaced"),
-        installed.clone(),
-        installed.clone(),
+    let entry = bin.join("lf-entry");
+    std::os::unix::fs::symlink(bin.join("lf-installed"), &entry).unwrap();
+    let removed = build("lf-idle");
+    let replaced = build("lf-replaced");
+    // (executable, the entry it was launched through)
+    let launched = [
+        (removed.clone(), entry.clone()),
+        (replaced.clone(), replaced.clone()),
+        (installed.clone(), installed.clone()),
+        (installed.clone(), installed.clone()),
     ];
     let mut owners = Vec::new();
     let mut viewers = Vec::new();
-    for executable in &executables {
-        let lf = executable.to_str().unwrap();
+    for (executable, entry) in &launched {
+        let entry = entry.to_str().unwrap();
         let mut owner = fixture.command_from(executable, &["session", "serve", "--terminal"]);
-        // Each owner's entry is the executable it was launched through.
         owner
-            .args(["--", lf, "--interactive", "--agent", "claude", ":", "hello"])
-            .env("LF_BIN", lf)
+            .args([
+                "--",
+                entry,
+                "--interactive",
+                "--agent",
+                "claude",
+                ":",
+                "hello",
+            ])
+            .env("LF_BIN", entry)
             .env("PATH", &path);
         let owner = fixture.owner(owner);
         viewers.push(fixture.viewer(&owner, false));
         owners.push(owner);
     }
     fixture.launches(owners.len());
-    let followed = fixture.session_of_owner(&owners[2]);
-    let busy = fixture.session_of_owner(&owners[3]);
+    let sessions: Vec<String> = owners
+        .iter()
+        .map(|owner| fixture.session_of_owner(owner))
+        .collect();
+    let busy = sessions[3].clone();
     fixture.mark_working(&busy);
-    let resume = |session: &str| {
-        fixture
-            .command_from(&installed, &["session", "resume", session])
-            .env("LF_BIN", &installed)
-            .env("PATH", &path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap()
+    let resume = |entry: &Path, session: &str| {
+        let mut command = fixture.command_from(entry, &["session", "resume", session]);
+        command.env("LF_BIN", entry).env("PATH", &path);
+        Terminal::spawn(command)
     };
-    let mut terminal = resume(&followed);
-    fixture.wait_controlled(&owners[2]);
+    let mut terminals: Vec<Terminal> = (0..3)
+        .map(|index| resume(&launched[index].1, &sessions[index]))
+        .collect();
+    for owner in &owners[..3] {
+        fixture.wait_controlled(owner);
+    }
 
-    // A worktree removed, a build relinked, `lf install` selecting another build.
-    std::fs::remove_file(&executables[0]).unwrap();
-    let relinked = bin.join("lf-relinked");
-    std::fs::write(&relinked, "another build").unwrap();
-    std::fs::rename(&relinked, &executables[1]).unwrap();
+    // A worktree removed, a build rebuilt in place, `lf install` selecting
+    // another build.
+    std::fs::remove_file(&removed).unwrap();
+    let rebuilt = bin.join("lf-rebuilt");
+    other_build(&rebuilt);
+    std::fs::rename(&rebuilt, &replaced).unwrap();
     let next = bin.join("lf-next");
     other_build(&next);
     let swapped = bin.join("lf-swapped");
     std::os::unix::fs::symlink(&next, &swapped).unwrap();
     std::fs::rename(&swapped, &installed).unwrap();
 
-    fixture.ends(&owners[0]);
-    fixture.ends(&owners[1]);
-    fixture.ends(&owners[2]);
-    // Their viewers learn why; only the superseded one learns which entry
-    // reopens the conversation.
-    for (index, how) in [(0, "build was removed"), (1, "build was replaced")] {
-        let session = fixture.session_of_owner(&owners[index]);
-        assert_eq!(
-            viewers[index].moves(),
-            [(
-                Some(format!(
-                    "This Session's lf {how}; `lf resume {session}` reopens it."
-                )),
-                None
-            )]
-        );
+    for owner in &owners[..3] {
+        fixture.ends(owner);
     }
-    let superseded_move = (
-        Some("This Session's lf was superseded; reopening on the installed lf.".to_owned()),
-        Some(installed.to_str().unwrap().to_owned()),
-    );
-    assert_eq!(viewers[2].moves(), std::slice::from_ref(&superseded_move));
-    // The terminal showing the superseded conversation reran its invocation
-    // through the entry: the conversation resumed on lf-next with its history.
-    let line = fixture.launches(5).pop().unwrap();
-    assert!(
-        line.contains(" --resume ") && session_of(&fixture.sql(), &line) == followed,
-        "reopened without history: {line}"
-    );
-    let reopened = fixture.owner_of(&followed);
-    assert_ne!(reopened, owners[2]);
-    let executable: String = fixture
-        .sql()
-        .query_row(
-            "SELECT json_extract(command,'$[0]') FROM processes WHERE id=?1",
-            [&reopened],
-            |r| r.get(0),
+    // Every viewer learns why and which entry reopens the conversation.
+    let moved = |index: usize, change: &str| {
+        (
+            Some(format!(
+                "This Session's lf was {change}; reopening it as `lf resume {}`",
+                sessions[index]
+            )),
+            Some(launched[index].1.to_str().unwrap().to_owned()),
         )
-        .unwrap();
-    assert_eq!(
-        std::fs::canonicalize(&executable).unwrap(),
-        std::fs::canonicalize(bin.join("lf-next")).unwrap(),
-        "reopened on {executable}"
-    );
-    assert!(
-        terminal.try_wait().unwrap().is_none(),
-        "terminal left the conversation"
-    );
+    };
+    for (index, change) in [(0, "removed"), (1, "replaced"), (2, "superseded")] {
+        assert_eq!(viewers[index].moves(), [moved(index, change)], "{change}");
+    }
+    // Each terminal reran its invocation through its entry: the conversation
+    // resumed with its history on the build that entry runs now.
+    let lines = fixture.launches(7);
+    let mut reopened_sessions: Vec<String> = lines[4..]
+        .iter()
+        .map(|line| {
+            assert!(
+                line.contains(" --resume "),
+                "reopened without history: {line}"
+            );
+            session_of(&fixture.sql(), line)
+        })
+        .collect();
+    reopened_sessions.sort();
+    let mut expected = sessions[..3].to_vec();
+    expected.sort();
+    assert_eq!(reopened_sessions, expected);
+    let mut reopened = Vec::new();
+    for (index, build) in [(0, "lf-installed"), (1, "lf-replaced"), (2, "lf-next")] {
+        let owner = fixture.owner_of(&sessions[index]);
+        assert_ne!(owner, owners[index]);
+        let executable: String = fixture
+            .sql()
+            .query_row(
+                "SELECT json_extract(command,'$[0]') FROM processes WHERE id=?1",
+                [&owner],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::canonicalize(&executable).unwrap(),
+            std::fs::canonicalize(bin.join(build)).unwrap(),
+            "reopened on {executable}"
+        );
+        terminals[index].assert_viewing(&format!("terminal {index}"));
+        reopened.push(owner);
+    }
     // Opening the busy owner's conversation from the installed lf attaches to
     // it rather than cutting its turn, and several judgments later it still runs.
-    let mut watching = resume(&busy);
+    let watching = resume(&installed, &busy);
     fixture.wait_controlled(&owners[3]);
     std::thread::sleep(Duration::from_secs(4));
     assert!(fixture.running(&owners[3]), "busy owner ended mid-turn");
     assert_eq!(
-        fixture.launches(5).len(),
-        5,
+        fixture.launches(7).len(),
+        7,
         "the busy conversation relaunched"
     );
     // Its turn settling lets it end; the watching terminal then follows.
@@ -1278,25 +1299,27 @@ fn sessions_end_when_their_lf_executable_goes() {
         .execute("DELETE FROM session_activity WHERE session_id=?1", [&busy])
         .unwrap();
     fixture.ends(&owners[3]);
-    assert_eq!(viewers[3].moves(), [superseded_move]);
-    let line = fixture.launches(6).pop().unwrap();
+    assert_eq!(viewers[3].moves(), [moved(3, "superseded")]);
+    let line = fixture.launches(8).pop().unwrap();
     assert!(
         line.contains(" --resume ") && session_of(&fixture.sql(), &line) == busy,
         "reopened without history: {line}"
     );
     let busy_reopened = fixture.owner_of(&busy);
     assert_ne!(busy_reopened, owners[3]);
-    assert!(
-        watching.try_wait().unwrap().is_none(),
-        "watching terminal left the conversation"
-    );
-    drop(viewers);
-    for mut terminal in [terminal, watching] {
-        terminal.kill().unwrap();
-        terminal.wait().unwrap();
+    terminals.push(watching);
+    // Every terminal is still in its reopened conversation.
+    std::thread::sleep(Duration::from_secs(1));
+    for (index, terminal) in terminals.iter_mut().enumerate() {
+        terminal.assert_viewing(&format!("terminal {index}"));
     }
-    fixture.stop(&reopened);
-    fixture.stop(&busy_reopened);
+    drop(viewers);
+    for terminal in terminals {
+        terminal.stop();
+    }
+    for owner in reopened.iter().chain([&busy_reopened]) {
+        fixture.stop(owner);
+    }
 }
 
 /// An lf executable with other bytes than the test binary, still runnable:
@@ -1319,6 +1342,65 @@ fn other_build(path: &Path) {
         std::fs::read(path).unwrap(),
         std::fs::read(env!("CARGO_BIN_EXE_lf")).unwrap()
     );
+}
+
+/// An `lf resume` typed at a terminal: its screen is a pseudo-terminal, read
+/// in the background so the viewer never blocks on it; its stdin stays open.
+struct Terminal {
+    child: Child,
+    screen: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+}
+impl Terminal {
+    fn spawn(mut command: Command) -> Self {
+        let mut master = -1;
+        let mut slave = -1;
+        // SAFETY: valid output pointers; null selects default PTY settings.
+        assert_eq!(
+            unsafe {
+                libc::openpty(
+                    &mut master,
+                    &mut slave,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        // SAFETY: openpty returned two independently owned descriptors.
+        let mut master = unsafe { std::fs::File::from_raw_fd(master) };
+        // SAFETY: the fresh slave descriptor is owned only by this File.
+        let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::from(slave.try_clone().unwrap()))
+            .stderr(Stdio::from(slave));
+        let child = command.spawn().unwrap();
+        drop(command);
+        let screen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written = screen.clone();
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 4096];
+            // Linux reports EIO once the last slave closes; keep what came.
+            while let Ok(read @ 1..) = master.read(&mut buffer) {
+                written.lock().unwrap().extend_from_slice(&buffer[..read]);
+            }
+        });
+        Self { child, screen }
+    }
+    /// Panics with the screen when the viewer has left the conversation.
+    fn assert_viewing(&mut self, what: &str) {
+        if let Some(status) = self.child.try_wait().unwrap() {
+            panic!(
+                "{what} left the conversation ({status}):\n{}",
+                String::from_utf8_lossy(&self.screen.lock().unwrap())
+            );
+        }
+    }
+    fn stop(mut self) {
+        self.child.kill().unwrap();
+        self.child.wait().unwrap();
+    }
 }
 
 /// A Session whose owner runs another lf build than this test binary, with

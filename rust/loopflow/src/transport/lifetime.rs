@@ -94,23 +94,21 @@ fn watch(
                     let moved = match change {
                         Some(change) => {
                             tracing::warn!(%owner, "ending a Session whose lf was {change}");
-                            let session = store.owner_sessions(owner)?.into_iter().next();
-                            // Viewers of a superseded owner rerun their
-                            // invocation through the entry; a removed or
-                            // replaced build has no newer entry to follow.
-                            let successor = (change == Change::Superseded)
-                                .then(crate::os_process::resolve_lf_binary)
-                                .and_then(Result::ok);
-                            let notice = match (&successor, session) {
-                                (Some(_), _) => {
-                                    "This Session's lf was superseded; reopening on the installed lf."
-                                        .to_owned()
-                                }
-                                (None, Some(session)) => format!(
-                                    "This Session's lf build was {change}; `lf resume {session}` reopens it."
-                                ),
-                                (None, None) => format!("This Session's lf build was {change}."),
-                            };
+                            // Removed, replaced and superseded are three ways
+                            // of noticing that a launch through the entry no
+                            // longer runs this build; viewers rerun their
+                            // invocation through the entry for every one. The
+                            // notice names the command they are rerunning, so
+                            // the hint survives a follow that fails.
+                            let session = store
+                                .owner_sessions(owner)?
+                                .into_iter()
+                                .next()
+                                .expect("an owner waiting for a person has a Session");
+                            let successor = crate::os_process::resolve_lf_binary().ok();
+                            let notice = format!(
+                                "This Session's lf was {change}; reopening it as `lf resume {session}`"
+                            );
                             Response::Moved {
                                 notice: Some(notice),
                                 successor,

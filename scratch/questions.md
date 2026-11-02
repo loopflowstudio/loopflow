@@ -87,3 +87,15 @@ Realign assumption (2026-11-02), reversible:
   once so demo steps 2–3 stay one click; Swift decides from the receipt's typed
   facts (an Initiative with an error, uncommitted files, prose mentions), the
   same three Rust's `leftovers` renders, rather than a fourth DTO field.
+
+Second concept review (2026-11-02), reversible:
+
+- **Default `lf wave list` hides removed Waves only.** The old `--current`
+  filter also hid `abandoned` rows that were never retired; nothing in product
+  code abandons a Wave except `lf wave remove`, so those rows are legacy strays
+  (Jack's `engbot`, `list`) and listing them lets **Remove Wave…** finish the
+  cleanup. Alternative kept in mind: hide abandoned rows too (the old
+  `--current` semantics), which leaves strays invisible but present.
+- **No flag lists removed Waves.** `lf wave show <name|id>` reads one; an
+  inventory of removed Waves is a later ask if someone needs it, not part of
+  deleting `--current`.

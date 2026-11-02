@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-500 concept review</title>
+<title>LOO-500 concept review (second pass)</title>
 <style>
   :root {
     --bg: #fbfaf7; --fg: #1d1c1a; --muted: #6b6761; --rule: #e2ded6;
@@ -44,6 +44,9 @@
   .flow { display: grid; grid-template-columns: 1fr; gap: .6rem; margin: 1rem 0; }
   .flow > div { padding: .8rem 1rem; border: 1px solid var(--rule); border-radius: 6px; }
   .flow .who { color: var(--muted); font-size: .85rem; margin-bottom: .2rem; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 40rem) { .pair { grid-template-columns: 1fr; } }
+  .pair h4 { margin: 0 0 .3rem; font-size: .85rem; font-weight: 600; }
   ol.q li { margin: .5rem 0; }
   ol.q ol { list-style: lower-alpha; }
   ul { padding-left: 1.3rem; }
@@ -53,19 +56,23 @@
 </head>
 <body>
 <header>
-  <h1>LOO-500 · Add and remove Waves seamlessly · concept review</h1>
-  <p>Step: concept-review (headless, after realign) · 2026-11-02</p>
+  <h1>LOO-500 · Add and remove Waves seamlessly · concept review, second pass</h1>
+  <p>Step: concept-review (headless, after realign at <code>0d73fe5f30</code>) · 2026-11-02</p>
   <p>Built from <code>scratch/jack-loo-500-make-adding-and-deleting-waves-seamless.md</code>,
     <code>rust/loopflow/src/ops/wave_lifecycle.rs</code>, <code>rust/loopflow/src/lf/mod.rs</code>,
-    <code>swift/LoopflowMac/PortfolioDiscovery.swift</code>, <code>swift/LoopflowMac/WorkModel.swift</code>,
-    <code>swift/LoopflowMac/Views/WavesView.swift</code>, <code>swift/LoopflowMac/Views/RemoveWaveSheet.swift</code>,
-    <code>swift/LoopflowMac/Views/RenameWaveSheet.swift</code>.</p>
+    <code>rust/loopflow/src/lf/commands/waves.rs</code>, <code>rust/loopflow/src/lf/commands/read.rs</code>,
+    <code>rust/loopflow/src/store/sqlite/wave_definitions.rs</code>,
+    <code>swift/Loopflow/Services/RegistryQuery.swift</code>, <code>swift/LoopflowMac/Views/RemoveWaveSheet.swift</code>,
+    <code>swift/LoopflowMac/Views/RenameWaveSheet.swift</code>, <code>swift/LoopflowMac/Views/WorkNavigator.swift</code>,
+    <code>swift/README.md</code>, <code>docs/work.md</code>.</p>
 </header>
 
 <div class="decision">
-  <p class="lead">The accepted lifecycle is built and holds. One thing the accepted decisions already settle is still
-  unbuilt: Desktop keeps a second Wave reader, a filesystem scan of <code>.lf/wave/*/GOAL.md</code>, and that reader
-  brings a removed Wave back on removal's own retry path. The next implement direction is one reader.</p>
+  <p class="lead">The lifecycle holds as accepted. One consequence of “removed Waves stay removed” is still unbuilt:
+  the default <code>lf wave list</code> keeps showing a removed Wave as <code>abandoned</code>, while Desktop reads the
+  same command with <code>--current</code> and drops it. The next implement direction is one list: the live filter is the
+  default, <code>--current</code> goes, and the state is called <em>removed</em> everywhere it is printed. No product
+  choice is open.</p>
 </div>
 
 <h2>What you do</h2>
@@ -75,118 +82,148 @@
     <strong>New Wave…</strong> name, optional objective → the row appears selected, its workspace opens.<br>
     <code>lf wave add ops --objective "…"</code></div>
   <div><div class="who">Wave row menu, titlebar crumb, or the CLI</div>
-    <strong>Rename Wave…</strong> → same Wave, Tasks and chapters; <code>.lf/wave/ops</code> moves on main.<br>
+    <strong>Rename Wave…</strong> → same Wave, Tasks and chapters; <code>.lf/wave/ops</code> moves on main; leftovers
+    (an Initiative that kept its title, prose still naming the old address) keep the sheet open with the CLI's lines.<br>
     <code>lf wave rename ops operations</code></div>
   <div><div class="who">Wave row menu, titlebar crumb, or the CLI</div>
-    <strong>Remove Wave…</strong> → a sheet shows what happens, then Remove. Open Tasks move to the parent Wave or the
-    repository; started ones keep worktree, PR and Graph; chapters, completed Tasks and conversations stay in history.<br>
+    <strong>Remove Wave…</strong> → the sheet shows what happens, then Remove. Open Tasks move to the parent Wave or the
+    repository; started ones keep worktree, PR and Graph; chapters, completed Tasks and conversations stay in history. A
+    clean removal closes the sheet; leftovers keep it open.<br>
     <code>lf wave remove ops --preview</code> · <code>lf wave remove ops</code> · <code>--delete-backlog</code></div>
-  <div><div class="who">After an interruption</div>
-    Retry in the sheet, or run the same command again. Nothing retires until every open Task has its disposition, so a
-    second run finishes the first.</div>
+  <div><div class="who">Afterwards</div>
+    <strong>Which Waves exist?</strong> Desktop: the sidebar. CLI: <code>lf wave list</code>. This is where the two
+    disagree today.</div>
 </div>
 
 <h2>The few concepts</h2>
 
 <table>
-  <tr><th>Concept</th><th>Before this Task</th><th>Now <span class="tag now">shipped</span></th></tr>
+  <tr><th>Concept</th><th>Shipped on this branch <span class="tag now">verified</span></th><th>Still to do <span class="tag proposed">proposed</span></th></tr>
   <tr><td>Wave lifecycle</td>
-      <td><code>lf wave ensure</code>; Desktop wrote <code>GOAL.md</code> itself; no remove</td>
-      <td><code>lf wave add | rename | remove</code>, one op module, Desktop calls the same op</td></tr>
+      <td><code>lf wave add | rename | remove</code>; one op module; Desktop calls the same op (add in-process, rename and
+          remove through <code>lf … --json</code>)</td>
+      <td>—</td></tr>
   <tr><td>Removed</td>
-      <td>retirement only for registration collisions; any Wave with a Project could never retire</td>
-      <td>retired (<code>retired_at</code>, reason <code>removed</code>); rows never deleted; history readable with
-          <code>lf wave show</code> until a new Wave takes the name</td></tr>
+      <td>retired (<code>retired_at</code>, reason <code>removed</code>, <code>work_state = abandoned</code>); rows never
+          deleted; <code>lf wave show &lt;name|id&gt;</code> reads the history</td>
+      <td>one word when printed: <em>removed</em></td></tr>
+  <tr><td>Which Waves exist</td>
+      <td>Desktop: store rows via <code>lf wave list --all --current</code>. CLI: <code>lf wave list</code> shows removed
+          rows as <code>abandoned</code>; <code>--current</code> hides them</td>
+      <td>one list: live Waves by default, <code>--current</code> deleted</td></tr>
   <tr><td>Open Task disposition</td>
-      <td>blocker</td>
-      <td>moves to parent or repository; <code>--delete-backlog</code> deletes unstarted ones; started always move</td></tr>
+      <td>moves to parent or repository; <code>--delete-backlog</code> deletes unstarted ones; started always move;
+          nothing retires until every move succeeded</td>
+      <td>—</td></tr>
   <tr><td>Authored files</td>
-      <td>seeded in whatever checkout ran the command, never committed</td>
-      <td>committed on the main checkout; stale checkouts match by <code>config.yaml</code> id, never path</td></tr>
+      <td>committed on the main checkout; stale checkouts match by <code>config.yaml</code> id, never path</td>
+      <td>—</td></tr>
   <tr><td>Receipt</td>
-      <td>none</td>
-      <td><code>WaveRemoval.summary</code>: Rust sentences, shown verbatim by CLI and Desktop</td></tr>
+      <td><code>WaveRemoval.summary</code> / <code>WaveRenamed.summary</code>: Rust sentences, shown verbatim by CLI and
+          Desktop; leftovers keep the sheet open</td>
+      <td>—</td></tr>
 </table>
 
 <h2>The one consequential mismatch</h2>
 
-<p>Two readers decide which Waves exist. <code>lf</code> reads
-<code>wave_addresses WHERE retired_at IS NULL</code>. Desktop additionally runs
-<code>PortfolioDiscovery.authoredWaves</code>, a scan of <code>.lf/wave/*/GOAL.md</code> in every portfolio
-repository, and both <code>WorkModel.visibleWaves</code> and <code>WavesView.mergedWaves</code> merge the scan in as
-placeholder rows with <code>isRegistered == false</code>.</p>
+<p>The Problem section of the design opens with Jack's own <code>lf wave list</code> showing <code>engbot</code> and
+<code>list</code> “stuck as <code>abandoned</code>”. The product's own remove now produces exactly that row:</p>
 
-<p>They disagree exactly where removal is supposed to be clear:</p>
+<pre><code>$ lf wave remove desktop
+3 open Tasks moved to the repository (1 started keeps its worktree, PR and running Graph).
+1 completed Task and 1 chapter stay readable in history.
+.lf/wave/desktop removed on the main checkout.
 
-<pre><code>$ lf wave remove ops            # Linear archive fails
-ops has no Tasks or Sessions.
-Linear Initiative init_… is still live: …. Run `lf wave remove ops` again to retry.
-.lf/wave/ops is not committed: kept until the Linear Initiative is archived.
+$ lf wave list                       # what docs/work.md, init.md and repo_operate.md tell people and agents to run
+WAVE              REPOSITORY                    STATUS    TASKS  MACHINE
+desktop           …/loopflow                    abandoned     0  unplaced
+product           …/loopflow                    ready        12  unplaced
 
-$ lf wave list --current        # ops is gone
-Desktop sidebar                 # ops is back, as a "ready" unregistered row</code></pre>
+Desktop sidebar                      # reads `lf wave list --all --current --json`
+product</code></pre>
 
-<p>The receipt says removed; the sidebar says present. The accepted contract says both
-"Desktop and CLI … reflect the result consistently" and "removed Waves stay removed". The same ghost appears on any main
-checkout that is behind the planning store (another Machine ran the removal) until it pulls. The design's own deletion
-list already names this reader; slice 5 kept it because unregistered directories "no longer arise from Desktop
-creation". They arise from removal's retry path and from clones.</p>
+<p>Three readers, two answers, three words for one state. <code>retire_waves</code> writes <code>retired_at</code> and
+<code>work_state = 'abandoned'</code>; the list prints <code>status.label()</code>; <code>lf wave show</code> prints
+“retired at …; superseded by -: removed”. The accepted contract says removed Waves stay removed and that Desktop and the
+CLI reflect the result consistently. An agent in a repository session reading <code>lf wave list --json</code> sees an
+abandoned Wave it may try to plan around.</p>
 
-<h3>What the placeholder is for, and must survive</h3>
+<h3>Where <code>--current</code> came from</h3>
 
-<p>A freshly cloned repository whose <code>.lf/wave/</code> has authored Waves nobody registered on this Machine. Today
-the scan is the only way Desktop shows them; <code>WorkModelTests.authoredWavesRemainVisible</code> pins that. The only
-registering paths are <code>lf wave add</code>, <code>lf wave connect</code>, Task creation, <code>lf run</code> and
-relocation.</p>
+<p>#1615 (2026-10-21, “Trim undesigned CLI surface”) added it as a navigation filter — “exclude abandoned and retired
+registrations from current navigation” — and the Swift README of the same PR calls the unfiltered list “historical
+registry visibility”. No decision made the unfiltered list a history view, and nothing in product code abandons a Wave
+except <code>retire_waves</code>; the abandoned-without-retired rows are legacy strays.</p>
 
-<h3>Direction <span class="tag proposed">proposed, next implement</span></h3>
+<h3>Direction <span class="tag proposed">next implement</span></h3>
+
+<div class="pair">
+  <div><h4>Now</h4>
+<pre><code>lf wave list                 # live + removed (as abandoned)
+lf wave list --current       # live
+lf wave show desktop
+  desktop  retired
+  history   retired at 1762…; superseded by -: removed</code></pre></div>
+  <div><h4>Proposed</h4>
+<pre><code>lf wave list                 # live; what Desktop shows
+                             # (--current deleted)
+lf wave show desktop
+  desktop  removed
+  history   removed at 1762…</code></pre></div>
+</div>
 
 <ul>
-  <li>Desktop lists what the store knows. Nothing else.</li>
-  <li>Registering authored directories is <code>lf</code>'s job, through <code>ensure_wave</code>'s id-first match,
-      which already skips retired ids. So a kept directory of a removed Wave never returns, and a clone's Waves still
-      appear.</li>
-  <li>The trigger is an explicit write, not a plan read (reads record no Work): when a repository joins the Desktop
-      portfolio, and inside <code>lf wave add</code> / <code>connect --all</code> as today.</li>
-  <li>Delete <code>PortfolioDiscovery.authoredWaves</code>, both <code>authoredWavesByRepo</code> copies,
-      <code>authoredPlaceholder</code>, <code>WaveViewModel.isRegistered</code> and every guard on it. The Swift
-      placeholder test becomes a Rust test: registering a clone's directories lists them and skips a retired id.</li>
-  <li>The archive-failure case then needs no Desktop code: the kept directory is invisible to Desktop and only the
-      receipt's leftover line names it.</li>
+  <li>The default excludes <code>retired_at</code> rows. A legacy <code>abandoned</code> row that was never retired stays
+      listed, in Desktop too, so <strong>Remove Wave…</strong> can finish it.</li>
+  <li><code>--current</code> and its callers go: <code>RegistryQuery</code>, <code>read.rs</code> <code>Waves</code>, the
+      <code>s1</code>–<code>s5</code> skills, the <code>graph/mod.rs</code> test, <code>status_tests</code>,
+      <code>wave_lifecycle</code>, the Swift README and tests.</li>
+  <li><code>lf wave list</code>'s help drops “retained planning identities”; <code>lf wave show</code> says
+      <em>removed at</em>, and <em>superseded by</em> only when a successor exists. The <code>WaveSnapshot</code> wire
+      (<code>status</code>, <code>retired_at</code>) is unchanged.</li>
+  <li>No new listing of removed Waves. <code>lf wave show &lt;name|id&gt;</code> reads one; an inventory is a later ask.</li>
+  <li>Same pass: the Swift README still says authored <code>GOAL.md</code> files “appear before their first
+      registration” — the placeholder scan slice 6 deleted.</li>
 </ul>
 
-<h2>Smaller, implied by "CLI and Desktop say the same thing"</h2>
-
-<table>
-  <tr><th></th><th>Now</th><th>Direction <span class="tag proposed">proposed</span></th></tr>
-  <tr><td>Rename leftovers</td>
-      <td>CLI prints "Still mentioned in …" and "Linear Initiative … kept its title"; Desktop's rename sheet discards the
-          receipt and closes</td>
-      <td><code>WaveRenamed.summary: Vec&lt;String&gt;</code> like <code>WaveRemoval.summary</code>; the sheet stays open on
-          leftovers and shows the same lines</td></tr>
-  <tr><td><code>WaveRemoval</code> DTO</td>
-      <td><code>has_files: bool</code> and <code>files: Option&lt;AuthoredFiles&gt;</code> carry one fact twice, mirrored in Swift</td>
-      <td>optional compress: fold <code>has_files</code> into the preview's <code>files</code> value</td></tr>
-</table>
-
-<h2>Looked at, not changed</h2>
+<h3>Counterexamples checked</h3>
 
 <ul>
-  <li>Desktop's Remove sheet has no <code>--delete-backlog</code> control; unstarted Tasks move and the preview says so.
-      A checkbox is ordinary follow-up, not a product choice.</li>
-  <li><code>lf wave rename</code> also carries <code>--repo</code> (relocation) and <code>--title</code>. Pre-existing,
-      outside this Task.</li>
-  <li>Removal flow, idempotency and the Rust-authored receipt match the accepted design and the five demo steps.</li>
+  <li>A clone whose Waves nobody registered: still listed once <code>lf wave add</code>, <code>connect --all</code> or
+      joining the portfolio registers them; unaffected by the default filter.</li>
+  <li>A removal whose Linear archive failed: the row is retired, so the list hides it; the receipt's leftover line is the
+      only place it is named, as the first review decided.</li>
+  <li>Re-adding a removed name: the fresh Wave lists; the old one answers to its id in <code>lf wave show</code>.</li>
+</ul>
+
+<h2>Looked at, holding</h2>
+
+<ul>
+  <li><code>lf wave rename old new</code> after the rename already happened answers with the Wave at <code>new</code>
+      (<code>renamed: false</code>). Desktop renames by id and never takes that path; the CLI answer is the idempotent
+      one.</li>
+  <li>The Remove sheet stays open when other Waves' documents still mention the name. Jack's 2026-10-28 direction lists
+      those for a person to edit; the sheet shows what the CLI prints.</li>
+  <li>The sidebar's New Wave selects the new row after <code>addWave</code> awaited the planning refresh, so the row
+      exists when selected; the Waves window closes its sheet and refreshes.</li>
+  <li>Removal order, idempotency, recursive child removal, memory folding and the Rust-authored receipt match the accepted
+      design and the five demo steps (<code>wave_lifecycle</code> 6 tests).</li>
 </ul>
 
 <h2>Questions</h2>
 
-<p class="muted">None block. Open product choices: none. If the direction above is wrong, the one reversible call is:</p>
+<p class="muted">None block. The reversible calls recorded in <code>scratch/questions.md</code>:</p>
 <ol class="q">
-  <li>When should <code>lf</code> register a clone's authored Wave directories?
+  <li>What does the default <code>lf wave list</code> hide?
     <ol>
-      <li>when the repository joins the Desktop portfolio, plus <code>lf wave add</code>/<code>connect --all</code> (chosen)</li>
-      <li>only on <code>lf wave connect --all</code>, so a clone's Waves stay invisible until someone runs it</li>
+      <li>removed (retired) Waves only; legacy abandoned rows stay visible until removed (chosen)</li>
+      <li>removed and abandoned, the old <code>--current</code> semantics</li>
+    </ol>
+  </li>
+  <li>Should any command list removed Waves?
+    <ol>
+      <li>no; <code>lf wave show &lt;name|id&gt;</code> reads one (chosen)</li>
+      <li>yes, a <code>--removed</code> flag on <code>lf wave list</code></li>
     </ol>
   </li>
 </ol>

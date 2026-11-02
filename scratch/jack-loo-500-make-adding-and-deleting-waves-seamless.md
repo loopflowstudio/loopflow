@@ -1,7 +1,8 @@
 # LOO-500: Add and remove Waves seamlessly
 
-Status: accepted; implemented (reconciled 2026-11-02). CLI demo done; Desktop
-demo awaits a display session. Jack Heart filed LOO-500; exact controls,
+Status: accepted; implemented (reconciled 2026-11-02); one implement pass left
+from the second concept review (`lf wave list` lists what Desktop lists). CLI
+demo done; Desktop demo awaits a display session. Jack Heart filed LOO-500; exact controls,
 required fields and the meaning of deletion were left as design questions.
 Choices below are the plan's; reversible ones are noted in
 `scratch/questions.md`.
@@ -212,6 +213,9 @@ removed Wave's files surface as ordinary rebase conflicts.
   free because readers already exclude `retired_at`).
 - Linear: removal archives (never deletes) the Initiative; Linear sync stops
   reading retired Waves.
+- `lf wave list` lists live Waves, the same rows Desktop shows; a removed Wave
+  is read by address or id with `lf wave show` (second concept review,
+  2026-11-02; implement next).
 
 ### Desktop
 
@@ -435,6 +439,51 @@ the gap as found).
 Not changed: Desktop's Remove sheet exposes no `--delete-backlog` (unstarted
 Tasks move and the preview says so; a checkbox is ordinary follow-up), and
 `lf wave rename` still carries the pre-existing `--repo` and `--title`.
+
+## Concept review (2026-11-02, second pass) — design changed
+
+Run against the implemented change at `0d73fe5f30` after realign. The accepted
+experience holds: add, rename and remove behave as the demo lists, the receipt
+is Rust-authored and shown verbatim, Desktop lists only store rows, removal is
+idempotent and nothing retires before every open Task has its disposition. One
+implied consequence of "removed Waves stay removed" and "Desktop and CLI
+reflect the result consistently" is still unbuilt. No open product choice.
+Page: `scratch/concept-review.html`.
+
+- **The default `lf wave list` still lists a removed Wave, as `abandoned`.**
+  `retire_waves` sets `work_state = 'abandoned'` beside `retired_at`; the list
+  prints `status.label()`, and only `--current` applies the live filter
+  (`current_wave`: not abandoned, not retired). Desktop reads
+  `lf wave list --all --current --json`, so after `lf wave remove desktop` the
+  sidebar drops the row while a person or agent running the documented read
+  (`lf wave list`, `lf wave list --json` in the `init` and `repo_operate`
+  skills) sees `desktop … abandoned` — the "stuck as abandoned" rows the
+  Problem section opens with, now produced by the product's own remove.
+  `--current` arrived in #1615 (2026-10-21) as a navigation filter with no
+  decision that the unfiltered list is a history view; nothing in product code
+  abandons a Wave except `retire_waves`, so "abandoned", "retired" and
+  "removed" name one state with three words.
+  Direction (implement next): the live filter is the default and `--current`
+  is deleted with its callers (`RegistryQuery`, `read.rs` `Waves`, the
+  `s1`–`s5` skills, `graph/mod.rs` test, `status_tests`, `wave_lifecycle`,
+  the Swift README and tests). The default excludes retired rows; a legacy
+  `abandoned` row that was never retired (Jack's `engbot`, `list`) stays
+  listed, in Desktop too, so **Remove Wave…** can finish it. `lf wave list`'s
+  help drops "retained planning identities". `lf wave show` names the state
+  with the product word: `removed at <date>` (and `superseded by <id>` only
+  when a successor exists) instead of `retired at …; superseded by -: removed`.
+  The `WaveSnapshot` wire is unchanged (`status`, `retired_at`); no new
+  listing of removed Waves is added — `lf wave show <name|id>` reads one.
+- **Stale sentence** in `swift/README.md` (Current Wave navigation): "Authored
+  `.lf/wave/<name>/GOAL.md` files still appear before their first
+  registration" describes the placeholder scan slice 6 deleted; replace with
+  the one-reader statement `docs/work.md` already carries.
+
+Looked at, holding: `lf wave rename`'s already-renamed path answers by the
+new address (Desktop renames by id, so it never takes it); the Remove sheet
+stays open on prose mentions, which Jack's 2026-10-28 direction lists for a
+person to edit; Desktop's sidebar selects the new Wave after `addWave`
+awaits the planning refresh, so the row exists when selected.
 
 ## Checks
 

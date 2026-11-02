@@ -75,15 +75,8 @@ pub(super) struct Decoder {
 }
 
 impl Decoder {
-    pub fn extend(&mut self, bytes: &[u8]) -> io::Result<()> {
+    pub fn extend(&mut self, bytes: &[u8]) {
         self.buffer.extend_from_slice(bytes);
-        if self.buffer.len() > MAX_PAYLOAD + HEADER {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "transport frame too large",
-            ));
-        }
-        Ok(())
     }
 
     pub fn next(&mut self) -> io::Result<Option<(Tag, Vec<u8>)>> {
@@ -374,7 +367,39 @@ impl Scanner {
 mod tests {
     use std::collections::VecDeque;
 
-    use super::{encode, event, Decoder, Event, Incoming, Piece, Request, Scanner, Tag};
+    use super::{
+        encode, event, frame, Decoder, Event, Incoming, Piece, Request, Scanner, Tag, MAX_PAYLOAD,
+    };
+
+    #[test]
+    fn a_maximum_frame_can_share_a_read_with_the_next_frame() {
+        let payload = vec![b'x'; MAX_PAYLOAD];
+        let mut bytes = frame(Tag::Input, &payload);
+        bytes.extend(frame(Tag::Input, b"next"));
+        let mut decoder = Decoder::default();
+        let mut decoded = Vec::new();
+        for chunk in bytes.chunks(8192) {
+            decoder.extend(chunk);
+            while let Some(frame) = decoder.next().unwrap() {
+                decoded.push(frame);
+            }
+        }
+        assert_eq!(
+            decoded,
+            vec![(Tag::Input, payload), (Tag::Input, b"next".to_vec())]
+        );
+    }
+
+    #[test]
+    fn an_oversized_frame_is_rejected_before_receiving_its_payload() {
+        let mut decoder = Decoder::default();
+        decoder.extend(&[Tag::Input as u8]);
+        decoder.extend(&((MAX_PAYLOAD + 1) as u32).to_be_bytes());
+        assert_eq!(
+            decoder.next().unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
 
     #[test]
     fn frames_round_trip_across_split_reads() {
@@ -383,9 +408,9 @@ mod tests {
         encode(Tag::Err, b"", &mut wire);
         let wire: Vec<u8> = wire.into();
         let mut decoder = Decoder::default();
-        decoder.extend(&wire[..3]).unwrap();
+        decoder.extend(&wire[..3]);
         assert!(decoder.next().unwrap().is_none());
-        decoder.extend(&wire[3..]).unwrap();
+        decoder.extend(&wire[3..]);
         assert_eq!(decoder.next().unwrap(), Some((Tag::Out, b"hello".to_vec())));
         assert_eq!(decoder.next().unwrap(), Some((Tag::Err, Vec::new())));
         assert!(decoder.next().unwrap().is_none());

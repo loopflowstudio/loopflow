@@ -3,7 +3,7 @@
 Jack Heart asked (2026-11-02) for the owner (`lf session serve`) and its viewers
 to adopt the parts of Rex's protocol worth copying. Status: accepted design;
 core stream, successor handoff and concept-review color ownership implemented
-(2026-11-02). Dependency integration, gate and live acceptance remain.
+(2026-11-02). Local gate is checked; dependency integration and live acceptance remain.
 Integration and landing follow LOO-705, then LOO-708/LOO-709.
 Evidence: `scratch/research/rex-architecture.md` in the LOO-672 checkout
 (read 2026-11-02).
@@ -95,7 +95,7 @@ not a configured Claude conversation; native acceptance remains below.
   `successor_handoff_restores_the_terminal_and_preserves_command_results`.
   The latter covers terminal attributes and alternate-screen restoration,
   exact argv, success/nonzero exit, signal, missing/empty command and no successor.
-- [ ] `session_lifecycle_tests` and `session_launch_contract` pass — gate runs them.
+- [x] `session_lifecycle_tests` and `session_launch_contract` passed in the affected gate run; transport checks were refreshed after the immediate-resume correction.
 - [ ] Two viewers of one running Claude conversation receive the snapshot and
   live output, including controlling-viewer input — demo/review evidence remains.
 
@@ -126,7 +126,7 @@ not a configured Claude conversation; native acceptance remains below.
   `screens/<session>.ghostsnp` file. The second to land removes the `.vt` path.
   This Task preserves that writer/reader on integration; framing remains opaque
   to the snapshot format. Their snapshot storage work stays in those Tasks.
-- `session_lifecycle_tests` and `session_launch_contract` are gate's.
+- Dependency integration must refresh the affected acceptance on the combined tree before landing.
 
 ## Concept review (2026-11-02)
 
@@ -181,3 +181,45 @@ page is `scratch/concept-review.html`; implementation and Wave memory are
 unchanged by this review.
 
 Check (2026-11-02): `git diff --check` and `lf context` pass; prose-only realign reuses the 5 focused transport passes, build, formatting and Clippy recorded at `d1eeb41e1d6cbfc39c543598468382a8ae28cec8:scratch/loo-712-transport-wire.md` (snapshot waits for socket EOF after the earlier leaky pass); earlier core/handoff evidence: `76654874b332ff0874dd125735b15d957b6e00a4:scratch/loo-712-transport-wire.md`. Gate owns affected transport/lifecycle/launch suites and owner-boundary startup/interactive-Graph checks after dependency integration; CI owns Linux/installation proofs, and live Claude acceptance remains demo/review's.
+
+## Gate plan (2026-11-02)
+
+Review comparison: supplied checkout base `4e9ade2d04`, including working edits.
+Changed transport owner, lifetime, output and wire modules reach `transport::`,
+`transport_tests`, `session_lifecycle_tests`, `session_launch_contract`,
+`agent_startup_tests`, `session_cli_tests`, and the retained-terminal interactive
+Graph fixture. LOOPFLOW.md and its five prompt goldens reach `golden_prompt`.
+The changed-aware runner also selects architecture, inventory, formatting and
+Clippy. No Swift, website or Python production paths changed. The installation
+boundary requires `declared_agent_can_start_another_tasks_graph`; Linux transport
+and Clippy remain CI proofs. Live Claude interaction remains demo/review's.
+
+Gate review found two wire/ownership edge cases: a maximum-size frame sharing a
+read with the next frame was rejected by an aggregate-buffer limit, and taking
+ownership left a previously queued request eligible for another grant. Focused
+regressions cover legal coalesced frames and one-time fulfillment of a request.
+
+Fresh shared Task reads: LOO-705 still has open PR #1799 at demo; LOO-708 is
+running implement without a PR; LOO-709 is idle without a PR. This gate checks
+the current tree; integration and Jack Heart's landing order remain required.
+
+The first full gate passed 125 tests plus architecture, inventory, fmt and stable
+Clippy (`.lf/tmp/gate/run-69292`). Further review found same-pass EOF/resume
+could see the old input claim and appearance owner. A paused-owner fixture
+confirmed the resume reply had no input token (its initial failure cleanup then
+encountered a removed Process row). Release claims and expired streams before
+resume; the regression checks restored input and new PTY dimensions. The rerun
+narrows to transport modules and fixtures, plus required static checks. Other
+Session/launch/prompt suites retain their first-gate evidence.
+
+Check (2026-11-02): `scripts/test.py --reuse-passing --rust-filter "test(transport::) | binary(transport_tests) | binary(session_lifecycle_tests) | binary(session_launch_contract) | binary(golden_prompt) | test(agent_startup_tests::) | test(session_cli_tests::) | test(interactive_graph_keeps_input_and_advances_only_after_each_provider_exits)"` via `uv run python`, LF variables unset, stable Rust 1.99.1 — PASS, 125 tests plus architecture/inventory/fmt/build/Clippy; after the resume correction the same runner with `"test(transport::) | binary(transport_tests)"` passed all 49 tests and static checks (`.lf/tmp/gate/run-60047`); Linux transport/Clippy remain CI-owned, configured Claude interaction remains demo/review-owned.
+Check (2026-11-02): `uv run python scripts/test_task_installation.py --test declared_agent_can_start_another_tasks_graph` with inherited LF variables unset — PASS on disposable Linux/Rust 1.99.1, including its two prerequisite store tests; container removed (`.lf/tmp/gate-installation.log`).
+
+Gate disposition: three defects repaired with regressions (coalesced maximum
+frames, fulfilled ownership requests, immediate byte-resume claims/size).
+The documented stream remains accurate; no extra API or compatibility path was
+introduced. All selected local checks pass. This is not integrated dependency
+or configured-provider acceptance: preserve the required landing order above,
+then test the combined source and complete the live Claude walkthrough. No
+current-gate fixture owners or background commands remain; older processes
+observed during the exit check were left untouched.

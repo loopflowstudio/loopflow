@@ -454,7 +454,7 @@ impl Viewer {
         let mut bytes = [0; 8192];
         match socket.read(&mut bytes) {
             Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
-            Ok(n) => self.decoder.extend(&bytes[..n])?,
+            Ok(n) => self.decoder.extend(&bytes[..n]),
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
             Err(e) => return Err(e),
         }
@@ -556,6 +556,7 @@ impl Ownership {
             }
             _ => return false,
         }
+        self.requests.retain(|id| id != &viewer.id);
         self.owner = Some(Owner::of(viewer));
         true
     }
@@ -841,6 +842,16 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     .is_some_and(|error| survive(viewer, error)),
             }
         });
+        // Release dropped connections' claims before a same-pass resume asks
+        // for them again; reconnecting restores the stream, not its old claims.
+        viewers.retain(|viewer| !viewer.connection.expired());
+        owner_change |= ownership.settle(&viewers);
+        if !viewers
+            .iter()
+            .any(|viewer| viewer.token.is_some() && viewer.token == control)
+        {
+            control = None;
+        }
         // A resume moves its connection onto the dropped viewer's stream.
         for index in 0..viewers.len() {
             let Some((answers, resume)) = viewers[index].resuming.take() else {
@@ -874,7 +885,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             owner_change |= ownership.claim(resume.own, viewer);
             viewer.resume(socket, answers, resume.received, ownership.id(), terminal);
         }
-        viewers.retain(|viewer| !viewer.leaving && !viewer.connection.expired());
+        viewers.retain(|viewer| !viewer.leaving);
         owner_change |= ownership.settle(&viewers);
         let owner = viewers.iter().find(|viewer| ownership.held_by(viewer));
         let new_size = owner
@@ -1376,7 +1387,7 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
             let mut bytes = [0; 16384];
             let n = socket.read(&mut bytes)?;
             anyhow::ensure!(n != 0, "Execution owner disconnected; outcome is unknown");
-            decoder.extend(&bytes[..n])?;
+            decoder.extend(&bytes[..n]);
             while let Some((tag, payload)) = decoder.next()? {
                 let pieces = match tag {
                     Tag::Reply => {
@@ -1537,7 +1548,7 @@ pub(crate) fn controlled(id: &LfProcessId) -> Result<bool> {
     loop {
         let n = socket.read(&mut bytes)?;
         anyhow::ensure!(n != 0, "Execution owner closed before answering");
-        decoder.extend(&bytes[..n])?;
+        decoder.extend(&bytes[..n]);
         if let Some((Tag::Reply, payload)) = decoder.next()? {
             let reply: Outgoing = serde_json::from_slice(&payload)?;
             return match reply.reply {
@@ -1716,10 +1727,35 @@ pub fn report_exit(code: u8) {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
+    use std::os::unix::net::UnixStream;
     use std::process::Command;
 
-    use super::{carry_across_exec, Handoff, CONTROL_ENV, OWNER_ENV, PARENT_ENV};
+    use super::{
+        carry_across_exec, Handoff, Own, Ownership, Viewer, CONTROL_ENV, OWNER_ENV, PARENT_ENV,
+    };
     use crate::id::LfProcessId;
+
+    #[test]
+    fn taking_ownership_fulfills_a_viewers_queued_request() {
+        let (first, _first_peer) = UnixStream::pair().unwrap();
+        let (second, _second_peer) = UnixStream::pair().unwrap();
+        let mut viewers = vec![Viewer::new(first), Viewer::new(second)];
+        for viewer in &mut viewers {
+            viewer.attached = true;
+        }
+        let mut ownership = Ownership::default();
+        ownership.claim(Some(Own::Take), &viewers[0]);
+        ownership.claim(Some(Own::Request), &viewers[1]);
+        ownership.claim(Some(Own::Take), &viewers[1]);
+        ownership.claim(Some(Own::Take), &viewers[0]);
+        viewers[0].drop_connection();
+        ownership.settle(&viewers);
+        assert_eq!(
+            ownership.id(),
+            None,
+            "a fulfilled request cannot reclaim ownership"
+        );
+    }
 
     fn env<'a>(command: &'a Command, key: &str) -> Option<&'a OsStr> {
         command

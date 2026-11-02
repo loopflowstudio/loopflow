@@ -2031,6 +2031,61 @@ fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
 }
 
 #[test]
+fn an_immediate_resume_can_reclaim_input_and_resize() {
+    struct PausedOwner(libc::pid_t);
+    impl Drop for PausedOwner {
+        fn drop(&mut self) {
+            // SAFETY: only the fixture's paused owner is resumed, including on panic.
+            unsafe { libc::kill(self.0, libc::SIGCONT) };
+        }
+    }
+
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    let mut first = fixture.viewer(&owner, true);
+    first.until_event("owner");
+    let mut resumed = fixture.connect(&owner);
+    let pid: libc::pid_t = fixture
+        .sql()
+        .query_row("SELECT pid FROM processes WHERE id=?1", [&owner], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    // Deliver EOF and resume in one owner pass, without a scheduling sleep.
+    // SAFETY: this process owns the child; waitpid observes only its stopped state.
+    unsafe {
+        assert_eq!(libc::kill(pid, libc::SIGSTOP), 0);
+    }
+    let paused = PausedOwner(pid);
+    let mut status = 0;
+    // SAFETY: status is writable and pid names this fixture's child.
+    assert_eq!(
+        unsafe { libc::waitpid(pid, &mut status, libc::WUNTRACED) },
+        pid
+    );
+    assert!(libc::WIFSTOPPED(status));
+    first.socket.shutdown(std::net::Shutdown::Both).unwrap();
+    resumed.request(json!({"kind":"resume","reconnect":first.reconnect,
+        "received":first.received,"control":true,"own":"take","rows":35,"cols":110}));
+    drop(paused);
+    let reply = resumed.until_reply();
+    if reply["token"].is_null() {
+        fixture.stop(&owner);
+        let _ = resumed.socket.read_to_end(&mut Vec::new());
+        panic!("resume did not regain input: {reply}");
+    }
+    resumed.accept(&reply);
+    let items = resumed.until_event("owner");
+    assert_eq!(events(&items, "resize")[0]["rows"], 35);
+    resumed.input("size\n");
+    until_out(&mut resumed, "35 110");
+    resumed.input("done\n");
+    resumed.finish();
+    assert!(resumed.next().is_none());
+}
+
+#[test]
 fn a_resume_past_the_spool_is_refused_and_a_fresh_attach_repaints() {
     let fixture = Fixture::new();
     let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);

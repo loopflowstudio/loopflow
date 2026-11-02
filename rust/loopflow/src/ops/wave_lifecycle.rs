@@ -240,35 +240,37 @@ pub fn remove(
     let main = main.as_path().to_path_buf();
     let store = runtime.block_on(super::planning_sync::planning_store())?;
     // Desktop names the Wave by its id, which survives a concurrent rename.
-    if let Ok(id) = WaveId::parse(name) {
-        let wave = store
+    let wave = match WaveId::parse(name) {
+        Ok(id) => store
             .sqlite
             .get_wave(&id)
             .map_err(lifecycle_error)?
-            .ok_or_else(|| lifecycle_error(format!("no Wave {id}")))?;
-        return remove(repo, wave.slug(), preview, delete_backlog).or_else(|error| {
-            if wave.is_retired() {
-                Ok(already_removed_receipt(&wave, preview))
-            } else {
-                Err(error)
-            }
-        });
-    }
-    let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
-    let (wave, already_removed) = match runtime
-        .block_on(store.get_wave_at(&locator))
-        .map_err(lifecycle_error)?
-    {
-        Some(wave) => (wave, false),
-        None => (
-            store
-                .sqlite
-                .retired_wave_at(&repo_key, locator.slug())
+            .ok_or_else(|| lifecycle_error(format!("no Wave {id}")))?,
+        Err(_) => {
+            let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
+            match runtime
+                .block_on(store.get_wave_at(&locator))
                 .map_err(lifecycle_error)?
-                .ok_or_else(|| lifecycle_error(format!("no Wave {} here", locator.slug())))?,
-            true,
-        ),
+            {
+                Some(wave) => wave,
+                None => store
+                    .sqlite
+                    .retired_wave_at(&repo_key, locator.slug())
+                    .map_err(lifecycle_error)?
+                    .ok_or_else(|| lifecycle_error(format!("no Wave {} here", locator.slug())))?,
+            }
+        }
     };
+    let already_removed = wave.is_retired();
+    // A new Wave may hold a removed Wave's address; its files and Initiative are not ours.
+    let owns_address =
+        !already_removed
+            || runtime
+                .block_on(store.get_wave_at(
+                    &WaveLocator::discover(&main, wave.slug()).map_err(lifecycle_error)?,
+                ))
+                .map_err(lifecycle_error)?
+                .is_none();
     let mut subtree = vec![wave.clone()];
     let mut next = 0;
     while !already_removed && next < subtree.len() {
@@ -325,9 +327,10 @@ pub fn remove(
         .map_err(lifecycle_error)?;
     let slugs: Vec<String> = subtree.iter().map(|wave| wave.slug().to_string()).collect();
     let directory = main.join(authored_path(wave.slug()));
-    let has_files = directory.exists();
+    let has_files = owns_address && directory.exists();
     let mut initiatives: Vec<InitiativeArchive> = slugs
         .iter()
+        .filter(|_| owns_address)
         .filter_map(|slug| {
             super::linear::read_initiative(&main, slug).map(|initiative| InitiativeArchive {
                 wave: slug.clone(),
@@ -407,27 +410,6 @@ pub fn remove(
     Ok(receipt)
 }
 
-fn already_removed_receipt(wave: &crate::work::wave::Wave, preview: bool) -> WaveRemoval {
-    WaveRemoval {
-        id: wave.id().clone(),
-        name: wave.slug().to_string(),
-        preview,
-        already_removed: true,
-        destination: None,
-        waves: vec![wave.slug().to_string()],
-        moved: Vec::new(),
-        deleted: Vec::new(),
-        completed_tasks: 0,
-        chapters: 0,
-        sessions: 0,
-        initiatives: Vec::new(),
-        has_files: false,
-        files: None,
-        mentions: Vec::new(),
-        summary: vec![format!("{} was already removed.", wave.slug())],
-    }
-}
-
 fn interrupted(
     wave: &str,
     done: usize,
@@ -455,7 +437,7 @@ fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<V
             &parent_dir.join("config.yaml"),
         )?;
         changed.push(authored_path(parent));
-        changed.extend(rewrite_references(main, slug, Some(parent))?);
+        changed.extend(rewrite_references(main, slug, parent)?);
     }
     std::fs::remove_dir_all(&directory)
         .map_err(|error| lifecycle_error(format!("{}: {error}", directory.display())))?;
@@ -466,7 +448,11 @@ fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<V
 fn fold_memory(directory: &Path, slug: &str, parent_memory: &Path) -> OpsResult<()> {
     let date = time::OffsetDateTime::now_utc().date();
     let mut folded = String::new();
-    for memory in memory_files(directory) {
+    let memories = directories(directory, None)
+        .into_iter()
+        .map(|dir| dir.join("MEMORY.md"))
+        .filter(|memory| memory.is_file());
+    for memory in memories {
         let relative = memory
             .parent()
             .and_then(|dir| dir.strip_prefix(directory).ok())
@@ -495,13 +481,13 @@ fn fold_memory(directory: &Path, slug: &str, parent_memory: &Path) -> OpsResult<
         .map_err(|error| lifecycle_error(format!("{}: {error}", parent_memory.display())))
 }
 
-fn memory_files(directory: &Path) -> Vec<PathBuf> {
+/// `root` and every directory beneath it except `skip`'s subtree, sorted.
+fn directories(root: &Path, skip: Option<&Path>) -> Vec<PathBuf> {
     let mut found = Vec::new();
-    let mut pending = vec![directory.to_path_buf()];
+    let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
-        let memory = dir.join("MEMORY.md");
-        if memory.is_file() {
-            found.push(memory);
+        if Some(dir.as_path()) == skip {
+            continue;
         }
         if let Ok(entries) = std::fs::read_dir(&dir) {
             pending.extend(
@@ -511,6 +497,7 @@ fn memory_files(directory: &Path) -> Vec<PathBuf> {
                     .filter(|path| path.is_dir()),
             );
         }
+        found.push(dir);
     }
     found.sort();
     found
@@ -549,29 +536,11 @@ fn fold_config(config: &Path, parent_config: &Path) -> OpsResult<()> {
 /// Every authored Wave document on main outside `slug`'s own directory.
 fn wave_documents(main: &Path, slug: &str) -> Vec<PathBuf> {
     let root = main.join(".lf/wave");
-    let own = root.join(slug);
-    let mut found = Vec::new();
-    let mut pending = vec![root];
-    while let Some(dir) = pending.pop() {
-        if dir == own {
-            continue;
-        }
-        for file in ["GOAL.md", "MEMORY.md"] {
-            if dir.join(file).is_file() {
-                found.push(dir.join(file));
-            }
-        }
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            pending.extend(
-                entries
-                    .flatten()
-                    .map(|entry| entry.path())
-                    .filter(|path| path.is_dir()),
-            );
-        }
-    }
-    found.sort();
-    found
+    directories(&root, Some(&root.join(slug)))
+        .into_iter()
+        .flat_map(|dir| [dir.join("GOAL.md"), dir.join("MEMORY.md")])
+        .filter(|document| document.is_file())
+        .collect()
 }
 
 fn path_reference(slug: &str) -> regex::Regex {
@@ -582,16 +551,8 @@ fn path_reference(slug: &str) -> regex::Regex {
     .expect("escaped Wave path is a valid pattern")
 }
 
-/// Rewrite `.lf/wave/<slug>` paths in other Waves' documents to `replacement`,
-/// or leave them (and list them as mentions) when there is none.
-fn rewrite_references(
-    main: &Path,
-    slug: &str,
-    replacement: Option<&str>,
-) -> OpsResult<Vec<String>> {
-    let Some(replacement) = replacement else {
-        return Ok(Vec::new());
-    };
+/// Rewrite `.lf/wave/<slug>` paths in other Waves' documents to `replacement`.
+fn rewrite_references(main: &Path, slug: &str, replacement: &str) -> OpsResult<Vec<String>> {
     let pattern = path_reference(slug);
     let mut changed = Vec::new();
     for document in wave_documents(main, slug) {
@@ -676,10 +637,9 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             count(removal.moved.len(), "open Task", "open Tasks")
         );
         if started > 0 {
+            let verb = if started == 1 { "keeps" } else { "keep" };
             line.push_str(&format!(
-                " ({} {} its worktree, PR and running Graph)",
-                count(started, "started", "started"),
-                if started == 1 { "keeps" } else { "keep" }
+                " ({started} started {verb} its worktree, PR and running Graph)"
             ));
         }
         line.push('.');
@@ -725,19 +685,10 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
         ));
     }
     if removal.sessions > 0 {
-        lines.push(format!(
-            "{} {} in history.",
-            if removal.sessions == 1 {
-                "The Wave conversation".to_string()
-            } else {
-                format!("{} Wave conversations", removal.sessions)
-            },
-            if removal.sessions == 1 {
-                "stays"
-            } else {
-                "stay"
-            }
-        ));
+        lines.push(match removal.sessions {
+            1 => "The Wave conversation stays in history.".to_string(),
+            n => format!("{n} Wave conversations stay in history."),
+        });
     }
     if removal.has_files {
         lines.push(match &removal.destination {
@@ -911,7 +862,7 @@ pub async fn rename(
         std::fs::rename(&source, &destination)
             .map_err(|error| lifecycle_error(format!("{}: {error}", source.display())))?;
         let mut paths = vec![authored_path(&from), authored_path(&to)];
-        paths.extend(rewrite_references(&main, &from, Some(&to))?);
+        paths.extend(rewrite_references(&main, &from, &to)?);
         commit_authored(&main, &paths, &format!("lf wave rename: {from} → {to}"))
     };
     let checkout = relocation

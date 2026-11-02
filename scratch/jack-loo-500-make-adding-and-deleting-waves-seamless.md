@@ -366,3 +366,8 @@ CLI demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
   wave_definitions, planning_peers, wave_repository_ownership, migrations pass;
   Swift `CreateWaveSheet|RemoveWaveSheet|ProjectActivation|WaveRow` pass;
   `cargo clippy --all-targets -D warnings` clean. Affected suites → gate.
+- 2026-11-02 compress: `remove` resolves the Wave once (id or address) instead of
+  recursing through its slug, which removed a new Wave holding a removed Wave's
+  address; one directory walk serves memory folding and reference rewrites.
+  `cargo test --test integration -- wave_lifecycle dto_fixtures::wave_removal` 6/6;
+  clippy clean.

@@ -133,6 +133,16 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     );
     assert_eq!(fresh["created"], true);
     assert_ne!(fresh["id"], added["id"], "re-adding mints a fresh Wave");
+
+    // Desktop retries by id; the old id never reaches the new Wave at its address.
+    let by_old_id = lf(
+        repo.path(),
+        home.path(),
+        &["wave", "remove", added["id"].as_str().unwrap(), "--json"],
+    );
+    assert_eq!(by_old_id["already_removed"], true);
+    assert_eq!(live_waves(repo.path(), home.path()), ["research"]);
+    assert!(repo.path().join(".lf/wave/research").exists());
 }
 
 #[test]

@@ -956,10 +956,12 @@ through (`resolve_lf_binary()`) no longer dispatches to its build:
 `installation::superseded`, the one judgement the owner, `lf resume` and
 rollover's inventory share. The owner ends once its Sessions wait for a person
 and tells viewers the successor entry, which they rerun their invocation
-through without judging. `lf resume` ends a superseded owner and resumes from
-provider history; rollover is that sweep for every idle superseded owner, its
-viewed rule and artifact-set rule deleted. Graph runners are never stopped;
-each step already launches through the entry.
+through without judging. `lf resume` ends a superseded owner at that same
+boundary and resumes from provider history; one mid-turn that answers its
+socket is watched instead, one that does not is ended and the cut turn reported
+(concept review, 2026-11-02). Rollover is that sweep for every superseded
+owner, its viewed and artifact-set rules deleted. Graph runners are never
+stopped; each step already launches through the entry.
 
 Lessons: the transport crosses builds, so add `Option` fields to existing
 `Response` variants and never a new variant (the `moved` variant broke 0.15.0

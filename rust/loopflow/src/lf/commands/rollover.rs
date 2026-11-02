@@ -2,8 +2,9 @@
 //!
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
 //! processes. The inventory names every recorded, live lf Process by executable
-//! and version, and flags the ones that aren't the selected install or can't
-//! open the store any more. An owner on this build ends itself once its
+//! and version, and flags the ones a launch through the entry no longer runs
+//! (`installation::superseded`, the owner's and `lf resume`'s judgement) or
+//! that can't open the store any more. An owner on this build ends itself once its
 //! Sessions wait for a person and `lf resume` reopens them on the installed lf;
 //! rollover does the same now, for every superseded owner at once, including
 //! owners that predate that policy: an idle Session execution owner with saved
@@ -23,7 +24,6 @@ use serde::Serialize;
 use time::OffsetDateTime;
 
 use crate::id::LfProcessId;
-use crate::installation::ArtifactSet;
 use crate::journal::{
     recorded_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
 };
@@ -39,7 +39,7 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct BinaryInventory {
-    /// The CLI ordinary launches run; `None` before a receipt-managed install.
+    /// The lf a launch through the entry runs now; `None` when no entry resolves.
     pub selected: Option<SelectedBinary>,
     /// The migration a binary must know to open the store.
     pub store_floor: Option<String>,
@@ -57,7 +57,7 @@ pub struct RunningBinary {
     /// `None` when the kernel withholds the executable.
     pub path: Option<PathBuf>,
     pub version: Option<String>,
-    /// Part of the selected artifact set, by path or content.
+    /// One build with `selected`: the same file, or the same bytes.
     pub selected: bool,
     /// It does not know the store's reader floor, so it fails every store open.
     pub cannot_open_store: bool,
@@ -128,12 +128,9 @@ impl RunningBinary {
 pub fn inventory() -> Result<BinaryInventory> {
     let database = crate::store::database_path_from_env()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let selected_set = crate::installation::root()
-        .and_then(|root| crate::installation::installed_artifacts(&root))
-        .unwrap_or_else(|error| {
-            tracing::warn!(%error, "installed artifact set unreadable");
-            None
-        });
+    let target = crate::installation::launch_target()
+        .inspect_err(|error| tracing::warn!(%error, "the lf a launch runs now is unknown"))
+        .ok();
     let (store_floor, processes) = if database.exists() {
         let store = SqliteStore::open_processes_read_only(&database)?;
         let floor = store.reader_floor().unwrap_or_else(|error| {
@@ -151,18 +148,15 @@ pub fn inventory() -> Result<BinaryInventory> {
             .or_insert_with(|| binary_version(path))
             .clone()
     };
-    let selected = selected_set.as_ref().and_then(|set| {
-        let cli = set.artifact(&crate::installation::ArtifactRole::Cli)?;
-        Some(SelectedBinary {
-            path: cli.path.clone(),
-            version: version_of(&cli.path),
-        })
+    let selected = target.map(|path| SelectedBinary {
+        version: version_of(&path),
+        path,
     });
     let mut binaries = group(processes, |path| {
         let version = path.and_then(&mut version_of);
-        let is_selected = match (&selected_set, path) {
-            (Some(set), Some(path)) => in_artifact_set(set, path),
-            // Without a receipt there is nothing to be behind.
+        let is_selected = match (&selected, path) {
+            (Some(_), Some(path)) => !crate::installation::superseded(path),
+            // Without an entry there is nothing to be behind.
             (None, _) => true,
             (Some(_), None) => false,
         };
@@ -252,19 +246,6 @@ fn group(
         .collect::<Vec<_>>();
     binaries.sort_by_key(|binary| (binary.selected, binary.name()));
     binaries
-}
-
-/// By path, or by content for a copy such as Desktop's `/Applications` bundle.
-fn in_artifact_set(set: &ArtifactSet, path: &Path) -> bool {
-    if set.artifacts.iter().any(|artifact| artifact.path == path) {
-        return true;
-    }
-    let Ok(digest) = crate::installation::file_sha256(path) else {
-        return false;
-    };
-    set.artifacts
-        .iter()
-        .any(|artifact| artifact.sha256 == digest)
 }
 
 /// `lf --version` exits during argument parsing in every released lf, before it

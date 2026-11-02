@@ -23,8 +23,9 @@ Headless choices, 2026-11-02. Each is reversible; Jack decides.
   `lf resume` from the other side restarts the provider from history. The
   viewer compares the owner with what the entry launches, not with itself, so
   a development build in the main Home attaches rather than restarting
-  (realign, 2026-11-02). The owner, the takeover and the viewer's follow share
-  this judgement (`installation::superseded`, implement 2026-11-02), so an
+  (realign, 2026-11-02). The owner, the takeover and rollover's inventory share this
+  judgement (`installation::superseded`, implement and realign 2026-11-02);
+  viewers follow on the owner's word. So an
   owner on the same bytes as the entry's target never ends for supersession;
   content hashing happens only when the two files differ in path but not in
   length.

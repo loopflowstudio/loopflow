@@ -889,16 +889,15 @@ fn gate_artifact<'a>(
 /// `lf resume` taking an owner over, and a viewer following the entry. An
 /// entry or executable nobody can read is not superseded; it is judged again.
 pub(crate) fn superseded(executable: &Path) -> bool {
-    crate::os_process::resolve_lf_binary()
-        .and_then(|entry| entry_target(&entry))
-        .is_ok_and(|target| !same_build(executable, &target))
+    launch_target().is_ok_and(|target| !same_build(executable, &target))
 }
 
-/// The executable a launch through `entry` runs now: the gate's selected CLI
-/// artifact, else the file `entry` names after following symlinks.
-fn entry_target(entry: &Path) -> Result<PathBuf> {
-    let canonical =
-        fs::canonicalize(entry).with_context(|| format!("resolve lf entry {}", entry.display()))?;
+/// The executable a launch through the entry runs now: the gate's selected CLI
+/// artifact, else the file the entry names after following symlinks.
+pub(crate) fn launch_target() -> Result<PathBuf> {
+    let entry = crate::os_process::resolve_lf_binary()?;
+    let canonical = fs::canonicalize(&entry)
+        .with_context(|| format!("resolve lf entry {}", entry.display()))?;
     let root = root()?;
     let gate = entry_gate_path(&root, &ArtifactRole::Cli)?;
     if !fs::canonicalize(&gate).is_ok_and(|gate| gate == canonical) {
@@ -940,20 +939,6 @@ pub fn read_state(root: &Path) -> Result<InstallationState> {
         return Ok(InstallationState::Settled(Box::new(active)));
     }
     Ok(InstallationState::Legacy)
-}
-
-/// Ordinary launches use published artifacts even if an old development
-/// installation is still selected. Its store never participates in routing.
-pub(crate) fn installed_artifacts(root: &Path) -> Result<Option<ArtifactSet>> {
-    let active = match read_state(root)? {
-        InstallationState::Legacy => return Ok(None),
-        InstallationState::Settled(active) => *active,
-        InstallationState::Switching(receipt) => startup_active_during_switch(&receipt)?,
-    };
-    Ok(Some(match active.selection.source {
-        InstallSource::Published => active.selection.artifact_set,
-        InstallSource::Development => active.published_fallback,
-    }))
 }
 
 /// The install selection ordinary startup should use while a switch receipt is
@@ -1657,30 +1642,6 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("digest mismatch"));
-    }
-
-    #[test]
-    fn ordinary_cli_uses_published_artifacts_through_legacy_development_selection() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("authority");
-        let installed_cli = |root: &std::path::Path| {
-            super::installed_artifacts(root)
-                .unwrap()
-                .and_then(|set| set.artifact(&ArtifactRole::Cli).cloned())
-        };
-        assert!(installed_cli(&root).is_none());
-        let published = selection(directory.path(), "published", InstallSource::Published);
-        let development = selection(directory.path(), "development", InstallSource::Development);
-        let expected = published.artifact_set.artifact(&ArtifactRole::Cli).unwrap();
-        for selected in [published.clone(), development.clone()] {
-            let active = active(selected, published.artifact_set.clone());
-            write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
-            assert_eq!(installed_cli(&root).as_ref(), Some(expected));
-        }
-        let next = selection(directory.path(), "next", InstallSource::Published);
-        let receipt = switch(development, next, published.artifact_set.clone());
-        write_switch(&root, &receipt).unwrap();
-        assert_eq!(installed_cli(&root).as_ref(), Some(expected));
     }
 
     #[test]

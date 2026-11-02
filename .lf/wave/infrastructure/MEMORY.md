@@ -952,12 +952,13 @@ installed lf by one mechanism, deep enough that a new kind of skew needs no new
 case, after 0.15.0 owners refused 0.15.1 attaches and `lf monitor rollover`
 moved none of them. Headless choice, pending Jack: replacement from durable
 state, never negotiation. An owner is superseded when the entry it was launched
-through (`resolve_lf_binary()`, resolved by `installation::entry_target`) no
-longer dispatches to its executable; it ends once its Sessions wait for a
-person and tells viewers the successor entry, which they rerun their invocation
-through. `lf resume` ends an owner that is not the build the entry launches
-now and resumes from provider history; rollover is that sweep for every idle
-superseded owner, its viewed rule deleted. Graph runners are never stopped;
+through (`resolve_lf_binary()`) no longer dispatches to its build:
+`installation::superseded`, the one judgement the owner, `lf resume` and
+rollover's inventory share. The owner ends once its Sessions wait for a person
+and tells viewers the successor entry, which they rerun their invocation
+through without judging. `lf resume` ends a superseded owner and resumes from
+provider history; rollover is that sweep for every idle superseded owner, its
+viewed rule and artifact-set rule deleted. Graph runners are never stopped;
 each step already launches through the entry.
 
 Lessons: the transport crosses builds, so add `Option` fields to existing

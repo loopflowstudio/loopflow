@@ -36,3 +36,9 @@ Steers 2026-10-30 (after sync onto main, #1776 merged):
 - `install.py local` Sparkle: `scripts/app_bundle.embed_frameworks` shared with release packaging.
 - Preview install output: the link was right (into the app); the "promoted" line printed the staged
   `~/.lf/bin` copy and the Desktop warning fired after replacing the app. Both fixed.
+
+Gate 2026-11-02: `desktop-app` green on branch dispatch run 41111152406 (a548abd81b; workflow and
+scripts unchanged since). `scripts/test.py --reuse-passing --rust-filter 'test(lf::commands::install::) |
+test(lf::commands::rollover::) | binary(one_machine_tests) | test(installation_reaches_candidate_verdict)'`
+PASS (architecture, python, rust+clippy, website, swift). Fixed: architecture map for hdiutil/codesign/spctl;
+AppUpdater's dev wording. Demo (live Mac install) remains.

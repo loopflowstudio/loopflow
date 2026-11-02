@@ -878,20 +878,22 @@ fn save_last_screen(owner: &LfProcessId, output: &output::Output) {
     let Some(bytes) = output.last_screen() else {
         return;
     };
-    let saved = (|| -> Result<()> {
-        let session = crate::journal::process_ledger()?
-            .transport_session(owner)?
-            .context("owner holds no Session")?;
-        let path = last_screen_path(&crate::store::lf_home_dir(), &session);
-        std::fs::create_dir_all(path.parent().expect("screens directory"))?;
-        let draft = path.with_extension("vt.draft");
-        std::fs::write(&draft, &bytes)?;
-        std::fs::rename(&draft, &path)?;
-        Ok(())
-    })();
-    if let Err(error) = saved {
+    if let Err(error) = write_last_screen(owner, &bytes) {
         tracing::warn!(%error, %owner, "cannot keep the Session's last screen");
     }
+}
+
+/// Write `bytes` whole: readers never see a half-written screen.
+fn write_last_screen(owner: &LfProcessId, bytes: &[u8]) -> Result<()> {
+    let session = crate::journal::process_ledger()?
+        .transport_session(owner)?
+        .context("owner holds no Session")?;
+    let path = last_screen_path(&crate::store::lf_home_dir(), &session);
+    std::fs::create_dir_all(path.parent().expect("screens directory"))?;
+    let draft = path.with_extension("vt.draft");
+    std::fs::write(&draft, bytes)?;
+    std::fs::rename(&draft, &path)?;
+    Ok(())
 }
 
 fn deliver(

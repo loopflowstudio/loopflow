@@ -61,24 +61,31 @@ pub(super) fn last_screen(screen: &vt100::Screen) -> Vec<u8> {
     if screen.alternate_screen() {
         bytes.extend(b"\x1b[?1049h");
     } else {
-        let (rows, cols) = screen.size();
-        let mut history = screen.clone();
-        history.set_scrollback(usize::MAX);
-        // Scrolled back `offset` rows, the view starts `offset` rows above the
-        // screen; a screen's height at a time, oldest first.
-        let mut offset = history.scrollback();
-        while offset > 0 {
-            history.set_scrollback(offset);
-            let take = offset.min(usize::from(rows));
-            for row in history.rows_formatted(0, cols).take(take) {
-                bytes.extend(row);
-                bytes.extend(b"\r\n");
-            }
-            offset -= take;
-        }
+        bytes.extend(scrollback(screen));
         bytes.extend(blank(screen));
     }
     bytes.extend(screen.state_formatted());
+    bytes
+}
+
+/// The owner's scrollback as terminal lines, oldest row first.
+fn scrollback(screen: &vt100::Screen) -> Vec<u8> {
+    let (rows, cols) = screen.size();
+    let mut history = screen.clone();
+    history.set_scrollback(usize::MAX);
+    let mut bytes = Vec::new();
+    // Scrolled back `offset` rows, the view starts `offset` rows above the
+    // screen; a screen's height at a time.
+    let mut offset = history.scrollback();
+    while offset > 0 {
+        history.set_scrollback(offset);
+        let take = offset.min(usize::from(rows));
+        for row in history.rows_formatted(0, cols).take(take) {
+            bytes.extend(row);
+            bytes.extend(b"\r\n");
+        }
+        offset -= take;
+    }
     bytes
 }
 

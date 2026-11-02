@@ -42,8 +42,8 @@ fresh terminal paints it. A Session whose lf executable is removed or replaced
 (a deleted worktree, a relinked build, a rebuilt Dev.app) ends within seconds,
 viewed or not, and logs the path to `logs/lf.log`; an attached viewer prints
 why and the `lf resume <session>` that reopens it. A turn in progress or a
-step of a running Graph keeps its owner until it settles; a finished Graph
-holds nothing; a terminal's status report counts only while a viewer is
+step of a running Graph keeps its owner and restarts the grace; a finished
+Graph holds nothing; a terminal's status report counts only while a viewer is
 attached to refresh it; headless Runs (pipe owners) are never ended for want
 of viewers. Each owner judges only itself and ends by signaling itself, which
 stops its agent and records its exit. A store it cannot read is judged again

@@ -58,26 +58,26 @@ pub(super) fn spawn(
 /// When an unviewed, quiet owner is due to end, in wall time.
 #[derive(Debug)]
 struct Grace {
-    limit: Option<Duration>,
+    /// Unknown until the store names the owner's repository; a pipe owner
+    /// never learns one and never ends for want of viewers.
+    limit: Option<DetachedLimit>,
     viewed: bool,
     quiet_since: SystemTime,
 }
 
 impl Grace {
     fn note(&mut self, activity: Activity, now: SystemTime) {
-        match activity {
-            Activity::Viewed(viewed) => {
-                self.viewed = viewed;
-                self.quiet_since = now;
-            }
-            Activity::Output => self.quiet_since = now,
+        if let Activity::Viewed(viewed) = activity {
+            self.viewed = viewed;
         }
+        self.quiet_since = now;
     }
 
     fn due(&self) -> Option<SystemTime> {
-        self.limit
-            .filter(|_| !self.viewed)
-            .map(|limit| self.quiet_since + limit)
+        match self.limit {
+            Some(DetachedLimit::After(limit)) if !self.viewed => Some(self.quiet_since + limit),
+            _ => None,
+        }
     }
 
     fn expired(&self, now: SystemTime) -> bool {
@@ -98,9 +98,6 @@ fn watch(
         viewed: false,
         quiet_since: SystemTime::now(),
     };
-    let mut configured = false;
-    // After a judgement that found the owner held, the next is no sooner than this.
-    let mut held_until: Option<SystemTime> = None;
     loop {
         match changes.recv_timeout(POLL) {
             Ok(activity) => {
@@ -118,15 +115,14 @@ fn watch(
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
-        if terminal && !configured {
+        if terminal && grace.limit.is_none() {
             if let Some(store) = store.open(owner) {
                 let repo = store
                     .process(owner)
                     .ok()
                     .flatten()
                     .and_then(|process| process.repo);
-                grace.limit = limit(repo.as_deref());
-                configured = true;
+                grace.limit = Some(limit(repo.as_deref()));
             }
         }
         let now = SystemTime::now();
@@ -134,16 +130,15 @@ fn watch(
         if gone.is_none() && !grace.expired(now) {
             continue;
         }
-        if held_until.is_some_and(|until| now < until) {
-            continue;
-        }
         let Some(store) = store.open(owner) else {
             continue;
         };
         match store.owner_waits_for_person(owner) {
             Ok(true) => {}
+            // A turn or a running Graph holds it: activity, and the grace
+            // runs again from here.
             Ok(false) => {
-                held_until = Some(now + grace.limit.map_or(POLL, recheck));
+                grace.quiet_since = now;
                 continue;
             }
             Err(error) => {
@@ -253,39 +248,29 @@ fn identity(metadata: &std::fs::Metadata) -> (u64, u64, u64, i64, i64) {
     )
 }
 
-/// The detached limit configured for `repo`; `None` when it is off. An
-/// unreadable configuration keeps the default rather than keeping the Session.
-fn limit(repo: Option<&str>) -> Option<Duration> {
-    let configured = match crate::config::load_config(repo.map(Path::new)) {
+/// The detached limit configured for `repo`. An unreadable configuration
+/// keeps the default rather than keeping the Session.
+fn limit(repo: Option<&str>) -> DetachedLimit {
+    match crate::config::load_config(repo.map(Path::new)) {
         Ok(config) => config.unwrap_or_default().session.end_detached_after,
         Err(error) => {
             tracing::warn!(%error, ?repo, "configuration unreadable; using the default detached limit");
             DetachedLimit::default()
         }
-    };
-    match configured {
-        DetachedLimit::After(limit) => Some(limit),
-        DetachedLimit::Off => None,
     }
-}
-
-/// How long an owner past `limit` waits before looking again while a turn or
-/// Graph holds it.
-fn recheck(limit: Duration) -> Duration {
-    (limit / 12).clamp(POLL, Duration::from_secs(5 * 60))
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{Activity, Grace};
+    use super::{Activity, DetachedLimit, Grace};
 
     #[test]
     fn the_grace_runs_from_the_last_viewer_or_output_in_wall_time() {
         let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
         let mut grace = Grace {
-            limit: Some(Duration::from_secs(120)),
+            limit: Some(DetachedLimit::After(Duration::from_secs(120))),
             viewed: false,
             quiet_since: start,
         };
@@ -299,6 +284,8 @@ mod tests {
         assert_eq!(grace.due(), None);
         grace.note(Activity::Viewed(false), start + Duration::from_secs(400));
         assert_eq!(grace.due(), Some(start + Duration::from_secs(520)));
+        grace.limit = Some(DetachedLimit::Off);
+        assert_eq!(grace.due(), None);
         grace.limit = None;
         assert_eq!(grace.due(), None);
     }

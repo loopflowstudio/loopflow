@@ -60,9 +60,10 @@ fidelity (sibling Task) stay out.
 
 ## Delete — do not maintain
 
-- `lifetime::LONGEST_PAUSE`/`recheck` Instant arithmetic: replaced by
-  wall-clock judgement with the same poll.
-- `limit()`'s "unreadable config keeps the Session" branch.
+- `lifetime::LONGEST_PAUSE`/`recheck`/`held_until` pacing: gone. A judgement
+  that finds the owner held is activity and restarts the grace, so a busy
+  owner is asked once per grace, not on its own schedule.
+- `limit()`'s "unreadable config keeps the Session" branch: gone.
 
 ## Done when
 
@@ -78,6 +79,8 @@ fidelity (sibling Task) stay out.
 - `cargo test -p loopflow --test transport_tests` (20 tests) and
   `cargo test -p loopflow --lib -- transport:: detached_sessions_end rollover restore human_session::tests`
   pass; `cargo fmt`, `cargo clippy -p loopflow --all-targets -- -D warnings` clean.
+- Compress: `cargo test -p loopflow --lib -- transport::` (15), `--test transport_tests
+  detached_sessions_end_after_their_limit resume_all_restores` (2), clippy clean.
 - Live, 2026-11-02, branch debug build in a throwaway `LF_HOME`, real Claude
   Code 2.1.316, this worktree as checkout: 20 conversations opened, each
   viewed once and detached at 13:53:07. Before: 60 processes (20 owners, 20

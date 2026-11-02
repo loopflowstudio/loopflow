@@ -646,6 +646,14 @@ order gives ids, and `lf self install --main` alone advances `~/.lf`. Released
 SQL stays immutable. Mechanics: [MIGRATIONS.md](../../../rust/loopflow/src/store/MIGRATIONS.md).
 The retired draft/copy model (LOO-344): `986be7988:wave/infrastructure/MEMORY.md`.
 
+Jack Heart decided on 2026-11-02 (LOO-693) that a build may migrate `~/.lf`
+under running readers: one lf per Mac on every stream (LOO-669/688), additive
+migrations never break an older reader, and no process rollover at install.
+The 2026-10-30 outage came from 0.15.0 readers predating slug ids, not from
+additive tails. Lesson: store skew must surface as an error naming the skew and
+`lf install`, never read as an empty registry — agents take "nothing here" as
+fact. `open_existing_store` is the one opener (`Ok(None)` only when no file).
+
 ## One main Home (LOO-342, curated 2026-10-10)
 
 Jack Heart approved installed `lf` and `~/.lf` for ordinary commands, Task

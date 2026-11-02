@@ -26,7 +26,12 @@ import tempfile
 from pathlib import Path
 
 from app_bundle import executable_name, install_app_executable
-from bundle_version import read_release_version, read_source_revision, stamp_bundle_version
+from bundle_version import (
+    read_release_version,
+    read_source_revision,
+    stamp_bundle_version,
+    stamp_release_bundle_id,
+)
 
 REPO_ROOT = Path(__file__).parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
@@ -388,6 +393,7 @@ def release() -> int:
     install_app_executable(build_dir, info_plist, app_dir)
     shutil.copy(info_plist, app_dir)
     stamp_bundle_version(app_dir / "Info.plist", version, read_source_revision(REPO_ROOT))
+    stamp_release_bundle_id(app_dir / "Info.plist")
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(app_dir / "MacOS")
     (app_dir / "PkgInfo").write_text("APPL????")
@@ -490,6 +496,9 @@ def release() -> int:
         )
 
     shutil.rmtree(dmg_staging)
+    # The DMG is the deliverable. A release-id bundle left in the checkout is one
+    # more copy Spotlight and Launch Services could open in place of the installed app.
+    shutil.rmtree(app_path)
 
     # Sign and notarize the DMG
     if identity:
@@ -504,7 +513,6 @@ def release() -> int:
 
     print()
     print("Release built:", flush=True)
-    print(f"  App: dist/{app_name}.app", flush=True)
     print(f"  DMG: {dmg_path}", flush=True)
     return 0
 

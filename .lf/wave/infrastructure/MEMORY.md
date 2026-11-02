@@ -965,6 +965,15 @@ telemetry red; fresh failures join existing work.
 
 ## Gotchas
 
+- **A bundle id reaches any registered copy** (LOO-620, 2026-11-02). Launch
+  Services resolved `com.loopflow.mac` to a benchmark staging copy and Desktop showed
+  a database mismatch. `lf open` launches the installed app by path (the OS account's
+  `~/.local/bin/lf` resolves into it); `LF_DESKTOP` routes by id only to a dev
+  Desktop, and fixtures set a test id so a Machine's real app never answers. Source
+  and every build carry `com.loopflow.mac.dev`; release packaging stamps the release
+  id. Promotion stages in `<Applications>/.Loopflow.app.noindex/` and sweeps earlier
+  sibling copies. Same-id copies registered elsewhere stay registered; removing them
+  means parsing `lsregister -dump`.
 - **Git exclusions can fail after staging work** (LOO-664, 2026-10-27).
   Apple Git 2.50.1 rejects a literal ignored `.lf/tmp` exclusion after staging
   ordinary edits. The rooted glob `[.]lf/tmp/**` avoids that literal prefix;

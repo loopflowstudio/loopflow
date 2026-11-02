@@ -535,9 +535,9 @@ fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
     // URLComponents treats '+' literally; retain spaces across the native link.
     let query = url.query().map(|query| query.replace('+', "%20"));
     url.set_query(query.as_deref());
+    let app = super::open::DesktopApp::current().context(super::open::NO_DESKTOP)?;
     let status = std::process::Command::new("open")
-        .arg("-b")
-        .arg(super::open::desktop_bundle())
+        .args(app.open_args())
         .arg(url.as_str())
         .status()
         .context("launch Loopflow.app with the macOS `open` command")?;

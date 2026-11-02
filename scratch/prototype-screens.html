@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-711 · Three screens</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --background: #faf8f5; --surface: #fffdf9; --surface-muted: #f3eee7; --surface-element: #ece6dd;
+    --border: #e6dfd6; --border-strong: #d6ccc0; --border-active: #c2b5a6;
+    --text: #2a2624; --text-secondary: #5f5752; --text-tertiary: #685f58;
+    --accent: #722f37; --accent-text: #faf8f5;
+    --working: #3269aa; --working-fill: #eaedf0; --warning: #87601b; --warning-fill: #f4eee4; --available: #5d3539; --available-fill: #efeae8; --failure: #b0443b; --failure-fill: #f5eae6; --success: #3b734c; --success-fill: #ebefe8;
+    --bar: #3269aa; --bar-soft: #b9cbe3;
+    --proto-bg: #2a2624; --proto-fg: #faf8f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: #2b3036; --surface: #31363c; --surface-muted: #363b42; --surface-element: #3c4249;
+      --border: #3f454c; --border-strong: #4a515a; --border-active: #5c646e;
+      --text: #f5f1ea; --text-secondary: #c5bfb7; --text-tertiary: #a39c94;
+      --accent: #c8b9c1; --accent-text: #2b3036;
+      --working: #a5c0e1; --working-fill: #2c3541; --warning: #d3bb8e; --warning-fill: #353634; --available: #c8b9c1; --available-fill: #33363c; --failure: #e3b2ae; --failure-fill: #373237; --success: #a7c5af; --success-fill: #2d3739;
+      --bar: #a5c0e1; --bar-soft: #4d5e73;
+      --proto-bg: #14171a; --proto-fg: #f5f1ea;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--proto-bg); color: var(--text); font: 13px/1.45 "Lato", -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; display: flex; flex-direction: column; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace; }
+  .serif { font-family: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; }
+
+  .proto { color: var(--proto-fg); padding: .55rem 1rem; display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; align-items: center; font-size: 12.5px; }
+  .proto .seg { display: inline-flex; border: 1px solid rgba(255,255,255,.25); border-radius: 6px; overflow: hidden; }
+  .proto .seg button { background: transparent; color: var(--proto-fg); border: 0; border-right: 1px solid rgba(255,255,255,.25); padding: .3rem .7rem; font: inherit; cursor: pointer; }
+  .proto .seg button:last-child { border-right: 0; }
+  .proto .seg button.on { background: var(--proto-fg); color: var(--proto-bg); }
+  .proto .scrub { display: flex; align-items: center; gap: .6rem; flex: 1 1 18rem; }
+  .proto .scrub input { flex: 1; accent-color: var(--proto-fg); }
+  .proto .clock { font-variant-numeric: tabular-nums; min-width: 2.8rem; }
+  .proto .phase { opacity: .75; min-width: 10rem; }
+
+  .stage { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; padding: 0 1rem 1.5rem; min-height: 0; overflow: auto; align-items: start; }
+  @media (max-width: 1200px) { .stage { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: .5rem; }
+  .lineage { color: var(--proto-fg); font-size: 12px; opacity: .8; padding: 0 .2rem; }
+  .lineage b { opacity: 1; font-weight: 600; }
+  .pane { background: var(--background); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,.35); overflow: hidden; display: flex; flex-direction: column; }
+  .bar { display: flex; align-items: center; gap: .6rem; padding: .4rem .9rem; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); }
+  .bar .name { color: var(--text); font-weight: 600; }
+  .bar .right { margin-left: auto; font-size: 11px; }
+  .body { padding: .7rem .9rem 1.1rem; color: var(--text-secondary); font-size: 12.5px; }
+  .heading { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .5rem; }
+  .heading .id { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; color: var(--text); }
+  .heading .title { color: var(--text); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .h2 { font-family: "Cormorant Garamond", "Iowan Old Style", Georgia, serif; font-size: 17px; font-weight: 500; color: var(--text); margin: .9rem 0 .25rem; }
+  .quiet { color: var(--text-tertiary); font-size: 11.5px; }
+  .pr a { color: var(--text-secondary); text-decoration: underline; text-decoration-color: var(--border-active); }
+  .btn { display: inline-block; padding: .3rem .7rem; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font-size: 12px; }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .btn.off { color: var(--text-tertiary); }
+  .row { display: flex; align-items: baseline; gap: .5rem; }
+
+  /* 1 · deployment page */
+  .state { font-size: 22px; font-weight: 600; color: var(--text); line-height: 1.2; }
+  .state.ready { color: var(--available); } .state.working { color: var(--working); } .state.done { color: var(--success); }
+  .state-sub { color: var(--text-secondary); margin: .1rem 0 .6rem; }
+  .checks { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+  .check { display: grid; grid-template-columns: 1.2rem minmax(0, 1fr) auto; gap: .5rem; align-items: baseline; padding: .32rem .6rem; border-top: 1px solid var(--border); }
+  .check:first-child { border-top: 0; }
+  .check .m { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+  .check .m.ok { color: var(--success); } .check .m.run { color: var(--working); } .check .m.wait { color: var(--available); } .check .m.todo { color: var(--text-tertiary); } .check .m.bad { color: var(--failure); }
+  .check .t { color: var(--text); }
+  .check .t.dim { color: var(--text-tertiary); }
+  .check .r { color: var(--text-tertiary); font-size: 11.5px; white-space: nowrap; }
+  .actions { display: flex; gap: .5rem; align-items: center; margin: .6rem 0 .2rem; }
+  .toggle { display: inline-flex; align-items: center; gap: .4rem; color: var(--text-secondary); font-size: 12px; }
+  .toggle i { width: 26px; height: 15px; border-radius: 8px; background: var(--border-strong); position: relative; display: inline-block; }
+  .toggle i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--surface); }
+  .toggle.on i { background: var(--accent); } .toggle.on i::after { left: 13px; }
+  .crumb { color: var(--text-tertiary); font-size: 11.5px; margin-top: .55rem; }
+  .crumb b { color: var(--text-secondary); font-weight: 600; }
+  .files .f { display: grid; grid-template-columns: minmax(0, 1fr) 70px 90px; gap: .5rem; align-items: center; padding: .16rem 0; border-top: 1px solid var(--border); }
+  .files .f:first-child { border-top: 0; }
+  .files .p { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .files .n { color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: 11.5px; }
+  .files .stat { display: flex; gap: 2px; height: 7px; }
+  .files .stat i { display: block; height: 100%; border-radius: 2px; }
+  .files .stat .a { background: var(--success); } .files .stat .d { background: var(--failure); }
+  .runs .r { display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) auto auto; gap: .6rem; padding: .2rem 0; border-top: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .runs .r:first-child { border-top: 0; }
+  .runs .t { color: var(--text-tertiary); }
+  .runs .n { color: var(--text); }
+
+  /* 2 · run page */
+  .meta { display: grid; grid-template-columns: repeat(4, auto); gap: .2rem 1.2rem; font-size: 12px; margin-bottom: .5rem; }
+  .meta .k { color: var(--text-tertiary); font-size: 11px; }
+  .meta .v { color: var(--text); font-variant-numeric: tabular-nums; }
+  .meta .v.working { color: var(--working); } .meta .v.wait { color: var(--available); }
+  .ev { display: grid; grid-template-columns: 3.2rem 10px minmax(0, 1fr); gap: 0 .55rem; align-items: start; }
+  .ev .t { color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: 11.5px; padding-top: .12rem; }
+  .ev .dot { position: relative; height: 100%; }
+  .ev .dot::before { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px; background: var(--border-strong); }
+  .ev .dot i { position: absolute; left: 0; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--bar); border: 2px solid var(--surface); box-sizing: content-box; margin-left: -2px; margin-top: -2px; }
+  .ev .dot i.cur { background: var(--accent); } .ev .dot i.wait { background: var(--available); } .ev .dot i.group { background: var(--surface); border: 2px solid var(--bar); }
+  .ev .c { padding: .08rem 0 .45rem; }
+  .ev .c .n { color: var(--text); }
+  .ev .c .n .mono { font-size: 11.5px; }
+  .ev .c .s { color: var(--text-secondary); font-size: 12px; }
+  .ev .c .s.quote { font-style: italic; }
+  .ev.group .c .n { font-weight: 600; }
+  .ev .c .dur { color: var(--text-tertiary); font-size: 11.5px; margin-left: .4rem; font-variant-numeric: tabular-nums; }
+  .ev .c .bar { display: block; height: 6px; border-radius: 0 3px 3px 0; background: var(--bar-soft); margin: .25rem 0 .1rem; border: 0; padding: 0; }
+  .ev .c .bar.cur { background: var(--accent); }
+  .ev.sub { margin-left: 1.1rem; }
+  .ev.sub .t { font-size: 11px; }
+  .ev.sub .c { padding-bottom: .25rem; }
+  .ev.sub .c .n { color: var(--text-secondary); }
+
+  /* 3 · task file */
+  .phases { display: flex; gap: .25rem; margin: .2rem 0 .7rem; }
+  .phase { flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: .3rem .45rem; background: var(--surface); min-width: 0; }
+  .phase .n { font-size: 11px; color: var(--text-tertiary); }
+  .phase .v { color: var(--text); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phase.done { background: var(--success-fill); border-color: transparent; }
+  .phase.cur { border-color: var(--accent); }
+  .phase.cur .n { color: var(--accent); }
+  .phase.wait { background: var(--available-fill); border-color: var(--available); }
+  .phase.wait .n { color: var(--available); }
+  .phase.todo { border-style: dashed; }
+  .phase.todo .v { color: var(--text-tertiary); }
+  .artifact { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: .5rem .65rem; margin-bottom: .5rem; }
+  .artifact .h { display: flex; align-items: baseline; gap: .5rem; margin-bottom: .25rem; }
+  .artifact .h .n { color: var(--text); font-weight: 600; }
+  .artifact .h .p { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-tertiary); }
+  .artifact .h .r { margin-left: auto; color: var(--text-tertiary); font-size: 11.5px; white-space: nowrap; }
+  .items .it { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; gap: .4rem; align-items: baseline; padding: .14rem 0; }
+  .items .m { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+  .items .m.ok { color: var(--success); } .items .m.def { color: var(--warning); } .items .m.todo { color: var(--text-tertiary); }
+  .items .t { color: var(--text); }
+  .items .w { color: var(--text-tertiary); font-size: 11px; white-space: nowrap; }
+  .proof { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-secondary); white-space: pre-wrap; background: var(--surface-muted); border-radius: 6px; padding: .4rem .55rem; margin-top: .25rem; }
+  .proof b { color: var(--success); font-weight: 600; }
+  .checkpoint { border-left: 3px solid var(--available); padding: .15rem 0 .15rem .6rem; color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="proto">
+  <span>Three screens, same facts · the Files pane owns the diff, so Changes is one line here</span>
+  <div class="scrub">
+    <span class="clock" id="clock">12:10</span>
+    <input type="range" id="time" min="0" max="90" value="90" step="1" aria-label="time">
+    <span class="phase" id="phase"></span>
+  </div>
+  <div class="seg" id="depth">
+    <button data-v="min">Minimal</button>
+    <button data-v="full" class="on">Expanded</button>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="col">
+    <div class="lineage"><b>1 · The deployment page.</b> Vercel's one state word and checks that gate "ready"; Graphite's merge-when-ready; GitHub's checks list.</div>
+    <div class="pane"><div class="bar"><span class="name">Task</span><span class="right" id="sub1"></span></div><div class="body" id="s1"></div></div>
+  </div>
+  <div class="col">
+    <div class="lineage"><b>2 · The run page.</b> Temporal's event timeline with summaries beside events and child runs inline; GitHub Actions' per-step durations; Devin's Progress worklog.</div>
+    <div class="pane"><div class="bar"><span class="name">Task</span><span class="right" id="sub2"></span></div><div class="body" id="s2"></div></div>
+  </div>
+  <div class="col">
+    <div class="lineage"><b>3 · The task file.</b> HumanLayer's phases with an artifact and a checkpoint each; Amp's "the thread contains the proof".</div>
+    <div class="pane"><div class="bar"><span class="name">Task</span><span class="right" id="sub3"></span></div><div class="body" id="s3"></div></div>
+  </div>
+</div>
+
+<script>
+// ---------- the imagined run (minutes after 12:10) ----------
+const T0 = 12 * 60 + 10;
+const clock = m => { const t = T0 + m; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
+const steps = [
+  { s: 0,  e: 24, n: 'implement',    loop: 1, cost: 1.20, files: 6,  add: 210, del: 40, sum: 'wait rides the watch loop; --until moved compares positions' },
+  { s: 24, e: 31, n: 'compress',     loop: 1, cost: 0.40, files: 3, sum: 'deleted the 1 s poll and TaskSnapshot output' },
+  { s: 31, e: 31, n: 'sync',         loop: 1, cost: 0, sum: 'main unchanged' },
+  { s: 31, e: 42, n: 'realign',      loop: 1, cost: 0.55, sum: 'plan: 2 of 5 done; exit status still open' },
+  { s: 42, e: 43, n: 'loop-or-next', loop: 1, cost: 0.05, route: 'loop', why: 'wait exit status untested' },
+  { s: 43, e: 59, n: 'implement',    loop: 2, cost: 0.90, files: 4,  add: 150, del: 40, sum: 'skills name the flags; integration test added' },
+  { s: 59, e: 63, n: 'compress',     loop: 2, cost: 0.25, files: 2, sum: 'folded two helpers' },
+  { s: 63, e: 63, n: 'sync',         loop: 2, cost: 0 },
+  { s: 63, e: 66, n: 'realign',      loop: 2, cost: 0.25, sum: 'plan: 4 of 5 done' },
+  { s: 66, e: 67, n: 'loop-or-next', loop: 2, cost: 0.05, route: 'loop', why: 'integration test flaky on timeout' },
+  { s: 67, e: 76, n: 'implement',    loop: 3, cost: 0.45, files: 2,  add: 52, del: 16, sum: 'pinned the timeout test to a fake clock' },
+  { s: 76, e: 77, n: 'compress',     loop: 3, cost: 0.10 },
+  { s: 77, e: 77, n: 'sync',         loop: 3, cost: 0 },
+  { s: 77, e: 78, n: 'realign',      loop: 3, cost: 0.10, sum: 'deferred “timeout exits 2”: collides with lf’s own 2' },
+  { s: 78, e: 78, n: 'loop-or-next', loop: 3, cost: 0.05, route: 'next' },
+  { s: 78, e: 83, n: 'deliver',      loop: 0, cost: 0.15, pr: true, sum: 'PR #1803 opened and submitted' },
+  { s: 83, e: null, n: 'verify',     loop: 0, cost: 0, wait: true },
+];
+const design = [
+  { t: 'wait returns on the first move',        done: 24, loop: 1, where: 'ops/task.rs' },
+  { t: 'settle window folds a step boundary',   done: 24, loop: 1, where: 'ops/task.rs' },
+  { t: 'three session skills name the flags',   done: 59, loop: 2, where: '3 skill files' },
+  { t: 'integration test in tests/',            done: 76, loop: '2–3', where: 'task_wait_tests.rs' },
+  { t: '--timeout 0s exits 2',                  deferred: 78, loop: 3, why: 'collides with lf’s own exit 2' },
+];
+const filesAt = m => {
+  const out = [];
+  if (m >= 24) out.push(['rust/loopflow/src/ops/task.rs', 188, 41], ['rust/loopflow/src/lf/commands/watch.rs', 36, 4], ['rust/loopflow/src/lf/commands/task.rs', 21, 6], ['rust/loopflow/tests/task_wait_tests.rs', 96, 0], ['docs/work.md', 3, 2], ['docs/agent-api.md', 2, 1]);
+  if (m >= 59) out.push(['rust/loopflow/src/builtins/task/skill/task_session.md', 22, 9], ['rust/loopflow/src/builtins/wave/skill/wave_session.md', 2, 2], ['rust/loopflow/src/builtins/ops/skill/repo_session.md', 2, 2], ['rust/loopflow/tests/integration.rs', 1, 0]);
+  if (m >= 76) { out.push(['rust/loopflow/tests/task_initialization_tests.rs', 0, 18], ['rust/loopflow/src/lf/commands/steer.rs', 0, 5], ['scratch/questions.md', 6, 0]); const i = out.findIndex(f => f[0].endsWith('task_wait_tests.rs')); out[i] = ['rust/loopflow/tests/task_wait_tests.rs', 140, 12]; }
+  return out;
+};
+const statAt = m => { let f = 0, a = 0, d = 0; for (const s of steps) if (s.files && s.e <= m) { f += s.files; a += s.add || 0; d += s.del || 0; } return { f, a, d }; };
+const loopsAt = m => steps.filter(s => s.n === 'loop-or-next' && s.e <= m && s.route === 'loop').length + (m >= 78 ? 1 : 0);
+const costAt = m => steps.filter(s => s.e !== null && s.e <= m).reduce((c, s) => c + s.cost, 0) + (steps.find(s => s.s <= m && (s.e === null || s.e > m))?.cost || 0) * 0.5;
+const current = m => steps.find(s => s.s <= m && (s.e === null || s.e > m)) || (m >= 83 ? steps[steps.length - 1] : null);
+const prAt = m => m >= 83 ? { n: 1803, at: clock(83), lint: m >= 86, test: m >= 88, swift: m >= 88 } : null;
+const dur = s => s.e === null ? null : (s.e - s.s);
+const money = c => '$' + c.toFixed(2);
+const hm = m => m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const heading = `<div class="heading"><span class="id">LOO-711</span><span class="title">Task Sessions tell you what their background work is doing</span></div>`;
+
+function changesLine(m) {
+  const st = statAt(m);
+  return st.f ? `<div class="row"><span style="color:var(--text)">${st.f} files · +${st.a} −${st.d}</span><span class="quiet">against main@d404104</span><span class="pr" style="margin-left:auto"><a href="#">open in Files ›</a></span></div>` : '<div class="quiet">no changes yet</div>';
+}
+function fileList(m, max = 99) {
+  const fs = filesAt(m); if (!fs.length) return '<div class="quiet">no changes yet</div>';
+  const top = Math.max(...fs.map(f => f[1] + f[2]));
+  let h = '<div class="files">';
+  for (const [p, a, d] of fs.slice(0, max)) h += `<div class="f"><span class="p">${esc(p)}</span><span class="n">${a ? '+' + a : ''}${d ? ' −' + d : ''}</span><span class="stat"><i class="a" style="width:${Math.round(a / top * 90)}px"></i><i class="d" style="width:${Math.round(d / top * 90)}px"></i></span></div>`;
+  if (fs.length > max) h += `<div class="f"><span class="quiet">… ${fs.length - max} more</span><span></span><span></span></div>`;
+  return h + '</div>';
+}
+
+// ---------- 1 · the deployment page ----------
+function screen1(m, full) {
+  const cur = current(m), pr = prAt(m), loops = loopsAt(m), st = statAt(m);
+  const green = pr && pr.lint && pr.test && pr.swift;
+  let state, cls, sub;
+  if (!pr) { state = 'Working'; cls = 'working'; sub = `${cur.n}${cur.loop ? `, loop ${cur.loop}` : ''} · ${hm(m)} · ${money(costAt(m))}`; }
+  else if (!green) { state = 'Checks running'; cls = 'working'; sub = `PR #${pr.n} submitted ${pr.at} · ${st.f} files`; }
+  else { state = 'Ready for your review'; cls = 'ready'; sub = `PR #${pr.n} submitted ${pr.at} · ${st.f} files +${st.a} −${st.d}`; }
+  const ck = (mark, t, r, dim) => `<div class="check"><span class="m ${mark}">${{ ok: '✓', run: '◌', wait: '●', todo: '·', bad: '✕' }[mark]}</span><span class="t ${dim ? 'dim' : ''}">${t}</span><span class="r">${r}</span></div>`;
+  let checks = '<div class="checks">';
+  checks += pr ? ck('ok', `PR <span class="pr"><a href="#">#${pr.n}</a></span> opened and submitted`, pr.at) : ck(cur.n === 'deliver' ? 'run' : 'todo', 'PR', cur.n === 'deliver' ? 'opening' : `after ${loops ? 'this loop' : 'implement'}`, !pr && cur.n !== 'deliver');
+  checks += pr ? ck(pr.lint ? 'ok' : 'run', 'rust-lint', pr.lint ? '2m' : 'running') : ck('todo', 'rust-lint', '', true);
+  checks += pr ? ck(pr.test ? 'ok' : 'run', 'rust-test', pr.test ? '4m' : 'running') : ck('todo', 'rust-test', '', true);
+  checks += pr ? ck(pr.swift ? 'ok' : 'run', 'swift', pr.swift ? '4m' : 'running') : ck('todo', 'swift', '', true);
+  checks += pr ? ck('ok', 'no conflicts with main', 'd404104') : ck('todo', 'conflicts with main', '', true);
+  checks += green ? ck('wait', 'your review', 'waits here') : ck('todo', 'your review', '', true);
+  checks += '</div>';
+  let h = heading + `<div class="state ${cls}">${state}</div><div class="state-sub">${sub}</div>` + checks;
+  h += `<div class="actions"><span class="btn ${green ? 'primary' : 'off'}">Ship</span><span class="toggle ${false ? 'on' : ''}"><i></i>Merge when ready</span></div>`;
+  h += `<div class="crumb">feature · ${loops} loop${loops === 1 ? '' : 's'}${cur.loop ? ' + 1 running' : ''} · ${cur.wait ? 'stopped at <b>verify</b>' : `at <b>${cur.n}</b>`} · ${hm(m)} · ${money(costAt(m))}</div>`;
+  if (full) {
+    h += `<div class="h2">Changes</div>${changesLine(m)}`;
+    h += `<div class="h2">Runs</div><div class="runs">`;
+    for (const l of [3, 2, 1]) { const ss = steps.filter(s => s.loop === l && s.s <= m); if (!ss.length) continue; const a = ss[0].s, b = Math.max(...ss.map(s => s.e ?? m)); const why = steps.find(s => s.loop === l && s.n === 'loop-or-next' && s.e <= m); h += `<div class="r"><span class="t">${clock(a)}</span><span class="n">loop ${l}${why?.why ? ` · looped: “${esc(why.why)}”` : why?.route === 'next' ? ' · moved on to deliver' : ' · running'}</span><span class="t">${hm(Math.min(b, m) - a)}</span><span class="t">${money(ss.filter(s => s.e !== null && s.e <= m).reduce((c, s) => c + s.cost, 0))}</span></div>`; }
+    h += `</div>`;
+  }
+  return h;
+}
+
+// ---------- 2 · the run page ----------
+function screen2(m, full) {
+  const cur = current(m), pr = prAt(m), loops = loopsAt(m), span = Math.max(m, 30);
+  const w = s => Math.max(2, Math.round(((s.e === null || s.e > m ? m : s.e) - s.s) / span * 100));
+  let h = heading;
+  h += `<div class="meta"><div><div class="k">Started</div><div class="v">12:10</div></div><div><div class="k">Duration</div><div class="v">${hm(m)}</div></div><div><div class="k">Cost</div><div class="v">${money(costAt(m))}</div></div><div><div class="k">State</div><div class="v ${cur.wait ? 'wait' : 'working'}">${cur.wait ? 'waits for your review' : 'running'}</div></div></div>`;
+  const ev = (t, dot, n, s, extra = '', cls = '') => `<div class="ev ${cls}"><span class="t">${t}</span><span class="dot"><i class="${dot}"></i></span><div class="c"><div class="n">${n}</div>${s ? `<div class="s">${s}</div>` : ''}${extra}</div></div>`;
+  // newest first, like an event history
+  const groups = [];
+  if (m >= 83) groups.push({ t: 83, kind: 'verify' });
+  if (m >= 78) groups.push({ t: 78, kind: 'deliver' });
+  for (const l of [3, 2, 1]) if (steps.some(s => s.loop === l && s.s <= m)) groups.push({ t: steps.find(s => s.loop === l).s, kind: 'loop', l });
+  for (const g of groups) {
+    if (g.kind === 'verify') { h += ev(clock(83), 'wait', `verify <span class="dur">waits for you</span>`, `PR <span class="pr"><a href="#">#${pr.n}</a></span> submitted · ${pr.lint && pr.test && pr.swift ? 'checks green' : 'checks running'} · the Graph continues here after your review`); continue; }
+    if (g.kind === 'deliver') { const s = steps.find(x => x.n === 'deliver'); const running = current(m) === s; h += ev(clock(78), running ? 'cur' : '', `deliver <span class="dur">${running ? (m - 78) + 'm…' : '5m'}</span>`, running ? 'opening the PR' : s.sum); continue; }
+    const ss = steps.filter(s => s.loop === g.l && s.s <= m);
+    const a = ss[0].s, b = Math.max(...ss.map(s => s.e ?? m)), running = ss.some(s => s === cur);
+    const lon = ss.find(s => s.n === 'loop-or-next' && s.e <= m);
+    const summary = lon ? (lon.route === 'loop' ? `looped: “${esc(lon.why)}”` : 'moved on to deliver') : 'running';
+    const files = ss.filter(s => s.files && s.e <= m).reduce((c, s) => c + s.files, 0);
+    h += ev(clock(a), 'group', `loop ${g.l} <span class="dur">${hm(Math.min(b, m) - a)} · ${money(ss.filter(s => s.e !== null && s.e <= m).reduce((c, s) => c + s.cost, 0))}${files ? ` · ${files} files` : ''}</span>`, summary, '', 'group');
+    if (full) for (const s of ss) {
+      if (s.n === 'sync' || s.n === 'loop-or-next') continue;
+      const isCur = s === cur;
+      h += ev(clock(s.s), isCur ? 'cur' : '', `<span class="mono">${s.n}</span> <span class="dur">${isCur ? (m - s.s) + 'm…' : dur(s) + 'm'}</span>`, isCur ? '' : (s.sum || ''), `<span class="bar ${isCur ? 'cur' : ''}" style="width:${w(s)}%"></span>`, 'sub');
+    }
+  }
+  h += ev('12:10', '', 'run started <span class="dur">feature from implement · Jack Heart</span>', '');
+  return h;
+}
+
+// ---------- 3 · the task file ----------
+function screen3(m, full) {
+  const cur = current(m), pr = prAt(m), loops = loopsAt(m), st = statAt(m);
+  const green = pr && pr.lint && pr.test && pr.swift;
+  const done = design.filter(x => x.done && x.done <= m).length, def = design.filter(x => x.deferred && x.deferred <= m).length;
+  const ph = (cls, n, v) => `<div class="phase ${cls}"><div class="n">${n}</div><div class="v">${v}</div></div>`;
+  let phases = '<div class="phases">';
+  phases += ph('done', 'Research', 'kickoff · 9m');
+  phases += ph('done', 'Design', 'explore · you chose');
+  phases += ph(pr ? 'done' : 'cur', 'Build', pr ? `${loops} loops · ${st.f} files` : `loop ${cur.loop || loops} · ${cur.n}`);
+  phases += ph(green ? 'done' : pr ? 'cur' : 'todo', 'Proof', green ? 'tests · checks green' : pr ? 'checks running' : 'tests per loop');
+  phases += ph(green && cur.wait ? 'wait' : 'todo', 'Review', green && cur.wait ? 'your turn' : 'verify');
+  phases += '</div>';
+  let h = heading + phases;
+  const art = (n, p, r, body) => `<div class="artifact"><div class="h"><span class="n">${n}</span><span class="p">${p}</span><span class="r">${r}</span></div>${body}</div>`;
+  // the current phase's artifact first; the rest when expanded
+  const plan = () => { let b = '<div class="items">'; for (const d of design) { const ok = d.done && d.done <= m, df = d.deferred && d.deferred <= m; b += `<div class="it"><span class="m ${ok ? 'ok' : df ? 'def' : 'todo'}">${ok ? '✓' : df ? '○' : '·'}</span><span class="t">${esc(d.t)}</span><span class="w">${ok ? `loop ${d.loop}` : df ? 'deferred' : ''}</span></div>`; } return b + '</div>'; };
+  const proof = () => pr ? `<div class="proof">cargo test -p loopflow --test integration task_wait::   <b>7 passed</b>\ncargo clippy --all-targets -- -D warnings            <b>clean</b>\nrust-lint ${pr.lint ? '<b>✓</b>' : '◌'}  rust-test ${pr.test ? '<b>✓</b>' : '◌'}  swift ${pr.swift ? '<b>✓</b>' : '◌'}   (PR #${pr.n})\n\ndemo: lf task wait LOO-711 --until moved returned in 1.8 s\n      after a step Process was recorded in another shell</div>` : `<div class="proof">loop ${cur.loop || loops}: cargo test task_wait::   ${cur.loop === 2 ? '<span style="color:var(--failure)">1 flaky</span>' : '<b>passing</b>'}\nchecks run when deliver opens the PR</div>`;
+  if (green && cur.wait) h += `<div class="checkpoint">Your review. PR <span class="pr"><a href="#">#${pr.n}</a></span>, ${st.f} files, ${done} of 5 plan items landed${def ? `, ${def} deferred` : ''}. verify continues here when you’ve looked.</div>`;
+  if (full || !pr) h += art('Plan', 'scratch/loo-711-task-sessions-tell.md', `${done} / 5${def ? ` · ${def} deferred` : ''} · realign ${clock(steps.filter(s => s.n === 'realign' && s.e <= m).pop()?.e ?? 0)}`, plan());
+  h += art('Proof', pr ? `PR #${pr.n}` : 'per loop', green ? 'green' : pr ? 'running' : `loop ${cur.loop || loops}`, proof());
+  if (full) {
+    h += art('Changes', '', '', changesLine(m));
+    h += art('Build', 'feature', `${loops} loop${loops === 1 ? '' : 's'} · ${hm(m)} · ${money(costAt(m))}`, `<div class="quiet">${[1, 2, 3].filter(l => steps.some(s => s.loop === l && s.s <= m)).map(l => { const lon = steps.find(s => s.loop === l && s.n === 'loop-or-next' && s.e <= m); return `loop ${l}: ${lon ? (lon.route === 'loop' ? `looped, “${esc(lon.why)}”` : 'moved on') : 'running'}`; }).join('<br>')}</div>`);
+  }
+  return h;
+}
+
+// ---------- wiring ----------
+let depth = 'full';
+const $ = id => document.getElementById(id);
+function render() {
+  const m = +$('time').value, full = depth === 'full', cur = current(m);
+  $('clock').textContent = clock(m);
+  $('phase').textContent = cur ? (cur.wait ? 'verify waits for you' : `${cur.n}${cur.loop ? ' · loop ' + cur.loop : ''}`) : '';
+  for (const i of [1, 2, 3]) $('sub' + i).textContent = full ? 'expanded' : 'minimal';
+  $('s1').innerHTML = screen1(m, full);
+  $('s2').innerHTML = screen2(m, full);
+  $('s3').innerHTML = screen3(m, full);
+}
+for (const b of $('depth').querySelectorAll('button')) b.onclick = () => { depth = b.dataset.v; for (const x of $('depth').querySelectorAll('button')) x.classList.toggle('on', x === b); render(); };
+$('time').oninput = render;
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight') { $('time').value = Math.min(90, +$('time').value + 1); render(); }
+  if (e.key === 'ArrowLeft') { $('time').value = Math.max(0, +$('time').value - 1); render(); }
+});
+render();
+</script>
+</body>
+</html>

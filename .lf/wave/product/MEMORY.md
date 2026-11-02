@@ -934,8 +934,9 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
 - Wave lifecycle (LOO-500, Jack Heart 2026-10-28): `lf wave add|remove|rename` is
   the one path for CLI and Desktop. Remove retires (never deletes rows); open Tasks
   move to the parent Wave or repository, `--delete-backlog` deletes unstarted ones,
-  started Tasks always move. Authored `.lf/wave/<name>/` changes commit on the main
-  checkout; stale checkouts match directories by `config.yaml` id, never by path.
+  started Tasks always move. `lf wave list` and Desktop list the same live rows
+  (no `--current`); `lf wave show` reads a removed one. Authored `.lf/wave/<name>/`
+  changes commit on main; stale checkouts match directories by `config.yaml` id.
 - `lf pm show --no-sync` is cache evidence, not proof of current provider state.
   `synced_at`, snapshot generation, and source freshness have different meanings.
   A rejected write can follow a successful provider mutation if readback failed;
@@ -957,9 +958,9 @@ lfd and resident-cron contracts remain in
 Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
 Unknown wire status stays explicit. Desktop lists Waves from the store only:
 LOO-500 (2026-11-02) deleted the `.lf/wave/*/GOAL.md` placeholder scan after a
-removal whose Linear archive failed left the directory on main and the sidebar
-showed the removed Wave again. Authored directories register through `lf`
-(`wave add`, `connect --all`, a repository joining the portfolio), never a read. AGENTS.md owns shared runtime vocabulary;
+failed Linear archive left the directory on main and the sidebar showed the
+removed Wave again. Authored directories register through `lf` (`wave add`,
+`connect --all`, a repository joining the portfolio), never a read. AGENTS.md owns shared runtime vocabulary;
 earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
 `92d95edfe:wave/product/MEMORY.md`, this heading.
 

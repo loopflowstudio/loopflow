@@ -247,8 +247,7 @@ this Task makes them work and adds nothing beside them):
 
 - Wave rows already have retirement columns and a `wave_addresses` view that
   excludes retired rows from every live reader (`get_wave_at`,
-  `find_waves_by_slug`); `lf wave list --current` already hides
-  abandoned/retired. Retirement is the supported mechanism.
+  `find_waves_by_slug`). Retirement is the supported mechanism.
 - Implementation finding (2026-10-28): the `waves` CHECK required every retired
   row to name `superseded_by_wave_id` and a reason, so successor-less removal,
   and a peer importing only `retired_at`, both violated it. The Task's one
@@ -449,44 +448,42 @@ Not changed: Desktop's Remove sheet exposes no `--delete-backlog` (unstarted
 Tasks move and the preview says so; a checkbox is ordinary follow-up), and
 `lf wave rename` still carries the pre-existing `--repo` and `--title`.
 
-## Concept review (2026-11-02, second pass) — design changed
+## Concept review (2026-11-02, second pass) — resolved
 
 Run against the implemented change at `0d73fe5f30` after realign. The accepted
 experience holds: add, rename and remove behave as the demo lists, the receipt
 is Rust-authored and shown verbatim, Desktop lists only store rows, removal is
 idempotent and nothing retires before every open Task has its disposition. One
 implied consequence of "removed Waves stay removed" and "Desktop and CLI
-reflect the result consistently" is still unbuilt. No open product choice.
-Page: `scratch/concept-review.html`.
+reflect the result consistently" was unbuilt; slices 9–10 closed it. No open
+product choice. Page: `scratch/concept-review.html` (describes the gap as found).
 
-- **The default `lf wave list` still lists a removed Wave, as `abandoned`.**
+- **The default `lf wave list` listed a removed Wave, as `abandoned`.**
   `retire_waves` sets `work_state = 'abandoned'` beside `retired_at`; the list
-  prints `status.label()`, and only `--current` applies the live filter
-  (`current_wave`: not abandoned, not retired). Desktop reads
-  `lf wave list --all --current --json`, so after `lf wave remove desktop` the
-  sidebar drops the row while a person or agent running the documented read
-  (`lf wave list`, `lf wave list --json` in the `init` and `repo_operate`
-  skills) sees `desktop … abandoned` — the "stuck as abandoned" rows the
-  Problem section opens with, now produced by the product's own remove.
-  `--current` arrived in #1615 (2026-10-21) as a navigation filter with no
-  decision that the unfiltered list is a history view; nothing in product code
-  abandons a Wave except `retire_waves`, so "abandoned", "retired" and
-  "removed" name one state with three words.
-  Direction (built 2026-11-02, below in Checks): the live filter is the default and `--current`
-  is deleted with its callers (`RegistryQuery`, `read.rs` `Waves`, the
-  `s1`–`s5` skills, `graph/mod.rs` test, `status_tests`, `wave_lifecycle`,
-  the Swift README and tests). The default excludes retired rows; a legacy
-  `abandoned` row that was never retired (Jack's `engbot`, `list`) stays
-  listed, in Desktop too, so **Remove Wave…** can finish it. `lf wave list`'s
-  help drops "retained planning identities". `lf wave show` names the state
-  with the product word: `removed at <date>` (and `superseded by <id>` only
-  when a successor exists) instead of `retired at …; superseded by -: removed`.
-  The `WaveSnapshot` wire is unchanged (`status`, `retired_at`); no new
-  listing of removed Waves is added — `lf wave show <name|id>` reads one.
-- **Stale sentence** in `swift/README.md` (Current Wave navigation): "Authored
-  `.lf/wave/<name>/GOAL.md` files still appear before their first
-  registration" describes the placeholder scan slice 6 deleted; replace with
-  the one-reader statement `docs/work.md` already carries.
+  printed `status.label()`, and only `--current` applied the live filter.
+  Desktop read `lf wave list --all --current --json`, so after `lf wave remove
+  desktop` the sidebar dropped the row while the documented read (`lf wave
+  list`, and `--json` in the `init` and `repo_operate` skills) showed
+  `desktop … abandoned` — the "stuck as abandoned" rows the Problem section
+  opens with, now produced by the product's own remove. `--current` arrived in
+  #1615 (2026-10-21) as a navigation filter with no decision that the
+  unfiltered list is a history view; nothing in product code abandons a Wave
+  except `retire_waves`, so "abandoned", "retired" and "removed" named one
+  state with three words.
+  Resolved (2026-11-02): the live filter is the default and `--current` is
+  deleted with its callers (`RegistryQuery`, `read.rs` `Waves`, the `s1`–`s5`
+  skills, `graph/mod.rs` test, `status_tests`, `wave_lifecycle`, the Swift
+  README, tests and the startup benchmark). The default excludes retired rows;
+  a legacy `abandoned` row that was never retired (Jack's `engbot`, `list`)
+  stays listed, in Desktop too, so **Remove Wave…** can finish it. The list
+  help no longer says "retained planning identities". `lf wave show|status`
+  name the state with the product word: `removed at <date>`, and `superseded
+  by <id>` only when a successor exists. The `WaveSnapshot` wire is unchanged
+  (`status`, `retired_at`); no listing of removed Waves is added — `lf wave
+  show <name|id>` reads one.
+- **Stale sentence** in `swift/README.md` (Current Wave navigation) described
+  the placeholder scan slice 6 deleted; it now carries the one-reader statement
+  `docs/work.md` has.
 
 Looked at, holding: `lf wave rename`'s already-renamed path answers by the
 new address (Desktop renames by id, so it never takes it); the Remove sheet
@@ -530,3 +527,7 @@ awaits the planning refresh, so the row exists when selected.
   integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9;
   `swift test --filter 'WaveLensTests|WaveTests|RenameWaveSheetTests|CreateWaveSheetTests|DTOFixtureTests|RemoveWaveSheetTests|MockWaveFixtureTests|RegistryQueryTests|PortfolioRepoStateTests'`
   98/98; clippy and fmt clean. Affected suites → gate.
+- 2026-11-02 realign (after the second merge with main, `ce172bd3d0`, which only
+  added `?` to `open_existing_store` calls): `cargo test -p loopflow --test
+  integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9.
+  Affected suites → gate.

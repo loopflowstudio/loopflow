@@ -1,8 +1,8 @@
 # LOO-693 plan: running steps and conversations survive a store upgrade
 
-Reconciled 2026-11-02 against HEAD `51251496b3`; code unchanged since
-`677ffca2b7`. origin/main moved to `39defd0e22` (#1795) with no file in
-common with this branch.
+Reconciled 2026-11-02 against HEAD `2c2e1fb669`. Code last changed in
+`7730f178c6` (compress: test trim and one doc comment). origin/main
+(`7404ba92ef`, #1792) is merged; it shares no file with this change.
 
 ## Exists (proved on this branch)
 
@@ -46,10 +46,7 @@ Nothing in this Task's scope. Gate owns the affected suites.
   not: they self-migrate (`apply_sqlite_with_backup`). Only the shared `~/.lf`
   store admits additive newer tails, which is where running steps live.
 
-Check: `cargo test -p loopflow --lib store::sqlite::frontier_tests::` 11 passed;
-`--test task_pr_authority_tests` 12 passed; `--test integration -- doctor_tests::status_reads` passed;
-clippy clean. Compress (2026-11-02) trimmed the running-reader test's unused
-seed and a doc comment; frontier_tests reran, 11 passed; gate owns the rest.
+Check: `cargo test -p loopflow --lib store::sqlite::frontier_tests::` 11 passed after the compress trim; `--test task_pr_authority_tests` 12 passed; `--test integration -- doctor_tests::status_reads` passed; clippy clean; realign (prose only) reran nothing; gate owns the affected suites.
 
 ## Concept review (2026-11-02, headless)
 

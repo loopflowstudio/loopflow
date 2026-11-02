@@ -1,10 +1,10 @@
 # LOO-710: Session snapshots at Rex fidelity with libghostty-vt
 
 Status: **accepted** (Jack Heart's Task brief, 2026-11-02; mechanisms below are
-this plan's choices). Reconciled 2026-11-02 against `bb7c8944a8`; the
-preview recovery repairs are retained. This implementation pass addresses the
-subsequent review's primary-buffer and program-color gaps. No product decision
-is pending.
+this plan's choices). Reconciled 2026-11-02 against `9371e126f4`. Preview recovery,
+retained primary-buffer restoration and explicit program-color restoration are implemented.
+Gate, package CI and configured-provider demo remain acceptance work. No product
+decision is pending.
 
 ## Outcome
 
@@ -79,14 +79,16 @@ writes a Ghostty-format (`GHOSTSNP`) snapshot when it ends so `lf resume` and
   Linux Clippy and four-target package linking remain CI's obligations. These
   checks and the interactive demo are still acceptance work; source fixtures do
   not establish installed/native-provider behavior.
-- **Meeting LOO-709.** Its branch still writes `screens/<session>.vt` through
+- **Meeting LOO-709.** The November 2 status read reports unfinished work and no
+  PR; the prior code inspection found its branch writes `screens/<session>.vt` through
   `transport::save_last_screen`/`last_screen_path`, `Output::last_screen` and
   `terminal::last_screen(&vt100::Screen)`, and a `transport_tests` case decodes that
   file with `vt100::Parser`. Both branches call their writer at the same two owner
   ends. Whichever lands second deletes the `.vt` writer and its helpers, keeps
   `snapshot::leave` at both ends, and rewrites that test to decode `.ghostsnp`
   through `Terminal::decode`. No DTO field either way.
-- **Meeting LOO-705 (PR #1799).** The `ending` arm's body changes shape (it queues
+- **Meeting LOO-705 (PR #1799).** The November 2 status read still reports an open
+  PR at demo. The `ending` arm's body changes shape (it queues
   one `Response::Moved` instead of an input hint); `snapshot::leave` stays before
   `kill_process` in the merged arm.
 
@@ -125,6 +127,10 @@ both its cooked preview and raw attachment phases. The isolated fixtures reuse
   and mode-only attachment fixtures. Fresh owners preserve the viewer's screen.
 - `transport_tests` (gate) pass unchanged.
 - Package builds for the four targets link the archive.
+- The configured-provider demo attaches a second viewer to a running Claude
+  conversation and compares colors, hyperlinks, alternate screen, keyboard modes
+  and retained history; ending and reopening the same Session paints its saved
+  display before live handoff. Fixture passes do not replace this acceptance.
 
 ## Recovery reconciliation — 2026-11-02
 
@@ -169,79 +175,74 @@ GOAL/MEMORY files were read; Release's entry-point lesson reinforces the CLI
 resume proofs and the remaining package/installed acceptance distinction.
 
 
-## Concept review after recovery — 2026-11-02
+## Fidelity reconciliation — 2026-11-02
 
-**Outcome: design changed; implemented in the following pass.** The live viewer must carry the owner's
-primary screen through an alternate-screen attachment, and preserve explicit
-program color changes. No unresolved product choice: these follow from Jack
-Heart's accepted same-screen, colors, alternate-screen and scrollback requirements.
-The previous preview ownership and mode-only repairs remain valid and complete.
+**Accepted scope, implemented.** Jack Heart's same-screen requirement includes
+retained primary content after alternate-screen attachment and explicit program
+colors. The prior review found that active-screen-only formatting skipped primary
+history and that disabling palette export dropped OSC 4 changes. These were
+implementation gaps, not product choices. The complete review and counterexamples
+remain at `9371e126f4:scratch/loo-710-session-snapshots.md`, “Concept review after
+recovery”; its next-implement direction is now fulfilled.
 
-### Experience and concepts
+`terminal::repaint` formats retained primary history and screen, then the active
+alternate screen. Only a disposable decoded copy receives cancellation of
+unfinished parser input and the switch to primary. The owner's bytes, continuation
+and replies remain intact. Removing the intervening cursor-home preserves the
+primary cursor saved by 1049. Live attachment and saved preview share this path.
 
-One action remains: `lf resume SESSION`. A Session is the durable conversation;
-its owner retains the live terminal; a viewer temporarily displays and controls
-it; the snapshot retains display after the owner ends. A person should not have
-to learn whether the program happened to enter its alternate screen before
-attachment, or request a redraw to recover retained content.
+`Terminal::format` enables palette restoration through archive `lf4`'s selective
+VT patch. The override mask preserves even explicitly assigned values equal to
+the owner's defaults; untouched colors remain at the viewer's configured theme.
+Foreground, background and cursor overrides are emitted too. Cleanup and live
+handoff reset those overrides. HTML formatting remains unchanged, providing the
+rendered-color oracle for Rust fixtures.
 
-| Action | Existing implementation | Required continuation |
-| --- | --- | --- |
-| Attach while a program uses its alternate screen | `Output::attach` sends `terminal::repaint`, then reports and the unfinished VT continuation | Initialize the viewer with the retained primary screen/history as well as the active alternate screen, before forwarding live bytes |
-| Program returns to primary without redrawing | Raw `Response::Output` forwards the screen switch; the viewer reveals its own prior primary contents | Reveal the owner's primary contents, cursor and modes; keep the viewer's earlier scrollback |
-| Reopen an ended Session | `snapshot::last_screen` decodes the file and uses the same repaint path | Show the saved display under `ViewerTerminal`; live state still supersedes it and no saved continuation reaches the new provider |
-| Startup fails or attachment is cancelled | The existing guard restores terminal modes | Preserve this behavior, including any additional state the new repaint changes |
+Existing proofs now cover:
 
-### Consequential mismatch: retained state never reaches the viewer
+- Alternate-screen attachment followed only by `?1049l`: primary text, cursor,
+  keyboard modes and retained history agree, and prior viewer history survives.
+  The same fixture runs after snapshot encode/decode and checks that repaint
+  leaves the live owner's encoding and split-sequence continuation unchanged.
+- Indexed overrides, including one equal to the owner's default, resolve to the
+  same rendered foreground. Untouched indexed/default colors retain a different
+  viewer theme. Forwarded output and the return to primary keep program colors;
+  cleanup restores the theme. Zig round trips also cover foreground, background
+  and cursor overrides.
+- Existing fresh-owner, mode-only, failed-launch and cancelled-preview proofs
+  remain; PTY handoff/failure fixtures now also inspect color reset. Public resume
+  fixtures retain Session history and exercise provider failure without replaying
+  input. They use fixture providers, not configured Claude or Desktop.
 
-`transport/terminal.rs::repaint` skips history whenever `alternate_screen()` is
-true. `ghostty_vt.rs::format` selects only active-screen coordinates. Subsequent
-output is forwarded unchanged, with no restoration when the program returns to
-primary. A full GHOSTSNP on disk does not repair this: `last_screen` decodes it,
-then passes it through that same active-screen-only repaint.
+No new public command, DTO, snapshot lifecycle or GhosttyKit decoder was needed.
+Images, bounded history and cross-revision snapshot rejection remain documented
+limits. Source inspection found no further bounded mismatch in this reconciliation;
+the remaining acceptance and second-landing integration work is listed above.
 
-Concrete counterexample: the owner prints `kept primary` and several history rows,
-enters `?1049h`, and prints `alternate`. A new viewer attaches and sees
-`alternate`. The program sends only `?1049l`. The owner now shows `kept primary`;
-the viewer shows its own previous primary screen. The attach-time SIGWINCH is
-only a redraw request; a program need not repaint its inactive buffer or handle
-that signal. Existing tests assert the active alternate screen but never follow
-the later switch back.
+## Concept review after fidelity repair — 2026-11-02
 
-The color counterpart is explicit in `ghostty_vt.rs::format`: `palette: false`
-preserves a viewer's theme but also drops the program's OSC 4 palette changes.
-A program can set an indexed color, draw with it, then detach. A second viewer
-receives the color index without its new value. Keeping default theme choices
-does not imply discarding explicit program colors.
+**Outcome: nothing to change; no open product choice.** Reviewed the current
+implementation and usage docs against Jack Heart's accepted experience. The
+Session remains the conversation, its owner retains live terminal state, and a
+viewer temporarily displays and controls it. The saved screen is optional display
+data under the same Session identity; it creates no separate recovery lifecycle.
 
-### Next implement direction and proof
+The normal interaction stays `lf resume SESSION`: `Output::attach` repaints a
+live owner; an ended owner goes through `delegate_with_preview` and
+`snapshot::last_screen` before live acknowledgement. The consequential earlier
+mismatch—retained state missing after a bare return to primary—is addressed by
+the shared repaint path described above. Program overrides and viewer theme now
+have separate, explicit ownership without adding a user-facing choice.
 
-Keep one terminal model and one repaint implementation shared by live attach and
-saved preview. Revise the formatter path to initialize the necessary retained
-buffers and their cursor/mode state, ending in the owner's active buffer. A
-temporary decoded copy may be used to inspect the inactive buffer; do not switch
-or mutate the live owner's parser to paint a viewer. Keep the existing history
-and transport bounds explicit. Preserve explicit program color values, either
-through selective palette restoration or resolved cell colors, while retaining
-default theme behavior and terminal cleanup. The exact library mechanism is an
-implementation decision; no new public command, DTO, or snapshot lifecycle is
-needed. GhosttyKit decoding and Desktop UI remain outside this Task.
+Failure and recovery preserve this model: `ViewerTerminal` owns cleanup from
+preview through attachment, blank live output supersedes saved display, and a
+failed start permits reopening the same Session without replaying input. An
+unreadable or incompatible snapshot does not become a prerequisite for resume.
+The existing README expresses these actions; no skill instruction needs changing.
 
-Prove attachment during alternate-screen use followed by a bare return to primary:
-compare screen text, cursor, input modes and retained history with the owner.
-Repeat after encode/decode to exercise saved state. Include an explicit indexed
-palette override and compare rendered colors, not merely escape presence. Retain
-the fresh-owner, mode-only, failed-launch and cancelled-preview proofs. Never
-restore an old snapshot into a new provider or replay input. If the library cannot
-express required state, preserve that evidence rather than narrowing acceptance
-in README prose. Images, retention bounds and cross-revision snapshot handling
-remain separately documented limitations; this review grants no new waiver.
+No next-implement direction is added. Gate, package linking and the configured
+provider demo remain the next proof, with the LOO-705/709 integration obligations
+above preserved. This review neither waives those checks nor establishes native
+acceptance from fixtures. No code or Wave memory was changed in this step.
 
-Proposed usage wording, after implementation: “Reattach while a program uses its
-alternate screen; returning to its primary screen keeps the conversation and
-history. Program-defined colors survive reattachment; default colors follow the
-viewer's theme.” Keep the already-correct resume, preparation and failure-recovery
-instructions unchanged. No skill instructions need changing because the action
-and concepts stay the same.
-
-Check: `cargo test -p loopflow --lib -- transport::terminal:: transport::viewer_tests:: transport::native:: ghostty_vt::` (inherited `LF_*` unset, stdin closed) — 25 passed after simplification; macOS linker warned about compact-unwind size. `cargo fmt --all`, `git diff --check` and `uv run python -m py_compile scripts/loopflow-dev.py` passed. Prior `ghostty-vt-build --publish` palette/hyperlink tests and four `lf4` archive readbacks remain applicable. Gate (including Clippy), configured-provider demo and four-target package linking remain later obligations.
+Check: `cargo test -p loopflow --lib -- transport::terminal:: transport::viewer_tests:: transport::native:: ghostty_vt::` (inherited `LF_*` unset, stdin closed) — 25 passed after simplification at `9371e126f4` (reused for this prose-only reconciliation); macOS linker warned about compact-unwind size. Prior `cargo fmt --all` and `uv run python -m py_compile scripts/loopflow-dev.py` passed; this reconciliation passed `git diff --check` and `lf context` (both memory/scratch budgets met). Prior `ghostty-vt-build --publish` palette/hyperlink tests and four `lf4` archive readbacks remain applicable. Gate (including Clippy), configured-provider demo and four-target package linking remain later obligations.

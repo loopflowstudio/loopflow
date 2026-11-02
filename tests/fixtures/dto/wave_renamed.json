@@ -7,7 +7,7 @@
   "initiative": {"initiative": "init_8f2c", "title": "Prod", "error": "Linear: rate limited"},
   "mentions": [".lf/wave/ops/MEMORY.md:1"],
   "summary": [
-    "Linear Initiative init_8f2c kept its title: Linear: rate limited. Run `lf wave rename prod --title <title>` to retry.",
+    "Linear Initiative init_8f2c kept its title: Linear: rate limited. Repeat the original `lf wave rename` command to retry.",
     "Still mentioned in: .lf/wave/ops/MEMORY.md:1."
   ]
 }

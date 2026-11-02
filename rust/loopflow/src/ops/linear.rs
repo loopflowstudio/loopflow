@@ -126,19 +126,6 @@ pub struct LinearReteamResult {
     pub task_updates: usize,
 }
 
-#[derive(Debug, Clone)]
-pub struct LinearRenameOptions {
-    pub wave: Option<String>,
-    pub title: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearRenameResult {
-    pub wave: String,
-    pub initiative: String,
-    pub title: String,
-}
-
 // ── Client + Linear project resolution ──────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -1753,30 +1740,13 @@ async fn refresh_async(
 
 // ── explicit mutations ─────────────────────────────────────────────
 
-pub(crate) async fn rename(
-    repo: &Path,
-    options: &LinearRenameOptions,
-    progress: &impl Progress,
-) -> OpsResult<LinearRenameResult> {
-    let wave = resolve_wave(options.wave.as_deref())?;
-    let (ctx, initiative) = resolve_context(repo, &wave).await?;
-    progress.status(&format!(
-        "renaming Linear Initiative {} to {}",
-        initiative, options.title
-    ));
+/// Rename the captured Initiative, even after its Wave address or binding changed.
+pub(super) async fn rename_initiative(repo: &Path, initiative: &str, title: &str) -> OpsResult<()> {
+    let ctx = resolve_repository_context(repo).await?;
     ctx.client
-        .rename_wave(&initiative, &options.title)
+        .rename_wave(initiative, title)
         .await
-        .map_err(linear_error)?;
-    progress.status(&format!(
-        "refreshing local Linear observations for wave/{wave}"
-    ));
-    refresh_inventory(repo, &wave, &ctx, &initiative).await?;
-    Ok(LinearRenameResult {
-        wave,
-        initiative,
-        title: options.title.clone(),
-    })
+        .map_err(linear_error)
 }
 
 /// Archive the Initiative of a removed Wave.

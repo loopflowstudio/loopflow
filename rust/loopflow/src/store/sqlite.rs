@@ -62,6 +62,7 @@ pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;
 pub(crate) mod wave_definitions;
+mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
 pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};

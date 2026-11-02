@@ -4,7 +4,11 @@
 //! `.lf/wave/<name>/` files change on the repository's main checkout and are
 //! committed there, so later launches from any worktree read them after rebase.
 
+pub(crate) mod recovery;
+
 use std::path::{Path, PathBuf};
+
+use recovery::{Identity, Operation, ProviderChange};
 
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +52,7 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         .map_err(lifecycle_error)?
         .as_path()
         .to_path_buf();
+    let _lifecycle = recovery::lock(&main)?;
     let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
     // A clone's authored Waves join the store with the first explicit write here.
@@ -161,6 +166,25 @@ fn resolve_wave(store: &Store, main: &Path, name: &str) -> OpsResult<Option<Wave
     }
 }
 
+/// Capture the live subtree before changing its addresses or retiring it.
+/// Retries use the saved identities, since live-child reads exclude retired Waves.
+fn wave_subtree(store: &Store, root: Wave) -> OpsResult<Vec<Wave>> {
+    let mut waves = vec![root];
+    let mut next = 0;
+    while next < waves.len() {
+        if !waves[next].is_retired() {
+            waves.extend(
+                store
+                    .sqlite
+                    .list_child_waves(waves[next].id())
+                    .map_err(lifecycle_error)?,
+            );
+        }
+        next += 1;
+    }
+    Ok(waves)
+}
+
 pub(crate) fn authored_path(slug: &str) -> String {
     format!(".lf/wave/{slug}")
 }
@@ -176,24 +200,10 @@ fn write_objective(main: &Path, slug: &str, objective: &str) -> OpsResult<()> {
     Ok(())
 }
 
-/// Commit exactly `paths` on the main checkout, leaving every other change a
-/// person has there untouched. A checkout that cannot take the commit keeps
-/// the files as they are and says why.
+/// Commit the files add/connect just wrote on main, leaving unrelated changes
+/// untouched. Removal/rename commit their retained images through `Operation`.
+/// A failed commit keeps the files and reports why.
 pub(crate) fn commit_authored(main: &Path, paths: &[String], message: &str) -> AuthoredFiles {
-    // A pathspec must match: keep paths on disk or in the index.
-    let paths: Vec<String> = paths
-        .iter()
-        .filter(|path| {
-            main.join(path).exists()
-                || crate::git::git_stdout(main, &["ls-files", "--", path.as_str()])
-                    .is_ok_and(|tracked| !tracked.trim().is_empty())
-        })
-        .cloned()
-        .collect();
-    if paths.is_empty() {
-        return AuthoredFiles::Unchanged;
-    }
-    let paths = paths.as_slice();
     let mut status = vec!["status", "--porcelain", "--"];
     status.extend(paths.iter().map(String::as_str));
     match crate::git::git_stdout(main, &status) {
@@ -289,8 +299,24 @@ pub fn remove(
     let repo_key = main.to_string();
     let main = main.as_path().to_path_buf();
     let store = runtime.block_on(super::planning_sync::planning_store())?;
-    // A removed Wave's address still resolves, so a repeat run reports it.
-    let wave = match resolve_wave(&store, &main, name)? {
+    let _lifecycle = recovery::lock(&main)?;
+    let operations = store
+        .sqlite
+        .wave_operations(&repo_key, "remove")
+        .map_err(lifecycle_error)?;
+    let pending = operations
+        .iter()
+        .find(|operation| !operation.complete() && operation.matches(name, None));
+    // An unfinished request retains its identity even when the address is reused.
+    let wave = if let Some(operation) = pending {
+        store
+            .sqlite
+            .get_wave(&operation.waves[0].id)
+            .map_err(lifecycle_error)?
+    } else {
+        resolve_wave(&store, &main, name)?
+    };
+    let wave = match wave {
         Some(wave) => wave,
         None => {
             let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
@@ -301,20 +327,34 @@ pub fn remove(
                 .ok_or_else(|| lifecycle_error(format!("no Wave {name} here")))?
         }
     };
+    let saved = pending.or_else(|| {
+        operations
+            .iter()
+            .find(|operation| &operation.waves[0].id == wave.id())
+    });
     let already_removed = wave.is_retired();
-    // A new Wave may hold a removed Wave's address; its files and Initiative are not ours.
-    let owns_address = !already_removed || resolve_wave(&store, &main, wave.slug())?.is_none();
-    let mut subtree = vec![wave.clone()];
-    let mut next = 0;
-    while !already_removed && next < subtree.len() {
-        let children = store
-            .sqlite
-            .list_child_waves(subtree[next].id())
-            .map_err(lifecycle_error)?;
-        subtree.extend(children);
-        next += 1;
-    }
-    let destination = match wave.parent_wave_id() {
+    let owns_address =
+        resolve_wave(&store, &main, wave.slug())?.is_none_or(|current| current.id() == wave.id());
+    let subtree = if let Some(operation) = saved {
+        operation
+            .waves
+            .iter()
+            .map(|identity| {
+                store
+                    .sqlite
+                    .get_wave(&identity.id)
+                    .map_err(lifecycle_error)?
+                    .ok_or_else(|| lifecycle_error(format!("Wave {} is missing", identity.id)))
+            })
+            .collect::<OpsResult<Vec<_>>>()?
+    } else {
+        wave_subtree(&store, wave.clone())?
+    };
+    let parent_id = saved.map_or_else(
+        || wave.parent_wave_id().cloned(),
+        |operation| operation.destination.clone(),
+    );
+    let destination = match &parent_id {
         Some(parent) => store
             .sqlite
             .get_wave(parent)
@@ -323,6 +363,7 @@ pub fn remove(
             .map(|parent| parent.slug().to_string()),
         None => None,
     };
+    let delete_backlog = saved.map_or(delete_backlog, |operation| operation.delete_backlog);
     let ids: Vec<WaveId> = subtree.iter().map(|wave| wave.id().clone()).collect();
     let mut moved = Vec::new();
     let mut deleted = Vec::new();
@@ -358,23 +399,47 @@ pub fn remove(
         .sqlite
         .wave_session_count(&ids)
         .map_err(lifecycle_error)?;
-    let slugs: Vec<String> = subtree.iter().map(|wave| wave.slug().to_string()).collect();
+    let slugs: Vec<String> = saved.map_or_else(
+        || subtree.iter().map(|wave| wave.slug().to_string()).collect(),
+        |operation| {
+            operation
+                .waves
+                .iter()
+                .map(|wave| wave.slug.clone())
+                .collect()
+        },
+    );
     let directory = main.join(authored_path(wave.slug()));
     let has_files = owns_address && directory.exists();
-    let initiatives = slugs
-        .iter()
-        .filter(|_| owns_address)
-        .filter_map(|slug| {
-            super::linear::read_initiative(&main, slug).map(|initiative| InitiativeArchive {
-                wave: slug.clone(),
-                initiative,
+    let initiatives = if let Some(operation) = saved {
+        operation
+            .providers
+            .iter()
+            .map(|provider| InitiativeArchive {
+                wave: provider.wave.clone(),
+                initiative: provider.initiative.clone(),
                 error: None,
             })
-        })
-        .collect();
+            .collect()
+    } else {
+        slugs
+            .iter()
+            .filter(|_| owns_address)
+            .filter_map(|slug| {
+                super::linear::read_initiative(&main, slug).map(|initiative| InitiativeArchive {
+                    wave: slug.clone(),
+                    initiative,
+                    error: None,
+                })
+            })
+            .collect()
+    };
     let mut receipt = WaveRemoval {
         id: wave.id().clone(),
-        name: wave.slug().to_string(),
+        name: saved.map_or_else(
+            || wave.slug().to_string(),
+            |operation| operation.from.clone(),
+        ),
         preview,
         already_removed,
         destination,
@@ -400,6 +465,52 @@ pub fn remove(
         return Ok(receipt);
     }
 
+    let mut operation = if let Some(operation) = saved {
+        operation.clone()
+    } else {
+        let owners = store
+            .sqlite
+            .list_waves(Some(&repo_key))
+            .map_err(lifecycle_error)?
+            .iter()
+            .map(Identity::from)
+            .collect::<Vec<_>>();
+        let changes = if has_files {
+            recovery::prepare_files(&main, &owners, |copy| {
+                remove_authored(copy, &receipt.name, receipt.destination.as_deref())
+            })?
+        } else {
+            Vec::new()
+        };
+        let operation = Operation {
+            id: uuid::Uuid::new_v4().to_string(),
+            repo: repo_key.clone(),
+            kind: "remove".into(),
+            from: receipt.name.clone(),
+            to: String::new(),
+            target_repo: repo_key.clone(),
+            waves: subtree.iter().map(Identity::from).collect(),
+            destination: parent_id,
+            delete_backlog,
+            providers: receipt
+                .initiatives
+                .iter()
+                .map(|archive| ProviderChange {
+                    wave: archive.wave.clone(),
+                    initiative: archive.initiative.clone(),
+                    title: None,
+                    done: false,
+                })
+                .collect(),
+            changes,
+            planning_done: false,
+            applied: false,
+            files_done: false,
+        };
+        operation.save(&store)?;
+        operation
+    };
+
     // Tasks first: nothing retires until every open Task has its disposition.
     let total = receipt.moved.len() + receipt.deleted.len();
     let mut done = 0;
@@ -413,7 +524,7 @@ pub fn remove(
             .map_err(|error| interrupted(&receipt.name, done, total, task, error))?;
         done += 1;
     }
-    if !already_removed {
+    if subtree.iter().any(|wave| !wave.is_retired()) {
         store
             .sqlite
             .retire_waves(&ids, "removed")
@@ -421,29 +532,33 @@ pub fn remove(
         runtime.block_on(super::planning_sync::sync_after_save(&store, &repo_key));
     }
 
-    for archive in &mut receipt.initiatives {
-        if let Err(error) = runtime.block_on(super::linear::archive_initiative(
+    operation.planning_done = true;
+    operation.save(&store)?;
+
+    for (index, archive) in receipt.initiatives.iter_mut().enumerate() {
+        if operation.providers[index].done {
+            continue;
+        }
+        match runtime.block_on(super::linear::archive_initiative(
             &main,
             &archive.initiative,
         )) {
-            archive.error = Some(error.to_string());
+            Ok(()) => {
+                operation.providers[index].done = true;
+                operation.save(&store)?;
+            }
+            Err(error) => archive.error = Some(error.to_string()),
         }
     }
-    let archived = receipt
-        .initiatives
-        .iter()
-        .all(|archive| archive.error.is_none());
-    receipt.files = Some(if !has_files {
-        AuthoredFiles::Unchanged
-    } else if !archived {
-        // The Initiative id lives in these files; keep them until a retry archives it.
-        AuthoredFiles::Uncommitted {
-            reason: "kept until the Linear Initiative is archived".into(),
-        }
-    } else {
-        let paths = remove_authored(&main, &receipt.name, receipt.destination.as_deref())?;
-        commit_authored(&main, &paths, &format!("lf wave remove: {}", receipt.name))
-    });
+    receipt.files = Some(
+        if operation.providers.iter().any(|provider| !provider.done) {
+            AuthoredFiles::Uncommitted {
+                reason: "kept until the Linear Initiative is archived".into(),
+            }
+        } else {
+            operation.finish_files(&store, &main)
+        },
+    );
     receipt.summary = removal_summary(&receipt);
     Ok(receipt)
 }
@@ -475,11 +590,9 @@ fn uncommitted_edits(main: &Path, path: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Delete the removed Wave's directory on main, first folding its memory and the
-/// config keys its parent lacks into the parent. Returns every changed path.
-fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<Vec<String>> {
+/// Prepare removal on the private authored copy, folding into the parent first.
+fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<()> {
     let directory = main.join(authored_path(slug));
-    let mut changed = Vec::new();
     if let Some(parent) = parent {
         let parent_dir = main.join(authored_path(parent));
         fold_memory(&directory, slug, &parent_dir.join("MEMORY.md"))?;
@@ -487,17 +600,10 @@ fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<V
             &directory.join("config.yaml"),
             &parent_dir.join("config.yaml"),
         )?;
-        // Select the folded files, not the parent's whole tree: sibling Waves
-        // and the parent's other documents may have unrelated edits.
-        changed.extend(
-            ["MEMORY.md", "config.yaml"].map(|file| format!("{}/{file}", authored_path(parent))),
-        );
-        changed.extend(rewrite_references(main, slug, parent)?);
+        rewrite_references(main, slug, parent)?;
     }
     std::fs::remove_dir_all(&directory)
-        .map_err(|error| lifecycle_error(format!("{}: {error}", directory.display())))?;
-    changed.push(authored_path(slug));
-    Ok(changed)
+        .map_err(|error| lifecycle_error(format!("{}: {error}", directory.display())))
 }
 
 /// Append each removed Wave's curated memory (the Wave and its children) to the parent's.
@@ -608,9 +714,8 @@ fn path_reference(slug: &str) -> regex::Regex {
 }
 
 /// Rewrite `.lf/wave/<slug>` paths in other Waves' documents to `replacement`.
-fn rewrite_references(main: &Path, slug: &str, replacement: &str) -> OpsResult<Vec<String>> {
+fn rewrite_references(main: &Path, slug: &str, replacement: &str) -> OpsResult<()> {
     let pattern = path_reference(slug);
-    let mut changed = Vec::new();
     for document in wave_documents(main, slug) {
         let Ok(text) = std::fs::read_to_string(&document) else {
             continue;
@@ -619,12 +724,9 @@ fn rewrite_references(main: &Path, slug: &str, replacement: &str) -> OpsResult<V
         if rewritten != text {
             std::fs::write(&document, rewritten.as_ref())
                 .map_err(|error| lifecycle_error(format!("{}: {error}", document.display())))?;
-            if let Ok(relative) = document.strip_prefix(main) {
-                changed.push(relative.to_string_lossy().to_string());
-            }
         }
     }
-    Ok(changed)
+    Ok(())
 }
 
 /// Lines in other Waves' documents naming the Wave as a bare word or path.
@@ -747,6 +849,7 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
         });
     }
     if removal.has_files {
+        let pending = matches!(removal.files, Some(AuthoredFiles::Uncommitted { .. }));
         lines.push(match &removal.destination {
             Some(parent) if removal.preview => format!(
                 ".lf/wave/{name} folds its memory into {parent} and is deleted on the main checkout."
@@ -757,9 +860,10 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             None if removal.preview => format!(
                 ".lf/wave/{name} is deleted on the main checkout; Git history keeps its committed files."
             ),
+            _ if pending => format!("Authored changes for .lf/wave/{name} remain pending on the main checkout."),
             _ => format!(".lf/wave/{name} removed on the main checkout."),
         });
-        if !removal.uncommitted.is_empty() {
+        if !removal.uncommitted.is_empty() && !pending {
             lines.push(format!(
                 "Uncommitted edits in .lf/wave/{name} {} deleted with it: {}.",
                 if removal.preview { "are" } else { "were" },
@@ -857,115 +961,180 @@ pub async fn rename(
                 .ok_or_else(|| lifecycle_error(format!("invalid Wave name {name:?}")))
         })
         .transpose()?;
-    let wave = match resolve_wave(&store, &main, wave)? {
-        Some(wave) => wave,
-        None => {
-            // Already renamed: the old address is free and the new one is live.
-            if let Some(target) = &target {
-                if let Some(existing) = resolve_wave(&store, &main, target)? {
-                    return Ok(WaveRenamed {
-                        id: existing.id().clone(),
-                        from: wave.to_string(),
-                        to: existing.slug().to_string(),
-                        renamed: false,
-                        files: AuthoredFiles::Unchanged,
-                        initiative: None,
-                        mentions: Vec::new(),
-                        summary: Vec::new(),
-                    });
-                }
-            }
-            return Err(lifecycle_error(format!("no Wave {wave} here")));
-        }
+    let _lifecycle = recovery::lock(&main)?;
+    let repo_key = main.to_string_lossy().to_string();
+    let target_checkout = crate::repository::CanonicalRepo::discover(target_repo.unwrap_or(&main))
+        .map_err(lifecycle_error)?
+        .to_string();
+    let operations = store
+        .sqlite
+        .wave_operations(&repo_key, "rename")
+        .map_err(lifecycle_error)?;
+    let matching = |operation: &&Operation| {
+        operation.matches(wave, target.as_deref()) && operation.target_repo == target_checkout
     };
-    let from = wave.slug().to_string();
-    let to = target.clone().unwrap_or_else(|| from.clone());
-    let moves = to != from || target_repo.is_some();
-    // Refuse before changing the store: the directory move would fail after it.
-    if to != from
-        && target_repo.is_none()
-        && main.join(authored_path(&from)).exists()
-        && main.join(authored_path(&to)).exists()
-    {
-        return Err(lifecycle_error(format!(
-            ".lf/wave/{to} already exists in {}; move or delete it first",
-            main.display()
-        )));
-    }
-    let relocation = if moves {
-        Some(
+    let pending = operations
+        .iter()
+        .filter(matching)
+        .find(|operation| !operation.complete());
+    let resolved = if let Some(operation) = pending {
+        store
+            .sqlite
+            .get_wave(&operation.waves[0].id)
+            .map_err(lifecycle_error)?
+    } else {
+        resolve_wave(&store, &main, wave)?
+    };
+    let saved = pending.or_else(|| {
+        operations.iter().filter(matching).find(|operation| {
+            resolved.as_ref().is_none_or(|current| {
+                current.id() == &operation.waves[0].id
+                    && current.slug() == operation.to
+                    && operation.from != operation.to
+            })
+        })
+    });
+    let mut operation = if let Some(operation) = saved {
+        operation.clone()
+    } else {
+        let wave = resolved
+            .as_ref()
+            .ok_or_else(|| lifecycle_error(format!("no Wave {wave} here")))?;
+        if wave.is_retired() {
+            return Err(lifecycle_error(format!("Wave {} is retired", wave.id())));
+        }
+        let from = wave.slug().to_string();
+        let to = target.unwrap_or_else(|| from.clone());
+        let moves = to != from || repo_key != target_checkout;
+        if let Some(existing) = resolve_wave(&store, Path::new(&target_checkout), &to)? {
+            if existing.id() != wave.id() {
+                return Err(lifecycle_error(format!(
+                    "Wave {to} already exists; remove or rename it first"
+                )));
+            }
+        }
+        if to != from && repo_key == target_checkout && main.join(authored_path(&to)).exists() {
+            return Err(lifecycle_error(format!(
+                ".lf/wave/{to} already exists in {}; move or delete it first",
+                main.display()
+            )));
+        }
+        let subtree = wave_subtree(&store, wave.clone())?;
+        let mut owners = store
+            .sqlite
+            .list_waves(Some(&repo_key))
+            .map_err(lifecycle_error)?
+            .iter()
+            .map(Identity::from)
+            .collect::<Vec<_>>();
+        owners.extend(subtree.iter().map(|child| Identity {
+            id: child.id().clone(),
+            slug: format!("{to}{}", &child.slug()[from.len()..]),
+        }));
+        let changes = if moves && repo_key == target_checkout {
+            recovery::prepare_files(&main, &owners, |copy| {
+                let source = copy.join(authored_path(&from));
+                if source.exists() {
+                    let destination = copy.join(authored_path(&to));
+                    std::fs::create_dir_all(
+                        destination.parent().expect("Wave directory has a parent"),
+                    )?;
+                    std::fs::rename(source, destination)?;
+                }
+                rewrite_references(copy, &from, &to)?;
+                Ok(())
+            })?
+        } else {
+            Vec::new()
+        };
+        let providers = super::linear::read_initiative(&main, &from)
+            .filter(|_| moves || title.is_some())
+            .map(|initiative| ProviderChange {
+                wave: from.clone(),
+                initiative,
+                title: Some(title.map_or_else(|| super::linear::title_case(&to), str::to_string)),
+                done: false,
+            })
+            .into_iter()
+            .collect();
+        let operation = Operation {
+            id: uuid::Uuid::new_v4().to_string(),
+            repo: repo_key.clone(),
+            kind: "rename".into(),
+            from,
+            to,
+            target_repo: target_checkout.clone(),
+            waves: subtree.iter().map(Identity::from).collect(),
+            destination: None,
+            delete_backlog: false,
+            providers,
+            changes,
+            planning_done: false,
+            applied: false,
+            files_done: !moves,
+        };
+        operation.save(&store)?;
+        operation
+    };
+    let renamed_now = !operation.planning_done
+        && (operation.from != operation.to || operation.repo != operation.target_repo);
+    if !operation.planning_done {
+        let current = store
+            .sqlite
+            .get_wave(&operation.waves[0].id)
+            .map_err(lifecycle_error)?
+            .ok_or_else(|| lifecycle_error("original Wave is missing"))?;
+        if current.slug() != operation.to || current.repo() != operation.target_repo {
+            if current.slug() != operation.from || current.repo() != operation.repo {
+                return Err(lifecycle_error(
+                    "original Wave moved again; this rename remains pending",
+                ));
+            }
             crate::work::wave::relocate::relocate_wave(
                 &store,
-                wave.id(),
+                current.id(),
                 &main,
-                target_repo,
-                Some(&to),
+                Some(Path::new(&operation.target_repo)),
+                Some(&operation.to),
             )
             .await
-            .map_err(lifecycle_error)?,
-        )
+            .map_err(lifecycle_error)?;
+        }
+        operation.planning_done = true;
+        operation.save(&store)?;
+    }
+    let files = operation.finish_files(&store, &main);
+    let initiative = if let Some(provider) = operation.providers.first() {
+        let mut result = InitiativeRename {
+            initiative: provider.initiative.clone(),
+            title: provider.title.clone().expect("rename retains its title"),
+            error: None,
+        };
+        if !provider.done {
+            match super::linear::rename_initiative(
+                Path::new(&operation.target_repo),
+                &result.initiative,
+                &result.title,
+            )
+            .await
+            {
+                Ok(()) => {
+                    operation.providers[0].done = true;
+                    operation.save(&store)?;
+                }
+                Err(error) => result.error = Some(error.to_string()),
+            }
+        }
+        Some(result)
     } else {
         None
     };
-    let same_repo = relocation
-        .as_ref()
-        .is_none_or(|receipt| receipt.from_repo == receipt.to_repo);
-    let source = main.join(authored_path(&from));
-    let files = if !moves || !source.exists() {
-        AuthoredFiles::Unchanged
-    } else if !same_repo {
-        AuthoredFiles::Uncommitted {
-            reason: format!(
-                "move .lf/wave/{from} into the target repository; files do not cross repositories"
-            ),
-        }
-    } else {
-        let destination = main.join(authored_path(&to));
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| lifecycle_error(format!("{}: {error}", parent.display())))?;
-        }
-        std::fs::rename(&source, &destination)
-            .map_err(|error| lifecycle_error(format!("{}: {error}", source.display())))?;
-        let mut paths = vec![authored_path(&from), authored_path(&to)];
-        paths.extend(rewrite_references(&main, &from, &to)?);
-        commit_authored(&main, &paths, &format!("lf wave rename: {from} → {to}"))
-    };
-    let checkout = relocation
-        .as_ref()
-        .map_or_else(|| main.clone(), |receipt| PathBuf::from(&receipt.to_repo));
-    let initiative = match super::linear::read_initiative(&checkout, &to) {
-        Some(initiative) if moves || title.is_some() => {
-            let title = title.map_or_else(|| super::linear::title_case(&to), str::to_string);
-            let error = super::linear::rename(
-                &checkout,
-                &super::linear::LinearRenameOptions {
-                    wave: Some(to.clone()),
-                    title: title.clone(),
-                },
-                &crate::ops::NullProgress,
-            )
-            .await
-            .err()
-            .map(|error| error.to_string());
-            Some(InitiativeRename {
-                initiative,
-                title,
-                error,
-            })
-        }
-        _ => None,
-    };
     let mut renamed = WaveRenamed {
-        id: wave.id().clone(),
-        mentions: if moves {
-            prose_mentions(&main, &from)
-        } else {
-            Vec::new()
-        },
-        from,
-        to,
-        renamed: moves,
+        id: operation.waves[0].id.clone(),
+        mentions: prose_mentions(&main, &operation.from),
+        from: operation.from,
+        to: operation.to,
+        renamed: renamed_now,
         files,
         initiative,
         summary: Vec::new(),
@@ -984,8 +1153,7 @@ fn rename_summary(renamed: &WaveRenamed) -> Vec<String> {
     }) = &renamed.initiative
     {
         lines.push(format!(
-            "Linear Initiative {initiative} kept its title: {error}. Run `lf wave rename {} --title <title>` to retry.",
-            renamed.to
+            "Linear Initiative {initiative} kept its title: {error}. Repeat the original `lf wave rename` command to retry."
         ));
     }
     if !renamed.mentions.is_empty() {

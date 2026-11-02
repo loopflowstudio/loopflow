@@ -1,8 +1,8 @@
 # LOO-500: Add and remove Waves seamlessly
 
-Status: accepted experience; implementation incomplete (2026-11-02).
-Post-merge verification reproduced two removal retry failures; the retry
-design returns to review below. Three concept reviews closed the alternate
+Status: accepted experience; retry repair implemented and focused checks passed (2026-11-02).
+Post-merge verification reproduced removal and rename retry failures; retained
+operation evidence now replaces the failed recovery paths below. Three concept reviews closed the alternate
 creation path (`lf wave connect <new-name>` adds first). Merged with main at
 `4e9ade2d04`. Happy-path CLI demo done; Desktop demo awaits a display session.
 Jack Heart filed LOO-500; exact controls,
@@ -10,35 +10,19 @@ required fields and the meaning of deletion were left as design questions.
 Choices below are the plan's; reversible ones are noted in
 `scratch/questions.md`.
 
-## Problem
+## Problem and current implementation
 
 Jack wants adding and removing Waves to be ordinary, discoverable actions in
-Desktop and the CLI. Today:
+Desktop and the CLI, preserving existing work and making interrupted operations
+retryable. The branch now shares `ops::wave_lifecycle`, registers new Waves and
+their first Projects, commits authored files on main, and exposes add, rename
+and removal in Desktop. The retired `ensure` command and Desktop filesystem
+creation/placeholder paths are gone. Original diagnosis remains at
+`fe5e2fab42776f23678bdc13eb8d1c01ead6e22e:scratch/jack-loo-500-make-adding-and-deleting-waves-seamless.md`.
 
-- **Adding** is `lf wave ensure <name>`, whose help says "Ensure the configured
-  Project is active". It registers the row, seeds `.lf/wave/<name>/`
-  (`config.yaml`, `GOAL.md`, `MEMORY.md`) in whatever checkout ran it, and
-  commits nothing. A Task worktree run strands the files on that branch.
-- **Desktop's New Wave** (`NewWaveRow` in `WorkNavigator.swift`, and
-  `CreateWaveSheet` in `WavesView.swift`) calls
-  `PortfolioRepoState.createWave`, which writes `GOAL.md`/`MEMORY.md` with
-  `FileManager` and never calls `lf`. Nothing registers Waves on read or
-  launch, so the new Wave stays invisible until someone runs
-  `lf wave ensure`/`connect` — the bug the `wave-lifecycle` world's own Task
-  describes. The `init` and `split-wave` skills also hand-write
-  `.lf/wave/<name>/GOAL.md` and then run `lf wave connect`.
-- **Removing** has no command. `WaveRow` has a "Delete Wave" context item
-  behind `onDelete`, which no caller passes. Removed callers of
-  `delete_wave`: #1360, #1375; a `lf wave create` existed until `6c4d13269`. The store has `delete_wave` (test-only caller)
-  and a retirement write that only `relocate_waves` uses for a
-  registration-only collision. `wave_retirement_blockers` refuses any Wave with
-  Projects — and `ensure` always creates one, so no real Wave can retire.
-  Jack's own `lf wave list` shows `engbot` and `list` (an accidental
-  `lf wave ensure list`) stuck as `abandoned`, and `spend` registered with no
-  authored directory.
-- Removing a Wave's files by hand resurrects nothing visibly but leaves the
-  row; restoring a directory whose `config.yaml` id belongs to a retired row
-  fails inside `planning_write::create` with an opaque error.
+Recovery now retains original identities, provider obligations and exact authored
+changes before effects. The dated counterexamples below explain the repair;
+broader acceptance, live Linear recovery and native Desktop interaction remain.
 
 ## Demo
 
@@ -108,7 +92,7 @@ Removal **retires** the Wave (`retired_at`, `retirement_reason = "removed"`,
 completed Tasks and Wave Sessions stay readable through `lf wave show <name>`
 and the Wave's history — GOAL.md requires historical chapters stay readable.
 
-Steps, each idempotent so a retry finishes partial work:
+Required sequence, with durable retry evidence described below:
 
 1. **Preview** (also `--preview`, and what Desktop's sheet renders): open Tasks
    split into unstarted vs started (with live Graph counts), completed Tasks,
@@ -164,7 +148,9 @@ commit-on-main path as add/remove:
    untouched; only the address changes.
 3. `git mv .lf/wave/<name> .lf/wave/<new-name>` on the main checkout and
    commit (`lf wave rename: <name> → <new-name>`), same selective-commit rule.
-4. Idempotent: already at `<new-name>` with the same id → exit 0.
+4. Required idempotency: already at `<new-name>` with the same id → exit 0
+   after reporting or finishing pending effects. Saved operations establish
+   the old identity; a live target alone never proves a prior rename.
 5. A connected Wave's Linear Initiative is renamed through the existing
    `LinearClient::rename_wave` (already used by `ops::linear`), so the name
    stays consistent; a Linear failure is reported and retried like removal's
@@ -229,8 +215,8 @@ Entry points reuse the controls that already exist (LOO-489 owns the layout;
 this Task makes them work and adds nothing beside them):
 
 - `NewWaveRow` (sidebar `WorkNavigator.waveSection`) and `CreateWaveSheet`
-  (Waves window) gain an optional Objective field and call a new
-  `RegistryQuery.addWave` → `lf wave add <name> [--objective] --json`, then
+  (Waves window) expose an optional Objective field and call
+  `RegistryQuery.addWave` → `Write::WaveAdd`, then
   select the new Wave once the `desktop plan --all --watch` stream (which
   re-reads on `store_revisions`) delivers it. `refreshPlanning()` after the
   command stays as the immediate nudge.
@@ -304,7 +290,20 @@ later Task if wanted), cleanup of other branches' stale `.lf/wave/` copies.
 
 ## Delete — do not maintain
 
-No remaining predecessor to cut over. Removed with their exclusive tests:
+Retry repair deletes live-subtree reconstruction after retirement, target-only
+rename success, transient authored-path vectors as recovery evidence, and
+`LinearRenameOptions`/`LinearRenameResult` plus the address-resolving provider
+rename. The surviving provider mutation accepts the captured Initiative ID.
+The durable operation below owns those effects; no second Wave state is added.
+
+Compression removes `commit_authored`'s deleted-path discovery (only add/connect
+still call it), duplicate live-subtree walks and duplicate Git blob readers.
+Removal/rename keep their saved-image commit path; its base/index reads select
+literal filenames and read the exact object returned by Git. The split-wave
+recipe uses the child's full address throughout and the first Project add creates.
+No obsolete lifecycle implementation remains to delete.
+
+Previously removed with their exclusive tests:
 
 - `WaveCommand::Ensure`, `ops::project::ensure`, `WaveEnsure`/`ensureProject`;
   `add` owns creation and first-Project activation in CLI, Desktop and lf-world.
@@ -353,8 +352,13 @@ Removal, rename and add share the uncommitted-files sentence.
 
 ## Remaining work
 
-Repair the removal retry contract below and cover both failures through the
-public CLI. Desktop demo steps 1–3 need a display session (demo/review); CLI
+Gate owns affected suites, migration upgrade verification, lint and the design's
+broader acceptance checks. The retry implementation now retains Machine-local
+operation evidence and has public CLI regressions for the four counterexamples,
+replacement identities, changed provider bindings and later staged/working edits.
+Provider failure tests use missing repository configuration, so they prove retained
+obligations, not successful recovery against live Linear.
+Desktop demo steps 1–3 need a display session (demo/review); CLI
 steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02). Headless view tests
 prove sheet content and actions, not the complete native interaction.
 
@@ -365,7 +369,30 @@ Those reviews closed the filesystem placeholder reader, live-list mismatch,
 connect's alternate creation path, missing Desktop leftovers and the
 uncommitted-edit preview; their happy-path results do not establish retry safety.
 
-## Retry design counterexamples (2026-11-02) — unresolved
+## Retry recovery design (2026-11-02)
+
+Engineering decision: retain lifecycle operations in the existing Machine SQLite
+store, in the Task's `wave_removal` migration. Each operation pins its root and
+subtree IDs, original addresses, destination identity, backlog disposition,
+provider IDs/title, and before/after authored file images before any effect.
+This is a local effect journal, not portable Wave state or another planning owner.
+Retirement/name edits still use the existing planning writer and exchange.
+
+A repository lifecycle lock serializes add/remove/rename. Pending requests resolve
+by saved identity/address before live address lookup; completed rename evidence is
+used only when the old address no longer resolves. A fresh explicit ID addresses
+a replacement. Completed effects never replay. Provider updates target captured
+IDs, never a later config binding. Authored edits are prepared off-checkout, then
+persisted before applying, so folds and reference rewrites survive interruption.
+Retries apply only unchanged before-images or recognize after-images; replacement
+Wave paths are excluded by identity. Atomic per-file replacement avoids an
+interruption between deleting and rewriting a file. Files added later to the old
+directory remain untouched and keep cleanup pending. Commits use the saved after-images in an
+independent index, preserving later working/index edits. Changed committed content
+is reported as pending rather than overwritten. Completed records retain identity
+evidence for repeated commands. Cross-repository file relocation remains manual.
+
+## Retry design counterexamples (2026-11-02)
 
 Verified against `fe5e2fab42` with the checkout's `target/debug/lf`, temporary
 Git repositories and isolated Machines; no configured provider or live Work
@@ -392,20 +419,38 @@ operations permit retry without presenting partial cleanup as success.
   the deleted directory; those paths exist only in the first call's local
   vector.
 
+- **Rename retry hides pending moves.** An isolated CLI probe at `601c5a5b25`
+  added `research`, detached main's HEAD, and ran
+  `lf wave rename research ops --json`. The first receipt reported `uncommitted`. After switching back to
+  `main`, repeating the rename returned `files.state = unchanged` and an empty
+  summary while Git still showed three deleted `research` files and an
+  untracked `ops` directory. The old-name lookup misses, so rename returns
+  before file commit or provider reconciliation. This probe used the existing
+  `target/debug/lf`; source inspection confirms the same early return at HEAD.
+- **An occupied target does not establish a previous rename.** In that same
+  fixture, `lf wave rename never-existed ops --json` succeeded with the `ops`
+  identity and `renamed = false`. No previous identity links those names.
+  A retry must distinguish the original Wave from an unrelated or replacement
+  Wave at the target; a live target alone cannot establish completion.
+
 The accepted outcome stays unchanged. The design needs an explicit source of
-retry evidence that survives retirement and directory deletion: retained
-descendant identities/provider bindings and the exact pending authored paths.
-This is not another Wave state flag. Any repair must preserve a replacement
-Wave at a reused address and unrelated dirty files, finish the same removal,
-and report remaining effects until they finish. No new persistence authority
-or migration has been selected. The compress pass leaves these two failures
-unresolved; implementation cannot be called complete on happy-path passes.
+retry evidence that survives retirement, rename and directory deletion: retained
+original/descendant identities, provider bindings and exact pending authored paths.
+This is not another Wave state flag. The Machine-local operation journal now
+retains this evidence in the Task's existing migration. Retry tests exercise
+both interrupted commits and replacement identities; incomplete provider effects
+stay visible. The original counterexamples above retain the evidence that shaped
+the repair. Live Linear recovery and native Desktop interaction remain
+unproved; isolated Git/CLI failures establish the local recovery gap only.
 
 ## Checks
 
-Earlier Rust, Swift, fmt and clippy evidence remains at
-`d035260519:scratch/jack-loo-500-make-adding-and-deleting-waves-seamless.md`,
-Checks; the conflict-free merge changed no lifecycle code. `global_commands`
-is a standalone binary, not an integration-module filter.
+Earlier happy-path and Desktop evidence remains in
+`601c5a5b25:scratch/jack-loo-500-make-adding-and-deleting-waves-seamless.md`.
+The four original retry probes are retained above; native Desktop and live
+Linear recovery still belong to demo/review. This pass's affected owners are
+`wave_lifecycle` integration, `store::sqlite::wave_definitions` migration upgrade,
+and lifecycle callers in `global_commands`, `served_reads` and
+`linear::local_planning`; no Swift or DTO shape changed in the retry repair.
 
-2026-11-02 compress: `cargo test -p loopflow --test integration wave_lifecycle` 6/6; `scripts/test_desktop.sh --filter 'PortfolioRepoStateTests|MockWaveFixtureTests|RenameWaveSheetTests' -Xswiftc -gnone` builds Desktop, 13/13 headless; `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` pass; `lf context` memory 15,997/16,000 tokens (75,540/131,072 bytes), scratch within both limits; affected suites → gate, Desktop visual demo → demo/review. The two retry failures above remain unresolved.
+2026-11-02 compress: `cargo test -p loopflow --test integration wave_lifecycle::` passes 12/12 (inherited `LF_*` unset, stdin closed); `cargo fmt --check`, `git diff --check`, `lf context` pass; broader affected suites/migration upgrade/lint → gate, native interaction/live Linear recovery → demo/review.

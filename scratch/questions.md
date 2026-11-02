@@ -25,8 +25,10 @@ Reversible implementation choices, retained for demo/review:
   inventory reads an existing Wave. No second creation path.
 - Removal folds the subtree's memories but only the root removed Wave's config
   keys, excluding `id`/`linear`. Archive failure keeps files containing the
-  Initiative binding. This does **not** prove retry safety: both concrete
-  failures remain in the design's “Retry design counterexamples” section.
+  Initiative binding. The retry journal also retains original descendant IDs
+  and bindings; later config changes never redirect an outstanding effect.
+  Machine-local operations retain exact authored images before applying effects.
+  The design's dated counterexamples record why live rows/paths were insufficient.
 - Automatic authored registration skips a retired config id and its subtree;
   explicit add/connect may create a fresh identity by name. A live config id
   wins over a stale directory name.
@@ -58,3 +60,12 @@ Reversible implementation choices, retained for demo/review:
 
 The detailed implementation/review chronology remains at
 `fe5e2fab42776f23678bdc13eb8d1c01ead6e22e:scratch/questions.md`.
+
+2026-11-02 retry implementation assumption: an unfinished matching remove/rename
+request names its saved operation even if its original address has been reused.
+Use the replacement's explicit ID for a new operation. Machine SQLite owns the
+local effect journal; completed records prove prior identity but never replay effects.
+
+Proposed Product memory update (read-only here): LOO-500 now retains rename/remove
+intent and effect completion in Machine SQLite, with identity-safe CLI retry
+regressions. Live Linear recovery and native interaction remain demo/review work.

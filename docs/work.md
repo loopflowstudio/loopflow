@@ -198,6 +198,10 @@ Removal retires the Wave and its child Waves: chapters, completed Tasks and
 conversations stay readable with `lf wave show payments` until a new Wave takes
 the name. A child's `MEMORY.md` folds into its parent's. Running it again
 finishes an interrupted removal; adding the name again starts a fresh Wave.
+Repeat a failed rename with the same old and new names to finish its pending
+files and Initiative title. Retries keep later edits uncommitted. An unfinished
+request retains the original Wave even if its name has been reused; address the
+replacement by its ID for a new removal or rename.
 
 ### Run a pass, or keep a conversation
 

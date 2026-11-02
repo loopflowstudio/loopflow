@@ -97,3 +97,14 @@ WITH RECURSIVE addresses(id,slug) AS (
     JOIN addresses a ON w.parent_wave_id=a.id
 )
 SELECT w.*,a.slug FROM waves w JOIN addresses a ON a.id=w.id;
+
+-- Local lifecycle effects survive the planning edits and filesystem changes
+-- they perform. These receipts do not participate in portable planning exchange.
+CREATE TABLE wave_lifecycle_operations (
+    id TEXT PRIMARY KEY,
+    repo TEXT NOT NULL,
+    wave_id TEXT NOT NULL REFERENCES waves(id),
+    kind TEXT NOT NULL CHECK (kind IN ('remove', 'rename')),
+    operation_json TEXT NOT NULL
+);
+CREATE INDEX wave_lifecycle_retry ON wave_lifecycle_operations(repo, kind);

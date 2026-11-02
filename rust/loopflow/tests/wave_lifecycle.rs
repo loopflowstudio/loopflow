@@ -1,5 +1,6 @@
 //! `lf wave add|remove|rename`: one Wave lifecycle for the CLI and Desktop.
 
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -94,13 +95,7 @@ impl Lab {
     }
 
     fn committed(&self, path: &str) -> bool {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(self.path())
-            .args(["ls-files", "--", path])
-            .output()
-            .unwrap();
-        !output.stdout.is_empty()
+        !git(self, &["ls-files", "--", path]).is_empty()
     }
 }
 
@@ -120,6 +115,7 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
         "## Objective\n\nUnsaved thoughts\n",
     )
     .unwrap();
+    git(&lab, &["add", ".lf/wave/research/GOAL.md"]);
     let preview = lab.lf(&["wave", "remove", "research", "--preview", "--json"]);
     assert_eq!(preview["summary"][0], "research has no Tasks or Sessions.");
     assert_eq!(preview["uncommitted"][0], ".lf/wave/research/GOAL.md");
@@ -141,6 +137,7 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
     assert_eq!(removed["files"]["state"], "committed");
     assert!(!lab.path().join(".lf/wave/research").exists());
     assert!(!lab.committed(".lf/wave/research/GOAL.md"));
+    assert!(git(&lab, &["diff", "--cached", "--name-only"]).is_empty());
     assert!(lab.live_waves().is_empty());
     assert_eq!(
         removed["summary"][1],
@@ -251,14 +248,8 @@ fn removing_a_child_wave_moves_tasks_to_its_parent_and_folds_memory() {
     assert!(config.contains("graph: auto"), "{config}");
     assert!(!child.exists());
     assert_eq!(lab.live_waves(), ["product", "product/cli"]);
-    let dirty = Command::new("git")
-        .current_dir(lab.path())
-        .args(["diff", "HEAD", "--name-only"])
-        .output()
-        .unwrap();
-    assert!(dirty.status.success());
     assert_eq!(
-        String::from_utf8(dirty.stdout).unwrap(),
+        git(&lab, &["diff", "HEAD", "--name-only"]),
         unrelated.join("\n") + "\n"
     );
 }
@@ -367,4 +358,262 @@ fn a_repository_joining_the_portfolio_registers_its_authored_waves_but_not_remov
             && clone.join(".lf/wave/archive/GOAL.md").is_file(),
         "only the clone still has the directory"
     );
+}
+
+fn git(lab: &Lab, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(lab.path())
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{args:?}: {}", stderr(&output));
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn bind_initiative(lab: &Lab, wave: &str, initiative: &str) {
+    let path = lab.path().join(format!(".lf/wave/{wave}/config.yaml"));
+    let config = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        path,
+        format!("{config}linear:\n  initiative: {initiative}\n"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn removal_retry_retains_descendant_archive_bindings_after_retirement_and_replacement() {
+    let lab = Lab::new();
+    let parent = lab.lf(&["wave", "add", "parent", "--json"]);
+    lab.lf(&["wave", "add", "parent/child", "--json"]);
+    bind_initiative(&lab, "parent/child", "original-child-initiative");
+    for _ in 0..2 {
+        let removed = lab.lf(&["wave", "remove", "parent", "--json"]);
+        assert_eq!(
+            removed["waves"],
+            serde_json::json!(["parent", "parent/child"])
+        );
+        assert_eq!(
+            removed["initiatives"][0]["initiative"],
+            "original-child-initiative"
+        );
+        assert!(removed["initiatives"][0]["error"].is_string());
+        assert_eq!(removed["files"]["state"], "uncommitted");
+        assert!(!removed["summary"]
+            .to_string()
+            .contains("removed on the main checkout"));
+        assert!(lab
+            .path()
+            .join(".lf/wave/parent/child/config.yaml")
+            .exists());
+    }
+    let replacement = lab.lf(&["wave", "add", "parent", "--json"]);
+    assert_ne!(replacement["id"], parent["id"]);
+    bind_initiative(&lab, "parent", "replacement-initiative");
+    let config = std::fs::read(lab.path().join(".lf/wave/parent/config.yaml")).unwrap();
+    let retried = lab.lf(&["wave", "remove", "parent", "--json"]);
+    assert_eq!(retried["id"], parent["id"]);
+    assert_eq!(retried["initiatives"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        retried["initiatives"][0]["initiative"],
+        "original-child-initiative"
+    );
+    assert_eq!(
+        std::fs::read(lab.path().join(".lf/wave/parent/config.yaml")).unwrap(),
+        config
+    );
+    assert_eq!(lab.live_waves(), ["parent"]);
+}
+
+#[test]
+fn removal_retry_commits_saved_folds_and_references_preserving_later_edits() {
+    let lab = Lab::new();
+    lab.lf(&["wave", "add", "parent/child", "--json"]);
+    lab.lf(&["wave", "add", "notes", "--json"]);
+    std::fs::write(
+        lab.path().join(".lf/wave/parent/child/MEMORY.md"),
+        "Remember this once.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        lab.path().join(".lf/wave/notes/MEMORY.md"),
+        "See .lf/wave/parent/child/GOAL.md\n",
+    )
+    .unwrap();
+    let branch = git(&lab, &["branch", "--show-current"]);
+    git(&lab, &["checkout", "--detach"]);
+    let first = lab.lf(&["wave", "remove", "parent/child", "--json"]);
+    assert_eq!(first["files"]["state"], "uncommitted");
+    let memory_path = ".lf/wave/parent/MEMORY.md";
+    let folded = std::fs::read_to_string(lab.path().join(memory_path)).unwrap();
+    assert_eq!(folded.matches("Remember this once.").count(), 1);
+    std::fs::write(
+        lab.path().join(memory_path),
+        format!("{folded}\nLater staged thought.\n"),
+    )
+    .unwrap();
+    git(&lab, &["add", memory_path]);
+    std::fs::write(lab.path().join("unrelated.txt"), "Leave staged.\n").unwrap();
+    git(&lab, &["add", "unrelated.txt"]);
+    git(&lab, &["checkout", branch.trim()]);
+    let again = lab.lf(&["wave", "remove", "parent/child", "--json"]);
+    assert_eq!(again["files"]["state"], "committed", "{again}");
+    assert_eq!(git(&lab, &["show", &format!("HEAD:{memory_path}")]), folded);
+    assert!(git(&lab, &["diff", "--cached"]).contains("Later staged thought."));
+    assert!(git(&lab, &["diff", "--cached", "--name-only"]).contains("unrelated.txt"));
+    assert_eq!(
+        git(&lab, &["show", "HEAD:.lf/wave/notes/MEMORY.md"]),
+        "See .lf/wave/parent/GOAL.md\n"
+    );
+    assert!(!lab.committed(".lf/wave/parent/child/config.yaml"));
+    assert_eq!(
+        lab.lf(&["wave", "remove", "parent/child", "--json"])["files"]["state"],
+        "unchanged"
+    );
+}
+
+#[test]
+fn rename_retry_finishes_saved_move_and_rejects_an_unrelated_target() {
+    let lab = Lab::new();
+    let original = lab.lf(&["wave", "add", "research", "--json"]);
+    lab.lf(&["wave", "add", "notes", "--json"]);
+    std::fs::write(
+        lab.path().join(".lf/wave/notes/MEMORY.md"),
+        "See .lf/wave/research/GOAL.md\n",
+    )
+    .unwrap();
+    let branch = git(&lab, &["branch", "--show-current"]);
+    git(&lab, &["checkout", "--detach"]);
+    let first = lab.lf(&["wave", "rename", "research", "ops", "--json"]);
+    assert_eq!(first["files"]["state"], "uncommitted");
+    let goal = std::fs::read_to_string(lab.path().join(".lf/wave/ops/GOAL.md")).unwrap();
+    std::fs::write(
+        lab.path().join(".lf/wave/ops/GOAL.md"),
+        format!("{goal}\nLater edit.\n"),
+    )
+    .unwrap();
+    git(&lab, &["checkout", branch.trim()]);
+    let again = lab.lf(&["wave", "rename", "research", "ops", "--json"]);
+    assert_eq!(again["id"], original["id"]);
+    assert_eq!(again["files"]["state"], "committed", "{again}");
+    assert_eq!(git(&lab, &["show", "HEAD:.lf/wave/ops/GOAL.md"]), goal);
+    assert!(git(&lab, &["diff"]).contains("Later edit."));
+    assert_eq!(
+        git(&lab, &["show", "HEAD:.lf/wave/notes/MEMORY.md"]),
+        "See .lf/wave/ops/GOAL.md\n"
+    );
+    let unrelated = lab.run(&["wave", "rename", "never-existed", "ops", "--json"]);
+    assert!(!unrelated.status.success());
+    assert!(stderr(&unrelated).contains("no Wave never-existed"));
+}
+
+#[test]
+fn rename_preserves_authored_bytes_modes_and_symlinks() {
+    let lab = Lab::new();
+    lab.lf(&["wave", "add", "research", "--json"]);
+    let source = lab.path().join(".lf/wave/research");
+    // The bracketed filename is literal, not a pattern selecting notes1.md.
+    std::fs::write(source.join("notes[1].md"), [0, 255, 10]).unwrap();
+    std::fs::write(source.join("notes1.md"), "A different document.\n").unwrap();
+    std::fs::write(source.join("measure"), "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(
+        source.join("measure"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    symlink("notes[1].md", source.join("latest")).unwrap();
+    git(&lab, &["add", ".lf/wave/research"]);
+    git(&lab, &["commit", "-m", "Authored Wave files"]);
+
+    let renamed = lab.lf(&["wave", "rename", "research", "ops", "--json"]);
+    assert_eq!(renamed["files"]["state"], "committed", "{renamed}");
+    let target = lab.path().join(".lf/wave/ops");
+    assert_eq!(
+        std::fs::read(target.join("notes[1].md")).unwrap(),
+        [0, 255, 10]
+    );
+    assert_eq!(
+        std::fs::read_link(target.join("latest")).unwrap(),
+        Path::new("notes[1].md")
+    );
+    assert!(git(&lab, &["ls-tree", "HEAD", ".lf/wave/ops/measure"]).starts_with("100755"));
+    assert!(git(&lab, &["ls-tree", "HEAD", ".lf/wave/ops/latest"]).starts_with("120000"));
+    assert!(git(&lab, &["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn removal_retry_leaves_a_replacement_at_the_deleted_address_intact() {
+    let lab = Lab::new();
+    let original = lab.lf(&["wave", "add", "research", "--json"]);
+    let branch = git(&lab, &["branch", "--show-current"]);
+    git(&lab, &["checkout", "--detach"]);
+    assert_eq!(
+        lab.lf(&["wave", "remove", "research", "--json"])["files"]["state"],
+        "uncommitted"
+    );
+    let replacement = lab.lf(&[
+        "wave",
+        "add",
+        "research",
+        "--objective",
+        "Replacement work",
+        "--json",
+    ]);
+    let files = std::fs::read(lab.path().join(".lf/wave/research/GOAL.md")).unwrap();
+    git(&lab, &["checkout", branch.trim()]);
+    let retry = lab.lf(&["wave", "remove", original["id"].as_str().unwrap(), "--json"]);
+    assert_eq!(retry["files"]["state"], "unchanged", "{retry}");
+    assert_eq!(
+        std::fs::read(lab.path().join(".lf/wave/research/GOAL.md")).unwrap(),
+        files
+    );
+    assert_eq!(lab.live_waves(), ["research"]);
+    assert_ne!(original["id"], replacement["id"]);
+    assert!(git(&lab, &["diff"]).contains("Replacement work"));
+}
+
+#[test]
+fn rename_retry_preserves_a_reused_source_and_the_original_provider_binding() {
+    let lab = Lab::new();
+    let original = lab.lf(&["wave", "add", "research", "--json"]);
+    bind_initiative(&lab, "research", "original-initiative");
+    let branch = git(&lab, &["branch", "--show-current"]);
+    git(&lab, &["checkout", "--detach"]);
+    let first = lab.lf(&[
+        "wave",
+        "rename",
+        "research",
+        "ops",
+        "--title",
+        "Operations",
+        "--json",
+    ]);
+    assert_eq!(first["files"]["state"], "uncommitted");
+    assert!(first["initiative"]["error"].is_string());
+    let replacement = lab.lf(&["wave", "add", "research", "--json"]);
+    bind_initiative(&lab, "research", "replacement-initiative");
+    let replacement_config =
+        std::fs::read(lab.path().join(".lf/wave/research/config.yaml")).unwrap();
+    // The current target binding also cannot redirect the outstanding provider effect.
+    let target_config = lab.path().join(".lf/wave/ops/config.yaml");
+    let changed_binding = std::fs::read_to_string(&target_config)
+        .unwrap()
+        .replace("original-initiative", "later-initiative");
+    std::fs::write(&target_config, &changed_binding).unwrap();
+    git(&lab, &["checkout", branch.trim()]);
+    let again = lab.lf(&["wave", "rename", "research", "ops", "--json"]);
+    assert_eq!(again["id"], original["id"]);
+    assert_eq!(again["files"]["state"], "committed", "{again}");
+    assert_eq!(again["initiative"]["initiative"], "original-initiative");
+    assert_eq!(again["initiative"]["title"], "Operations");
+    assert!(again["initiative"]["error"].is_string());
+    assert_eq!(
+        std::fs::read(&target_config).unwrap(),
+        changed_binding.as_bytes()
+    );
+    assert_eq!(
+        std::fs::read(lab.path().join(".lf/wave/research/config.yaml")).unwrap(),
+        replacement_config
+    );
+    assert_ne!(original["id"], replacement["id"]);
+    assert_eq!(lab.live_waves(), ["ops", "research"]);
 }

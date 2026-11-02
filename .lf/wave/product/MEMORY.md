@@ -931,13 +931,15 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   creation selects its current Project; standalone creation has none. Ordinary
   Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;
   repository configuration owns the Linear Team.
-- Wave lifecycle (LOO-500, Jack Heart 2026-10-28): `lf wave add|remove|rename` is
-  the one path for CLI and Desktop; `connect` only links (an unregistered name runs
-  `add` first). Remove retires (never deletes); open Tasks move to the parent
-  Wave or repository, `--delete-backlog` deletes unstarted ones, started Tasks
-  always move. `lf wave list` and Desktop list the same live rows; `lf wave show`
-  reads a removed one. Authored `.lf/wave/<name>/` changes commit on main; stale
-  checkouts match directories by `config.yaml` id.
+- LOO-500 (Jack Heart, 2026-10-28): CLI/Desktop share `wave add|remove|rename`;
+  unknown `connect` names use add first. Remove retires; open Tasks move to
+  parent/repository, started Tasks always move, `--delete-backlog` deletes only
+  unstarted Tasks. Live lists exclude retired Waves; `show` retains history.
+  Authored files commit on main; stale paths resolve by config id. November 2
+  isolated CLI failures show retry evidence must outlive retirement, rename and
+  directory deletion: live-child readers lose archive obligations, absent paths
+  hide pending commits, and a target name cannot prove a previous rename.
+  Recovery remains unresolved; preserve replacement Waves and unrelated edits.
 - `lf pm show --no-sync` is cache evidence, not proof of current provider state.
   `synced_at`, snapshot generation, and source freshness have different meanings.
   A rejected write can follow a successful provider mutation if readback failed;
@@ -957,10 +959,9 @@ lfd and resident-cron contracts remain in
 ## Swift data path — RegistryQuery is the single reader
 
 Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
-Unknown wire status stays explicit. Desktop lists Waves from the store only:
-LOO-500 (2026-11-02) deleted the `.lf/wave/*/GOAL.md` placeholder scan, which
-resurfaced a removed Wave whose directory outlived the store row. Directories
-register on `lf wave add`, `connect --all` or a portfolio join, never on a read.
+Unknown wire status stays explicit. LOO-500 (2026-11-02) removed Desktop's
+filesystem placeholder scan: surviving files resurfaced retired Waves. Explicit
+writes register directories; reads list store rows only.
 AGENTS.md owns shared runtime vocabulary; earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
 `92d95edfe:wave/product/MEMORY.md`, this heading.
 

@@ -34,8 +34,8 @@ A Session nobody views ends after `session.end_detached_after` (default `24h`,
 executable is removed, replaced or superseded (a deleted worktree, a relinked
 build, a rebuilt Dev.app, `lf install` selecting another build) ends once it
 waits for a person, viewed or not, and logs the path to `logs/lf.log`; an
-attached viewer prints why and reruns its invocation through the lf entry, so
-it lands in the reopened conversation without typing `lf resume <session>`.
+attached viewer prints why and runs the `lf resume <session>` the owner sends
+through the lf entry, so it lands in the reopened conversation without typing.
 A turn in progress or a Graph step keeps its owner running until it settles; a
 viewer keeps it only from the detached limit; headless Runs are never ended. Each
 owner judges only itself and ends by signaling itself, which stops its agent and

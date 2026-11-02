@@ -3,19 +3,18 @@
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
 //! processes. The inventory names every recorded, live lf Process by executable
 //! and version, and flags the ones a launch through the entry no longer runs
-//! (`installation::superseded`, the owner's and `lf resume`'s judgement) or
-//! that can't open the store any more. An owner on this build ends itself once its
+//! (`installation::superseded`, the judgement owners and `lf resume` share) or
+//! that can't open the store any more. A superseded owner ends itself once its
 //! Sessions wait for a person and `lf resume` reopens them on the installed lf;
-//! rollover does the same now, for every superseded owner at once, including
-//! owners that predate that policy: an idle Session execution owner with saved
-//! provider history is ended the way its lifetime policy ends it, then each of
-//! its Sessions resumes on the selected lf. Its viewers follow. A busy owner
-//! that answers its socket stays until its turn ends; one that does not answer
-//! cannot be watched or trusted to report idle, so it moves and the cut turn is
-//! reported. A Graph runner
-//! isn't stopped: each step resolves the installed entry when it launches, so
-//! its next step already runs on the selected lf and the runner leaves with the
-//! Graph. Everything else is listed with why it stays.
+//! rollover does that for every superseded owner at once, including owners that
+//! predate the policy: an idle owner with saved provider history is ended the
+//! way its lifetime policy ends it, each of its Sessions resumes on the selected
+//! lf, and its viewers follow. A busy owner that answers its socket stays until
+//! its turn ends; one that does not answer cannot be watched or trusted to
+//! report idle, so it moves and the cut turn is reported. A Graph runner isn't
+//! stopped: each step resolves the installed entry when it launches, so its next
+//! step already runs on the selected lf and the runner leaves with the Graph.
+//! Everything else is listed with why it stays.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -157,11 +156,10 @@ pub fn inventory() -> Result<BinaryInventory> {
     });
     let mut binaries = group(processes, |path| {
         let version = path.and_then(&mut version_of);
-        let is_selected = match (&selected, path) {
-            (Some(_), Some(path)) => !crate::installation::superseded(path),
+        let is_selected = match path {
+            Some(path) => !crate::installation::superseded(path),
             // Without an entry there is nothing to be behind.
-            (None, _) => true,
-            (Some(_), None) => false,
+            None => selected.is_none(),
         };
         (version, is_selected)
     });
@@ -384,12 +382,10 @@ enum Disposition {
 }
 
 /// Whether a superseded Process can move, and why not when it can't.
-/// `answering` asks an owner whether it still answers its socket.
 async fn disposition(
     shared: &SharedStore,
     binary: &RunningBinary,
     process: &RunningLfProcess,
-    answering: impl Fn(&LfProcessId) -> bool,
 ) -> Result<Disposition> {
     if shared.sqlite.runs_graph(&process.id)? {
         return Ok(graph_runner(binary));
@@ -401,7 +397,7 @@ async fn disposition(
 /// a person or cannot be watched: a busy owner that answers its socket finishes
 /// its turn and ends itself, as `lf resume` lets it; one that does not answer
 /// has only a claim of a turn in progress. Its viewers follow it to the
-/// selected lf.
+/// selected lf. `answering` asks the owner; the unit test answers for it.
 async fn owner_disposition(
     shared: &SharedStore,
     process: &RunningLfProcess,
@@ -520,7 +516,7 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
     };
     for binary in inventory.superseded() {
         for process in &binary.processes {
-            let disposition = disposition(&store, binary, process, answering).await?;
+            let disposition = disposition(&store, binary, process).await?;
             report.place(binary.describe(), process, disposition);
         }
     }
@@ -752,11 +748,7 @@ mod tests {
 
         let of = |binary, process| {
             let store = store.clone();
-            async move {
-                disposition(&store, binary, process, |_| true)
-                    .await
-                    .unwrap()
-            }
+            async move { disposition(&store, binary, process).await.unwrap() }
         };
         assert!(matches!(
             of(&installed, &runner).await,

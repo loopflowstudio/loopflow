@@ -4,8 +4,8 @@
 //! deleted, a build relinked, Dev.app rebuilt, `lf install` selecting another
 //! build) ends as soon as its Sessions wait for a person, viewers
 //! notwithstanding: it would otherwise run a vanished or outdated build
-//! indefinitely. Its attached viewers are told why and which entry reopens the
-//! conversation, and they follow it. An owner nobody has viewed for
+//! indefinitely. Its attached viewers are told why and sent the `lf resume`
+//! that reopens the conversation through the entry, and they run it. An owner nobody has viewed for
 //! `session.end_detached_after` ends the same way. Ending stops its agent and
 //! records its exit, so `lf resume` reopens the conversation from provider
 //! history and `lf resume --all` leaves it alone.
@@ -94,18 +94,22 @@ fn watch(
                     let moved = match change {
                         Some(change) => {
                             tracing::warn!(%owner, "ending a Session whose lf was {change}");
-                            // Removed, replaced and superseded are three ways
-                            // of noticing that a launch through the entry no
-                            // longer runs this build; viewers rerun their
-                            // invocation through the entry for every one. The
-                            // notice names the command they are rerunning, so
-                            // the hint survives a follow that fails.
+                            // The notice names the command viewers run through
+                            // the entry, so it survives a failed follow.
                             let session = store
                                 .owner_sessions(owner)?
                                 .into_iter()
                                 .next()
                                 .expect("an owner waiting for a person has a Session");
-                            let successor = crate::os_process::resolve_lf_binary().ok();
+                            let successor =
+                                crate::os_process::resolve_lf_binary().ok().map(|entry| {
+                                    vec![
+                                        entry.to_string_lossy().into_owned(),
+                                        "session".into(),
+                                        "resume".into(),
+                                        session.clone(),
+                                    ]
+                                });
                             let notice = format!(
                                 "This Session's lf was {change}; reopening it as `lf resume {session}`"
                             );

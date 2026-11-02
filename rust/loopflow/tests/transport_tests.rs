@@ -305,8 +305,8 @@ impl Viewer {
         serde_json::from_str(&line).unwrap()
     }
     /// Every move notice received until the owner closes this connection,
-    /// with the lf entry it names.
-    fn moves(&mut self) -> Vec<(Option<String>, Option<String>)> {
+    /// with the successor command it carries.
+    fn moves(&mut self) -> Vec<(Option<String>, Option<Vec<String>>)> {
         let mut moves = Vec::new();
         let mut line = String::new();
         while matches!(self.socket.read_line(&mut line), Ok(1..)) {
@@ -314,7 +314,7 @@ impl Viewer {
             if value["kind"] == "moved" {
                 moves.push((
                     value["notice"].as_str().map(str::to_owned),
-                    value["successor"].as_str().map(str::to_owned),
+                    serde_json::from_value(value["successor"].clone()).unwrap(),
                 ));
             }
             line.clear();
@@ -1232,21 +1232,27 @@ fn sessions_end_when_their_lf_executable_goes() {
     for owner in &owners[..3] {
         fixture.ends(owner);
     }
-    // Every viewer learns why and which entry reopens the conversation.
+    // Every viewer learns why and the command that reopens the conversation
+    // through its entry.
     let moved = |index: usize, change: &str| {
         (
             Some(format!(
                 "This Session's lf was {change}; reopening it as `lf resume {}`",
                 sessions[index]
             )),
-            Some(launched[index].1.to_str().unwrap().to_owned()),
+            Some(vec![
+                launched[index].1.to_str().unwrap().to_owned(),
+                "session".to_owned(),
+                "resume".to_owned(),
+                sessions[index].clone(),
+            ]),
         )
     };
     for (index, change) in [(0, "removed"), (1, "replaced"), (2, "superseded")] {
         assert_eq!(viewers[index].moves(), [moved(index, change)], "{change}");
     }
-    // Each terminal reran its invocation through its entry: the conversation
-    // resumed with its history on the build that entry runs now.
+    // Each terminal ran that command: the conversation resumed with its
+    // history on the build its entry runs now.
     let lines = fixture.launches(7);
     let mut reopened_sessions: Vec<String> = lines[4..]
         .iter()

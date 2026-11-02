@@ -14,7 +14,9 @@ Headless choices, 2026-11-02. Each is reversible; Jack decides.
   and others ended. Lazy is uniform: idle Sessions end and come back on
   `lf resume` or when viewed. If Jack wants every idle Session running again
   right after an install, rollover should also resume Sessions that ended
-  for supersession (needs a recorded reason on the exit).
+  for supersession (needs a recorded reason on the exit). Jack (2026-11-02):
+  LOO-709's 2-minute unviewed grace makes "perhaps always" moot; unviewed
+  superseded owners end within minutes on their own.
 - **Build identity for `lf resume` = canonical path, else content digest,
   owner against the entry's target.** Desktop's helper and the CLI artifact
   are different paths with the same bytes; comparing content keeps Desktop and

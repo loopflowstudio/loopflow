@@ -139,12 +139,11 @@ enum Response {
     Detached,
     /// Another viewer took input control, or the owner is ending because its
     /// lf was removed, replaced or superseded; this viewer prints `notice` and
-    /// leaves. With a `successor`, it reruns its invocation through that lf
-    /// entry; an ending owner sends the entry for every change. Older owners
-    /// send no `successor`; serde reads the missing field as `None`.
+    /// leaves. An ending owner also sends `successor`, the command that reopens
+    /// the conversation through the lf entry, and the viewer runs it.
     Moved {
         notice: Option<String>,
-        successor: Option<PathBuf>,
+        successor: Option<Vec<String>>,
     },
     Busy,
     /// How a viewer that detaches can return.
@@ -1088,7 +1087,7 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                             eprintln!("\n{notice}");
                         }
                         return match successor {
-                            Some(entry) => follow(&entry),
+                            Some(command) => follow(&command),
                             None => Ok(()),
                         };
                     }
@@ -1155,20 +1154,21 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
     }
 }
 
-/// Rerun this invocation through `entry`, the lf that now owns the work the
-/// ended owner held: `lf resume <id>` lands in the conversation on the
-/// installed lf. The owner judged itself superseded; this viewer only follows.
-/// The argv is replayed as typed, so a renamed command survives only while
-/// the newer lf keeps the old spelling as a Clap alias.
-fn follow(entry: &Path) -> Result<()> {
-    let status = Command::new(entry)
-        .args(std::env::args_os().skip(1))
+/// Run `command`, the `<entry> session resume <id>` an ending owner sent, so
+/// this terminal lands in the conversation on the lf the entry launches now.
+/// The owner judged itself; this viewer only follows.
+fn follow(command: &[String]) -> Result<()> {
+    let (program, args) = command
+        .split_first()
+        .context("the owner sent an empty successor command")?;
+    let status = Command::new(program)
+        .args(args)
         .status()
-        .with_context(|| format!("rerun through {}", entry.display()))?;
+        .with_context(|| format!("run {}", command.join(" ")))?;
     match status.code() {
         Some(0) => Ok(()),
         Some(code) => Err(crate::process::CommandExit(code as u8).into()),
-        None => bail!("{} ended by a signal", entry.display()),
+        None => bail!("{program} ended by a signal"),
     }
 }
 

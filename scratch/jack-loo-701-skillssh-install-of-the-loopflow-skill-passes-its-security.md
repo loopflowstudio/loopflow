@@ -51,3 +51,22 @@ delegated the PromptScript decision.
   High/Critical, read the finding and repair the skill.
 
 Check: alignment pytest passed (5); `cargo test -p loopflow --test golden_prompt` passed.
+
+## Demo (headless, 2026-11-02)
+
+Reviewed on Jack Heart's behalf; no person present, so nothing here is Jack's
+statement.
+
+- The published skill's handoff is literal: a quoted heredoc carrying
+  ``fix `rm -rf ~` and $(whoami)`` prints it unchanged, and `lf help task create`
+  confirms stdin supplies the notes and its first line the title.
+- Skill Run/Graph runs are scoped to the person's request, read first.
+- Live audit endpoint still reports main's skill: Gen `safe`, Socket `0 alerts`,
+  Snyk `low` (analyzed 2026-10-30). The branch text is not audited until merged.
+- PR #1795 open and mergeable at c052f6677e; alignment pytest 5 passed.
+
+Next: merge, then the post-merge re-audit in Remaining is the Task's proof.
+
+## Gate (2026-11-02)
+
+`scripts/test.py --reuse-passing --rust-filter 'binary(golden_prompt) | test(builtins::)'`: PASS (architecture, python, rust fmt/nextest/clippy, website) in 252 s. No code changes needed; positional `lf task create '<outcome>'` confirmed in `lf help task create`.

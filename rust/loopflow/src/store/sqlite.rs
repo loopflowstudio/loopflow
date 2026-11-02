@@ -2442,7 +2442,6 @@ mod frontier_tests {
         let shared = SharedMachine::new();
         let path = shared.shared_db();
         open(&path, &shared.home, Authorized).unwrap();
-        seed_current_wave(&path);
         let running = open(&path, &shared.home, Forbidden).unwrap();
         let before = Wave::new(WaveId::new(), "Before upgrade".into(), "/repo".into());
         running.create_wave(&before).unwrap();
@@ -2475,9 +2474,8 @@ mod frontier_tests {
         let path = broken.shared_db();
         open(&path, &broken.home, Authorized).unwrap();
         let running = open(&path, &broken.home, Forbidden).unwrap();
-        let newer = rusqlite::Connection::open(&path).unwrap();
-        apply_newer_migration(
-            &newer,
+        let newer = apply_newer_migration(
+            &rusqlite::Connection::open(&path).unwrap(),
             "CREATE TABLE wave_marks (wave_id TEXT NOT NULL);",
             false,
         )
@@ -2487,7 +2485,7 @@ mod frontier_tests {
             .expect_err("a breaking newer migration stops the running reader")
             .to_string();
         assert!(
-            refusal.contains("this store needs an lf that knows newer_migration")
+            refusal.contains(&format!("this store needs an lf that knows {newer}"))
                 && refusal.ends_with("run `lf install`")
                 && !refusal.contains("delete"),
             "{refusal}"

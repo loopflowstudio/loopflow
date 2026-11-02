@@ -1211,8 +1211,8 @@ pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
 
 /// Open the machine's shared registry store only if one already exists;
 /// `None` when it is absent. A store this lf cannot open — one a newer build
-/// locked, say — is an error naming the skew and its fix, never an empty
-/// registry: agents read "nothing here" as fact.
+/// migrated past it, say — is an error naming the skew and its fix, never an
+/// empty registry: agents read "nothing here" as fact.
 pub async fn open_existing_store() -> StoreResult<Option<Store>> {
     let path = default_db_path();
     if !path.exists() {

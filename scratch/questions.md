@@ -48,7 +48,8 @@ Nothing in this Task's scope. Gate owns the affected suites.
 
 Check: `cargo test -p loopflow --lib store::sqlite::frontier_tests::` 11 passed;
 `--test task_pr_authority_tests` 12 passed; `--test integration -- doctor_tests::status_reads` passed;
-clippy clean (tree unchanged since; realign reran nothing).
+clippy clean. Compress (2026-11-02) trimmed the running-reader test's unused
+seed and a doc comment; frontier_tests reran, 11 passed; gate owns the rest.
 
 ## Concept review (2026-11-02, headless)
 

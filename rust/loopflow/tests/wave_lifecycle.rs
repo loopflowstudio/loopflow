@@ -47,7 +47,7 @@ fn create_task(repo: &Path, home: &Path, wave: &str, title: &str) -> String {
 }
 
 fn live_waves(repo: &Path, home: &Path) -> Vec<String> {
-    let listing = lf(repo, home, &["wave", "list", "--current", "--json"]);
+    let listing = lf(repo, home, &["wave", "list", "--json"]);
     let mut names: Vec<String> = listing
         .as_array()
         .unwrap()
@@ -117,6 +117,12 @@ fn removing_an_empty_wave_retires_it_and_removes_its_files_on_main() {
         history["waves"][0]["wave"]["id"], added["id"],
         "its address still shows the history"
     );
+    let text = command(repo.path(), home.path(), &["wave", "show", "research"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("removed at "), "{text}");
+    assert!(!text.contains("superseded by"), "{text}");
 
     let again = lf(
         repo.path(),

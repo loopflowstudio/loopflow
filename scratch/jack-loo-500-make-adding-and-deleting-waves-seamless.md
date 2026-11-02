@@ -463,7 +463,7 @@ Page: `scratch/concept-review.html`.
   decision that the unfiltered list is a history view; nothing in product code
   abandons a Wave except `retire_waves`, so "abandoned", "retired" and
   "removed" name one state with three words.
-  Direction (implement next): the live filter is the default and `--current`
+  Direction (built 2026-11-02, below in Checks): the live filter is the default and `--current`
   is deleted with its callers (`RegistryQuery`, `read.rs` `Waves`, the
   `s1`–`s5` skills, `graph/mod.rs` test, `status_tests`, `wave_lifecycle`,
   the Swift README and tests). The default excludes retired rows; a legacy
@@ -506,6 +506,14 @@ awaits the planning refresh, so the row exists when selected.
   integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9;
   `swift test --filter 'RenameWaveSheetTests|RemoveWaveSheetTests|DTOFixtureTests|WaveRowTests|CreateWaveSheetTests|WaveSurfacePrimaryHierarchyTests'`
   61/61; clippy and fmt clean. Affected suites → gate.
+- 2026-11-02 list default: `lf wave list` omits removed Waves without a flag
+  (`--current` deleted with RegistryQuery, `read.rs`, s1–s5, benchmark); never-
+  removed `abandoned` strays stay listed; `lf wave show|status` head with
+  `removed`, `removed at <date>`, `superseded by <id>` only with a successor.
+  `--lib status_tests::wave_list_keeps lf::tests graph::tests::vsm` 38/38;
+  `--test integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests`
+  9/9; `swift test --filter 'RegistryQueryTests|PortfolioRepoStateTests'` 21/21;
+  clippy and fmt clean. Affected suites → gate.
 - 2026-11-02 realign (Remove sheet leftovers): `swift test --filter
   'RemoveWaveSheetTests|RenameWaveSheetTests|DTOFixtureTests'` 55/55. Rust untouched
   since the compress pass; affected suites → gate.

@@ -1810,7 +1810,7 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List authored Waves and retained planning identities without starting work.
+    /// List this repository's Waves; removed Waves stay readable by `lf wave show`.
     List {
         /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
         #[arg(long)]
@@ -1819,9 +1819,6 @@ pub enum WaveCommand {
         /// current repository (worktrees collapse to their main checkout).
         #[arg(long)]
         all: bool,
-        /// Exclude abandoned and retired registrations from current navigation.
-        #[arg(long)]
-        current: bool,
     },
     /// Show one Wave's current plan, Task details, and execution evidence.
     Status {
@@ -3211,8 +3208,7 @@ mod tests {
             Some(Commands::Wave {
                 cmd: WaveCommand::List {
                     json: true,
-                    all: false,
-                    current: false
+                    all: false
                 }
             })
         ));

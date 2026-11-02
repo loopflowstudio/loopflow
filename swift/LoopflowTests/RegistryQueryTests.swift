@@ -180,7 +180,7 @@ struct RegistryQueryTests {
         let counter = CallCounter()
         let query = RegistryQuery { args, _ in
             await counter.increment()
-            #expect(args == ["wave", "list", "--all", "--current", "--json"])
+            #expect(args == ["wave", "list", "--all", "--json"])
             return json
         }
 

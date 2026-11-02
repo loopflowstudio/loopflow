@@ -578,10 +578,10 @@ fn scope_waves_to_repo(waves: Vec<Wave>, directory: &Path, all: bool) -> Result<
         .collect())
 }
 
-pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
+pub fn ls(json: bool, all: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let Some(snapshots) = list(all, current).await? else {
+        let Some(snapshots) = list(all).await? else {
             return no_registry(json, "[]");
         };
         if json {
@@ -594,19 +594,16 @@ pub fn ls(json: bool, all: bool, current: bool) -> Result<()> {
 }
 
 /// `lf wave list`'s rows; `None` before this Machine has a registry.
-pub async fn list(all: bool, current: bool) -> Result<Option<Vec<WaveSnapshot>>> {
+pub async fn list(all: bool) -> Result<Option<Vec<WaveSnapshot>>> {
     let Some(store) = open_existing_store().await.map(std::sync::Arc::new) else {
         return Ok(None);
     };
-    Ok(Some(wave_snapshots(&store, all, current).await?))
+    Ok(Some(wave_snapshots(&store, all).await?))
 }
 
-/// The rows of `lf wave list`, in its order.
-pub(crate) async fn wave_snapshots(
-    store: &SharedStore,
-    all: bool,
-    current: bool,
-) -> Result<Vec<WaveSnapshot>> {
+/// The rows of `lf wave list`, in its order: every Wave `lf wave remove` has
+/// not removed. Desktop's sidebar reads the same rows.
+pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec<WaveSnapshot>> {
     let waves = store
         .list_waves(None)
         .await
@@ -617,7 +614,7 @@ pub(crate) async fn wave_snapshots(
     for wave in waves {
         let checkout = wave_repository(&wave, &mut checkouts)?;
         let snapshot = snapshot_wave(store, &wave, &checkout).await?;
-        if !current || current_wave(&snapshot) {
+        if !removed(&snapshot) {
             snapshots.push(snapshot);
         }
     }
@@ -625,8 +622,10 @@ pub(crate) async fn wave_snapshots(
     Ok(snapshots)
 }
 
-fn current_wave(wave: &WaveSnapshot) -> bool {
-    wave.status != WorkStatus::Abandoned && wave.retired_at.is_none()
+/// `lf wave remove` retires the row. A legacy `abandoned` row that was never
+/// removed stays listed so **Remove Wave…** can finish it.
+fn removed(wave: &WaveSnapshot) -> bool {
+    wave.retired_at.is_some()
 }
 
 /// Publication is local; Session claims and receipts never enter planning sync.
@@ -1392,7 +1391,7 @@ async fn roadmap_snapshot(
             .unwrap_or(wave);
         let checkout = wave_repository(wave, &mut checkouts)?;
         let snapshot = snapshot_wave(store, wave, &checkout).await?;
-        if !include_history && !current_wave(&snapshot) {
+        if !include_history && removed(&snapshot) {
             continue;
         }
         if task.is_some()
@@ -2592,27 +2591,32 @@ fn print_setup(setup: &crate::work::wave::setup::WaveSetup) {
     }
 }
 
-fn print_status(status: &WaveDetailSnapshot) {
+/// The Wave line `lf wave show` and `lf wave status` open with. A removed Wave
+/// reads `removed`, with its date and its successor when one exists.
+fn print_wave_heading(wave: &WaveSnapshot) {
     let colors = Colors::default();
-    let wave = &status.wave;
     println!(
         "{bold}{name}{reset}  {status}",
         bold = colors.bold,
         reset = colors.reset,
         name = wave.name,
-        status = if wave.retired_at.is_some() {
-            "retired"
+        status = if removed(wave) {
+            "removed"
         } else {
             wave.status.label()
         },
     );
-    if let Some(retired_at) = &wave.retired_at {
-        println!(
-            "  history   retired at {retired_at}; superseded by {}: {}",
-            wave.superseded_by_wave_id.as_deref().unwrap_or("-"),
-            wave.retirement_reason.as_deref().unwrap_or("retired")
-        );
+    if let Some(removed_at) = &wave.retired_at {
+        println!("  removed at {removed_at}");
     }
+    if let Some(successor) = &wave.superseded_by_wave_id {
+        println!("  superseded by {successor}");
+    }
+}
+
+fn print_status(status: &WaveDetailSnapshot) {
+    let wave = &status.wave;
+    print_wave_heading(wave);
     println!("  goal      {}", wave.goal);
     match &wave.machine {
         Some(machine) => println!("  machine      {} ({})", machine.id, machine.route),
@@ -3023,20 +3027,13 @@ fn section_label(section: RoadmapSection) -> &'static str {
 }
 
 fn print_roadmap(roadmap: &RoadmapSnapshot) {
-    let colors = Colors::default();
     if roadmap.waves.is_empty() {
         println!("No waves in the registry.");
         return;
     }
     let now = now();
     for wave in &roadmap.waves {
-        println!(
-            "{bold}{name}{reset}  {status}",
-            bold = colors.bold,
-            reset = colors.reset,
-            name = wave.wave.name,
-            status = wave.wave.status.label(),
-        );
+        print_wave_heading(&wave.wave);
         print_projects(&wave.projects);
         print_metric_portfolio(&wave.metric_portfolio);
         print_unavailable_tasks(&wave.unavailable_tasks);

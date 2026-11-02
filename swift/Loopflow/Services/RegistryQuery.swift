@@ -90,7 +90,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .taskFile(let issue, let path):
             return ["task", "file", issue, path, "--json"]
         case .waves:
-            return ["wave", "list", "--all", "--current", "--json"]
+            return ["wave", "list", "--all", "--json"]
         case .machineId:
             return ["machine", "id", "--json"]
         case .portfolio:

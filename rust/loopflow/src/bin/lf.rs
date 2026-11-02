@@ -2739,8 +2739,8 @@ fn execute_command(
                 },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune, *repo),
         Some(Commands::Wave {
-            cmd: WaveCommand::List { json, all, current },
-        }) => loopflow::lf::commands::waves::ls(*json, *all, *current),
+            cmd: WaveCommand::List { json, all },
+        }) => loopflow::lf::commands::waves::ls(*json, *all),
         Some(Commands::Wave {
             cmd: WaveCommand::Status {
                 wave, watch: true, ..

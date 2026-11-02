@@ -37,7 +37,8 @@
   no judgement. The test instead closes the dead owner rows the way retention
   does after a reboot (`completed_at` set, no `outcome`) and shows
   `lf resume --all` still resumes the viewed set.
-- **`s.interactive=0` in `owner_waits_for_person` may be redundant.** The
-  headless Run test passes without it because a pipe owner never reads a
-  limit. Left in place: a terminal owner holding a non-interactive Session
-  might still need it, and nothing here proves otherwise.
+- **`s.interactive=0` in `owner_waits_for_person` stays.** A pipe owner
+  never reads a detached limit, so the headless Run test passes without it,
+  but every owner watches its executable, and that path asks the same
+  question: a Run whose lf build is replaced mid-turn must keep running, and
+  `interactive=0` is what keeps it. Resolved 2026-11-02 (compress).

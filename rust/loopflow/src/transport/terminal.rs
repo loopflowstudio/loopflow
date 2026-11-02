@@ -32,9 +32,12 @@ impl vt100::Callbacks for Queries {
     }
 }
 
+/// Default attributes and a visible cursor, before any redraw.
+const PLAIN: &[u8] = b"\x1b[0m\x1b[?25h";
+
 /// Bytes that paint the owner's visible screen on an attaching viewer.
 pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
-    let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
+    let mut bytes = PLAIN.to_vec();
     let mut history = screen.clone();
     history.set_scrollback(usize::MAX);
     if screen.alternate_screen() {
@@ -57,7 +60,7 @@ pub(super) fn snapshot(screen: &vt100::Screen) -> Vec<u8> {
 /// owner is gone: its scrollback, oldest row first, then the visible screen.
 /// The alternate screen keeps no scrollback.
 pub(super) fn last_screen(screen: &vt100::Screen) -> Vec<u8> {
-    let mut bytes = b"\x1b[0m\x1b[?25h".to_vec();
+    let mut bytes = PLAIN.to_vec();
     if screen.alternate_screen() {
         bytes.extend(b"\x1b[?1049h");
     } else {

@@ -1709,12 +1709,24 @@ fn headless_run(command: &[&str], resume: bool) {
     creator.wait().unwrap();
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
     let (session, step): (String,String) = sql.query_row("SELECT session_id,lf_process_id FROM session_events WHERE kind='captured' AND receipt_key=?1", [launched.trim()], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
-    let outcome: Option<String> = sql
-        .query_row("SELECT outcome FROM processes WHERE id=?1", [&step], |r| {
+    let outcome = |id: &str| -> Option<String> {
+        sql.query_row("SELECT outcome FROM processes WHERE id=?1", [id], |r| {
             r.get(0)
         })
-        .unwrap();
-    assert!(outcome.is_none(), "viewer death settled the execution");
+        .unwrap()
+    };
+    let settles = |id: &str, what: &str| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(outcome) = outcome(id) {
+                assert_eq!(outcome, "succeeded");
+                return;
+            }
+            assert!(Instant::now() < deadline, "{what} did not settle");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    assert_eq!(outcome(&step), None, "viewer death settled the execution");
     if resume {
         // A Run is never resumed or taken over: the step keeps its turn.
         let output = fixture.command(&["resume", &session]).output().unwrap();
@@ -1727,30 +1739,9 @@ fn headless_run(command: &[&str], resume: bool) {
     }
     // Unviewed well past the limit, the Run keeps its turn.
     std::thread::sleep(Duration::from_secs(4));
-    let outcome: Option<String> = sql
-        .query_row("SELECT outcome FROM processes WHERE id=?1", [&step], |r| {
-            r.get(0)
-        })
-        .unwrap();
-    assert!(
-        outcome.is_none(),
-        "the detached limit ended a Run: {outcome:?}"
-    );
+    assert_eq!(outcome(&step), None, "the detached limit ended a Run");
     std::fs::remove_file(fixture.home.path().join("hold-turn")).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        let outcome: Option<String> = sql
-            .query_row("SELECT outcome FROM processes WHERE id=?1", [&step], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        if let Some(outcome) = outcome {
-            assert_eq!(outcome, "succeeded");
-            break;
-        }
-        assert!(Instant::now() < deadline, "step did not settle");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    settles(&step, "step");
     let graph: Option<String> = sql
         .query_row(
             "SELECT graph_lf_process_id FROM graph_process_steps WHERE lf_process_id=?1",
@@ -1759,18 +1750,8 @@ fn headless_run(command: &[&str], resume: bool) {
         )
         .optional()
         .unwrap();
-    while let Some(graph) = &graph {
-        let outcome: Option<String> = sql
-            .query_row("SELECT outcome FROM processes WHERE id=?1", [graph], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        if let Some(outcome) = outcome {
-            assert_eq!(outcome, "succeeded");
-            break;
-        }
-        assert!(Instant::now() < deadline, "Graph did not settle");
-        std::thread::sleep(Duration::from_millis(20));
+    if let Some(graph) = &graph {
+        settles(graph, "Graph");
     }
     let captures: i64 = sql
         .query_row(

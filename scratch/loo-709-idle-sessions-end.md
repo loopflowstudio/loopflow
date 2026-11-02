@@ -114,7 +114,9 @@ the Session" branch.
 - Run acceptance: `cargo test -p loopflow --test transport_tests -- headless
   resume_refuses detached_sessions_end_after_their_limit` (4) pass; Graph and
   plain `lf -b skill … --message` Runs hold their turn 4s past a 2s grace and
-  settle `succeeded`. The skill Run still passes with `s.interactive=0` removed
-  from `owner_waits_for_person`: the pipe owner never reads a limit.
+  settle `succeeded`. `s.interactive=0` in `owner_waits_for_person` is for the
+  executable-gone path, not the limit (`scratch/questions.md`).
+- Compress 2: `cargo test -p loopflow --lib -- transport::` and `--test
+  transport_tests headless resume_refuses` pass; `cargo fmt`, clippy clean.
 - The 27 pre-rule owners on Jack's machine are untouched; LOO-705's
   `lf monitor rollover` is the path for them.

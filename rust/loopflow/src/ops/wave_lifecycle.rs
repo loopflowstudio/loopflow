@@ -485,6 +485,7 @@ pub fn remove(
         let operation = Operation {
             id: uuid::Uuid::new_v4().to_string(),
             repo: repo_key.clone(),
+            source_repo: wave.repo().to_string(),
             kind: "remove".into(),
             from: receipt.name.clone(),
             to: String::new(),
@@ -1004,8 +1005,9 @@ pub async fn rename(
             return Err(lifecycle_error(format!("Wave {} is retired", wave.id())));
         }
         let from = wave.slug().to_string();
+        let source_repo = wave.repo().to_string();
         let to = target.unwrap_or_else(|| from.clone());
-        let moves = to != from || repo_key != target_checkout;
+        let moves = to != from || source_repo != target_checkout;
         if let Some(existing) = resolve_wave(&store, Path::new(&target_checkout), &to)? {
             if existing.id() != wave.id() {
                 return Err(lifecycle_error(format!(
@@ -1031,7 +1033,7 @@ pub async fn rename(
             id: child.id().clone(),
             slug: format!("{to}{}", &child.slug()[from.len()..]),
         }));
-        let changes = if moves && repo_key == target_checkout {
+        let changes = if moves && source_repo == target_checkout {
             recovery::prepare_files(&main, &owners, |copy| {
                 let source = copy.join(authored_path(&from));
                 if source.exists() {
@@ -1047,7 +1049,7 @@ pub async fn rename(
         } else {
             Vec::new()
         };
-        let providers = super::linear::read_initiative(&main, &from)
+        let providers = super::linear::read_initiative(Path::new(&source_repo), &from)
             .filter(|_| moves || title.is_some())
             .map(|initiative| ProviderChange {
                 wave: from.clone(),
@@ -1060,6 +1062,7 @@ pub async fn rename(
         let operation = Operation {
             id: uuid::Uuid::new_v4().to_string(),
             repo: repo_key.clone(),
+            source_repo,
             kind: "rename".into(),
             from,
             to,
@@ -1077,7 +1080,7 @@ pub async fn rename(
         operation
     };
     let renamed_now = !operation.planning_done
-        && (operation.from != operation.to || operation.repo != operation.target_repo);
+        && (operation.from != operation.to || operation.source_repo != operation.target_repo);
     if !operation.planning_done {
         let current = store
             .sqlite
@@ -1085,7 +1088,7 @@ pub async fn rename(
             .map_err(lifecycle_error)?
             .ok_or_else(|| lifecycle_error("original Wave is missing"))?;
         if current.slug() != operation.to || current.repo() != operation.target_repo {
-            if current.slug() != operation.from || current.repo() != operation.repo {
+            if current.slug() != operation.from || current.repo() != operation.source_repo {
                 return Err(lifecycle_error(
                     "original Wave moved again; this rename remains pending",
                 ));

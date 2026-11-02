@@ -362,8 +362,8 @@ Removal, rename and add share the uncommitted-files sentence.
 
 ## Remaining work
 
-Gate owns affected suites, migration upgrade verification, lint and the design's
-broader acceptance checks. The retry implementation now retains Machine-local
+Publication verification below covers affected suites, migration upgrades and lint;
+the existing install-scheduler fixture failure remains outside this lifecycle change. The retry implementation now retains Machine-local
 operation evidence and has public CLI regressions for the four counterexamples,
 replacement identities, changed provider bindings and later staged/working edits.
 Provider failure tests use missing repository configuration, so they prove retained
@@ -521,3 +521,33 @@ and lifecycle callers in `global_commands`, `served_reads` and
 `linear::local_planning`; no Swift or DTO shape changed in the retry repair.
 
 2026-11-02 realign: reused compress's `TMPDIR=/private/tmp uv run python scripts/test_network.py cargo test -p loopflow --test integration wave_lifecycle:: < /dev/null` pass (14/14) and `cargo fmt --all` pass; code unchanged; `git diff --check` and `lf context` pass; broader affected suites/migration upgrade/lint → gate, native interaction/live Linear recovery → demo/review.
+
+
+### Publication verification, 2026-11-02
+
+The affected checks found and repaired a missing architecture-map owner and a
+relocation regression: the invoking repository was mistaken for the original
+Wave repository when the original checkout was gone. Retained operations now
+record both locations, capture the original provider binding and preserve the
+manual cross-repository file receipt. The existing relocation test also proves
+that retry preserves the relocated identity.
+
+- `uv run python scripts/check_architecture.py` and `uv run python scripts/check_migrations.py`: pass after mapping `wave_lifecycle_operations` and correcting the Wave lifecycle description.
+- `TMPDIR=/private/tmp uv run python scripts/test.py --rust --reuse-passing --rust-filter <affected lifecycle and caller suites>`: initial Rust 272/274 passed, including migration upgrades, exchange and all 14 lifecycle tests; Python 512 passed/1 skipped plus the performance boundary check passed; website 72 passed. Exact command and results: `.lf/tmp/gate/run-78182/` and `/tmp/loo-500-publish-rust.log`.
+- `TMPDIR=/private/tmp LOOPFLOW_TEST_LF="$PWD/target/debug/lf" uv run python scripts/test_network.py cargo nextest run -p loopflow --no-fail-fast --build-jobs 4 --test-threads 4 -E 'test(wave_lifecycle::) | test(wave_repository_ownership::) | binary(served_reads) | test(scheduled_install_is_independent)' < /dev/null`: all 18 lifecycle/ownership/app-equivalence checks pass after repair; the unrelated scheduler fixture still fails.
+- `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings`: pass on the repair.
+- `scripts/test_desktop.sh --filter 'WorkCLISubscriptionTests|CreateWaveSheetTests|RemoveWaveSheetTests|RenameWaveSheetTests|DTOFixtureTests|PortfolioRepoStateTests' -Xswiftc -gnone < /dev/null`: 67/67 pass after relinking the stale generated test executable; `uv run python scripts/check_swift_multiplatform_boundaries.py` passes.
+
+The broad Desktop run initially failed three CLI-stream cases because SwiftPM
+relinked the app but retained the older test executable (14:55 versus the Rust
+archive's 15:51). The executable lacked `wave_lifecycle_operations`; removing
+only that generated executable and rebuilding linked the current archive and
+resolved all three failures. No production workaround or test retry was added.
+
+The install-scheduler failure is pre-existing: both the unchanged test and
+`origin/main` implementation retain the mismatch. `schedule` deliberately skips
+a disposable HOME before scheduling, while the fixture expects a weekly job.
+A trial daily expectation still failed at that guard and was reverted. This
+publication does not claim a wholly green gate. Native Desktop interaction,
+successful live Linear recovery and process termination at every effect boundary
+remain unproved; publication neither merges nor completes the Task.

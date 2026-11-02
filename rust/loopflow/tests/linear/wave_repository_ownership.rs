@@ -609,6 +609,23 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
         ],
     );
     assert_eq!(relocated["id"], wave.id().as_str());
+    assert_eq!(relocated["renamed"], true);
+    assert_eq!(relocated["files"]["state"], "uncommitted");
+    let retried = lf(
+        &home,
+        &target,
+        &[
+            "wave",
+            "rename",
+            wave.id().as_str(),
+            "--repo",
+            target.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(retried["id"], relocated["id"]);
+    assert_eq!(retried["renamed"], false);
+    assert_eq!(retried["files"]["state"], "uncommitted");
     let repaired = store.get_wave(wave.id()).await.unwrap().unwrap();
     assert_eq!(
         repaired.repo(),

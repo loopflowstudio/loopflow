@@ -40,7 +40,9 @@ pub(crate) struct ProviderChange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Operation {
     pub id: String,
+    /// Repository where the request is retried, even if the old checkout is gone.
     pub repo: String,
+    pub source_repo: String,
     pub kind: String,
     pub from: String,
     pub to: String,
@@ -86,7 +88,7 @@ impl Operation {
     }
 
     fn apply_and_commit(&mut self, store: &Store, main: &Path) -> OpsResult<AuthoredFiles> {
-        if self.repo != self.target_repo {
+        if self.source_repo != self.target_repo {
             return Err(lifecycle_error(format!(
                 "move .lf/wave/{} into the target repository; files do not cross repositories",
                 self.from

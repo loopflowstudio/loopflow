@@ -412,7 +412,7 @@ removes automatic restart and selects stable entries for future commands.
 LOO-708 (Jack Heart, 2026-11-02): exec removes the Claude launcher and viewer
 heap; only the owner's direct child hands off exit settlement. Graph steps keep
 their wait. A blocking child wait wakes the descriptor loop without taking
-SIGCHLD from background runtimes. Stand-in footprint: owner/relay 20/2.5 MB;
+SIGCHLD from background runtimes. Pre-compression stand-in footprint: owner/relay 20/2.5 MB;
 installed acceptance remains unproved. LOO-705 must supply the Session successor:
 replaying relay argv targets the ended owner. LOO-712 owns wire encoding.
 Release's entry-path lesson applies to each resume/new-thread entry. Exec

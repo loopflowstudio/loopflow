@@ -126,8 +126,15 @@ LOO-709 memory at `9bc58f47ba` now protects recent native output for both
 lifetime exit causes, retains running Graphs/headless Runs, and records its
 agreement with LOO-710 on `screens/<session>.ghostsnp`. Its disposable-Home
 check ended 20 owners but resumed only three; this is not acceptance here.
-Earlier LOO-710 evidence remains `ca6493ff68`. These lifetime and snapshot
-responsibilities remain with those Tasks during integration.
+LOO-710 is now at `bf9947eb1c`: its source owns terminal cleanup from saved
+preview through live attachment, including startup failure and pre-acknowledgement
+cancellation. Its plan records primary-screen, palette and public-resume fixture
+proofs, not configured Claude/Desktop acceptance. Its `delegate_with_preview`
+passes an in-memory `ViewerTerminal` into attachment; this branch's relay exec
+cannot inherit that cleanup object. Integration must preserve preview cleanup,
+the store-free live relay and JSON continuation without retaining a waiter.
+Snapshot fidelity and lifetime responsibilities remain with their owning Tasks;
+neither branch is merged here.
 
 ## Acceptance evidence and remaining work
 
@@ -136,6 +143,9 @@ responsibilities remain with those Tasks during integration.
   `resume --fork --json`, threaded `session new --json`, and provider-changing
   resume launch once, append one input and return the correct identity.
   Fork also preserves its source input; each result contains one JSON record.
+  Source inspection at `04552ff2b4` confirms this supersedes the supplied
+  iteration feedback's direct-`serve_locked` defect; no repeat implementation
+  remains for those three paths.
 - Implemented and fixture-proven: one owner plus one relay through Desktop's
   prepared-command path, Claude directly parented by the owner, one provider
   launch, attachment exit, AgentProcess completion, capture settlement and
@@ -166,6 +176,23 @@ held owner 16 MB + inner connect 17 MB + `lf -i` 58 MB. Claude's parent is the
 owner.
 
 ## Concept review — 2026-11-02
+
+Current review at `04552ff2b4`: **nothing to change and no open product
+choice.** Source and fixture inspection confirms the preservation direction
+below is implemented, including fork and thread replacement. The concrete
+interaction remains open → detach → reopen the same Session; failed startup
+retains prepared input for retry, and reboot recovery uses saved history without
+replaying the interrupted turn. A relay has no independent durable lifecycle:
+its exit cannot complete the conversation or transfer provider authority.
+The transport README already describes that experience; no usage or skill
+rewrite is needed. The review page now shows the current result instead of
+presenting the repaired gaps as proposed work.
+
+Next proof remains the affected gate suites and final Desktop/Claude process
+count and footprint acceptance listed above. Integration must preserve successor
+selection and preview cleanup across exec; these are established obligations,
+not new product choices or permission to take over LOO-705/710/712. This review
+changes no implementation, starts no provider, and claims no new runtime pass.
 
 **Result: command-contract preservation across exec. No unresolved product
 choice.** Jack Heart accepted
@@ -222,4 +249,4 @@ owner's handoff, preserving one settlement path.
 
 ## Checks
 
-2026-11-02: `cargo test -p loopflow --test transport_tests` passed (30); `cargo test -p loopflow --lib harness::native_exit::` passed (1; nonfatal linker unwind-size warning); `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed; inherited `LF_*` cleared and stdin closed; `lf context` within both budgets. Gate owns remaining affected suites; authored review owns Desktop/footprint judgment.
+2026-11-02: reused unchanged-code results recorded at `04552ff2b4`: `cargo test -p loopflow --test transport_tests` passed (30), `cargo test -p loopflow --lib harness::native_exit::` passed (1; nonfatal linker unwind-size warning), `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed (tests cleared inherited `LF_*` and closed stdin); reconciliation: `git diff --check` passed and `lf context` within both budgets. Gate owns remaining affected suites; authored review owns Desktop/footprint judgment.

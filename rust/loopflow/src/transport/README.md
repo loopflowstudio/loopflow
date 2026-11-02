@@ -25,7 +25,7 @@ the same provider thread in a new owner, without replaying input.
 `lf resume --all` is the one automatic restart: it resumes Sessions that were on
 screen when the machine went down, as after a reboot, crash or kill: their owner
 had a viewer, never recorded its own exit, and is gone from the OS. Leaving
-through the provider, detaching or idling out records an exit, so those never
+through the provider or idling out records an exit, so those never
 qualify, and a conversation nobody was viewing waits for `lf resume`. Dead PIDs,
 pre-boot start times and rows retention already closed read as gone and block
 nothing. Each resumes through ordinary `lf resume` in a new owner with no

@@ -53,23 +53,26 @@ recency; preparation launches no provider. LOO-499 history:
 
 ## Idle owners end (LOO-709, 2026-11-02)
 
-Jack Heart's goal: a closed or idle conversation costs nothing. A terminal owner
-nobody views and nothing uses ends after `session.end_detached_after` (default
-`2m`; Jack named 2m and 30m, the choice stays his) of quiet, writes
-`$LF_HOME/screens/<session>.vt`, stops the agent and records its exit;
-`lf resume` reopens from provider history, and `lf resume --all` restores only
-Sessions whose owner had a viewer and died without recording an exit. This
-supersedes LOO-415's "viewer loss never transitions". Why the 24h rule never
-fired on Jack's Mac: finished Graphs held their owner forever (no completion
-filter on the ancestry walk), the limit counted awake time, one store error
-ended the policy thread, a stale terminal status report read as a turn, and
-pre-rule builds had no policy. Lessons: a turn, a running
-Graph or a headless Run holds an owner and a finished Graph does not; long
-deadlines use `SystemTime`; a policy thread logs and judges again rather than
-exiting; a terminal status report is evidence only while someone views it.
-Open with LOO-710: one last-screen path and reader (`screens/<session>.vt`
-against `snapshots/<owner>.ghostsnp` with a DTO field). LOO-705's
-`lf monitor rollover` ends pre-rule owners.
+Jack Heart's goal: a closed or idle conversation costs nothing. Source ends
+unviewed, quiet terminal owners after `session.end_detached_after` (chosen
+default `2m`; Jack named 2m and 30m). Resume retains history without replay;
+`--all` selects viewed owners that died without recording an exit. This
+supersedes LOO-415's "viewer loss never transitions".
+
+The failed 24h policy counted finished Graphs, awake time and stale status,
+exited on store errors, and was absent from pre-rule builds. Use `SystemTime`,
+retry failed judgments, and hold only running Graphs, live turns and headless
+Runs. Native turns may supply only output: both exit causes preserve recent
+output; viewer changes cannot reset executable-gone quiet time. Silent native
+work without store activity remains undetectable. LOO-705's `lf monitor rollover`
+owns pre-rule owners.
+
+Agreement with LOO-710 (2026-11-02, following Jack's coordination request):
+`screens/<session>.ghostsnp`, no DTO field; LOO-710 owns the reader and format.
+The second branch to land replaces LOO-709's `.vt` writer at policy and command
+exit. Pruning remains unresolved. Release's source/installed distinction applies:
+the disposable-Home live check ended all 20 owners, but resumed only three;
+installation and the full acceptance set remain unproved.
 
 ## Waited landing (LOO-503, 2026-10-17)
 

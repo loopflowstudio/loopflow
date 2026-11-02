@@ -42,6 +42,11 @@ an unreadable config silently disables the rule.
 
 ## Design
 
+Accepted direction: Jack Heart's 2026-11-02 brief and continuation steer retain
+idle ending and the LOO-710 boundary. The 2m default and viewed-only restart
+interpretation are implementation choices recorded in `questions.md`, not new
+explicit approvals. Reconciled against `f6cdd9d33a` on 2026-11-02.
+
 Rust only. Desktop (LOO-672), per-process overhead (LOO-708) and snapshot
 fidelity (sibling Task) stay out.
 
@@ -53,17 +58,22 @@ fidelity (sibling Task) stay out.
   the next poll. Unreadable configuration uses the default instead of
   disabling the rule. A turn in progress, a *running* Graph (ancestry or step
   membership) or a headless Run still holds the owner; a finished Graph does
-  not. A store error is logged once per distinct failure and judged again
-  next poll; the policy thread never exits on one. A turn counts only from a
+  not. Store-open failures are logged once per distinct failure; judgment and
+  viewer-write errors log on each failure. The policy retries instead of
+  exiting. A turn counts only from a
   live AgentProcess on its current attachment, and a terminal status report
-  counts only while the owner is viewed (`TURN_LIVE`).
-- **The last screen survives.** Before a terminal owner exits (idle end,
+  counts only while the owner is viewed (`TURN_LIVE`). Native terminal output
+  supplies activity when no store turn is recorded. Silent native work without
+  a store fact is unobservable and can end after the grace (or two seconds
+  when its executable is gone).
+- **The last screen survives.** Before a terminal owner decides to exit (idle end,
   executable gone, or its command exiting) it writes
   `$LF_HOME/screens/<session>.vt`: the vt100 scrollback rows followed by the
   visible grid redraw (live attach redraws only the visible grid). The file is
   keyed by Session because that is what a returning reader knows; one
   conversation has one last screen, overwritten by each owner's end. This
-  branch delivers the writer and its test; the reader (`lf resume` painting
+  branch delivers the writer and its test; external SIGTERM writes no snapshot.
+  The reader (`lf resume` painting
   it when stdout is a terminal) and the format upgrade are LOO-710's.
 - **Return is cheap and starts nothing.** Unchanged: `lf resume <id|task>`
   reopens from provider history (`claude --resume <id>`), lands at the bottom,
@@ -88,6 +98,11 @@ the grace expired. Keep the output-only clock separate from the detached grace;
 viewer changes must not extend the executable-gone quiet interval. Lifetime
 fixtures name owners by their role so the preservation assertions stay readable.
 
+Removed the duplicate `RUNNING_SESSION_GRAPH` lookup. The lifetime judgment uses
+the existing `SESSION_GRAPH` capture-to-step relationship and checks that Graph's
+Process for completion. The membership fixture captures its step ID once, then
+uses it to record membership.
+
 ## Concept review (2026-11-02, headless)
 
 Reviewed the accepted experience against the implemented change. No new
@@ -105,7 +120,7 @@ one mismatch, repaired in the following implement pass:
   quiet-provider, active-turn and installed-symlink cases remain. The new
   regression failed before the repair and passed after it.
 
-Consequences recorded, no change needed:
+Consequences and limits:
 
 - A clean shutdown delivers SIGTERM, which records the owner's exit, so after
   a clean reboot `lf resume --all` restores nothing; only a hard crash leaves
@@ -116,11 +131,20 @@ Consequences recorded, no change needed:
   again. This follows from the 2m default, which stays Jack's to change.
 - Screen files: one per Session, overwritten on each end, never removed.
   LOO-710 leaves pruning to this Task's retention; nothing in the store's
-  Session retention deletes files today. Left as a known gap for whichever
-  branch lands second, with the format.
+  Session retention deletes files today. Pruning remains unimplemented; its
+  retention rule is unresolved, separate from the agreed format handoff.
 
 ## Remaining
 
+- **Acceptance coverage.** The detached-limit regression now covers both
+  Graph ancestry and step membership: a separate unviewed step owner survives
+  beyond its grace while the Graph runs and ends after Graph completion.
+  The full session lifecycle, transport and launch-contract checks and Clippy
+  remain with gate.
+- **Live return evidence.** All 20 owners ended, but only three conversations
+  were resumed in the recorded probe. Returning each of the twenty at the
+  bottom without a new turn remains acceptance work for demo; the three
+  samples do not satisfy that full requirement.
 - **Last-screen path and reader: agreed with LOO-710 (2026-11-02).** LOO-710's
   plan adopts this branch's directory and key, `<home>/screens/<session>`, in
   its own format (`.ghostsnp`), adds no DTO field, and owns the reader:
@@ -128,8 +152,12 @@ Consequences recorded, no change needed:
   stdout is a terminal. Whichever lands second deletes the `.vt` writer
   (`transport::save_last_screen`/`last_screen_path`, `Output::last_screen`,
   `terminal::last_screen`) and rewrites the `transport_tests` decode to
-  `.ghostsnp`. Jack Heart's steer asked the two Tasks to agree before either
+  `.ghostsnp`. LOO-710's corrected API names are `transport::snapshot::leave`
+  and `transport::snapshot::last_screen` (comment `a49ccb66`, 2026-11-02).
+  Jack Heart's steer asked the two Tasks to agree before either
   publishes; they have.
+- **Screen retention.** No pruning exists. The retention rule still needs
+  judgment at demo/review; the format agreement does not resolve it.
 - PR body: before/after numbers below; point the 27 pre-rule owners at
   LOO-705's `lf monitor rollover`; say that painting the last screen on return
   arrives with LOO-710's reader, this PR writes it.
@@ -147,7 +175,10 @@ Consequences recorded, no change needed:
 
 ## Check results
 
-- `cargo test -p loopflow --lib transport::lifetime::` (1) and `cargo test -p loopflow --test transport_tests sessions_end_` (2) pass; `cargo fmt --check`, `git diff --check` and `lf context` pass; macOS linker warns about the large test binary’s unwind table; gate owns broader affected suites and Clippy.
+- `cargo test -p loopflow --test transport_tests detached_sessions_end_after_their_limit -- --exact`: passed (1); `cargo fmt`, `git diff --check` and `lf context`: pass; earlier lifetime/executable-gone checks remain applicable; broader suites and Clippy: gate.
+
+## Recorded live evidence (2026-11-02)
+
 - Live, 2026-11-02, branch debug build in a throwaway `LF_HOME`, real Claude
   Code 2.1.316, this worktree as checkout: 20 conversations opened, each
   viewed once and detached at 13:53:07. Before: 60 processes (20 owners, 20

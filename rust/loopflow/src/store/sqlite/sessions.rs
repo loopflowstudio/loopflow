@@ -26,12 +26,6 @@ macro_rules! session_step {
     };
 }
 pub(super) const SESSION_GRAPH: &str = session_graph!();
-/// The Graph still running whose step captured session `s`'s current input;
-/// a finished Graph holds nothing.
-const RUNNING_SESSION_GRAPH: &str = "(SELECT gs.graph_lf_process_id FROM session_events captured
-    JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
-    JOIN processes g ON g.id=gs.graph_lf_process_id AND g.completed_at IS NULL
-    WHERE captured.seq=s.current_capture)";
 /// Session `s`'s current AgentProcess last reported work in progress rather
 /// than waiting for a person.
 const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
@@ -574,8 +568,8 @@ impl SqliteStore {
     }
 
     /// Unfinished interactive Sessions whose execution owner last had a viewer
-    /// and never recorded its own exit, with that owner. Leaving, detaching
-    /// or idling records one; a restart, crash or kill does not, and a dead
+    /// and never recorded its own exit, with that owner. Provider exit or idle
+    /// ending records one; a crash or kill does not, and a dead
     /// row retention closed afterwards still has none. Liveness is the
     /// caller's observation.
     pub(crate) fn interrupted_session_owners(
@@ -656,7 +650,9 @@ impl SqliteStore {
                      WHERE s.transport_lf_process_id=?1 AND s.completed_at IS NULL)
                  AND NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.transport_lf_process_id=?1
-                     AND (s.interactive=0 OR {RUNNING_SESSION_GRAPH} IS NOT NULL
+                     AND (s.interactive=0
+                         OR EXISTS(SELECT 1 FROM processes g
+                             WHERE g.id={SESSION_GRAPH} AND g.completed_at IS NULL)
                          OR (s.completed_at IS NULL AND {TURN_LIVE})))"
             ),
             [owner.as_str()],

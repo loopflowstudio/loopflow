@@ -3,7 +3,7 @@
 //!
 //! A Session is interrupted when its execution owner had a viewer, never
 //! recorded its own exit, and the OS shows it gone. Leaving with the
-//! provider's own exit, detaching, or idling out never qualifies, and a
+//! provider's own exit or idling out never qualifies, and a
 //! conversation nobody was viewing is left for `lf resume`. Each Session
 //! resumes through the ordinary `lf resume` path in a new owner with no
 //! viewer; terminals attach when they show it.

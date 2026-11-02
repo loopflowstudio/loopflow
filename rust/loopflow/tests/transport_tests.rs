@@ -1114,7 +1114,9 @@ fn detached_sessions_end_after_their_limit() {
     // Each starts viewed, so nothing ends while the fixture is arranged.
     let mut owners = Vec::new();
     let mut viewers = Vec::new();
-    for input in ["idle", "viewed", "busy", "graph", "stale", "talking"] {
+    for input in [
+        "idle", "viewed", "busy", "graph", "step", "stale", "talking",
+    ] {
         let mut owner = fixture.serve(
             true,
             &[
@@ -1132,9 +1134,9 @@ fn detached_sessions_end_after_their_limit() {
         owners.push(owner);
     }
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
-    fixture.launches(6);
-    let [idle_owner, viewed_owner, busy_owner, graph_owner, stale_owner, talking_owner] =
-        <[String; 6]>::try_from(owners).unwrap();
+    fixture.launches(7);
+    let [idle_owner, viewed_owner, busy_owner, graph_owner, step_owner, stale_owner, talking_owner] =
+        <[String; 7]>::try_from(owners).unwrap();
     let session_of = |line: &str| -> String {
         sql.query_row(
             "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
@@ -1154,6 +1156,24 @@ fn detached_sessions_end_after_their_limit() {
             |r| r.get(0),
         )
         .unwrap();
+    // This owner is outside the Graph's ancestry: only its Session's current
+    // capture makes it a step, so membership must hold it independently.
+    let step: String = sql
+        .query_row(
+            "UPDATE processes SET parent_lf_process_id=?1 WHERE id=(
+             SELECT captured.lf_process_id FROM agent_sessions s
+             JOIN session_events captured ON captured.seq=s.current_capture
+             WHERE s.transport_lf_process_id=?2) RETURNING id",
+            [&graph, &step_owner],
+            |r| r.get(0),
+        )
+        .unwrap();
+    sql.execute(
+        "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+         VALUES(?1,?2,0,'[]')",
+        [&graph, &step],
+    )
+    .unwrap();
     fixture.mark_stale_working(&fixture.session_of_owner(&stale_owner));
     // Closing the window: every owner but the viewed one loses its viewers.
     let viewed = viewers.remove(1);
@@ -1162,7 +1182,13 @@ fn detached_sessions_end_after_their_limit() {
     fixture.ends(&stale_owner);
     // Several judgments later, everything else still runs.
     std::thread::sleep(Duration::from_secs(4));
-    for owner in [&viewed_owner, &busy_owner, &graph_owner, &talking_owner] {
+    for owner in [
+        &viewed_owner,
+        &busy_owner,
+        &graph_owner,
+        &step_owner,
+        &talking_owner,
+    ] {
         assert!(fixture.running(owner), "{owner} ended");
     }
     let resumed = fixture
@@ -1187,13 +1213,15 @@ fn detached_sessions_end_after_their_limit() {
         screen.screen().contents()
     );
     // Its last viewer leaving lets the viewed one end too; its Graph
-    // finishing lets the Graph owner end; falling quiet lets the talking one.
+    // finishing releases both its ancestor owner and its step's owner;
+    // falling quiet lets the talking one end.
     drop(viewed);
     sql.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&graph])
         .unwrap();
     std::fs::write(fixture.home.path().join("hush"), "").unwrap();
     fixture.ends(&viewed_owner);
     fixture.ends(&graph_owner);
+    fixture.ends(&step_owner);
     fixture.ends(&talking_owner);
     assert!(fixture.running(&busy_owner), "busy owner ended mid-turn");
     // `lf resume` reopens the ended conversation from its saved history.
@@ -1204,7 +1232,7 @@ fn detached_sessions_end_after_their_limit() {
     reopen.env("PATH", &path);
     let reopened = fixture.owner(reopen);
     let _viewer = fixture.viewer(&reopened, false);
-    let line = fixture.launches(7).pop().unwrap();
+    let line = fixture.launches(8).pop().unwrap();
     assert!(
         line.contains(" --resume ") && session_of(&line) == idle,
         "reopened without history: {line}"

@@ -8,6 +8,10 @@ import re
 import subprocess
 from pathlib import Path
 
+# The installed app's identity. Source and every other build carry
+# `com.loopflow.mac.dev`, so Launch Services never mistakes one for it.
+RELEASE_BUNDLE_ID = "com.loopflow.mac"
+
 
 def read_release_version(repo_root: Path) -> str:
     """Use RELEASE_TAG on CI, otherwise the Cargo workspace version."""
@@ -39,4 +43,11 @@ def stamp_bundle_version(info_plist: Path, version: str, revision: str) -> None:
     data["CFBundleShortVersionString"] = version
     data["CFBundleVersion"] = version
     data["LoopflowSourceRevision"] = revision
+    info_plist.write_bytes(plistlib.dumps(data))
+
+
+def stamp_release_bundle_id(info_plist: Path) -> None:
+    """Make a packaged release the installed app `lf open` and Spotlight reach."""
+    data = plistlib.loads(info_plist.read_bytes())
+    data["CFBundleIdentifier"] = RELEASE_BUNDLE_ID
     info_plist.write_bytes(plistlib.dumps(data))

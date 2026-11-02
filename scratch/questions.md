@@ -99,3 +99,17 @@ Second concept review (2026-11-02), reversible:
 - **No flag lists removed Waves.** `lf wave show <name|id>` reads one; an
   inventory of removed Waves is a later ask if someone needs it, not part of
   deleting `--current`.
+
+Third concept review (2026-11-02), reversible:
+
+- **`lf wave connect <new-name>` adds the Wave first** rather than refusing
+  with "run `lf wave add` first": the Flexibility rule prefers adapting to a
+  guard, and `add` is idempotent. Connect's config writes then land on the
+  main checkout with the lifecycle's selective commit, not the invoking
+  checkout's whole dirty tree.
+- **`rename --repo` stays as it is.** Cross-repository relocation under the
+  rename verb is pre-existing surface no decision covers; a separate Task if
+  it should become `lf wave move` or go.
+- **Uncommitted edits in a removed Wave's directory are named, not guarded.**
+  The preview adds one sentence; removal still deletes them with the
+  directory, since the person chose to remove the Wave.

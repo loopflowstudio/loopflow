@@ -1,8 +1,10 @@
 # LOO-500: Add and remove Waves seamlessly
 
-Status: accepted; implemented (reconciled 2026-11-02), including the second
-concept review's direction (`lf wave list` lists what Desktop lists). CLI demo
-done; Desktop demo awaits a display session. Jack Heart filed LOO-500; exact controls,
+Status: accepted; implemented (reconciled 2026-11-02) through the second
+concept review's direction (`lf wave list` lists what Desktop lists). The third
+concept review (2026-11-02) found one creation path the design deletes still
+open (`lf wave connect <new-name>`); slice 11 closes it. CLI demo done; Desktop
+demo awaits a display session. Jack Heart filed LOO-500; exact controls,
 required fields and the meaning of deletion were left as design questions.
 Choices below are the plan's; reversible ones are noted in
 `scratch/questions.md`.
@@ -310,6 +312,10 @@ later Task if wanted), cleanup of other branches' stale `.lf/wave/` copies.
 - `init` and `split-wave` builtin skills: replace hand-written
   `.lf/wave/<name>/` plus `lf wave connect` with `lf wave add` (then `connect`
   only for Linear).
+- `lf wave connect <name>` minting a Wave: `connect_async` registers through
+  `ensure_wave_row`, which seeds `.lf/wave/<name>/` in the invoking checkout
+  with no first Project and no lifecycle commit (third concept review). The
+  `ops/mod.rs` comment calling connection "a creation graph" goes with it.
 - `SqliteStore::delete_wave` / `Store::delete_wave` and their test-only use.
 - `wave_retirement_blockers(_in)`; relocation's collision retirement calls the
   shared retire write instead.
@@ -404,8 +410,29 @@ One PR, deletions first:
     `supersededByWaveId`, `retirementReason` and the "Retired at" lens, which
     no listed row could reach once the list excludes removed Waves.
 
-Remaining: Desktop demo steps 1–3 need a display session (demo/review).
-CLI demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
+11. Next (third concept review, 2026-11-02): `connect` never creates a Wave.
+    An explicit unregistered name runs `wave_lifecycle::add` first (main
+    checkout, first Project, selective commit) and then links; connect's own
+    `config.yaml` and `.lf/config.yaml` writes and their commit land on the
+    main checkout through the lifecycle's `commit_authored`, not
+    `commit_workflow { add: true }` on the invoking checkout. `reteam`'s
+    `ensure_wave_row` loop registers authored directories through
+    `register_authored`; `refresh_inventory` reads the connected Wave with
+    `get_wave_at`. Proof: `wave_lifecycle` test that `lf wave connect ops`
+    from a Task worktree (fake `gh`) lands `.lf/wave/ops/` committed on main
+    with a first Project, and that `lf wave list` and Desktop show the same
+    row. Same pass, smaller: `WaveAdded.summary` (one line when files are
+    uncommitted, Rust-built like the other two receipts, fixture
+    `wave_added.json`, Swift mirror replacing `WaveIdentity`); the New Wave
+    popover and `CreateWaveSheet` stay open with it and a Done button, as the
+    Rename and Remove sheets do. And the Remove preview names uncommitted
+    edits inside `.lf/wave/<name>` on main (`git status --porcelain -- <path>`),
+    since they are deleted with the directory and Git history does not keep
+    them.
+
+Remaining: slice 11; Desktop demo steps 1–3 need a display session
+(demo/review). CLI demo steps 4–5 ran on `lf-world wave-lifecycle`
+(2026-11-02).
 
 ## Concept review (2026-11-02, headless) — resolved
 
@@ -447,6 +474,46 @@ the gap as found).
 Not changed: Desktop's Remove sheet exposes no `--delete-backlog` (unstarted
 Tasks move and the preview says so; a checkbox is ordinary follow-up), and
 `lf wave rename` still carries the pre-existing `--repo` and `--title`.
+
+## Concept review (2026-11-02, third pass) — design changed
+
+Run against the implemented change at `cd42ecb239`. Add, rename and remove
+behave as the demo lists; the receipt is Rust-authored and shown verbatim; the
+list is one list. One accepted decision was still not carried through, and
+two smaller consequences of the acceptance were unbuilt. No open product
+choice. Page: `scratch/concept-review.html`.
+
+- **`lf wave connect <new-name>` is still a creation path.** The design
+  deletes `ensure` so that `add` is the one way a Wave comes to exist, with
+  files on main, a first Project and a commit. `connect_async` still calls
+  `ensure_wave_row(store, repo_root, name)` for an explicit name, and the
+  dispatcher's comment says so: "Wave connection is a creation graph: its
+  positional name may select a wave not yet registered". From a Task worktree,
+  `lf wave connect ops` registers the row, seeds `.lf/wave/ops/` on that
+  branch, creates no Project, creates the Initiative and commits the whole
+  dirty tree there (`commit_workflow { add: true }`). That is the stranded
+  state the Problem section opens with, reachable through the one Wave
+  command the `init` and `split-wave` skills still tell agents to run right
+  after `add`. Settled by the accepted decision: connect links; an
+  unregistered name adds first (slice 11).
+- **Add's leftovers reach the CLI only.** `render_added` prints `.lf/wave/<name>
+  is uncommitted on <main>: <reason>`; Desktop decodes `WaveIdentity { id }`
+  and closes the popover. Rename and Remove keep their sheets open on the same
+  kind of line. Same receipt shape for all three (slice 11).
+- **The Remove preview does not name uncommitted edits.** `remove_authored`
+  deletes the directory with `remove_dir_all`; the preview says "Git history
+  keeps it", which is false for edits nobody committed. Jack's main checkout
+  has none today (`git status -- .lf/wave` is clean), so this is a sentence
+  in the preview, not a refusal (slice 11).
+
+Looked at, holding: `lf wave rename <wave> --repo <path>` moves a Wave
+between repositories under the rename verb, files not following (the receipt
+says so); pre-existing relocation surface the design kept, and no accepted
+decision speaks to it. `lf task create --wave <new>` adds the Wave through
+`add` (it called `project::ensure` before this branch), so a mistyped Wave
+name lands a committed `.lf/wave/<typo>/` on main; `lf wave remove <typo>`
+is the cleanup, as the design says for strays. Desktop's Remove sheet has no
+`--delete-backlog`; unstarted Tasks move and the preview says so.
 
 ## Concept review (2026-11-02, second pass) — resolved
 

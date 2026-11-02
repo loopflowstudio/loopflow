@@ -1,6 +1,6 @@
 # LOO-620: lf open, Spotlight and Finder reach only the installed Loopflow.app
 
-Status: implemented and realigned (2026-11-02), awaiting gate. Source: Task definition
+Status: implemented and realigned (2026-11-02); concept review's one implied change is in; gate next. Source: Task definition
 (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop database-mismatch incident).
 
 ## What exists
@@ -14,7 +14,9 @@ Status: implemented and realigned (2026-11-02), awaiting gate. Source: Task defi
 - **Only release packaging carries `com.loopflow.mac`.** `Info.plist` and
   `project.yml` say `com.loopflow.mac.dev`; `scripts/release-loopflow.py` stamps the
   release id (`bundle_version.stamp_release_bundle_id`) and deletes
-  `swift/dist/Loopflow.app` once the DMG exists. local-bin, DerivedData, rebuild and
+  `swift/dist/Loopflow.app` once the DMG exists. `scripts/install.py local` stages
+  its app under `local-bin/app.noindex/`, which Spotlight skips, and removes the
+  `local-bin/Loopflow.app` earlier builds left beside `lf`. DerivedData, rebuild and
   other raw copies are dev apps without remembering anything.
 - **Promotion converges on one bundle.** Staged (`promote.*`) and superseded
   (`superseded.*`) copies live in `<Applications>/.Loopflow.app.noindex/`
@@ -58,10 +60,39 @@ Status: implemented and realigned (2026-11-02), awaiting gate. Source: Task defi
 - Two consecutive installs leave only `Loopflow.app`, even beside an earlier orphan:
   `install::artifact_tests::repeated_installs_leave_one_bundle_in_the_applications_folder`.
 
+## Concept review 2026-11-02
+
+The product contract holds: `lf open` has one destination, the installed app by
+path, and a bundle id names only the Desktop the caller runs inside. Promotion
+converges on one bundle. The error for a Mac without Desktop (`lf install` places
+it) is the only new copy. Checked on Jack's Mac (read-only): `~/.local/bin/lf`
+resolves into `/Applications/Loopflow.app`; `mdfind` on `com.loopflow.mac*` lists
+only `/Applications/Loopflow.app` and `~/Applications/Loopflow Dev.app`; no
+`.promote.*`/`.superseded.*` orphans, so the sweep's proof stays the unit test.
+Its one finding, `scripts/install.py local` staging an indexed bundle, is fixed
+(`app.noindex`, see What exists).
+
+Not changed, and why:
+
+- `DesktopApp::Running` is reached by id even for the installed Desktop (its agents get
+  `LF_DESKTOP=com.loopflow.mac`); Launch Services prefers the running instance for
+  `-b`, which is the one that launched the agent. Accepted in the Task text.
+- `quiesce_app_processes` asks `application id "com.loopflow.mac"` to quit, then
+  signals by executable path; stays as `scratch/questions.md` records.
+
+## Compress 2026-11-02
+
+`earlier_release_installs` reads bundle ids through `published::app_info` instead of
+a second plutil reader; `commit_app_bundle` no longer recreates the scratch directory
+(staging always creates it first); the lsregister wrapper is `lsregister`, not a
+second `launch_services`. No open product choice.
+
 ## Remaining
 
 - Gate: affected suites (`global_commands`, `work_open_tests`, install lib tests,
   `test_release_loopflow.py`, `test_app_bundle.py`, `test_install_script.py`), clippy.
+  `global_commands::scheduled_install_is_independent_of_the_invoking_checkout_and_reusable`
+  fails on main too (#1776's HOME-vs-account-home check, macOS-only); not this branch.
 - Demo on a Mac: `lf install` twice, then `ls -a /Applications`, `lf open`.
 
-Checks (2026-11-02 realign): `cargo test -p loopflow -- repeated_installs_leave_one_bundle available_conversations_need_no_question desktop_launches_the_installed desktop_inside_a_build` 4 passed; `cargo clippy -p loopflow --all-targets -- -D warnings` clean; Python suites unchanged since the implement pass.
+Checks (2026-11-02 compress): `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests::` 11 passed; `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `uv run pytest test_install_script.py test_release_loopflow.py test_app_bundle.py` 26 passed; `install.py local --dry-run` names `local-bin/app.noindex`.

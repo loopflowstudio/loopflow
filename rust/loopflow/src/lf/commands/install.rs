@@ -1194,6 +1194,8 @@ fn install_scratch(target: &Path) -> PathBuf {
     target.with_file_name(format!(".{name}.noindex"))
 }
 
+/// A unique path inside the scratch directory, which exists on return; a
+/// staged copy always precedes the commit that retires the target beside it.
 fn scratch_entry(target: &Path, label: &str) -> Result<PathBuf> {
     let scratch = install_scratch(target);
     fs::create_dir_all(&scratch).with_context(|| format!("create {}", scratch.display()))?;
@@ -1237,9 +1239,6 @@ fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<Option<Pa
     }
     let had_target = fs::symlink_metadata(plan.target).is_ok();
     if had_target {
-        if let Some(scratch) = superseded.parent() {
-            fs::create_dir_all(scratch).with_context(|| format!("create {}", scratch.display()))?;
-        }
         fs::rename(plan.target, &superseded).with_context(|| {
             format!(
                 "preserve installed app {} as {}",
@@ -1291,9 +1290,6 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
 // One release app for Launch Services
 // ---------------------------------------------------------------------------
 
-/// Bundle ids earlier release installs carried.
-const RELEASE_BUNDLE_IDS: [&str; 2] = ["com.loopflow.mac", "com.loopflow.concerto"];
-
 /// Leave `target` the only release app Spotlight, Finder and `open -b` reach:
 /// remove the staging directory, copies earlier lf staged beside the target and
 /// release installs at earlier installer locations, then register `target`
@@ -1312,7 +1308,7 @@ fn converge_release_app(target: &Path) {
     }
     for app in stale {
         if registered {
-            launch_services(&["-u"], &app);
+            lsregister(&["-u"], &app);
         }
         match remove_path(&app) {
             Ok(()) => tracing::info!(path = %app.display(), "removed superseded app"),
@@ -1320,7 +1316,7 @@ fn converge_release_app(target: &Path) {
         }
     }
     if registered && target.exists() {
-        launch_services(&["-f"], target);
+        lsregister(&["-f"], target);
     }
 }
 
@@ -1360,32 +1356,28 @@ fn in_applications_folder(target: &Path) -> bool {
                 .is_ok_and(|home| parent == home.join("Applications")))
 }
 
-/// Release installs from earlier installer locations (0.10 used `~/Applications`).
+/// Release installs from earlier installer locations (0.10 used `~/Applications`;
+/// Concerto was the app's earlier name), told apart from dev builds by bundle id.
 fn earlier_release_installs(target: &Path) -> Vec<PathBuf> {
     let Ok(home) = crate::installation::account_home() else {
         return Vec::new();
     };
+    let release_ids = ["com.loopflow.mac", "com.loopflow.concerto"];
     ["Loopflow.app", "Concerto.app"]
         .into_iter()
         .map(|name| home.join("Applications").join(name))
         .filter(|app| app != target)
-        .filter(|app| bundle_id(app).is_some_and(|id| RELEASE_BUNDLE_IDS.contains(&id.as_str())))
+        .filter(|app| {
+            published::app_info(app).is_some_and(|info| {
+                release_ids
+                    .iter()
+                    .any(|id| info["CFBundleIdentifier"] == *id)
+            })
+        })
         .collect()
 }
 
-fn bundle_id(app: &Path) -> Option<String> {
-    let output = Command::new("/usr/bin/plutil")
-        .args(["-extract", "CFBundleIdentifier", "raw", "-o", "-"])
-        .arg(app.join("Contents/Info.plist"))
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-}
-
-fn launch_services(flags: &[&str], app: &Path) {
+fn lsregister(flags: &[&str], app: &Path) {
     let status = Command::new(crate::work::link_receiver::LSREGISTER)
         .args(flags)
         .arg(app)

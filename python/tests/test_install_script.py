@@ -206,4 +206,5 @@ def test_local_dry_run_has_no_production_activation_path(
 
     output = capsys.readouterr().out
     assert "build under local-bin" in output
+    assert str(root / "local-bin" / "app.noindex") in output
     assert "promote" not in output.lower()

@@ -1761,7 +1761,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn desktop_bundle_defaults_to_the_installed_app() {
+    fn desktop_bundle_defaults_to_the_release_id() {
         for desktop in [None, Some("")] {
             assert_eq!(named_bundle(desktop), DESKTOP_BUNDLE, "{desktop:?}");
         }

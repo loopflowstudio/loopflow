@@ -486,7 +486,7 @@ fn inspect(program: &Path, args: &[&str]) -> Option<Output> {
     })
 }
 
-fn app_info(app: &Path) -> Option<serde_json::Value> {
+pub(super) fn app_info(app: &Path) -> Option<serde_json::Value> {
     inspect(
         Path::new("/usr/bin/plutil"),
         &[

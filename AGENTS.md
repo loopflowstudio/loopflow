@@ -329,7 +329,7 @@ When accepted work needs a developer tool the Machine lacks, install it
 missing tool is never a reason to defer. Keep Machine-only tools out of
 repository config CI also reads: sccache runs through `~/.cargo/config.toml`.
 `scripts/testing.md` holds the shared command list, and module READMEs
-(`rust/loopflow/tests/`, `scripts/`, `swift/`, `website/`, `.github/`) own
+(`rust/loopflow/tests/`, `scripts/`, `swift/`, `website/`) and `.github/CI.md` own
 their boundary checks.
 
 # Code Organization

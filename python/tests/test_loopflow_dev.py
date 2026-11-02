@@ -11,7 +11,11 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "loopflow-dev.py"
 SPEC = importlib.util.spec_from_file_location("loopflow_dev", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 loopflow_dev = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(loopflow_dev)
+sys.path.insert(0, str(SCRIPT.parent))
+try:
+    SPEC.loader.exec_module(loopflow_dev)
+finally:
+    sys.path.pop(0)
 
 
 @pytest.mark.parametrize("debug", [False, True])
@@ -125,6 +129,8 @@ def test_dev_app_runs_under_its_own_executable_name(
     monkeypatch.setattr(loopflow_dev, "run", run)
     monkeypatch.setattr(loopflow_dev, "_copy_bundled_tools", lambda _: None)
     monkeypatch.setattr(loopflow_dev, "_ensure_dev_signing_identity", lambda: "identity")
+    # Sparkle embedding needs a real Mach-O build; test_app_bundle covers it.
+    monkeypatch.setattr(sys.modules["app_bundle"], "_embed_frameworks", lambda *_: None)
     loopflow_dev._install_dev_app()
 
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())

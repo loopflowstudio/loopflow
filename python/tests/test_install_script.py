@@ -36,18 +36,14 @@ def _write_fake_macho(path: Path, content: bytes = b"fake-macho") -> None:
 
 def _stage_build_artifacts(root: Path) -> None:
     swift_rel = root / "swift" / ".build" / "release"
-    swift_rel.mkdir(parents=True)
+    (swift_rel / "Sparkle.framework" / "Versions" / "B").mkdir(parents=True)
+    _write_fake_macho(swift_rel / "Sparkle.framework" / "Versions" / "B" / "Sparkle")
     _write_fake_macho(swift_rel / "LoopflowMac")
 
     swift_loopflow = root / "swift" / "LoopflowMac"
     swift_loopflow.mkdir(parents=True)
-    (swift_loopflow / "Info.plist").write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>\n'
-        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
-        '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-        '<plist version="1.0"><dict>'
-        "<key>CFBundleName</key><string>Loopflow</string>"
-        "</dict></plist>\n"
+    (swift_loopflow / "Info.plist").write_bytes(
+        plistlib.dumps({"CFBundleExecutable": "Loopflow", "CFBundleName": "Loopflow"})
     )
     (swift_loopflow / "AppIcon.icns").write_bytes(b"icns-fake")
 
@@ -57,7 +53,11 @@ def _stage_build_artifacts(root: Path) -> None:
 
 
 def _make_spec(root: Path) -> install.BundleSpec:
-    return install.default_bundle_spec(root=root)
+    spec = install.default_bundle_spec(root=root)
+    spec.info_plist.parent.mkdir(parents=True, exist_ok=True)
+    if not spec.info_plist.exists():
+        spec.info_plist.write_bytes(plistlib.dumps({"CFBundleExecutable": "Loopflow"}))
+    return spec
 
 
 def _stage_bundle(spec: install.BundleSpec, binaries: tuple[str, ...]) -> None:
@@ -77,7 +77,7 @@ def _patch_subprocess(
     codesign_rc: int = 0,
     codesign_verify_rc: int = 0,
 ) -> None:
-    """Fake out lipo and codesign."""
+    """Fake out lipo, codesign and the Mach-O tools (no rpath libraries to resolve)."""
     arch_list = archs if archs is not None else [platform.machine()]
 
     real_run = subprocess.run
@@ -89,6 +89,8 @@ def _patch_subprocess(
             if "--verify" in cmd:
                 return subprocess.CompletedProcess(cmd, codesign_verify_rc, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, codesign_rc, stdout="", stderr="")
+        if cmd and cmd[0] in ("otool", "install_name_tool"):
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{cmd[-1]}:\n", stderr="")
         if cmd and cmd[0] == "security" and cmd[1:2] == ["find-identity"]:
             # No signing identity available → ad-hoc signing (the CI/test path).
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -113,6 +115,7 @@ def test_install_loopflow_bundles_the_control_plane_helpers(
     assert (spec.macos_dir / "Loopflow").exists()
     assert (spec.macos_dir / "lf").exists()
     assert not (spec.macos_dir / "lfd").exists()
+    assert (spec.contents_dir / "Frameworks" / "Sparkle.framework" / "Versions" / "B").is_dir()
 
     stamped = plistlib.loads((spec.contents_dir / "Info.plist").read_bytes())
     assert stamped["CFBundleShortVersionString"] == "9.9.9"
@@ -193,7 +196,7 @@ def test_local_dry_run_has_no_production_activation_path(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     root = tmp_path / "repo"
-    bundle_spec = install.default_bundle_spec(root)
+    bundle_spec = _make_spec(root)
     monkeypatch.setattr(install, "ROOT", root)
     monkeypatch.setattr(install, "LOCAL_BIN", root / "local-bin")
     monkeypatch.setattr(install, "default_bundle_spec", lambda: bundle_spec)

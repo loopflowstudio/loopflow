@@ -38,6 +38,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+from app_bundle import install_app_executable
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWIFT_DIR = REPO_ROOT / "swift"
 DEV_APP = Path.home() / "Applications" / "Loopflow Dev.app"
@@ -609,9 +611,10 @@ def _install_dev_app() -> None:
     macos_dir.mkdir(parents=True)
     (app_dir / "Resources").mkdir(parents=True, exist_ok=True)
 
-    shutil.copy(SWIFT_DIR / ".build" / "debug" / "LoopflowMac", macos_dir / DEV_EXECUTABLE)
+    # The dev plist names the executable `Loopflow Dev`, so install against it.
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "Info.plist", app_dir)
     _apply_dev_identity(app_dir / "Info.plist")
+    install_app_executable(SWIFT_DIR / ".build" / "debug", app_dir / "Info.plist", app_dir)
     shutil.copy(SWIFT_DIR / "LoopflowMac" / "AppIcon.icns", app_dir / "Resources")
     _copy_bundled_tools(macos_dir)
     (app_dir / "Resources" / DEV_CONTROL_CONFIG).unlink(missing_ok=True)

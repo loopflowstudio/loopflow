@@ -46,7 +46,7 @@ SCAN_ROOTS = (
     Path("PROMPTS.md"),
     Path("RELEASE_NOTES.md"),
     Path("AGENTS.md"),
-    Path(".github/README.md"),
+    Path(".github/CI.md"),
     Path("rust/loopflow/tests/README.md"),
     Path("tests/e2e/README.md"),
     Path("VISUAL_DESIGN.md"),

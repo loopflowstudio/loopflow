@@ -8,29 +8,10 @@ public struct WaveRenamed: Decodable, Sendable, Hashable {
     public let from: String
     public let to: String
     public let renamed: Bool
-    public let relocation: Relocation?
     public let files: WaveRemoval.AuthoredFiles
     public let initiative: InitiativeRename?
     public let mentions: [String]
     public let summary: [String]
-
-    public struct Relocation: Decodable, Sendable, Hashable {
-        public let waveId: String
-        public let fromRepo: String
-        public let fromName: String
-        public let toRepo: String
-        public let toName: String
-        public let wavesMoved: Int
-
-        enum CodingKeys: String, CodingKey {
-            case waveId = "wave_id"
-            case fromRepo = "from_repo"
-            case fromName = "from_name"
-            case toRepo = "to_repo"
-            case toName = "to_name"
-            case wavesMoved = "waves_moved"
-        }
-    }
 
     public struct InitiativeRename: Decodable, Sendable, Hashable {
         public let initiative: String
@@ -48,7 +29,7 @@ public struct WaveRenamed: Decodable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, from, to, renamed, relocation, files, initiative, mentions, summary
+        case id, from, to, renamed, files, initiative, mentions, summary
     }
 
     public init(from decoder: Decoder) throws {
@@ -57,7 +38,6 @@ public struct WaveRenamed: Decodable, Sendable, Hashable {
         from = try container.decode(String.self, forKey: .from)
         to = try container.decode(String.self, forKey: .to)
         renamed = try container.decode(Bool.self, forKey: .renamed)
-        relocation = try container.decode(Relocation?.self, forKey: .relocation)
         files = try container.decode(WaveRemoval.AuthoredFiles.self, forKey: .files)
         initiative = try container.decode(InitiativeRename?.self, forKey: .initiative)
         mentions = try container.decode([String].self, forKey: .mentions)

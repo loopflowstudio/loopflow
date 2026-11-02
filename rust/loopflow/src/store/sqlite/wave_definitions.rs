@@ -39,38 +39,37 @@ impl SqliteStore {
             }
             prefix.push_str(part);
             let directory = checkout.join(".lf/wave").join(&prefix);
-            let authored_id = crate::work::wave::config::try_read_wave_config(checkout, &prefix)
-                .map_err(|error| StoreError::InvalidData(error.to_string()))?
-                .and_then(|config| config.id);
+            let mut authored_id =
+                crate::work::wave::config::try_read_wave_config(checkout, &prefix)
+                    .map_err(|error| StoreError::InvalidData(error.to_string()))?
+                    .and_then(|config| config.id);
             // Authored directories match by id first: a checkout that has not yet
             // rebased past a rename or removal neither renames the Wave back nor
             // resurrects a removed identity.
-            let authored_live: Option<bool> = match &authored_id {
-                Some(id) => tx
+            if let Some(id) = authored_id.clone() {
+                let live: Option<bool> = tx
                     .query_row(
                         "SELECT retired_at IS NULL FROM waves WHERE id=?1",
-                        [id],
+                        [&id],
                         |row| row.get(0),
                     )
-                    .optional()?,
-                None => None,
-            };
-            let authored_id = match authored_live {
-                Some(true) => {
-                    let wave = authored_id.expect("a live match has an authored id");
-                    seed_wave_files(&directory, &wave, &prefix)?;
-                    parent = Some(wave);
-                    continue;
+                    .optional()?;
+                match live {
+                    Some(true) => {
+                        seed_wave_files(&directory, &id, &prefix)?;
+                        parent = Some(id);
+                        continue;
+                    }
+                    Some(false) => {
+                        tracing::info!(
+                            directory = %directory.display(),
+                            "skipping authored Wave directory whose Wave was removed"
+                        );
+                        authored_id = None;
+                    }
+                    None => {}
                 }
-                Some(false) => {
-                    tracing::info!(
-                        directory = %directory.display(),
-                        "skipping authored Wave directory whose Wave was removed"
-                    );
-                    None
-                }
-                None => authored_id,
-            };
+            }
             let existing: Option<WaveId> = tx.query_row(
                 "SELECT id FROM waves WHERE repo=?1 AND name=?2 AND parent_wave_id IS ?3 AND retired_at IS NULL",
                 params![repo, part, parent], |row| row.get(0)).optional()?;
@@ -111,10 +110,9 @@ impl SqliteStore {
     /// alone with its subtree, so a clone or a checkout behind the planning store
     /// never brings a removed Wave back. A directory that cannot be read or
     /// registered is logged and skipped with its subtree; the rest still register.
-    pub fn register_authored_waves(&self, repo: &str) -> StoreResult<Vec<WaveId>> {
+    pub fn register_authored_waves(&self, repo: &str) -> StoreResult<()> {
         let checkout = Path::new(repo);
         let root = checkout.join(".lf/wave");
-        let mut registered = Vec::new();
         let mut pending = child_directories(&root, "");
         while let Some(slug) = pending.pop() {
             let directory = root.join(&slug);
@@ -140,17 +138,14 @@ impl SqliteStore {
                     );
                     continue;
                 }
-                match self.ensure_wave(repo, &slug) {
-                    Ok(wave) => registered.push(wave),
-                    Err(error) => {
-                        tracing::warn!(slug, %error, "authored Wave directory was not registered");
-                        continue;
-                    }
+                if let Err(error) = self.ensure_wave(repo, &slug) {
+                    tracing::warn!(slug, %error, "authored Wave directory was not registered");
+                    continue;
                 }
             }
             pending.extend(child_directories(&root, &slug));
         }
-        Ok(registered)
+        Ok(())
     }
 }
 
@@ -378,7 +373,7 @@ mod tests {
         }
         std::fs::create_dir_all(repo.path().join(".lf/wave/research/metrics")).unwrap();
 
-        let registered = store.register_authored_waves(root).unwrap();
+        store.register_authored_waves(root).unwrap();
         let canonical = crate::repository::CanonicalRepo::discover(repo.path())
             .unwrap()
             .to_string();
@@ -390,8 +385,11 @@ mod tests {
             .map(|wave| wave.slug().to_string())
             .collect();
         live.sort();
-        assert_eq!(live, ["research", "tools", "tools/parser"]);
-        assert_eq!(registered.len(), 2, "tools registers through its child");
+        assert_eq!(
+            live,
+            ["research", "tools", "tools/parser"],
+            "tools registers through its child"
+        );
         assert!(store.get_wave(&removed).unwrap().unwrap().is_retired());
         store.register_authored_waves(root).unwrap();
         assert_eq!(

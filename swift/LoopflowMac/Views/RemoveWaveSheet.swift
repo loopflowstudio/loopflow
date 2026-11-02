@@ -29,6 +29,10 @@ struct RemoveWaveSheetContent: View {
         }
     }
 
+    private var canRemove: Bool {
+        if case .preview = phase { true } else { false }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             Text("Remove \(name)?")
@@ -60,7 +64,7 @@ struct RemoveWaveSheetContent: View {
                 } else {
                     Button("Remove", role: .destructive, action: onRemove)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(preview == nil || phase != .preview(preview!))
+                        .disabled(!canRemove)
                         .accessibilityIdentifier("remove-wave-confirm")
                 }
             }

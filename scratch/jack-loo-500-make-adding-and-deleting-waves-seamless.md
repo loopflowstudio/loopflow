@@ -380,6 +380,12 @@ One PR, deletions first:
    `WaveRenamed.summary` (Rust-built leftovers, fixture `wave_renamed.json`,
    Swift mirror) keeps `RenameWaveSheet` open with those lines and a Done button.
    `WaveRemoval.has_files` stays: it is the preview's fact, `files` the receipt's.
+7. Compress (2026-11-02): `remove` and `rename` share one `resolve_wave`
+   (id or address, synchronous store reads); `WaveRenamed` drops the
+   relocation receipt nothing read (Swift mirror and fixture follow);
+   `register_authored_waves` returns nothing; Desktop's three copies of the
+   Wave context menu and sheet presentation are one `WaveLifecycleMenu` and
+   `waveLifecycleSheets` modifier (`Views/WaveLifecycle.swift`).
 
 Remaining: Desktop demo steps 1–3 need a display session (demo/review).
 CLI demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
@@ -450,6 +456,9 @@ it, which is the accepted contract.
   choice.
 - `lf wave rename` also carries `--repo` (relocation) and `--title`;
   pre-existing and outside this Task.
+- Desktop's Remove sheet closes on a receipt with leftovers (an Initiative
+  still live after an archive failure); only the CLI prints that line. Keeping
+  it open like the rename sheet is ordinary follow-up for demo/review.
 
 Open product choices: none. Review page: `scratch/concept-review.html`.
 
@@ -470,3 +479,7 @@ Open product choices: none. Review page: `scratch/concept-review.html`.
   `--test integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests`
   9/9; `swift test --filter 'RenameWaveSheetTests|RemoveWaveSheetTests|DTOFixtureTests|WaveTests|MockWaveFixtureTests|WaveSurfacePrimaryHierarchyTests|WorkModelTests|CreateWaveSheetTests'`
   94/94; clippy clean. Affected suites → gate.
+- 2026-11-02 compress (one reader): `--lib wave_definitions::` 5/5; `--test
+  integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9;
+  `swift test --filter 'RenameWaveSheetTests|RemoveWaveSheetTests|DTOFixtureTests|WaveRowTests|CreateWaveSheetTests|WaveSurfacePrimaryHierarchyTests'`
+  61/61; clippy and fmt clean. Affected suites → gate.

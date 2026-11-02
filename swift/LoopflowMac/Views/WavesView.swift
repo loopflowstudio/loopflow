@@ -190,7 +190,7 @@ struct WavesView: View {
                                 isSelected: selectedWaveId == waveSelectionId(entry.wave),
                                 onSelect: { selectedWaveId = waveSelectionId(entry.wave) },
                                 indentLevel: entry.indent,
-                                onDelete: { removing = entry.wave },
+                                onRemove: { removing = entry.wave },
                                 onRename: { renaming = entry.wave }
                             )
                         }

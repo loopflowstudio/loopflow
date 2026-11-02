@@ -148,25 +148,6 @@ struct WorkNavigator: View {
     /// Pinned below the Task list so any Wave is a click away however far the
     /// list scrolls; it starts about three rows tall and its divider drags.
     private var waveSection: some View {
-        waveList.sheet(item: $removingWave) { wave in
-            RemoveWaveSheet(
-                model: model, name: wave.id, displayName: wave.displayName, repo: model.repoPath ?? wave.repo,
-                onRemoved: {
-                    if model.navigation.sidebarScope == .wave(wave.id) { model.select(nil) }
-                    removingWave = nil
-                },
-                onCancel: { removingWave = nil }
-            )
-        }
-        .sheet(item: $renamingWave) { wave in
-            RenameWaveSheet(
-                model: model, id: wave.id, currentName: wave.name, repo: model.repoPath ?? wave.repo,
-                onDone: { renamingWave = nil }
-            )
-        }
-    }
-
-    private var waveList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
@@ -178,6 +159,7 @@ struct WorkNavigator: View {
         }
         .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
         .hoverSource(wavesHover)
+        .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
     }
 
     /// The repository is the default Wave; it lists Working Tasks and can't be edited.
@@ -190,12 +172,7 @@ struct WorkNavigator: View {
         waveRow(scope: .wave(wave.wave.id), name: wave.wave.displayName, icon: "water.waves",
                 count: model.startedTaskCount(wave), unavailableReason: wave.tasks.unavailableReason)
             .contextMenu {
-                Button { renamingWave = wave.wave } label: {
-                    Label("Rename Wave…", systemImage: "pencil")
-                }
-                Button(role: .destructive) { removingWave = wave.wave } label: {
-                    Label("Remove Wave…", systemImage: "trash")
-                }
+                WaveLifecycleMenu(onRename: { renamingWave = wave.wave }, onRemove: { removingWave = wave.wave })
             }
     }
 
@@ -365,22 +342,7 @@ struct WorkBreadcrumbs: View {
         .font(Typography.strong(13))
         .foregroundStyle(palette.titlebarText, palette.titlebarSecondaryText)
         .accessibilityIdentifier("work-breadcrumbs")
-        .sheet(item: $removingWave) { wave in
-            RemoveWaveSheet(
-                model: model, name: wave.id, displayName: wave.displayName, repo: model.repoPath ?? wave.repo,
-                onRemoved: {
-                    if model.navigation.sidebarScope == .wave(wave.id) { model.select(nil) }
-                    removingWave = nil
-                },
-                onCancel: { removingWave = nil }
-            )
-        }
-        .sheet(item: $renamingWave) { wave in
-            RenameWaveSheet(
-                model: model, id: wave.id, currentName: wave.name, repo: model.repoPath ?? wave.repo,
-                onDone: { renamingWave = nil }
-            )
-        }
+        .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
     }
 
     private func trail(showWave: Bool) -> some View {
@@ -447,10 +409,7 @@ struct WorkBreadcrumbs: View {
             }.lineLimit(1).fixedSize()
             .contextMenu {
                 if let wave = model.wave(id: id)?.wave {
-                    Button { renamingWave = wave } label: { Label("Rename Wave…", systemImage: "pencil") }
-                    Button(role: .destructive) { removingWave = wave } label: {
-                        Label("Remove Wave…", systemImage: "trash")
-                    }
+                    WaveLifecycleMenu(onRename: { renamingWave = wave }, onRemove: { removingWave = wave })
                 }
             }
             WorkJumpSeparator(model: model, scope: .wave(id), label: "Tasks in \(name)")

@@ -12,7 +12,7 @@ use crate::id::WaveId;
 use crate::ops::{OpsError, OpsResult};
 use crate::store::Store;
 use crate::work::project::Project;
-use crate::work::wave::WaveLocator;
+use crate::work::wave::{Wave, WaveLocator};
 
 fn lifecycle_error(message: impl ToString) -> OpsError {
     OpsError::Message(message.to_string())
@@ -124,13 +124,25 @@ async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> 
 /// planning store does not know yet. Desktop lists only what the store knows, so
 /// this runs when a repository joins the portfolio and before `lf wave connect
 /// --all`; a directory of a removed Wave stays removed.
-pub async fn register_authored(repo: &Path) -> OpsResult<Vec<WaveId>> {
+pub async fn register_authored(repo: &Path) -> OpsResult<()> {
     let main = crate::repository::CanonicalRepo::discover(repo).map_err(lifecycle_error)?;
     let store = super::planning_sync::planning_store().await?;
     store
         .sqlite
         .register_authored_waves(&main.to_string())
         .map_err(lifecycle_error)
+}
+
+/// The live Wave `name` addresses: Desktop names a Wave by its id, which survives
+/// a concurrent rename; the CLI by its address in this repository.
+fn resolve_wave(store: &Store, main: &Path, name: &str) -> OpsResult<Option<Wave>> {
+    match WaveId::parse(name) {
+        Ok(id) => store.sqlite.get_wave(&id).map_err(lifecycle_error),
+        Err(_) => {
+            let locator = WaveLocator::discover(main, name).map_err(lifecycle_error)?;
+            store.sqlite.get_wave_at(&locator).map_err(lifecycle_error)
+        }
+    }
 }
 
 fn authored_path(slug: &str) -> String {
@@ -257,38 +269,21 @@ pub fn remove(
     let repo_key = main.to_string();
     let main = main.as_path().to_path_buf();
     let store = runtime.block_on(super::planning_sync::planning_store())?;
-    // Desktop names the Wave by its id, which survives a concurrent rename.
-    let wave = match WaveId::parse(name) {
-        Ok(id) => store
-            .sqlite
-            .get_wave(&id)
-            .map_err(lifecycle_error)?
-            .ok_or_else(|| lifecycle_error(format!("no Wave {id}")))?,
-        Err(_) => {
+    // A removed Wave's address still resolves, so a repeat run reports it.
+    let wave = match resolve_wave(&store, &main, name)? {
+        Some(wave) => wave,
+        None => {
             let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
-            match runtime
-                .block_on(store.get_wave_at(&locator))
+            store
+                .sqlite
+                .retired_wave_at(&repo_key, locator.slug())
                 .map_err(lifecycle_error)?
-            {
-                Some(wave) => wave,
-                None => store
-                    .sqlite
-                    .retired_wave_at(&repo_key, locator.slug())
-                    .map_err(lifecycle_error)?
-                    .ok_or_else(|| lifecycle_error(format!("no Wave {} here", locator.slug())))?,
-            }
+                .ok_or_else(|| lifecycle_error(format!("no Wave {name} here")))?
         }
     };
     let already_removed = wave.is_retired();
     // A new Wave may hold a removed Wave's address; its files and Initiative are not ours.
-    let owns_address =
-        !already_removed
-            || runtime
-                .block_on(store.get_wave_at(
-                    &WaveLocator::discover(&main, wave.slug()).map_err(lifecycle_error)?,
-                ))
-                .map_err(lifecycle_error)?
-                .is_none();
+    let owns_address = !already_removed || resolve_wave(&store, &main, wave.slug())?.is_none();
     let mut subtree = vec![wave.clone()];
     let mut next = 0;
     while !already_removed && next < subtree.len() {
@@ -346,7 +341,7 @@ pub fn remove(
     let slugs: Vec<String> = subtree.iter().map(|wave| wave.slug().to_string()).collect();
     let directory = main.join(authored_path(wave.slug()));
     let has_files = owns_address && directory.exists();
-    let mut initiatives: Vec<InitiativeArchive> = slugs
+    let initiatives = slugs
         .iter()
         .filter(|_| owns_address)
         .filter_map(|slug| {
@@ -369,14 +364,13 @@ pub fn remove(
         completed_tasks,
         chapters,
         sessions,
-        initiatives: Vec::new(),
+        initiatives,
         has_files,
         files: None,
         mentions: prose_mentions(&main, wave.slug()),
         summary: Vec::new(),
     };
     if preview {
-        receipt.initiatives = initiatives;
         receipt.summary = removal_summary(&receipt);
         return Ok(receipt);
     }
@@ -402,7 +396,7 @@ pub fn remove(
         runtime.block_on(super::planning_sync::sync_after_save(&store, &repo_key));
     }
 
-    for archive in &mut initiatives {
+    for archive in &mut receipt.initiatives {
         if let Err(error) = runtime.block_on(super::linear::archive_initiative(
             &main,
             &archive.initiative,
@@ -410,8 +404,10 @@ pub fn remove(
             archive.error = Some(error.to_string());
         }
     }
-    let archived = initiatives.iter().all(|archive| archive.error.is_none());
-    receipt.initiatives = initiatives;
+    let archived = receipt
+        .initiatives
+        .iter()
+        .all(|archive| archive.error.is_none());
     receipt.files = Some(if !has_files {
         AuthoredFiles::Unchanged
     } else if !archived {
@@ -767,7 +763,6 @@ pub struct WaveRenamed {
     pub from: String,
     pub to: String,
     pub renamed: bool,
-    pub relocation: Option<crate::work::wave::relocate::WaveRelocationReceipt>,
     pub files: AuthoredFiles,
     /// The connected Initiative's new title, or why Linear kept the old one.
     pub initiative: Option<InitiativeRename>,
@@ -803,28 +798,17 @@ pub async fn rename(
                 .ok_or_else(|| lifecycle_error(format!("invalid Wave name {name:?}")))
         })
         .transpose()?;
-    let resolved = match WaveId::parse(wave) {
-        Ok(id) => store.get_wave(&id).await.map_err(lifecycle_error)?,
-        Err(_) => {
-            let locator = WaveLocator::discover(&main, wave).map_err(lifecycle_error)?;
-            store.get_wave_at(&locator).await.map_err(lifecycle_error)?
-        }
-    };
-    let wave = match resolved {
+    let wave = match resolve_wave(&store, &main, wave)? {
         Some(wave) => wave,
         None => {
             // Already renamed: the old address is free and the new one is live.
             if let Some(target) = &target {
-                let locator = WaveLocator::discover(&main, target).map_err(lifecycle_error)?;
-                if let Some(existing) =
-                    store.get_wave_at(&locator).await.map_err(lifecycle_error)?
-                {
+                if let Some(existing) = resolve_wave(&store, &main, target)? {
                     return Ok(WaveRenamed {
                         id: existing.id().clone(),
                         from: wave.to_string(),
                         to: existing.slug().to_string(),
                         renamed: false,
-                        relocation: None,
                         files: AuthoredFiles::Unchanged,
                         initiative: None,
                         mentions: Vec::new(),
@@ -923,7 +907,6 @@ pub async fn rename(
         from,
         to,
         renamed: moves,
-        relocation,
         files,
         initiative,
         summary: Vec::new(),

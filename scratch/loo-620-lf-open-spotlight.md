@@ -43,10 +43,12 @@ Concept review (2026-11-02) sent one change back; it landed (432eefbff3) and the
 
 ## Open branches nearby
 
-#1777 (`lf install --dev`) and #1656 (drag-and-open install) are both still open.
-Synced onto main through #1792 (Loopflow Dev under its own process name): it
-stamps `com.loopflow.mac.dev`, the id `project.yml` now defaults to, so Loopflow
-Dev stays a dev app with no branch change. Rebase onto whichever lands first.
+#1777 (`lf install --dev`) landed and is merged into this branch (69710e2f57); the
+install sweep tests pass on the merged `install.rs`. #1656 (drag-and-open install)
+is still open and touches `installation.rs`, `install.rs` and `release/install.sh`;
+whichever lands second rebases. Synced onto main through #1792 (Loopflow Dev under
+its own process name): it stamps `com.loopflow.mac.dev`, the id `project.yml` now
+defaults to, so Loopflow Dev stays a dev app with no branch change.
 
 ## Deleted
 
@@ -122,4 +124,4 @@ Not changed, and why:
   fails on main too (#1776's HOME-vs-account-home check, macOS-only); not this branch.
 - Demo on a Mac: `lf install` twice, then `ls -a /Applications`, `lf open`.
 
-Checks (2026-11-02 realign, confirming 432eefbff3 is in the tree): `cargo test -p loopflow --lib -- open::tests::` 4 passed; compress: `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests::` after the `DESKTOP_BUNDLE` constant replaced the literal in `earlier_release_installs` 12 passed, fmt and clippy clean; implement: `cargo test -p loopflow --lib -- open::tests::` 4 passed after the select change; earlier `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::` 36 passed; `cargo test --test integration -- available_conversations_need_no_question` and `--test global_commands -- open_delivers_exact_task_to_desktop` passed; clippy clean; Python suites unchanged since the last pass (35 passed), gate reruns them.
+Checks (2026-11-02 implement, after the #1777 merge): `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests::` 12 passed; realign, confirming 432eefbff3 is in the tree: `cargo test -p loopflow --lib -- open::tests::` 4 passed; compress: `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests::` after the `DESKTOP_BUNDLE` constant replaced the literal in `earlier_release_installs` 12 passed, fmt and clippy clean; implement: `cargo test -p loopflow --lib -- open::tests::` 4 passed after the select change; earlier `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::` 36 passed; `cargo test --test integration -- available_conversations_need_no_question` and `--test global_commands -- open_delivers_exact_task_to_desktop` passed; clippy clean; Python suites unchanged since the last pass (35 passed), gate reruns them.

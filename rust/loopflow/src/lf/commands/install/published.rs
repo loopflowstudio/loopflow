@@ -886,11 +886,11 @@ fn schedule_plist(home: &Path, binary: &Path, logs: &Path, frequency: InstallFre
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
-    use super::{checked, DiskImage};
+    use super::{checked, updates_itself, DiskImage};
     use super::{
         cron_table, finish_adoption, is_current, newest_release, newest_run, opens_store,
         package_target, record_stream, recorded_stream, release_tag, run_verified_installer,
-        updates_itself, Stream, CRON_MARKER,
+        Stream, CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;

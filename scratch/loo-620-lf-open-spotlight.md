@@ -1,7 +1,8 @@
 # LOO-620: lf open, Spotlight and Finder reach only the installed Loopflow.app
 
 Status: implemented, synced onto main through #1792, realigned and compressed twice
-(2026-11-02). Concept review sent one change back; it landed (432eefbff3). Gate next.
+(2026-11-02). Concept review sent one change back; it landed (432eefbff3); the second
+pass found nothing to change and no open choice. Gate next.
 Source: Task definition (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop
 database-mismatch incident).
 
@@ -103,6 +104,11 @@ installed (an older `~/.local/bin/lf` that is a plain binary). Covered by
 `open -b com.loopflow.mac` now. Consequence worth knowing: an agent launched by a
 stale same-id copy opens in the installed app rather than back in the copy that
 launched it, which is the Task's outcome, not a regression.
+
+Second pass (after 432eefbff3): re-traced the three callers, the no-Desktop failure
+and interrupted-promotion recovery; every launch goes through `DesktopApp::current`,
+`lsregister -f` follows every promotion, and the Swift side's "installed" (`AppUpdates`,
+by folder) only decides self-update, not where `lf open` lands. Nothing to change.
 
 Not changed, and why:
 

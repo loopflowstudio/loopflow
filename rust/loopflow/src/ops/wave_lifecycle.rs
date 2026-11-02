@@ -276,7 +276,8 @@ pub struct WaveRemoval {
 
 /// Retire a Wave and its child Waves. Open Tasks move to the parent Wave (or the
 /// repository); `delete_backlog` deletes the unstarted ones instead. Each step is
-/// idempotent, so re-running finishes an interrupted removal.
+/// idempotent, so re-running finishes an interrupted removal. Synchronous because
+/// the Task moves and deletes block on their own runtime.
 pub fn remove(
     repo: &Path,
     name: &str,
@@ -772,6 +773,16 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
     }
     lines.extend(leftovers(removal));
     lines
+}
+
+pub fn render_removed(removal: &WaveRemoval) -> String {
+    let headline = (!removal.preview && !removal.already_removed)
+        .then(|| format!("Removed Wave {}.", removal.name));
+    headline
+        .into_iter()
+        .chain(removal.summary.iter().cloned())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn leftovers(removal: &WaveRemoval) -> Vec<String> {

@@ -954,12 +954,10 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             if *json {
                 println!("{}", serde_json::to_string_pretty(&removal)?);
             } else {
-                if !removal.preview && !removal.already_removed {
-                    println!("Removed Wave {}.", removal.name);
-                }
-                for line in &removal.summary {
-                    println!("{line}");
-                }
+                println!(
+                    "{}",
+                    loopflow::ops::wave_lifecycle::render_removed(&removal)
+                );
             }
             Ok(())
         }

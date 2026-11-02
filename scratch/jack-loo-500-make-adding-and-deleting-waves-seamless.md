@@ -429,6 +429,14 @@ One PR, deletions first:
     Remove preview carries `uncommitted` (`git status --porcelain -- <path>` on
     main) and says those edits are deleted with the directory.
 
+12. Compress (2026-11-02, after slice 11): `render_removed` joins
+    `render_added`/`render_renamed`, so the lifecycle module owns all three
+    receipts' text and `lf.rs` prints each the same way; Swift `WaveAdded`
+    decodes synthesized (no optional field, so the hand-written decoder added
+    nothing); `tests/wave_lifecycle.rs` runs on one `Lab` fixture instead of
+    passing repo and home to every call. The plan's delete list was swept and
+    is clear.
+
 Remaining: Desktop demo steps 1–3 need a display session (demo/review). CLI
 demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
 
@@ -558,45 +566,13 @@ awaits the planning refresh, so the row exists when selected.
 
 ## Checks
 
-- 2026-11-02: `cargo test --test integration wave_lifecycle` 5/5; `--lib`
-  wave_definitions, planning_peers, wave_repository_ownership, migrations pass;
-  Swift `CreateWaveSheet|RemoveWaveSheet|ProjectActivation|WaveRow` pass;
-  `cargo clippy --all-targets -D warnings` clean. Affected suites → gate.
-- 2026-11-02 compress: `remove` resolves the Wave once (id or address) instead of
-  recursing through its slug, which removed a new Wave holding a removed Wave's
-  address; one directory walk serves memory folding and reference rewrites.
-  `cargo test --test integration -- wave_lifecycle dto_fixtures::wave_removal` 6/6;
-  clippy clean.
-- 2026-11-02 realign (after the merge with main): `cargo test -p loopflow --test
-  integration -- wave_lifecycle dto_fixtures::wave_removal` 6/6.
-- 2026-11-02 one reader: `--lib wave_definitions::tests::registering` 1/1;
-  `--test integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests`
-  9/9; `swift test --filter 'RenameWaveSheetTests|RemoveWaveSheetTests|DTOFixtureTests|WaveTests|MockWaveFixtureTests|WaveSurfacePrimaryHierarchyTests|WorkModelTests|CreateWaveSheetTests'`
-  94/94; clippy clean. Affected suites → gate.
-- 2026-11-02 compress (one reader): `--lib wave_definitions::` 5/5; `--test
-  integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9;
-  `swift test --filter 'RenameWaveSheetTests|RemoveWaveSheetTests|DTOFixtureTests|WaveRowTests|CreateWaveSheetTests|WaveSurfacePrimaryHierarchyTests'`
-  61/61; clippy and fmt clean. Affected suites → gate.
-- 2026-11-02 list default: `lf wave list` omits removed Waves without a flag
-  (`--current` deleted with RegistryQuery, `read.rs`, s1–s5, benchmark); never-
-  removed `abandoned` strays stay listed; `lf wave show|status` head with
-  `removed`, `removed at <date>`, `superseded by <id>` only with a successor.
-  `--lib status_tests::wave_list_keeps lf::tests graph::tests::vsm` 38/38;
-  `--test integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests`
-  9/9; `swift test --filter 'RegistryQueryTests|PortfolioRepoStateTests'` 21/21;
-  clippy and fmt clean. Affected suites → gate.
-- 2026-11-02 realign (Remove sheet leftovers): `swift test --filter
-  'RemoveWaveSheetTests|RenameWaveSheetTests|DTOFixtureTests'` 55/55. Rust untouched
-  since the compress pass; affected suites → gate.
-- 2026-11-02 compress (list default): `--lib wave_definitions::` 5/5; `--test
-  integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9;
-  `swift test --filter 'WaveLensTests|WaveTests|RenameWaveSheetTests|CreateWaveSheetTests|DTOFixtureTests|RemoveWaveSheetTests|MockWaveFixtureTests|RegistryQueryTests|PortfolioRepoStateTests'`
-  98/98; clippy and fmt clean. Affected suites → gate.
-- 2026-11-02 realign (after the second merge with main, `ce172bd3d0`, which only
-  added `?` to `open_existing_store` calls): `cargo test -p loopflow --test
-  integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9.
-  Affected suites → gate.
-- 2026-11-02 slice 11: `--lib ops::linear::tests::connect_adds_an_unregistered_wave`
-  1/1; `--test integration -- wave_lifecycle dto_fixtures::wave_` 11/11;
-  `swift test --filter 'CreateWaveSheetTests|DTOFixtureTests|ProjectActivationTests|RemoveWaveSheetTests|RenameWaveSheetTests|WorkModelTests'`
-  94/94; clippy and fmt clean. Affected suites → gate.
+- Through slice 11 (2026-11-02, `c834f97033`): every pass ran its focused
+  Rust tests (`wave_lifecycle`, `dto_fixtures::wave_`, `wave_definitions`,
+  `planning_peers`, `wave_repository_ownership`, `migrations`,
+  `ops::linear::tests::connect_adds_an_unregistered_wave`, `status_tests`,
+  `portfolio_cli_tests`), the Swift sheet/DTO/model suites, clippy and fmt
+  green; per-pass counts are in that commit's version of this file.
+- 2026-11-02 compress (slice 12): `cargo test -p loopflow --test integration --
+  wave_lifecycle dto_fixtures::wave_` 11/11; `swift test --filter
+  'CreateWaveSheetTests|DTOFixtureTests|ProjectActivationTests'` 58/58; clippy
+  and fmt clean. Affected suites → gate.

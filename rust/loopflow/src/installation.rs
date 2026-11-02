@@ -772,6 +772,17 @@ pub(crate) fn desktop_helper() -> Option<PathBuf> {
     is_app_helper(&current).then_some(current)
 }
 
+/// The installed Loopflow.app: the bundle the account's public `lf` resolves
+/// into. Promotion links `~/.local/bin/lf` to the app's own `lf`, so this names
+/// the promoted copy and never another build that shares its bundle id.
+pub(crate) fn installed_app() -> Option<PathBuf> {
+    let public = fs::canonicalize(account_home().ok()?.join(".local/bin/lf")).ok()?;
+    if !is_app_helper(&public) {
+        return None;
+    }
+    public.ancestors().nth(3).map(Path::to_path_buf)
+}
+
 /// `<App>.app/Contents/MacOS/lf`.
 pub(crate) fn is_app_helper(path: &Path) -> bool {
     let tail: Vec<_> = path

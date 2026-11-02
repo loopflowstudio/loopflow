@@ -80,3 +80,10 @@ Concept review assumption (2026-11-02), reversible:
   repository, so a second clone of an already-registered repository on the same
   Machine attaches to the first clone's Wave rows (path-keyed listing then hides
   them in the second clone). Pre-existing; a separate Task if it bites.
+
+Realign assumption (2026-11-02), reversible:
+
+- **The Remove sheet stays open only on leftovers.** A clean removal closes at
+  once so demo steps 2–3 stay one click; Swift decides from the receipt's typed
+  facts (an Initiative with an error, uncommitted files, prose mentions), the
+  same three Rust's `leftovers` renders, rather than a fourth DTO field.

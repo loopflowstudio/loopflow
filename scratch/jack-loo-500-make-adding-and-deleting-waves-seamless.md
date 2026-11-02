@@ -232,7 +232,9 @@ this Task makes them work and adds nothing beside them):
   button. No destination picker: open Tasks go to the repository, and
   moving them elsewhere uses the ordinary Task move.
 - Failures show the receipt's error in the sheet and keep it open with Retry;
-  a partial receipt (Tasks moved, retirement failed) says exactly that.
+  a partial receipt (Tasks moved, retirement failed) says exactly that. A
+  successful receipt with leftovers (an Initiative Linear kept live, files
+  left uncommitted) stays open with the CLI's lines and a Done button.
 - If the removed Wave is selected or open in the workspace, selection moves to
   the repository row; open Task panes stay open (their Tasks still exist).
 
@@ -336,8 +338,8 @@ later Task if wanted), cleanup of other branches' stale `.lf/wave/` copies.
   and `planning_peers::a_removed_wave_reaches_a_peer_as_retired_…` (exchange
   carries `WaveRetired`).
 - Gate: Swift view tests for the New Wave and Remove Wave sheets render the
-  preview DTO (fixture under `tests/fixtures/dto/`) and the failure/Retry
-  state, headless.
+  preview DTO (fixture under `tests/fixtures/dto/`), the failure/Retry state
+  and the leftovers/Done state, headless.
 - Demo: the five steps above on `lf-world wave-lifecycle`, in Desktop and CLI.
 
 ## Internal slices
@@ -386,81 +388,53 @@ One PR, deletions first:
    `register_authored_waves` returns nothing; Desktop's three copies of the
    Wave context menu and sheet presentation are one `WaveLifecycleMenu` and
    `waveLifecycleSheets` modifier (`Views/WaveLifecycle.swift`).
+8. Realign (2026-11-02): the Remove sheet stays open on a receipt with
+   leftovers (`RemoveWavePhase.leftovers`, `WaveRemoval.hasLeftovers`), as the
+   Rename sheet already did; a clean removal closes at once.
 
 Remaining: Desktop demo steps 1–3 need a display session (demo/review).
 CLI demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
 
-## Concept review (2026-11-02, headless)
+## Concept review (2026-11-02, headless) — resolved
 
 The accepted experience holds: three verbs, remove = retire with explicit
 disposition, one Rust-authored receipt that CLI and Desktop both show. The
-review found one mismatch the accepted decisions already settle, two smaller
-ones, and no open product choice.
+review found one acceptance gap and two smaller ones; slices 6–8 closed them.
+No open product choice. Review page: `scratch/concept-review.html` (describes
+the gap as found).
 
-### Desktop still has a second Wave reader
+- **Desktop kept a second Wave reader.** `PortfolioDiscovery.authoredWaves`
+  scanned `.lf/wave/*/GOAL.md` and the sidebar and Waves window merged it with
+  the store's rows as unregistered placeholders, while `lf` reads
+  `wave_addresses WHERE retired_at IS NULL`. They disagreed exactly where
+  removal matters: a removal whose Linear archive fails keeps the directory on
+  main (the Initiative id lives in `config.yaml`), so the receipt said removed
+  and the sidebar showed the Wave again; a main checkout behind the planning
+  store showed the same ghost. Resolved: Desktop lists only store rows, and
+  `lf` registers authored directories through `ensure_wave`'s id-first match
+  (which skips removed ids) on explicit writes — `lf wave add`, `lf wave
+  connect --all`, a repository joining the portfolio — never on a plan read.
+  A clone's authored Waves still appear once registered, the counterexample
+  the deleted `WorkModelTests.authoredWavesRemainVisible` pinned; now pinned by
+  `a_repository_joining_the_portfolio_registers_its_authored_waves_but_not_removed_ones`
+  and `wave_definitions::registering_a_clones_directories_lists_them_and_skips_a_removed_wave`.
+- **Rename leftovers were CLI-only.** `WaveRenamed.summary` (Rust-built,
+  fixture `wave_renamed.json`, Swift mirror) keeps the Rename sheet open with
+  the same lines and a Done button.
+- **Remove leftovers were CLI-only too** (found at realign, 2026-11-02): the
+  Remove sheet closed on every successful receipt, so an Initiative still live
+  after an archive failure was presented as a clean removal — the "partial
+  cleanup presented as success" acceptance forbids. `RemoveWavePhase.leftovers`
+  keeps the sheet open with the receipt's `summary` and a Done button when
+  `WaveRemoval.hasLeftovers` (an Initiative with an error, uncommitted files or
+  prose mentions — the three facts Rust's `leftovers` renders); a clean removal
+  still closes at once.
+- `WaveRemoval.has_files` stays beside `files`: the preview's fact and the
+  receipt's outcome.
 
-`PortfolioDiscovery.authoredWaves` scans `.lf/wave/*/GOAL.md` in every
-portfolio repository; `WorkModel.visibleWaves` and `WavesView.mergedWaves`
-each merge that scan with the store's rows as unregistered placeholders
-(`WaveViewModel.isRegistered == false`). `lf` reads Waves through
-`wave_addresses WHERE retired_at IS NULL`. The two readers disagree exactly
-where removal matters:
-
-- `lf wave remove` whose Linear archive fails keeps `.lf/wave/<name>/` on
-  main (the Initiative id lives there, see "Archive failure keeps the files").
-  The receipt says the Wave is removed; the sidebar shows it again as a
-  "ready" unregistered row. Acceptance ("Desktop and CLI … reflect the result
-  consistently") and "Removed Waves stay removed" both break on this path.
-- A main checkout behind the planning store (another Machine removed the Wave;
-  the stale-checkout case `ensure_wave` already handles by id) shows the same
-  ghost until it pulls.
-- The design's deletion list already names this reader. Slice 5 kept it
-  because unregistered directories "no longer arise from Desktop creation".
-  They arise from removal's retry path and from clones.
-
-Counterexample to preserve: a freshly cloned repository whose `.lf/wave/`
-holds authored Waves nobody registered on this Machine. Today the placeholder
-is the only way Desktop shows them (`WorkModelTests.authoredWavesRemainVisible`
-pins it); the only registering paths are `lf wave add|connect`, Task creation,
-`lf run` and relocation.
-
-Direction (next implement): one reader. Desktop lists what the store knows.
-Registering authored directories is `lf`'s job through `ensure_wave`'s
-id-first matching, which already skips retired ids, so a kept directory of a
-removed Wave never comes back and a clone's Waves still appear. The trigger is
-an explicit write, not a plan read (reads record no Work): when a repository
-joins the Desktop portfolio, and inside `lf wave add`/`connect --all` as
-today. Delete `PortfolioDiscovery.authoredWaves`, both `authoredWavesByRepo`
-copies, `authoredPlaceholder`, `WaveViewModel.isRegistered` and every
-`isRegistered` guard; the Swift placeholder test becomes a Rust test that
-registering a clone's directories lists them and skips a retired id. The
-removal-with-archive-failure case then needs no Desktop code: the kept
-directory is invisible to Desktop and only the receipt's leftover line names
-it, which is the accepted contract.
-
-### Smaller, implied by "CLI and Desktop say the same thing"
-
-- Rename leftovers are CLI-only. `render_renamed` prints "Still mentioned
-  in …" and "Linear Initiative … kept its title …"; Desktop's `renameWave`
-  discards the receipt and closes the sheet. Give `WaveRenamed` a
-  `summary: Vec<String>` built in Rust like `WaveRemoval.summary`, mirror it
-  in Swift, and keep the rename sheet open on leftovers with the same lines.
-- `WaveRemoval.has_files` and `files: Option<AuthoredFiles>` carry one fact
-  twice and Swift mirrors both. Optional compress: fold `has_files` into the
-  preview's `files` value.
-
-### Not changed, noted
-
-- Desktop's Remove sheet exposes no `--delete-backlog`; unstarted Tasks move
-  and the preview says so. A checkbox is ordinary follow-up, not a product
-  choice.
-- `lf wave rename` also carries `--repo` (relocation) and `--title`;
-  pre-existing and outside this Task.
-- Desktop's Remove sheet closes on a receipt with leftovers (an Initiative
-  still live after an archive failure); only the CLI prints that line. Keeping
-  it open like the rename sheet is ordinary follow-up for demo/review.
-
-Open product choices: none. Review page: `scratch/concept-review.html`.
+Not changed: Desktop's Remove sheet exposes no `--delete-backlog` (unstarted
+Tasks move and the preview says so; a checkbox is ordinary follow-up), and
+`lf wave rename` still carries the pre-existing `--repo` and `--title`.
 
 ## Checks
 
@@ -483,3 +457,6 @@ Open product choices: none. Review page: `scratch/concept-review.html`.
   integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9;
   `swift test --filter 'RenameWaveSheetTests|RemoveWaveSheetTests|DTOFixtureTests|WaveRowTests|CreateWaveSheetTests|WaveSurfacePrimaryHierarchyTests'`
   61/61; clippy and fmt clean. Affected suites → gate.
+- 2026-11-02 realign (Remove sheet leftovers): `swift test --filter
+  'RemoveWaveSheetTests|RenameWaveSheetTests|DTOFixtureTests'` 55/55. Rust untouched
+  since the compress pass; affected suites → gate.

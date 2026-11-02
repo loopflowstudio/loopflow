@@ -1,6 +1,8 @@
 // Remove Wave: renders `lf wave remove --preview --json` verbatim, then removes.
 // A failure keeps the sheet open with the error and Retry; removal is idempotent,
-// so Retry finishes whatever the interrupted run left.
+// so Retry finishes whatever the interrupted run left. A receipt with leftovers
+// (an Initiative still live, uncommitted files, prose mentions) stays open with
+// the same lines the CLI prints.
 
 import SwiftUI
 import Loopflow
@@ -10,6 +12,8 @@ enum RemoveWavePhase: Equatable {
     case preview(WaveRemoval)
     case removing(WaveRemoval)
     case failed(preview: WaveRemoval?, message: String)
+    /// Removed, with `summary` lines a person still has to act on.
+    case leftovers(WaveRemoval)
 }
 
 /// The sheet's content for one phase; the owner runs the commands.
@@ -19,14 +23,19 @@ struct RemoveWaveSheetContent: View {
     let onRemove: () -> Void
     let onRetry: () -> Void
     let onCancel: () -> Void
+    let onDone: () -> Void
     @Environment(\.palette) private var palette
 
-    private var preview: WaveRemoval? {
+    private var removal: WaveRemoval? {
         switch phase {
         case .loading: nil
-        case .preview(let removal), .removing(let removal): removal
+        case .preview(let removal), .removing(let removal), .leftovers(let removal): removal
         case .failed(let preview, _): preview
         }
+    }
+
+    private var removed: Bool {
+        if case .leftovers = phase { true } else { false }
     }
 
     private var canRemove: Bool {
@@ -35,12 +44,12 @@ struct RemoveWaveSheetContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
-            Text("Remove \(name)?")
+            Text(removed ? "\(name) removed" : "Remove \(name)?")
                 .font(Typography.sectionTitle(20))
                 .foregroundStyle(palette.text)
-            if let preview {
+            if let removal {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
-                    ForEach(Array(preview.summary.enumerated()), id: \.offset) { _, line in
+                    ForEach(Array(removal.summary.enumerated()), id: \.offset) { _, line in
                         Text(line).font(Typography.body()).foregroundStyle(palette.textSecondary)
                     }
                 }.accessibilityIdentifier("remove-wave-summary")
@@ -55,13 +64,19 @@ struct RemoveWaveSheetContent: View {
             }
             HStack(spacing: Spacing.md) {
                 Spacer()
-                Button("Cancel", action: onCancel).buttonStyle(.plain)
-                    .foregroundStyle(palette.textSecondary)
-                if case .failed = phase {
+                if removed {
+                    Button("Done", action: onDone)
+                        .keyboardShortcut(.defaultAction)
+                        .accessibilityIdentifier("remove-wave-done")
+                } else if case .failed = phase {
+                    Button("Cancel", action: onCancel).buttonStyle(.plain)
+                        .foregroundStyle(palette.textSecondary)
                     Button("Retry", action: onRetry)
                         .keyboardShortcut(.defaultAction)
                         .accessibilityIdentifier("remove-wave-retry")
                 } else {
+                    Button("Cancel", action: onCancel).buttonStyle(.plain)
+                        .foregroundStyle(palette.textSecondary)
                     Button("Remove", role: .destructive, action: onRemove)
                         .keyboardShortcut(.defaultAction)
                         .disabled(!canRemove)
@@ -87,7 +102,8 @@ struct RemoveWaveSheet: View {
 
     var body: some View {
         RemoveWaveSheetContent(
-            name: displayName, phase: phase, onRemove: remove, onRetry: retry, onCancel: onCancel
+            name: displayName, phase: phase, onRemove: remove, onRetry: retry, onCancel: onCancel,
+            onDone: onRemoved
         )
         .task { await loadPreview() }
     }
@@ -115,8 +131,12 @@ struct RemoveWaveSheet: View {
         phase = .removing(preview)
         Task {
             do {
-                _ = try await model.removeWave(name: name, preview: false, repo: repo)
-                onRemoved()
+                let receipt = try await model.removeWave(name: name, preview: false, repo: repo)
+                if receipt.hasLeftovers {
+                    phase = .leftovers(receipt)
+                } else {
+                    onRemoved()
+                }
             } catch {
                 phase = .failed(preview: preview, message: error.localizedDescription)
             }

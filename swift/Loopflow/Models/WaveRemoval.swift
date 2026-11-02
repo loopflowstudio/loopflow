@@ -21,6 +21,13 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
     public let mentions: [String]
     public let summary: [String]
 
+    /// Whether `summary` ends with lines a person still has to act on: an
+    /// Initiative Linear kept live, files left uncommitted, or prose mentions.
+    public var hasLeftovers: Bool {
+        if case .uncommitted = files { return true }
+        return initiatives.contains { $0.error != nil } || !mentions.isEmpty
+    }
+
     public struct Task: Decodable, Sendable, Hashable {
         public let id: String
         public let identifier: String

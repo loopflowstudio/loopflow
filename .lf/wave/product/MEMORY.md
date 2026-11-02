@@ -955,7 +955,11 @@ lfd and resident-cron contracts remain in
 ## Swift data path — RegistryQuery is the single reader
 
 Swift reads through `RegistryQuery` (`lf … --json`), never the removed lfd API.
-Unknown wire status stays explicit. AGENTS.md owns shared runtime vocabulary;
+Unknown wire status stays explicit. Desktop lists Waves from the store only:
+LOO-500 (2026-11-02) deleted the `.lf/wave/*/GOAL.md` placeholder scan after a
+removal whose Linear archive failed left the directory on main and the sidebar
+showed the removed Wave again. Authored directories register through `lf`
+(`wave add`, `connect --all`, a repository joining the portfolio), never a read. AGENTS.md owns shared runtime vocabulary;
 earlier vocabulary: `4a84d93b59:.lf/wave/product/MEMORY.md`. Migration detail:
 `92d95edfe:wave/product/MEMORY.md`, this heading.
 
@@ -1133,10 +1137,6 @@ snapshots don't prove renderer restoration. Earlier tmux and LOO-280–283 notes
   (`37205c3fb6:wave/product/MEMORY.md`, Learnings).
 - **`loopflow-dev.py` builds from the worktree it runs in.** Repository
   discovery collapses linked worktrees to the canonical main checkout.
-- `cargo test -p loopflow dto_fixtures` filters by test name; use
-  `--test dto_fixtures` to run that integration file. Headless runs set
-  `LF_RUN_ID`, `LF_AS` and `LF_FLOW_ID`; Rust tests that launch or assert journal ids
-  must clear them or `cargo test -p loopflow` fails only under agent runs.
 - **Released migrations are immutable.** The Product/Intelligence `061` collision
   left existing databases missing a column. Test upgrades from the released frontier;
   AGENTS.md owns one draft per Task.

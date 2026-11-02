@@ -19,7 +19,7 @@ struct RemoveWaveSheetTests {
         var removed = false
         let view = RemoveWaveSheetContent(
             name: "desktop", phase: .preview(removal),
-            onRemove: { removed = true }, onRetry: {}, onCancel: {})
+            onRemove: { removed = true }, onRetry: {}, onCancel: {}, onDone: {})
         let summary = try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-summary")
         #expect(try summary.find(text: removal.summary[0]).string() == removal.summary[0])
         try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-confirm").button().tap()
@@ -31,7 +31,7 @@ struct RemoveWaveSheetTests {
         let view = RemoveWaveSheetContent(
             name: "desktop",
             phase: .failed(preview: try preview(), message: "1 of 2 open Tasks moved; LOO-2 could not"),
-            onRemove: {}, onRetry: { retried = true }, onCancel: {})
+            onRemove: {}, onRetry: { retried = true }, onCancel: {}, onDone: {})
         #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-error").text().string()
             == "1 of 2 open Tasks moved; LOO-2 could not")
         #expect(throws: (any Error).self) {
@@ -39,6 +39,21 @@ struct RemoveWaveSheetTests {
         }
         try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-retry").button().tap()
         #expect(retried)
+    }
+
+    @Test func leftoversStayOpenWithTheRustLinesAndADoneButton() throws {
+        let receipt = try preview()
+        var done = false
+        let view = RemoveWaveSheetContent(
+            name: "desktop", phase: .leftovers(receipt),
+            onRemove: {}, onRetry: {}, onCancel: {}, onDone: { done = true })
+        let summary = try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-summary")
+        #expect(try summary.find(text: receipt.summary[3]).string() == receipt.summary[3])
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-confirm")
+        }
+        try view.inspect().find(viewWithAccessibilityIdentifier: "remove-wave-done").button().tap()
+        #expect(done)
     }
 }
 #endif

@@ -2915,18 +2915,32 @@ mod tests {
     use loopflow::lf::{Cli, Commands, OpsCommand, PrCommand, TaskCommand};
     use loopflow::work::task::{GithubPr, PrPublication, TaskId, TaskPr, TaskPrId};
 
+    /// `--as` never degrades to raw attribution: an absent registry is named
+    /// as such, and a store lf cannot open names its cause, never "empty".
     #[test]
     fn bound_work_selector_requires_a_readable_registry() {
         let _lock = PROCESS_STATE_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let directory = tempfile::tempdir().unwrap();
-        std::fs::create_dir(directory.path().join("loopflow.db")).unwrap();
         let _home = EnvGuard::set("LF_HOME", directory.path().display().to_string());
 
-        let error = super::prepare_work_binding("task:LOO-265", directory.path())
-            .expect_err("--as must not degrade to raw attribution");
-        assert!(error.to_string().contains("planning registry unavailable"));
+        let absent = super::prepare_work_binding("task:LOO-265", directory.path())
+            .expect_err("no registry means no binding")
+            .to_string();
+        assert!(absent.contains("planning registry unavailable"), "{absent}");
+
+        let path = directory.path().join("loopflow.db");
+        std::fs::create_dir(&path).unwrap();
+        let unopenable = super::prepare_work_binding("task:LOO-265", directory.path())
+            .expect_err("an unopenable store must not read as empty")
+            .to_string();
+        assert!(
+            unopenable.contains("cannot resolve task:LOO-265")
+                && unopenable.contains(&path.display().to_string())
+                && !unopenable.contains("planning registry unavailable"),
+            "{unopenable}"
+        );
     }
 
     static PROCESS_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

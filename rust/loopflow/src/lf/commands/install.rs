@@ -1295,8 +1295,9 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
 const RELEASE_BUNDLE_IDS: [&str; 2] = ["com.loopflow.mac", "com.loopflow.concerto"];
 
 /// Leave `target` the only release app Spotlight, Finder and `open -b` reach:
-/// remove the staging directory and release installs at earlier installer
-/// locations, and register `target` afresh. Callers remove the legacy target.
+/// remove the staging directory, copies earlier lf staged beside the target and
+/// release installs at earlier installer locations, then register `target`
+/// afresh. Callers remove the legacy target.
 /// Runs under the promotion lock with no switch in flight; the install is
 /// already committed, so failures are logged.
 fn converge_release_app(target: &Path) {
@@ -1304,19 +1305,47 @@ fn converge_release_app(target: &Path) {
     if let Err(error) = remove_path(&install_scratch(target)) {
         tracing::warn!(%error, "superseded app copies were not removed");
     }
-    if !in_applications_folder(target) {
-        return;
+    let registered = in_applications_folder(target);
+    let mut stale = sibling_promotion_copies(target);
+    if registered {
+        stale.extend(earlier_release_installs(target));
     }
-    for app in earlier_release_installs(target) {
-        launch_services(&["-u"], &app);
+    for app in stale {
+        if registered {
+            launch_services(&["-u"], &app);
+        }
         match remove_path(&app) {
             Ok(()) => tracing::info!(path = %app.display(), "removed superseded app"),
             Err(error) => tracing::warn!(%error, "superseded app was not removed"),
         }
     }
-    if target.exists() {
+    if registered && target.exists() {
         launch_services(&["-f"], target);
     }
+}
+
+/// Copies earlier lf staged beside the target (`.Loopflow.app.promote.*`,
+/// `.Loopflow.app.superseded.*`), which Spotlight indexed and Launch Services
+/// registered under the release bundle id.
+fn sibling_promotion_copies(target: &Path) -> Vec<PathBuf> {
+    let (Some(parent), Some(name)) = (target.parent(), target.file_name().and_then(|n| n.to_str()))
+    else {
+        return Vec::new();
+    };
+    let prefixes = [format!(".{name}.promote."), format!(".{name}.superseded.")];
+    let Ok(entries) = fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|entry| prefixes.iter().any(|prefix| entry.starts_with(prefix)))
+        })
+        .map(|entry| entry.path())
+        .collect()
 }
 
 /// Launch Services registration belongs to real application folders; staging
@@ -3081,6 +3110,9 @@ mod artifact_tests {
         let directory = tempfile::tempdir().unwrap();
         let applications = directory.path().join("Applications");
         let target = applications.join("Loopflow.app");
+        // Earlier lf staged beside the target; Spotlight indexed the leftovers.
+        let orphan = applications.join(".Loopflow.app.superseded.4242-old");
+        fs::create_dir_all(orphan.join("Contents")).unwrap();
         let candidate = CandidateIdentity::current();
         for version in ["1", "2"] {
             let source = directory.path().join(version).join("Loopflow.app");

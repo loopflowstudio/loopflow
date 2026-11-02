@@ -17,13 +17,5 @@ struct CreateWaveSheetTests {
         #expect(try objective.textField().labelView().text().string() == "What this Wave is for")
         #expect(try view.inspect().find(text: "Objective (optional)").string() == "Objective (optional)")
     }
-
-    @Test func renameSheetStartsFromTheCurrentAddress() throws {
-        let view = RenameWaveSheet(
-            model: WorkModel(query: RegistryQuery { _, _ in "{}" }), id: "wave-id",
-            currentName: "product/desktop", repo: "/repo", onDone: {})
-        #expect(try view.inspect().find(text: "Rename product/desktop").string() == "Rename product/desktop")
-        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "rename-wave-confirm").button().isDisabled())
-    }
 }
 #endif

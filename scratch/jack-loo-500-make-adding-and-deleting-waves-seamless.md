@@ -1,8 +1,8 @@
 # LOO-500: Add and remove Waves seamlessly
 
-Status: accepted; implemented (reconciled 2026-11-02); one implement pass left
-from the second concept review (`lf wave list` lists what Desktop lists). CLI
-demo done; Desktop demo awaits a display session. Jack Heart filed LOO-500; exact controls,
+Status: accepted; implemented (reconciled 2026-11-02), including the second
+concept review's direction (`lf wave list` lists what Desktop lists). CLI demo
+done; Desktop demo awaits a display session. Jack Heart filed LOO-500; exact controls,
 required fields and the meaning of deletion were left as design questions.
 Choices below are the plan's; reversible ones are noted in
 `scratch/questions.md`.
@@ -215,7 +215,8 @@ removed Wave's files surface as ordinary rebase conflicts.
   reading retired Waves.
 - `lf wave list` lists live Waves, the same rows Desktop shows; a removed Wave
   is read by address or id with `lf wave show` (second concept review,
-  2026-11-02; implement next).
+  2026-11-02). Desktop's `Wave` row therefore carries no retirement fields and
+  no "Retired at" lens; the wire `WaveSnapshot` keeps them for `lf wave show`.
 
 ### Desktop
 
@@ -395,6 +396,14 @@ One PR, deletions first:
 8. Realign (2026-11-02): the Remove sheet stays open on a receipt with
    leftovers (`RemoveWavePhase.leftovers`, `WaveRemoval.hasLeftovers`), as the
    Rename sheet already did; a clean removal closes at once.
+9. Done (2026-11-02): `lf wave list` omits removed Waves by default and
+   `--current` is deleted with its callers; `lf wave show|status` head with
+   `removed at <date>` and `superseded by <id>` only with a successor.
+10. Compress (2026-11-02): `retired_wave_at` takes the `WaveLocator` its
+    callers already hold, like `get_wave_at`; `remove_authored` returns every
+    path the commit selects; Swift's app `Wave` drops `retiredAt`,
+    `supersededByWaveId`, `retirementReason` and the "Retired at" lens, which
+    no listed row could reach once the list excludes removed Waves.
 
 Remaining: Desktop demo steps 1–3 need a display session (demo/review).
 CLI demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
@@ -517,3 +526,7 @@ awaits the planning refresh, so the row exists when selected.
 - 2026-11-02 realign (Remove sheet leftovers): `swift test --filter
   'RemoveWaveSheetTests|RenameWaveSheetTests|DTOFixtureTests'` 55/55. Rust untouched
   since the compress pass; affected suites → gate.
+- 2026-11-02 compress (list default): `--lib wave_definitions::` 5/5; `--test
+  integration -- wave_lifecycle dto_fixtures::wave_re portfolio_cli_tests` 9/9;
+  `swift test --filter 'WaveLensTests|WaveTests|RenameWaveSheetTests|CreateWaveSheetTests|DTOFixtureTests|RemoveWaveSheetTests|MockWaveFixtureTests|RegistryQueryTests|PortfolioRepoStateTests'`
+  98/98; clippy and fmt clean. Affected suites → gate.

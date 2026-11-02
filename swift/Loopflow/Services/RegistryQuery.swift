@@ -1082,13 +1082,14 @@ public enum WorkMachineTarget: Sendable, Hashable {
     case wave(id: String)
 }
 
-/// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
-/// explicit (no serde defaults on the wire).
 /// The `id` every Wave lifecycle receipt carries.
 public struct WaveIdentity: Decodable, Sendable {
     public let id: String
 }
 
+/// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
+/// explicit (no serde defaults on the wire). `lf wave list` never lists a removed
+/// Wave, so the app row carries no retirement; `lf wave show` reads one.
 public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
@@ -1124,10 +1125,7 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
             repo: repo,
             status: status,
             activeTasks: activeTasks,
-            parentWaveId: parentWaveId,
-            retiredAt: retiredAt,
-            supersededByWaveId: supersededByWaveId,
-            retirementReason: retirementReason
+            parentWaveId: parentWaveId
         )
     }
 }

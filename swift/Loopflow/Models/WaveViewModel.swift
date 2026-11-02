@@ -27,13 +27,7 @@ public struct WaveViewModel: Sendable, Identifiable, Hashable {
     /// The operational lens for this row, in the shared green/red/blue/black grammar,
     /// projected from the runtime `lf wave list` carries.
     public var lens: WaveLens {
-        if let retiredAt = api.retiredAt {
-            let successor = api.supersededByWaveId.map { " · superseded by \($0)" } ?? ""
-            return WaveLens(color: .black, reason: "Retired at \(retiredAt)\(successor)")
-        }
-        return WaveLens.forWave(
-            activeTasks: api.activeTasks
-        )
+        WaveLens.forWave(activeTasks: api.activeTasks)
     }
 
     public var objectiveTagline: String? {

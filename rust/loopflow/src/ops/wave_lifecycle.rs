@@ -276,7 +276,7 @@ pub fn remove(
             let locator = WaveLocator::discover(&main, name).map_err(lifecycle_error)?;
             store
                 .sqlite
-                .retired_wave_at(&repo_key, locator.slug())
+                .retired_wave_at(&locator)
                 .map_err(lifecycle_error)?
                 .ok_or_else(|| lifecycle_error(format!("no Wave {name} here")))?
         }
@@ -416,8 +416,7 @@ pub fn remove(
             reason: "kept until the Linear Initiative is archived".into(),
         }
     } else {
-        let mut paths = remove_authored(&main, &receipt.name, receipt.destination.as_deref())?;
-        paths.push(authored_path(&receipt.name));
+        let paths = remove_authored(&main, &receipt.name, receipt.destination.as_deref())?;
         commit_authored(&main, &paths, &format!("lf wave remove: {}", receipt.name))
     });
     receipt.summary = removal_summary(&receipt);
@@ -439,7 +438,7 @@ fn interrupted(
 }
 
 /// Delete the removed Wave's directory on main, first folding its memory and the
-/// config keys its parent lacks into the parent. Returns other changed paths.
+/// config keys its parent lacks into the parent. Returns every changed path.
 fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<Vec<String>> {
     let directory = main.join(authored_path(slug));
     let mut changed = Vec::new();
@@ -455,6 +454,7 @@ fn remove_authored(main: &Path, slug: &str, parent: Option<&str>) -> OpsResult<V
     }
     std::fs::remove_dir_all(&directory)
         .map_err(|error| lifecycle_error(format!("{}: {error}", directory.display())))?;
+    changed.push(authored_path(slug));
     Ok(changed)
 }
 
@@ -715,8 +715,8 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             _ => format!(".lf/wave/{name} removed on the main checkout."),
         });
     }
-    for archive in &removal.initiatives {
-        if removal.preview {
+    if removal.preview {
+        for archive in &removal.initiatives {
             lines.push(format!(
                 "Linear Initiative {} for {} will be archived.",
                 archive.initiative, archive.wave

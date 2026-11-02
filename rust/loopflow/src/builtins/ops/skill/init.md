@@ -201,7 +201,8 @@ lf wave add <name> --objective "<outcome>"
 ```
 
 This registers the Wave, starts its first chapter, and commits
-`.lf/wave/<name>/` on the main checkout. Then edit that `GOAL.md` there. Write the goal as a durable operating contract: objective, observable success,
+`.lf/wave/<name>/` on the main checkout. Then edit that `GOAL.md` there. Write
+the goal as a durable operating contract: objective, observable success,
 boundaries, and when to stop or escalate. Keep chapter priorities, KRs and Tasks
 in the chapter plan. Curate durable decisions in `.lf/wave/<name>/MEMORY.md` through
 the repository workflow; do not invent runtime memory commands or duplicate the

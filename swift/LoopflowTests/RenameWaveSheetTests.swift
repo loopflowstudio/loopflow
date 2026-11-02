@@ -14,6 +14,14 @@ struct RenameWaveSheetTests {
             WaveRenamed.self, from: String(decoding: loadFixtureData("wave_renamed.json"), as: UTF8.self))
     }
 
+    @Test func startsFromTheCurrentAddressWithRenameDisabled() throws {
+        let view = RenameWaveSheet(
+            model: WorkModel(query: RegistryQuery { _, _ in "{}" }), id: "wave-id",
+            currentName: "product/desktop", repo: "/repo", onDone: {})
+        #expect(try view.inspect().find(text: "Rename product/desktop").string() == "Rename product/desktop")
+        #expect(try view.inspect().find(viewWithAccessibilityIdentifier: "rename-wave-confirm").button().isDisabled())
+    }
+
     @Test func leftoversStayOpenWithTheRustLinesAndADoneButton() throws {
         let receipt = try renamed()
         var done = false

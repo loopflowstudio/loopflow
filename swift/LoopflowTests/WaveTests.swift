@@ -9,8 +9,7 @@ struct WaveTests {
             id: "wave-123",
             name: "OpenAI-tools",
             repo: "/tmp/repo",
-            status: .ready,
-            
+            status: .ready
         ))
 
         #expect(wave.id == "wave-123")

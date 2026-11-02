@@ -870,9 +870,7 @@ fn removed_wave_at(
         return Ok(None);
     };
     let locator = crate::work::wave::WaveLocator::discover(repo, wave)?;
-    Ok(store
-        .sqlite
-        .retired_wave_at(&locator.repo().to_string(), locator.slug())?)
+    Ok(store.sqlite.retired_wave_at(&locator)?)
 }
 
 /// What `lf wave show` prints. `observe` first asks the tracker about each

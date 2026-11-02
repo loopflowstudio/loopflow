@@ -195,9 +195,9 @@ lf wave remove payments --delete-backlog # delete unstarted Tasks instead; start
 ```
 
 Removal retires the Wave and its child Waves: chapters, completed Tasks and
-conversations stay readable with `lf wave show payments` until a new Wave takes the name. A child's `MEMORY.md` folds
-into its parent's. Running it again finishes an interrupted removal; adding the
-name again starts a fresh Wave.
+conversations stay readable with `lf wave show payments` until a new Wave takes
+the name. A child's `MEMORY.md` folds into its parent's. Running it again
+finishes an interrupted removal; adding the name again starts a fresh Wave.
 
 ### Run a pass, or keep a conversation
 

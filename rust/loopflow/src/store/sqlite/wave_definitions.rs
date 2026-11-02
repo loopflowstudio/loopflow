@@ -8,6 +8,7 @@ use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use crate::id::WaveId;
 use crate::store::{StoreError, StoreResult};
 use crate::work::project::Project;
+use crate::work::wave::{Wave, WaveLocator};
 
 use super::{planning_write, SqliteStore};
 
@@ -147,37 +148,7 @@ impl SqliteStore {
         }
         Ok(())
     }
-}
 
-/// The directories directly under `prefix`, as slugs. A directory without its own
-/// authored files still leads to nested Waves.
-fn child_directories(root: &Path, prefix: &str) -> Vec<String> {
-    let directory = if prefix.is_empty() {
-        root.to_path_buf()
-    } else {
-        root.join(prefix)
-    };
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return Vec::new();
-    };
-    let mut slugs: Vec<String> = entries
-        .flatten()
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-        .filter(|name| !name.starts_with('.'))
-        .map(|name| {
-            if prefix.is_empty() {
-                name
-            } else {
-                format!("{prefix}/{name}")
-            }
-        })
-        .collect();
-    slugs.sort();
-    slugs
-}
-
-impl SqliteStore {
     /// Retire Waves together through the planning writer, so Git planning exchange
     /// carries the removal. Rows, Projects, Tasks and Sessions stay readable;
     /// an already retired Wave keeps its original retirement.
@@ -213,11 +184,7 @@ impl SqliteStore {
     }
 
     /// The most recently retired Wave at this address, if any.
-    pub(crate) fn retired_wave_at(
-        &self,
-        repo: &str,
-        slug: &str,
-    ) -> StoreResult<Option<crate::work::wave::Wave>> {
+    pub(crate) fn retired_wave_at(&self, locator: &WaveLocator) -> StoreResult<Option<Wave>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT id, name, repo, created_at, parent_wave_id, promoted_at,
@@ -225,7 +192,7 @@ impl SqliteStore {
              FROM wave_addresses
              WHERE repo=?1 AND slug=?2 AND retired_at IS NOT NULL
              ORDER BY retired_at DESC LIMIT 1",
-            params![repo, slug],
+            params![locator.repo().to_string(), locator.slug()],
             |row| Ok(crate::store::rows::map_wave_row(row)),
         )
         .optional()?
@@ -245,6 +212,34 @@ impl SqliteStore {
         }
         Ok(count)
     }
+}
+
+/// The directories directly under `prefix`, as slugs. A directory without its own
+/// authored files still leads to nested Waves.
+fn child_directories(root: &Path, prefix: &str) -> Vec<String> {
+    let directory = if prefix.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(prefix)
+    };
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut slugs: Vec<String> = entries
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .filter(|name| !name.starts_with('.'))
+        .map(|name| {
+            if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            }
+        })
+        .collect();
+    slugs.sort();
+    slugs
 }
 
 fn seed_wave_files(directory: &Path, id: &WaveId, name: &str) -> StoreResult<()> {

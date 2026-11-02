@@ -1,8 +1,7 @@
 # LOO-693 plan: running steps and conversations survive a store upgrade
 
-Reconciled 2026-11-02 against HEAD `2c2e1fb669`. Code last changed in
-`7730f178c6` (compress: test trim and one doc comment). origin/main
-(`7404ba92ef`, #1792) is merged; it shares no file with this change.
+Reconciled 2026-11-02 after the second concept review (`786a1c4d62`).
+origin/main (`7404ba92ef`, #1792) is merged; it shares no file with this change.
 
 ## Exists (proved on this branch)
 
@@ -23,22 +22,20 @@ Reconciled 2026-11-02 against HEAD `2c2e1fb669`. Code last changed in
   The `delete loopflow.db` text the Task cites was already gone at the base.
 - MIGRATIONS.md already documents "Older lf keeps opening an additively
   extended store"; no doc change needed.
+- **The Task PR refusal names one fix.** `task_registry_error`
+  (`rust/loopflow/src/ops/task/delivery.rs`) prefixes `Task PR authority
+  refused: the shared Loopflow registry <path> cannot be opened:` and passes
+  the store's error through verbatim, as planning, linear, context and
+  session_move do; under skew that error already ends in ``run `lf install` ``.
+  `missing_task_registry` is unchanged: no store is not skew, and `lf doctor`
+  is right there. `task_pr_authority_tests` asserts the store's own text
+  (`not a database`, `unable to open database file`) for the corrupt and
+  inaccessible registries. Settled by the concept review of 2026-11-02
+  (second pass) below.
 
 ## Remains
 
-- **The Task PR refusal names one fix.** `task_registry_error`
-  (`rust/loopflow/src/ops/task/delivery.rs`) wraps the store's refusal, which
-  under skew already ends in ``run `lf install` ``, with a guessed cause
-  ("inaccessible or schema-incompatible") and a second fix ("Run `lf doctor`").
-  Implement: prefix only `Task PR authority refused: the shared Loopflow
-  registry <path> cannot be opened: {error}` and pass the store error through,
-  as planning, linear, context and session_move already do. The store names
-  the fix when there is one. `missing_task_registry` is unchanged: no store is
-  not skew, and `lf doctor` is right there. Test consequence:
-  `task_pr_authority_tests::publish_refuses_when_registry_schema_incompatible_before_any_push`
-  asserts `contains("incompatible")`, which the wrapper supplied; assert the
-  store's own text (`not a database`) instead. Settled by the concept review
-  of 2026-11-02 (second pass) below.
+Nothing.
 
 ## Assumptions (Jack Heart's decisions of 2026-11-02 applied; revisit if wrong)
 
@@ -58,14 +55,14 @@ Reconciled 2026-11-02 against HEAD `2c2e1fb669`. Code last changed in
   not: they self-migrate (`apply_sqlite_with_backup`). Only the shared `~/.lf`
   store admits additive newer tails, which is where running steps live.
 
-Check: `cargo test -p loopflow --lib store::sqlite::frontier_tests::` 11 passed after the compress trim; `--test task_pr_authority_tests` 12 passed; `--test integration -- doctor_tests::status_reads` passed; clippy clean; realign (prose only) reran nothing; gate owns the affected suites.
+Check: `cargo test -p loopflow --test task_pr_authority_tests` 12 passed after the wrapper change; `--lib store::sqlite::frontier_tests::` 11 passed and `--test integration -- doctor_tests::status_reads` passed earlier on unchanged code; clippy clean; gate owns the affected suites.
 
 ## Concept review (2026-11-02, headless; second pass after compress and realign)
 
 Reviewed the implemented change against Jack Heart's decisions of 2026-11-02.
 Page: `scratch/concept-review.html`. The second pass found one surface the
-first did not inspect: the Task PR entry point's wrapper, recorded under
-Remains and under Settled below.
+first did not inspect: the Task PR entry point's wrapper, now fixed and
+recorded under Exists and under Settled below.
 
 **Accepted experience.** Jack installs a newer lf while steps and conversations
 run on the older one. Nothing he does changes: the install migrates `~/.lf`,
@@ -90,9 +87,9 @@ tail; `incompatible()` for a diverged history). No new record, flag or state.
   `run \`lf doctor\`` for that case are right, since there is no skew to name.
 - A refusal names one fix. The store's error carries ``run `lf install` `` when
   the cause is skew; a caller that appends its own fix after it (`lf pr submit`
-  from a Task worktree today says both) contradicts "name the fix" and sends
-  the operator to `lf doctor`, which cannot install anything. Callers prefix
-  who refused and the path, then pass the store error through verbatim.
+  from a Task worktree did, before this change) contradicts "name the fix" and
+  sends the operator to `lf doctor`, which cannot install anything. Callers
+  prefix who refused and the path, then pass the store error through verbatim.
 
 **Normal path, failure, recovery.**
 - Additive install under a running Graph: the step finishes, revalidation

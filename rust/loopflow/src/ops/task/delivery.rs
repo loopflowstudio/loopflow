@@ -40,12 +40,12 @@ pub(super) enum ManagedTask {
 }
 
 /// A Task entry point refuses rather than degrading to generic PR behavior
-/// when the shared registry exists but cannot be opened: inaccessible, locked
-/// or schema-incompatible. The message names the recovery so the operator can move.
+/// when the shared registry exists but cannot be opened. The store's error
+/// passes through verbatim: it names the fix (`lf install`) when the cause is
+/// skew, and a second fix here would contradict it.
 pub(super) fn task_registry_error(error: StoreError) -> OpsError {
     task_error(format!(
-        "Task PR authority refused: the shared Loopflow registry {} is present but \
-         inaccessible or schema-incompatible: {error}. Run `lf doctor`.",
+        "Task PR authority refused: the shared Loopflow registry {} cannot be opened: {error}",
         default_db_path().display()
     ))
 }

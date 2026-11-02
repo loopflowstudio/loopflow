@@ -179,8 +179,8 @@ fn publish_refuses_when_registry_inaccessible_before_any_push() {
         "expected an authority refusal, got: {message}"
     );
     assert!(
-        message.contains("incompatible"),
-        "refusal must name the inaccessible/incompatible registry, got: {message}"
+        message.contains("unable to open database file"),
+        "refusal must carry the store's own error, got: {message}"
     );
 
     assert!(
@@ -326,8 +326,8 @@ fn publish_refuses_when_registry_schema_incompatible_before_any_push() {
         "expected an authority refusal, got: {message}"
     );
     assert!(
-        message.contains("incompatible"),
-        "refusal must name the incompatible registry, got: {message}"
+        message.contains("not a database"),
+        "refusal must carry the store's own error, got: {message}"
     );
 
     assert!(

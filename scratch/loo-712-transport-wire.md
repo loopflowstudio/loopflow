@@ -86,7 +86,9 @@ not a configured Claude conversation; native acceptance remains below.
   colors without applying them until takeover, preserving byte replay and event
   sequence — the ownership and byte-resume fixtures above.
 - [x] 1 MB burst → wire within 10% — `a_megabyte_burst_costs_within_ten_percent_on_the_wire`.
-- [x] `transport_tests` and `golden_prompt` pass; `transport/README.md` documents the stream.
+- [x] Core `transport_tests` and `golden_prompt` passed before the color correction;
+  the five focused checks below cover the latest implementation. The README
+  documents the stream; gate still owns the full affected suites on the integrated tree.
 - [x] Owner retirement carries the full successor command in `control`; the
   viewer restores its terminal and executes that command, preserving its result
   — `sessions_end_when_their_lf_executable_goes` and
@@ -100,11 +102,11 @@ not a configured Claude conversation; native acceptance remains below.
 ## Remaining
 
 - **Land order** (Jack Heart, 2026-11-02, via the Task comment): LOO-705 first,
-  then LOO-708/LOO-709, then this Task. On 2026-11-02, shared Task reads still
-  show LOO-705 at demo with open PR #1799, LOO-708 running implement and LOO-709
-  running concept-review, both without a PR. LOO-710 is running compress without
-  a PR. The local origin/main ref remains `4e9ade2d04`; it was not fetched
-  during reconciliation and is not fresh remote merge evidence.
+  then LOO-708/LOO-709, then this Task. Shared Task reads during realign
+  (2026-11-02) show LOO-705 at demo with open PR #1799, LOO-708 running compress,
+  LOO-709 idle with its latest Graph stopped at loop-or-next, and LOO-710 running
+  implement. The latter three have no PR. A fresh `git fetch origin main`
+  still resolves to `4e9ade2d04`; dependency integration remains outstanding.
 - **LOO-705 integration (2026-11-02).** Its source at
   `c788a6ea32e93f180f827441eba103ad53551886` supplies the full
   `[entry, "session", "resume", session_id]` command and `follow` implementation,
@@ -148,6 +150,34 @@ and byte count recover only an in-memory viewer stream. They are different
 recovery scopes. Spool exhaustion requires a fresh snapshot, never replay of
 input. Snapshot format and owner retirement policy remain with the named
 dependencies; the existing integration and live-acceptance obligations above
-remain. Wave memory is unchanged by this implementation pass.
+remain. Realign (2026-11-02) confirms the implementation matches this correction
+and records its report-retention lesson in Infrastructure memory. Infrastructure
+and its sole immediate child, Release, were read in full; Release's distinction
+between source fixtures and installed acceptance still applies. No new product
+decision is needed for reconciliation; the unknown-color assumption remains
+explicit for demo/review.
 
-Check (2026-11-02): after decoder/appearance reduction, network-isolated `cargo nextest run -p loopflow --test transport_tests -E 'test(ownership_queues_behind_a_taker) | test(a_dropped_viewer_resumes) | test(every_viewer_starts_with_the_snapshot) | test(resize_reaches_every_viewer) | test(native_pending_request_survives_creator_exit)'` — 5 pass (snapshot waits for socket EOF after the earlier leaky pass); build, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` and `lf context` pass. Earlier core/handoff evidence: `76654874b332ff0874dd125735b15d957b6e00a4:scratch/loo-712-transport-wire.md`. Gate owns affected transport/lifecycle/launch suites and owner-boundary startup/interactive-Graph checks after dependency integration; CI owns Linux/installation proofs, and live Claude acceptance remains demo/review's.
+Headless concept review after the color correction: **no further design change
+and no open product choice**. The normal interaction remains one Session viewed
+from two connections: both receive its snapshot and output, one may type, and a
+separately selected viewer supplies size and known colors. Losing appearance
+ownership alone leaves the viewer attached. The CLI's existing departure on
+input-control loss remains separate from Desktop's eventual presentation.
+
+The recovery counterexamples still require these distinctions. If a disconnected
+viewer returns after another takes over, restoring its output must not silently
+restore its input or appearance claims. If the spool no longer contains its
+offset, a fresh snapshot recovers viewing without resubmitting input. If the owner
+ends, its in-memory stream cannot recover the conversation; the successor command
+addresses the durable Session and provider history instead. No new persistent
+viewer record or second successor lifecycle is warranted. Byte resume is a wire
+capability exercised by the fixtures; this review does not claim the CLI
+automatically reconnects a broken socket.
+
+The current README and LOOPFLOW.md already express the accepted interaction;
+no additional usage or agent instruction is proposed. Next proof remains the
+integrated dependency checks and live Claude interaction listed above. The review
+page is `scratch/concept-review.html`; implementation and Wave memory are
+unchanged by this review.
+
+Check (2026-11-02): `git diff --check` and `lf context` pass; prose-only realign reuses the 5 focused transport passes, build, formatting and Clippy recorded at `d1eeb41e1d6cbfc39c543598468382a8ae28cec8:scratch/loo-712-transport-wire.md` (snapshot waits for socket EOF after the earlier leaky pass); earlier core/handoff evidence: `76654874b332ff0874dd125735b15d957b6e00a4:scratch/loo-712-transport-wire.md`. Gate owns affected transport/lifecycle/launch suites and owner-boundary startup/interactive-Graph checks after dependency integration; CI owns Linux/installation proofs, and live Claude acceptance remains demo/review's.

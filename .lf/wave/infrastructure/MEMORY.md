@@ -65,6 +65,15 @@ EOF; exhaustion answers `reconnect_required` and the viewer repaints.
 Ownership arbitrates size and colors only and is separate from input control,
 which keeps LOO-618's token/replace/Busy semantics.
 
+Concept-review correction (2026-11-02): reports belong to each viewer, not a
+serve-wide theme cache. Retain queued reports through reconnect grace; only the
+settled owner's known theme reaches broadcasts and fresh observers. Resume alone
+does not restore appearance; takeover or queued promotion does. The ownership
+and byte-resume fixtures prove this with sequence/reply ordering intact.
+Unknown colors supply no override: this remains an implementation assumption,
+not a palette/reset decision attributed to Jack Heart. Desktop acceptance stays
+unproved.
+
 Deviations from Rex, with reasons: input control and ownership release at EOF,
 not after the grace window, because LOO-618's automatic attach must not see Busy
 for a disconnected viewer. EOF proves connection loss, not process death. Events ride stream 1 in pipe

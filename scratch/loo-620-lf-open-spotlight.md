@@ -1,6 +1,7 @@
 # LOO-620: lf open, Spotlight and Finder reach only the installed Loopflow.app
 
-Status: implemented, compressed, synced onto main through #1792 and realigned (2026-11-02); gate next. Source: Task definition
+Status: implemented, compressed, synced onto main through #1792 and realigned (2026-11-02).
+Concept review (2026-11-02) sends one change back to implement, below; gate after it. Source: Task definition
 (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop database-mismatch incident).
 
 ## What exists
@@ -73,13 +74,47 @@ Checked on Jack's Mac 2026-11-02 (read-only): `~/.local/bin/lf` resolves into
 `/Applications/Loopflow.app` and `~/Applications/Loopflow Dev.app`; no
 `.promote.*`/`.superseded.*` orphans, so the sweep's proof stays the unit test.
 
+## Concept review (2026-11-02, in the Graph)
+
+Traced the normal path (`lf open` from a terminal, from an agent inside Loopflow
+Dev, from an agent inside the installed Desktop), the failure (no installed app) and
+recovery (an interrupted promotion's staged copy, a Desktop that will not quit).
+Promotion errors out when old app processes outlive the 10s quiesce, so the
+superseded copy is never removed from under a running Desktop; the `.noindex`
+scratch directory and the sibling sweep both hold. The link receiver, `lf desktop`
+and `lf open` ask one question (`DesktopApp::current`). Names map to the thing:
+`Installed(path)` is the app the account's `lf` resolves into, `Running(bundle)` the
+Desktop that launched the caller.
+
+**Next implement direction (implied by the accepted contract, not a new choice).**
+An agent inside the installed Desktop gets `LF_DESKTOP=com.loopflow.mac`, so its
+`lf open` still runs `open -b com.loopflow.mac`: the exact command from the
+2026-11-02 incident, which Launch Services resolves to any registered copy
+(questions.md keeps earlier same-id registrations in place). Only release
+packaging carries that id now, so the installed app *is* that caller's Desktop and
+the path names it more precisely than the id; `open -a <path>` activates the
+running instance just as `-b` does. Change `DesktopApp::select`: when `LF_DESKTOP`
+is `DESKTOP_BUNDLE` and `installed_app()` resolves, answer `Installed(path)`;
+keep `Running(bundle)` for every other id (Loopflow Dev routes back to itself)
+and as the fallback when nothing is installed (an older `~/.local/bin/lf` that is
+a plain binary). Add the unit test beside
+`desktop_inside_a_build_routes_back_to_it_by_bundle_id`. After this, no `lf`
+command spells `open -b com.loopflow.mac`. Consequence worth knowing: an agent
+launched by a stale same-id copy opens in the installed app rather than back in
+the copy that launched it, which is the Task's outcome, not a regression.
+
 Not changed, and why:
 
-- `DesktopApp::Running` is reached by id even for the installed Desktop (its agents get
-  `LF_DESKTOP=com.loopflow.mac`); Launch Services prefers the running instance for
-  `-b`, which is the one that launched the agent. Accepted in the Task text.
 - `quiesce_app_processes` asks `application id "com.loopflow.mac"` to quit, then
-  signals by executable path; stays as `scratch/questions.md` records.
+  signals by executable path. Reaching an already-running instance by id is inside
+  the accepted contract; `scratch/questions.md` keeps the follow-up.
+- `sibling_promotion_copies` sweeps `.promote.*`/`.superseded.*` orphans no known
+  Machine still has (Jack's Mac was clean on 2026-11-02). It is the "earlier known
+  location" sweep the Task asked for; deletable once every Machine has promoted once
+  on this build.
+- `recover_switch` converges after `resume_switch_app`, `promote_from_installation`
+  before it. The resumed app runs from the target, never from scratch, so the order
+  is harmless; not worth a loop.
 
 ## Remaining
 

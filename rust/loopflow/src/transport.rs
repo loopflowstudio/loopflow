@@ -137,9 +137,13 @@ enum Response {
         code: u8,
     },
     Detached,
-    /// Another viewer took input control; this one prints `notice` and leaves.
+    /// Another viewer took input control, or the owner is ending because its
+    /// lf is gone or superseded; this viewer prints `notice` and leaves. With
+    /// a `successor`, it reruns its invocation through that lf entry. Older
+    /// owners send no `successor`; serde reads the missing field as `None`.
     Moved {
         notice: Option<String>,
+        successor: Option<PathBuf>,
     },
     Busy,
     /// How a viewer that detaches can return.
@@ -662,6 +666,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 }
                 let _ = v.queue(&Response::Moved {
                     notice: notice.clone(),
+                    successor: None,
                 });
                 let _ = v.flush();
                 false
@@ -681,11 +686,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 });
             }
         }
-        if let Ok(hint) = ending.try_recv() {
+        if let Ok(moved) = ending.try_recv() {
             for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                if let Some(hint) = &hint {
-                    let _ = viewer.queue(&Response::InputHint { hint: hint.clone() });
-                }
+                let _ = viewer.queue(&moved);
                 let _ = viewer.flush();
             }
             crate::platform::kill_process(std::process::id());
@@ -1078,12 +1081,15 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                         }
                     }
                     Response::Detached => return Ok(()),
-                    Response::Moved { notice } => {
+                    Response::Moved { notice, successor } => {
                         drop(terminal.take());
                         if let Some(notice) = notice {
                             eprintln!("\n{notice}");
                         }
-                        return Ok(());
+                        return match successor {
+                            Some(entry) => follow(&entry),
+                            None => Ok(()),
+                        };
                     }
                     Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                     Response::Return { detach } => returning = Some(detach),
@@ -1145,6 +1151,31 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                 )?;
             }
         }
+    }
+}
+
+/// Rerun this invocation through `entry`, the lf that now owns the work the
+/// ended owner held: `lf resume <id>` lands in the conversation on the
+/// installed lf. An entry that is this executable has nothing newer to run.
+fn follow(entry: &Path) -> Result<()> {
+    let same = match (
+        crate::installation::entry_target(entry),
+        crate::journal::current_executable(),
+    ) {
+        (Ok(target), Ok(current)) => target == current,
+        _ => true,
+    };
+    if same {
+        return Ok(());
+    }
+    let status = Command::new(entry)
+        .args(std::env::args_os().skip(1))
+        .status()
+        .with_context(|| format!("rerun through {}", entry.display()))?;
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(code) => Err(crate::process::CommandExit(code as u8).into()),
+        None => bail!("{} ended by a signal", entry.display()),
     }
 }
 

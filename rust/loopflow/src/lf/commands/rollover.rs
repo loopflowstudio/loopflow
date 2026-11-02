@@ -3,17 +3,20 @@
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
 //! processes. The inventory names every recorded, live lf Process by executable
 //! and version, and flags the ones that aren't the selected install or can't
-//! open the store any more. Rollover moves what can be proven resumable: an idle,
-//! unviewed Session execution owner with saved provider history is ended the way
-//! the detached-Session policy ends it, then each of its Sessions resumes on the
-//! selected lf. A Graph runner isn't stopped: each step resolves the installed
-//! entry when it launches, so its next step already runs on the selected lf and
-//! the runner leaves with the Graph. Everything else is listed with why it stays.
+//! open the store any more. An owner on this build ends itself once its
+//! Sessions wait for a person and `lf resume` reopens them on the installed lf;
+//! rollover does the same now, for every superseded owner at once, including
+//! owners that predate that policy: an idle Session execution owner with saved
+//! provider history is ended the way its lifetime policy ends it, then each of
+//! its Sessions resumes on the selected lf. Its viewers follow. A Graph runner
+//! isn't stopped: each step resolves the installed entry when it launches, so
+//! its next step already runs on the selected lf and the runner leaves with the
+//! Graph. Everything else is listed with why it stays.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde::Serialize;
@@ -24,13 +27,13 @@ use crate::installation::ArtifactSet;
 use crate::journal::{
     recorded_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
 };
+use crate::ops::human_session::end_owner;
 use crate::ops::human_session::restore::{self, ResumeOutcome, ResumedSession};
 use crate::process::ProcessKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
-const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 
 // -- Inventory -----------------------------------------------------------------
 
@@ -382,7 +385,7 @@ pub struct ListedProcess {
 
 #[derive(Debug)]
 enum Disposition {
-    /// An idle, unviewed owner and the Sessions it holds.
+    /// An idle owner and the Sessions it holds.
     Moves(Vec<String>),
     /// A Graph runner, left running; its next step launches on the selected lf.
     NextStep,
@@ -401,7 +404,8 @@ async fn disposition(
     owner_disposition(shared, process).await
 }
 
-/// A Session execution owner moves when it is idle, unviewed and resumable.
+/// A Session execution owner moves when it is idle and resumable; its viewers
+/// follow it to the selected lf.
 async fn owner_disposition(
     shared: &SharedStore,
     process: &RunningLfProcess,
@@ -411,11 +415,6 @@ async fn owner_disposition(
     let sessions = store.owner_sessions(&process.id)?;
     if sessions.is_empty() {
         return stays("keeps its lf until it exits");
-    }
-    if store.owner_viewed(&process.id)? {
-        return stays(
-            "a terminal is attached; detach it (Ctrl+]) or close it, then roll over again",
-        );
     }
     if !store.owner_waits_for_person(&process.id)? {
         return stays("a turn, Graph step or headless Run is in progress");
@@ -538,7 +537,7 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
             continue;
         };
         owner.session_ids = session_ids;
-        if let Err(error) = stop_owner(&store.sqlite, &owner.process) {
+        if let Err(error) = end_owner(&store.sqlite, &owner.process.id, owner.process.pid) {
             owner.error = Some(format!("{error:#}"));
             report.moved.push(owner);
             continue;
@@ -560,23 +559,6 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
         report.moved.push(owner);
     }
     Ok(report)
-}
-
-/// End an owner as the detached-Session policy does: its signal handler stops
-/// the agent and records the exit.
-fn stop_owner(store: &SqliteStore, process: &RunningLfProcess) -> Result<()> {
-    crate::platform::kill_process(process.pid);
-    let deadline = Instant::now() + STOP_TIMEOUT;
-    while crate::ops::human_session::owner_running(store, &process.id)? {
-        anyhow::ensure!(
-            Instant::now() < deadline,
-            "pid {} did not stop within {}s",
-            process.pid,
-            STOP_TIMEOUT.as_secs()
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Ok(())
 }
 
 fn render_report(report: &RolloverReport) -> String {
@@ -644,7 +626,7 @@ pub fn report_after_promote() {
                     );
                 }
                 println!(
-                    "`lf monitor rollover` moves the resumable ones; `--dry-run` lists them first"
+                    "each ends as its Session goes idle and `lf resume` reopens it on this lf; `lf monitor rollover` moves the idle ones now (`--dry-run` lists them)"
                 );
             }
         }

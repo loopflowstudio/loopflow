@@ -173,6 +173,7 @@ When editing `*.rs` files:
 - Canonicalize Clap command aliases in shared navigation so help, remote routing and execution resolve the same owner.
 - `lf help <path>` renders Clap's short help; text it must show (exit statuses, caveats) goes in `after_help`, not a second doc-comment paragraph.
 - Give nested global Clap flags a distinct argument `id` when a root flag shares their name; otherwise their values can propagate into the root command.
+- Session transport (`transport.rs` `Request`/`Response`) crosses lf builds: an installed viewer reaches an owner from an earlier build. Add `Option` fields to existing variants (a missing field reads as `None`); a new variant makes every older peer fail to parse the line.
 - Use `thiserror` for library error types callers need to match on
 - Use `expect("why this is safe")` over `unwrap()` outside tests
 - Conversion methods: `as_` (cheap/borrowed), `to_` (allocates), `into_` (consumes self)

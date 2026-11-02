@@ -807,6 +807,7 @@ pub(crate) async fn open(
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
                     && owner_running(&store.sqlite, &owner)?
+                    && !taken_over(&store.sqlite, session, &owner)?
                     && answering(&owner)
                 {
                     // This viewer takes control, so the conversation is now
@@ -1099,6 +1100,71 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
         .is_some_and(|process| process.completed_at.is_none())
         && crate::journal::process_evidence(store, owner)
             != crate::journal::ProcessIdentityEvidence::Dead)
+}
+
+/// End a running owner from another build so the conversation resumes here:
+/// a viewer never negotiates with an owner whose lf is not its own. The owner
+/// ends the way its own lifetime policy ends it, stopping its agent and
+/// recording its exit; a turn it was running is reported, never cut silently.
+/// False when the owner is this build, or runs an executable nobody can read.
+fn taken_over(
+    store: &SqliteStore,
+    session: &LfSession,
+    owner: &crate::id::LfProcessId,
+) -> Result<bool> {
+    let Some(pid) = crate::journal::live_process_pid(store, owner) else {
+        return Ok(false);
+    };
+    let Some(executable) = crate::journal::OsProcess::executable(pid) else {
+        return Ok(false);
+    };
+    if crate::installation::same_build(&executable, &crate::journal::current_executable()?) {
+        return Ok(false);
+    }
+    let turn_cut_off = store.session_turn_was_running(&session.id)?;
+    end_owner(store, owner, pid).with_context(|| {
+        format!(
+            "end the owner on {} so the conversation can move here",
+            executable.display()
+        )
+    })?;
+    eprintln!(
+        "Moved {} off {}; continuing on this lf.{}",
+        if session.title.is_empty() {
+            session.id.as_str()
+        } else {
+            session.title.as_str()
+        },
+        executable.display(),
+        if turn_cut_off {
+            " Its last turn was cut off; ask again."
+        } else {
+            ""
+        }
+    );
+    Ok(true)
+}
+
+/// End the execution owner running as `pid` as its lifetime policy does: its
+/// signal handler stops the agent and records the exit. Returns once the
+/// owner is gone.
+pub(crate) fn end_owner(
+    store: &SqliteStore,
+    owner: &crate::id::LfProcessId,
+    pid: u32,
+) -> Result<()> {
+    const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+    crate::platform::kill_process(pid);
+    let deadline = std::time::Instant::now() + STOP_TIMEOUT;
+    while owner_running(store, owner)? {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "pid {pid} did not stop within {}s",
+            STOP_TIMEOUT.as_secs()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
 }
 
 /// Whether a running owner answers its socket. One that does not, as an owner

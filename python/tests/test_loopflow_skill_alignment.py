@@ -37,7 +37,7 @@ def test_external_user_and_internal_worker_authority_are_distinct() -> None:
     assert "external harness" in agent_api
     assert "Loopflow-launched" in agent_api
 
-    install = "npx skills add loopflowstudio/loopflow --skill loopflow -g -y"
+    install = "npx skills add loopflowstudio/loopflow --skill loopflow -g"
     assert install in agent_api
     assert install in readme
 
@@ -53,3 +53,11 @@ def test_launcher_surfaces_load_the_shared_work_contract() -> None:
     assert "lf wave list --json" in work
     assert "lf wave status <wave> --json" in work
     assert "lf wave show --json" in work
+
+
+def test_placeholders_never_sit_inside_double_quotes() -> None:
+    """The person's words are data, never shell: a `"<…>"` placeholder teaches
+    agents to paste text where the shell expands `$` and backticks."""
+    for path in (SKILL, LOOPFLOW):
+        found = re.findall(r'"<[^>"]+>"', path.read_text())
+        assert not found, f"{path.name} double-quotes placeholders: {found}"

@@ -1,8 +1,12 @@
 # The Loopflow skill
 
 ```bash
-npx skills add loopflowstudio/loopflow --skill loopflow -g -y
+npx skills add loopflowstudio/loopflow --skill loopflow -g
 ```
+
+The installer shows its security assessments and asks before installing.
+PromptScript reads skills only per project: inside a PromptScript project, run
+the same command without `-g`.
 
 Teaches the coding agent you already use (Claude Code, Codex, OpenCode, Pi) to
 work through `lf`. You keep talking to your agent; it hands work off, keeps track
@@ -15,10 +19,10 @@ of it and brings back pull requests.
 Your agent:
 
 ```bash
-lf task create --title "validate session tokens on refresh"   # one Task per outcome
-lf task create --title "delete the legacy cookie path"
-lf task run LOO-41                                            # each in its own worktree and branch;
-lf task run LOO-42                                            # returns once it's running
+lf task create 'validate session tokens on refresh'   # one Task per outcome
+lf task create 'delete the legacy cookie path'
+lf task run LOO-41                                    # each in its own worktree and branch;
+lf task run LOO-42                                    # returns once it's running
 ```
 
 and comes back with a link per Task. Each ends as its own pull request, so you
@@ -41,7 +45,7 @@ lf task status LOO-41         # one Task: its run, its PR, what it needs
 > *"Tell the token one to keep the retry budget at 3."*
 
 ```bash
-lf comment LOO-41 "keep the retry budget at 3"   # reaches the run before its next step
+lf comment LOO-41 'keep the retry budget at 3'   # reaches the run before its next step
 ```
 
 ## Get back into it

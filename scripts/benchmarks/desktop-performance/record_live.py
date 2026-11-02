@@ -605,7 +605,7 @@ def main(argv: list[str] | None = None) -> int:
     rec.add_argument(
         "--process",
         default="Loopflow",
-        help="process name: Loopflow (installed) or LoopflowMac (dev)",
+        help="process name: Loopflow (installed) or Loopflow Dev (dev)",
     )
     rec.add_argument("--pid", type=int)
     rec.add_argument("--output")

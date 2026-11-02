@@ -1,6 +1,6 @@
 # LOO-620: lf open, Spotlight and Finder reach only the installed Loopflow.app
 
-Status: implemented, realigned and synced onto main through #1792 (2026-11-02); gate next. Source: Task definition
+Status: implemented, compressed and synced onto main through #1792 (2026-11-02); gate next. Source: Task definition
 (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop database-mismatch incident).
 
 ## What exists
@@ -27,24 +27,27 @@ Status: implemented, realigned and synced onto main through #1792 (2026-11-02); 
   target; for targets in `/Applications` or `~/Applications` it also unregisters
   (`lsregister -u`) what it removes, removes `~/Applications/{Loopflow,Concerto}.app`
   carrying `com.loopflow.mac`/`com.loopflow.concerto`, and registers the target
-  (`lsregister -f`). The legacy target stays with its existing owners
+  (`lsregister -f`). It runs once per promotion, after settlement, and after switch
+  recovery; a copy an interrupted promotion left waits in the scratch directory
+  until then. The legacy target stays with its existing owners
   (`settle_app_artifacts`, `recover_switch`).
 
-## Realign 2026-11-02
+## Tests
 
 - `installed_app()` reads the OS account's Home (like the rest of install), so on a
   Mac with Loopflow installed every `lf open` fixture reaches the real
-  `/Applications/Loopflow.app` by path unless it sets `LF_DESKTOP`. The Desktop batch
-  test in `work_open_tests` asserted the old `-b com.loopflow.mac` form and failed;
-  it now addresses its own Desktop (`LF_DESKTOP=com.loopflow.mac.test`) like the
-  `global_commands` delivery test, and its fake `osascript` probe is gone.
-- The "two consecutive installs" acceptance only held on a Machine without earlier
-  sibling orphans. `sibling_promotion_copies` now sweeps them, covered by the
-  repeated-installs test.
-- #1777 (`lf install --dev`) and #1656 (drag-and-open install) are both still open.
-  Synced onto main through #1792 (Loopflow Dev under its own process name): it
-  stamps `com.loopflow.mac.dev`, the id `project.yml` now defaults to, so Loopflow
-  Dev stays a dev app with no branch change. Rebase onto whichever lands first.
+  `/Applications/Loopflow.app` by path unless it sets `LF_DESKTOP`. The Desktop
+  fixtures in `work_open_tests` and `global_commands` address their own Desktop
+  (`LF_DESKTOP=com.loopflow.mac.test`); the fake `osascript` probe is gone.
+- The "two consecutive installs" acceptance only holds on a Machine with earlier
+  sibling orphans swept, so the repeated-installs test plants one.
+
+## Open branches nearby
+
+#1777 (`lf install --dev`) and #1656 (drag-and-open install) are both still open.
+Synced onto main through #1792 (Loopflow Dev under its own process name): it
+stamps `com.loopflow.mac.dev`, the id `project.yml` now defaults to, so Loopflow
+Dev stays a dev app with no branch change. Rebase onto whichever lands first.
 
 ## Deleted
 
@@ -62,17 +65,15 @@ Status: implemented, realigned and synced onto main through #1792 (2026-11-02); 
 - Two consecutive installs leave only `Loopflow.app`, even beside an earlier orphan:
   `install::artifact_tests::repeated_installs_leave_one_bundle_in_the_applications_folder`.
 
-## Concept review 2026-11-02
+## Contract
 
-The product contract holds: `lf open` has one destination, the installed app by
-path, and a bundle id names only the Desktop the caller runs inside. Promotion
-converges on one bundle. The error for a Mac without Desktop (`lf install` places
-it) is the only new copy. Checked on Jack's Mac (read-only): `~/.local/bin/lf`
-resolves into `/Applications/Loopflow.app`; `mdfind` on `com.loopflow.mac*` lists
-only `/Applications/Loopflow.app` and `~/Applications/Loopflow Dev.app`; no
+`lf open` has one destination, the installed app by path, and a bundle id names
+only the Desktop the caller runs inside. Promotion converges on one bundle. The
+error for a Mac without Desktop (`lf install` places it) is the only new copy.
+Checked on Jack's Mac 2026-11-02 (read-only): `~/.local/bin/lf` resolves into
+`/Applications/Loopflow.app`; `mdfind` on `com.loopflow.mac*` lists only
+`/Applications/Loopflow.app` and `~/Applications/Loopflow Dev.app`; no
 `.promote.*`/`.superseded.*` orphans, so the sweep's proof stays the unit test.
-Its one finding, `scripts/install.py local` staging an indexed bundle, is fixed
-(`app.noindex`, see What exists).
 
 Not changed, and why:
 
@@ -82,13 +83,6 @@ Not changed, and why:
 - `quiesce_app_processes` asks `application id "com.loopflow.mac"` to quit, then
   signals by executable path; stays as `scratch/questions.md` records.
 
-## Compress 2026-11-02
-
-`earlier_release_installs` reads bundle ids through `published::app_info` instead of
-a second plutil reader; `commit_app_bundle` no longer recreates the scratch directory
-(staging always creates it first); the lsregister wrapper is `lsregister`, not a
-second `launch_services`. No open product choice.
-
 ## Remaining
 
 - Gate: affected suites (`global_commands`, `work_open_tests`, install lib tests,
@@ -97,4 +91,4 @@ second `launch_services`. No open product choice.
   fails on main too (#1776's HOME-vs-account-home check, macOS-only); not this branch.
 - Demo on a Mac: `lf install` twice, then `ls -a /Applications`, `lf open`.
 
-Checks (2026-11-02 after sync onto main): `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests::` 11 passed; `uv run pytest test_install_script.py test_release_loopflow.py test_app_bundle.py test_loopflow_dev.py` 35 passed; clippy last clean at compress, gate reruns it.
+Checks (2026-11-02 compress): `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests:: installation::` 36 passed; `cargo test --test integration -- available_conversations_need_no_question` and `--test global_commands -- open_delivers_exact_task_to_desktop` passed; clippy clean; Python suites unchanged since the last pass (35 passed), gate reruns them.

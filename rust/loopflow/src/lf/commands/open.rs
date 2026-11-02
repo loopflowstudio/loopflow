@@ -988,7 +988,10 @@ fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<Open
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "lf".into());
     let mut receipts: Vec<OpenReceipt> = Vec::new();
-    let mut desktop = DesktopBatch::default();
+    let mut desktop = DesktopBatch {
+        app: DesktopApp::current(),
+        ..DesktopBatch::default()
+    };
     for (index, target) in targets.iter().enumerate() {
         let focus = index + 1 == targets.len();
         desktop.next = index;
@@ -1023,7 +1026,7 @@ fn open_all(targets: &[Resolved], route: &OpenRoute, in_place: bool) -> Vec<Open
 /// only the latest arrival's window, so the batch changes focus once.
 #[derive(Default)]
 struct DesktopBatch {
-    app: Option<Option<DesktopApp>>,
+    app: Option<DesktopApp>,
     /// The receipt index of the item being opened.
     next: usize,
     /// Receipt index and address of each item waiting to be sent.
@@ -1032,9 +1035,8 @@ struct DesktopBatch {
 }
 
 impl DesktopBatch {
-    fn app(&mut self) -> Result<&DesktopApp, RouteError> {
+    fn app(&self) -> Result<&DesktopApp, RouteError> {
         self.app
-            .get_or_insert_with(DesktopApp::current)
             .as_ref()
             .ok_or_else(|| RouteError::Definite(NO_DESKTOP.into()))
     }

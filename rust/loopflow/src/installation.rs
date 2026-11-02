@@ -780,8 +780,7 @@ pub(crate) fn installed_app() -> Option<PathBuf> {
     if !is_app_helper(&public) {
         return None;
     }
-    let app = public.parent()?.parent()?.parent()?;
-    Some(app.to_path_buf())
+    public.ancestors().nth(3).map(Path::to_path_buf)
 }
 
 /// `<App>.app/Contents/MacOS/lf`.

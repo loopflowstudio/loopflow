@@ -1291,11 +1291,11 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Leave `target` the only release app Spotlight, Finder and `open -b` reach:
-/// remove the staging directory, copies earlier lf staged beside the target and
-/// release installs at earlier installer locations, then register `target`
-/// afresh. Callers remove the legacy target.
-/// Runs under the promotion lock with no switch in flight; the install is
-/// already committed, so failures are logged.
+/// remove the staging directory (with any copy an interrupted promotion left),
+/// copies earlier lf staged beside the target and release installs at earlier
+/// installer locations, then register `target` afresh. Callers remove the
+/// legacy target. Runs under the promotion lock with no switch in flight; the
+/// install is already committed, so failures are logged.
 fn converge_release_app(target: &Path) {
     // Nothing in it ends in `.app`, so Launch Services holds none of it.
     if let Err(error) = remove_path(&install_scratch(target)) {
@@ -2635,11 +2635,6 @@ fn promote_from_installation(
         println!("  (preview only: no target changed)");
         return Ok(());
     }
-    // Copies an interrupted earlier promotion left behind.
-    if let Some(target) = artifacts.app_target {
-        converge_release_app(target);
-    }
-
     if prior.is_none() && store_path.exists() {
         prior = Some(bootstrap_published_install(&root, &artifacts)?);
     }

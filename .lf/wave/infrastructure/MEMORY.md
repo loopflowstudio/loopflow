@@ -642,7 +642,7 @@ Optional chapters and Task workflows.
 ## Migrations get ids at merge (LOO-656, 2026-10-28)
 
 One slug migration per Task, edited until merge; origin/main's first-parent
-order gives ids, and `lf self install --main` alone advances `~/.lf`. Released
+order gives ids, and `lf install --dev` alone advances `~/.lf`. Released
 SQL stays immutable. Mechanics: [MIGRATIONS.md](../../../rust/loopflow/src/store/MIGRATIONS.md).
 The retired draft/copy model (LOO-344): `986be7988:wave/infrastructure/MEMORY.md`.
 

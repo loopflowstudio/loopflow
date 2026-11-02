@@ -995,6 +995,249 @@ fn a_terminal_launcher_becomes_its_provider_and_the_owner_records_its_exit() {
     assert_eq!(launcher_outcome.as_deref(), Some("succeeded"));
 }
 
+#[test]
+fn native_exit_preserves_returning_launcher_results() {
+    for code in [7, 130] {
+        for handoff in [false, true] {
+            let fixture = Fixture::new();
+            let path = parented_provider(&fixture);
+            let provider = fixture.home.path().join("bin/claude");
+            let mut script = std::fs::read_to_string(&provider).unwrap();
+            script.push_str("exit \"$answer\"\n");
+            std::fs::write(provider, script).unwrap();
+            let argv = [
+                env!("CARGO_BIN_EXE_lf"),
+                "-i",
+                "-a",
+                "claude",
+                ":",
+                "exit proof",
+            ];
+            fixture
+                .repo
+                .create_file(".lf/skills/probe.md", "Exit proof.");
+            fixture
+                .repo
+                .create_file(".lf/graphs/return.yaml", "- probe\n");
+            let mut command = if handoff {
+                fixture.serve(true, &argv)
+            } else {
+                fixture.serve(
+                    true,
+                    &[
+                        env!("CARGO_BIN_EXE_lf"),
+                        "-i",
+                        "-a",
+                        "claude",
+                        "graph",
+                        "return",
+                    ],
+                )
+            };
+            command.env("PATH", path);
+            let owner = fixture.owner(command);
+            let launched = fixture.launches(1)[0].clone();
+            let capture = launched.split(':').nth(2).unwrap();
+            let session: String = fixture.sql().query_row(
+                "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
+                [capture], |r| r.get(0),
+            ).unwrap();
+            let launcher: String = fixture.sql().query_row(
+                "SELECT attached_lf_process_id FROM processes WHERE id=(SELECT agent_process_id FROM agent_sessions WHERE id=?1)",
+                [&session], |r| r.get(0),
+            ).unwrap();
+            let mut viewer = fixture
+                .command(&["session", "attach", &owner, "--session-json", &session])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            viewer
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(format!("{code}\n").as_bytes())
+                .unwrap();
+            let result = wait_for_viewer(viewer, Duration::from_secs(30));
+            fixture.ends(&owner);
+            assert_eq!(
+                result.status.code(),
+                Some(1),
+                "handoff={handoff}, provider={code}: {result:?}"
+            );
+            assert!(
+                !String::from_utf8_lossy(&result.stdout).contains("\"open_argv\""),
+                "a failed resume printed success JSON"
+            );
+            let recorded: (i32, String) = fixture
+                .sql()
+                .query_row(
+                    "SELECT exit_code,outcome FROM processes WHERE id=?1",
+                    [&launcher],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(recorded, (1, "failed".into()));
+            let capture: String = fixture.sql().query_row(
+                "SELECT json_extract(payload,'$.evidence.outcome') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.source')='terminal.json'",
+                [&session], |r| r.get(0),
+            ).unwrap();
+            assert_eq!(capture, "failed", "handoff={handoff}, provider={code}");
+            assert_eq!(fixture.launches(1).len(), 1);
+        }
+    }
+}
+
+#[test]
+fn failed_native_exec_settles_once_without_launching_a_provider() {
+    let fixture = Fixture::new();
+    let path = parented_provider(&fixture);
+    let provider = fixture.home.path().join("bin/claude");
+    // Discovery succeeds, then exec meets an absent interpreter. No real
+    // provider or substitute from the Machine can run.
+    std::fs::write(
+        &provider,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then
+    printf '#!/absent/fixture-interpreter\n' > "$0"
+    echo '2.1.302'
+    exit
+fi
+exit 99
+"#,
+    )
+    .unwrap();
+    let mut command = fixture.serve(
+        true,
+        &[
+            env!("CARGO_BIN_EXE_lf"),
+            "-i",
+            "-a",
+            "claude",
+            ":",
+            "exec failure",
+        ],
+    );
+    command.env("PATH", path);
+    let owner = fixture.owner(command);
+    let mut viewer = fixture.viewer(&owner, true);
+    let frames = read_until(&mut viewer, "exit");
+    assert_eq!(frames.last().unwrap()["code"], 1);
+    fixture.ends(&owner);
+    assert!(!fixture.home.path().join("launches").exists());
+    let sql = fixture.sql();
+    let (code, outcome, provider_outcome): (i32, String, Option<String>) = sql.query_row(
+        "SELECT launcher.exit_code, launcher.outcome, agent.outcome FROM processes agent JOIN processes launcher ON launcher.id=agent.parent_lf_process_id WHERE agent.kind='agent'",
+        [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+    ).unwrap();
+    assert_eq!(provider_outcome, None);
+    assert_eq!(code, 1);
+    assert_eq!(outcome, "failed");
+    let captures: i64 = sql.query_row(
+        "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.source')='terminal.json' AND json_extract(payload,'$.evidence.outcome')='failed'",
+        [], |r| r.get(0),
+    ).unwrap();
+    assert_eq!(captures, 1);
+}
+
+fn returned_session(output: &Output) -> Value {
+    let text = String::from_utf8_lossy(&output.stdout);
+    let start = text
+        .find("{\n")
+        .unwrap_or_else(|| panic!("Session JSON missing: {output:?}"));
+    serde_json::from_str(text[start..].trim()).unwrap()
+}
+
+#[test]
+fn resume_json_returns_once_when_it_starts_the_owner() {
+    let fixture = Fixture::new();
+    let path = parented_provider(&fixture);
+    let provider = fixture.home.path().join("bin/claude");
+    let script = std::fs::read_to_string(&provider)
+        .unwrap()
+        .replace("stty -echo < /dev/tty\n", "")
+        .replace(" < /dev/tty", "");
+    std::fs::write(provider, script).unwrap();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(prepared.status.success(), "{prepared:?}");
+    let record: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = record["id"].as_str().unwrap();
+    let mut viewer = fixture
+        .command(&["-a", "claude", "resume", session, "--json"])
+        .env("PATH", path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    fixture.launches(1);
+    viewer.stdin.take().unwrap().write_all(b"done\n").unwrap();
+    let result = wait_for_viewer(viewer, Duration::from_secs(30));
+    assert!(result.status.success(), "{result:?}");
+    let returned: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(returned["id"], session);
+    assert_eq!(fixture.launches(1).len(), 1);
+    let owner: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    fixture.ends(&owner);
+}
+
+#[test]
+fn resume_json_returns_after_relay_and_viewer_takeover() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", "stty -echo; read answer"]);
+    let session = fixture.session(&owner);
+    let args = ["resume", &session, "--json"];
+    let mut viewer = fixture
+        .command(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !command_of(i64::from(viewer.id())).contains("session attach") {
+        if viewer.try_wait().unwrap().is_some() || Instant::now() >= deadline {
+            let _ = viewer.kill();
+            let result = viewer.wait_with_output().unwrap();
+            fixture.stop(&owner);
+            panic!("viewer did not become a relay: {result:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let mut observer = fixture.viewer(&owner, false);
+    loop {
+        observer.send(json!({"kind":"controlled"}));
+        let frames = read_until(&mut observer, "controlled");
+        if frames.last().unwrap()["held"] == true {
+            break;
+        }
+        assert!(Instant::now() < deadline, "viewer never attached");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // The departing viewer still owes its JSON; the provider stays live.
+    let mut next = fixture.viewer(&owner, true);
+    let result = wait_for_viewer(viewer, Duration::from_secs(10));
+    assert!(result.status.success(), "{result:?}");
+    let record = returned_session(&result);
+    assert_eq!(record["id"], session);
+    assert!(fixture.running(&owner));
+    next.input("done\n");
+    next.finish();
+    fixture.ends(&owner);
+}
+
 /// Opening a prepared conversation leaves one owner and one relay: the connect
 /// becomes the launcher, the launcher becomes Claude, and a viewer that
 /// resolved the Session relays bytes with nothing else loaded.
@@ -1056,7 +1299,7 @@ fn opening_a_prepared_conversation_runs_one_owner_and_one_relay() {
         "lf processes beside the provider: {lf_children:?}"
     );
     let mut viewer = fixture
-        .command(&["-a", "claude", "session", "resume", &session])
+        .command(&["-a", "claude", "session", "resume", &session, "--json"])
         .env("PATH", &path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1083,6 +1326,8 @@ fn opening_a_prepared_conversation_runs_one_owner_and_one_relay() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+    let record = returned_session(&result);
+    assert_eq!(record["id"], session);
     assert_eq!(
         fixture.launches(1).len(),
         1,

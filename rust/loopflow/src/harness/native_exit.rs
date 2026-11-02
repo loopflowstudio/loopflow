@@ -25,6 +25,7 @@ pub(crate) struct NativeExit {
     /// The launcher's own Process, completed when the provider exits.
     pub lf_process_id: LfProcessId,
     pub provider: String,
+    pub resuming: bool,
     pub cwd: PathBuf,
     /// The capture whose settlement the launcher's caller owned.
     pub capture: Option<CaptureHandoff>,
@@ -36,7 +37,7 @@ pub(crate) struct NativeExit {
 }
 
 /// How the owner reports a settled provider exit.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Settled {
     pub code: u8,
     /// What a viewer reads after the provider's own exit text.
@@ -45,15 +46,10 @@ pub(crate) struct Settled {
 
 /// Record a handed-off provider's exit as its launcher would have.
 pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
-    use std::os::unix::process::ExitStatusExt;
     let store = SqliteStore::new(&crate::store::database_path_from_env()?)?;
     let owner: AttachmentOwner = (store, exit.session.clone(), exit.attachment.clone());
     let (store, session, attachment) = &owner;
-    let code = status
-        .code()
-        .unwrap_or_else(|| 128 + status.signal().unwrap_or(1)) as u8;
-    // No launcher held an interrupt handler for this provider; its own 130 is one.
-    let interrupted = record_exit(&owner)? || code == 130;
+    let interrupted = record_exit(&owner)?;
     let lost = attachment_lost(&owner).unwrap_or_else(|error| {
         tracing::warn!(%error, "cannot read this launch's Session attachment");
         false
@@ -61,11 +57,12 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
     if let (Some(account), Some(key), false) = (&exit.account, &exit.capture_key, lost) {
         pin_account_home(&exit.provider, account, key);
     }
-    let outcome = if status.success() || interrupted {
-        "completed"
-    } else {
-        "failed"
+    let command = crate::lf::commands::util::SessionCommandOutcome {
+        status,
+        interrupted: interrupted || lost,
+        moved: lost.then(|| departure(&owner)).flatten(),
     };
+    let outcome = command.capture_outcome();
     match crate::session_record::finish_session_attachment(store, session, attachment, outcome) {
         Ok(()) | Err(StoreError::InvalidAuthority(_)) => {}
         Err(error) => return Err(error.into()),
@@ -73,17 +70,15 @@ pub(crate) fn settle(exit: &NativeExit, status: ExitStatus) -> Result<Settled> {
     if let Some(capture) = &exit.capture {
         crate::session_record::CaptureHandle::adopt(capture.clone())?.finish(outcome)?;
     }
-    let mut settled = Settled::default();
-    if lost {
-        settled.lines.extend(departure(&owner));
-    } else if !status.success() && !interrupted {
-        settled.lines.push(format!(
-            "{} exited with {status}. If another client still owns this session, close it and run `lf resume` again.",
-            exit.provider
-        ));
-        settled.code = code;
-    } else if code == 130 {
-        settled.code = code;
+    // The command's result differs from the provider's native status. Use the
+    // returning launcher's interpretation, including attachment loss.
+    let result = command.result(&exit.provider, exit.resuming);
+    let mut settled = Settled {
+        code: crate::journal::command_exit_code(&result),
+        lines: command.moved.into_iter().collect(),
+    };
+    if let Err(error) = result {
+        settled.lines.push(error.to_string());
     }
     let (path, size) = &exit.diagnostics;
     if std::fs::metadata(path).is_ok_and(|info| info.len() > *size) {
@@ -170,5 +165,108 @@ fn pin_account_home(provider: &str, account: &ProviderAccountId, capture_key: &s
     })();
     if let Err(error) = pinned {
         tracing::warn!(%error, "failed to record the provider session's account home");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
+    use crate::journal::{self, TestLedgerGuard};
+    use crate::process::Departure;
+    use crate::session_record::{CaptureHandle, SessionCaptureSpec, SessionGraphMembership};
+    use crate::store::sqlite::SqliteStore;
+
+    use super::{settle, NativeExit};
+
+    #[test]
+    fn settlement_preserves_takeover_capture_and_new_attachment() {
+        let ledger = TestLedgerGuard::new();
+        let home = ledger.home();
+        journal::with_process(|| {
+            journal::admit_process(home, &["lf".into(), "-i".into()]);
+            let capture = CaptureHandle::begin_at(
+                home,
+                SessionCaptureSpec {
+                    harness: "claude".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )
+            .unwrap();
+            let store = SqliteStore::new(&home.join("loopflow.db")).unwrap();
+            let session = store
+                .session_for_artifact(&capture.artifact_key())
+                .unwrap()
+                .unwrap();
+            let launcher = journal::current_lf_process_id().unwrap();
+            let attachment = store
+                .claim_session_attachment(&session.id, None, &launcher, true)
+                .unwrap();
+            let exit = NativeExit {
+                session: session.id.to_string(),
+                attachment: attachment.clone(),
+                lf_process_id: launcher.clone(),
+                provider: "claude".into(),
+                resuming: true,
+                cwd: home.into(),
+                capture: Some(capture.hand_off()),
+                capture_key: Some(capture.artifact_key()),
+                account: None,
+                diagnostics: (home.join("absent.log"), 0),
+            };
+            store
+                .finish_session_attachment(
+                    &session.id,
+                    &attachment,
+                    "completed",
+                    Some(&Departure::Terminal {
+                        to: Some("tmux %9".into()),
+                    }),
+                    || Ok(true),
+                )
+                .unwrap();
+            let current = store.session_attachment(&session.id).unwrap();
+            let next = store
+                .claim_session_attachment(
+                    &session.id,
+                    current.as_ref(),
+                    &store.test_lf_process(),
+                    true,
+                )
+                .unwrap();
+            let before = store.process(&next.agent_process_id).unwrap().unwrap();
+            let settled = settle(&exit, ExitStatus::from_raw(7 << 8)).unwrap();
+            assert_eq!(settled.code, 0);
+            assert!(settled
+                .lines
+                .iter()
+                .any(|line| line.contains("moved to tmux %9")));
+            assert_eq!(
+                store.session_attachment(&session.id).unwrap(),
+                Some(next.clone())
+            );
+            let after = store.process(&next.agent_process_id).unwrap().unwrap();
+            assert_eq!(after.completed_at, before.completed_at);
+            assert_eq!(after.outcome, before.outcome);
+            let launcher = store.process(&launcher).unwrap().unwrap();
+            assert_eq!(launcher.exit_code, Some(0));
+            assert_eq!(launcher.outcome.as_deref(), Some("succeeded"));
+            let terminal: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(capture.artifact_dir().join("terminal.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(terminal["outcome"], "completed");
+            Ok::<_, anyhow::Error>(())
+        })
+        .unwrap();
     }
 }

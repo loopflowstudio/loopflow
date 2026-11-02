@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-708 · Process footprint</title>
+<style>
+  :root { color-scheme: light dark; --muted: #626262; --rule: #c8c8c8; }
+  body { margin: 0 auto; padding: 3rem 1.25rem 5rem; max-width: 46rem;
+    font: 17px/1.6 system-ui, sans-serif; }
+  header, small { color: var(--muted); font-size: .85rem; }
+  h1 { font-size: 2rem; line-height: 1.2; margin: 1.5rem 0; }
+  h2 { font-size: 1.2rem; margin-top: 2.5rem; }
+  p { margin: 1rem 0; }
+  code, pre { font-family: ui-monospace, monospace; font-size: .86em; }
+  pre { padding: 1rem; border-left: 2px solid var(--rule); white-space: pre-wrap;
+    overflow-wrap: anywhere; }
+  li { margin: .8rem 0; }
+  a { color: inherit; text-underline-offset: .15em; }
+  .finding { border-left: 3px solid currentColor; padding-left: 1rem; }
+  @media (prefers-color-scheme: dark) {
+    :root { --muted: #aaa; --rule: #555; }
+  }
+  @media (max-width: 480px) { body { padding-top: 1.5rem; } h1 { font-size: 1.65rem; } }
+</style>
+<header>LOO-708 · concept-review · 2026-11-02<br>
+Built from <a href="loo-708-processes-stay-small.md">the working design</a>,
+<a href="questions.md">questions.md</a>, and Rust Session commands,
+human_session.rs, transport.rs, native_exit.rs, journal/mod.rs and transport tests.</header>
+<main>
+<h1>Keep the command's result when its waiting process goes away.</h1>
+<p><strong>Review result: design changed.</strong> The next implementation preserves
+post-return JSON and launcher exit semantics across exec. Jack Heart's accepted
+requirement to keep resume and exit recording intact supplies this direction.
+No open product choice or new approval is recorded.</p>
+
+<h2>Same actions, fewer retained processes</h2>
+<pre>Open a conversation → Session → lf resume SESSION
+Close its pane      → viewer leaves; owner retains execution
+Open another pane   → same Session → attach to its live owner
+Recover after reboot → saved Session/history → lf resume --all</pre>
+<p><strong>Before:</strong> the viewer and inner connect retained launch state;
+<code>lf -i</code> waited beside Claude.</p>
+<pre>viewer → owner → connect → lf -i → Claude</pre>
+<p><strong>Implemented:</strong> connect becomes the launcher, which becomes Claude.
+The viewer execs into a store-free relay.</p>
+<pre>viewer ⇄ owner → Claude
+          └─ wait, terminal, capture and exit settlement</pre>
+<p>Session and provider identities survive. Attachment tokens retain exact control
+authority. <code>NativeExit</code> carries settlement work to the owner;
+<code>record_process</code> remains the writer. Graph children retain their own
+waits. No new public lifecycle or database table is needed.</p>
+
+<h2>The remaining mismatch</h2>
+<div class="finding">
+<p><strong>Implemented gap:</strong> a successful relay exec cannot return to
+<code>print_opened</code>. The existing post-return Session JSON disappears.
+Separately, a provider exit of 7 now becomes launcher exit 7; the returning path
+previously produced an ordinary command error, exit 1.</p>
+<p><strong>Proposed repair:</strong> retain the command's continuation without a
+resident waiter or live store. Interpret provider exit, interruption and attachment
+loss consistently in both settlement paths. Preserve the capture result as well
+as the command result.</p>
+</div>
+<pre>lf resume SESSION --prepare --json  # existing Desktop preparation
+lf resume SESSION --json            # restore existing JSON after successful return</pre>
+<p>Direct startup errors remain acceptable when they explain the failure and
+preserve recovery. The deleted history-polling loop need not return just to keep
+its old wording. LOO-712 still owns encoding; LOO-705 owns the explicit successor
+needed when an owner ends.</p>
+
+<h2>Evidence limits</h2>
+<p>Existing stand-ins prove the reduced chain and normal settlement. Earlier
+measurements were owner 20 MB and relay 2.5 MB, before compression; final-tree
+Desktop and footprint acceptance remain outstanding. This review inspected code
+and changed scratch documents only. It ran no new lifecycle tests.</p>
+
+<h2>Questions for the next proof</h2>
+<ol>
+<li>Does successful <code>resume --json</code> still return the Session JSON,
+while the live viewer stays small and opens no store?</li>
+<li>Do native exits 7 and 130 produce equivalent command, Process and capture
+results through the returning and owner-settled paths?</li>
+<li>Does takeover leave the new attachment intact, and does reboot recovery
+preserve history without replaying input?</li>
+</ol>
+<p><small>These are verification obligations, not unanswered product choices.
+The working design records the direction; loop-or-next owns routing.</small></p>
+</main>
+</html>

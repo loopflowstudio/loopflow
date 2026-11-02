@@ -752,6 +752,7 @@ pub(crate) async fn open(
     session_id: &str,
     fork: bool,
     resume: bool,
+    json: bool,
 ) -> Result<SessionRecord> {
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
@@ -858,12 +859,16 @@ pub(crate) async fn open(
                         &session.id,
                         departure_here(),
                     )?;
-                    crate::transport::attach(&owner, Some(moved))?;
+                    crate::transport::attach(
+                        &owner,
+                        Some(moved),
+                        json.then_some(session.id.as_str()),
+                    )?;
                     return surface(store, session).await;
                 }
             }
         }
-        if crate::transport::delegate_current(false)? {
+        if crate::transport::delegate_session(false, json.then_some(session.id.as_str()))? {
             return surface(store, session).await;
         }
     }

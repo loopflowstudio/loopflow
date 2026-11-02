@@ -1547,13 +1547,18 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
 
 fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
-    // It opens no store and parses no command tree: socket in, terminal out.
+    // While relaying it opens no store or command tree: socket in, terminal out.
     let raw_args: Vec<String> = std::env::args().collect();
-    if let Some((owner, moved)) = loopflow::transport::relay_args(&raw_args) {
+    if let Some((owner, moved, json_session)) = loopflow::transport::relay_args(&raw_args) {
         journal::mark_effect_free_read();
         ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        return loopflow::transport::relay(&owner, moved);
+        loopflow::transport::relay(&owner, moved)?;
+        // Only after relaying ends may the command reopen its store/runtime.
+        if let Some(session) = json_session {
+            loopflow::lf::commands::session::print_returned(&session)?;
+        }
+        return Ok(());
     }
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Validate addressed commands once, before help, repository lookup, or admission.

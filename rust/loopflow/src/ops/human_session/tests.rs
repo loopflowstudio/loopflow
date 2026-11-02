@@ -45,8 +45,8 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 None,
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
             )?;
-            let opened = super::open(&store, &session.id, false, true).await;
-            let forked = super::open(&store, &session.id, true, true).await;
+            let opened = super::open(&store, &session.id, false, true, false).await;
+            let forked = super::open(&store, &session.id, true, true, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");

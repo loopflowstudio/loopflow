@@ -12,6 +12,9 @@ and observers never see them. Closing a terminal leaves execution, provider requ
 settlement with the detached owner; `lf session list` shows its Session as
 `detached` and `lf resume` reattaches it. Attaching takes control: the previous
 viewer's input token is revoked and that terminal says where the conversation went.
+`lf resume SESSION --json` prints the Session record after a successful return,
+including detaching or moving to another viewer. The live relay opens no store;
+it reads the final record only after relaying ends.
 `lf resume SESSION --prepare --json` returns the one command Desktop runs, without
 opening a socket or starting a provider. Desktop decides from the record's `state`
 whether showing a pane reattaches: a `detached` Session reattaches, an `active` one

@@ -181,22 +181,8 @@ fn spawn_session_command_with_env(
     )?;
     if let Some(moved) = &outcome.moved {
         eprintln!("{moved}");
-        return Ok(());
     }
-    if outcome.status.success() || outcome.interrupted {
-        Ok(())
-    } else if agent_session.is_some() {
-        Err(anyhow!(
-            "{} exited with {}. If another client still owns this session, close it and run `lf resume` again.",
-            command.program,
-            outcome.status,
-        ))
-    } else {
-        Err(anyhow!(
-            "session launcher exited with status {}",
-            outcome.status
-        ))
-    }
+    outcome.result(&command.program, agent_session.is_some())
 }
 
 pub(crate) fn departure_notice(
@@ -240,11 +226,37 @@ pub(crate) fn departure_notice(
 }
 
 #[derive(Debug)]
-struct SessionCommandOutcome {
-    status: std::process::ExitStatus,
-    interrupted: bool,
+pub(crate) struct SessionCommandOutcome {
+    pub status: std::process::ExitStatus,
+    pub interrupted: bool,
     /// Where the conversation went when a mover took it from this launch.
-    moved: Option<String>,
+    pub moved: Option<String>,
+}
+
+impl SessionCommandOutcome {
+    pub(crate) fn capture_outcome(&self) -> &'static str {
+        if self.status.success() || self.interrupted {
+            "completed"
+        } else {
+            "failed"
+        }
+    }
+
+    pub(crate) fn result(&self, program: &str, resuming: bool) -> Result<()> {
+        if self.moved.is_some() || self.status.success() || self.interrupted {
+            Ok(())
+        } else if resuming {
+            Err(anyhow!(
+                "{program} exited with {}. If another client still owns this session, close it and run `lf resume` again.",
+                self.status,
+            ))
+        } else {
+            Err(anyhow!(
+                "session launcher exited with status {}",
+                self.status
+            ))
+        }
+    }
 }
 
 fn record_interactive_opened(environment: &BTreeMap<String, String>) -> Result<()> {
@@ -397,14 +409,9 @@ fn session_command_status_with_env(
             caller_capture.or(capture.as_ref()),
             &mut progress,
         );
-        let outcome = if result
+        let outcome = result
             .as_ref()
-            .is_ok_and(|outcome| outcome.interrupted || outcome.status.success())
-        {
-            "completed"
-        } else {
-            "failed"
-        };
+            .map_or("failed", SessionCommandOutcome::capture_outcome);
         if let Some((store, session, attachment)) = admitted {
             match crate::session_record::finish_session_attachment(
                 &store,
@@ -559,6 +566,7 @@ fn run_native_session(
             lf_process_id: crate::journal::current_lf_process_id()
                 .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?,
             provider: command.program.clone(),
+            resuming: agent_session.is_some(),
             cwd: command.cwd.clone(),
             capture: capture.map(CaptureHandle::hand_off),
             capture_key: environment

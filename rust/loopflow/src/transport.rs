@@ -183,13 +183,17 @@ pub(crate) fn current() -> Option<&'static LfProcessId> {
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 pub fn delegate_current(batch: bool) -> Result<bool> {
+    delegate_session(batch, None)
+}
+
+pub(crate) fn delegate_session(batch: bool, json_session: Option<&str>) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
     }
     // Library tests do not execute the CLI entry point.
     #[cfg(test)]
     {
-        let _ = batch;
+        let _ = (batch, json_session);
         Ok(false)
     }
     #[cfg(not(test))]
@@ -199,11 +203,15 @@ pub fn delegate_current(batch: bool) -> Result<bool> {
         crate::journal::current_lf_process_id()
             .context("Execution requires an admitted invocation; check the process ledger and caller provenance")?;
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
+        if json_session.is_some() {
+            // The viewer owns this continuation, including an early detach.
+            argv.retain(|arg| arg != "--json");
+        }
         // `lf -b … > file` typed at a terminal writes only the answer, never a
         // relayed screen; an interactive run keeps the terminal it reads from.
         let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
         let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
-        attach(&owner, None)?;
+        attach(&owner, None, json_session)?;
         Ok(true)
     }
 }
@@ -820,9 +828,11 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 detached,
             );
         }
-        // The client has exited and its parent waits for acknowledgement, so
-        // everything it printed is already readable.
-        if viewers.iter().any(|viewer| viewer.ending) {
+        // The child wait reports once. A returning launcher announces its
+        // client's end; an exec'd launcher leaves that announcement to our wait.
+        let status = child_exit.try_recv().ok().transpose()?;
+        if viewers.iter().any(|viewer| viewer.ending) || (status.is_some() && exit_record.is_some())
+        {
             if let Some(ended) = client.take() {
                 finish_client(
                     ended,
@@ -839,83 +849,63 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 let _ = viewer.flush();
             }
         }
-        if exit.is_none() {
-            if let Ok(status) = child_exit.try_recv() {
-                let status = status?;
-                use std::os::unix::process::ExitStatusExt;
-                let code = status
-                    .code()
-                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(1))
-                    as u8;
-                let code = if let Some(record) = exit_record.take() {
-                    // The child became its provider; its native client ended
-                    // with it, and what the launcher recorded after waiting is
-                    // recorded here.
-                    if let Some(ended) = client.take() {
-                        finish_client(
-                            ended,
-                            &mut readers,
-                            &mut output,
-                            &mut viewers,
-                            &mut pending_input,
-                            detached,
-                        );
-                    }
-                    let settled = match crate::harness::native_exit::settle(&record, status) {
-                        Ok(settled) => settled,
-                        Err(error) => {
-                            tracing::warn!(%error, session = %record.session, "provider exit was not recorded");
-                            crate::harness::native_exit::Settled {
-                                code,
-                                lines: vec![format!(
-                                    "Loopflow could not record this exit: {error:#}"
-                                )],
-                            }
+        if let Some(status) = status {
+            let code = if let Some(record) = exit_record.take() {
+                let settled = match crate::harness::native_exit::settle(&record, status) {
+                    Ok(settled) => settled,
+                    Err(error) => {
+                        tracing::warn!(%error, session = %record.session, "provider exit was not recorded");
+                        crate::harness::native_exit::Settled {
+                            code: 1,
+                            lines: vec![format!("Loopflow could not record this exit: {error:#}")],
                         }
-                    };
-                    for line in &settled.lines {
-                        deliver(
-                            &mut output,
-                            &mut viewers,
-                            &mut pending_input,
-                            1,
-                            format!("\r\n{line}\r\n").as_bytes(),
-                            detached,
-                        );
                     }
-                    let process = format!("lf/{}", record.lf_process_id.as_str().replace('-', ""));
-                    output.report(
-                        format!("{process}/step"),
-                        crate::program_status::State::Clear,
-                        None,
-                    );
-                    output.report(
-                        process,
-                        match settled.code {
-                            0 => crate::program_status::State::Done,
-                            130 => crate::program_status::State::Idle,
-                            _ => crate::program_status::State::Error,
-                        },
-                        None,
-                    );
-                    planning = None;
-                    settled.code
-                } else {
-                    // A launch that died before reporting its client's end.
-                    if let Some(held) = client.take().map(native::NativeClient::release) {
-                        deliver(
-                            &mut output,
-                            &mut viewers,
-                            &mut pending_input,
-                            1,
-                            &held,
-                            detached,
-                        );
-                    }
-                    code
                 };
-                exit = Some((code, Instant::now()));
-            }
+                for line in &settled.lines {
+                    deliver(
+                        &mut output,
+                        &mut viewers,
+                        &mut pending_input,
+                        1,
+                        format!("\r\n{line}\r\n").as_bytes(),
+                        detached,
+                    );
+                }
+                let process = format!("lf/{}", record.lf_process_id.as_str().replace('-', ""));
+                output.report(
+                    format!("{process}/step"),
+                    crate::program_status::State::Clear,
+                    None,
+                );
+                output.report(
+                    process,
+                    match settled.code {
+                        0 => crate::program_status::State::Done,
+                        130 => crate::program_status::State::Idle,
+                        _ => crate::program_status::State::Error,
+                    },
+                    None,
+                );
+                planning = None;
+                settled.code
+            } else {
+                // A launch that died before reporting its client's end.
+                if let Some(held) = client.take().map(native::NativeClient::release) {
+                    deliver(
+                        &mut output,
+                        &mut viewers,
+                        &mut pending_input,
+                        1,
+                        &held,
+                        detached,
+                    );
+                }
+                use std::os::unix::process::ExitStatusExt;
+                status
+                    .code()
+                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(1)) as u8
+            };
+            exit = Some((code, Instant::now()));
         }
         if let Some((code, at)) = exit {
             if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
@@ -1157,12 +1147,19 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
 ///
 /// The process that resolved the connection built it with a store, a command
 /// tree and often a runtime; none of that serves a relay. It completes its
-/// Process and execs the relay entry, which opens no store at all.
-pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
+/// Process and execs the relay entry, which opens no store while relaying.
+pub(crate) fn attach(
+    id: &LfProcessId,
+    moved: Option<String>,
+    json_session: Option<&str>,
+) -> Result<()> {
     let mut command = Command::new(std::env::current_exe()?);
     command.args([RELAY_COMMAND[0], RELAY_COMMAND[1], id.as_str()]);
     if let Some(moved) = &moved {
         command.args([RELAY_MOVED_FLAG, moved]);
+    }
+    if let Some(session) = json_session {
+        command.args([RELAY_JSON_FLAG, session]);
     }
     crate::journal::finish_before_exec();
     let error = command.exec();
@@ -1172,10 +1169,11 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
 
 const RELAY_COMMAND: [&str; 2] = ["session", "attach"];
 const RELAY_MOVED_FLAG: &str = "--moved";
+const RELAY_JSON_FLAG: &str = "--session-json";
 
 /// The owner and notice a relay invocation names: `lf session attach OWNER
-/// [--moved TEXT]`. Recognized before any command parsing.
-pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>)> {
+/// [--moved TEXT] [--session-json SESSION]`. Recognized before command parsing.
+pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>, Option<String>)> {
     let [_, command, subcommand, owner, rest @ ..] = args else {
         return None;
     };
@@ -1183,12 +1181,20 @@ pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>)> {
         return None;
     }
     let owner = LfProcessId::parse(owner).ok()?;
-    let moved = match rest {
-        [] => None,
-        [flag, moved] if flag == RELAY_MOVED_FLAG => Some(moved.clone()),
-        _ => return None,
-    };
-    Some((owner, moved))
+    let mut moved = None;
+    let mut json_session = None;
+    for pair in rest.chunks(2) {
+        match pair {
+            [flag, value] if flag == RELAY_MOVED_FLAG && moved.is_none() => {
+                moved = Some(value.clone());
+            }
+            [flag, value] if flag == RELAY_JSON_FLAG && json_session.is_none() => {
+                json_session = Some(value.clone());
+            }
+            _ => return None,
+        }
+    }
+    Some((owner, moved, json_session))
 }
 
 /// Relay this terminal to the execution owner: socket in, terminal out.

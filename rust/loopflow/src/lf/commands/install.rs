@@ -932,11 +932,7 @@ fn prepare_artifacts(
             if fs::symlink_metadata(target).is_err() {
                 return None;
             }
-            let name = target
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("Loopflow.app");
-            Some(target.with_file_name(format!(".{name}.superseded.{upgrade_id}")))
+            Some(install_scratch(target).join(format!("superseded.{upgrade_id}")))
         });
     Ok(PreparedArtifacts {
         cli_binary,
@@ -1187,18 +1183,27 @@ struct AppPromotion<'a> {
     expected_verdict: &'a Verdict,
 }
 
-fn stage_app_copy(source: &Path, target: &Path) -> Result<PathBuf> {
-    let parent = target.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+/// Where promotion stages and retires bundles for `target`: one hidden
+/// `.noindex` directory beside it, so a commit stays a same-volume rename while
+/// Spotlight never indexes the copies. Its entries never end in `.app`.
+fn install_scratch(target: &Path) -> PathBuf {
     let name = target
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("Loopflow.app");
-    let staged = target.with_file_name(format!(
-        ".{name}.promote.{}-{}",
-        std::process::id(),
-        Uuid::new_v4()
-    ));
+    target.with_file_name(format!(".{name}.noindex"))
+}
+
+/// A unique path inside the scratch directory, which exists on return; a
+/// staged copy always precedes the commit that retires the target beside it.
+fn scratch_entry(target: &Path, label: &str) -> Result<PathBuf> {
+    let scratch = install_scratch(target);
+    fs::create_dir_all(&scratch).with_context(|| format!("create {}", scratch.display()))?;
+    Ok(scratch.join(format!("{label}.{}-{}", std::process::id(), Uuid::new_v4())))
+}
+
+fn stage_app_copy(source: &Path, target: &Path) -> Result<PathBuf> {
+    let staged = scratch_entry(target, "promote")?;
     let result = copy_tree(source, &staged).and_then(|()| verify_matching_bundles(source, &staged));
     if result.is_err() {
         let _ = remove_path(&staged);
@@ -1221,18 +1226,10 @@ fn stage_app_bundle(plan: &AppPromotion<'_>) -> Result<PathBuf> {
 /// old target or the sidecar recoverable and never a partially copied bundle.
 fn commit_app_bundle(staged: &Path, plan: &AppPromotion<'_>) -> Result<Option<PathBuf>> {
     let parent = plan.target.parent().unwrap_or_else(|| Path::new("."));
-    let name = plan
-        .target
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("Loopflow.app");
-    let superseded = plan.superseded.map(Path::to_path_buf).unwrap_or_else(|| {
-        plan.target.with_file_name(format!(
-            ".{name}.superseded.{}-{}",
-            std::process::id(),
-            Uuid::new_v4()
-        ))
-    });
+    let superseded = match plan.superseded {
+        Some(superseded) => superseded.to_path_buf(),
+        None => scratch_entry(plan.target, "superseded")?,
+    };
     let had_superseded = superseded.exists();
     if had_superseded && plan.target.exists() {
         validate_staged_app_helper(plan.target, plan.expected_candidate, plan.expected_verdict)
@@ -1287,6 +1284,107 @@ fn settle_app_artifacts(artifacts: &PreparedArtifacts) -> Result<()> {
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// One release app for Launch Services
+// ---------------------------------------------------------------------------
+
+/// Leave `target` the only release app Spotlight, Finder and `open -b` reach:
+/// remove the staging directory (with any copy an interrupted promotion left),
+/// copies earlier lf staged beside the target and release installs at earlier
+/// installer locations, then register `target` afresh. Callers remove the
+/// legacy target. Runs under the promotion lock with no switch in flight; the
+/// install is already committed, so failures are logged.
+fn converge_release_app(target: &Path) {
+    // Nothing in it ends in `.app`, so Launch Services holds none of it.
+    if let Err(error) = remove_path(&install_scratch(target)) {
+        tracing::warn!(%error, "superseded app copies were not removed");
+    }
+    let registered = in_applications_folder(target);
+    let mut stale = sibling_promotion_copies(target);
+    if registered {
+        stale.extend(earlier_release_installs(target));
+    }
+    for app in stale {
+        if registered {
+            lsregister(&["-u"], &app);
+        }
+        match remove_path(&app) {
+            Ok(()) => tracing::info!(path = %app.display(), "removed superseded app"),
+            Err(error) => tracing::warn!(%error, "superseded app was not removed"),
+        }
+    }
+    if registered && target.exists() {
+        lsregister(&["-f"], target);
+    }
+}
+
+/// Copies earlier lf staged beside the target (`.Loopflow.app.promote.*`,
+/// `.Loopflow.app.superseded.*`), which Spotlight indexed and Launch Services
+/// registered under the release bundle id.
+fn sibling_promotion_copies(target: &Path) -> Vec<PathBuf> {
+    let (Some(parent), Some(name)) = (target.parent(), target.file_name().and_then(|n| n.to_str()))
+    else {
+        return Vec::new();
+    };
+    let prefixes = [format!(".{name}.promote."), format!(".{name}.superseded.")];
+    let Ok(entries) = fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|entry| prefixes.iter().any(|prefix| entry.starts_with(prefix)))
+        })
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// Launch Services registration belongs to real application folders; staging
+/// and test targets elsewhere stay out of the account's database.
+fn in_applications_folder(target: &Path) -> bool {
+    let Some(parent) = target.parent() else {
+        return false;
+    };
+    cfg!(target_os = "macos")
+        && (parent == Path::new("/Applications")
+            || crate::installation::account_home()
+                .is_ok_and(|home| parent == home.join("Applications")))
+}
+
+/// Release installs from earlier installer locations (0.10 used `~/Applications`;
+/// Concerto was the app's earlier name), told apart from dev builds by bundle id.
+fn earlier_release_installs(target: &Path) -> Vec<PathBuf> {
+    let Ok(home) = crate::installation::account_home() else {
+        return Vec::new();
+    };
+    let release_ids = [super::open::DESKTOP_BUNDLE, "com.loopflow.concerto"];
+    ["Loopflow.app", "Concerto.app"]
+        .into_iter()
+        .map(|name| home.join("Applications").join(name))
+        .filter(|app| app != target)
+        .filter(|app| {
+            published::app_info(app).is_some_and(|info| {
+                release_ids
+                    .iter()
+                    .any(|id| info["CFBundleIdentifier"] == *id)
+            })
+        })
+        .collect()
+}
+
+fn lsregister(flags: &[&str], app: &Path) {
+    let status = Command::new(crate::work::link_receiver::LSREGISTER)
+        .args(flags)
+        .arg(app)
+        .status();
+    if !status.is_ok_and(|status| status.success()) {
+        tracing::warn!(app = %app.display(), ?flags, "Launch Services registration failed");
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -2476,6 +2574,9 @@ pub fn recover_switch(switch_id: &str) -> Result<()> {
     if let Some(legacy) = receipt.activation.legacy_app.as_deref() {
         remove_path(legacy)?;
     }
+    if let Some(target) = receipt.activation.app.as_deref() {
+        converge_release_app(target);
+    }
     drop(lock);
     Ok(())
 }
@@ -2534,7 +2635,6 @@ fn promote_from_installation(
         println!("  (preview only: no target changed)");
         return Ok(());
     }
-
     if prior.is_none() && store_path.exists() {
         prior = Some(bootstrap_published_install(&root, &artifacts)?);
     }
@@ -2644,6 +2744,9 @@ fn promote_from_installation(
     };
     settle_app_artifacts(&prepared)?;
     settle_switch(&root, &mut switch, &active)?;
+    if let Some(target) = prepared.app_target.as_deref() {
+        converge_release_app(target);
+    }
     resume_switch_app(&switch)?;
     println!(
         "promoted {}: {} -> {} (store {})",
@@ -2753,9 +2856,10 @@ fn rollback_from_store(cli_target: &Path, candidate: &Path, bin_dir: &Path) -> R
 #[cfg(test)]
 mod artifact_tests {
     use super::{
-        activate_cli_targets, app_executable_paths, commit_cli_symlink, copy_tree,
-        prune_superseded_artifacts, retained_published_sets, stage_binary, tree_digest,
-        verify_cli_target,
+        activate_cli_targets, app_executable_paths, commit_app_bundle, commit_cli_symlink,
+        converge_release_app, copy_tree, prune_superseded_artifacts, retained_published_sets,
+        stage_app_copy, stage_binary, tree_digest, verify_cli_target, AppPromotion,
+        CandidateIdentity, Verdict,
     };
     use crate::installation::{
         entry_gate_path, ActivationTargets, ActiveInstall, ArtifactIdentity, ArtifactRole,
@@ -2985,6 +3089,43 @@ mod artifact_tests {
                 .mode()
                 & 0o777,
             0o755
+        );
+    }
+
+    #[test]
+    fn repeated_installs_leave_one_bundle_in_the_applications_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        let applications = directory.path().join("Applications");
+        let target = applications.join("Loopflow.app");
+        // Earlier lf staged beside the target; Spotlight indexed the leftovers.
+        let orphan = applications.join(".Loopflow.app.superseded.4242-old");
+        fs::create_dir_all(orphan.join("Contents")).unwrap();
+        let candidate = CandidateIdentity::current();
+        for version in ["1", "2"] {
+            let source = directory.path().join(version).join("Loopflow.app");
+            fs::create_dir_all(source.join("Contents")).unwrap();
+            fs::write(source.join("Contents/Info.plist"), version).unwrap();
+            // An interrupted promotion leaves its staged copy behind.
+            stage_app_copy(&source, &target).unwrap();
+            let plan = AppPromotion {
+                source: &source,
+                target: &target,
+                superseded: None,
+                expected_candidate: &candidate,
+                expected_verdict: &Verdict::Promote,
+            };
+            let staged = stage_app_copy(&source, &target).unwrap();
+            commit_app_bundle(&staged, &plan).unwrap();
+            converge_release_app(&target);
+        }
+        let names: Vec<_> = fs::read_dir(&applications)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["Loopflow.app"]);
+        assert_eq!(
+            fs::read_to_string(target.join("Contents/Info.plist")).unwrap(),
+            "2"
         );
     }
 }

@@ -1086,9 +1086,11 @@ fn open_delivers_exact_task_to_desktop_without_preparing_its_execution() {
     .unwrap();
     fs::set_permissions(bin.join("open"), fs::Permissions::from_mode(0o755)).unwrap();
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    // A caller inside a Desktop reaches that Desktop; nothing here is installed.
     let run = |args: &[&str]| {
         let output = command(home.path(), repo.path(), args)
             .env("PATH", &path)
+            .env("LF_DESKTOP", "com.loopflow.mac.test")
             .output()
             .unwrap();
         serde_json::from_str::<serde_json::Value>(&success(output)).unwrap()
@@ -1105,9 +1107,12 @@ fn open_delivers_exact_task_to_desktop_without_preparing_its_execution() {
         "/task/{}",
         created["identifier"].as_str().unwrap()
     )));
-    assert!(fs::read_to_string(received)
-        .unwrap()
-        .ends_with(&format!("{url}\n")));
+    let received = fs::read_to_string(received).unwrap();
+    assert!(
+        received.starts_with("-b\ncom.loopflow.mac.test\n"),
+        "{received}"
+    );
+    assert!(received.ends_with(&format!("{url}\n")));
     let conn = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     let worktree: Option<String> = conn
         .query_row("SELECT worktree FROM tasks WHERE id=?1", [id], |row| {

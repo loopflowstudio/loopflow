@@ -984,14 +984,8 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 }
             }
         }
-        if let Ok(hint) = ending.try_recv() {
-            for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                if let Some(hint) = &hint {
-                    viewer.event(Event::Hint { text: hint.clone() });
-                }
-                let _ = viewer.flush_events();
-                let _ = viewer.flush();
-            }
+        if let Ok(event) = ending.try_recv() {
+            end_viewers(&mut viewers, event);
             crate::platform::kill_process(std::process::id());
         }
         let now_viewed = viewers.iter().any(|v| v.live());
@@ -1013,7 +1007,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 }
             });
         }
-        place_events(&mut output, &mut viewers, announced);
+        place_events(&output, &mut viewers, announced);
         if let Some(input) = input.as_mut().filter(|_| !pending_input.is_empty()) {
             match input.write(pending_input.as_slices().0) {
                 Ok(n) => {
@@ -1062,11 +1056,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         // Output written before the execution detached reaches its viewers first.
         if detach {
             control = None;
-            for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                viewer.event(Event::Detached);
-                let _ = viewer.flush_events();
-                let _ = viewer.flush();
-            }
+            end_viewers(&mut viewers, Event::Detached);
             // The execution's own control connections outlive its viewers.
             viewers.retain(|v| !v.attached);
             detach = false;
@@ -1143,11 +1133,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         if let Some((code, at)) = exit {
             if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
-                for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                    viewer.event(Event::ChildExited { code });
-                    let _ = viewer.flush_events();
-                    let _ = viewer.flush();
-                }
+                end_viewers(&mut viewers, Event::ChildExited { code });
                 announced = true;
             }
             // Once viewers have received the final output, release execution
@@ -1169,10 +1155,20 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     }
 }
 
+/// Send the ending event even when no more output can complete a sequence.
+/// A failed viewer must not prevent the others from receiving it.
+fn end_viewers(viewers: &mut [Viewer], event: Event) {
+    for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+        viewer.event(event.clone());
+        let _ = viewer.flush_events();
+        let _ = viewer.flush();
+    }
+}
+
 /// Events enter a stream only between complete terminal sequences, so a viewer
 /// feeding the raw stream to a terminal never sees one split. After the
 /// execution has ended nothing more completes, so they go at once.
-fn place_events(output: &mut output::Output, viewers: &mut Vec<Viewer>, announced: bool) {
+fn place_events(output: &output::Output, viewers: &mut Vec<Viewer>, announced: bool) {
     if !(output.ready() || announced) {
         return;
     }
@@ -1465,10 +1461,10 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                                 eprintln!("\n{notice}");
                             }
                             let _ = send(&mut socket, Request::Leave);
-                            // LOO-705 lands the rerun through `successor`; until
-                            // that rebase the viewer leaves as before.
-                            let _ = successor;
-                            return Ok(());
+                            return match successor {
+                                Some(command) => follow(&command),
+                                None => Ok(()),
+                            };
                         }
                         Event::ChildExited { code } => {
                             return if code == 0 {
@@ -1522,6 +1518,24 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                 },
             )?;
         }
+    }
+}
+
+/// Run `command`, the `<entry> session resume <id>` an ending owner sent, so
+/// this terminal lands in the conversation on the lf the entry launches now.
+/// The owner judged itself; this viewer only follows.
+fn follow(command: &[String]) -> Result<()> {
+    let (program, args) = command
+        .split_first()
+        .context("the owner sent an empty successor command")?;
+    let status = Command::new(program)
+        .args(args)
+        .status()
+        .with_context(|| format!("run {}", command.join(" ")))?;
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(code) => Err(crate::process::CommandExit(code as u8).into()),
+        None => bail!("{program} ended by a signal"),
     }
 }
 

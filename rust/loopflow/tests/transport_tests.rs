@@ -377,18 +377,6 @@ impl Viewer {
             |items| matches!(items.last(), Some(Item::Event(event)) if event["type"] == kind),
         )
     }
-    /// Every hint received until the owner closes this connection.
-    fn hints(&mut self) -> Vec<String> {
-        let mut hints = Vec::new();
-        while let Some(item) = self.next() {
-            if let Item::Event(event) = item {
-                if event["type"] == "hint" {
-                    hints.push(event["text"].as_str().unwrap().to_owned());
-                }
-            }
-        }
-        hints
-    }
     fn input(&mut self, text: &str) {
         self.socket
             .write_all(&frame(INPUT, text.as_bytes()))
@@ -742,6 +730,165 @@ fn wait_for_viewer(mut child: Child, timeout: Duration) -> Output {
     child.wait_with_output().unwrap()
 }
 
+/// Answer the Session's control probe, then accept its viewer connection.
+fn accept_attachment(listener: &UnixListener) -> UnixStream {
+    let started = Instant::now();
+    loop {
+        match listener.accept() {
+            Ok((mut socket, _)) => {
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .unwrap();
+                let (tag, payload) = read_frame(&mut socket).unwrap();
+                assert_eq!(tag, REQUEST);
+                let request: Value = serde_json::from_slice(&payload).unwrap();
+                match request["kind"].as_str().unwrap() {
+                    "controlled" => socket
+                        .write_all(&frame(
+                            REPLY,
+                            json!({"answers":request["id"],"seq":0,"kind":"controlled","held":false})
+                                .to_string()
+                                .as_bytes(),
+                        ))
+                        .unwrap(),
+                    "attach" => return socket,
+                    other => panic!("unexpected request {other}"),
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                assert!(started.elapsed() < Duration::from_secs(10));
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => panic!("accept: {error}"),
+        }
+    }
+}
+
+#[test]
+fn successor_handoff_restores_the_terminal_and_preserves_command_results() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", "sleep 60"]);
+    let session = fixture.session(&owner);
+    let endpoint = fixture.endpoint(&owner);
+    let retained = endpoint.with_extension("retained");
+    std::fs::rename(&endpoint, &retained).unwrap();
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    listener.set_nonblocking(true).unwrap();
+
+    let entry = fixture.home.path().join("successor entry");
+    std::fs::write(
+        &entry,
+        r#"#!/bin/sh
+[ "$#" = 3 ] && [ "$1" = session ] && [ "$2" = resume ] && [ "$3" = "$EXPECTED_SESSION" ] || exit 91
+[ "$(stty -g)" = "$EXPECTED_TERMINAL" ] || exit 92
+printf 'successor saw restored terminal\n'
+if [ "$SUCCESSOR_RESULT" = signal ]; then kill -TERM $$; fi
+exit "$SUCCESSOR_RESULT"
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut master = -1;
+    let mut slave = -1;
+    // SAFETY: openpty initializes both descriptors; optional settings are null.
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    // SAFETY: each newly opened descriptor is transferred exactly once.
+    let _terminal = unsafe { std::fs::File::from_raw_fd(master) };
+    // SAFETY: the slave is a distinct, newly opened descriptor.
+    let input = unsafe { std::fs::File::from_raw_fd(slave) };
+    let original = Command::new("stty")
+        .arg("-g")
+        .stdin(input.try_clone().unwrap())
+        .output()
+        .unwrap();
+    assert!(original.status.success());
+    let original = String::from_utf8(original.stdout).unwrap();
+
+    for (result, exit, error) in [
+        ("0", 0, None),
+        ("23", 23, None),
+        ("signal", 1, Some("ended by a signal")),
+        ("missing", 1, Some("run /")),
+        ("empty", 1, Some("empty successor command")),
+        ("none", 0, None),
+    ] {
+        let successor = match result {
+            "none" => Value::Null,
+            "empty" => json!([]),
+            "missing" => json!([
+                fixture.home.path().join("missing"),
+                "session",
+                "resume",
+                session
+            ]),
+            _ => json!([entry, "session", "resume", session]),
+        };
+        let viewer = fixture
+            .command(&["session", "resume", &session])
+            .env("EXPECTED_SESSION", &session)
+            .env("EXPECTED_TERMINAL", original.trim())
+            .env("SUCCESSOR_RESULT", result)
+            .stdin(input.try_clone().unwrap())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut socket = accept_attachment(&listener);
+        socket
+            .write_all(&frame(
+                REPLY,
+                json!({
+                    "answers":1,"seq":0,"kind":"attached","viewer":"v","reconnect":"r",
+                    "nonce":"00","token":"claim","terminal":true,"grace_ms":60000,"owner":"v"
+                })
+                .to_string()
+                .as_bytes(),
+            ))
+            .unwrap();
+        socket.write_all(&frame(SNAPSHOT, b"\x1b[?1049h")).unwrap();
+        let event = json!({"seq":1,"type":"control","held":false,
+            "notice":"owner retired","successor":successor});
+        socket
+            .write_all(&frame(OUT, format!("\x1b_lf1;00;{event}\x1b\\").as_bytes()))
+            .unwrap();
+        let output = wait_for_viewer(viewer, Duration::from_secs(10));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.code(),
+            Some(exit),
+            "{result}: {stdout} {stderr}"
+        );
+        assert!(stderr.contains("owner retired"), "{result}: {stderr}");
+        if let Some(error) = error {
+            assert!(stderr.contains(error), "{result}: {stderr}");
+        }
+        assert!(stdout.contains("\x1b[?1049l"), "{result}: {stdout}");
+        if matches!(result, "0" | "23" | "signal") {
+            let restored = stdout.find("\x1b[?1049l").unwrap();
+            let followed = stdout.find("successor saw restored terminal").unwrap();
+            assert!(restored < followed, "{stdout}");
+        }
+    }
+    drop(listener);
+    std::fs::remove_file(&endpoint).unwrap();
+    std::fs::rename(retained, endpoint).unwrap();
+    fixture.stop(&owner);
+}
+
 fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: SilentOwner) {
     // Keep the real owner and provider running while this viewer reaches a
     // socket that accepts its request but never acknowledges it.
@@ -766,39 +913,7 @@ fn silent_attachment(fixture: &Fixture, owner: &str, session: &str, silent: Sile
             while input.write_all(&chunk).is_ok() {}
         });
     }
-    let started = Instant::now();
-    // This owner answers whether a viewer holds control, then never
-    // acknowledges the attachment itself.
-    let mut socket = loop {
-        match listener.accept() {
-            Ok((mut socket, _)) => {
-                socket.set_nonblocking(false).unwrap();
-                socket
-                    .set_read_timeout(Some(Duration::from_secs(10)))
-                    .unwrap();
-                let (tag, payload) = read_frame(&mut socket).unwrap();
-                assert_eq!(tag, REQUEST);
-                let request: Value = serde_json::from_slice(&payload).unwrap();
-                match request["kind"].as_str().unwrap() {
-                    "controlled" => socket
-                        .write_all(&frame(
-                            REPLY,
-                            json!({"answers":request["id"],"seq":0,"kind":"controlled","held":false})
-                                .to_string()
-                                .as_bytes(),
-                        ))
-                        .unwrap(),
-                    "attach" => break socket,
-                    other => panic!("unexpected request {other}"),
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(started.elapsed() < Duration::from_secs(10));
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(error) => panic!("accept: {error}"),
-        }
-    };
+    let mut socket = accept_attachment(&listener);
     std::fs::remove_file(&endpoint).unwrap();
     std::fs::rename(retained, endpoint).unwrap();
     drop(listener);
@@ -1279,11 +1394,16 @@ fn sessions_end_when_their_lf_executable_goes() {
     // Their viewers learn why and how to return.
     for (index, how) in [(0, "removed"), (1, "replaced")] {
         let session = fixture.session_of_owner(&owners[index]);
+        let items = viewers[index].until_event("control");
+        let control = events(&items, "control")[0];
+        assert_eq!(control["held"], false);
         assert_eq!(
-            viewers[index].hints(),
-            [format!(
-                "This Session's lf build was {how}; `lf resume {session}` reopens it."
-            )]
+            control["notice"],
+            format!("This Session's lf was {how}; reopening it as `lf resume {session}`")
+        );
+        assert_eq!(
+            control["successor"],
+            json!([env!("CARGO_BIN_EXE_lf"), "session", "resume", session])
         );
     }
     // Several judgments later, the busy and installed owners still run.

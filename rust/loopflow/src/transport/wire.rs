@@ -3,7 +3,6 @@
 //! sequences. The stream a viewer counts and the owner spools is the bytes of
 //! its snapshot, out and err frames, in order.
 
-use std::collections::VecDeque;
 use std::io;
 
 use serde::{Deserialize, Serialize};
@@ -57,16 +56,16 @@ impl Tag {
 }
 
 /// Append `payload` as one frame.
-pub(super) fn encode(tag: Tag, payload: &[u8], into: &mut VecDeque<u8>) {
-    into.push_back(tag as u8);
+pub(super) fn encode(tag: Tag, payload: &[u8], into: &mut impl Extend<u8>) {
+    into.extend([tag as u8]);
     into.extend((payload.len() as u32).to_be_bytes());
-    into.extend(payload);
+    into.extend(payload.iter().copied());
 }
 
 pub(super) fn frame(tag: Tag, payload: &[u8]) -> Vec<u8> {
-    let mut bytes = VecDeque::with_capacity(HEADER + payload.len());
+    let mut bytes = Vec::with_capacity(HEADER + payload.len());
     encode(tag, payload, &mut bytes);
-    bytes.into()
+    bytes
 }
 
 /// Reassemble frames from a byte stream.
@@ -255,14 +254,13 @@ pub(super) enum Event {
         name: Option<String>,
         held: bool,
     },
-    /// Input control changed hands, or the owner is ending because its lf was
-    /// removed, replaced or superseded (LOO-705). A recipient with `held: false`
-    /// prints `notice`; given a `successor` lf entry it reruns its invocation
-    /// through that entry instead of leaving.
+    /// Input control changed hands. A recipient with `held: false` restores
+    /// its terminal, prints `notice`, then runs the full successor command
+    /// when the owner is retiring, or leaves when another viewer took control.
     Control {
         held: bool,
         notice: Option<String>,
-        successor: Option<std::path::PathBuf>,
+        successor: Option<Vec<String>>,
     },
     ChildExited {
         code: u8,

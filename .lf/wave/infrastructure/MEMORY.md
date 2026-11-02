@@ -66,8 +66,8 @@ Ownership arbitrates size and colors only and is separate from input control,
 which keeps LOO-618's token/replace/Busy semantics.
 
 Deviations from Rex, with reasons: input control and ownership release at EOF,
-not after the grace window, because a Unix-socket drop is a dead process and
-LOO-618's automatic attach must not see Busy for it. Events ride stream 1 in pipe
+not after the grace window, because LOO-618's automatic attach must not see Busy
+for a disconnected viewer. EOF proves connection loss, not process death. Events ride stream 1 in pipe
 mode too (the viewer strips them, piped stdout stays byte-exact); a second
 control channel was rejected. Theme is relayed opaque; Desktop (LOO-672) owns
 colors. Lesson: `#[serde(flatten)]` of a struct with its own `id` onto the
@@ -76,9 +76,13 @@ a connection whose frame fails to parse; a `wire.rs` unit test pins the key name
 
 Land order per Jack Heart's comment: LOO-705 (successor on the Moved message)
 first, then LOO-708/LOO-709, then LOO-712 re-homes `successor` on the `control`
-event and the viewer reruns through it instead of leaving. Unproved: Desktop
-consuming the stream, a measured reconnect over SSH, and the 1 MB wire bound
-outside the test fixture.
+event. The successor is the full `[entry, "session", "resume", session_id]`
+command, not an entry path or replay of viewer argv: LOO-708's thin viewer argv
+would reattach to the ended owner. Terminal restoration and successor exit/error
+propagation belong to that handoff. This integration remains unimplemented in
+LOO-712; the current path-only field is ignored. Shell fixtures prove the wire,
+not the requested live Claude walkthrough. Desktop consumption, measured SSH
+reconnect and the 1 MB wire bound outside the fixture remain unproved.
 
 ## Waited landing (LOO-503, 2026-10-17)
 

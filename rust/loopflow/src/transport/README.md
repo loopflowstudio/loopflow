@@ -33,7 +33,9 @@ A Session nobody views ends after `session.end_detached_after` (default `24h`,
 `off` disables it), counted from when its last viewer left. A Session whose lf
 executable is removed or replaced (a deleted worktree, a relinked build, a rebuilt
 Dev.app) ends within seconds, viewed or not, and logs the path to `logs/lf.log`;
-an attached viewer prints why and the `lf resume <session>` that reopens it.
+an attached viewer prints why, restores its terminal, and runs the supplied
+`lf resume <session>` command through the lf entry. Its exit status or launch
+error becomes the viewer's result.
 A turn in progress or a Graph step keeps its owner running until it settles; a
 viewer keeps it only from the detached limit; headless Runs are never ended. Each
 owner judges only itself and ends by signaling itself, which stops its agent and
@@ -96,7 +98,9 @@ per viewer, and every reply carries the `seq` of the last event queued when it
 was computed. Kinds: `resize {rows,cols}`, `theme {theme}`,
 `owner {viewer,name,held}`, `control {held,notice,successor}` (input control
 left this connection), `child_exited {code}`, `detached`, `hint {text}` and
-`return {detach}`.
+`return {detach}`. A retiring owner sends `control` with `held: false` and
+`successor: [entry, "session", "resume", session_id]`. The viewer runs that
+command after restoring its terminal; `successor: null` simply leaves.
 
 A connection that ends without a `leave` request keeps its stream for 60 s.
 `{"kind":"resume","reconnect":…,"received":N,…}` continues from byte `N` with no

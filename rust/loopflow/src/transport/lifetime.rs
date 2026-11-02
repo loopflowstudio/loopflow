@@ -3,7 +3,8 @@
 //! An owner whose lf executable is removed or replaced (a worktree deleted, a
 //! build relinked, Dev.app rebuilt) ends as soon as its Sessions wait for a
 //! person, viewers notwithstanding: it would otherwise run a vanished build
-//! indefinitely. Its attached viewers are told why and how to return. An owner
+//! indefinitely. Its attached viewers restore their terminals and run the
+//! successor Session resume command through the lf entry. An owner
 //! nobody has viewed for `session.end_detached_after` ends the same way.
 //! Ending stops its agent and records its exit, so
 //! `lf resume` reopens the conversation from provider history and
@@ -16,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
+use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
 
@@ -27,7 +29,7 @@ const EXECUTABLE_PAUSE: Duration = Duration::from_secs(2);
 /// Record viewer changes sent on the first channel. Once the executable is gone
 /// or the owner has gone unviewed past its limit, send the second channel what
 /// to tell attached viewers; the serve loop delivers it and ends the owner.
-pub(super) fn spawn(owner: LfProcessId) -> (mpsc::Sender<bool>, mpsc::Receiver<Option<String>>) {
+pub(super) fn spawn(owner: LfProcessId) -> (mpsc::Sender<bool>, mpsc::Receiver<Event>) {
     let executable = Executable::current();
     let (viewers, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
@@ -43,7 +45,7 @@ fn watch(
     owner: &LfProcessId,
     executable: Option<&Executable>,
     changes: &mpsc::Receiver<bool>,
-    end: &mpsc::Sender<Option<String>>,
+    end: &mpsc::Sender<Event>,
 ) -> Result<()> {
     let store = crate::journal::process_ledger()?;
     let repo = store.process(owner)?.and_then(|process| process.repo);
@@ -77,25 +79,45 @@ fn watch(
                 let gone = executable
                     .and_then(|executable| executable.gone().map(|how| (executable, how)));
                 if (gone.is_some() || expired) && store.owner_waits_for_person(owner)? {
-                    let hint = match gone {
+                    let event = match gone {
                         Some((executable, how)) => {
                             tracing::warn!(
                                 %owner,
                                 path = %executable.path.display(),
                                 "ending a Session whose lf executable was {how}"
                             );
-                            store.owner_sessions(owner)?.first().map(|session| {
-                                format!(
-                                    "This Session's lf build was {how}; `lf resume {session}` reopens it."
-                                )
-                            })
+                            let session = store
+                                .owner_sessions(owner)?
+                                .into_iter()
+                                .next()
+                                .expect("an owner waiting for a person has a Session");
+                            let successor =
+                                crate::os_process::resolve_lf_binary().ok().map(|entry| {
+                                    vec![
+                                        entry.to_string_lossy().into_owned(),
+                                        "session".into(),
+                                        "resume".into(),
+                                        session.clone(),
+                                    ]
+                                });
+                            Event::Control {
+                                held: false,
+                                notice: Some(format!(
+                                    "This Session's lf was {how}; reopening it as `lf resume {session}`"
+                                )),
+                                successor,
+                            }
                         }
                         None => {
                             tracing::info!(%owner, "ending a Session nobody has viewed");
-                            None
+                            Event::Control {
+                                held: false,
+                                notice: None,
+                                successor: None,
+                            }
                         }
                     };
-                    if end.send(hint).is_err() {
+                    if end.send(event).is_err() {
                         crate::platform::kill_process(std::process::id());
                     }
                     return Ok(());

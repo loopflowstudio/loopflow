@@ -1,7 +1,8 @@
 # LOO-500: Add and remove Waves seamlessly
 
-Status: accepted experience; retry repair extended on 2026-11-02 to reconcile
-the index after a successful commit and failed reset; focused regressions passed.
+Status: accepted experience; reconciled on 2026-11-02 against `138384444d`.
+The post-commit reset failure from `6cb4adb010` is repaired: retries reconcile
+the index independently of commit creation; saved focused checks passed 14/14.
 Verification after integrating main reproduced removal and rename retry failures;
 retained operation evidence now replaces those recovery paths. Three concept reviews closed the alternate
 creation path (`lf wave connect <new-name>` adds first). Merged with main at
@@ -309,9 +310,8 @@ commit-only branch. The operation's saved index/after images now reconcile all
 selected paths even when HEAD already matches, under the same mutation lock.
 Later staged edits and paths owned by replacement Waves remain untouched.
 Recovery selects files and pending commits with direct loops; retries no longer
-rewrite the saved `applied` state. The reset-failure helper only asserts the
-failure receipt, since neither caller consumes it. Removed the obsolete
-`scratch/concept-review.html`; its exact historical reference remains below.
+rewrite the saved `applied` state. Historical concept-review evidence remains
+at the Git reference below.
 
 Previously removed with their exclusive tests:
 
@@ -470,6 +470,48 @@ unproved; isolated Git/CLI failures establish the local recovery gap only.
 
 ## Checks
 
+### Concept review, 2026-11-02
+
+Outcome: no further design change and no unresolved product choice. Reviewed
+the accepted interaction against `138384444d` and the current working design;
+this is source review, not a new native Desktop or live-provider demonstration.
+
+The useful concepts remain Wave identity, Project membership and retained
+operation effects. Add makes a Wave usable with its first Project; rename changes
+its address; remove moves open Tasks and hides the Wave while preserving history.
+Jack Heart's explicit backlog choice remains separate from removal. Neither
+Desktop nor skills need to expose registration, retirement or the local journal
+as additional actions. The current usage examples and init/split-wave instructions
+already express that interaction; leave them unchanged.
+
+The consequential mismatch from the earlier review was treating an absent live
+row/path, or a matching Git HEAD, as proof that cleanup finished. The retained
+operation now owns original identities, provider obligations and authored images;
+planning retains ownership of Wave/Task state. Index reconciliation is an effect
+even when no new commit is needed. Keep this distinction: folding the journal
+into Wave state or reconstructing it from live navigation would reintroduce the
+dated counterexamples above.
+
+Normal path: add `research`, enter its workspace, rename it to `ops`, preview
+removal, move its open Tasks to the repository and retain its chapters. Failure:
+the commit succeeds but index reconciliation fails, or Linear archival fails
+after retirement. Recovery: repeat the original request; reconcile the retained
+effects without another Wave, duplicate memory fold, changed provider target or
+damage to later edits/replacement Waves. The existing regression evidence covers
+local Git recovery; it does not establish successful Linear recovery.
+
+Preserve the chosen receipt behavior: command failures offer Retry; partial
+success retains Rust's explanation with Done; prose mentions remain advisory.
+Retirement alone must never imply that file/provider effects completed. The
+Desktop receipt can direct CLI retry even after the Wave leaves navigation;
+adding a persistent recovery surface would be a separate product decision, not
+an implicit requirement of this review.
+
+Next proof remains the affected gate checks and the complete Desktop add → use →
+remove interaction, plus successful provider recovery. No implementation restart
+or broader testing is requested by this review. The current one-page interaction
+map is `scratch/concept-review.html`.
+
 Earlier happy-path and Desktop evidence remains in
 `601c5a5b25:scratch/jack-loo-500-make-adding-and-deleting-waves-seamless.md`.
 The four original retry probes are retained above; native Desktop and live
@@ -478,4 +520,4 @@ Linear recovery still belong to demo/review. This pass's affected owners are
 and lifecycle callers in `global_commands`, `served_reads` and
 `linear::local_planning`; no Swift or DTO shape changed in the retry repair.
 
-2026-11-02 compress: `TMPDIR=/private/tmp uv run python scripts/test_network.py cargo test -p loopflow --test integration wave_lifecycle:: < /dev/null` passed 14/14; `cargo fmt --all`, `git diff --check` and `lf context` pass; broader affected suites/migration upgrade/lint → gate, native interaction/live Linear recovery → demo/review.
+2026-11-02 realign: reused compress's `TMPDIR=/private/tmp uv run python scripts/test_network.py cargo test -p loopflow --test integration wave_lifecycle:: < /dev/null` pass (14/14) and `cargo fmt --all` pass; code unchanged; `git diff --check` and `lf context` pass; broader affected suites/migration upgrade/lint → gate, native interaction/live Linear recovery → demo/review.

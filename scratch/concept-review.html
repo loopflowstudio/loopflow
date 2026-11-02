@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-500 · Wave interactions</title>
+<style>
+  :root { color-scheme: light dark; --paper:#faf9f6; --ink:#222724; --muted:#5b645e; --line:#cbd2cb; --accent:#275c47; }
+  @media (prefers-color-scheme:dark) { :root { --paper:#191d1b; --ink:#e5e9e5; --muted:#aab5ac; --line:#465249; --accent:#9bd6b5; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink); font:17px/1.65 system-ui,sans-serif; }
+  main { max-width:850px; margin:auto; padding:48px 24px 72px; }
+  header { color:var(--muted); font-size:13px; }
+  h1 { font-size:clamp(28px,5vw,42px); line-height:1.15; letter-spacing:-.025em; margin:24px 0; }
+  h2 { font-size:22px; margin:40px 0 12px; }
+  p { margin:12px 0; }
+  code { font: .87em/1.5 ui-monospace,monospace; overflow-wrap:anywhere; }
+  pre { padding:18px; border:1px solid var(--line); white-space:pre-wrap; }
+  .finding { border-left:3px solid var(--accent); padding-left:20px; margin:28px 0; }
+  .muted { color:var(--muted); }
+  .flow { display:grid; grid-template-columns:1fr 1fr 1.3fr; gap:18px; padding:18px 0; border-top:1px solid var(--line); }
+  .flow p { margin:0; }
+  .label { color:var(--muted); font-size:13px; }
+  li { margin:10px 0; }
+  @media(max-width:620px) { main { padding:28px 18px 48px; } .flow { grid-template-columns:1fr; gap:8px; } }
+</style>
+<main>
+  <header>
+    LOO-500 · concept-review · 2026-11-02<br>
+    Source revision: <code>138384444d</code>, with the current working design.<br>
+    Built from <code>scratch/jack-loo-500-make-adding-and-deleting-waves-seamless.md</code>,
+    <code>docs/work.md</code>, <code>ops/wave_lifecycle.rs</code>,
+    <code>ops/wave_lifecycle/recovery.rs</code>, the Desktop lifecycle sheets,
+    and <code>tests/wave_lifecycle.rs</code>.
+  </header>
+  <h1>No further concept change needed</h1>
+  <p>The accepted experience remains coherent: add a usable Wave, rename its address,
+    or remove it while keeping existing work and history. No product decision is
+    awaiting Jack Heart. This review leaves implementation unchanged.</p>
+
+  <div class="finding">
+    <strong>The consequential mismatch, now addressed</strong>
+    <p>Previously, a missing Wave directory or an already-matching Git commit could
+      be mistaken for finished cleanup. A retry could forget an archive obligation
+      or leave staged residue behind.</p>
+    <p>Implemented now: the original request retains its identities and unfinished
+      effects. A Wave leaving navigation does not erase the work needed to finish
+      its removal.</p>
+  </div>
+
+  <h2>Actions → concepts → APIs</h2>
+  <div class="flow">
+    <p><span class="label">ACTION</span><br>New Wave…<br><code>research</code></p>
+    <p><span class="label">CONCEPT</span><br>One Wave, its first Project and authored files on main.</p>
+    <p><span class="label">API</span><br><code>Write::WaveAdd → wave_lifecycle::add</code><br>Refresh planning; select its stable ID.</p>
+  </div>
+  <div class="flow">
+    <p><span class="label">ACTION</span><br>Rename Wave…<br><code>research → ops</code></p>
+    <p><span class="label">CONCEPT</span><br>Same identity, Tasks and chapters; a new address.</p>
+    <p><span class="label">API</span><br><code>lf wave rename &lt;id&gt; ops</code><br>Planning relocation, saved file changes, captured Initiative ID.</p>
+  </div>
+  <div class="flow">
+    <p><span class="label">ACTION</span><br>Remove Wave…<br>Read consequences; Remove.</p>
+    <p><span class="label">CONCEPT</span><br>Open Tasks move to parent/repository. Chapters and conversations remain in history.</p>
+    <p><span class="label">API</span><br><code>lf wave remove &lt;id&gt; --preview --json</code><br>Then remove: Task membership changes → retirement → archive → authored cleanup.</p>
+  </div>
+  <p class="muted">CLI-only <code>--delete-backlog</code> explicitly deletes unstarted Tasks.
+    Started Tasks always move. Re-adding a removed name creates a fresh identity.</p>
+
+  <h2>Failure and recovery</h2>
+  <pre><code>lf wave remove ops
+# Wave retired; Linear archive failed. Files remain pending.
+
+lf wave remove ops
+# Retry the captured Initiative and authored changes.
+# A reused name does not redirect this unfinished request.</code></pre>
+  <p>Command failures retain a Retry action. Partial receipts keep the explanation
+    visible with Done; their CLI retry remains available after the row disappears.
+    Bare-word prose mentions are advisory and are never rewritten automatically.</p>
+  <p>For a commit followed by a failed index reset, repeating the command reconciles
+    the saved index entries even if HEAD already contains the change. Later staged
+    edits and replacement Waves remain intact.</p>
+  <p><strong>Ownership:</strong> planning owns Wave and Task state; the Machine-local
+    operation journal owns unfinished effects. Desktop renders the shared receipt.
+    Neither the journal nor retirement needs another user-facing management action.</p>
+
+  <h2>Evidence and next proof</h2>
+  <p>Source review and the saved 14-test local lifecycle result support the recovery
+    model. This pass did not rerun those tests. Successful live Linear recovery and
+    the complete native Desktop interaction remain unproved; affected gate checks
+    remain with gate. No proposed behavior is being presented as demonstrated.</p>
+  <p>The working design retains the earlier counterexamples and their repairs.
+    Usage documentation and init/split-wave instructions already express the
+    accepted actions and need no further revision.</p>
+
+  <h2>Review questions, settled by the accepted design</h2>
+  <ol>
+    <li>Does removal delete started work? <strong>No.</strong> Started Tasks move;
+      only explicit backlog deletion removes unstarted Tasks.</li>
+    <li>Does a hidden Wave mean cleanup finished? <strong>No.</strong> Retained
+      effects and the receipt establish what remains.</li>
+    <li>Is a new product choice needed? <strong>No.</strong> Further proof is needed,
+      with no additional redesign proposed here.</li>
+  </ol>
+</main>
+</html>

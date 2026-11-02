@@ -936,10 +936,10 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   parent/repository, started Tasks always move, `--delete-backlog` deletes only
   unstarted Tasks. Live lists exclude retired Waves; `show` retains history.
   Authored files commit on main; stale paths resolve by config id. November 2:
-  retries now retain original/subtree IDs, provider bindings and exact file images
-  in Machine SQLite. Live rows/paths lost obligations; target names proved no
-  prior rename. CLI regressions cover pending commits, replacement identities and
-  later edits; live Linear recovery and native interaction remain unproved.
+  retries retain original/subtree IDs, provider bindings and file images in Machine
+  SQLite; live rows/paths cannot prove completion. Matching HEAD still requires
+  index reconciliation. CLI regressions cover reset failures, later edits and
+  replacement Waves; live Linear recovery and native interaction remain unproved.
 - `lf pm show --no-sync` is cache evidence, not proof of current provider state.
   `synced_at`, snapshot generation, and source freshness have different meanings.
   A rejected write can follow a successful provider mutation if readback failed;

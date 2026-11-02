@@ -23,10 +23,10 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json # explicit disposable exper
 cat release/SCHEDULE.md      # hosted-build and cron-host release boundaries
 ```
 
-`scripts/install.py local` builds this worktree's `lf`
-and `Loopflow.app` into `<worktree>/local-bin/`. Local builds never change the
-installed CLI and never migrate the main Machine. Use an explicit disposable
-`LF_HOME` for schema work.
+`scripts/install.py local` builds this worktree's `lf` into `<worktree>/local-bin/`
+and `Loopflow.app` into `local-bin/app.noindex/`, which Spotlight never indexes.
+Local builds never change the installed CLI and never migrate the main Machine.
+Use an explicit disposable `LF_HOME` for schema work.
 
 Older installed CLIs still call `scripts/install.py refresh` after updating
 main. That upgrade entry point delegates to `release/install.sh`, which verifies

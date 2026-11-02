@@ -3890,13 +3890,11 @@ pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::pr
                 }
             };
             runtime.block_on(async {
-                let store = match crate::store::open_registry_for_authority().await {
-                    Ok(store) => store,
-                    Err(crate::store::RegistryUnavailable::MissingFile { .. }) => {
-                        return Vec::new();
-                    }
+                let store = match crate::store::open_existing_store().await {
+                    Ok(Some(store)) => store,
+                    Ok(None) => return Vec::new(),
                     Err(error) => {
-                        warn!(?error, "stored provider credential registry is unavailable");
+                        warn!(%error, "stored provider credential registry is unavailable");
                         return Vec::new();
                     }
                 };

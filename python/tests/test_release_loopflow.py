@@ -240,3 +240,20 @@ def test_notarization_does_not_resubmit_uncertain_or_changed_artifacts(
     monkeypatch.setattr(release_loopflow, "run_capture", capture)
     with pytest.raises(RuntimeError, match="changed|different source|outcome unknown"):
         release_loopflow._notarize_dmg(tmp_path / "checkout/Loopflow.dmg")
+
+
+def test_only_release_packaging_carries_the_installed_bundle_id(tmp_path: Path) -> None:
+    swift = SCRIPTS_DIR.parent / "swift"
+    source = swift / "LoopflowMac/Info.plist"
+    xcode_ids = [
+        line.split(":", 1)[1].strip()
+        for line in (swift / "project.yml").read_text().splitlines()
+        if line.strip().startswith("PRODUCT_BUNDLE_IDENTIFIER: com.loopflow.mac")
+    ]
+    assert xcode_ids == ["com.loopflow.mac.dev"]
+    assert plistlib.loads(source.read_bytes())["CFBundleIdentifier"] == "com.loopflow.mac.dev"
+
+    packaged = tmp_path / "Info.plist"
+    shutil.copy(source, packaged)
+    release_loopflow.stamp_release_bundle_id(packaged)
+    assert plistlib.loads(packaged.read_bytes())["CFBundleIdentifier"] == "com.loopflow.mac"

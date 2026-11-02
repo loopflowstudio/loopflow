@@ -639,12 +639,14 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
     // Desktop receives the batch in one request. Here the final item, an
     // exact secondary Session, cannot open there, so nothing activates Desktop.
     if cfg!(target_os = "macos") {
-        host(bin.path(), "osascript", "/Applications/Loopflow.app", 0);
+        // A caller inside a Desktop addresses that Desktop by id; nothing here
+        // is installed, so the Machine's own Loopflow.app never answers.
         let opened = host(bin.path(), "open", "", 0);
-        let output = lf(
+        let output = lf_with(
             home.path(),
             repo.path(),
             Some(bin.path()),
+            &[("LF_DESKTOP", "com.loopflow.mac.test")],
             &["open", "--available", "--host", "desktop", "--json"],
         );
         let report: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -657,7 +659,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         assert_eq!(statuses, ["opening", "failed"], "{report}");
         assert_eq!(
             std::fs::read_to_string(opened).unwrap(),
-            format!("-b com.loopflow.mac -g {task_url}\n"),
+            format!("-b com.loopflow.mac.test -g {task_url}\n"),
             "one background request"
         );
     }

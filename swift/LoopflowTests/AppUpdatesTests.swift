@@ -16,7 +16,7 @@ struct AppUpdatesTests {
 
     @Test func onlyTheInstalledAppUpdatesItself() {
         #expect(AppUpdates.isInstalled(URL(filePath: "/Applications/Loopflow.app"), environment: [:]))
-        #expect(!AppUpdates.isInstalled(URL(filePath: "/src/loopflow/local-bin/Loopflow.app"), environment: [:]))
+        #expect(!AppUpdates.isInstalled(URL(filePath: "/src/loopflow/local-bin/app.noindex/Loopflow.app"), environment: [:]))
         #expect(AppUpdates.isInstalled(URL(filePath: "/tmp/apps/Loopflow.app"),
                                        environment: ["LF_APPLICATIONS_DIR": "/tmp/apps"]))
     }

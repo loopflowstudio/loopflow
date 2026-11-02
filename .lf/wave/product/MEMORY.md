@@ -797,11 +797,7 @@ caps, and keep missing ownership evidence explicit.
   planning publication; selection-time text can be stale by a transfer gap. Cancel
   asynchronous historical-reference reads on navigation so late results cannot
   replace the newer Task or repository selection.
-- Monitor needs its own AppKit responder: clearing focus to nil can select a visible
-  terminal. Hidden terminals release input; resize/polling must not steal search
-  focus. A retained native view owns focus requests and latest title. Verify ordinary
-  dispatched input stays out of both PTYs while Monitor is focused, then require
-  exact retained draft and child replies on return. PTY echo alone is insufficient.
+- Monitor-pane focus/PTY lessons (pane deleted): `580127761d:.lf/wave/product/MEMORY.md`.
 - Retired completion/Approve/Iterate UI lessons remain at
   `6c44d9792:wave/product/MEMORY.md`. Action errors must preserve live terminals;
   delayed results retain their originating workspace, and external disappearance
@@ -935,6 +931,11 @@ October 4 retired automatic recovery; unknown liveness grants no retry.
   creation selects its current Project; standalone creation has none. Ordinary
   Task saves cannot restore an old parent after transfer. Wave-linked Initiative identity remains in GOAL frontmatter;
   repository configuration owns the Linear Team.
+- Wave lifecycle (LOO-500, Jack Heart 2026-10-28): `lf wave add|remove|rename` is
+  the one path for CLI and Desktop. Remove retires (never deletes rows); open Tasks
+  move to the parent Wave or repository, `--delete-backlog` deletes unstarted ones,
+  started Tasks always move. Authored `.lf/wave/<name>/` changes commit on the main
+  checkout; stale checkouts match directories by `config.yaml` id, never by path.
 - `lf pm show --no-sync` is cache evidence, not proof of current provider state.
   `synced_at`, snapshot generation, and source freshness have different meanings.
   A rejected write can follow a successful provider mutation if readback failed;

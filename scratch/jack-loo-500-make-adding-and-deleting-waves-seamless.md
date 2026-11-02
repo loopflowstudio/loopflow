@@ -1,6 +1,7 @@
 # LOO-500: Add and remove Waves seamlessly
 
-Status: accepted; implementation in progress (2026-10-28). Jack Heart filed LOO-500; exact controls,
+Status: accepted; implemented (reconciled 2026-11-02). CLI demo done; Desktop
+demo awaits a display session. Jack Heart filed LOO-500; exact controls,
 required fields and the meaning of deletion were left as design questions.
 Choices below are the plan's; reversible ones are noted in
 `scratch/questions.md`.
@@ -70,16 +71,20 @@ lf wave rename <name> <new-name> [--json]
   Project-activation step stays inside `add`: a new Wave gets its first
   Project so planning works immediately.
 - Both live in `ops::wave_lifecycle` (new module, replacing the creation half
-  of `ops::project::ensure`). The CLI and Desktop call the same op; Desktop
-  shells `lf wave add|remove --json` like its other mutations.
+  of `ops::project::ensure`). The CLI and Desktop call the same op: Desktop's
+  add runs through the in-process `Write::WaveAdd` (recorded as `lf wave add`
+  would be); rename and remove launch `lf wave rename|remove … --json`.
+  Folding those two into `Write` is ordinary follow-up work, not part of this
+  Task.
 
 ### Add
 
 1. Resolve the repository's **main checkout** (`CanonicalRepo`), never the
    invoking worktree, so the authored files land where every later launch reads
    them.
-2. `SqliteStore::ensure_wave` (unchanged) registers the row and seeds files;
-   `--objective` replaces the seeded `GOAL.md` objective text.
+2. `SqliteStore::ensure_wave` registers the row and seeds files (matching an
+   authored directory by its `config.yaml` id first; see "Other checkouts lag
+   the store"); `--objective` replaces the seeded `GOAL.md` objective text.
 3. Ensure the first Project (existing `ensure_project`).
 4. Commit `.lf/wave/<name>/` with `commit_workflow` (`lf wave add: <name>`),
    the same path `lf wave connect` already uses. A dirty or non-branch main
@@ -239,11 +244,12 @@ this Task makes them work and adds nothing beside them):
   abandoned/retired. Retirement is the supported mechanism.
 - Implementation finding (2026-10-28): the `waves` CHECK required every retired
   row to name `superseded_by_wave_id` and a reason, so successor-less removal,
-  and a peer importing only `retired_at`, both violated it. The Task's one draft
-  migration `drafts/wave_removal.sql` rebuilds `waves` (same column order,
-  indexes, triggers and `wave_addresses` view) with: live rows carry no
-  successor/reason; retired rows may omit both. Remaining: an upgrade test
-  seeded from the released 0.15.0 schema with a superseded retired row.
+  and a peer importing only `retired_at`, both violated it. The Task's one
+  migration `src/store/migrations/wave_removal.sql` rebuilds `waves` (same
+  column order, indexes, triggers and `wave_addresses` view) with: live rows
+  carry no successor/reason; retired rows may omit both. The upgrade test
+  `wave_definitions::released_waves_upgrade_and_removal_needs_no_successor`
+  seeds the released schema with a superseded retired row.
 - `ops::project::ensure` creates a Project for every Wave, so
   `wave_retirement_blockers` makes retirement impossible for any real Wave —
   it must go, not be extended.
@@ -252,12 +258,12 @@ this Task makes them work and adds nothing beside them):
   `WaveRetired` edit is required. Finding: `WorkValue` is an internally tagged
   enum with no `#[serde(other)]`, and `PlanningSnapshot` deserializes every
   change, so a released lf (≤ 0.15.0) reading a document that contains
-  `wave_retired` fails the whole Git planning read. Decision: add the variant
-  and make the branch's snapshot reader skip unknown fields with a named
-  "written by a newer lf — upgrade" diagnostic, so this is the last skew of its
-  kind; peers on 0.15.0 fail loudly until upgraded (exchange users are Jack's
-  own Machines; solo-dev rule: detect skew and name the fix). Recorded in
-  `scratch/questions.md`.
+  `wave_retired` fails the whole Git planning read. Decision: add the variant;
+  peers on 0.15.0 fail loudly until upgraded (exchange users are Jack's own
+  Machines; solo-dev rule: detect skew and name the fix). The kickoff idea of a
+  reader that skips unknown edits was dropped during implementation: an older
+  reader that republished a snapshot without them would silently drop a newer
+  peer's removals. Recorded in `scratch/questions.md`.
 - The authored directory is shared Git content. Committing on the main
   checkout is what `lf wave connect` already does; Desktop targets the main
   repo (project memory), so this matches where Desktop runs.
@@ -316,14 +322,19 @@ later Task if wanted), cleanup of other branches' stale `.lf/wave/` copies.
 ## Done when
 
 - Gate: `cargo test -p loopflow --test integration wave_lifecycle` passes,
-  covering: add is idempotent and lands files on main; remove of an empty Wave;
-  remove of a Wave with unstarted, started and completed Tasks moves the open
-  ones (started keeps worktree and Graph), retires the Wave, keeps chapters
-  readable via `lf wave show`; a failure injected after moves and before
-  retirement resumes on retry; `ensure_wave` from a stale checkout (renamed or
-  removed Wave) neither errors nor renames/resurrects it; Git planning exchange carries `WaveRetired` to a
-  peer store. Rename keeps the Wave id, Tasks and chapters,
-  moves the authored directory on main, and refuses a taken name.
+  covering: add is idempotent and lands files on main; remove of an empty Wave
+  and a repeat remove (by name or old id) reporting `already_removed`; remove
+  of a Wave with unstarted, started and completed Tasks moves the open ones
+  (started keeps worktree and Graph), retires the Wave, keeps chapters readable
+  via `lf wave show`; a partially completed removal (a Task already moved)
+  finishes on re-run; a child Wave's Tasks go to its parent and its memory
+  folds up; `--delete-backlog` deletes only unstarted Tasks; rename keeps the
+  Wave id, Tasks and chapters, moves the authored directory on main, and
+  refuses a taken name or an existing directory. Library tests cover the rest:
+  `wave_definitions::stale_checkouts_match_by_id_and_never_resurrect_a_removed_wave`
+  (`ensure_wave` from a stale checkout neither errors nor renames/resurrects)
+  and `planning_peers::a_removed_wave_reaches_a_peer_as_retired_…` (exchange
+  carries `WaveRetired`).
 - Gate: Swift view tests for the New Wave and Remove Wave sheets render the
   preview DTO (fixture under `tests/fixtures/dto/`) and the failure/Retry
   state, headless.
@@ -371,3 +382,5 @@ CLI demo steps 4–5 ran on `lf-world wave-lifecycle` (2026-11-02).
   address; one directory walk serves memory folding and reference rewrites.
   `cargo test --test integration -- wave_lifecycle dto_fixtures::wave_removal` 6/6;
   clippy clean.
+- 2026-11-02 realign (after the merge with main): `cargo test -p loopflow --test
+  integration -- wave_lifecycle dto_fixtures::wave_removal` 6/6.

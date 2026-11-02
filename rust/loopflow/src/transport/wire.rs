@@ -155,7 +155,7 @@ pub(super) enum Request {
     Own {
         mode: Own,
     },
-    /// The owner's terminal colors, relayed opaque to every viewer.
+    /// Remember this viewer's colors; relay them while it owns appearance.
     Theme {
         theme: serde_json::Value,
     },

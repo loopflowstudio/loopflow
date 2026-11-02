@@ -11,6 +11,14 @@
   control channel for pipes was rejected: one stream, one count, one spool.
 - **Theme is relayed opaque.** The CLI viewer never sends one; Desktop (LOO-672)
   owns the colors it reports. Included because the Task names it.
+- **Unknown colors supply no override (concept review, 2026-11-02).** An
+  attached viewer may remember an opaque color report before owning appearance,
+  just as it remembers size. A viewer without a report supplies no new color
+  event on takeover; viewers retain their displayed colors until a known report
+  arrives. Fresh attachments receive only the selected owner's known theme,
+  not a previous owner's cached value. This reversible implementation assumption
+  avoids inventing a default palette or a Desktop reset interaction; it is not
+  an additional product decision attributed to Jack Heart.
 - **Viewer name** for "who took it" is the viewer's tty (`ttyname(0)`) when it
   has one; Desktop can pass its own.
 - **`status` names its program as `program`, not `id`.** The request envelope

@@ -341,6 +341,7 @@ struct Viewer {
     /// Events awaiting a sequence boundary in the stream.
     events: Vec<Vec<u8>>,
     size: (u16, u16),
+    theme: Option<serde_json::Value>,
     name: Option<String>,
     leaving: bool,
     /// A resume this connection sent, moved onto the dropped viewer's stream.
@@ -366,6 +367,7 @@ impl Viewer {
             seq: 0,
             events: Vec::new(),
             size: (24, 80),
+            theme: None,
             name: None,
             leaving: false,
             resuming: None,
@@ -444,10 +446,10 @@ impl Viewer {
         Ok(())
     }
 
-    /// Frames the viewer sent; its close is `UnexpectedEof`.
-    fn read(&mut self) -> io::Result<Vec<(Tag, Vec<u8>)>> {
+    /// Read into the frame decoder; a closed connection is `UnexpectedEof`.
+    fn read(&mut self) -> io::Result<()> {
         let Some(socket) = self.connection.open() else {
-            return Ok(Vec::new());
+            return Ok(());
         };
         let mut bytes = [0; 8192];
         match socket.read(&mut bytes) {
@@ -456,11 +458,7 @@ impl Viewer {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
             Err(e) => return Err(e),
         }
-        let mut frames = Vec::new();
-        while let Some(frame) = self.decoder.next()? {
-            frames.push(frame);
-        }
-        Ok(frames)
+        Ok(())
     }
 
     /// Lose the connection and every claim; keep the stream for a resume.
@@ -683,7 +681,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     // Who may type.
     let mut control: Option<String> = None;
     let mut ownership = Ownership::default();
-    let mut theme: Option<serde_json::Value> = None;
     let mut size = (24, 80);
     let mut pending_input = VecDeque::new();
     let mut output = output::Output::new(terminal);
@@ -699,15 +696,17 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     loop {
         let mut replaced = None;
         let mut owner_change = false;
-        let mut new_size = None;
+        let mut size_change = false;
         let mut theme_change = false;
+        let mut attaching = Vec::new();
         while let Ok((socket, _)) = listener.accept() {
             socket.set_nonblocking(true)?;
             viewers.push(Viewer::new(socket));
         }
         viewers.retain_mut(|viewer| {
             let result = (|| -> Result<()> {
-                for (tag, payload) in viewer.read()? {
+                viewer.read()?;
+                while let Some((tag, payload)) = viewer.decoder.next()? {
                     let request = match tag {
                         Tag::Input => {
                             // Stale and passive viewers cannot write.
@@ -797,6 +796,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 viewer.token = None;
                             }
                             viewer.attached = true;
+                            attaching.push(viewer.id.clone());
                             owner_change |= ownership.claim(own, viewer);
                             viewer.reply(answers, viewer.attached_reply(ownership.id(), terminal));
                             if let Some(snapshot) = output.snapshot()? {
@@ -804,34 +804,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             }
                             for (stream, bytes) in output.tail() {
                                 viewer.stream(Tag::stream(stream), bytes)?;
-                            }
-                            // Every stream opens: snapshot, size, colors, owner.
-                            // A change of owner this pass sizes and names it below.
-                            if !owner_change {
-                                viewer.event(Event::Resize {
-                                    rows: size.0,
-                                    cols: size.1,
-                                });
-                            }
-                            if let Some(theme) = &theme {
-                                viewer.event(Event::Theme {
-                                    theme: theme.clone(),
-                                });
-                            }
-                            if !owner_change {
-                                let event = ownership.event(viewer);
-                                viewer.event(event);
-                            }
-                            if let Some(client) = &client {
-                                viewer.event(Event::Return {
-                                    detach: client.detach.clone(),
-                                });
-                            }
-                            if announced {
-                                if let Some((code, _)) = exit {
-                                    viewer.event(Event::ChildExited { code });
-                                    viewer.flush_events()?;
-                                }
                             }
                         }
                         Request::Resume(resume) => {
@@ -844,16 +816,14 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         }
                         Request::Resize { rows, cols } => {
                             viewer.size = dimensions(rows, cols);
-                            if ownership.held_by(viewer) {
-                                new_size = Some(viewer.size);
-                            }
+                            size_change |= ownership.held_by(viewer);
                         }
                         Request::Own { mode } if viewer.attached => {
                             owner_change |= ownership.claim(Some(mode), viewer);
                         }
-                        Request::Theme { theme: colors } if ownership.held_by(viewer) => {
-                            theme = Some(colors);
-                            theme_change = true;
+                        Request::Theme { theme } if viewer.attached => {
+                            viewer.theme = Some(theme);
+                            theme_change |= ownership.held_by(viewer);
                         }
                         Request::Leave => {
                             viewer.leaving = true;
@@ -906,12 +876,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         viewers.retain(|viewer| !viewer.leaving && !viewer.connection.expired());
         owner_change |= ownership.settle(&viewers);
-        if owner_change {
-            new_size = viewers
-                .iter()
-                .find(|viewer| ownership.held_by(viewer))
-                .map(|viewer| viewer.size);
-        }
+        let owner = viewers.iter().find(|viewer| ownership.held_by(viewer));
+        let new_size = owner
+            .filter(|_| owner_change || size_change)
+            .map(|viewer| viewer.size);
+        let theme = owner
+            .filter(|_| owner_change || theme_change || !attaching.is_empty())
+            .and_then(|viewer| viewer.theme.clone());
         if let Some((rows, cols)) = new_size {
             size = (rows, cols);
             if terminal {
@@ -932,22 +903,37 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     }
                 }
             }
-            for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
-                viewer.event(Event::Resize { rows, cols });
-            }
         }
-        if owner_change {
-            for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
-                let event = ownership.event(viewer);
-                viewer.event(event);
+        for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+            // Fresh streams and ownership changes share the same appearance.
+            let fresh = attaching.contains(&viewer.id);
+            if new_size.is_some() || fresh {
+                viewer.event(Event::Resize {
+                    rows: size.0,
+                    cols: size.1,
+                });
             }
-        }
-        if theme_change {
-            if let Some(theme) = &theme {
-                for viewer in viewers.iter_mut().filter(|viewer| viewer.attached) {
+            if owner_change || theme_change || fresh {
+                if let Some(theme) = &theme {
                     viewer.event(Event::Theme {
                         theme: theme.clone(),
                     });
+                }
+            }
+            if owner_change || fresh {
+                let event = ownership.event(viewer);
+                viewer.event(event);
+            }
+            if fresh {
+                if let Some(client) = &client {
+                    viewer.event(Event::Return {
+                        detach: client.detach.clone(),
+                    });
+                }
+                if announced {
+                    if let Some((code, _)) = exit {
+                        viewer.event(Event::ChildExited { code });
+                    }
                 }
             }
         }

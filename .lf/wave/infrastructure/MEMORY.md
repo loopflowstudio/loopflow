@@ -78,10 +78,12 @@ Land order per Jack Heart's comment: LOO-705 (successor on the Moved message)
 first, then LOO-708/LOO-709, then LOO-712 re-homes `successor` on the `control`
 event. The successor is the full `[entry, "session", "resume", session_id]`
 command, not an entry path or replay of viewer argv: LOO-708's thin viewer argv
-would reattach to the ended owner. Terminal restoration and successor exit/error
-propagation belong to that handoff. This integration remains unimplemented in
-LOO-712; the current path-only field is ignored. Shell fixtures prove the wire,
-not the requested live Claude walkthrough. Desktop consumption, measured SSH
+would reattach to the ended owner. LOO-712 now carries that command end to end;
+focused fixtures prove terminal restoration before following, exact argv and
+successor exit/error propagation. LOO-705's superseded-install detection and
+retry policy still require dependency integration. Release's entry-point lesson
+applies: shell fixtures prove the wire and handoff, not installed rollover or
+the requested live Claude walkthrough. Desktop consumption, measured SSH
 reconnect and the 1 MB wire bound outside the fixture remain unproved.
 
 ## Waited landing (LOO-503, 2026-10-17)

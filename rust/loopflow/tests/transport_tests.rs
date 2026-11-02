@@ -364,9 +364,8 @@ impl Viewer {
     }
     fn until_reply(&mut self) -> Value {
         loop {
-            match self.next().expect("owner closed before replying") {
-                Item::Reply(reply) => return reply,
-                _ => continue,
+            if let Item::Reply(reply) = self.next().expect("owner closed before replying") {
+                return reply;
             }
         }
     }
@@ -1929,9 +1928,8 @@ fn until(viewer: &mut Viewer, done: impl Fn(&[Item]) -> bool) -> Vec<Item> {
 /// Items up to the owner event naming `id`.
 fn until_owner(viewer: &mut Viewer, id: &str) -> Vec<Item> {
     until(viewer, |items| {
-        events(items, "owner")
-            .last()
-            .is_some_and(|event| event["viewer"] == id)
+        matches!(items.last(), Some(Item::Event(event))
+            if event["type"] == "owner" && event["viewer"] == id)
     })
 }
 
@@ -1959,6 +1957,8 @@ fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
     first.input("done\n");
     first.finish();
     second.finish();
+    assert!(first.next().is_none());
+    assert!(second.next().is_none());
 }
 
 #[test]
@@ -1967,6 +1967,12 @@ fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
     let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
     fixture.wait_file("drawn");
     let mut first = fixture.viewer(&owner, true);
+    let dark = json!({"background":"#111111","foreground":"#eeeeee"});
+    let light = json!({"background":"#eeeeee","foreground":"#111111"});
+    first.until_event("owner");
+    first.request(json!({"kind":"theme","theme":dark}));
+    let initial = first.until_event("theme");
+    let last_seq = events(&initial, "theme")[0]["seq"].as_u64().unwrap();
     first.input("one\n");
     until_out(&mut first, "line one\r\n");
     let received = first.received;
@@ -1975,6 +1981,8 @@ fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
     first.socket.shutdown(std::net::Shutdown::Both).unwrap();
     drop(first);
     let mut second = fixture.viewer(&owner, true);
+    second.request(json!({"kind":"theme","theme":light}));
+    second.until_event("theme");
     second.input("two\n");
     until_out(&mut second, "line two\r\n");
     // Three bytes short of what it had: the stream resumes with exactly them.
@@ -1992,6 +2000,31 @@ fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
         "{items:?}"
     );
     assert_eq!(out(&items), b"e\r\nline two\r\n", "{items:?}");
+    assert_eq!(events(&items, "theme").len(), 1, "{items:?}");
+    assert_eq!(events(&items, "theme")[0]["theme"], light);
+    let mut seq = last_seq;
+    for item in &items {
+        if let Item::Event(event) = item {
+            seq += 1;
+            assert_eq!(event["seq"], seq);
+        }
+    }
+    assert_eq!(reply["seq"], seq);
+    second.input("three\n");
+    for viewer in [&mut resumed, &mut second] {
+        let items = until_out(viewer, "line three\r\n");
+        assert!(events(&items, "theme").is_empty(), "{items:?}");
+    }
+    // Resuming did not restore the old colors; explicitly taking ownership does.
+    resumed.request(json!({"kind":"own","mode":"take"}));
+    let resumed_id = resumed.id.clone();
+    for viewer in [&mut resumed, &mut second] {
+        let items = until_owner(viewer, &resumed_id);
+        assert_eq!(events(&items, "theme").last().unwrap()["theme"], dark);
+    }
+    resumed.request(json!({"kind":"controlled"}));
+    let reply = resumed.until_reply();
+    assert_eq!(reply["seq"], seq + 3); // resize, theme, owner
     second.input("done\n");
     second.finish();
     resumed.finish();
@@ -2075,16 +2108,36 @@ fn ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it() {
     let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
     fixture.wait_file("drawn");
     let mut typist = fixture.viewer(&owner, true);
+    let dark = json!({"background":"#111111","foreground":"#eeeeee"});
+    let light = json!({"background":"#eeeeee","foreground":"#111111"});
+    typist.request(json!({"kind":"theme","theme":dark}));
+    typist.until_event("theme");
     let mut waiting = fixture.attach(
         &owner,
         json!({"kind":"attach","control":false,"replace":true,"own":"request","rows":30,"cols":90,"name":"pane 2"}),
     );
+    let items = waiting.until_event("owner");
+    assert_eq!(events(&items, "theme")[0]["theme"], dark);
+    waiting.request(json!({"kind":"theme","theme":light}));
+    waiting.request(json!({"kind":"controlled"}));
+    waiting.until_reply();
+    typist.input("size\n");
+    for viewer in [&mut waiting, &mut typist] {
+        let items = until_out(viewer, "24 80");
+        assert!(events(&items, "theme").is_empty(), "{items:?}");
+    }
     let mut taker = fixture.attach(
         &owner,
         json!({"kind":"attach","control":false,"replace":true,"own":"take","rows":40,"cols":120,"name":"tmux %4"}),
     );
-    taker.until_event("owner");
+    let items = taker.until_event("owner");
+    assert!(events(&items, "theme").is_empty(), "{items:?}");
+    // An owner without a color report supplies no override, even to new observers.
+    let mut observer = fixture.viewer(&owner, false);
+    let items = observer.until_event("owner");
+    assert!(events(&items, "theme").is_empty(), "{items:?}");
     let items = until_owner(&mut typist, &taker.id);
+    assert!(events(&items, "theme").is_empty(), "{items:?}");
     let lost = events(&items, "owner");
     assert!(
         lost.iter().any(|event| event["viewer"] == taker.id
@@ -2094,12 +2147,23 @@ fn ownership_queues_behind_a_taker_and_tells_the_loser_who_took_it() {
     );
     typist.input("size\n");
     until_out(&mut typist, "40 120");
-    // The taker leaves: the queued request is granted and sizes the terminal.
+    // The taker leaves: the queued request supplies size and colors to everyone.
     taker.request(json!({"kind":"leave"}));
     drop(taker);
     let waiting_id = waiting.id.clone();
     let items = until_owner(&mut waiting, &waiting_id);
     assert_eq!(events(&items, "owner").last().unwrap()["held"], true);
+    assert_eq!(events(&items, "theme")[0]["theme"], light);
+    let seq = events(&items, "owner").last().unwrap()["seq"].clone();
+    waiting.request(json!({"kind":"controlled"}));
+    assert_eq!(waiting.until_reply()["seq"], seq);
+    for viewer in [&mut typist, &mut observer] {
+        let items = until_owner(viewer, &waiting_id);
+        assert_eq!(events(&items, "theme")[0]["theme"], light);
+    }
+    let mut fresh = fixture.viewer(&owner, false);
+    let items = fresh.until_event("owner");
+    assert_eq!(events(&items, "theme")[0]["theme"], light);
     typist.input("size\n");
     until_out(&mut typist, "30 90");
     typist.input("done\n");

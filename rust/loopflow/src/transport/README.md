@@ -110,8 +110,12 @@ ends; a resume asks for them again.
 
 Ownership arbitrates only size and colors. `own: "take"` replaces the owner,
 who receives `owner` with `held: false` and stays attached; `own: "request"`
-queues until the owner leaves. The PTY takes the owner's size; another viewer's
-`resize` is remembered for when it owns. Who may type is separate: the `token`
+queues until the owner leaves. A viewer may report its size and colors before
+it owns them. Reports are remembered through reconnect grace; only the selected
+owner's reports are broadcast as effective appearance. When ownership changes,
+its known size and colors follow it. A viewer that has not reported colors
+supplies no color override; fresh observers receive only the selected owner's
+known theme. Who may type is separate: the `token`
 of a controlling attach, `busy` when control is held and `replace` is false,
 and a `control` event to the connection that lost it.
 

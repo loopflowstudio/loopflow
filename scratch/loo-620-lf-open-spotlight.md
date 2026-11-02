@@ -1,6 +1,6 @@
 # LOO-620: lf open, Spotlight and Finder reach only the installed Loopflow.app
 
-Status: implemented and realigned (2026-11-02); concept review's one implied change is in; gate next. Source: Task definition
+Status: implemented, realigned and synced onto main through #1792 (2026-11-02); gate next. Source: Task definition
 (Jack Heart, 2026-10-26; extended 2026-11-02 after the Desktop database-mismatch incident).
 
 ## What exists
@@ -41,8 +41,10 @@ Status: implemented and realigned (2026-11-02); concept review's one implied cha
 - The "two consecutive installs" acceptance only held on a Machine without earlier
   sibling orphans. `sibling_promotion_copies` now sweeps them, covered by the
   repeated-installs test.
-- #1777 (`lf install --dev`) and #1656 (drag-and-open install) are both still open;
-  nothing new on `origin/main` since the base. Rebase onto whichever lands first.
+- #1777 (`lf install --dev`) and #1656 (drag-and-open install) are both still open.
+  Synced onto main through #1792 (Loopflow Dev under its own process name): it
+  stamps `com.loopflow.mac.dev`, the id `project.yml` now defaults to, so Loopflow
+  Dev stays a dev app with no branch change. Rebase onto whichever lands first.
 
 ## Deleted
 
@@ -95,4 +97,4 @@ second `launch_services`. No open product choice.
   fails on main too (#1776's HOME-vs-account-home check, macOS-only); not this branch.
 - Demo on a Mac: `lf install` twice, then `ls -a /Applications`, `lf open`.
 
-Checks (2026-11-02 compress): `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests::` 11 passed; `cargo clippy -p loopflow --all-targets -- -D warnings` clean; `uv run pytest test_install_script.py test_release_loopflow.py test_app_bundle.py` 26 passed; `install.py local --dry-run` names `local-bin/app.noindex`.
+Checks (2026-11-02 after sync onto main): `cargo test -p loopflow --lib -- install::artifact_tests:: open::tests::` 11 passed; `uv run pytest test_install_script.py test_release_loopflow.py test_app_bundle.py test_loopflow_dev.py` 35 passed; clippy last clean at compress, gate reruns it.

@@ -8,7 +8,8 @@ processes holding 8.7 GB.
 ## Why the 24-hour rule did not end them (2026-11-02 evidence)
 
 56 `lf session serve` owners were alive on Jack's machine; 27 were older than a
-day. Three distinct causes, each confirmed against the live store:
+day. Causes 1–3 were confirmed against the live store; 4–5 come from the
+LOO-672 audit (2026-11-02) and `lf.log`:
 
 1. **Finished Graphs hold their owner forever.** `owner_waits_for_person`
    walks `graph_processes` ancestry and `graph_process_steps` membership with no
@@ -24,6 +25,15 @@ day. Three distinct causes, each confirmed against the live store:
    Owners up 4–6 days run copied builds under `~/.lf/bin/lf-<hash>` that have
    no lifetime policy at all, and nothing but a signal ends them (e.g. the
    LOO-618 owner, `lf session connect … --try`, up 4.9 days).
+
+4. **One store error killed the policy.** `lifetime::watch` propagated store
+   errors with `?`; the thread died ("Session owner policy stopped") and the
+   owner lived on with no policy. `lf.log`: 43 `database is locked` deaths on
+   10-27, 34 `incompatible Loopflow database` deaths on 10-30 after 0.15.1's
+   migrations, and no "ending a Session nobody has viewed" line ever.
+5. **A stale status report reads as a turn forever.** `TURN_RUNNING` counts a
+   terminal `program_status` with no idle/blocked/done record as running, so
+   a provider that stopped reporting made its owner immortal.
 
 Also observed: `limit()` returns `None` when the repo config fails to load, so
 an unreadable config silently disables the rule.
@@ -41,7 +51,10 @@ fidelity (sibling Task) stay out.
   the next poll. Unreadable configuration uses the default instead of
   disabling the rule. A turn in progress, a *running* Graph (ancestry or step
   membership) or a headless Run still holds the owner; a finished Graph does
-  not.
+  not. A store error is logged once per distinct failure and judged again
+  next poll; the policy thread never exits on one. A turn counts only from a
+  live AgentProcess on its current attachment, and a terminal status report
+  counts only while the owner is viewed (`TURN_LIVE`).
 - **The last screen survives.** Before a terminal owner exits (idle end,
   executable gone, or its command exiting) it writes
   `$LF_HOME/screens/<session>.vt`: the vt100 scrollback rows followed by the
@@ -58,17 +71,29 @@ fidelity (sibling Task) stay out.
   owners are not resumed; their cut-off turn is not replayed anyway.
 - **Closing is the same as idling.** No new command.
 
-## Delete — do not maintain
+Deleted: `lifetime::LONGEST_PAUSE`/`recheck`/`held_until` pacing (a held
+judgement restarts the grace instead) and `limit()`'s "unreadable config keeps
+the Session" branch.
 
-- `lifetime::LONGEST_PAUSE`/`recheck`/`held_until` pacing: gone. A judgement
-  that finds the owner held is activity and restarts the grace, so a busy
-  owner is asked once per grace, not on its own schedule.
-- `limit()`'s "unreadable config keeps the Session" branch: gone.
+## Remaining
+
+- **Decision (Jack Heart / LOO-710): one last-screen path and reader.** This
+  branch writes `$LF_HOME/screens/<session>.vt` with no DTO field; LOO-710
+  writes `<home>/snapshots/<owner>.ghostsnp` and adds `last_screen` to the
+  Session DTO. Unresolved; must agree before either publishes. See
+  `scratch/questions.md`.
+- Acceptance gap: no test shows an `lf -b … --message` Run surviving the
+  grace. It holds structurally (a pipe owner never learns a limit, and
+  `interactive=0` holds in `owner_waits_for_person`), but nothing proves it
+  under a short grace.
+- PR body: before/after numbers below, and point the 27 pre-rule owners at
+  LOO-705's `lf monitor rollover`.
 
 ## Done when
 
 - `cargo test -p loopflow --test transport_tests` covers: finished Graph and
-  finished step membership no longer hold an owner; viewed-only `resume --all`
+  finished step membership no longer hold an owner; a stale status report
+  does not hold one; a turn and fresh terminal output do; viewed-only `resume --all`
   after a crash, including rows retention already closed; screen file written
   at idle end and at command exit.
 - Live check on this machine: open 20 terminal conversations, detach, wait the

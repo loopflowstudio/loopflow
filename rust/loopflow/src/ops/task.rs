@@ -29,8 +29,8 @@ pub(crate) use delivery::{
     TaskPrContext,
 };
 use delivery::{
-    reconcile_task_pr_observation, resolve_managed_task, resolve_upstream_base,
-    task_registry_error, ManagedTask,
+    authority_store, missing_task_registry, reconcile_task_pr_observation, resolve_managed_task,
+    resolve_upstream_base, ManagedTask,
 };
 mod snapshot;
 pub(crate) use snapshot::task_workspace_context;
@@ -62,7 +62,7 @@ use crate::naming::git_user;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::TaskActionModel;
 use crate::store::sqlite::{SqliteStore, TaskCheckout};
-use crate::store::{open_existing_store, open_registry_for_authority, SharedStore, Store};
+use crate::store::{open_existing_store, SharedStore, Store};
 use crate::work::task::{
     GithubPr, Observation, PrPhase, PrPublication, Task, TaskEventKind, TaskPr, TaskPrId,
 };
@@ -372,6 +372,7 @@ async fn task_store() -> OpsResult<SharedStore> {
     }
     open_existing_store()
         .await
+        .map_err(task_error)?
         .map(Arc::new)
         .ok_or_else(|| task_error("no Loopflow registry on this machine; run `lf doctor`"))
 }
@@ -473,11 +474,7 @@ pub fn record_stack_sync(
     let task_id = stacked.child.id.clone();
     let new_base = new_base.to_string();
     block_on_task(async move {
-        let store = Arc::new(
-            open_registry_for_authority()
-                .await
-                .map_err(task_registry_error)?,
-        );
+        let store = task_store().await?;
         // The immutable event log preserves the audit trail — the child's
         // `PrStarted` (parent base) and the parent's `PrMerged` remain — so the
         // sync only repoints the mutable row to the post-merge truth.

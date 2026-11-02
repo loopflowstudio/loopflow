@@ -1209,61 +1209,16 @@ pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
     Ok(Some(Store { sqlite }))
 }
 
-/// Open the machine's shared registry store only if one already exists.
-/// Returns `None` if the registry is absent or incompatible; never creates it.
-pub async fn open_existing_store() -> Option<Store> {
-    let cfg = crate::store::storage_config_from_env().ok()?;
-    let StorageConfig::Sqlite { path } = &cfg;
+/// Open the machine's shared registry store only if one already exists;
+/// `None` when it is absent. A store this lf cannot open — one a newer build
+/// migrated past it, say — is an error naming the skew and its fix, never an
+/// empty registry: agents read "nothing here" as fact.
+pub async fn open_existing_store() -> StoreResult<Option<Store>> {
+    let path = default_db_path();
     if !path.exists() {
-        return None;
+        return Ok(None);
     }
-    match open_store(&cfg).await {
-        Ok(store) => Some(store),
-        Err(err) => {
-            tracing::warn!(?path, %err, "local store is incompatible; run lf doctor");
-            None
-        }
-    }
-}
-
-/// Why the shared registry could not be opened for a Task authority check.
-/// Unlike [`open_existing_store`], this preserves the *reason* so a Task PR
-/// entry point can refuse with an actionable error instead of silently
-/// degrading to generic PR behavior.
-#[derive(Debug, Clone)]
-pub enum RegistryUnavailable {
-    /// The configured registry path does not exist — no registry has been
-    /// created on this machine. For a worktree with no ambient Task id this is
-    /// the explicit "ordinary non-Task PR" case (no tasks exist); for a Task
-    /// entry point it is missing authority.
-    MissingFile { path: PathBuf },
-    /// The registry path is configured but cannot be resolved — bad env, the
-    /// development guard, or an IO failure before the file is even opened.
-    Unresolved { error: String },
-    /// The registry file exists but could not be opened: inaccessible, locked,
-    /// or schema-incompatible. Actionable via `lf doctor`.
-    Incompatible { path: PathBuf, error: String },
-}
-
-/// Open the shared registry for a Task authority check, surfacing the reason it
-/// could not be opened rather than collapsing every failure to `None`. Callers
-/// that must not degrade to generic PR behavior turn the [`RegistryUnavailable`]
-/// into an actionable authority error; callers that may treat a missing file as
-/// "no tasks on this machine" handle [`RegistryUnavailable::MissingFile`]
-/// explicitly.
-pub async fn open_registry_for_authority() -> Result<Store, RegistryUnavailable> {
-    let path = database_path_from_env().map_err(|error| RegistryUnavailable::Unresolved {
-        error: error.to_string(),
-    })?;
-    if !path.exists() {
-        return Err(RegistryUnavailable::MissingFile { path });
-    }
-    open_store(&StorageConfig::sqlite(path.clone()))
-        .await
-        .map_err(|error| RegistryUnavailable::Incompatible {
-            path,
-            error: error.to_string(),
-        })
+    open_store(&StorageConfig::sqlite(path)).await.map(Some)
 }
 
 pub type SharedStore = Arc<Store>;

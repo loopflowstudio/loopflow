@@ -234,6 +234,39 @@ fn doctor_reports_processes_despite_an_unknown_migration() {
     assert_eq!(latest, "9.0.001_future");
 }
 
+/// An agent reading status through an lf older than the store sees the skew
+/// and its fix and a failing exit, never an empty registry.
+#[test]
+fn status_reads_name_a_newer_store_instead_of_reading_empty() {
+    let home = TestRepo::new();
+    let path = home.path().join("loopflow.db");
+    SqliteStore::new(&path).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "INSERT INTO schema_migrations (version, applied_at) VALUES ('9.0.001_future', unixepoch() + 1)",
+            [],
+        )
+        .unwrap();
+    for args in [
+        &["wave", "status"][..],
+        &["wave", "status", "--json"],
+        &["wave", "list"],
+        &["task", "status"],
+    ] {
+        let output = run_lf(home.path(), args);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{args:?} succeeded: {stderr}");
+        assert!(
+            stderr.contains("9.0.001_future")
+                && stderr.contains("run `lf install`")
+                && !stderr.contains("delete"),
+            "{args:?}: {stderr}"
+        );
+        assert!(output.stdout.is_empty(), "{args:?} printed a result");
+    }
+}
+
 #[test]
 fn doctor_keeps_reporting_when_the_database_is_corrupt() {
     let home = TestRepo::new();

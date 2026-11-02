@@ -33,9 +33,11 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
-`binary(name)` matches only the standalone `[[test]]` binaries in
-`rust/loopflow/Cargo.toml`; suites inside `integration` take `test(name::)`, and
-an unknown binary name fails the whole filterset before anything runs.
+`binary(name)` matches the standalone `[[test]]` binaries in
+`rust/loopflow/Cargo.toml` and the CLI's own unit tests as `binary(lf)`;
+suites inside `integration` take `test(name::)`, and an unknown binary name
+fails the whole filterset before anything runs. A change to what `src/bin/lf.rs`
+calls (store openers, work binding) reaches `binary(lf)`: `--lib` never runs it.
 A filtered run covers `-p loopflow` only: run `cargo test -p loopflow-ffi`
 separately when the app's library changed. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,

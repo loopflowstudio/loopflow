@@ -1,13 +1,12 @@
 //! Task decisions commit locally; PR and checkout cleanup retain separate authority.
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::durable::{WorkRef, WorkStatus};
 use crate::git::current_branch;
 use crate::git::worktrees::main_repo_root;
 use crate::ops::wt::BranchDeletion;
 use crate::ops::{NullProgress, OpsResult, Progress};
-use crate::store::{open_existing_store, SharedStore};
+use crate::store::SharedStore;
 use crate::work::task::{Task, TaskPr};
 
 use super::{block_on_task, repository_for_task, task_error, task_store};
@@ -81,11 +80,8 @@ pub(crate) async fn cleanup_completed_task(store: &SharedStore, task: &Task) -> 
 }
 
 async fn branch_task(repo: &Path, branch: &str) -> OpsResult<Option<(SharedStore, Task)>> {
-    let store = match open_existing_store()
-        .await
-        .map_err(super::task_registry_error)?
-    {
-        Some(store) => Arc::new(store),
+    let store = match super::authority_store().await? {
+        Some(store) => store,
         None if crate::journal::agent_caller().is_none() => return Ok(None),
         None => return Err(super::missing_task_registry()),
     };

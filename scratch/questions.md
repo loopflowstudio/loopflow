@@ -22,11 +22,12 @@ origin/main (`7404ba92ef`, #1792) is merged; it shares no file with this change.
   The `delete loopflow.db` text the Task cites was already gone at the base.
 - MIGRATIONS.md already documents "Older lf keeps opening an additively
   extended store"; no doc change needed.
-- **The Task PR refusal names one fix.** `task_registry_error`
-  (`rust/loopflow/src/ops/task/delivery.rs`) prefixes `Task PR authority
-  refused: the shared Loopflow registry <path> cannot be opened:` and passes
-  the store's error through verbatim, as planning, linear, context and
-  session_move do; under skew that error already ends in ``run `lf install` ``.
+- **The Task PR refusal names one fix.** `authority_store`
+  (`rust/loopflow/src/ops/task/delivery.rs`) is the one open both Task PR
+  entry points use; it prefixes `Task PR authority refused: the shared
+  Loopflow registry <path> cannot be opened:` and passes the store's error
+  through verbatim, as planning, linear, context and session_move do; under
+  skew that error already ends in ``run `lf install` ``.
   `missing_task_registry` is unchanged: no store is not skew, and `lf doctor`
   is right there. `task_pr_authority_tests` asserts the store's own text
   (`not a database`, `unable to open database file`) for the corrupt and
@@ -55,7 +56,7 @@ Nothing.
   not: they self-migrate (`apply_sqlite_with_backup`). Only the shared `~/.lf`
   store admits additive newer tails, which is where running steps live.
 
-Check: `cargo test -p loopflow --test task_pr_authority_tests` 12 passed after the wrapper change; `--lib store::sqlite::frontier_tests::` 11 passed and `--test integration -- doctor_tests::status_reads` passed earlier on unchanged code; clippy clean; gate owns the affected suites.
+Check: `cargo test -p loopflow --test task_pr_authority_tests` 12 passed after the compress fold (`authority_store`), clippy clean; `--lib store::sqlite::frontier_tests::` 11 passed and `--test integration -- doctor_tests::status_reads` passed earlier on unchanged code; gate owns the affected suites.
 
 ## Concept review (2026-11-02, headless; second pass after compress and realign)
 

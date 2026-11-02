@@ -29,8 +29,8 @@ pub(crate) use delivery::{
     TaskPrContext,
 };
 use delivery::{
-    missing_task_registry, reconcile_task_pr_observation, resolve_managed_task,
-    resolve_upstream_base, task_registry_error, ManagedTask,
+    authority_store, missing_task_registry, reconcile_task_pr_observation, resolve_managed_task,
+    resolve_upstream_base, ManagedTask,
 };
 mod snapshot;
 pub(crate) use snapshot::task_workspace_context;

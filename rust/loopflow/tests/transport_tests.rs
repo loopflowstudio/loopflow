@@ -1138,10 +1138,11 @@ fn detached_sessions_end_after_their_limit() {
 }
 
 /// A conversation whose lf executable is deleted or rebuilt ends once it waits
-/// for a person, even while viewed; a turn in progress finishes first. One
-/// launched through the installed entry ends when the entry's target changes,
-/// as `lf install` changes it, and a terminal showing it follows through the
-/// entry onto the installed lf with the conversation's history.
+/// for a person, even while viewed. One launched through the installed entry
+/// ends when the entry's target changes, as `lf install` changes it, and a
+/// terminal showing it follows through the entry onto the installed lf with
+/// the conversation's history. A turn in progress finishes first: `lf resume`
+/// on that owner watches it rather than cutting it, and follows when it ends.
 #[test]
 fn sessions_end_when_their_lf_executable_goes() {
     let fixture = Fixture::new();
@@ -1157,7 +1158,7 @@ fn sessions_end_when_their_lf_executable_goes() {
     let executables = [
         build("lf-idle"),
         build("lf-replaced"),
-        build("lf-busy"),
+        installed.clone(),
         installed.clone(),
     ];
     let mut owners = Vec::new();
@@ -1175,23 +1176,25 @@ fn sessions_end_when_their_lf_executable_goes() {
         owners.push(owner);
     }
     fixture.launches(owners.len());
-    let busy = fixture.session_of_owner(&owners[2]);
+    let followed = fixture.session_of_owner(&owners[2]);
+    let busy = fixture.session_of_owner(&owners[3]);
     fixture.mark_working(&busy);
-    let followed = fixture.session_of_owner(&owners[3]);
-    let mut terminal = fixture
-        .command_from(&installed, &["session", "resume", &followed])
-        .env("LF_BIN", &installed)
-        .env("PATH", &path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    fixture.wait_controlled(&owners[3]);
+    let resume = |session: &str| {
+        fixture
+            .command_from(&installed, &["session", "resume", session])
+            .env("LF_BIN", &installed)
+            .env("PATH", &path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    let mut terminal = resume(&followed);
+    fixture.wait_controlled(&owners[2]);
 
     // A worktree removed, a build relinked, `lf install` selecting another build.
     std::fs::remove_file(&executables[0]).unwrap();
-    std::fs::remove_file(&executables[2]).unwrap();
     let relinked = bin.join("lf-relinked");
     std::fs::write(&relinked, "another build").unwrap();
     std::fs::rename(&relinked, &executables[1]).unwrap();
@@ -1203,7 +1206,7 @@ fn sessions_end_when_their_lf_executable_goes() {
 
     fixture.ends(&owners[0]);
     fixture.ends(&owners[1]);
-    fixture.ends(&owners[3]);
+    fixture.ends(&owners[2]);
     // Their viewers learn why; only the superseded one learns which entry
     // reopens the conversation.
     for (index, how) in [(0, "build was removed"), (1, "build was replaced")] {
@@ -1218,13 +1221,11 @@ fn sessions_end_when_their_lf_executable_goes() {
             )]
         );
     }
-    assert_eq!(
-        viewers[3].moves(),
-        [(
-            Some("This Session's lf was superseded; reopening on the installed lf.".to_owned()),
-            Some(installed.to_str().unwrap().to_owned())
-        )]
+    let superseded_move = (
+        Some("This Session's lf was superseded; reopening on the installed lf.".to_owned()),
+        Some(installed.to_str().unwrap().to_owned()),
     );
+    assert_eq!(viewers[2].moves(), std::slice::from_ref(&superseded_move));
     // The terminal showing the superseded conversation reran its invocation
     // through the entry: the conversation resumed on lf-next with its history.
     let line = fixture.launches(5).pop().unwrap();
@@ -1232,15 +1233,18 @@ fn sessions_end_when_their_lf_executable_goes() {
         line.contains(" --resume ") && session_of(&fixture.sql(), &line) == followed,
         "reopened without history: {line}"
     );
-    let reopened: String = fixture
-        .sql()
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [&followed],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_ne!(reopened, owners[3]);
+    let owner_of = |session: &str| -> String {
+        fixture
+            .sql()
+            .query_row(
+                "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let reopened = owner_of(&followed);
+    assert_ne!(reopened, owners[2]);
     let executable: String = fixture
         .sql()
         .query_row(
@@ -1258,19 +1262,42 @@ fn sessions_end_when_their_lf_executable_goes() {
         terminal.try_wait().unwrap().is_none(),
         "terminal left the conversation"
     );
-    // Several judgments later, the busy owner still runs.
+    // Opening the busy owner's conversation from the installed lf attaches to
+    // it rather than cutting its turn, and several judgments later it still runs.
+    let mut watching = resume(&busy);
+    fixture.wait_controlled(&owners[3]);
     std::thread::sleep(Duration::from_secs(4));
-    assert!(fixture.running(&owners[2]), "busy owner ended mid-turn");
-    // Its turn settling lets the busy one end.
+    assert!(fixture.running(&owners[3]), "busy owner ended mid-turn");
+    assert_eq!(
+        fixture.launches(5).len(),
+        5,
+        "the busy conversation relaunched"
+    );
+    // Its turn settling lets it end; the watching terminal then follows.
     fixture
         .sql()
         .execute("DELETE FROM session_activity WHERE session_id=?1", [&busy])
         .unwrap();
-    fixture.ends(&owners[2]);
+    fixture.ends(&owners[3]);
+    assert_eq!(viewers[3].moves(), [superseded_move]);
+    let line = fixture.launches(6).pop().unwrap();
+    assert!(
+        line.contains(" --resume ") && session_of(&fixture.sql(), &line) == busy,
+        "reopened without history: {line}"
+    );
+    let busy_reopened = owner_of(&busy);
+    assert_ne!(busy_reopened, owners[3]);
+    assert!(
+        watching.try_wait().unwrap().is_none(),
+        "watching terminal left the conversation"
+    );
     drop(viewers);
-    terminal.kill().unwrap();
-    terminal.wait().unwrap();
+    for mut terminal in [terminal, watching] {
+        terminal.kill().unwrap();
+        terminal.wait().unwrap();
+    }
     fixture.stop(&reopened);
+    fixture.stop(&busy_reopened);
 }
 
 /// An lf executable with other bytes than the test binary, still runnable:
@@ -1348,6 +1375,69 @@ fn resume_takes_over_an_owner_from_another_build() {
         "{stderr}"
     );
     assert!(!stderr.contains("cut off"), "{stderr}");
+    fixture.stop(&current);
+}
+
+/// A superseded owner mid-turn that does not answer its socket cannot be
+/// watched to the turn's end, so `lf resume` ends it, reopens the conversation
+/// from its saved history and says the turn was cut.
+#[test]
+fn resume_ends_a_busy_superseded_owner_that_never_answers() {
+    let fixture = Fixture::new();
+    let path = fixture.waiting_provider();
+    let other = fixture.home.path().join("bin/lf-other");
+    other_build(&other);
+    let lf = other.to_str().unwrap();
+    let mut owner = fixture.command_from(&other, &["session", "serve", "--terminal"]);
+    owner
+        .args(["--", lf, "--interactive", "--agent", "claude", ":", "hello"])
+        .env("LF_BIN", lf)
+        .env("PATH", &path);
+    let previous = fixture.owner(owner);
+    fixture.launches(1);
+    let session = fixture.session_of_owner(&previous);
+    fixture.mark_working(&session);
+    let endpoint = fixture.endpoint(&previous);
+    std::fs::rename(&endpoint, endpoint.with_extension("retained")).unwrap();
+    let listener = UnixListener::bind(&endpoint).unwrap();
+    std::thread::spawn(move || {
+        let held: Vec<UnixStream> = listener.incoming().map_while(Result::ok).collect();
+        drop(held);
+    });
+    let mut viewer = fixture
+        .command(&["session", "resume", &session])
+        .env("PATH", &path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let line = fixture.launches(2).pop().unwrap();
+    assert!(
+        line.contains(" --resume ") && session_of(&fixture.sql(), &line) == session,
+        "reopened without history: {line}"
+    );
+    fixture.ends(&previous);
+    let current: String = fixture
+        .sql()
+        .query_row(
+            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_ne!(current, previous);
+    assert!(
+        viewer.try_wait().unwrap().is_none(),
+        "viewer left the conversation"
+    );
+    viewer.kill().unwrap();
+    let output = viewer.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Moved") && stderr.contains("cut off"),
+        "{stderr}"
+    );
     fixture.stop(&current);
 }
 

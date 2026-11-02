@@ -1104,10 +1104,13 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
 
 /// End a running owner from another build so the conversation resumes on the
 /// lf the entry launches now: a viewer never negotiates with an owner whose lf
-/// is not that one. The owner ends the way its own lifetime policy ends it,
-/// stopping its agent and recording its exit; a turn it was running is
-/// reported, never cut silently. False when the owner already runs the build
-/// a relaunch would run, or an executable nobody can read.
+/// is not that one. The takeover happens at the boundary the owner's own
+/// lifetime policy uses, once its Sessions wait for a person, and ends it the
+/// same way, stopping its agent and recording its exit. A turn in progress is
+/// watched instead when the owner can show it (false: this viewer attaches,
+/// the owner ends itself after the turn and the viewer follows); one the owner
+/// cannot show is cut and reported, never cut silently. False when the owner
+/// already runs the build a relaunch would run, or an executable nobody can read.
 fn taken_over(
     store: &SqliteStore,
     session: &LfSession,
@@ -1124,7 +1127,10 @@ fn taken_over(
     if !crate::installation::superseded(&executable) {
         return Ok(false);
     }
-    let turn_cut_off = store.session_turn_was_running(&session.id)?;
+    let turn_cut_off = !store.owner_waits_for_person(owner)?;
+    if turn_cut_off && answering(owner) {
+        return Ok(false);
+    }
     end_owner(store, owner, pid).with_context(|| {
         format!(
             "end the owner on {} so the conversation can move here",
@@ -1173,7 +1179,7 @@ pub(crate) fn end_owner(
 /// Whether a running owner answers its socket. One that does not, as an owner
 /// from an earlier lf may not after an upgrade, can never hand its terminal to
 /// a viewer, so opening takes the conversation over on the same provider thread.
-fn answering(owner: &crate::id::LfProcessId) -> bool {
+pub(crate) fn answering(owner: &crate::id::LfProcessId) -> bool {
     match crate::transport::controlled(owner) {
         Ok(_) => true,
         Err(error) => {

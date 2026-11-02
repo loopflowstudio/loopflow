@@ -9,7 +9,10 @@
 //! rollover does the same now, for every superseded owner at once, including
 //! owners that predate that policy: an idle Session execution owner with saved
 //! provider history is ended the way its lifetime policy ends it, then each of
-//! its Sessions resumes on the selected lf. Its viewers follow. A Graph runner
+//! its Sessions resumes on the selected lf. Its viewers follow. A busy owner
+//! that answers its socket stays until its turn ends; one that does not answer
+//! cannot be watched or trusted to report idle, so it moves and the cut turn is
+//! reported. A Graph runner
 //! isn't stopped: each step resolves the installed entry when it launches, so
 //! its next step already runs on the selected lf and the runner leaves with the
 //! Graph. Everything else is listed with why it stays.
@@ -27,8 +30,8 @@ use crate::id::LfProcessId;
 use crate::journal::{
     recorded_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
 };
-use crate::ops::human_session::end_owner;
 use crate::ops::human_session::restore::{self, ResumeOutcome, ResumedSession};
+use crate::ops::human_session::{answering, end_owner};
 use crate::process::ProcessKind;
 use crate::store::sqlite::SqliteStore;
 use crate::store::{open_store, storage_config_from_env, SharedStore};
@@ -354,6 +357,9 @@ pub struct MovedOwner {
     /// Empty in a dry run.
     pub sessions: Vec<ResumedSession>,
     pub session_ids: Vec<String>,
+    /// The owner reported a turn in progress but does not answer its socket,
+    /// so moving it cuts that turn.
+    pub turn_cut_off: bool,
     pub error: Option<String>,
 }
 
@@ -366,30 +372,40 @@ pub struct ListedProcess {
 
 #[derive(Debug)]
 enum Disposition {
-    /// An idle owner and the Sessions it holds.
-    Moves(Vec<String>),
+    /// A resumable owner and the Sessions it holds; `turn_cut_off` when it
+    /// claims a turn in progress nobody can watch.
+    Moves {
+        sessions: Vec<String>,
+        turn_cut_off: bool,
+    },
     /// A Graph runner, left running; its next step launches on the selected lf.
     NextStep,
     Stays(String),
 }
 
 /// Whether a superseded Process can move, and why not when it can't.
+/// `answering` asks an owner whether it still answers its socket.
 async fn disposition(
     shared: &SharedStore,
     binary: &RunningBinary,
     process: &RunningLfProcess,
+    answering: impl Fn(&LfProcessId) -> bool,
 ) -> Result<Disposition> {
     if shared.sqlite.runs_graph(&process.id)? {
         return Ok(graph_runner(binary));
     }
-    owner_disposition(shared, process).await
+    owner_disposition(shared, process, answering).await
 }
 
-/// A Session execution owner moves when it is idle and resumable; its viewers
-/// follow it to the selected lf.
+/// A Session execution owner moves when it is resumable and either waits for
+/// a person or cannot be watched: a busy owner that answers its socket finishes
+/// its turn and ends itself, as `lf resume` lets it; one that does not answer
+/// has only a claim of a turn in progress. Its viewers follow it to the
+/// selected lf.
 async fn owner_disposition(
     shared: &SharedStore,
     process: &RunningLfProcess,
+    answering: impl Fn(&LfProcessId) -> bool,
 ) -> Result<Disposition> {
     let store = &shared.sqlite;
     let stays = |reason: &str| Ok(Disposition::Stays(reason.into()));
@@ -397,7 +413,8 @@ async fn owner_disposition(
     if sessions.is_empty() {
         return stays("keeps its lf until it exits");
     }
-    if !store.owner_waits_for_person(&process.id)? {
+    let turn_cut_off = !store.owner_waits_for_person(&process.id)?;
+    if turn_cut_off && answering(&process.id) {
         return stays("a turn, Graph step or headless Run is in progress");
     }
     for session in &sessions {
@@ -415,7 +432,10 @@ async fn owner_disposition(
             )));
         }
     }
-    Ok(Disposition::Moves(sessions))
+    Ok(Disposition::Moves {
+        sessions,
+        turn_cut_off,
+    })
 }
 
 /// A Graph runner's steps resolve the installed entry at each launch, except
@@ -441,11 +461,15 @@ impl RolloverReport {
     fn place(&mut self, binary: String, process: &RunningLfProcess, disposition: Disposition) {
         let process = process.clone();
         match disposition {
-            Disposition::Moves(session_ids) => self.moved.push(MovedOwner {
+            Disposition::Moves {
+                sessions,
+                turn_cut_off,
+            } => self.moved.push(MovedOwner {
                 process,
                 binary,
                 sessions: Vec::new(),
-                session_ids,
+                session_ids: sessions,
+                turn_cut_off,
                 error: None,
             }),
             Disposition::NextStep => self.next_step.push(ListedProcess {
@@ -496,7 +520,7 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
     };
     for binary in inventory.superseded() {
         for process in &binary.processes {
-            let disposition = disposition(&store, binary, process).await?;
+            let disposition = disposition(&store, binary, process, answering).await?;
             report.place(binary.describe(), process, disposition);
         }
     }
@@ -509,15 +533,20 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
         let still_running = crate::journal::process_evidence(&store.sqlite, &owner.process.id)
             == ProcessIdentityEvidence::Live;
         let now = if still_running {
-            owner_disposition(&store, &owner.process).await?
+            owner_disposition(&store, &owner.process, answering).await?
         } else {
             Disposition::Stays("exited before rollover reached it".into())
         };
-        let Disposition::Moves(session_ids) = now else {
+        let Disposition::Moves {
+            sessions,
+            turn_cut_off,
+        } = now
+        else {
             report.place(owner.binary, &owner.process, now);
             continue;
         };
-        owner.session_ids = session_ids;
+        owner.session_ids = sessions;
+        owner.turn_cut_off = turn_cut_off;
         if let Err(error) = end_owner(&store.sqlite, &owner.process.id, owner.process.pid) {
             owner.error = Some(format!("{error:#}"));
             report.moved.push(owner);
@@ -568,8 +597,14 @@ fn render_report(report: &RolloverReport) -> String {
                 owner.process.pid, owner.binary
             )),
             None => lines.push(format!(
-                "{verb} pid {} on {} → {target}: {sessions}",
-                owner.process.pid, owner.binary
+                "{verb} pid {} on {} → {target}: {sessions}{}",
+                owner.process.pid,
+                owner.binary,
+                if owner.turn_cut_off {
+                    " (a turn in progress it cannot show; moving cuts it)"
+                } else {
+                    ""
+                }
             )),
         }
         for session in &owner.sessions {
@@ -621,8 +656,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{
-        disposition, group, parse_version, superseded_summary, BinaryInventory, Disposition,
-        RunningBinary, RunningLfProcess,
+        disposition, group, owner_disposition, parse_version, superseded_summary, BinaryInventory,
+        Disposition, RunningBinary, RunningLfProcess,
     };
     use crate::id::LfProcessId;
     use crate::store::{open_ephemeral_store, SharedStore, StorageConfig};
@@ -717,7 +752,11 @@ mod tests {
 
         let of = |binary, process| {
             let store = store.clone();
-            async move { disposition(&store, binary, process).await.unwrap() }
+            async move {
+                disposition(&store, binary, process, |_| true)
+                    .await
+                    .unwrap()
+            }
         };
         assert!(matches!(
             of(&installed, &runner).await,
@@ -734,6 +773,82 @@ mod tests {
         assert!(matches!(
             of(&installed, &plain).await,
             Disposition::Stays(_)
+        ));
+    }
+
+    /// A superseded owner mid-turn stays while it answers its socket: the turn
+    /// ends in view and the owner ends itself. One that does not answer has
+    /// only a claim of a turn, so it moves and the cut turn is reported.
+    #[tokio::test]
+    async fn a_busy_owner_moves_only_when_it_cannot_show_its_turn() {
+        let directory = tempfile::tempdir().unwrap();
+        let store: SharedStore = std::sync::Arc::new(
+            open_ephemeral_store(&StorageConfig::sqlite(directory.path().join("lf.db")))
+                .await
+                .unwrap(),
+        );
+        let owner = process(7);
+        let session = store
+            .sqlite
+            .test_session("busy", &crate::session_record::new_artifact_key());
+        let input = session.input_key().unwrap().clone();
+        store
+            .sqlite
+            .retain_session_observation(
+                &session,
+                &crate::session::SessionObservation {
+                    artifact_key: input.clone(),
+                    source: "provider-session:fixture".into(),
+                    observed_at: 1,
+                    task_id: None,
+                    wave_id: None,
+                    payload: serde_json::json!({"input_id":input,"source":"provider-session:fixture","evidence":{
+                        "schema_version":1,"provider_session_id":"thread-1","account_id":null,
+                    }}),
+                },
+            )
+            .unwrap();
+        {
+            let conn = store.sqlite.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,command,started_at) VALUES(?1,'fixture','[\"lf\",\"session\",\"serve\"]',1)",
+                [&owner.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET transport_lf_process_id=?1 WHERE id=?2",
+                rusqlite::params![owner.id, session.id],
+            )
+            .unwrap();
+            conn.execute(
+                r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
+                   VALUES(?1,0,1,0,0,NULL,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}')"#,
+                [session.id.as_str()],
+            )
+            .unwrap();
+        }
+        let Disposition::Stays(reason) = owner_disposition(&store, &owner, |_| true).await.unwrap()
+        else {
+            panic!("a busy owner that answers stays");
+        };
+        assert!(reason.contains("in progress"), "{reason}");
+        assert!(matches!(
+            owner_disposition(&store, &owner, |_| false).await.unwrap(),
+            Disposition::Moves { ref sessions, turn_cut_off: true } if sessions == &[session.id.as_str().to_owned()]
+        ));
+        store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .execute("DELETE FROM session_activity", [])
+            .unwrap();
+        assert!(matches!(
+            owner_disposition(&store, &owner, |_| false).await.unwrap(),
+            Disposition::Moves {
+                turn_cut_off: false,
+                ..
+            }
         ));
     }
 }

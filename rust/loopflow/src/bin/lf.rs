@@ -518,6 +518,7 @@ fn prepare_work_binding(selector: &str, repo: &Path) -> anyhow::Result<loopflow:
     runtime.block_on(async {
         let store = loopflow::store::open_existing_store()
             .await
+            .map_err(|error| anyhow::anyhow!("cannot resolve {selector}: {error}"))?
             .ok_or_else(|| {
                 anyhow::anyhow!("cannot resolve {selector}: planning registry unavailable")
             })?;

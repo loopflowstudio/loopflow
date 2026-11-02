@@ -372,6 +372,7 @@ async fn task_store() -> OpsResult<SharedStore> {
     }
     open_existing_store()
         .await
+        .map_err(task_error)?
         .map(Arc::new)
         .ok_or_else(|| task_error("no Loopflow registry on this machine; run `lf doctor`"))
 }

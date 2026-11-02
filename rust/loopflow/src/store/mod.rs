@@ -1209,25 +1209,22 @@ pub(crate) fn read_existing_registry() -> StoreResult<Option<Store>> {
     Ok(Some(Store { sqlite }))
 }
 
-/// Open the machine's shared registry store only if one already exists.
-/// Returns `None` if the registry is absent or incompatible; never creates it.
-pub async fn open_existing_store() -> Option<Store> {
-    let cfg = crate::store::storage_config_from_env().ok()?;
+/// Open the machine's shared registry store only if one already exists;
+/// `None` when it is absent. A store this lf cannot open — one a newer build
+/// locked, say — is an error naming the skew and its fix, never an empty
+/// registry: agents read "nothing here" as fact.
+pub async fn open_existing_store() -> StoreResult<Option<Store>> {
+    let cfg = crate::store::storage_config_from_env()
+        .map_err(|error| StoreError::InvalidData(error.to_string()))?;
     let StorageConfig::Sqlite { path } = &cfg;
     if !path.exists() {
-        return None;
+        return Ok(None);
     }
-    match open_store(&cfg).await {
-        Ok(store) => Some(store),
-        Err(err) => {
-            tracing::warn!(?path, %err, "local store is incompatible; run lf doctor");
-            None
-        }
-    }
+    open_store(&cfg).await.map(Some)
 }
 
 /// Why the shared registry could not be opened for a Task authority check.
-/// Unlike [`open_existing_store`], this preserves the *reason* so a Task PR
+/// Like [`open_existing_store`], this preserves the *reason* so a Task PR
 /// entry point can refuse with an actionable error instead of silently
 /// degrading to generic PR behavior.
 #[derive(Debug, Clone)]

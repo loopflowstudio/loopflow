@@ -17,8 +17,8 @@ enum AppUpdates {
         return recorded.flatMap { $0.isEmpty ? nil : $0 } ?? "stable"
     }
 
-    /// dev has no appcast: `lf install --dev` links the CLI alone, and an app that
-    /// followed preview would relink `lf` away from it on its next launch.
+    /// dev has no appcast: `lf install --dev` replaces the app itself, and an app that
+    /// followed preview would relink `lf` away from dev on its next launch.
     static func feedURL(stream: String) -> URL? {
         switch stream {
         case "dev": nil
@@ -99,7 +99,7 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, @unchecked Sendable {
     /// A switch to dev while the app runs stops its checks until the next launch.
     func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
         guard feedURLString(for: updater) != nil else {
-            throw LocalLfError(errorDescription: "this Machine follows dev; `lf install --dev` updates the CLI alone")
+            throw LocalLfError(errorDescription: "this Machine follows dev; `lf install --dev` updates this app")
         }
     }
 

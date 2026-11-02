@@ -163,4 +163,9 @@ package-smoke/lf --help
 package-smoke/lf list
 ```
 
-`lf install --dev` installs the newest one with `gh`. The artifacts expire after 14 days; releases stay the durable channel.
+Its `desktop-app` job builds Loopflow.app around the ARM64 package's exact `lf`,
+signs and notarizes the DMG with the `APPLE_CERTIFICATE_BASE64`,
+`APPLE_CERTIFICATE_PASSWORD`, `NOTARY_KEY`, `NOTARY_KEY_ID` and `NOTARY_ISSUER`
+Actions secrets (copied from Doppler `loopflow`/`prd`), and uploads `Loopflow-dmg`.
+`lf install --dev` installs the newest green run with `gh`, app included on a Mac.
+The artifacts expire after 14 days; releases stay the durable channel.

@@ -1,0 +1,880 @@
+{
+  "date": "2026-11-02",
+  "head": "eb08f96a74f3bc9d6956b8b9a743d1c1b29a2d29",
+  "fixture_task": {
+    "id": "task_06bf2e26aea44545a32cad485686ed70",
+    "identifier": "06bf2e",
+    "title": "Worker updates demo",
+    "wave": null,
+    "project": null,
+    "state": "active",
+    "reason": "help demo-intentionally-missing: command exited with status 2. Inspect its history and effects, then launch fresh work",
+    "graph": {
+      "name": "demo",
+      "step": "demo"
+    },
+    "pr": null,
+    "next": "lf task run 06bf2e"
+  },
+  "session": "session_f1478d6846224f4dbc3384f9c37147dd",
+  "provider": "Codex 0.166.0 / GPT-6-Astra high",
+  "events": [
+    {
+      "seq": 4,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673345,
+      "payload": {
+        "key": "ea9142b66b8e9535c299bd0115c512bce81ff9e60c6b57de196759fef4e0084d",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": null,
+            "runs": {}
+          }
+        },
+        "source": "task_update",
+        "state": "baseline"
+      }
+    },
+    {
+      "seq": 9,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f43-3b89-7881-9910-65ca59298e68",
+      "kind": "started",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673346,
+      "payload": {}
+    },
+    {
+      "seq": 11,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f43-3b89-7881-9910-65ca59298e68",
+      "kind": "output",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673358,
+      "payload": {
+        "text": "Ready for the demo."
+      }
+    },
+    {
+      "seq": 12,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f43-3b89-7881-9910-65ca59298e68",
+      "kind": "completed",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673358,
+      "payload": {
+        "completed_at": 1793673358,
+        "context": {
+          "compaction_tokens": null,
+          "compactions": 0,
+          "first_request_tokens": 21933,
+          "peak_request_tokens": 21933,
+          "tool_output_tokens": 0,
+          "tool_results": 0
+        },
+        "duration_ms": 12305,
+        "error": null,
+        "started_at": 1793673345,
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 13,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673397,
+      "payload": {
+        "key": "e1381f61ad2d4c8de159f38b19f3c60257d4f31853e85fea5eb8c299e6ac5e2a",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": {
+              "kind": "at",
+              "step": "demo"
+            },
+            "runs": {
+              "59d50d35-459b-49aa-abae-394c79b44a6b": {
+                "completed": true,
+                "name": "demo",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673396,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help",
+                  "lf_process_id": "314b79c7-1735-423b-8e4f-53ad9c64983d",
+                  "outcome": "succeeded",
+                  "started_at": 1793673396
+                }
+              }
+            }
+          }
+        },
+        "source": "task_update",
+        "state": "dispatched"
+      }
+    },
+    {
+      "seq": 14,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673397,
+      "payload": {
+        "key": "e1381f61ad2d4c8de159f38b19f3c60257d4f31853e85fea5eb8c299e6ac5e2a",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": {
+              "kind": "at",
+              "step": "demo"
+            },
+            "runs": {
+              "59d50d35-459b-49aa-abae-394c79b44a6b": {
+                "completed": true,
+                "name": "demo",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673396,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help",
+                  "lf_process_id": "314b79c7-1735-423b-8e4f-53ad9c64983d",
+                  "outcome": "succeeded",
+                  "started_at": 1793673396
+                }
+              }
+            }
+          }
+        },
+        "source": "task_update",
+        "state": "accepted"
+      }
+    },
+    {
+      "seq": 16,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f44-0570-7363-a058-fee4713bf2b4",
+      "kind": "started",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673397,
+      "payload": {}
+    },
+    {
+      "seq": 18,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f44-0570-7363-a058-fee4713bf2b4",
+      "kind": "output",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673665,
+      "payload": {
+        "text": "Task 06bf2e\u2019s demo run and help step succeeded; it\u2019s available for review."
+      }
+    },
+    {
+      "seq": 19,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f44-0570-7363-a058-fee4713bf2b4",
+      "kind": "completed",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673665,
+      "payload": {
+        "completed_at": 1793673665,
+        "context": {
+          "compaction_tokens": null,
+          "compactions": 0,
+          "first_request_tokens": 22206,
+          "peak_request_tokens": 22206,
+          "tool_output_tokens": 0,
+          "tool_results": 0
+        },
+        "duration_ms": 267664,
+        "error": null,
+        "started_at": 1793673397,
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 20,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673666,
+      "payload": {
+        "key": "4b6b642c279469ff873f311afa7f9bbd16beb8489efd04f3ecc559a695699778",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": {
+              "kind": "at",
+              "step": "demo"
+            },
+            "runs": {
+              "59d50d35-459b-49aa-abae-394c79b44a6b": {
+                "completed": true,
+                "name": "demo",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673396,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help",
+                  "lf_process_id": "314b79c7-1735-423b-8e4f-53ad9c64983d",
+                  "outcome": "succeeded",
+                  "started_at": 1793673396
+                }
+              },
+              "7f7db7d5-84da-4b20-8127-e11c1d36e3ab": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673648,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task wait 06bf2e --until submitted --timeout 8s",
+                  "lf_process_id": "8fa0469a-14c8-493e-9f70-bf3ecab5e1f3",
+                  "outcome": "succeeded",
+                  "started_at": 1793673640
+                }
+              }
+            }
+          }
+        },
+        "source": "task_update",
+        "state": "dispatched"
+      }
+    },
+    {
+      "seq": 21,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673666,
+      "payload": {
+        "key": "4b6b642c279469ff873f311afa7f9bbd16beb8489efd04f3ecc559a695699778",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": {
+              "kind": "at",
+              "step": "demo"
+            },
+            "runs": {
+              "59d50d35-459b-49aa-abae-394c79b44a6b": {
+                "completed": true,
+                "name": "demo",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673396,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help",
+                  "lf_process_id": "314b79c7-1735-423b-8e4f-53ad9c64983d",
+                  "outcome": "succeeded",
+                  "started_at": 1793673396
+                }
+              },
+              "7f7db7d5-84da-4b20-8127-e11c1d36e3ab": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673648,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task wait 06bf2e --until submitted --timeout 8s",
+                  "lf_process_id": "8fa0469a-14c8-493e-9f70-bf3ecab5e1f3",
+                  "outcome": "succeeded",
+                  "started_at": 1793673640
+                }
+              }
+            }
+          }
+        },
+        "source": "task_update",
+        "state": "accepted"
+      }
+    },
+    {
+      "seq": 23,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-2054-7bc0-94b8-2d2415c3cd4a",
+      "kind": "started",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673666,
+      "payload": {}
+    },
+    {
+      "seq": 25,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-2054-7bc0-94b8-2d2415c3cd4a",
+      "kind": "output",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673670,
+      "payload": {
+        "text": "Task 06bf2e remains available for review at demo; the run named \u201cfailure\u201d and its wait step both recorded success."
+      }
+    },
+    {
+      "seq": 26,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-2054-7bc0-94b8-2d2415c3cd4a",
+      "kind": "completed",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673670,
+      "payload": {
+        "completed_at": 1793673670,
+        "context": {
+          "compaction_tokens": null,
+          "compactions": 0,
+          "first_request_tokens": 22379,
+          "peak_request_tokens": 22379,
+          "tool_output_tokens": 0,
+          "tool_results": 0
+        },
+        "duration_ms": 3481,
+        "error": null,
+        "started_at": 1793673666,
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 27,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673692,
+      "payload": {
+        "key": "40c16a9b77f75087da1d7d94e6502ec2df8ef95811df3c8898fe68d42ded3fb7",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": {
+              "kind": "at",
+              "step": "demo"
+            },
+            "runs": {
+              "59d50d35-459b-49aa-abae-394c79b44a6b": {
+                "completed": true,
+                "name": "demo",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673396,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help",
+                  "lf_process_id": "314b79c7-1735-423b-8e4f-53ad9c64983d",
+                  "outcome": "succeeded",
+                  "started_at": 1793673396
+                }
+              },
+              "7f7db7d5-84da-4b20-8127-e11c1d36e3ab": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673648,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task wait 06bf2e --until submitted --timeout 8s",
+                  "lf_process_id": "8fa0469a-14c8-493e-9f70-bf3ecab5e1f3",
+                  "outcome": "succeeded",
+                  "started_at": 1793673640
+                }
+              },
+              "ea4298d9-4c3c-4ed8-9949-f087aa0eca3e": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673691,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task status demo-intentionally-missing",
+                  "lf_process_id": "67192d24-d823-4ed0-bd22-67d3a07bc538",
+                  "outcome": "succeeded",
+                  "started_at": 1793673691
+                }
+              }
+            }
+          }
+        },
+        "source": "task_update",
+        "state": "dispatched"
+      }
+    },
+    {
+      "seq": 28,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673692,
+      "payload": {
+        "key": "40c16a9b77f75087da1d7d94e6502ec2df8ef95811df3c8898fe68d42ded3fb7",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": {
+              "kind": "at",
+              "step": "demo"
+            },
+            "runs": {
+              "59d50d35-459b-49aa-abae-394c79b44a6b": {
+                "completed": true,
+                "name": "demo",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673396,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help",
+                  "lf_process_id": "314b79c7-1735-423b-8e4f-53ad9c64983d",
+                  "outcome": "succeeded",
+                  "started_at": 1793673396
+                }
+              },
+              "7f7db7d5-84da-4b20-8127-e11c1d36e3ab": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673648,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task wait 06bf2e --until submitted --timeout 8s",
+                  "lf_process_id": "8fa0469a-14c8-493e-9f70-bf3ecab5e1f3",
+                  "outcome": "succeeded",
+                  "started_at": 1793673640
+                }
+              },
+              "ea4298d9-4c3c-4ed8-9949-f087aa0eca3e": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673691,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task status demo-intentionally-missing",
+                  "lf_process_id": "67192d24-d823-4ed0-bd22-67d3a07bc538",
+                  "outcome": "succeeded",
+                  "started_at": 1793673691
+                }
+              }
+            }
+          }
+        },
+        "source": "task_update",
+        "state": "accepted"
+      }
+    },
+    {
+      "seq": 30,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-85db-77e3-9465-12d9dd51951b",
+      "kind": "started",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673692,
+      "payload": {}
+    },
+    {
+      "seq": 32,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-85db-77e3-9465-12d9dd51951b",
+      "kind": "output",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673696,
+      "payload": {
+        "text": "Task 06bf2e remains available for review at demo; the run named \u201cfailure\u201d and its `task status demo-intentionally-missing` step both recorded success."
+      }
+    },
+    {
+      "seq": 33,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-85db-77e3-9465-12d9dd51951b",
+      "kind": "completed",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673696,
+      "payload": {
+        "completed_at": 1793673696,
+        "context": {
+          "compaction_tokens": null,
+          "compactions": 0,
+          "first_request_tokens": 22544,
+          "peak_request_tokens": 22544,
+          "tool_output_tokens": 0,
+          "tool_results": 0
+        },
+        "duration_ms": 3561,
+        "error": null,
+        "started_at": 1793673692,
+        "status": "completed"
+      }
+    },
+    {
+      "seq": 34,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673710,
+      "payload": {
+        "key": "fd8140ad509086f4fb62aa1237c3cd91d899cdefe8c61c5ab611d30f9d00c8e5",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": {
+              "kind": "at",
+              "step": "demo"
+            },
+            "runs": {
+              "59d50d35-459b-49aa-abae-394c79b44a6b": {
+                "completed": true,
+                "name": "demo",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673396,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help",
+                  "lf_process_id": "314b79c7-1735-423b-8e4f-53ad9c64983d",
+                  "outcome": "succeeded",
+                  "started_at": 1793673396
+                }
+              },
+              "7f7db7d5-84da-4b20-8127-e11c1d36e3ab": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673648,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task wait 06bf2e --until submitted --timeout 8s",
+                  "lf_process_id": "8fa0469a-14c8-493e-9f70-bf3ecab5e1f3",
+                  "outcome": "succeeded",
+                  "started_at": 1793673640
+                }
+              },
+              "b19b8d55-15a3-44e8-b976-4c3fa272c906": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "failed",
+                "step": {
+                  "completed_at": 1793673708,
+                  "exit_code": 2,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help demo-intentionally-missing",
+                  "lf_process_id": "a058e856-3555-4985-8b47-b285c2be1abe",
+                  "outcome": "failed",
+                  "started_at": 1793673708
+                }
+              },
+              "ea4298d9-4c3c-4ed8-9949-f087aa0eca3e": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673691,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task status demo-intentionally-missing",
+                  "lf_process_id": "67192d24-d823-4ed0-bd22-67d3a07bc538",
+                  "outcome": "succeeded",
+                  "started_at": 1793673691
+                }
+              }
+            }
+          }
+        },
+        "source": "task_update",
+        "state": "dispatched"
+      }
+    },
+    {
+      "seq": 35,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": null,
+      "provider_turn": null,
+      "kind": "observed",
+      "agent_process_id": null,
+      "lf_process_id": null,
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673710,
+      "payload": {
+        "key": "fd8140ad509086f4fb62aa1237c3cd91d899cdefe8c61c5ab611d30f9d00c8e5",
+        "observation": {
+          "task_06bf2e26aea44545a32cad485686ed70": {
+            "position": {
+              "kind": "at",
+              "step": "demo"
+            },
+            "runs": {
+              "59d50d35-459b-49aa-abae-394c79b44a6b": {
+                "completed": true,
+                "name": "demo",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673396,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help",
+                  "lf_process_id": "314b79c7-1735-423b-8e4f-53ad9c64983d",
+                  "outcome": "succeeded",
+                  "started_at": 1793673396
+                }
+              },
+              "7f7db7d5-84da-4b20-8127-e11c1d36e3ab": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673648,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task wait 06bf2e --until submitted --timeout 8s",
+                  "lf_process_id": "8fa0469a-14c8-493e-9f70-bf3ecab5e1f3",
+                  "outcome": "succeeded",
+                  "started_at": 1793673640
+                }
+              },
+              "b19b8d55-15a3-44e8-b976-4c3fa272c906": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "failed",
+                "step": {
+                  "completed_at": 1793673708,
+                  "exit_code": 2,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "help demo-intentionally-missing",
+                  "lf_process_id": "a058e856-3555-4985-8b47-b285c2be1abe",
+                  "outcome": "failed",
+                  "started_at": 1793673708
+                }
+              },
+              "ea4298d9-4c3c-4ed8-9949-f087aa0eca3e": {
+                "completed": true,
+                "name": "failure",
+                "outcome": "succeeded",
+                "step": {
+                  "completed_at": 1793673691,
+                  "exit_code": 0,
+                  "iterations": [
+                    []
+                  ],
+                  "key": 0,
+                  "label": "task status demo-intentionally-missing",
+                  "lf_process_id": "67192d24-d823-4ed0-bd22-67d3a07bc538",
+                  "outcome": "succeeded",
+                  "started_at": 1793673691
+                }
+              }
+            }
+          }
+        },
+        "source": "task_update",
+        "state": "accepted"
+      }
+    },
+    {
+      "seq": 37,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-cc38-7dc1-82bc-e79529367277",
+      "kind": "started",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673710,
+      "payload": {}
+    },
+    {
+      "seq": 39,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-cc38-7dc1-82bc-e79529367277",
+      "kind": "output",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673714,
+      "payload": {
+        "text": "Task 06bf2e remains available for review at demo; the latest run and its `help demo-intentionally-missing` step failed."
+      }
+    },
+    {
+      "seq": 40,
+      "session_id": "session_f1478d6846224f4dbc3384f9c37147dd",
+      "provider_thread": "01a19f43-3b41-72d3-bfff-88027bca6314",
+      "provider_turn": "01a19f48-cc38-7dc1-82bc-e79529367277",
+      "kind": "completed",
+      "agent_process_id": "514568b4-834b-4211-8d40-97fea7094d3c",
+      "lf_process_id": "ea3df9f1-c3b5-4077-a0bb-b7c2c5539abd",
+      "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+      "wave_id": null,
+      "observed_at": 1793673714,
+      "payload": {
+        "completed_at": 1793673714,
+        "context": {
+          "compaction_tokens": null,
+          "compactions": 0,
+          "first_request_tokens": 22716,
+          "peak_request_tokens": 22716,
+          "tool_output_tokens": 0,
+          "tool_results": 0
+        },
+        "duration_ms": 3516,
+        "error": null,
+        "started_at": 1793673710,
+        "status": "completed"
+      }
+    }
+  ],
+  "terminal_screen": "  advance review, publish or merge. Read current Task status before acting. Diffs belong in Files.              \n  </lf:task-update>                                                                                             \n                                                                                                                \n                                                                                                                \n\u2022 Task 06bf2e remains available for review at demo; the run named \u201cfailure\u201d and its wait step both recorded     \n  success.                                                                                                      \n                                                                                                                \n  Worked for 3s \u2022 6:41 PM                                                                                       \n                                                                                                                \n                                                                                                                \n\u203a <lf:task-update>                                                                                              \n  Task 06bf2e: At demo \u00b7 available for review. Run failure (ea4298d9-4c3c-4ed8-9949-f087aa0eca3e) \u00b7 succeeded \u00b7 \n  task status demo-intentionally-missing (67192d24-d823-4ed0-bd22-67d3a07bc538): succeeded.                     \n  Report this recorded progress briefly. This is observation, not a request or permission to launch work,       \n  advance review, publish or merge. Read current Task status before acting. Diffs belong in Files.              \n  </lf:task-update>                                                                                             \n                                                                                                                \n                                                                                                                \n\u2022 Task 06bf2e remains available for review at demo; the run named \u201cfailure\u201d and its task status demo-           \n  intentionally-missing step both recorded success.                                                             \n                                                                                                                \n  Worked for 3s \u2022 6:41 PM                                                                                       \n                                                                                                                \n                                                                                                                \n\u203a <lf:task-update>                                                                                              \n  Task 06bf2e: At demo \u00b7 available for review. Run failure (b19b8d55-15a3-44e8-b976-4c3fa272c906) \u00b7 failed \u00b7    \n  help demo-intentionally-missing (a058e856-3555-4985-8b47-b285c2be1abe): failed.                               \n  Report this recorded progress briefly. This is observation, not a request or permission to launch work,       \n  advance review, publish or merge. Read current Task status before acting. Diffs belong in Files.              \n  </lf:task-update>                                                                                             \n                                                                                                                \n                                                                                                                \n\u2022 Task 06bf2e remains available for review at demo; the latest run and its help demo-intentionally-missing step \n  failed.                                                                                                       \n                                                                                                                \n  Worked for 3s \u2022 6:41 PM                                                                                       \n                                                                                                                \n                                                                                                                \n\u203a Draft: keep this sentence while the worker changes.                                                           \n                                                                                                                \n  GPT-6-Astra high \u00b7 /private/tmp/loo711-demo/worker-demo.06bf2e-worker-updates-demo                            \n                                                                                                                ",
+  "desktop_before": "/tmp/loopflow-20261102-183902.png",
+  "desktop_after": "/tmp/loopflow-20261102-184100.png"
+}

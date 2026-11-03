@@ -676,20 +676,6 @@ impl SqliteStore {
         Ok(rows)
     }
 
-    /// Whether a viewer is attached to execution owner `owner`.
-    pub(crate) fn owner_viewed(&self, owner: &crate::id::LfProcessId) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT viewed FROM processes WHERE id=?1",
-                [owner.as_str()],
-                |row| row.get::<_, Option<bool>>(0),
-            )
-            .optional()?
-            .flatten()
-            .unwrap_or(false))
-    }
-
     /// A Task's unfinished interactive conversations, each with its last opening.
     pub(crate) fn task_conversations(
         &self,

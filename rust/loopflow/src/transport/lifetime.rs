@@ -3,11 +3,12 @@
 //! A terminal owner nobody views ends after `session.end_detached_after` of
 //! quiet: no viewer, no output from its command, and nothing in the store
 //! holding it (a turn in progress, a running Graph, a headless Run). An owner
-//! whose lf executable is removed or replaced (a worktree deleted, a build
-//! relinked, Dev.app rebuilt) ends once its Sessions wait for a person and its
-//! command has been quiet for one poll, viewers notwithstanding: it would
-//! otherwise run a vanished build
-//! indefinitely. Its attached viewers are told why and how to return. Ending
+//! whose lf executable is removed, replaced or superseded (a worktree deleted,
+//! a build relinked, Dev.app rebuilt, another installed build selected) ends once
+//! its Sessions wait for a person and its command has been quiet for one poll,
+//! viewers notwithstanding: it would
+//! otherwise run a vanished or outdated build indefinitely. Its attached viewers
+//! are told why and follow the resume command through the lf entry. Ending
 //! writes the last screen, stops the agent and records the exit, so `lf resume`
 //! reopens the conversation from provider history and `lf resume --all` leaves
 //! it alone.
@@ -16,11 +17,14 @@
 //! the first poll after it wakes. A store that cannot be read is judged again
 //! next time; the policy never stops on an error.
 
+use std::io::Write;
 use std::os::unix::fs::MetadataExt;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
+use super::Response;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
 use crate::store::sqlite::SqliteStore;
@@ -46,12 +50,15 @@ pub(super) enum Activity {
 pub(super) fn spawn(
     owner: LfProcessId,
     terminal: bool,
-) -> (mpsc::Sender<Activity>, mpsc::Receiver<Option<String>>) {
+    waker: UnixStream,
+) -> (mpsc::Sender<Activity>, mpsc::Receiver<Response>) {
     let executable = Executable::current();
     let (activity, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
     std::thread::spawn(move || {
         watch(&owner, executable.as_ref(), terminal, &changes, &end);
+        // Wake the descriptor loop once the policy has spoken.
+        let _ = (&waker).write_all(&[1]);
     });
     (activity, ending)
 }
@@ -87,7 +94,7 @@ fn watch(
     executable: Option<&Executable>,
     terminal: bool,
     changes: &mpsc::Receiver<Activity>,
-    end: &mpsc::Sender<Option<String>>,
+    end: &mpsc::Sender<Response>,
 ) {
     let mut store = Store::default();
     let mut last_output = SystemTime::now();
@@ -128,10 +135,10 @@ fn watch(
             }
         }
         let now = SystemTime::now();
-        let gone = executable.and_then(|executable| executable.gone().map(|how| (executable, how)));
+        let change = executable.and_then(Executable::change);
         // Native turns may leave only terminal output. Viewers never prolong a
         // vanished build, so their activity cannot reset this quiet interval.
-        let quiet = match gone {
+        let quiet = match change {
             Some(_) => now.duration_since(last_output).unwrap_or_default() >= POLL,
             None => grace.expired(now),
         };
@@ -154,29 +161,47 @@ fn watch(
                 continue;
             }
         }
-        let hint = match gone {
-            Some((executable, how)) => {
+        let moved = match change {
+            Some(change) => {
                 tracing::warn!(
                     %owner,
-                    path = %executable.path.display(),
-                    "ending a Session whose lf executable was {how}"
+                    path = ?executable.map(|executable| &executable.path),
+                    "ending a Session whose lf was {change}"
                 );
-                store
-                    .owner_sessions(owner)
-                    .ok()
-                    .and_then(|sessions| sessions.into_iter().next())
-                    .map(|session| {
-                        format!(
-                            "This Session's lf build was {how}; `lf resume {session}` reopens it."
-                        )
-                    })
+                let session = match store.owner_sessions(owner) {
+                    Ok(sessions) => sessions.into_iter().next(),
+                    Err(error) => {
+                        tracing::warn!(%error, %owner, "cannot find the Session to reopen; judging again later");
+                        continue;
+                    }
+                };
+                let Some(session) = session else {
+                    continue;
+                };
+                let successor = crate::os_process::resolve_lf_binary().ok().map(|entry| {
+                    vec![
+                        entry.to_string_lossy().into_owned(),
+                        "session".into(),
+                        "resume".into(),
+                        session.clone(),
+                    ]
+                });
+                Response::Moved {
+                    notice: Some(format!(
+                        "This Session's lf was {change}; reopening it as `lf resume {session}`"
+                    )),
+                    successor,
+                }
             }
             None => {
                 tracing::info!(%owner, "ending a Session nobody has viewed");
-                None
+                Response::Moved {
+                    notice: None,
+                    successor: None,
+                }
             }
         };
-        if end.send(hint).is_err() {
+        if end.send(moved).is_err() {
             crate::platform::kill_process(std::process::id());
         }
         return;
@@ -219,12 +244,31 @@ struct Executable {
     identity: (u64, u64, u64, i64, i64),
 }
 
+/// What became of the owner's executable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Change {
+    Removed,
+    Replaced,
+    /// The entry now dispatches to another build.
+    Superseded,
+}
+
+impl std::fmt::Display for Change {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Change::Removed => "removed",
+            Change::Replaced => "replaced",
+            Change::Superseded => "superseded",
+        })
+    }
+}
+
 impl Executable {
     /// `None` when the running executable cannot be read; that owner keeps only
     /// the detached limit.
     fn current() -> Option<Self> {
         let read = || -> std::io::Result<Self> {
-            let path = std::fs::canonicalize(std::env::current_exe()?)?;
+            let path = crate::journal::current_executable()?;
             let identity = identity(&std::fs::metadata(&path)?);
             Ok(Self { path, identity })
         };
@@ -235,14 +279,19 @@ impl Executable {
             .ok()
     }
 
-    /// `removed` or `replaced` once the file at the path is no longer this one.
-    /// Any other read error is transient and judged again next time.
-    fn gone(&self) -> Option<&'static str> {
+    /// Removed or replaced once the file at the path is no longer this one;
+    /// superseded once the entry dispatches to another build. Any other read
+    /// error is transient and judged again next time.
+    fn change(&self) -> Option<Change> {
         match std::fs::metadata(&self.path) {
-            Ok(metadata) => (identity(&metadata) != self.identity).then_some("replaced"),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some("removed"),
-            Err(_) => None,
+            Ok(metadata) if identity(&metadata) != self.identity => return Some(Change::Replaced),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Some(Change::Removed)
+            }
+            Err(_) => return None,
         }
+        crate::installation::superseded(&self.path).then_some(Change::Superseded)
     }
 }
 

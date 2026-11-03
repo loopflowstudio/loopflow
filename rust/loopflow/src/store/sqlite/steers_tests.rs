@@ -58,36 +58,74 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
         )
         .unwrap();
     }
-    store.record_native_turn(&adapter, "native", false).unwrap();
+    store
+        .record_native_turn(&adapter, "native", false, None)
+        .unwrap();
     assert!(!store.owner_waits_for_person(owner).unwrap());
     let next = store
         .claim_session_attachment("session", Some(&first), owner, false)
         .unwrap();
     assert_ne!(first.token, next.token);
     // The provider itself survived; its stop belongs to its current attachment.
-    store.record_native_turn(&adapter, "native", true).unwrap();
-    assert!(store.owner_waits_for_person(owner).unwrap());
-    store.record_native_turn(&adapter, "native", false).unwrap();
+    store
+        .record_native_turn(&adapter, "native", true, Some(1))
+        .unwrap();
     assert!(!store.owner_waits_for_person(owner).unwrap());
-    assert!(store.record_native_turn(&adapter, "child", true).is_err());
+    // A viewed prompt can say idle while its provider still owns a watch.
+    {
+        let conn = store.conn.lock().unwrap();
+        conn.execute("UPDATE processes SET viewed=1 WHERE id=?1", [owner])
+            .unwrap();
+        conn.execute(
+            r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
+            [],
+        )
+        .unwrap();
+    }
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .unwrap();
+    assert!(store.owner_waits_for_person(owner).unwrap());
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute("UPDATE processes SET viewed=0 WHERE id=?1", [owner])
+        .unwrap();
+    store
+        .record_native_turn(&adapter, "native", false, None)
+        .unwrap();
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    assert!(store
+        .record_native_turn(&adapter, "child", true, Some(0))
+        .is_err());
     assert!(!store.owner_waits_for_person(owner).unwrap());
     let replacement = store
         .replace_session_agent_process("session", &next, None, || Ok(true))
         .unwrap();
     // Activity from the old provider cannot keep its replacement alive.
     assert!(store.owner_waits_for_person(owner).unwrap());
-    assert!(store.record_native_turn(&adapter, "native", false).is_err());
+    assert!(store
+        .record_native_turn(&adapter, "native", true, Some(1))
+        .is_err());
     let current = store
         .reserve_steer_adapter("session", &replacement)
         .unwrap();
     store
         .with_provider_context(&current, "native", ACTIVATE, || Ok(()))
         .unwrap();
-    store.record_native_turn(&current, "native", false).unwrap();
+    store
+        .record_native_turn(&current, "native", true, Some(1))
+        .unwrap();
     assert!(!store.owner_waits_for_person(owner).unwrap());
-    assert!(store.record_native_turn(&adapter, "native", true).is_err());
+    assert!(store
+        .record_native_turn(&adapter, "native", true, Some(0))
+        .is_err());
     assert!(!store.owner_waits_for_person(owner).unwrap());
-    store.record_native_turn(&current, "native", true).unwrap();
+    store
+        .record_native_turn(&current, "native", true, Some(0))
+        .unwrap();
     assert!(store.owner_waits_for_person(owner).unwrap());
 }
 

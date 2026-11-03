@@ -1,5 +1,9 @@
 # infrastructure wave memory
 
+Pre-curation detail for the Session continuity and upgrade sections below:
+`eda48a4e80f033e821ea08756e865214cec06f42:.lf/wave/infrastructure/MEMORY.md`,
+under the same headings. Archives authorize no work or acceptance.
+
 ## Unpublished checkout preservation (LOO-666, 2026-10-27)
 
 Jack Heart authorized repair through merge after installed 0.14.19 cleanup
@@ -54,26 +58,22 @@ recency; preparation launches no provider. LOO-499 history:
 
 ## Idle owners end (LOO-709, 2026-11-02)
 
-Jack Heart: idle conversations cost nothing. Source ends unviewed, quiet
-owners after `session.end_detached_after` (default `2m`; Jack named 2m and 30m).
-Resume preserves history without replay; `--all` selects viewed owners with no
-recorded exit. This supersedes LOO-415's viewer-loss rule.
+Jack Heart requires idle conversations to cost nothing. Unviewed quiet owners
+end after `session.end_detached_after` (2m assumed from Jack's 2m/30m candidates).
+Resume never replays; `--all` selects viewed owners without recorded exits.
+This supersedes LOO-415's viewer-loss rule.
 
 The failed 24h policy counted finished Graphs, awake time and stale status,
-exited on store errors, and was absent from pre-rule builds. Use `SystemTime`,
-retry failed judgments, and hold only running Graphs, live turns and headless
-Runs. Jack's review requires silent native turns: Claude prompt/stop hooks record
-fenced current-attachment activity before context delivery. Silence never settles
-a turn; output adds evidence. Viewers cannot reset executable-gone quiet time.
-Stand-in hooks prove both deadlines and ending after Stop; native permission waits
-need demo evidence. LOO-705's `lf monitor rollover` owns pre-rule owners.
+died on store errors, and was absent from pre-rule builds. Use wall time, retry
+judgments, and preserve running Graphs, live turns and Runs. Claude hooks record
+fenced activity before context delivery; silence cannot settle it. Output adds
+evidence; viewers cannot extend executable-gone quiet. Stand-in hooks prove both
+deadlines and settlement; native permission waits need demo evidence. LOO-705
+owns pre-rule rollover.
 
-LOO-710 agreement following Jack's coordination request:
-`screens/<session>.ghostsnp`, no DTO field; LOO-710 owns the reader and format.
-LOO-709 now uses LOO-710's snapshot writer at policy and command exit;
-the `.vt` writer is removed. Jack retains screens without expiry or deletion. Release's evidence limit
-applies: the disposable-Home live check ended 20 owners but resumed only three;
-installation and full acceptance remain unproved.
+Jack's LOO-710 agreement: `screens/<session>.ghostsnp`, no DTO field, expiry or deletion.
+Its writer/reader replace `.vt`; save at policy and command exit. Disposable-Home
+proof ended 20 owners but resumed three; installation/full return remain unproved.
 
 ## Waited landing (LOO-503, 2026-10-17)
 
@@ -270,42 +270,30 @@ Earlier patch evidence and constraints:
 
 ## Session continuity (LOO-416/710, reconciled 2026-11-02)
 
-Jack Heart accepted per-Session lf owners (per-shell PTY owners for shells),
-shared Work-keyed layout intent, and uniform repository/Wave/Task lifecycle,
-including nested CLI. No shared daemon, automatic replay or selected eager-start
-policy. LOO-415 owns transport (#1581); LOO-618 folds attachment into `lf resume`.
-LOO-497 owns layout APIs and LOO-489 integrates them.
+Jack Heart accepted per-Session owners (per-shell PTYs), Work-keyed layout intent
+and uniform repository/Wave/Task lifecycle including nested CLI. No daemon,
+replay or eager-start policy. LOO-415 owns transport, LOO-618 resume, LOO-497
+layout APIs, LOO-489 integration. Known scenes render before lookup; fresh
+resolution owns new links. App death loses runtime state; repaint restores
+neither input nor cross-installation layout. Registries/twelve-layout fixtures
+prove no provider continuity.
 
-Retained registries and twelve-layout headless fixtures prove no live-provider
-continuity. Known scenes render before lookup; fresh resolution owns new links.
-App death destroys Desktop runtime state; repaint alone restores neither input
-nor cross-installation layout. LOO-710's November 2 source keeps libghostty-vt
-state and writes `screens/<session>.ghostsnp`; each file names its Ghostty revision
-because format v1 promises no cross-revision compatibility. GhosttyKit exposes no
-decoder (LOO-672).
+LOO-710 snapshots name their Ghostty revision: v1 has no cross-revision promise;
+GhosttyKit has no decoder (LOO-672). One preview/live cleanup owner restores
+modes/colors on launch failure or pre-ack cancellation. Even blank live state
+supersedes preview; freshness means no output. Jack's fidelity requirement:
+paint history/primary before alternate, inspect a disposable copy, preserve
+1049's saved cursor, and use the color override mask so untouched colors follow
+the viewer theme. Stand-ins prove return to primary, round trips, colors and
+public resume, not configured Claude, Desktop or four-target packaging.
 
-Preview and live bytes need one cleanup owner before startup. Launch failure and
-pre-acknowledgement cancellation restore modes/colors; even blank live state
-supersedes the preview. Freshness means no output, not empty text. Jack Heart's fidelity
-requirement also covers inactive primary content: paint retained history/primary
-before alternate, inspect only a disposable snapshot copy, and preserve the cursor
-1049 saves. Explicit color overrides need the override mask, not comparison with
-default values; untouched colors follow the viewer theme. LOO-710 fixtures prove
-bare return to primary, snapshot round trips, rendered colors and public resume
-recovery with stand-ins, not configured Claude, Desktop or four-target packaging.
-
-Admission is not execution: Task filing and explicit Wave admission now commit
-uncaptured primary Sessions; explicit execution reserves input and claims the
-Task. Nested CLI stand-ins preserve a pending request,
-provider/Session identity and caller provenance after calling-provider/viewer death;
-this proves neither native readiness nor a warming policy.
-Finite Desktop requests must propagate cancellation through the actual worker,
-drain input/output together and bound inherited pipes after child exit. Kill only
-the exact query child; a timed-out mutation remains unknown, never retried blindly.
-
-Prove reopening through its public router, then native remount and provider
-survival separately; retained models prove no editable provider readiness.
-LOO-416's saved-state integration and measured native continuity remain open.
+Filing/admission commits uncaptured primary Sessions; execution reserves input
+and claims Tasks. Nested CLI stand-ins preserve pending input, provider/Session
+identity and provenance after caller/viewer death, not readiness or warming.
+Desktop cancellation reaches the worker, drains both directions and bounds
+inherited pipes after exit. Kill only the exact query child; timed-out mutations
+stay unknown. Public reopening, native remount and provider survival need separate
+proof; LOO-416 saved-state integration/measured continuity remain open.
 
 ## Machines (LOO-394 / LOO-411, 2026-10-07)
 
@@ -408,34 +396,27 @@ Harness errors retain failed-result text for retries. CI owns the full matrix.
 ## Live conversation ownership (LOO-415, curated 2026-10-17)
 
 Jack Heart accepted per-conversation owners for nested CLI, headless, terminal,
-shell and Flow execution. LOO-415 owns transport; LOO-416 owns lifecycle/readiness.
-#1581 merged as `28dc141671`.
-No shared server or automatic turn/Flow replay. Explicit native resume may restart
-when necessary, preserving Session/history without resubmitting input. Viewer loss
-starts LOO-709's grace and nothing else; native-only Flow execution remains unselected.
+shell and Flow work (#1581, `28dc141671`). LOO-415 owns transport; LOO-416
+lifecycle/readiness. No shared server or automatic replay. Explicit resume
+preserves history/input; viewer loss starts only LOO-709's grace. Native-only
+Flows remain unselected. Owners retain execution/capture/client; passive viewers
+claim nothing. Viewer timeout/cancellation changes neither provider attachment
+nor execution authority.
 
-The owner retains execution, capture and native client; viewer tokens leave
-provider attachment unchanged. Passive viewing takes no claim. Acknowledgement
-timeout/cancellation exits only the viewer; unknown execution never authorizes replay.
-Release's entry-point lesson applies: Flow fixtures prove no installed use.
+Jack's October 17 disposable-Home Claude walkthrough kept provider PID and
+AgentProcess. Installed-store/Desktop, SSH, owner-crash/startup and twelve-Session
+acceptance remain unproved; detail: `28dc141671:.lf/wave/infrastructure/MEMORY.md`,
+this heading. Reattachment retains hooks. LOO-502 later removed automatic restart
+and selected stable entries.
 
-`28dc141671` records Jack Heart's October 17 disposable-Home Claude walkthrough:
-the restored interaction completed with the same provider PID and AgentProcess.
-Installed-store/Desktop, SSH, owner-crash/startup and twelve-Session acceptance
-remain unproved. Earlier limits: `28dc141671:.lf/wave/infrastructure/MEMORY.md`,
-this heading. Reattachment retains hooks; LOO-502's later October 17 direction
-removes automatic restart and selects stable entries for future commands.
-
-LOO-708 (Jack Heart, 2026-11-02): exec removes the Claude launcher and viewer
-heap; only the owner's direct child hands off exit settlement. Graph steps keep
-their wait. A blocking child wait wakes the descriptor loop without taking
-SIGCHLD from background runtimes. Pre-compression stand-in footprint: owner/relay 20/2.5 MB;
-installed acceptance remains unproved. LOO-705 must supply the Session successor:
-replaying relay argv targets the ended owner. LOO-712 owns wire encoding.
-Release's entry-path lesson applies to each resume/new-thread entry. Exec
-discards post-return work: carry the resulting Session identity without replaying
-mutations. Owner settlement shares returning-launcher result/capture semantics;
-native status alone cannot redefine command failure or attachment loss.
+LOO-708 (Jack Heart, November 2): exec removes Claude launcher/viewer heap;
+only the owner's direct child hands off settlement. Graph steps still wait.
+Blocking child wait wakes descriptors without taking runtimes' SIGCHLD.
+Pre-compression stand-ins: owner/relay 20/2.5 MB; no installed acceptance.
+LOO-705 supplies the Session successor; replaying relay argv targets a dead owner.
+LOO-712 owns encoding. Every resume/new-thread entry must carry its resulting
+Session across exec without replay. Owner/returning-launcher settlement share
+result/capture semantics; native status cannot redefine failure/attachment loss.
 
 ## Session steers (lf-9c03797, 2026-10-11)
 
@@ -953,56 +934,38 @@ retains cold-download/operation-entry evidence; reporting proves no operation su
 
 ## Upgrade continuity (LOO-502, 2026-10-17)
 
-After PR #1587 review, Jack Heart selected removing ordinary executable pinning,
-accepting natural failure of existing processes and retrying in the same Session
-and checkout. This supersedes automatic incompatible-client recovery; delivery
-remains review only. Earlier design/proofs:
-`4ca3bbe3d7b30b8a4bb05d466ad55f5eeb368201:scratch/loo-502.md`.
+Jack Heart removed executable pinning after #1587 review, accepting natural
+failure and retry in the same Session/checkout; delivery stays review-only.
+Providers, hooks, prepared commands and Flow children use the stable entry;
+execution selects/verifies artifacts. Main dispatch ignores inherited LF_BIN;
+private Homes retain selection. Schema checks remain; compatibility probing
+and installer-triggered restart are deleted. LOO-705 owns viewer return.
 
-Source now carries the stable installed entry through providers, hooks, prepared
-Session commands and Flow children. The existing gate selects/verifies artifacts
-at execution. Main-Machine dispatch ignores inherited LF_BIN; explicit private
-Homes retain executable selection. Compatibility probing and installer-triggered
-native restart are removed; LOO-705 (below) brings viewers that follow the entry
-back. Schema checks remain.
-
-Pre-fix binaries and hooks keep their old environment; reattachment cannot change
-it, and an explicit same-Session resume after provider exit refreshes it. Old Flow
-cursors cannot be reconstructed from display graphs; inspect receipts and effects
-before selecting remaining work, with no replay or invented exits. The
-disposable-account proof (exit 42 retry across an installation switch) and the
-claims it leaves unproved: `38dd8abd09:.lf/wave/infrastructure/MEMORY.md`, this
-heading. MTG-117's unknown exit is not proven upgrade-caused.
+Reattachment cannot update pre-fix environments; same-Session resume after exit
+can. Inspect old Flow receipts/effects before choosing remaining work; display
+graphs cannot reconstruct cursors or authorize replay. Disposable exit-42 retry
+proof and limits: `38dd8abd09:.lf/wave/infrastructure/MEMORY.md`, this heading;
+design: `4ca3bbe3d7b30b8a4bb05d466ad55f5eeb368201:scratch/loo-502.md`.
+MTG-117's unknown exit is not proven upgrade-caused.
 
 ## Moving onto the installed lf (LOO-705, 2026-11-02)
 
-Jack Heart asked (2026-11-02) that long-lived lf processes move onto the
-installed lf by one mechanism, deep enough that a new kind of skew needs no new
-case, after 0.15.0 owners refused 0.15.1 attaches and `lf monitor rollover`
-moved none of them. Headless choice, pending Jack: replacement from durable
-state, never negotiation. An owner is superseded when the entry it was launched
-through (`resolve_lf_binary()`) no longer dispatches to its build:
-`installation::superseded`, the one judgement the owner, `lf resume` and
-rollover's inventory share. The owner ends once its Sessions wait for a person,
-whatever became of its file (removed, replaced or superseded: one notice, one
-next move), and sends viewers `<entry> session resume <id>`, which they run
-without judging and without replaying their own argv (Jack, 2026-11-02: LOO-708
-execs viewers into `session attach` before Clap). `lf resume` ends a superseded owner at that same
-boundary and resumes from provider history; one mid-turn that answers its
-socket is watched instead, one that does not is ended and the cut turn reported
-(concept review, 2026-11-02). Rollover is that sweep for every superseded
-owner, its viewed and artifact-set rules deleted. Graph runners are never
-stopped; each step already launches through the entry.
+Jack Heart requested one rollover mechanism after 0.15.0 refused 0.15.1 attaches
+and rollover moved none. Replacement from durable state, without negotiation,
+remains the headless choice pending Jack. `installation::superseded` compares
+the owner's build with its launch entry (`resolve_lf_binary`), shared by owner,
+resume and inventory. Removed/replaced/superseded owners end when waiting and
+send `<entry> session resume <id>`; viewers execute it without replaying argv
+(LOO-708 execs viewers before Clap). Resume watches an answering busy owner;
+an unanswering one ends with a cut-turn report. Rollover sweeps all superseded
+owners; viewed/artifact-set filters are deleted. Graph runners stay; steps use
+the entry. Jack calls LOO-709's 2m grace sufficient for "move always."
 
-Lessons: the transport crosses builds, so add `Option` fields to existing
-`Response` variants and never a new variant (the `moved` variant broke 0.15.0
-peers). Compare build identity against what a relaunch runs, not the viewer's
-own executable, or a development viewer restarts installed owners. LOO-709's
-2-minute unviewed grace makes "move always" moot (Jack, 2026-11-02). Limits: an
-owner that cannot open an advanced store cannot judge idleness and keeps
-judging; Loopflow.app and the CLI on different builds restart each other's
-owners on `lf resume`; the Mac demo (`lf resume LOO-618`) and a Graph taking
-its next step on a newer lf are unproved by fixture.
+Cross-build transport adds optional fields to existing Response variants, never
+variants (`moved` broke 0.15.0). Compare against the relaunch entry, not the
+viewer binary. Unreadable advanced stores keep retrying; mismatched app/CLI
+builds restart each other's owners. Fixtures prove neither Mac `lf resume LOO-618`
+nor a Graph's next step on a newer build.
 
 ## Shipped history
 

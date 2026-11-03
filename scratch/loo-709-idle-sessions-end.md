@@ -7,12 +7,13 @@ Rust only; Desktop (LOO-672), process overhead (LOO-708), and snapshot fidelity
 (LOO-710) stay with their owners. Earlier design and concept review:
 `9bc58f47ba39ee1efaf0cc6677a37095d93d187f:scratch/loo-709-idle-sessions-end.md`.
 
-**Status, reconciled 2026-11-02:** the accepted silent-turn repair is implemented
-at `bafb3efdcd`, including generated-hook and attachment-handoff regressions.
-The focused checks below passed before reconciliation; code is unchanged here.
-The 2m default and viewed-only crash selection remain the documented assumptions
-in `questions.md`. No screen expiry or deletion is selected by Jack's review
-steer. Full return acceptance, gate and installation remain unproved.
+**Status, implemented 2026-11-02:** silent-turn protection from `bafb3efdcd`
+is preserved. Native Stop now retains background tasks and scheduled wakeups,
+including while a viewed terminal reports idle; missing snapshots cannot settle
+known work. Real Claude callback evidence and focused lifetime regressions are
+recorded below. The 2m default and viewed-only crash selection remain the
+assumptions in `questions.md`. Full return acceptance, gate and installation
+remain unproved.
 
 ## Required behavior
 
@@ -28,7 +29,11 @@ steer. Full return acceptance, gate and installation remain unproved.
   different conversations and replaced providers cannot write. Structured
   streams and Pi's native extension retain their activity path. Start/stop
   recording precedes steering or planning delivery so failed context delivery
-  cannot suppress evidence of a started turn.
+  cannot suppress evidence of a started turn. Claude Stop snapshots retain
+  background tasks and session-scoped scheduled wakeups as outstanding work;
+  a later complete empty snapshot settles them. Missing arrays preserve the
+  prior count for that same provider. A yielded reply or viewed idle terminal
+  cannot settle provider-owned background work.
 - Command output supplies additional activity. Executable removal/replacement
   requires two seconds of output silence plus the same store judgment; viewer
   changes cannot extend this interval. Silence never settles a recorded turn.
@@ -36,9 +41,9 @@ steer. Full return acceptance, gate and installation remain unproved.
   behavior needs demo evidence.
 - Store failures retry. Store-open failures log once per distinct error;
   judgment and viewer-write failures log each occurrence.
-- Before policy or command exit, save `$LF_HOME/screens/<session>.vt` atomically:
-  vt100 scrollback followed by the visible redraw. Live attach redraws only
-  the grid. External SIGTERM writes no snapshot. Keep one overwritten file
+- Before policy or command exit, save `$LF_HOME/screens/<session>.ghostsnp`
+  atomically through LOO-710's snapshot writer. Live attach and resume use its
+  Ghostty repaint. External SIGTERM writes no snapshot. Keep one overwritten file
   per Session, with no expiry or deletion; no age/space policy was accepted.
 - `lf resume` reopens provider history at the bottom without replay or a new
   turn. `lf resume --all` selects unfinished interactive Sessions whose owner
@@ -54,23 +59,22 @@ retain it); store-only executable-gone judgment; `LONGEST_PAUSE`, `recheck`,
 `held_until`, `Grace::due`; unreadable-config disabling; duplicate
 `RUNNING_SESSION_GRAPH`. Reuse `SESSION_GRAPH`, `session_activity` and the
 provider/attachment fences. No schema, DTO, public mode or second lifecycle.
-No remaining deletion is due in this pass.
+Completed this pass: `record_native_turn`'s unconditional `open_tools: 0` and
+`TURN_LIVE`'s terminal-idle precedence over owned background work.
+The surviving native callback records Claude's complete `background_tasks` and
+`session_crons` snapshots in the existing activity count. No new registry,
+polling process, status inference or completion timer is introduced.
+`TURN_LIVE` now states its precedence directly: owned work, viewed status, then
+the current attachment's unyielded turn. Native fixtures use the shared provider
+installer. No deletion targets remain.
 
-**LOO-710 handoff:** Jack Heart requested agreement before either publishes;
-LOO-710 agreed on `<home>/screens/<session>.ghostsnp`, no DTO field, and owns
-`lf resume` painting the saved screen before provider launch when stdout is a
-terminal. Whichever branch lands second deletes the `.vt` writer:
-`transport::{save_last_screen,write_last_screen,last_screen_path}`,
-`Output::last_screen`, `terminal::last_screen` and its exclusive helpers/test,
-and rewrites the transport fixture decode for `.ghostsnp`. LOO-710's APIs are
-`transport::snapshot::{leave,last_screen}` (comment `a49ccb66`, 2026-11-02).
-Keep this branch's writer until that cutover. LOO-705's superseded exit uses
-this same policy-ending arm.
-
-Related-work readback, 2026-11-02: LOO-710's PR #1801 is open at demo; LOO-705's
-PR #1799 is open with gate running. Neither is integrated in this checkout
-(base `4e9ade2d04`, also the local `origin/main`). Their publication does not
-complete the writer cutover or prove installed behavior.
+**LOO-710 handoff completed during sync, 2026-11-02:** pinned main
+`ece53eec1b0274bd549525be5efbdc0bfb3965f2` includes the agreed Ghostty writer
+and reader. Both policy and command exit use `snapshot::leave`; the `.vt`
+writer and its exclusive terminal helpers are removed. Transport fixtures decode
+`.ghostsnp`. No DTO field, expiry or deletion policy is added. Main's LOO-705
+rollover response and wake pipe are combined with this branch's activity and
+wall-clock judgment. Source integration proves no installed acceptance.
 
 ## Why the 24-hour rule failed
 
@@ -95,7 +99,8 @@ and point the PR there rather than prescribing signals.
 - Gate: lifecycle, transport and launch-contract checks, plus Clippy. The native
   repair reaches `store::sqlite::steers_tests`, `context_block`,
   `harness::context`, `lf::commands::context`, `transport_tests` and
-  `integration::session_cli_tests`.
+  `integration::session_cli_tests`, plus `world_recipes` watch cases and
+  `store::sqlite::program_status` for activity/terminal precedence.
 - Preserve regressions for active native turns across both deadlines and ending
   after Stop; current-attachment handoff/replacement fencing; continuous output;
   Graph ancestry and captured-step membership; stale status; installed symlink
@@ -108,33 +113,22 @@ and point the PR there rather than prescribing signals.
   but executable removal still asks this shared question and must preserve Runs.
 - Demo: return all twenty conversations at the bottom without new turns. Only
   three were resumed in the recorded probe; that does not meet full acceptance.
-- PR: include the numbers below and distinguish this writer from LOO-710's
-  reader. Installation and the complete return acceptance remain unproved.
+- PR: include the numbers below and describe the integrated LOO-710 snapshot
+  writer and reader. Installation and the complete return acceptance remain unproved.
 
 ## Concept review (2026-11-02)
 
-No further design change or unresolved product choice. Jack Heart's accepted
-silent-turn requirement fits the existing Session, provider and attachment
-model; it needs no suspended-Session state or separate resume lifecycle.
+Jack Heart's silent-turn requirement fits the existing Session/provider/attachment
+model; no suspended state, separate resume lifecycle or additional skill guidance
+is needed. No further product choice was identified beyond the recorded assumptions.
+Detach → retain live work → settle → save/end after quiet → resume provider history.
+Executable removal changes the interval, not turn authority. Generated callbacks
+use the stable entry independently of the owner's removable build.
 
-The interaction remains: detach → retain a live turn → settle → save the screen
-and end after quiet → ordinary resume of the same provider history. A removed
-owner executable changes the quiet interval, not the turn's authority.
-`record_native_turn` records start/settlement on the current attachment;
-`owner_waits_for_person` combines that evidence with running Graphs and Runs;
-the transport saves the screen before policy exit. Generated callbacks resolve
-the stable executable entry independently of the owner's removable build.
-
-Preservation counterexamples remain binding: silence cannot settle a turn;
-an old provider cannot settle its replacement; a finished Graph cannot retain
-an idle owner. After a crash, saved screen and provider history survive while
-the dead owner does not; viewed-only automatic restoration remains the recorded
-assumption. The existing usage docs express this interaction and mark the
-LOO-710 reader boundary. No additional skill instruction is needed.
-
-Next proof is the remaining acceptance above, particularly all twenty returns
-without new turns and real native permission waits. This review inspected
-source and existing regression coverage; it adds no runtime acceptance claim.
+Required counterexamples are retained above: silence cannot settle work, old
+providers cannot settle replacements, finished Graphs cannot retain owners.
+Source/coverage review adds no runtime acceptance; all twenty returns and real
+permission waits remain with demo.
 
 ## Recorded live evidence (2026-11-02)
 
@@ -146,6 +140,27 @@ Twenty screen files and idle-ending log lines, no store errors. Three resumes
 launched `claude --resume <thread>` without replay; saved screens showed the
 welcome and pending prompt. The 27 pre-rule owners were untouched.
 
+Native watch review (Jack Heart, 2026-11-02): Claude Code 2.1.317 in a
+throwaway native home and PTY, using a credential-free local Messages endpoint,
+ran a real background Bash watch on a completion file. Its first Stop contained
+one `shell` task with `status: running` and no scheduled wakeups. Five seconds
+later the file released the watch; Claude processed its completion notification
+and emitted a second Stop with both arrays empty (three model requests total).
+Evidence: `/private/tmp/native-watch-y1t6wzw1/hooks.jsonl` and
+`.lf/tmp/native-watch/probe.py`. This is real provider lifecycle evidence with
+synthetic model responses, not installed acceptance. All probe processes ended.
+The [Claude hook contract](https://code.claude.com/docs/en/hooks#stop-input)
+identifies both arrays as complete snapshots when its task registry is reachable.
+
+The generated-hook transport regression failed before repair: the owner ended
+past its grace with a yielded reply and a running watch. It now proves survival
+past both the grace and executable removal, missing-snapshot and child-callback
+isolation, scheduled work after shell completion, and owner exit after the final
+empty snapshot. Store regression also reproduced terminal-idle precedence while
+viewed; owned work now holds through that report and attachment handoff, with
+replacement-provider fencing intact. These fixtures preserve the prior silent
+turn test; they do not claim every external process is provider-owned work.
+
 ## Check result
 
-`cargo test -p loopflow --lib --test transport_tests silent_native_turn`: prior pass (2), reused with unchanged code; `git diff --check`, `lf context`: passed at realign; affected suites and Clippy: gate.
+`cargo test -p loopflow --lib --test transport_tests -- silent_native_turn native_background_watches_survive_until_settlement detached_sessions_end_after_their_limit sessions_end_when_their_lf_executable_goes` (inherited `LF_*` unset, stdin closed): 5 passed; `cargo fmt`, `git diff --check`: passed. Nonfatal linker unwind-size warning. Gate owns broader suites and Clippy; demo owns all twenty returns and native permission-wait judgment.

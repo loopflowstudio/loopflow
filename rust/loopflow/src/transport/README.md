@@ -39,7 +39,9 @@ A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
 from the last viewer change, command output or held work. A turn or running
 Graph keeps its owner and restarts the grace; finished Graphs do not. Native
-Claude prompt/stop hooks preserve even silent tool or network waits until Stop.
+Claude prompt/stop hooks preserve even silent tool or network waits. A reply
+with background tasks or scheduled wakeups keeps its owner until Claude reports
+that work has settled.
 Terminal status counts only while a viewer is attached to refresh it. Headless
 Runs never end for want of viewers.
 

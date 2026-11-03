@@ -1645,7 +1645,7 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
         owners.push(fixture.owner(owner));
         fixture.launches(owners.len());
     }
-    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    let sql = fixture.sql();
     let started = fixture.launches(4);
     let sessions: Vec<String> = started.iter().map(|line| session_of(&sql, line)).collect();
     // The first two are on screen; nobody opened the fourth.
@@ -1821,8 +1821,8 @@ fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
 
 /// Closing every view of a conversation ends its agent once
 /// `session.end_detached_after` of quiet passes. A viewer, live turn, output or
-/// running Graph keeps it; stale status and finished Graphs do not. The ended conversation reopens from saved history and
-/// stays out of `lf resume --all`.
+/// running Graph keeps it; stale status and finished Graphs do not. The ended
+/// conversation reopens from saved history and stays out of `lf resume --all`.
 #[test]
 fn detached_sessions_end_after_their_limit() {
     let fixture = Fixture::new();
@@ -1854,7 +1854,7 @@ fn detached_sessions_end_after_their_limit() {
         viewers.push(fixture.viewer(&owner, false));
         owners.push(owner);
     }
-    let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
+    let sql = fixture.sql();
     fixture.launches(7);
     let [idle_owner, viewed_owner, busy_owner, graph_owner, step_owner, stale_owner, talking_owner] =
         <[String; 7]>::try_from(owners).unwrap();
@@ -1958,15 +1958,22 @@ fn detached_sessions_end_after_their_limit() {
 /// Native start/stop callbacks preserve silent work across both deadlines.
 #[test]
 fn silent_native_turns_survive_until_settlement() {
+    native_work_survives_until_settlement(false);
+}
+
+#[test]
+fn native_background_watches_survive_until_settlement() {
+    native_work_survives_until_settlement(true);
+}
+
+fn native_work_survives_until_settlement(background: bool) {
     let fixture = Fixture::new();
     std::fs::write(
         fixture.home.path().join("config.yaml"),
         "session:\n  end_detached_after: 2s\n",
     )
     .unwrap();
-    let path = fixture.waiting_provider();
-    std::fs::write(
-        fixture.home.path().join("bin/claude"),
+    let path = fixture.provider(
         r#"#!/usr/bin/env python3
 import json, os, pathlib, subprocess, sys, time
 if sys.argv[1:] == ["--version"]:
@@ -1974,6 +1981,7 @@ if sys.argv[1:] == ["--version"]:
     sys.exit(0)
 home = pathlib.Path(os.environ["HOME"])
 name = os.environ["SILENT_CASE"]
+background = os.environ["BACKGROUND_WATCH"] == "true"
 settings = json.loads(pathlib.Path(sys.argv[sys.argv.index("--settings") + 1]).read_text())
 def hook(event, **extra):
     command = settings["hooks"][event][0]["hooks"][0]["command"]
@@ -1986,16 +1994,26 @@ hook("Stop")
 hook("UserPromptSubmit")
 # Child-agent completion must not settle the main conversation's turn.
 hook("Stop", agent_id="child")
+if background:
+    hook("Stop", background_tasks=[dict(id="watch", type="shell", status="running")], session_crons=[])
+    # Missing registry evidence and child completion cannot settle that watch.
+    hook("Stop")
+    hook("Stop", agent_id="child", background_tasks=[], session_crons=[])
 (home / (name + "-started")).write_text("started")
 while not (home / (name + "-settle")).exists():
     time.sleep(0.05)
-hook("Stop")
+if background:
+    # The shell watch finished, but a scheduled wakeup still owns work.
+    hook("Stop", background_tasks=[], session_crons=[dict(id="poll", schedule="* * * * *", recurring=True)])
+    (home / (name + "-scheduled")).write_text("scheduled")
+    while not (home / (name + "-unschedule")).exists():
+        time.sleep(0.05)
+hook("Stop", background_tasks=[], session_crons=[])
 (home / (name + "-settled")).write_text("settled")
 while True:
     time.sleep(1)
 "#,
-    )
-    .unwrap();
+    );
     let removable = fixture.home.path().join("bin/lf-removable");
     std::fs::copy(env!("CARGO_BIN_EXE_lf"), &removable).unwrap();
     let mut owners = Vec::new();
@@ -2015,6 +2033,7 @@ while True:
                 "silent turn",
             ])
             .env("PATH", &path)
+            .env("BACKGROUND_WATCH", background.to_string())
             .env("SILENT_CASE", name);
         let owner = fixture.owner(command);
         let viewer = fixture.viewer(&owner, false);
@@ -2039,6 +2058,12 @@ while True:
     }
     for (name, owner) in ["idle", "gone"].iter().zip(&owners) {
         std::fs::write(fixture.home.path().join(format!("{name}-settle")), "").unwrap();
+        if background {
+            fixture.wait_file(&format!("{name}-scheduled"));
+            std::thread::sleep(Duration::from_secs(4));
+            assert!(fixture.running(owner), "scheduled native work ended");
+            std::fs::write(fixture.home.path().join(format!("{name}-unschedule")), "").unwrap();
+        }
         fixture.wait_file(&format!("{name}-settled"));
         fixture.ends(owner);
     }

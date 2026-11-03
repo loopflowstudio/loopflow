@@ -266,7 +266,13 @@ pub fn emit_block(
             .as_str()
             .ok_or_else(|| anyhow!("Provider turn callback has no native conversation"))?;
         let store = crate::store::sqlite::SqliteStore::new(&delivery.home.join("loopflow.db"))?;
-        store.record_native_turn(adapter, thread, yielded)?;
+        // Claude's Stop snapshot includes work that will wake the conversation
+        // again. A yielded reply cannot settle a watch or a scheduled wakeup.
+        let open_tools = input["background_tasks"]
+            .as_array()
+            .zip(input["session_crons"].as_array())
+            .map(|(tasks, crons)| tasks.len() + crons.len());
+        store.record_native_turn(adapter, thread, yielded, open_tools)?;
     }
     if moment == crate::context_block::ContextMoment::Stop {
         return acquire_planning(&delivery);

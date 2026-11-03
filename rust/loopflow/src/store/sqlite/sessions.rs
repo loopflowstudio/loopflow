@@ -39,16 +39,20 @@ const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
 /// viewed; a report nobody refreshes is history, not a turn. Otherwise the
 /// facts the provider's own attachment wrote decide: open tools or an
 /// unyielded turn. A row with neither says nothing is running.
+/// Owned background work holds even a viewed terminal sitting at its prompt.
 const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
     JOIN processes p ON p.id=s.agent_process_id
     WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
     AND p.completed_at IS NULL
-    AND NOT CASE WHEN act.program_status IS NOT NULL
+    AND CASE
+        WHEN act.attachment_token IS p.attachment_token AND act.open_tools>0 THEN 1
+        WHEN act.program_status IS NOT NULL
             AND EXISTS(SELECT 1 FROM processes o WHERE o.id=s.transport_lf_process_id AND o.viewed=1) THEN
-        EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+        NOT EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
             WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
-    ELSE act.attachment_token IS NOT p.attachment_token
-        OR act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)";
+        ELSE act.attachment_token IS p.attachment_token
+            AND act.pending_input=0 AND act.yielded=0
+    END)";
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,

@@ -134,7 +134,7 @@ impl SqliteStore {
         write()
     }
 
-    /// Native hooks report turn boundaries even when the terminal is silent.
+    /// Native hooks report turn boundaries and work that outlives a reply.
     /// A retained provider capability follows attachment handoff, but cannot
     /// report for a replacement provider or a different native conversation.
     pub(crate) fn record_native_turn(
@@ -142,13 +142,18 @@ impl SqliteStore {
         adapter: &SteerAdapter,
         thread: &str,
         yielded: bool,
+        open_tools: Option<usize>,
     ) -> StoreResult<()> {
         self.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-            let native: bool = self.conn.lock().expect("store mutex poisoned").query_row(
-                "SELECT agent_interactive FROM processes WHERE id=?1",
-                [&adapter.agent_process_id],
-                |row| row.get(0),
-            )?;
+            let (native, previous_work): (bool, i64) =
+                self.conn.lock().expect("store mutex poisoned").query_row(
+                    "SELECT p.agent_interactive, COALESCE(act.open_tools,0)
+                     FROM processes p LEFT JOIN session_activity act
+                       ON act.agent_process_id=p.id AND act.session_id=?2
+                     WHERE p.id=?1",
+                    params![adapter.agent_process_id, adapter.session],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
             // Structured providers already report through their owned stream.
             if !native {
                 return Ok(());
@@ -162,7 +167,8 @@ impl SqliteStore {
                 &crate::session::SessionActivity {
                     preview: None,
                     observed_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-                    open_tools: 0,
+                    // An unavailable task registry cannot settle known work.
+                    open_tools: open_tools.unwrap_or(previous_work as usize),
                     pending_input: 0,
                     yielded,
                 },

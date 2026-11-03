@@ -57,6 +57,8 @@ not read as a turn (`transport_tests::detached_sessions_end_after_their_limit`).
 `transport_tests::silent_native_turns_survive_until_settlement` runs native
 prompt/stop callbacks from the generated hook settings, preserves silent work
 past the detached grace and executable removal, then proves ending after stop.
+`native_background_watches_survive_until_settlement` covers a yielded reply with
+background work, then scheduled wakeups, and ending only after both settle.
 
 Changes to Git default-branch discovery, checkout roots, or commit/push behavior
 also run `agent_startup_tests`, `release_tests`, and `release_lock_tests`. These

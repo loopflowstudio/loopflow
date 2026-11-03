@@ -702,7 +702,12 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
             config.env = environment.clone();
             let context_file = crate::agent::write_system_prompt_file(&config, &built.log_name)?;
             config.session_attachment = capture.session_attachment();
-            launch_session(&config, agent_session.as_ref(), context_file.as_deref())
+            launch_session(
+                &config,
+                agent_session.as_ref(),
+                context_file.as_deref(),
+                Some(&capture),
+            )
         })();
         if let Some(provider_session) =
             crate::session_record::read_provider_session(&capture.artifact_dir())

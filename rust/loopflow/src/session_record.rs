@@ -1397,6 +1397,19 @@ fn max_u64(values: impl Iterator<Item = Option<u64>>, gaps: &mut usize) -> Optio
 #[derive(Debug, Clone)]
 pub(crate) struct CaptureHandle(Arc<Mutex<SessionCapture>>);
 
+/// A capture's state as it crosses from an exec'd launcher to the execution
+/// owner that records its outcome.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CaptureHandoff {
+    pub key: String,
+    attempt: u32,
+    attempt_started: bool,
+    event_seq: u64,
+    account_id: Option<crate::store::ProviderAccountId>,
+    account_observed: bool,
+    agent_session: Option<AgentSessionId>,
+}
+
 pub(crate) fn register_session_attachment_interrupt(
     store: &crate::store::sqlite::SqliteStore,
     session: String,
@@ -1966,6 +1979,37 @@ impl CaptureHandle {
             .expect("Session capture mutex poisoned")
             .finish(outcome)
             .map_err(record_error)
+    }
+
+    /// This capture's live state, for the execution owner that settles it
+    /// after the launcher has exec'd its provider.
+    pub(crate) fn hand_off(&self) -> CaptureHandoff {
+        let capture = self.0.lock().expect("Session capture mutex poisoned");
+        CaptureHandoff {
+            key: capture.manifest.artifact_key.clone(),
+            attempt: capture.attempt,
+            attempt_started: capture.attempt_started,
+            event_seq: capture.event_seq,
+            account_id: capture.account_id.clone(),
+            account_observed: capture.account_observed,
+            agent_session: capture.agent_session.clone(),
+        }
+    }
+
+    /// Continue a handed-off capture in this process, at the stream position
+    /// its launcher left. Settling it writes the same terminal receipt and
+    /// attempt facts the launcher would have.
+    pub(crate) fn adopt(handoff: CaptureHandoff) -> StoreResult<Self> {
+        let (dir, manifest) =
+            resolve_manifest(&crate::store::lf_home_dir(), &handoff.key).map_err(record_error)?;
+        let mut capture = SessionCapture::from_manifest(manifest, dir);
+        capture.attempt = handoff.attempt;
+        capture.attempt_started = handoff.attempt_started;
+        capture.event_seq = handoff.event_seq;
+        capture.account_id = handoff.account_id;
+        capture.account_observed = handoff.account_observed;
+        capture.agent_session = handoff.agent_session;
+        Ok(Self(Arc::new(Mutex::new(capture))))
     }
 
     fn with_capture(&self, operation: impl FnOnce(&mut SessionCapture) -> std::io::Result<()>) {

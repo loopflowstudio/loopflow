@@ -16,6 +16,7 @@ mod dispatch_tests;
 mod fact;
 mod fact_writer;
 mod lf_tag;
+pub(crate) mod native_exit;
 pub mod opencode;
 mod opencode_decode;
 pub mod pi;

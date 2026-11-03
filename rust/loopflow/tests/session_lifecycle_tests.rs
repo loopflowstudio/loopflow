@@ -1343,7 +1343,10 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
         .unwrap();
         let failed = fixture.run(&["session", "resume", id]);
         assert!(!failed.status.success());
-        assert!(String::from_utf8_lossy(&failed.stderr).contains("before becoming resumable"));
+        // The connect became the launcher, so the launcher's own error is the
+        // connect's: the provider exited before publishing resumable history.
+        let stderr = String::from_utf8_lossy(&failed.stderr);
+        assert!(stderr.contains("failed to start"), "{stderr}");
         let previous = fixture.launches()[0].clone();
         fixture
             .db()

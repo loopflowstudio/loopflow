@@ -60,7 +60,8 @@ recency; preparation launches no provider. LOO-499 history:
 
 Jack Heart requires idle conversations to cost nothing. Unviewed quiet owners
 end after `session.end_detached_after` (2m assumed from Jack's 2m/30m candidates).
-Resume never replays; `--all` selects gone, viewed owners without recorded exits.
+Single-Session resume never replays; Jack removed bulk resume on November 3.
+Unsubmitted drafts and the same pending requests retain their native owner.
 This supersedes LOO-415's viewer-loss rule.
 
 The failed 24h policy counted finished Graphs, awake time and stale status,
@@ -76,6 +77,51 @@ LOO-710's integrated `screens/<session>.ghostsnp` writer/reader replaces `.vt`;
 save at policy and command exit. Jack selected no DTO field, expiry or deletion.
 Disposable-Home proof ended 20 owners but resumed three; installed/full return
 acceptance remains unproved.
+
+
+## Session viewer wire (LOO-712, 2026-11-02)
+
+Jack Heart asked (2026-11-02) that the owner and its viewers adopt the parts of
+Rex's protocol worth copying; the design and evidence live in the LOO-712 plan
+and `transport/README.md`. Decisions: one binary frame type (`tag · len · payload`)
+replaces JSON lines; a stream opens with the owner's snapshot in whatever format
+the owner has, so LOO-710's format change touches no framing. Events ride the
+output stream as APC sequences tagged with the viewer's nonce and a gapless
+`seq`; replies carry the `seq` they were computed at, in `--watch`'s id/answers
+shape. Resume is byte-counted against a 1 MiB per-viewer spool kept 60 s after
+EOF; exhaustion answers `reconnect_required` and the viewer repaints.
+Ownership arbitrates size and colors only and is separate from input control,
+which keeps LOO-618's token/replace/Busy semantics.
+
+Concept-review correction (2026-11-02): reports belong to each viewer, not a
+serve-wide theme cache. Retain queued reports through reconnect grace; only the
+settled owner's known theme reaches broadcasts and fresh observers. Resume alone
+does not restore appearance; takeover or queued promotion does. The ownership
+and byte-resume fixtures prove this with sequence/reply ordering intact.
+Unknown colors supply no override: this remains an implementation assumption,
+not a palette/reset decision attributed to Jack Heart. Desktop acceptance stays
+unproved.
+
+Deviations from Rex, with reasons: input control and ownership release at EOF,
+not after the grace window, because LOO-618's automatic attach must not see Busy
+for a disconnected viewer. EOF proves connection loss, not process death. Events ride stream 1 in pipe
+mode too (the viewer strips them, piped stdout stays byte-exact); a second
+control channel was rejected. Theme is relayed opaque; Desktop (LOO-672) owns
+colors. Lesson: `#[serde(flatten)]` of a struct with its own `id` onto the
+request envelope's `id` silently broke every status report, and the owner drops
+a connection whose frame fails to parse; a `wire.rs` unit test pins the key names.
+
+Land order per Jack Heart's comment: LOO-705 (successor on the Moved message)
+first, then LOO-708/LOO-709, then LOO-712 re-homes `successor` on the `control`
+event. The successor is the full `[entry, "session", "resume", session_id]`
+command, not an entry path or replay of viewer argv: LOO-708's thin viewer argv
+would reattach to the ended owner. LOO-712 now carries that command end to end;
+focused fixtures prove terminal restoration before following, exact argv and
+successor exit/error propagation. LOO-705's superseded-install detection and
+retry policy still require dependency integration. Release's entry-point lesson
+applies: shell fixtures prove the wire and handoff, not installed rollover or
+the requested live Claude walkthrough. Desktop consumption, measured SSH
+reconnect and the 1 MB wire bound outside the fixture remain unproved.
 
 ## Waited landing (LOO-503, 2026-10-17)
 
@@ -398,8 +444,8 @@ Harness errors retain failed-result text for retries. CI owns the full matrix.
 ## Live conversation ownership (LOO-415, curated 2026-10-17)
 
 Jack Heart accepted per-conversation owners for nested CLI, headless, terminal,
-shell and Flow work (#1581, `28dc141671`). LOO-415 owns transport; LOO-416
-lifecycle/readiness. No shared server or automatic replay. Explicit resume
+shell and Flow work (#1581, `28dc141671`). LOO-415 owned transport; LOO-712
+owns its viewer wire, and LOO-416 lifecycle/readiness. No shared server or automatic replay. Explicit resume
 preserves history/input; viewer loss starts only LOO-709's grace. Native-only
 Flows remain unselected. Owners retain execution/capture/client; passive viewers
 claim nothing. Viewer timeout/cancellation changes neither provider attachment

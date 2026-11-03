@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
-use super::Response;
+use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
 use crate::store::sqlite::SqliteStore;
@@ -32,12 +32,13 @@ use crate::store::sqlite::SqliteStore;
 const POLL: Duration = Duration::from_secs(2);
 
 /// Recheck a queued ending after the serving owner has accepted new viewers/input.
-pub(super) fn may_end(ending: &Response, viewed: bool, input_queued: bool) -> bool {
+pub(super) fn may_end(ending: &Event, viewed: bool, input_queued: bool) -> bool {
     !input_queued
         && (!viewed
             || !matches!(
                 ending,
-                Response::Moved {
+                Event::Control {
+                    held: false,
                     notice: None,
                     successor: None
                 }
@@ -63,7 +64,7 @@ pub(super) fn spawn(
     owner: LfProcessId,
     terminal: bool,
     waker: UnixStream,
-) -> (mpsc::Sender<Activity>, mpsc::Receiver<Response>) {
+) -> (mpsc::Sender<Activity>, mpsc::Receiver<Event>) {
     let executable = Executable::current();
     let (activity, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
@@ -111,7 +112,7 @@ fn watch(
     executable: Option<&Executable>,
     terminal: bool,
     changes: &mpsc::Receiver<Activity>,
-    end: &mpsc::Sender<Response>,
+    end: &mpsc::Sender<Event>,
     mut waker: &UnixStream,
 ) {
     let mut store = Store::default();
@@ -204,7 +205,8 @@ fn watch(
                         session.clone(),
                     ]
                 });
-                Response::Moved {
+                Event::Control {
+                    held: false,
                     notice: Some(format!(
                         "This Session's lf was {change}; reopening it as `lf resume {session}`"
                     )),
@@ -213,7 +215,8 @@ fn watch(
             }
             None => {
                 tracing::info!(%owner, "ending a Session nobody has viewed");
-                Response::Moved {
+                Event::Control {
+                    held: false,
                     notice: None,
                     successor: None,
                 }
@@ -341,17 +344,19 @@ fn limit(repo: Option<&str>) -> DetachedLimit {
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{may_end, Activity, DetachedLimit, Grace, Response};
+    use super::{may_end, Activity, DetachedLimit, Event, Grace};
 
     #[test]
     fn a_viewer_arriving_after_idle_judgment_keeps_its_conversation() {
-        let idle = Response::Moved {
+        let idle = Event::Control {
+            held: false,
             notice: None,
             successor: None,
         };
         assert!(may_end(&idle, false, false));
         assert!(!may_end(&idle, true, false));
-        let rollover = Response::Moved {
+        let rollover = Event::Control {
+            held: false,
             notice: Some("replaced".into()),
             successor: None,
         };

@@ -7,13 +7,15 @@ Rust only; Desktop (LOO-672), process overhead (LOO-708), and snapshot fidelity
 (LOO-710) stay with their owners. Earlier design and concept review:
 `9bc58f47ba39ee1efaf0cc6677a37095d93d187f:scratch/loo-709-idle-sessions-end.md`.
 
-**Status, implemented 2026-11-02:** silent-turn protection from `bafb3efdcd`
-is preserved. Native Stop now retains background tasks and scheduled wakeups,
+**Status, reconciled 2026-11-02 at `9b64e41cc3`:** silent-turn protection from
+`bafb3efdcd` is preserved. Native Stop retains background tasks and scheduled wakeups,
 including while a viewed terminal reports idle; missing snapshots cannot settle
 known work. Real Claude callback evidence and focused lifetime regressions are
 recorded below. The 2m default and viewed-only crash selection remain the
 assumptions in `questions.md`. Full return acceptance, gate and installation
-remain unproved.
+remain unproved. Source inspection found no further bounded implementation repair.
+Jack Heart's latest watch steer retains the interactive demo boundary and grants
+no shipping approval.
 
 ## Required behavior
 
@@ -59,7 +61,7 @@ retain it); store-only executable-gone judgment; `LONGEST_PAUSE`, `recheck`,
 `held_until`, `Grace::due`; unreadable-config disabling; duplicate
 `RUNNING_SESSION_GRAPH`. Reuse `SESSION_GRAPH`, `session_activity` and the
 provider/attachment fences. No schema, DTO, public mode or second lifecycle.
-Completed this pass: `record_native_turn`'s unconditional `open_tools: 0` and
+The watch repair removed `record_native_turn`'s unconditional `open_tools: 0` and
 `TURN_LIVE`'s terminal-idle precedence over owned background work.
 The surviving native callback records Claude's complete `background_tasks` and
 `session_crons` snapshots in the existing activity count. No new registry,
@@ -74,7 +76,8 @@ and reader. Both policy and command exit use `snapshot::leave`; the `.vt`
 writer and its exclusive terminal helpers are removed. Transport fixtures decode
 `.ghostsnp`. No DTO field, expiry or deletion policy is added. Main's LOO-705
 rollover response and wake pipe are combined with this branch's activity and
-wall-clock judgment. Source integration proves no installed acceptance.
+wall-clock judgment. Release's child objective and full memory were reviewed:
+configured-entry and installed acceptance remain distinct from source integration.
 
 ## Why the 24-hour rule failed
 
@@ -125,10 +128,30 @@ Detach → retain live work → settle → save/end after quiet → resume provi
 Executable removal changes the interval, not turn authority. Generated callbacks
 use the stable entry independently of the owner's removable build.
 
+The watch follow-through at `9b64e41cc3` requires no further design change.
+Jack Heart's accepted preservation requirement already implies that a reply can
+finish while the provider still owns work. Closing the viewer adds no action:
+the Session retains that work, a complete empty provider snapshot settles it,
+and quiet then permits snapshot/end. `emit_block` → `record_native_turn` →
+`session_activity` → `owner_waits_for_person` carries this distinction without
+a public watch mode, separate registry, schema change or additional skill rule.
+The transport usage documentation already describes this interaction.
+
+Failure and recovery preserve the same authority: a missing registry snapshot
+cannot clear known work; a surviving provider follows attachment handoff; a
+replaced provider cannot clear its successor's work. A viewed idle prompt cannot
+override an owned watch. Arbitrary external processes acquire no protection
+from silence alone. The existing Session and saved-screen resume path remains
+the return interaction after actual settlement and exit.
+
 Required counterexamples are retained above: silence cannot settle work, old
 providers cannot settle replacements, finished Graphs cannot retain owners.
 Source/coverage review adds no runtime acceptance; all twenty returns and real
 permission waits remain with demo.
+
+Concept-review outcome: nothing to change and no new open product choice.
+Keep the explicit assumptions in `questions.md`; gate and demo still own the
+remaining proof above. This review changes no implementation or delivery boundary.
 
 ## Recorded live evidence (2026-11-02)
 
@@ -163,4 +186,4 @@ turn test; they do not claim every external process is provider-owned work.
 
 ## Check result
 
-`cargo test -p loopflow --lib --test transport_tests -- silent_native_turn native_background_watches_survive_until_settlement detached_sessions_end_after_their_limit sessions_end_when_their_lf_executable_goes` (inherited `LF_*` unset, stdin closed): 5 passed; `cargo fmt`, `git diff --check`: passed. Nonfatal linker unwind-size warning. Gate owns broader suites and Clippy; demo owns all twenty returns and native permission-wait judgment.
+`git diff --check`: passed; `lf context`: within both limits. Reused unchanged-code result: `cargo test -p loopflow --lib --test transport_tests -- silent_native_turn native_background_watches_survive_until_settlement detached_sessions_end_after_their_limit sessions_end_when_their_lf_executable_goes` (inherited `LF_*` unset, stdin closed): 5 passed; `cargo fmt`: passed, nonfatal linker unwind-size warning. Gate owns broader suites and Clippy; demo owns all twenty returns and native permission-wait judgment.

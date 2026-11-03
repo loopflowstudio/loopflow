@@ -60,20 +60,22 @@ recency; preparation launches no provider. LOO-499 history:
 
 Jack Heart requires idle conversations to cost nothing. Unviewed quiet owners
 end after `session.end_detached_after` (2m assumed from Jack's 2m/30m candidates).
-Resume never replays; `--all` selects viewed owners without recorded exits.
+Resume never replays; `--all` selects gone, viewed owners without recorded exits.
 This supersedes LOO-415's viewer-loss rule.
 
 The failed 24h policy counted finished Graphs, awake time and stale status,
 died on store errors, and was absent from pre-rule builds. Use wall time, retry
 judgments, and preserve running Graphs, live turns and Runs. Claude hooks record
-fenced activity before context delivery; silence cannot settle it. Output adds
-evidence; viewers cannot extend executable-gone quiet. Stand-in hooks prove both
-deadlines and settlement; native permission waits need demo evidence. LOO-705
-owns pre-rule rollover.
+fenced activity before context delivery. Jack's watch review exposed Stop clearing
+owned work: retain complete background-task/cron snapshots; missing arrays,
+silence and viewed idle status cannot settle them. Native Claude/local-model
+evidence establishes watch completion callbacks; stand-ins prove both deadlines,
+handoff and settlement. Permission waits need demo evidence. LOO-705 owns rollover.
 
-Jack's LOO-710 agreement: `screens/<session>.ghostsnp`, no DTO field, expiry or deletion.
-Its writer/reader replace `.vt`; save at policy and command exit. Disposable-Home
-proof ended 20 owners but resumed three; installation/full return remain unproved.
+LOO-710's integrated `screens/<session>.ghostsnp` writer/reader replaces `.vt`;
+save at policy and command exit. Jack selected no DTO field, expiry or deletion.
+Disposable-Home proof ended 20 owners but resumed three; installed/full return
+acceptance remains unproved.
 
 ## Waited landing (LOO-503, 2026-10-17)
 

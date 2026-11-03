@@ -935,7 +935,12 @@ exit "$SUCCESSOR_RESULT"
         0
     );
     // SAFETY: each newly opened descriptor is transferred exactly once.
-    let _terminal = unsafe { std::fs::File::from_raw_fd(master) };
+    let mut terminal = unsafe { std::fs::File::from_raw_fd(master) };
+    // SAFETY: master is our live PTY; nonblocking reads drain the completed viewer.
+    assert_eq!(
+        unsafe { libc::fcntl(master, libc::F_SETFL, libc::O_NONBLOCK) },
+        0
+    );
     // SAFETY: the slave is a distinct, newly opened descriptor.
     let input = unsafe { std::fs::File::from_raw_fd(slave) };
     let original = Command::new("stty")
@@ -965,13 +970,13 @@ exit "$SUCCESSOR_RESULT"
             ]),
             _ => json!([entry, "session", "resume", session]),
         };
-        let viewer = fixture
+        let mut viewer = fixture
             .command(&["session", "resume", &session])
             .env("EXPECTED_SESSION", &session)
             .env("EXPECTED_TERMINAL", original.trim())
             .env("SUCCESSOR_RESULT", result)
             .stdin(input.try_clone().unwrap())
-            .stdout(Stdio::piped())
+            .stdout(input.try_clone().unwrap())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
@@ -993,8 +998,31 @@ exit "$SUCCESSOR_RESULT"
         socket
             .write_all(&frame(OUT, format!("\x1b_lf1;00;{event}\x1b\\").as_bytes()))
             .unwrap();
-        let output = wait_for_viewer(viewer, Duration::from_secs(10));
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut screen = Vec::new();
+        loop {
+            let exited = viewer.try_wait().unwrap().is_some();
+            // Drain while the viewer runs: a PTY can hold less than its reset sequence.
+            match terminal.read_to_end(&mut screen) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!("read terminal: {error}"),
+            }
+            if exited {
+                break;
+            }
+            if Instant::now() >= deadline {
+                viewer.kill().unwrap();
+                viewer.wait().unwrap();
+                panic!(
+                    "{result}: viewer did not exit: {}",
+                    String::from_utf8_lossy(&screen)
+                );
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let output = viewer.wait_with_output().unwrap();
+        let stdout = String::from_utf8_lossy(&screen);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
             output.status.code(),

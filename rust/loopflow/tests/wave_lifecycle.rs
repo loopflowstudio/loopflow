@@ -302,16 +302,10 @@ fn rename_keeps_identity_moves_files_on_main_and_refuses_a_taken_name() {
         "See .lf/wave/prod/GOAL.md; product owns Desktop.\n",
         "paths follow; prose stays word for word"
     );
-    assert!(renamed["mentions"]
-        .to_string()
-        .contains(".lf/wave/ops/MEMORY.md:1"));
-    assert!(
-        renamed["summary"][0]
-            .as_str()
-            .unwrap()
-            .starts_with("Still mentioned in: .lf/wave/ops/MEMORY.md:1"),
-        "Desktop shows the same leftovers the CLI prints: {}",
-        renamed["summary"]
+    assert_eq!(
+        renamed["summary"],
+        serde_json::json!([]),
+        "ordinary prose needs no cleanup receipt"
     );
 
     let again = lab.lf(&["wave", "rename", "product", "prod", "--json"]);

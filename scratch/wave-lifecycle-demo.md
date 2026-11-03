@@ -83,3 +83,41 @@ window, Archive/Desktop/Research Waves, and Task inventory. Native screenshot
 capture was unavailable. No Wave was added, renamed or removed in this pass;
 Jack Heart's hands-on acceptance remains pending. The earlier crash is retained
 as historical evidence, superseded for startup by this successful launch.
+
+## Sidebar review — 2026-11-03
+
+Jack Heart observed that New Wave was visible after selecting a Wave but not
+when the repository was selected. The action was the last child of the bounded
+Wave scroller and also hidden until hover. Moving a selected Wave to the header
+freed one row; repository selection put it back and pushed New Wave out of view.
+The repair pins New Wave below the scroller and makes it continuously visible.
+Native accessibility inspection after rebuilding confirmed New Wave outside
+the scroll area with the repository selected. The app is open for comparison.
+
+Jack Heart also asked what “Still mentioned in” does. Source inspection shows a
+case-sensitive word-boundary search for the old slug's leaf name in other Waves'
+GOAL.md and MEMORY.md. It reports file:line locations without changing prose or
+blocking the lifecycle operation. Explicit authored path rewriting is separate.
+The wording “Old name still appears in these documents; review if needed” was
+suggested in conversation; no copy change was requested or applied.
+
+Jack Heart then rejected the prose-mention feature entirely (“I just dont want
+this to exist at all”). Remove its scan and warning, rather than changing its
+wording. Keep explicit path updates and leave ordinary prose untouched. This
+supersedes the suggested copy above. Verification passed: lifecycle integration 14/14; Wave DTO round trips 5/5;
+`cargo fmt --all -- --check`; `cargo clippy --all-targets -- -D warnings`;
+`scripts/test_desktop.sh --filter 'DTOFixtureTests|RenameWaveSheetTests|RemoveWaveSheetTests' -Xswiftc -gnone < /dev/null` (57/57).
+New Wave's repository-scope button also opened the native creation form; it
+was dismissed without creating data. Reinstalling the final warning-free build
+is the remaining demo step.
+
+For the requested comparison, current official docs show Linear team creation
+in Settings → Your teams → +; Figma folder creation on the team/folder page via
++ Folder or + Create; Slack channel creation via its separate sidebar + action.
+These are documented entry points, not live verification of their scrolling.
+Sources: https://linear.app/docs/teams ;
+https://help.figma.com/hc/en-us/articles/360038006494-Create-and-manage-folders ;
+https://slack.com/help/articles/201402297-Create-a-channel .
+The proposed Loopflow footer keeps New Wave visible independently of list length
+and selected scope, at the cost of one permanent row. No final placement choice
+from Jack Heart has been recorded.

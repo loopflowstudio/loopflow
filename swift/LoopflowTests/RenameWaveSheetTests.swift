@@ -29,7 +29,7 @@ struct RenameWaveSheetTests {
             currentName: "product", newName: .constant("prod"), phase: .leftovers(receipt),
             onRename: {}, onDone: { done = true })
         let summary = try view.inspect().find(viewWithAccessibilityIdentifier: "rename-wave-summary")
-        #expect(try summary.find(text: receipt.summary[1]).string() == receipt.summary[1])
+        #expect(try summary.find(text: receipt.summary[0]).string() == receipt.summary[0])
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "rename-wave-confirm")
         }

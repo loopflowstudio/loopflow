@@ -20,14 +20,13 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
     /// Edits under `.lf/wave/<name>` nobody committed; removal deletes them.
     public let uncommitted: [String]
     public let files: AuthoredFiles?
-    public let mentions: [String]
     public let summary: [String]
 
     /// Whether `summary` ends with lines a person still has to act on: an
-    /// Initiative Linear kept live, files left uncommitted, or prose mentions.
+    /// Initiative Linear kept live or files left uncommitted.
     public var hasLeftovers: Bool {
         if case .uncommitted = files { return true }
-        return initiatives.contains { $0.error != nil } || !mentions.isEmpty
+        return initiatives.contains { $0.error != nil }
     }
 
     public struct Task: Decodable, Sendable, Hashable {
@@ -75,7 +74,7 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, preview, destination, waves, moved, deleted, chapters, sessions
-        case initiatives, uncommitted, files, mentions, summary
+        case initiatives, uncommitted, files, summary
         case alreadyRemoved = "already_removed"
         case completedTasks = "completed_tasks"
         case hasFiles = "has_files"
@@ -98,7 +97,6 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
         hasFiles = try container.decode(Bool.self, forKey: .hasFiles)
         uncommitted = try container.decode([String].self, forKey: .uncommitted)
         files = try container.decode(AuthoredFiles?.self, forKey: .files)
-        mentions = try container.decode([String].self, forKey: .mentions)
         summary = try container.decode([String].self, forKey: .summary)
     }
 }

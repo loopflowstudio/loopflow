@@ -172,8 +172,8 @@ checkout, in the same commit as the directory change:
   child Wave directories (path-nested, so `git mv` carries them), and
   `.lf/wave/<name>` paths in other Waves' `GOAL.md`/`MEMORY.md`. Prose that
   merely mentions the bare word (e.g. "product") is not rewritten — Jack's
-  written text stays word for word; the receipt lists remaining prose
-  mentions with file:line so a person or agent can edit them.
+  written text stays word for word. Jack Heart's November 3 review removes
+  prose scanning and mention receipts entirely.
 - **Remove folds up.** A removed child Wave's `MEMORY.md` is appended to its
   parent's `MEMORY.md` under `## From <name> (removed <date>)`; its
   `config.yaml` keys the parent lacks (`graph`, `chat`, …) are copied, never
@@ -501,7 +501,8 @@ damage to later edits/replacement Waves. The existing regression evidence covers
 local Git recovery; it does not establish successful Linear recovery.
 
 Preserve the chosen receipt behavior: command failures offer Retry; partial
-success retains Rust's explanation with Done; prose mentions remain advisory.
+success retains Rust's explanation with Done. The November 3 review supersedes
+the prose-mention advisory: ordinary prose is neither scanned nor reported.
 Retirement alone must never imply that file/provider effects completed. The
 Desktop receipt can direct CLI retry even after the Wave leaves navigation;
 adding a persistent recovery surface would be a separate product decision, not

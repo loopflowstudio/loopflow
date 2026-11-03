@@ -18,8 +18,6 @@ struct WorkNavigator: View {
     @State private var pressedScope: WorkNavigation.SidebarScope?
     @State private var removingWave: WaveSnapshot?
     @State private var renamingWave: WaveSnapshot?
-    /// Pointing at the Waves section reveals New Wave; only that row reads it.
-    @State private var wavesHover = HoverFlag()
     @State private var taskDrag = TaskOrderDrag.State()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -148,17 +146,18 @@ struct WorkNavigator: View {
     /// Pinned below the Task list so any Wave is a click away however far the
     /// list scrolls; it starts about three rows tall and its divider drags.
     private var waveSection: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 5) {
-                ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
-                NewWaveRow(model: model, hover: wavesHover)
-            }.padding(8)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(model.visibleRoadmaps.filter { $0.wave.id != model.sidebarWave?.wave.id }, id: \.wave.id) { waveRow($0) }
+                }.padding(8)
+            }
+            .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
+                wavesHeight = height
+            }
+            .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
+            NewWaveRow(model: model).padding(.horizontal, 8).padding(.bottom, 8)
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, height in
-            wavesHeight = height
-        }
-        .frame(height: min(wavesHeight, model.navigation.sidebarWavesHeight))
-        .hoverSource(wavesHover)
         .waveLifecycleSheets(model: model, removing: $removingWave, renaming: $renamingWave)
     }
 
@@ -574,12 +573,11 @@ private struct NewTaskRow: View {
     }
 }
 
-/// The last row of the Waves list while the pointer is over it; names and authors a Wave.
+/// Pinned below the scrolling Waves list; names and authors a Wave.
 /// An add with leftovers (its files uncommitted on main) keeps the popover open
 /// showing the receipt's lines; a clean add closes it.
 private struct NewWaveRow: View {
     let model: WorkModel
-    let hover: HoverFlag
     @Environment(\.palette) private var palette
     @State private var naming = false
     @State private var name = ""
@@ -588,19 +586,17 @@ private struct NewWaveRow: View {
     @State private var leftovers: WaveAdded?
 
     var body: some View {
-        HoverRevealed(flag: hover) {
-            Button { naming = true } label: {
-                HStack {
-                    Image(systemName: "plus")
-                    Text("New Wave").lineLimit(1)
-                    Spacer()
-                }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(RoundedRectangle(cornerRadius: 6))
-            }.buttonStyle(.plain)
-                .accessibilityIdentifier("work-new-wave")
-                .popover(isPresented: $naming, arrowEdge: .trailing) { form }
-        }
+        Button { naming = true } label: {
+            HStack {
+                Image(systemName: "plus")
+                Text("New Wave").lineLimit(1)
+                Spacer()
+            }.font(Typography.body(13)).foregroundStyle(palette.textSecondary).padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(.plain)
+            .accessibilityIdentifier("work-new-wave")
+            .popover(isPresented: $naming, arrowEdge: .trailing) { form }
     }
 
     @ViewBuilder

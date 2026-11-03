@@ -32,7 +32,7 @@ struct DTOFixtureTests {
         #expect(renamed.to == "prod")
         #expect(renamed.files == .committed(commit: "0f3c2a1d"))
         #expect(renamed.initiative?.error == "Linear: rate limited")
-        #expect(renamed.summary.count == 2)
+        #expect(renamed.summary.count == 1)
     }
 
     @Test func taskFilesFramesKeepInvalidationSeparateFromHeartbeat() throws {

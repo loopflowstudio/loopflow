@@ -279,8 +279,6 @@ pub struct WaveRemoval {
     pub uncommitted: Vec<String>,
     /// `None` in a preview.
     pub files: Option<AuthoredFiles>,
-    /// Prose that still names the Wave, as `path:line`; never rewritten.
-    pub mentions: Vec<String>,
     pub summary: Vec<String>,
 }
 
@@ -457,7 +455,6 @@ pub fn remove(
             Vec::new()
         },
         files: None,
-        mentions: prose_mentions(&main, wave.slug()),
         summary: Vec::new(),
     };
     if preview {
@@ -730,30 +727,6 @@ fn rewrite_references(main: &Path, slug: &str, replacement: &str) -> OpsResult<(
     Ok(())
 }
 
-/// Lines in other Waves' documents naming the Wave as a bare word or path.
-fn prose_mentions(main: &Path, slug: &str) -> Vec<String> {
-    let leaf = slug.rsplit('/').next().unwrap_or(slug);
-    let word = regex::Regex::new(&format!(r"\b{}\b", regex::escape(leaf)))
-        .expect("escaped Wave name is a valid pattern");
-    let mut mentions = Vec::new();
-    for document in wave_documents(main, slug) {
-        let Ok(text) = std::fs::read_to_string(&document) else {
-            continue;
-        };
-        let relative = document
-            .strip_prefix(main)
-            .unwrap_or(&document)
-            .to_string_lossy()
-            .to_string();
-        for (index, line) in text.lines().enumerate() {
-            if word.is_match(line) {
-                mentions.push(format!("{relative}:{}", index + 1));
-            }
-        }
-    }
-    mentions
-}
-
 fn count(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
@@ -907,12 +880,6 @@ fn leftovers(removal: &WaveRemoval) -> Vec<String> {
     if let Some(files) = &removal.files {
         lines.extend(uncommitted_summary(&removal.name, files));
     }
-    if !removal.mentions.is_empty() {
-        lines.push(format!(
-            "Still mentioned in: {}.",
-            removal.mentions.join(", ")
-        ));
-    }
     lines
 }
 
@@ -930,7 +897,6 @@ pub struct WaveRenamed {
     pub files: AuthoredFiles,
     /// The connected Initiative's new title, or why Linear kept the old one.
     pub initiative: Option<InitiativeRename>,
-    pub mentions: Vec<String>,
     pub summary: Vec<String>,
 }
 
@@ -1134,7 +1100,6 @@ pub async fn rename(
     };
     let mut renamed = WaveRenamed {
         id: operation.waves[0].id.clone(),
-        mentions: prose_mentions(&main, &operation.from),
         from: operation.from,
         to: operation.to,
         renamed: renamed_now,
@@ -1157,12 +1122,6 @@ fn rename_summary(renamed: &WaveRenamed) -> Vec<String> {
     {
         lines.push(format!(
             "Linear Initiative {initiative} kept its title: {error}. Repeat the original `lf wave rename` command to retry."
-        ));
-    }
-    if !renamed.mentions.is_empty() {
-        lines.push(format!(
-            "Still mentioned in: {}.",
-            renamed.mentions.join(", ")
         ));
     }
     lines

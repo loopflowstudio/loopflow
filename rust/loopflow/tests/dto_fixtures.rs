@@ -1265,7 +1265,7 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
     let json = include_str!("../../../tests/fixtures/dto/wave_renamed.json");
     let renamed: WaveRenamed = serde_json::from_str(json).unwrap();
     assert!(renamed.renamed);
-    assert_eq!(renamed.summary.len(), 2);
+    assert_eq!(renamed.summary.len(), 1);
     assert_eq!(
         serde_json::to_value(&renamed).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

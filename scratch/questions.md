@@ -49,7 +49,7 @@ Reversible implementation choices, retained for demo/review:
 - Remove previews name uncommitted edits inside the directory, which removal
   deletes; only committed files remain in Git. No additional refusal.
 - Desktop closes clean receipts immediately. Add/rename summaries and remove's
-  typed leftovers (archive error, uncommitted files, prose mentions) keep the
+  typed leftovers (archive error, uncommitted files) keep the
   sheet open with Rust's sentences and Done. Remove offers no delete-backlog UI.
 - Desktop add uses `Write::WaveAdd`, recording the same Process as the CLI.
   Rename/remove still launch `lf`; moving them into `Write` is follow-up work.
@@ -65,3 +65,10 @@ The detailed implementation/review chronology remains at
 request names its saved operation even if its original address has been reused.
 Use the replacement's explicit ID for a new operation. Machine SQLite owns the
 local effect journal; completed records prove prior identity but never replay effects.
+
+2026-11-03 native review: Jack Heart rejected prose-mention warnings entirely.
+Remove the scan, DTO field and receipts; preserve ordinary prose without
+reporting it. Explicit authored path rewrites remain. Jack also reported New
+Wave disappearing on repository selection and requested comparison with Linear,
+Figma and Slack for long lists. A fixed New Wave footer is available in Dev for
+review; its position is still a proposal.

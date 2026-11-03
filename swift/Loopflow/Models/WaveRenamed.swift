@@ -10,7 +10,6 @@ public struct WaveRenamed: Decodable, Sendable, Hashable {
     public let renamed: Bool
     public let files: WaveRemoval.AuthoredFiles
     public let initiative: InitiativeRename?
-    public let mentions: [String]
     public let summary: [String]
 
     public struct InitiativeRename: Decodable, Sendable, Hashable {
@@ -29,7 +28,7 @@ public struct WaveRenamed: Decodable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, from, to, renamed, files, initiative, mentions, summary
+        case id, from, to, renamed, files, initiative, summary
     }
 
     public init(from decoder: Decoder) throws {
@@ -40,7 +39,6 @@ public struct WaveRenamed: Decodable, Sendable, Hashable {
         renamed = try container.decode(Bool.self, forKey: .renamed)
         files = try container.decode(WaveRemoval.AuthoredFiles.self, forKey: .files)
         initiative = try container.decode(InitiativeRename?.self, forKey: .initiative)
-        mentions = try container.decode([String].self, forKey: .mentions)
         summary = try container.decode([String].self, forKey: .summary)
     }
 }

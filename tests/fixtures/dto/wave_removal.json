@@ -17,7 +17,6 @@
   "has_files": true,
   "uncommitted": [],
   "files": null,
-  "mentions": [],
   "summary": [
     "2 open Tasks move to the repository (1 started keeps its worktree, PR and running Graph).",
     "1 completed Task and 1 chapter stay readable in history.",

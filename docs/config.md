@@ -21,7 +21,8 @@ Edit `user.name` to correct it; remove it or leave it blank to use Git again.
 Keep other settings in the file. Repo `.lf/config.yaml` cannot override this
 preference. Direct interactive and batch launches use the resolved name, and `lf --machine`
 carries the caller's name rather than reading the destination owner's name.
-A non-empty `LF_USER_NAME` overrides these sources for a launched request; an
+A non-empty `LF_USER_NAME` overrides file and database values; an explicit
+`--setting user.name=NAME` wins over the environment. For a launched request, an
 empty or whitespace-only value falls through to personal configuration and Git.
 Steering comments prefer their recorded requester, then Linear's author name.
 Names describe people; they do not grant authority or establish who wrote an
@@ -56,9 +57,67 @@ agent: codex
 docs: [docs/api.md]
 ```
 
-CLI flags override repo config (`.lf/config.yaml`), which overrides global
-config (`~/.lf/config.yaml`). Additive lists such as `docs` combine across
-config files.
+Resolve each preference in this order, highest first: explicit CLI, explicit
+environment, `lf set` database values, personal config, repository/Wave config,
+then builtins. Within a source, Wave beats repository beats global; within one
+scope, authored Graph step beats skill beats general. A broad higher-source
+preference wins over a more specific lower-source preference.
+
+```bash
+lf set --global skills.implement.agent codex
+lf set --global graphs.release.steps.write-code.chrome false
+lf unset --global graphs.release.steps.write-code.chrome
+lf --setting 'skills.implement.yolo=false' implement
+lf config show --skill implement --json
+lf config show --graph release --step write-code --json
+```
+
+Use the same typed YAML values in files, `set`, and repeatable `--setting KEY=YAML`.
+`false` disables a boolean; omitting a file key or `unset` exposes the lower layer.
+Lists `docs`, `context`, `exclude`, `summaries`, and `supported_harnesses` add in
+precedence order; an explicit `[]` clears earlier entries. Keyed maps merge by
+key. `planning` replaces as a complete tagged provider configuration.
+Inspection lists effective values and every contributing candidate's source,
+scope and target. JSON uses the same read operation as Desktop clients.
+
+```yaml
+# ~/.lf/config.yaml
+agent: claude
+skills:
+  implement:
+    agent: codex
+    docs: [scripts/testing.md]
+graphs:
+  release:
+    steps:
+      write-code:
+        agent: claude
+        chrome: false
+```
+
+`write-code` names `id: write-code` in the defining `release` Graph. Composition
+and loop iterations retain that identity; another Graph's same-named step does
+not match. Reusing a Graph applies its preferences to each copy. Steps without
+IDs use skill and general preferences. Duplicate IDs within a definition are
+invalid. Repeated interactive stops receive distinct navigation names such as
+`review#1`; settings still select their original authored IDs.
+
+Launch targets accept `agent`, `yolo`, `chrome`, `isolate`, `docs`, `context`,
+`exclude`, `diff`, `diff_files`, `paste`, `summaries`, and `summary_tokens`.
+Repository delivery, planning, default Graph, retries and context authoring
+budgets are general preferences: they describe work rather than an agent turn.
+`user`, `repo_root`, and `session` are personal-only; use `set --global`.
+Account routes and Machine registration retain their dedicated commands.
+Theme, installation stream and portfolio remain local presentation,
+installation and navigation settings; they have no skill or Graph-step target.
+
+`LF_SETTINGS` accepts a YAML mapping of these preferences. Existing
+`LF_AGENT_OVERRIDE`, `LF_YOLO_OVERRIDE`, `LF_CHROME_OVERRIDE`, `LF_USER_NAME`, and
+`LF_ACCOUNT_ISOLATION` supply explicit environment preferences. User-supplied
+environment follows child processes and remote launches; CLI choices stay with
+the invocation. A Graph forwards explicit CLI choices to its own steps.
+A Session or `resume -a` changes that conversation only, never a Task default
+or the policy of unrelated Tasks its agent creates.
 
 ## Quick Reference
 
@@ -126,8 +185,7 @@ context_budgets:
   memory_tokens: 10000
 ```
 
-Each field resolves from Wave config, repo config, personal config, then
-the compiled default. `lf context` shows the winning source for every value.
+Each field follows the same source and scope precedence. `lf context` shows the winning source for every value.
 The same block supports `memory_bytes` and `scratch_bytes`. Values must be positive
 integers. These are authoring targets, not launch limits; exceeding them does not
 refuse a launch or select its context. The retired `goal_*` and `input_*` keys are removed.
@@ -155,7 +213,7 @@ in a provider request. The harness loads its repo guide natively.
 | Scratch and checkout Wave/ancestor documents | Refreshed conversation block; whole files, marked start excerpts and a complete listing | Current checkout and selected Wave |
 | Explicit docs | Complete reference bodies in the submitted turn | `docs:` in config or Loopflow skill frontmatter, or `--docs` |
 | Branch changes | Git inspection commands and changed paths | `--diff patch`, `diff_files: true` |
-| Codebase summaries | Complete private reference files | `summaries:` |
+| Captured references | Complete private reference files | Work direction supplied by the caller |
 | Clipboard | Tagged block after the request in the first turn | `-c` |
 
 The block refreshes at startup and after compaction. After compaction it also
@@ -166,9 +224,13 @@ remain readable through complete-file pointers.
 
 ## Config Files
 
-**Global config** (`~/.lf/config.yaml`) sets user-wide defaults. **Repo config** (`.lf/config.yaml`) overrides for that repo. **Wave config** (`.lf/wave/<name>/config.yaml`) overrides for work in that Wave; repository-only keys (`planning`, `release`, `exclude`, `merge_method`, `land`, `pr`) are an error there. See [Set it up once](work.md#set-it-up-once).
-
-For most settings, the nearer file wins; `context_budgets` and `skill_agents` merge per key. For additive settings (`docs`, `context`, `exclude`, `summaries`, `supported_harnesses`), lists combine from both.
+**Personal config** (`~/.lf/config.yaml`) overrides shared defaults. **Repo config**
+(`.lf/config.yaml`) supplies shared preferences; **Wave config**
+(`.lf/wave/<name>/config.yaml`) specializes them for that Wave. Repository-only
+keys (`planning`, `release`, `merge_method`, `land`, `pr`) are an error in Wave
+settings, whether stored in files or the database. Personal config can scope a `repos` block by canonical repository name
+or checkout path, with a nested `waves` block keyed by Wave name.
+See [Set it up once](work.md#set-it-up-once).
 
 ```yaml
 # ~/.lf/config.yaml (global)
@@ -178,7 +240,7 @@ session:
   end_detached_after: 24h # stop an unviewed Session's agent; `lf resume` reopens it
 
 # .lf/config.yaml (repo)
-agent: codex        # overrides global
+agent: codex        # shared default; personal agent wins
 context:
   - docs/api.md           # combined with global context
 ```
@@ -373,8 +435,9 @@ Set the default harness, with an optional model.
 ```yaml
 agent: codex          # harness default
 # agent: claude:opus  # harness plus model
-skill_agents:
-  implement: claude:opus  # this skill only, ahead of the skill's own agent
+skills:
+  implement:
+    agent: claude:opus
 ```
 
 Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific models.
@@ -382,7 +445,7 @@ Harnesses: `claude`, `codex`, `opencode`, `pi`. Use `harness:model` for specific
 Four built-in skills intentionally default to Claude: `kickoff`,
 `explore`, `realign`, and `prompt`. Every other unconfigured
 built-in skill uses Codex when it is installed, then Claude, then OpenCode, then Pi. A
-CLI `-m` or authored `agent:` config remains an explicit override.
+CLI `-a` wins over authored defaults. `xor-route` defaults to `claude:sonnet`.
 
 Loopflow starts every Codex CLI and interactive run on the standard service tier,
 even when the user's Codex config selects Fast mode. In an interactive Codex
@@ -552,7 +615,8 @@ Use `-b` for headless execution.
 
 ### Summaries
 
-Pre-generated codebase overviews for large repos.
+Reserved configuration for codebase overviews. No launch currently generates or loads
+these summaries; setting them does not start a paid summarization run.
 
 ```yaml
 summary_tokens: 25000
@@ -675,8 +739,7 @@ merge_method: merge  # merge, squash, or rebase
 preference, choose squash, then merge, then rebase from the allowed methods.
 A repository preference disabled by GitHub returns an actionable error before
 replacing an existing auto-merge request. A merge queue owns its method, so lf
-sends no method or commit-message override for queued merging. Personal config
-cannot override this repository policy. Every request retains the observed head
+sends no method or commit-message override for queued merging. Personal preferences can override the shared preference, subject to GitHub's allowed methods. Every request retains the observed head
 commit check and GitHub's protection requirements.
 
 Keep procedure in repository instructions and Graphs: who should review, when to

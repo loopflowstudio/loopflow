@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
-use crate::config::{load_config_or_default, load_repo_config, MergeMethod};
+use crate::config::{load_config_or_default, MergeMethod};
 use crate::git::worktrees::{list_worktrees, main_repo_root};
 use crate::git::{current_branch, get_default_branch, rev_parse};
 use crate::graph::load_skill;
@@ -531,6 +531,7 @@ pub fn generate_pr_copy(
     progress.status("Generating PR title/body...");
 
     let launch = AgentConfig {
+        isolate: None,
         chrome: config.chrome,
         task_prompt: prompt,
         agent: Some(agent),
@@ -1098,9 +1099,10 @@ pub(crate) fn enable_auto_merge(
     {
         return Ok(());
     }
-    let configured = load_repo_config(repo)
+    let configured = crate::config::load_config(Some(repo))
         .map_err(|error| OpsError::Message(error.to_string()))?
-        .and_then(|config| config.merge_method);
+        .unwrap_or_default()
+        .merge_method;
     // A merge queue owns its strategy. Validate policy before replacing an arm.
     let method = if observation.merge_queue_enabled {
         None

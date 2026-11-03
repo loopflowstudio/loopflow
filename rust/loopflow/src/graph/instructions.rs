@@ -45,7 +45,14 @@ fn headless_command(
     commands: &clap::Command,
 ) -> Result<String, LoadError> {
     let mut argv = vec!["lf", "-b"];
-    if let Some(agent) = &skill.agent {
+    // Only an authored occurrence becomes a command-line instruction. A skill's
+    // default still resolves at launch, below personal preferences.
+    if let Some(agent) = skill
+        .occurrence
+        .as_ref()
+        .and_then(|occurrence| occurrence.values.get("agent"))
+        .and_then(serde_yaml_ng::Value::as_str)
+    {
         argv.extend(["-a", agent]);
     }
     if graph_names.contains(&skill.name)
@@ -234,16 +241,22 @@ mod tests {
         fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
         fs::write(repo.path().join(".lf/skills/sync.md"), "Skill, not command").unwrap();
         fs::write(repo.path().join(".lf/skills/ship.md"), "Skill, not Graph").unwrap();
+        fs::write(
+            repo.path().join(".lf/skills/defaulted.md"),
+            "---\nagent: claude\n---\nUse the configured preference.",
+        )
+        .unwrap();
         fs::write(repo.path().join(".lf/graphs/ship.yaml"), "- implement\n").unwrap();
         fs::write(
             repo.path().join(".lf/graphs/chat.yaml"),
-            "- step: sync\n- step: ship\n- step: {name: implement, agent: codex:mini}\n",
+            "- step: sync\n- step: ship\n- step: {name: implement, agent: codex:mini}\n- defaulted\n",
         )
         .unwrap();
         let plan = recipe(repo.path(), "chat");
         assert!(plan.contains("Run `lf -b skill -- sync`"));
         assert!(plan.contains("Run `lf -b skill -- ship`"));
         assert!(plan.contains("Run `lf -b -a codex:mini implement`"));
+        assert!(plan.contains("Run `lf -b defaulted`"));
     }
 
     #[test]

@@ -7,6 +7,17 @@ import Testing
 
 @Suite("RegistryQuery")
 struct RegistryQueryTests {
+    @Test("Settings inspection retains skill and authored occurrence selectors")
+    func settingsInspection() throws {
+        let read = ServedRead.settings(directory: "/r", wave: nil, skill: nil, graph: "release", step: "write-code")
+        #expect(read.argv == ["config", "show", "--json", "--graph", "release", "--step", "write-code"])
+        let data = try JSONEncoder().encode(read)
+        let value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(value["read"] as? String == "settings")
+        #expect(value["graph"] as? String == "release")
+        #expect(value["step"] as? String == "write-code")
+    }
+
     @Test("Graph logs read captured execution from the content Machine, never a peer path locally")
     func contentRoutedGraphLog() async throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

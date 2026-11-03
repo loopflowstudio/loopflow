@@ -379,7 +379,12 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
             assert!(args(&first).contains(&"--chrome"));
         }
         let session = fixture.session();
-        fixture.settings(&format!("{provider}:current-model"), false, false);
+        let current_model = if provider == "opencode" {
+            "opencode/current-model"
+        } else {
+            "current-model"
+        };
+        fixture.settings(&format!("{provider}:{current_model}"), false, false);
         let resumed = fixture.run(&["session", "resume", &session]);
         bypass(&resumed, provider, false);
         assert!(args(&resumed).contains(&token.as_str()));
@@ -411,7 +416,7 @@ fn terminal_launch_and_resume_use_current_policy_and_preserve_native_identity() 
 }
 
 #[test]
-fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
+fn personal_true_overrides_repo_false_and_cli_can_disable_bypass() {
     let fixture = Fixture::new("claude");
     fs::create_dir_all(fixture.home.path().join("machine")).unwrap();
     fs::write(
@@ -425,11 +430,19 @@ fn repo_false_overrides_global_true_and_cli_can_enable_bypass() {
     );
     fixture.settings("claude", false, false);
     let configured = fixture.run(&["-i", ":", "hello"]);
-    bypass(&configured, "claude", false);
-    assert!(args(&configured).contains(&"--no-chrome"));
-    let explicit = fixture.run(&["-i", "--yolo", "--chrome", "on", ":", "hello"]);
-    bypass(&explicit, "claude", true);
-    assert!(args(&explicit).contains(&"--chrome"));
+    bypass(&configured, "claude", true);
+    assert!(args(&configured).contains(&"--chrome"));
+    let explicit = fixture.run(&[
+        "-i",
+        "--setting",
+        "yolo=false",
+        "--chrome",
+        "off",
+        ":",
+        "hello",
+    ]);
+    bypass(&explicit, "claude", false);
+    assert!(args(&explicit).contains(&"--no-chrome"));
 }
 
 #[test]

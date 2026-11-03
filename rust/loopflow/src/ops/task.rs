@@ -167,7 +167,6 @@ pub struct TaskSnapshot {
     pub workspace_slug: String,
     pub branch: Option<String>,
     pub base_commit: Option<String>,
-    pub agent: Option<String>,
     pub provider: String,
     pub pr: Option<TaskPr>,
     pub latest_event: Option<crate::work::task::TaskEvent>,
@@ -532,8 +531,8 @@ pub enum TaskRunStart {
     Ended,
 }
 
-/// Place the Task and fill what a run leaves unsaid: `agent` as the Task's
-/// agent, `reason` as a steer, and where the run begins. A Task keeps the
+/// Place the Task, record `reason` as a steer, and select where the run begins.
+/// Agent selection belongs to this execution only. A Task keeps the
 /// graph it took up; naming another takes that one up, and a Task with none
 /// takes up its Wave's, its repository's, or `code`.
 pub fn task_place(
@@ -545,7 +544,6 @@ pub fn task_place(
     let TaskProcessOptions {
         graph,
         from,
-        agent,
         reason,
         ..
     } = options.clone();
@@ -563,7 +561,7 @@ pub fn task_place(
             .map_err(task_error)?;
         let start =
             start_task_run(&store, &mut task, graph.as_deref(), from.as_deref(), mode).await?;
-        select_task_agent(&store, &mut task, agent.as_deref()).await?;
+
         if let Some(reason) = reason {
             append_task_comment(&store, &task, reason, true)?;
         }
@@ -627,8 +625,16 @@ pub(crate) fn scope_graph_default(
     wave: Option<&str>,
 ) -> OpsResult<(String, SetupSource)> {
     let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
-    let (name, layer) = crate::config::graph_setting(&layers).map_err(task_error)?;
-    Ok((name, layer.map_or(SetupSource::Default, SetupSource::from)))
+    let resolved = crate::config::settings::resolve_layers(&layers, None).map_err(task_error)?;
+    let source = resolved.settings["graph"]
+        .candidates
+        .last()
+        .expect("graph has a builtin default")
+        .layer;
+    Ok((
+        resolved.config.graph.expect("graph has a builtin default"),
+        source.into(),
+    ))
 }
 
 /// Load `name` from `repo`, or name the graphs it could have been;
@@ -1182,7 +1188,6 @@ struct TaskPlacement {
     workspace_slug: String,
     stack_parent: Option<TaskPr>,
     github: Option<GithubPr>,
-    requested_agent: Option<String>,
     directive: Option<String>,
 }
 
@@ -1338,7 +1343,6 @@ async fn prepare_task_placement(
         workspace_slug,
         stack_parent,
         github,
-        requested_agent: options.agent.clone(),
         directive,
     })
 }
@@ -1353,7 +1357,6 @@ async fn place_prepared_task(
         workspace_slug,
         stack_parent,
         github,
-        requested_agent,
         directive,
     } = prepared;
     let (mut task, acquisition) = loop {
@@ -1389,7 +1392,7 @@ async fn place_prepared_task(
     }
     if task.worktree.is_some() {
         restore_task_checkout(store, &task, None).await?;
-        select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
+
         return Ok(task);
     }
     let now = time::OffsetDateTime::now_utc();
@@ -1448,7 +1451,7 @@ async fn place_prepared_task(
         }
         return Err(error);
     }
-    select_task_agent(store, &mut task, requested_agent.as_deref()).await?;
+
     Ok(task)
 }
 
@@ -1582,7 +1585,7 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
     title
 }
 
-/// The Task's agent, else its Wave's and repository's configuration.
+/// Current launch preferences at the Task checkout, with no saved Task agent.
 pub(crate) fn resolve_task_agent(
     worktree: &Path,
     wave: Option<&str>,
@@ -1597,23 +1600,6 @@ pub(crate) fn resolve_task_agent(
     crate::prompt::process::resolve_agent(agent, skill, &config)
 }
 
-async fn select_task_agent(
-    store: &SharedStore,
-    task: &mut Task,
-    agent: Option<&str>,
-) -> OpsResult<()> {
-    if let Some(agent) = agent {
-        checkout_execution_boundary(task.worktree()?, agent)
-            .map_err(|error| task_error(error.to_string()))?;
-        store
-            .set_task_agent(&task.id, agent)
-            .await
-            .map_err(|error| task_error(format!("failed to save Task agent: {error}")))?;
-        task.agent = Some(agent.to_string());
-    }
-    Ok(())
-}
-
 fn task_configuration_refusal(
     task: &Task,
     wave: Option<&str>,
@@ -1623,7 +1609,7 @@ fn task_configuration_refusal(
     let worktree = task.worktree.as_deref()?;
     checkout_execution_boundary(
         worktree,
-        &resolve_task_agent(worktree, wave, personal, task.agent.as_deref(), skill),
+        &resolve_task_agent(worktree, wave, personal, None, skill),
     )
     .err()
     .map(|error| error.to_string())

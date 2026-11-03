@@ -422,6 +422,7 @@ impl SqliteStore {
                     skill: Skill::named(label),
                     id: None,
                     interactive: false,
+                    interactive_name: None,
                     returns: None,
                     sources: Vec::new(),
                 })
@@ -666,6 +667,7 @@ mod tests {
             skill: Skill::named("implement"),
             id: None,
             interactive: false,
+            interactive_name: None,
             returns: None,
             sources: Vec::new(),
         });

@@ -616,11 +616,7 @@ fn print_task_snapshot(
             }
         };
         let branch = snapshot.branch.as_deref().unwrap_or("unplaced");
-        let body = format!(
-            "agent {}, provider {}",
-            snapshot.agent.as_deref().unwrap_or("default"),
-            snapshot.provider
-        );
+        let body = format!("provider {}", snapshot.provider);
         println!(
             "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}",
             snapshot.issue_identifier,
@@ -1651,22 +1647,7 @@ fn run() -> anyhow::Result<()> {
         })
     );
     loopflow::installation::canonicalize_selected_home()?;
-    // Only an explicit selection becomes an inherited override. Task and
-    // repository defaults are filled later and never acquire this precedence.
-    let selected_agent = loopflow::config::agent_override().or(cli.agent.clone());
-    let _agent_override = selected_agent
-        .as_ref()
-        .map(|agent| EnvGuard::set(loopflow::config::AGENT_OVERRIDE_ENV, agent));
-    cli.agent = selected_agent;
-    let _yolo_override = cli
-        .yolo
-        .then(|| EnvGuard::set(loopflow::config::YOLO_OVERRIDE_ENV, "1"));
-    let _chrome_override = cli.chrome_setting().map(|enabled| {
-        EnvGuard::set(
-            loopflow::config::CHROME_OVERRIDE_ENV,
-            if enabled { "on" } else { "off" },
-        )
-    });
+    let _settings = loopflow::config::settings::select_invocation(cli.setting_values()?);
     let planning_read = matches!(
         &cli.command,
         Some(Commands::Wave {
@@ -1917,12 +1898,6 @@ fn run() -> anyhow::Result<()> {
     }
 
     {
-        let _account_isolation = cli
-            .isolate
-            .then_some(true)
-            .or(cli.shared.then_some(false))
-            .map(loopflow::provider_account::activation::isolation_env)
-            .map(|(name, mode)| EnvGuard::set(name, mode));
         let account_selection =
             loopflow::provider_account::selection::AccountSelection::from_flags(
                 &cli.account,
@@ -2573,9 +2548,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             if let Some(cwd) = cli.cwd.clone() {
                 binding.cwd = cwd;
             }
-            if cli.agent.is_none() {
-                cli.agent = binding.agent.clone();
-            }
             _task_cwd = Some(CwdGuard::enter(&binding.cwd)?);
             _work_declaration = Some(EnvGuard::set(
                 loopflow::lf::WORK_DECLARATION_ENV,
@@ -2663,6 +2635,21 @@ fn execute_command(
         }
         Some(Commands::Portfolio { cmd, json }) => loopflow::portfolio::run(cmd.as_ref(), *json),
         Some(Commands::Config { cmd }) => match cmd {
+            loopflow::lf::ConfigCommand::Show {
+                skill,
+                graph,
+                step,
+                json,
+            } => in_directory_runtime(args, |repo| {
+                loopflow::lf::commands::config::show(
+                    repo,
+                    cli.wave.as_deref(),
+                    skill.as_deref(),
+                    graph.as_deref(),
+                    step.as_deref(),
+                    *json,
+                )
+            }),
             loopflow::lf::ConfigCommand::User { json } => {
                 loopflow::lf::commands::config::print_user(*json)
             }

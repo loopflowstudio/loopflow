@@ -481,6 +481,7 @@ fn run_native_session(
                 agent_session.cloned(),
                 exact_account_id.cloned(),
                 crate::work::wave::context::ambient_wave_id(),
+                command.isolate,
             )
         })
         .transpose()
@@ -933,12 +934,13 @@ fn run_codex_native(
         let prepared = ready_rx.recv();
         let result = match prepared {
             Ok((thread, remote, account)) => {
-                let client = crate::agent::native_connection_command(
+                let mut client = crate::agent::native_connection_command(
                     command.cwd.clone(),
                     thread.as_ref(),
                     remote,
                     command.attachment.clone(),
                 );
+                client.isolate = command.isolate;
                 run_native_session(
                     &client,
                     environment,
@@ -1240,6 +1242,7 @@ mod tests {
         )
         .unwrap();
         let command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1445,6 +1448,7 @@ mod tests {
             }
         });
         let command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             context: None,
@@ -1466,6 +1470,7 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
         let mut command = SessionCommand {
+            isolate: None,
             launch: None,
             input: None,
             program: "/bin/sh".into(),
@@ -1562,6 +1567,7 @@ mod tests {
             )]);
             let before = store.process(&attached.agent_process_id)?.unwrap();
             let mut command = SessionCommand {
+                isolate: None,
                 launch: None,
                 input: None,
                 program: "/usr/bin/true".into(),
@@ -1647,6 +1653,7 @@ mod tests {
                 },
             )?;
             let command = SessionCommand {
+                isolate: None,
                 launch: None,
                 input: None,
                 context: None,

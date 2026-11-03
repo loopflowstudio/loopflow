@@ -1,7 +1,7 @@
 ---
 requires: a Task brief or kickoff plan
 produces: a chosen direction recorded in the design, with the visions it was chosen from
-default_agent: claude
+agent: claude
 action_style: exploratory
 ---
 Show several distinct visions of the outcome so the person can say "this one, build it."

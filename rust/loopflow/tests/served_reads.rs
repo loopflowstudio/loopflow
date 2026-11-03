@@ -134,6 +134,7 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
         | Read::Waves
         | Read::MachineId
         | Read::Portfolio
+        | Read::Settings { .. }
         | Read::PaneLayout { .. }
         | Read::People { .. }
         | Read::Graphs { .. }
@@ -175,6 +176,13 @@ fn what_an_app_serves_in_process_matches_its_lf_command() {
                 Read::Waves,
                 Read::MachineId,
                 Read::Portfolio,
+                Read::Settings {
+                    directory: repo.path().to_owned(),
+                    wave: None,
+                    skill: Some("implement".into()),
+                    graph: None,
+                    step: None,
+                },
                 Read::PaneLayout {
                     directory: repo.path().to_owned(),
                     work: "repository".into(),

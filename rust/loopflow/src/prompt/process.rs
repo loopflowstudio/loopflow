@@ -93,11 +93,18 @@ fn prepare_prompt(
         related_repos,
     } = input;
 
+    let resolved_skill = match resolved_skill {
+        Some(skill) => Some(skill),
+        None => skill
+            .as_deref()
+            .map(|name| crate::graph::load_skill(name, &repo_root))
+            .transpose()?,
+    };
+    let effective = crate::config::settings::resolve(config, resolved_skill.as_ref())?;
+    let config = &effective.config;
     let mut docs = config.docs.clone();
+    docs.extend(config.context.iter().cloned());
     docs.extend(requested_docs);
-    if let Some(skill) = &resolved_skill {
-        docs.extend(skill.docs.iter().cloned());
-    }
     let diff_files = source_overrides.diff_files.unwrap_or(config.diff_files);
     let diff = source_overrides.diff.unwrap_or(config.diff);
     let clipboard = match source_overrides.clipboard {
@@ -109,11 +116,7 @@ fn prepare_prompt(
 
     let opts = GatherContextOpts {
         repo_root: repo_root.clone(),
-        skill: if resolved_skill.is_some() {
-            None
-        } else {
-            skill
-        },
+        skill: None,
         message,
         operate: !no_loopflow,
         work,
@@ -130,6 +133,24 @@ fn prepare_prompt(
     let mut components = gather_context(&opts)?;
     if let Some(skill) = resolved_skill {
         components.skill = Some(skill);
+    }
+    if !config.exclude.is_empty() {
+        let mut patterns = ignore::gitignore::GitignoreBuilder::new(&repo_root);
+        for pattern in &config.exclude {
+            patterns
+                .add_line(None, pattern)
+                .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        }
+        let excluded = patterns
+            .build()
+            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
+        for docs in [&mut components.docs, &mut components.diff_files] {
+            docs.retain(|doc| {
+                !excluded
+                    .matched_path_or_any_parents(&doc.path, false)
+                    .is_ignore()
+            });
+        }
     }
     let deduplication_decisions = drop_duplicate_docs(&mut components, &repo_root);
 
@@ -149,7 +170,7 @@ fn prepare_prompt(
             source: DocumentSource::Summary,
         }));
 
-    let agent = resolve_agent(agent.as_deref(), components.skill.as_ref(), config);
+    let agent = agent.unwrap_or_else(|| config.agent().to_owned());
     validate_agent_policy(&agent)?;
 
     let skill_invocation = components
@@ -179,8 +200,9 @@ fn prepare_prompt(
         .skill
         .as_ref()
         .and_then(|skill| skill.action_style.as_deref());
-    let mut launch = AgentConfig {
+    let launch = AgentConfig {
         chrome: config.chrome,
+        isolate: Some(config.isolate),
         session_attachment: None,
         system_prompt,
         conversation_context,
@@ -195,7 +217,7 @@ fn prepare_prompt(
         cwd: Some(repo_root),
         write_scope: crate::agent::AgentWriteScope::Configured,
         execution_boundary: None,
-        skip_permissions: yolo_mode,
+        skip_permissions: yolo_mode || config.yolo,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
         env: [(
@@ -204,7 +226,6 @@ fn prepare_prompt(
         )]
         .into(),
     };
-    launch.apply_agent_override();
     Ok(PreparedProcessPrompt {
         config: launch,
         components,
@@ -212,7 +233,7 @@ fn prepare_prompt(
     })
 }
 
-fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
+pub(crate) fn validate_agent_policy(agent: &str) -> Result<(), CoreError> {
     let (harness, variant) = parse_agent(agent);
     match harness.as_str() {
         "claude" | "codex" | "pi" => return Ok(()),
@@ -259,20 +280,13 @@ pub(crate) fn resolve_agent(
     skill: Option<&Skill>,
     config: &Config,
 ) -> String {
-    crate::config::agent_override()
-        .or_else(|| override_agent.map(str::to_owned))
+    override_agent
+        .map(str::to_owned)
         .or_else(|| {
-            let skill = skill?;
-            let portable = crate::definition::name::portable_name(&skill.name);
-            config
-                .skill_agents
-                .get(&skill.name)
-                .or_else(|| config.skill_agents.get(portable.as_str()))
-                .cloned()
+            crate::config::settings::resolve(config, skill)
+                .ok()
+                .and_then(|resolved| resolved.config.agent)
         })
-        .or_else(|| skill.and_then(|skill| skill.agent.clone()))
-        .or_else(|| config.agent.clone())
-        .or_else(|| skill.and_then(|skill| skill.default_agent.clone()))
         .unwrap_or_else(|| default_agent().to_owned())
 }
 
@@ -787,7 +801,7 @@ Test skill body.
         fs::write(
             tmp.path().join(".lf/skills/test.md"),
             r#"---
-default_agent: claude:sonnet
+agent: claude:sonnet
 ---
 Test skill body.
 "#,
@@ -851,7 +865,7 @@ Test skill body.
         fs::write(
             tmp.path().join(".lf/skills/test.md"),
             r#"---
-default_agent: claude:sonnet
+agent: claude:sonnet
 ---
 Test skill body.
 "#,
@@ -859,7 +873,12 @@ Test skill body.
         .expect("write skill");
 
         let mut config = default_test_config();
-        config.agent = Some("codex:o3".to_string());
+        config.setting_layers = Some(vec![crate::config::ConfigLayerValues {
+            layer: crate::config::ConfigLayer::Global,
+            scope: crate::config::settings::SettingScope::Global,
+            path: "personal config".into(),
+            value: serde_yaml_ng::from_str("agent: codex:o3").unwrap(),
+        }]);
         let prepared = prepare_process_prompt(
             &config,
             ProcessPromptInput {
@@ -979,10 +998,15 @@ Test skill body.
                 repo_root: tmp.path().to_path_buf(),
                 skill: Some("team/skill-creator".to_string()),
                 resolved_skill: Some(Skill {
-                    source: None,
+                    source: Some(crate::skills::catalog::SkillOrigin {
+                        path: tmp.path().join(".lf/skills/team/skill-creator.md"),
+                        dialect: crate::skills::catalog::SkillDialect::Loopflow,
+                        frontmatter: None,
+                    }),
                     name: "team/skill-creator".to_string(),
                     agent: Some("codex:o3".to_string()),
-                    default_agent: None,
+                    occurrence: None,
+                    settings: Default::default(),
                     action_style: Some("procedural".to_string()),
                     docs: Vec::new(),
                     content: Some("Skill body".to_string()),

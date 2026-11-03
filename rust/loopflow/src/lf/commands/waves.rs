@@ -1937,7 +1937,7 @@ async fn snapshot_task_detail(
         task.worktree.as_deref().unwrap_or(repo),
         wave,
         personal,
-        task.agent.as_deref(),
+        None,
         None,
     );
     let (provider, _) = crate::config::parse_agent(&agent);

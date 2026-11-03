@@ -65,7 +65,7 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     repo.create_file(".lf/wave/infra/GOAL.md", "Keep it boring.\n");
     repo.create_file(
         ".lf/wave/infra/config.yaml",
-        "graph: code\nagent: claude\nskill_agents:\n  probe: claude:opus\n",
+        "graph: code\nagent: claude\nskills:\n  probe: {agent: claude:opus}\n",
     );
     repo.create_file(".lf/wave/research/GOAL.md", "Find out.\n");
     repo.create_file(".lf/wave/research/config.yaml", "agent: codex:o3\n");
@@ -270,13 +270,87 @@ fn settings_scope_by_the_typed_wave_only() {
     let typed = lf(
         repo.path(),
         home.path(),
-        &["--wave", "research", "set", "skill_agents.probe", "codex"],
+        &["--wave", "research", "set", "skills.probe.agent", "codex"],
     );
     assert!(typed.status.success());
     let settings = store
         .scope_settings(checkout.to_str(), Some("research"))
         .unwrap();
-    assert_eq!(settings.repository["agent"], "claude:haiku");
-    assert_eq!(settings.wave["skill_agents.probe"], "codex");
+    assert_eq!(settings.repository["agent"].trim(), "claude:haiku");
+    assert_eq!(settings.wave["skills.probe.agent"].trim(), "codex");
     assert!(!settings.wave.contains_key("agent"));
+}
+
+#[test]
+fn setting_targets_inspect_and_unset_through_the_cli() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(
+        ".lf/skills/probe.md",
+        "---\nagent: claude\nchrome: true\n---\nProbe.",
+    );
+    repo.create_file(
+        ".lf/graphs/release.yaml",
+        "- step: {name: probe, id: write-code}\n- step: {name: probe, id: review}\n",
+    );
+    std::fs::write(home.path().join("config.yaml"), "agent: claude\nskills: {probe: {agent: codex}}\ngraphs: {release: {steps: {write-code: {agent: claude, chrome: true}}}}\n").unwrap();
+    let inspect = || {
+        json(lf(
+            repo.path(),
+            home.path(),
+            &["config", "show", "--graph", "release", "--json"],
+        ))
+    };
+    let original = inspect();
+    assert_eq!(original[0]["settings"]["agent"]["value"], "claude");
+    assert_eq!(original[1]["settings"]["agent"]["value"], "codex");
+    for (key, value) in [
+        ("agent", "codex"),
+        ("graphs.release.steps.write-code.chrome", "false"),
+    ] {
+        let output = lf(repo.path(), home.path(), &["set", "--global", key, value]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let changed = inspect();
+    assert_eq!(changed[0]["settings"]["agent"]["value"], "codex");
+    assert_eq!(changed[0]["settings"]["chrome"]["value"], false);
+    assert_eq!(changed[1]["settings"]["chrome"]["value"], true);
+    let candidates = changed[0]["settings"]["chrome"]["candidates"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        candidates.last().unwrap()["target"],
+        "graph:release/write-code"
+    );
+    let output = lf(
+        repo.path(),
+        home.path(),
+        &[
+            "unset",
+            "--global",
+            "graphs.release.steps.write-code.chrome",
+        ],
+    );
+    assert!(output.status.success());
+    assert_eq!(inspect()[0]["settings"]["chrome"]["value"], true);
+    let selected = json(lf(
+        repo.path(),
+        home.path(),
+        &[
+            "--setting",
+            "graphs.release.steps.write-code.chrome=false",
+            "config",
+            "show",
+            "--graph",
+            "release",
+            "--step",
+            "write-code",
+            "--json",
+        ],
+    ));
+    assert_eq!(selected[0]["settings"]["chrome"]["value"], false);
 }

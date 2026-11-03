@@ -138,9 +138,13 @@ pub fn run(
         ));
         extra_env.push(crate::provider_account::activation::isolation_env(true));
     }
-    let agent = crate::config::agent_override();
+    let agent = std::env::var(crate::config::AGENT_OVERRIDE_ENV).ok();
     if let Some(agent) = agent.as_deref() {
         extra_env.push((crate::config::AGENT_OVERRIDE_ENV, agent));
+    }
+    let settings = std::env::var("LF_SETTINGS").ok();
+    if let Some(settings) = settings.as_deref() {
+        extra_env.push(("LF_SETTINGS", settings));
     }
     if let Some(source) = source_json.as_deref() {
         extra_env.push((crate::lf::TASK_SOURCE_ENV, source));

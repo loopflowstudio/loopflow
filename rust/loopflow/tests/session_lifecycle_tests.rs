@@ -1762,11 +1762,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     .unwrap();
     let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
         .unwrap();
-    // Saved Task defaults stay local to each Task. An explicit --agent would
-    // override Y too, selecting OpenCode without a managed checkout boundary.
-    // Y's mechanical Graph never starts a provider; X's OpenCode issues the command.
-    store.set_task_agent(&caller.id, "opencode").unwrap();
-    store.set_task_agent(&target.task.id, "claude").unwrap();
+    // X's explicit Session selection must not become Y's Graph policy.
     support::select_wave_graph(
         fixture.repo.path(),
         &store,
@@ -1794,7 +1790,7 @@ fn declared_agent_can_start_another_tasks_graph() {
     )
     .unwrap();
     let output = fixture
-        .command(&["--task", "INF-124", "-i", ":", "Start Y"])
+        .command(&["--task", "INF-124", "-a", "opencode", "-i", ":", "Start Y"])
         .env("LF_BIN", bin.join("lf"))
         .output()
         .unwrap();

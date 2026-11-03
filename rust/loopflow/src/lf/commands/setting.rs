@@ -19,8 +19,7 @@ use std::sync::Arc;
 /// A key `lf set` accepts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Key {
-    /// `graph`, `agent` or `skill_agents.<skill>`: your value over the
-    /// committed config.
+    /// A typed preference, optionally targeting a skill or Graph occurrence.
     Shared,
     /// `machine`, `machine.tasks` or `machine.session`.
     Machine(&'static [MachineSetting]),
@@ -30,18 +29,16 @@ enum Key {
 
 fn parse_key(raw: &str) -> anyhow::Result<Key> {
     Ok(match raw.split_once('.') {
-        None if raw == "graph" || raw == "agent" => Key::Shared,
         None if raw == "machine" => Key::Machine(&[MachineSetting::Tasks, MachineSetting::Session]),
         Some(("machine", "tasks")) => Key::Machine(&[MachineSetting::Tasks]),
         Some(("machine", "session")) => Key::Machine(&[MachineSetting::Session]),
-        Some(("skill_agents", skill)) if !skill.is_empty() && !skill.contains('.') => Key::Shared,
         Some(("account", provider)) => Key::Account(
             crate::lf::commands::profile::parse_managed_provider(provider)?,
         ),
-        _ => bail!(
-            "unknown key `{raw}`; keys are graph, agent, skill_agents.<skill>, machine, \
-             machine.tasks, machine.session and account.<provider>"
-        ),
+        _ => {
+            crate::config::settings::preference_path(raw)?;
+            Key::Shared
+        }
     })
 }
 
@@ -149,9 +146,16 @@ fn shared(
     key: &str,
     value: Option<&str>,
 ) -> anyhow::Result<()> {
-    if key == "graph" && matches!(scope, Scope::Global) {
-        bail!("a graph is chosen per repository or Wave, never for every repository");
-    }
+    use crate::config::settings::SettingScope;
+    crate::config::settings::validate_scope(
+        key,
+        crate::config::ConfigLayer::Personal,
+        match scope {
+            Scope::Global => SettingScope::Global,
+            Scope::Repository => SettingScope::Repository,
+            Scope::Wave { .. } => SettingScope::Wave,
+        },
+    )?;
     let default_scope = default_scope(store, repo, scope)?;
     let label = scope.label();
     match value {
@@ -164,10 +168,10 @@ fn shared(
                 {
                     bail!(crate::task_graph::missing_graph(value));
                 }
-            } else if value.trim().is_empty() {
-                bail!("{key} needs an agent, such as claude or claude:opus");
             }
-            store.set_scope_setting(default_scope.as_ref(), key, value)?;
+            let parsed = crate::config::settings::parse_value(key, value)?;
+            let stored = serde_yaml_ng::to_string(&parsed)?;
+            store.set_scope_setting(default_scope.as_ref(), key, &stored)?;
             println!("{label}: your {key} is {value}");
         }
         None => {
@@ -391,7 +395,7 @@ mod tests {
 
     #[test]
     fn keys_name_shared_setup_machines_and_accounts() {
-        assert_eq!(parse_key("skill_agents.implement").unwrap(), Key::Shared);
+        assert_eq!(parse_key("skills.implement.agent").unwrap(), Key::Shared);
         assert_eq!(
             parse_key("machine.session").unwrap(),
             Key::Machine(&[MachineSetting::Session])
@@ -400,7 +404,7 @@ mod tests {
             parse_key("account.claude").unwrap(),
             Key::Account(crate::provider_auth::Provider::Claude)
         );
-        for rejected in ["release", "skill_agents.", "account.pi", "machine.cpu"] {
+        for rejected in ["unknown", "skills.", "account.pi", "machine.cpu"] {
             assert!(parse_key(rejected).is_err(), "{rejected}");
         }
     }

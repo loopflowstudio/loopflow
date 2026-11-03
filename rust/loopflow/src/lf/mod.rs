@@ -53,9 +53,13 @@ pub struct Cli {
     #[arg(short = 'c', long = "clipboard")]
     pub clipboard: bool,
 
-    /// Override agents named in Tasks, Graphs and skills, including child commands (claude, codex, opencode, pi; harness[:model])
+    /// Select this conversation or all agent steps of this Graph (harness[:model])
     #[arg(short = 'a', long = "agent", global = true)]
     pub agent: Option<String>,
+
+    /// Override a typed preference for this invocation (KEY=YAML); repeatable
+    #[arg(long = "setting", global = true)]
+    pub settings: Vec<String>,
 
     /// Read the skill and its arguments from this captured invocation file, as a Graph step does
     #[arg(long, value_name = "PATH")]
@@ -159,6 +163,63 @@ pub struct Cli {
 }
 
 impl Cli {
+    pub fn setting_values(&self) -> anyhow::Result<serde_yaml_ng::Value> {
+        let mut value = serde_yaml_ng::Value::Mapping(Default::default());
+        for setting in &self.settings {
+            let (key, text) = setting
+                .split_once('=')
+                .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
+            let parsed = crate::config::settings::parse_value(key, text)?;
+            crate::config::settings::insert(
+                &mut value,
+                &key.split('.').collect::<Vec<_>>(),
+                parsed,
+            );
+        }
+        for (key, enabled) in [
+            ("yolo", self.yolo),
+            ("paste", self.clipboard),
+            ("isolate", self.isolate),
+        ] {
+            if enabled {
+                crate::config::settings::insert(&mut value, &[key], true.into());
+            }
+        }
+        if let Some(diff) = self.diff {
+            crate::config::settings::insert(
+                &mut value,
+                &["diff"],
+                matches!(diff, DiffContext::Patch | DiffContext::Both).into(),
+            );
+            crate::config::settings::insert(
+                &mut value,
+                &["diff_files"],
+                matches!(diff, DiffContext::Files | DiffContext::Both).into(),
+            );
+        }
+        if self.shared {
+            crate::config::settings::insert(&mut value, &["isolate"], false.into());
+        }
+        if let Some(agent) = &self.agent {
+            crate::config::settings::insert(&mut value, &["agent"], agent.clone().into());
+        }
+        if let Some(chrome) = self.chrome {
+            crate::config::settings::insert(
+                &mut value,
+                &["chrome"],
+                (chrome == BrowserMode::On).into(),
+            );
+        }
+        if !self.docs.is_empty() {
+            crate::config::settings::insert(
+                &mut value,
+                &["docs"],
+                serde_yaml_ng::to_value(&self.docs)?,
+            );
+        }
+        Ok(value)
+    }
+
     /// The global `--repo` or `--repository` selector names a repository.
     pub fn selects_repository(&self) -> bool {
         self.repo.is_some() || self.repository.is_some()
@@ -321,6 +382,7 @@ impl Cli {
             }
         }
         for (flag, values) in [
+            ("--setting", &self.settings),
             ("--docs", &self.docs),
             ("--account", &self.account),
             ("--only-account", &self.only_account),
@@ -343,6 +405,9 @@ impl Cli {
                 args.extend([flag.to_string(), value.get_name().to_string()]);
             }
         }
+        if let Some(agent) = &self.agent {
+            args.extend(["--agent".to_owned(), agent.clone()]);
+        }
         if let Some(input) = &self.skill_input {
             args.extend([
                 "--skill-input".to_string(),
@@ -364,6 +429,7 @@ impl Cli {
             docs: self.docs.clone(),
             clipboard: self.clipboard,
             agent: self.agent.clone(),
+            settings: self.settings.clone(),
             skill_input: self.skill_input.clone(),
             output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
@@ -1335,7 +1401,7 @@ impl MachineCommand {
 impl ConfigCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::User { .. } => false,
+            Self::User { .. } | Self::Show { .. } => false,
             Self::Repository { bind, relocate, .. } => bind.is_some() || relocate.is_some(),
             Self::Planning { cmd } => match cmd {
                 PlanningCommand::Key { new, recover } => *new || recover.is_some(),
@@ -1429,7 +1495,9 @@ impl WavePlanTarget {
 const SETTING_KEYS: &str = "Keys:
   graph                 the graph new Tasks take up
   agent                 the agent work launches on, such as claude:opus
-  skill_agents.<skill>  the agent one skill launches on
+  skills.<skill>.<key>  a preference for one skill
+  graphs.<graph>.steps.<id>.<key>  a preference for an authored Graph step
+  yolo, chrome, docs, context, diff, isolate, ...  typed configuration preferences
   machine               where new Tasks and the Session run; copied to your other
                         Machines. A pool or on-demand sends new Tasks there.
   machine.tasks         where new Tasks run
@@ -1438,7 +1506,8 @@ const SETTING_KEYS: &str = "Keys:
 
 Scope: this repository; `lf --wave <wave> set` a Wave; --global every repository.
 Yours wins over the committed .lf/config.yaml and .lf/wave/<name>/config.yaml,
-for you only; `lf wave status` shows each value and its source.";
+for you only; `lf config show --skill <name> --json` explains effective values.
+Values are YAML; false disables a boolean and [] clears an additive list.";
 
 #[derive(Subcommand, Debug)]
 pub enum WaveGraphCommand {
@@ -2530,6 +2599,17 @@ A stream whose build cannot open this Machine's store keeps the installed lf unt
 /// Read Loopflow configuration.
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
+    /// Explain effective preferences and their candidates without launching
+    Show {
+        #[arg(long)]
+        skill: Option<String>,
+        #[arg(long)]
+        graph: Option<String>,
+        #[arg(long, requires = "graph")]
+        step: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the configured participant display name.
     User {
         #[arg(long)]

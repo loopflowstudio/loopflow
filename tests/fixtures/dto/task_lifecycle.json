@@ -272,7 +272,6 @@
           "reason": "Task is terminal",
           "recommended": "no_action"
         },
-        "agent": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
@@ -988,7 +987,6 @@
         "connected": true
       },
       "task": {
-        "agent": null,
         "assignee": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
@@ -1277,7 +1275,6 @@
           "reason": "Task is terminal",
           "recommended": "no_action"
         },
-        "agent": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
@@ -1946,7 +1943,6 @@
         "connected": true
       },
       "task": {
-        "agent": null,
         "assignee": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
@@ -2205,7 +2201,6 @@
           "reason": "Merged; complete the Task",
           "recommended": "no_action"
         },
-        "agent": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",
         "completion_pending": null,
@@ -2832,7 +2827,6 @@
         "connected": true
       },
       "task": {
-        "agent": null,
         "assignee": null,
         "base_commit": "b61ecfe45224df107655f39cb4fb48646e97659a",
         "branch": "main",

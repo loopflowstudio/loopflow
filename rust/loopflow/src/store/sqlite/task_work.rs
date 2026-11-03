@@ -1001,6 +1001,7 @@ mod tests {
                     skill: crate::graph::Skill::named("pursue"),
                     id: None,
                     interactive: false,
+                    interactive_name: None,
                     returns: None,
                     sources: Vec::new(),
                 },

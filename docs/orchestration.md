@@ -41,9 +41,11 @@ Audit auth changes on this branch. Fix missing validation and untested paths.
 ```
 
 A Skill's frontmatter `agent:` names its harness and model; a Graph step can
-name another for that occurrence. `-a` overrides them all, including nested
-Graphs and child `lf` commands. Without any, your configured `agent:` applies,
-then the Skill's `default_agent:`, then whichever harness is installed.
+name another for that occurrence. Explicit Graph `-a` applies to all its steps,
+including nested Graphs and routers. It is not exported to unrelated child work.
+Personal and database preferences can target the skill or an authored step ID;
+see [setting precedence](config.md). Builtin defaults apply only when higher
+sources leave the preference unset.
 
 ```markdown
 ---

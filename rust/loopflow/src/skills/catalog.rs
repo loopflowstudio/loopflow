@@ -79,7 +79,26 @@ impl SkillSource {
             }),
             // Claude's `agent: Explore` describes its subagent, not an lf harness.
             agent: loopflow.then(|| field("agent")).flatten(),
-            default_agent: loopflow.then(|| field("default_agent")).flatten(),
+            occurrence: None,
+            settings: if loopflow {
+                let mut value = metadata.cloned().map(Value::Mapping).unwrap_or(Value::Null);
+                if let Some(docs) = metadata.and_then(|map| map.get("docs")) {
+                    value["docs"] = serde_yaml_ng::to_value(skill_docs(docs)?)
+                        .expect("document paths serialize");
+                }
+                let mut settings = crate::config::settings::metadata(&value)?;
+                settings.remove("agent");
+                if settings
+                    .get("docs")
+                    .and_then(Value::as_sequence)
+                    .is_some_and(|docs| !docs.is_empty())
+                {
+                    settings.remove("docs");
+                }
+                settings
+            } else {
+                BTreeMap::new()
+            },
             action_style: field("action_style"),
             docs: loopflow
                 .then(|| metadata.and_then(|map| map.get("docs")))
@@ -116,6 +135,7 @@ fn skill_docs(value: &Value) -> Result<Vec<String>, LoadError> {
 
 #[derive(Debug)]
 pub struct SkillCatalog {
+    pub(crate) repo: Option<PathBuf>,
     sources: BTreeMap<String, SkillSource>,
 }
 
@@ -130,6 +150,7 @@ impl SkillCatalog {
         provider_overrides: bool,
     ) -> Result<Self, LoadError> {
         let mut catalog = Self {
+            repo: repo.map(Path::to_path_buf),
             sources: BTreeMap::new(),
         };
         if let Some(repo) = repo {
@@ -197,6 +218,7 @@ impl SkillCatalog {
             (codex.join("prompts"), SkillDialect::Codex, true),
         ] {
             let mut scope = Self {
+                repo: self.repo.clone(),
                 sources: BTreeMap::new(),
             };
             scope.collect(&root, &root, dialect, files, &mut HashSet::new())?;

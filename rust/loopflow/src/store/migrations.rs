@@ -3439,31 +3439,32 @@ mod tests {
     }
 
     #[test]
-    fn task_agent_migration_preserves_existing_tasks() {
+    fn settings_authority_preserves_task_history_and_migrates_preferences() {
         let conn = open();
-        apply_before_migration(&conn, "task_agent");
-        conn.execute_batch("INSERT INTO waves (id, name, repo, created_at)
-            VALUES ('wave_agent', 'agent', '/repo', 1);
-            INSERT INTO projects (id, wave_id, external_project_id, created_at, updated_at)
-            VALUES ('project_agent', 'wave_agent', 'linear-project', 1, 1);
-            INSERT INTO tasks (id, project_id, external_issue_id, issue_identifier, worktree, workspace_slug, created_at, updated_at)
-            VALUES ('task_agent', 'project_agent', 'linear-issue', 'TEST-1', '/repo.task', 'task-agent', 1, 1);").unwrap();
-        conn.execute_batch(&migration_section_sql("task_agent"))
+        apply_before_migration(&conn, "settings_authority");
+        conn.execute_batch(include_str!(
+            "../../tests/fixtures/migrations/settings_authority_released.sql"
+        ))
+        .unwrap();
+        upgrade_from_migration(&conn, "settings_authority");
+        let retained: (String, String) = conn.query_row("SELECT t.worktree,s.provider FROM tasks t JOIN agent_sessions s ON s.task_id=t.id WHERE t.id='retained'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(retained, ("/repo.task".into(), "claude".into()));
+        let values = conn
+            .prepare("SELECT key,value FROM scope_settings ORDER BY key")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        let retained = conn
-            .query_row(
-                "SELECT issue_identifier, worktree, agent FROM tasks WHERE id='task_agent'",
-                [],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(retained, ("TEST-1".into(), "/repo.task".into(), None));
+        assert_eq!(
+            values,
+            vec![
+                ("skills.design.agent".into(), "codex:o3".into()),
+                ("skills.implement.agent".into(), "codex".into())
+            ]
+        );
     }
 
     #[test]

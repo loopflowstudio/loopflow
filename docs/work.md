@@ -216,8 +216,9 @@ Keychain.
 # .lf/wave/billing/config.yaml: committed, inherited by the Wave's Tasks
 graph: code
 agent: claude
-skill_agents:
-  implement: claude:opus
+skills:
+  implement:
+    agent: claude:opus
 context_budgets:
   memory_tokens: 20000
 ```
@@ -231,8 +232,8 @@ lf wave status billing                                    # each setting and its
 ```
 
 `config.yaml` has the shape of `.lf/config.yaml` and holds only what the Wave
-changes; launches in the Wave layer it over the repository's and your
-`~/.lf/config.yaml`. Repository settings (`planning`, `release`, `exclude`,
+changes; Wave values override repository values, and personal config overrides
+both. Repository settings (`planning`, `release`,
 `merge_method`, `land`, `pr`) are an error there. It also carries the Wave's
 `id`, `linear.initiative` and `chat`. A Task with no Wave uses the repository's
 settings.
@@ -240,7 +241,7 @@ settings.
 `lf set` never edits committed config. It stores your own value on this
 Machine for the repository, a Wave (`lf --wave <wave> set`) or every repository
 (`--global`); without `--wave` it sets the repository, even in a Wave's Task
-worktree. Your `graph`, `agent` or `skill_agents.<skill>` wins over the
+worktree. Your `graph`, `agent` or `skills.<skill>.agent` wins over the
 committed value for you only, and `lf wave status` reports it as `personal`.
 Machines (`machine`, `machine.tasks`, `machine.session`) and account routes
 (`account.<provider>`) exist only this way; a launch uses the nearest of Wave,

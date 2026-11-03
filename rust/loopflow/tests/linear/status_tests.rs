@@ -272,7 +272,6 @@ fn seed_stale_project_work(
         branch: "jack-heart/w2-127".to_string(),
         base_commit: "deadbeef".to_string(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         rank: 0,

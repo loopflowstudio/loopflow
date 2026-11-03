@@ -179,6 +179,7 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 9] = [
 pub struct AgentConfig {
     /// Chrome integration for Claude terminal and stream sessions.
     pub chrome: bool,
+    pub isolate: Option<bool>,
     /// System/context prompt content.
     pub system_prompt: String,
     /// Saved sources for native startup and compaction hooks.
@@ -226,8 +227,6 @@ impl AgentConfig {
     pub(crate) fn apply_agent_override(&mut self) {
         if let Some(agent) = crate::config::agent_override() {
             self.agent = Some(agent.clone());
-            self.env
-                .insert(crate::config::AGENT_OVERRIDE_ENV.into(), agent);
         }
     }
 
@@ -312,6 +311,7 @@ fn resolve_account_route_blocking(
                 .get(crate::work::wave::context::WAVE_ID_ENV)
                 .and_then(|id| crate::id::WaveId::parse(id).ok())
                 .or_else(crate::work::wave::context::ambient_wave_id),
+            launch.isolate,
         ),
         (None, Some(_)) => Err(crate::provider_account::ProviderAccountError::Runtime(
             "recorded account authority requires an account ID".to_string(),
@@ -864,7 +864,6 @@ fn run_admitted_agent(
     process: &ProcessConfig,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    launch.apply_agent_override();
     if process.auto && parse_agent(launch.agent()).0 != "claude" {
         if launch.max_turns.is_some() {
             eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");

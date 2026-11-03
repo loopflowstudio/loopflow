@@ -23,6 +23,7 @@ pub(crate) enum ProviderInvocation<'a> {
 #[derive(Debug, Clone)]
 pub(crate) struct SessionCommand {
     pub(crate) launch: Option<AgentConfig>,
+    pub(crate) isolate: Option<bool>,
     pub(crate) input: Option<String>,
     pub(crate) program: String,
     pub(crate) args: Vec<String>,
@@ -54,6 +55,7 @@ pub(crate) fn native_connection_command(
     }
     SessionCommand {
         launch: None,
+        isolate: None,
         input: None,
         program: "codex".into(),
         args,
@@ -160,6 +162,7 @@ pub(crate) fn build_session_command(
     }
     Ok(SessionCommand {
         launch: native,
+        isolate: config.isolate,
         input,
         program: harness,
         args,
@@ -230,13 +233,66 @@ pub(crate) fn resolve_session_config(
     session: &crate::session::LfSession,
     cli: &crate::lf::Cli,
 ) -> Result<AgentConfig> {
-    let current = crate::config::load_config(Some(&session.cwd))?.unwrap_or_default();
+    let _selection = crate::config::settings::select_invocation(cli.setting_values()?);
+    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
+    let wave = session
+        .wave_id
+        .as_ref()
+        .map(|id| store.get_wave(id))
+        .transpose()?
+        .flatten();
+    let current =
+        crate::config::load_wave_config(Some(&session.cwd), wave.as_ref().map(|wave| wave.slug()))?
+            .unwrap_or_default();
+    let request = if let Some(key) = session.artifact_key.as_deref() {
+        match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), key) {
+            Ok((_, saved)) => saved.process,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        None
+    };
+    let skill = request
+        .as_ref()
+        .and_then(|request| request.skill_invocation.as_ref())
+        .map(|invocation| invocation.skill.clone())
+        .or_else(|| {
+            session
+                .skill
+                .as_deref()
+                .and_then(|name| crate::graph::load_skill(name, &session.cwd).ok())
+        });
     let provider = session
         .provider
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("Session has no provider"))?;
-    let selected = cli.agent.clone().or_else(crate::config::agent_override);
-    let model = if let Some(agent) = current.agent.as_deref() {
+    let resolved = crate::config::settings::resolve(&current, skill.as_ref())?;
+    let current = &resolved.config;
+    let selected = resolved
+        .settings
+        .get("agent")
+        .filter(|setting| {
+            setting.candidates.last().is_some_and(|candidate| {
+                matches!(
+                    candidate.layer,
+                    crate::config::ConfigLayer::CommandLine
+                        | crate::config::ConfigLayer::Environment
+                )
+            })
+        })
+        .and_then(|setting| setting.value.as_str());
+    let configured_agent = resolved
+        .settings
+        .get("agent")
+        .filter(|setting| {
+            setting
+                .candidates
+                .last()
+                .is_some_and(|candidate| candidate.layer != crate::config::ConfigLayer::Builtin)
+        })
+        .and_then(|setting| setting.value.as_str());
+    let model = if let Some(agent) = configured_agent {
         let (harness, model) = crate::config::parse_agent(agent);
         if harness == provider {
             model
@@ -247,7 +303,7 @@ pub(crate) fn resolve_session_config(
         session.model.clone()
     };
     let (agent, importing) =
-        match crate::config::resume_choice(provider, model.as_deref(), selected.as_deref()) {
+        match crate::config::resume_choice(provider, model.as_deref(), selected) {
             crate::config::Resume::Native(model) => (
                 model.map_or_else(
                     || provider.to_string(),
@@ -258,21 +314,13 @@ pub(crate) fn resolve_session_config(
             crate::config::Resume::Import { agent } => (agent, true),
         };
     let mut config = AgentConfig {
+        isolate: Some(current.isolate),
         agent: Some(agent),
         cwd: Some(session.cwd.clone()),
-        skip_permissions: cli.yolo || crate::config::yolo_override() || current.yolo,
-        chrome: cli.chrome_setting().unwrap_or(current.chrome),
+        skip_permissions: current.yolo,
+        chrome: current.chrome,
         output_schema: cli.output_schema.clone(),
         ..Default::default()
-    };
-    let request = if let Some(key) = session.artifact_key.as_deref() {
-        match crate::session_record::resolve_manifest(&crate::store::lf_home_dir(), key) {
-            Ok((_, saved)) => saved.process,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        }
-    } else {
-        None
     };
     let mut needs_execution_boundary = false;
     if let Some(request) = request {
@@ -287,7 +335,6 @@ pub(crate) fn resolve_session_config(
         config.write_scope = request.write_scope;
         needs_execution_boundary = request.execution_boundary.is_some();
     }
-    let store = crate::store::sqlite::SqliteStore::new(&crate::store::database_path_from_env()?)?;
     if cli.batch {
         if let Some(task) = session
             .task_id
@@ -441,6 +488,7 @@ mod tests {
     fn claude_stream_retains_chrome_turn_limit_schema_and_resume() {
         let cwd = tempfile::tempdir().unwrap();
         let config = AgentConfig {
+            isolate: None,
             agent: Some("claude:sonnet".into()),
             cwd: Some(cwd.path().into()),
             chrome: true,

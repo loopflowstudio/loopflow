@@ -161,7 +161,6 @@ fn open_task(store: &SqliteStore) -> TaskId {
         branch: "jack/rent".into(),
         base_commit: "deadbeef".into(),
         parent_pr_id: None,
-        agent: None,
         created_at: now,
         updated_at: now,
         observation: Observation::NotRequired,

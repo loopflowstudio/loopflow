@@ -1,0 +1,132 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Loopflow critical review and report card</title><style>
+:root { color-scheme:light dark; --bg:#faf8f4; --ink:#292724; --muted:#68625c; --accent:#722f37; --line:#dcd5cc; --surface:#eee9e1; }
+@media(prefers-color-scheme:dark){:root{--bg:#232528;--ink:#f0ebe4;--muted:#bcb5ab;--accent:#e3a7ac;--line:#484641;--surface:#303236}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Georgia,'Times New Roman',serif;font-size:19px;line-height:1.72}main{max-width:850px;margin:auto;padding:76px 30px 100px}h1,h2{line-height:1.15;font-weight:400;letter-spacing:-.025em}h1{font-size:clamp(37px,6vw,60px);margin:0 0 24px}h2{font-size:31px;margin:64px 0 25px;color:var(--accent)}p{margin:0 0 23px}main>p:first-of-type{font:13px/1.6 system-ui,sans-serif;color:var(--muted);letter-spacing:.04em}a{color:var(--accent);text-underline-offset:3px}a:hover{text-decoration-thickness:2px}strong{font-weight:700}table{width:100%;border-collapse:collapse;font:14px/1.5 system-ui,sans-serif;margin:24px 0}th{text-align:left;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}td,th{padding:14px 10px;border-bottom:1px solid var(--line);vertical-align:top}td:first-child{width:27%;font-weight:600}td:nth-child(2){width:16%;color:var(--accent);font-weight:700}pre{padding:24px;background:var(--surface);overflow:auto;font:13px/1.75 ui-monospace,monospace;border-radius:5px}code{font-size:.85em}pre code{font-size:inherit}ul,ol{padding-left:23px}li{margin-bottom:14px}h2~ul{font-size:16px}::selection{background:#d8bcc0;color:#221c1c}@media(max-width:540px){main{padding:36px 20px 60px}body{font-size:18px}td,th{padding:10px 5px;font-size:12px}h2{font-size:28px}pre{font-size:11px;padding:14px}}@media print{main{max-width:none;padding:0}body{font-size:11pt}h2{break-after:avoid}tr{break-inside:avoid}a{color:inherit}}
+</style></head><body><main><h1>Loopflow critical review and report card</h1>
+<p>Prepared for Jack Heart · 2 November 2026 · Research in the LOO-714 checkout</p>
+<p><strong>Overall: B today, with an A-level product thesis.</strong> Loopflow makes a persuasive case for organizing agent work around durable purpose and deliberate participation. Its largest remaining burden is making that machinery feel dependable and easy to understand when ordinary things go wrong.</p>
+<h2>An instrument still learning to stay in tune</h2>
+<p>Loopflow’s most attractive promise is that you might stop being the memory of your own tools.</p>
+<p>Anyone working across several coding conversations eventually becomes their unpaid archivist: remembering which window contains the useful decision, which branch contains the actual work, which agent finished, and which merely sounded finished. Loopflow takes that exhaustion seriously. A Task gives the work an address. Its checkout, conversation, workflow and pull request belong together. A Wave gives an area of responsibility a life beyond the current ticket. There is something humane in this ambition: the computer should remember enough that a person can leave and come back. <a href="../README.md">The product model</a></p>
+<p>The orchestra language on the website is grand, but beneath it sits an unusually specific concern about attention. More simultaneous activity is easy to display. Choosing the moments when someone should participate is harder. Loopflow’s interactive workflow steps put that choice into the work itself. In the Mac app, the small phrase “At demo · yours” expresses the idea beautifully. It locates the work and offers a place to enter. The New Task form is similarly assured: “What do you want?”, a destination, a workflow, and the points where someone takes part. That is the product at its clearest. <a href="https://loopflow.studio/">Public positioning</a></p>
+<p>I like that the visual design gives this idea some warmth. Burgundy, cream, restrained borders, a serif heading in the task form: it feels like a place intended for sustained work. Yet the larger workspace is still dominated by a terminal transcript. The elegant frame surrounds a long conversation whose consequential facts can be buried several screens back. Sidebar descriptions truncate into fragments; activity, ownership and delivery compete for a narrow strip of attention. The room is inviting. Finding the thing that matters can still require rummaging.</p>
+<p>The underlying workflow system deserves real credit. Skills are Markdown; Graphs are YAML. These are materials a developer can read, change, version and argue about. I created a disposable task, gave it a three-step workflow, watched it stop before interactive research, continued it through a command, and saw it stop at demo. A final continuation completed the task while retaining its PR-less checkout. The mechanism behaved coherently. This is a useful amount of structure, and it does not require buying into every other concept at once. <a href="../rust/loopflow/src/builtins/task/graph/code.yaml">Built-in code workflow</a></p>
+<p>The commitment to working locally also has substance. I created tasks with no tracker account and no remote. Adding a local bare Git remote let another clone acquire the shared plan without a hosted Loopflow service. I particularly like that the shared plan and private conversations have different boundaries. That makes collaboration possible without treating every conversation as organizational property. It also leaves more responsibility with the product to explain when the local view has caught up. My second clone initially showed an empty list; a later synchronization brought in the task. The eventual behavior worked, but the route to a fresh answer was less obvious than the promise. <a href="../docs/work.md">Planning behavior</a></p>
+<p>Then there is the code’s almost stubborn insistence on evidence. Missing usage is not quietly converted to zero. A process exit does not establish that the work succeeded. A provider’s claim does not acquire authority to complete a task. Native process identity and durable identity are treated separately. Those distinctions are valuable in software that delegates work to systems capable of confidently describing events that did not happen. Loopflow has the temperament of a bookkeeper who enjoys music but still wants the receipts. <a href="../docs/telemetry.md">Telemetry</a> · <a href="../rust/loopflow/src/graph/transitions.rs">Graph transitions</a></p>
+<p>That temperament is supported by substantial engineering. I read provider-trace tests, shared Rust/Swift data fixtures, migration guidance, and a two-person planning scenario. The architecture inventory check passed, mapping all 77 discovered SQLite owners/mirrors within its declared scope. None of that proves the whole product works. It does establish that this is a serious system with explicit boundaries and an effort to test them. The development culture also asks agents to simplify, reconsider concepts, demonstrate outcomes and verify what actually shipped. Those are good instincts to encode. <a href="../rust/loopflow/tests/README.md">Test boundaries</a> · <a href="../rust/loopflow/tests/two_people.rs">Two-person scenario</a></p>
+<p>But the precision of the machinery is escaping into the experience.</p>
+<p>At one point my test task reported “Planning: unstarted,” a task state of “active,” and a “Completed” Graph, while its workflow waited at demo. Each statement refers to a different fact. Together they make a person solve a small ontology problem before answering “What happens next?” Task, Graph, Process, Session, provider thread, ownership, availability and shipping approval all earn a place somewhere in the implementation. They do not all earn equal prominence in the first explanation. I want the leading sentence to say: “Ready for your demo; nothing is running.” The machinery can remain available underneath it.</p>
+<p>This is where Loopflow sometimes feels like a workshop whose operating manual has become another machine. Even its concise commands carry distinctions to learn: <code>ship</code> runs the remaining task workflow; <code>land</code> requests merge; <code>research</code> resolves to a Graph while <code>skill research</code> selects the Skill. The help explains these distinctions, which is good. The number of explanations still accumulates. The full <code>code</code> Graph I inspected expanded to twelve entries, including two decision steps. There is craft in that arrangement. There is also a risk of paying for ceremony on work that needed a lighter touch. I would want comparative evidence of better outcomes per unit of time and cost before assuming the longer workflow always earns its keep. The inspected evaluation documentation carefully limits its own claims to proposed actions. <a href="../scripts/evals/README.md">Evaluation limits</a></p>
+<p>My strongest criticism concerns continuity. It is central enough to the product that it deserves a higher standard than merely recovering files.</p>
+<p>The current account-failover code clears the provider resume token and supplies a new prompt asking the replacement to reread the workspace. Transient retries can retain the provider conversation; this account-switch path starts differently. Pi and OpenCode also return without this automatic retry path. Meanwhile, conversation text remains in provider-native history, and the telemetry documentation describes provider retention as a limit on what can later be recovered. Durable Loopflow identity and durable access to the entire conversation are different promises. The README’s reassuring language makes the seam easy to overlook. <a href="../rust/loopflow/src/agent/mod.rs">Failover implementation</a> · <a href="../docs/telemetry.md">History retention</a></p>
+<p>The app made the consequences tangible. The workspace I opened contained repeated limit messages followed by a manual login and retry sequence. Its sidebar also showed shipping retries alongside broad “Working” labels. This was observed history and displayed state, not a controlled reproduction of those failures. Still, it showed exactly the kind of attention tax the product exists to reduce. The LOO-714 recovery drafts recognize the problem; they remain proposals. A critic should grade the experience that exists, while giving the diagnosis its due.</p>
+<p>Documentation has a related problem: it is plentiful, thoughtful, and unevenly synchronized. The work guide correctly says a bare task run returns once the Graph starts; the architecture page says it returns when the Graph ends. The current data guide still lists Linear as the shared-planning owner even though Git planning worked in my experiment. These are consequential discrepancies in a product whose complexity makes documentation unusually important. More prose will not resolve this; fewer conflicting accounts will. <a href="../docs/work.md">Work guide</a> · <a href="../docs/architecture.md">Architecture guide</a> · <a href="../docs/architecture/data.md">Data guide</a></p>
+<p>Performance is mixed rather than uniformly slow. My small CLI interactions mostly finished in tens or hundreds of milliseconds. Historical timing records for six app launches labeled 0.15.1 showed a median recorded first frame of about 679 ms, but a maximum of 23.4 seconds. That is a small, uncontrolled sample, not a benchmark or a diagnosis. It is enough to temper the promise that the tool disappears. A product devoted to preserving concentration is judged partly by its worst interruption. <a href="../scripts/benchmarks/desktop-performance/README.md">Measurement definitions</a></p>
+<p>I also appreciate the security documentation’s plainness. It explicitly says that a worktree is not a security sandbox and explains the more permissive policies used for unattended work. The practical consequence is that Loopflow’s autonomy relies on the execution environment and credentials entrusted to it. That tradeoff belongs in any serious assessment of the product; workflow review and process accounting do not replace containment. <a href="../docs/security.md">Security model</a></p>
+<p>What I like most is the conviction that agency should come with memory, inspectability and places for judgment. What I like least is how frequently understanding the system still seems to require thinking like its implementer. The next substantial improvement would be felt as relief: ordinary failures preserve the thread, the next useful action is unmistakable, and a person can return after lunch without reconstructing the orchestra’s administrative history. I want to close the laptop and trust the rehearsal will still make sense tomorrow.</p>
+<h2>Report card</h2>
+<p>Grades are editorial judgments about the inspected product, not measured reliability percentages. A means unusually strong; B means useful with material friction; C means recurring limitations in an important promise.</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Grade</th>
+<th>Assessment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Product thesis</td>
+<td>A</td>
+<td>Durable work and deliberate participation address a recognizable burden of using multiple agents.</td>
+</tr>
+<tr>
+<td>Workflow composition</td>
+<td>A−</td>
+<td>Plain files, inspectable expansion, meaningful interactive stops; the disposable lifecycle worked.</td>
+</tr>
+<tr>
+<td>Local control and portability</td>
+<td>A−</td>
+<td>Local tasks worked without a tracker; Git planning reached a separate clone. Freshness needs clearer presentation.</td>
+</tr>
+<tr>
+<td>Architecture and evidence discipline</td>
+<td>B+</td>
+<td>Strong ownership distinctions and substantive tests; maintaining the growing surface is expensive.</td>
+</tr>
+<tr>
+<td>CLI experience</td>
+<td>B</td>
+<td>Fast small operations, useful help and context preview; overlapping names and status concepts require study.</td>
+</tr>
+<tr>
+<td>Desktop design and orientation</td>
+<td>B−</td>
+<td>Warm visual character and excellent entry form; transcript density and competing status cues weaken orientation.</td>
+</tr>
+<tr>
+<td>Failure recovery and continuity</td>
+<td>C+</td>
+<td>Work survives, but account failover can replace the native conversation and provider behavior differs.</td>
+</tr>
+<tr>
+<td>Documentation consistency</td>
+<td>C+</td>
+<td>Excellent examples and useful depth, undermined by concrete contradictions about lifecycle and storage.</td>
+</tr>
+<tr>
+<td>Performance</td>
+<td>B−, provisional</td>
+<td>Small CLI probes felt quick; six historical app launches showed a substantial startup outlier.</td>
+</tr>
+<tr>
+<td>Security transparency</td>
+<td>B+</td>
+<td>Clear description of authority and containment limits; this is not a security audit.</td>
+</tr>
+<tr>
+<td>Workflow cost effectiveness</td>
+<td>Ungraded</td>
+<td>No controlled comparison here establishes that additional review loops pay for themselves.</td>
+</tr>
+<tr>
+<td>Overall</td>
+<td>B</td>
+<td>A compelling tool for engaged practitioners; recovery and comprehensibility still limit effortless trust.</td>
+</tr>
+</tbody>
+</table>
+<h2>System map</h2>
+<pre><code class="language-text">Request → Task → isolated checkout + durable work identity
+             │
+             └→ saved Graph → commands and agent steps
+                                  │
+                         stop for participation
+                                  │
+                         continue → delivery / end
+
+SQLite: identity, history references, observations, authority
+Repository files: Skills, Graphs, goals, working notes
+Provider: native conversation text and model execution
+Git ref / tracker: shared plan       GitHub: PR and merge facts
+CLI / Desktop: views and actions over these owners
+</code></pre>
+<h2>Evidence and limits</h2>
+<ul>
+<li>Source inspected at commit <code>4e9ade2d04</code>; installed CLI reported <code>lf 0.15.1</code>. Source findings are not proof that the installed executable has identical bytes.</li>
+<li>Read the README, getting-started/work/config/security/session-history documentation, architecture and storage material, Graph definitions and selected Skills, retry and session-record code, graph transitions, Desktop status types, tests, CI guidance, benchmark documentation, release notes, and existing recovery drafts. Also inspected the public homepage and repository page. This was a broad review, not an exhaustive audit of every module.</li>
+<li>Inspected the running Mac workspace and opened/cancelled its New Task form. No real task was submitted or altered through the UI. Displayed failure history does not establish a current provider outage.</li>
+<li>Used a disposable <code>LF_HOME</code>, repository, task checkout, bare remote and second clone. No paid model run, remote rental, production tracker write, release or PR merge was performed. The toy Graph used only interactive stops and a mechanical context command; it does not prove autonomous implementation quality.</li>
+<li>Verified task creation without a remote, checkout creation, Graph expansion, malformed definition diagnostics, context preview, task pauses and continuation, command/process history, completion and checkout retention.</li>
+<li>The peer initially returned an empty task list. <code>wave status --sync</code> subsequently acquired the shared plan but exited 1 because no Wave was selected; the next task list contained the shared task. This establishes transport and import in this fixture, with an awkward standalone refresh interaction.</li>
+<li><code>uv run python scripts/check_architecture.py --json</code> passed: 22 public API families, 4 process boundaries, 77 SQLite owners/mirrors, 10 read projections, 8 provider edges, 35 subprocess edges and 1 compatibility seam mapped. This inventory check is not a behavioral test suite.</li>
+<li>Timing data came from the existing local journal, not newly controlled trials. For six 0.15.1 launches: first-frame median 678.5 ms, maximum 23,387.1 ms; fresh-data median 3,191.9 ms, maximum 24,368.4 ms. No usable endpoint samples were recorded, so no time-to-usability claim is made. No p95 is justified by six samples.</li>
+<li>Original unrelated scratch files were preserved. Research artifacts do not approve the LOO-714 design or change product behavior.</li>
+</ul>
+<h2>Questions that would change this assessment</h2>
+<ol>
+<li>Can an interrupted task preserve its actual conversation across account exhaustion with one understandable recovery action?</li>
+<li>Can the default status explain present activity and the next useful action before exposing the underlying state distinctions?</li>
+<li>Do the default review loops improve accepted outcomes enough to justify their additional latency and model usage?</li>
+</ol></main></body></html>

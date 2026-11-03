@@ -77,6 +77,13 @@ pub enum Read {
     MachineId,
     /// `lf portfolio`: the repositories this Machine's windows show.
     Portfolio,
+    Settings {
+        directory: PathBuf,
+        wave: Option<String>,
+        skill: Option<String>,
+        graph: Option<String>,
+        step: Option<String>,
+    },
     /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
     PaneLayout { directory: PathBuf, work: String },
     /// `lf --cwd <directory> ops people`: who owns the repository's Tasks.
@@ -207,6 +214,20 @@ impl Read {
             Self::Waves => words(&["wave", "list", "--all", "--current", "--json"]),
             Self::MachineId => words(&["machine", "id", "--json"]),
             Self::Portfolio => words(&["portfolio", "--json"]),
+            Self::Settings {
+                directory,
+                wave,
+                skill,
+                graph,
+                step,
+            } => {
+                let mut argv = at(directory, &["config", "show", "--json"]);
+                argv.extend(optional("--wave", wave.as_ref()));
+                argv.extend(optional("--skill", skill.as_ref()));
+                argv.extend(optional("--graph", graph.as_ref()));
+                argv.extend(optional("--step", step.as_ref()));
+                argv
+            }
             // `desktop layout` always prints JSON.
             Self::PaneLayout { directory, work } => at(directory, &["desktop", "layout", work]),
             Self::People { directory } => at(directory, &["ops", "people", "--json"]),
@@ -375,6 +396,19 @@ impl Read {
             }
             Self::MachineId => pretty(&block_on(local_machine())??),
             Self::Portfolio => pretty(&crate::portfolio::read()?),
+            Self::Settings {
+                directory,
+                wave,
+                skill,
+                graph,
+                step,
+            } => pretty(&super::config::inspect(
+                directory,
+                wave.as_deref(),
+                skill.as_deref(),
+                graph.as_deref(),
+                step.as_deref(),
+            )?),
             Self::PaneLayout { directory, work } => {
                 super::desktop::saved_layout(None, directory, work)
             }

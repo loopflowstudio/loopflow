@@ -771,7 +771,7 @@ pub(crate) async fn resolve_provider_account(
     provider: Provider,
     agent_session: Option<&AgentSessionId>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    resolve_provider_account_exact(provider, agent_session, None, None).await
+    resolve_provider_account_exact(provider, agent_session, None, None, None).await
 }
 
 /// The `provider` login this launch's `--account` names when it differs from
@@ -807,8 +807,9 @@ pub(crate) async fn resolve_provider_account_exact(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
+    isolate: Option<bool>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
-    let route = select_route(provider, agent_session, exact_account_id, wave_id).await?;
+    let route = select_route(provider, agent_session, exact_account_id, wave_id, isolate).await?;
     if let (Some(route), Some(agent_session)) = (&route, agent_session) {
         route.adopt(agent_session).await?;
     }
@@ -820,6 +821,7 @@ async fn select_route(
     agent_session: Option<&AgentSessionId>,
     exact_account_id: Option<&ProviderAccountId>,
     wave_id: Option<&WaveId>,
+    isolate: Option<bool>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     ensure_supported(provider)?;
     let store = route_store().await?;
@@ -833,7 +835,9 @@ async fn select_route(
         }
         _ => None,
     };
-    let isolated = recorded.unwrap_or_else(activation::launch_isolated);
+    let isolated = recorded
+        .or(isolate)
+        .unwrap_or_else(activation::launch_isolated);
     // A shared conversation resumes under whichever account is active; the
     // account it began under is history, not a pin.
     let exact_account_id = exact_account_id.filter(|_| recorded != Some(false));
@@ -1433,6 +1437,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
     agent_session: Option<AgentSessionId>,
     exact_account_id: Option<ProviderAccountId>,
     wave_id: Option<WaveId>,
+    isolate: Option<bool>,
 ) -> Result<Option<ProviderAccountRoute>, ProviderAccountError> {
     _run_blocking_account(provider, "route", move |runtime| {
         runtime.block_on(resolve_provider_account_exact(
@@ -1440,6 +1445,7 @@ pub(crate) fn resolve_provider_account_exact_blocking(
             agent_session.as_ref(),
             exact_account_id.as_ref(),
             wave_id.as_ref(),
+            isolate,
         ))
     })
 }
@@ -3349,6 +3355,7 @@ mod account_first_tests {
             Some(&"conversation".into()),
             Some(&began),
             None,
+            None,
         )
         .await
         .unwrap()
@@ -3457,6 +3464,7 @@ mod account_first_tests {
             Provider::Codex,
             Some(&conversation),
             Some(&first),
+            None,
             None,
         )
         .await

@@ -44,6 +44,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         ));
     }
     let mut config = AgentConfig {
+        isolate: None,
         system_prompt: request.system_prompt.clone(),
         conversation_context: request.conversation_context.clone(),
         task_prompt: request.task_prompt.clone(),

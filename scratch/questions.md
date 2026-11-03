@@ -11,7 +11,11 @@
   preservation. The November 3 configured native demo verified Claude supplies its inbox capability; all four idle wake/rendering/draft cases are now observed. Unacknowledged Claude/Pi
   writes remain uncertain and are never replayed. No provider restriction or
   terminal-input substitute is assumed.
-- **Demo boundary:** Product memory now distinguishes the implemented paths and
-  simulated checks from configured-provider acceptance. All four native idle wake and draft checks were observed on November 3; reporting cadence and usability still need Jack Heart’s review.
+- **Demo boundary:** All four native idle wake and draft checks were observed on
+  November 3. Jack Heart subsequently gave positive feedback and authorized
+  shipping with disclosed limits. Headless decision pass 1 advances on that
+  evidence; busy bursts, comprehensive reconnect and mounted run-page navigation
+  remain unproved. Product memory's earlier unverified-provider account is stale;
+  the current evidence and decision are in `loo-711-native-update-demo.md`.
 - Superseded wait-only evidence stays at
   `5f658180d9:scratch/loo-711-task-sessions-tell.md`; prototypes remain for review.

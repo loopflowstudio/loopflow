@@ -972,7 +972,13 @@ mod tests {
                 let size = stream.read(&mut buffer).unwrap();
                 assert!(size > 0);
                 request.extend_from_slice(&buffer[..size]);
-                if request.ends_with(b"}") {
+                let complete = std::str::from_utf8(&request)
+                    .ok()
+                    .and_then(|request| request.split_once("\r\n\r\n"))
+                    .is_some_and(|(_, body)| {
+                        serde_json::from_str::<serde_json::Value>(body).is_ok()
+                    });
+                if complete {
                     break;
                 }
             }

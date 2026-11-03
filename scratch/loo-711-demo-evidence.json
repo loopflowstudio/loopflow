@@ -1916,5 +1916,95 @@
       "shipping_approval": true,
       "shipping_quote": "lets ship it"
     }
+  },
+  "headless_decision_pass_1": {
+    "date": "2026-11-03",
+    "observer": "assistant",
+    "head": "b7815609fb97df492597e8c8ddebbd165ad2496f",
+    "decision": "advance",
+    "new_human_feedback": null,
+    "basis": "Reuse four configured native demonstrations and recorded Jack Heart shipping approval; fresh read-only Task/history proof adds no new visual acceptance.",
+    "fixture_home": "/tmp/loo711-demo/home",
+    "cwd": "/tmp/loo711-demo/worker-demo",
+    "binary": "/Users/jack/src/loopflow.loo-711-task-sessions-tell/target/debug/lf",
+    "commands": [
+      {
+        "argv": [
+          "desktop",
+          "task",
+          "06bf2e",
+          "--json"
+        ],
+        "exit_code": 0,
+        "graph": {
+          "name": "demo",
+          "interactive_steps": [
+            {
+              "name": "demo",
+              "skill": "demo",
+              "description": "Demonstrate the changed behavior through the real configured path."
+            }
+          ],
+          "position": {
+            "kind": "at",
+            "step": "demo"
+          }
+        },
+        "run_count": 13,
+        "sessions": [
+          "session_114d6a8006824ddf83ffd4f529ffe8c1",
+          "session_a979758761b640e9b4199d1892c52dcc",
+          "session_aaa24f57f9fc41cc8475dfaf423e0928",
+          "session_f1478d6846224f4dbc3384f9c37147dd"
+        ],
+        "latest_run": {
+          "entry": {
+            "id": "73055e97-5709-4966-803e-db7451334c57",
+            "name": "failure",
+            "state": "stopped",
+            "task_id": "task_06bf2e26aea44545a32cad485686ed70",
+            "wave_id": null,
+            "updated_at": 1793731268,
+            "repo": "/private/tmp/loo711-demo/worker-demo",
+            "ended_at": 1793731268
+          },
+          "steps": [
+            {
+              "lf_process_id": "e8f33921-719c-414b-b09d-33b48feb786c",
+              "label": "help demo-intentionally-missing",
+              "key": 0,
+              "iterations": [
+                []
+              ],
+              "started_at": 1793731267,
+              "completed_at": 1793731268,
+              "outcome": "failed",
+              "exit_code": 2
+            }
+          ]
+        }
+      },
+      {
+        "argv": [
+          "history",
+          "show",
+          "e8f33921-719c-414b-b09d-33b48feb786c"
+        ],
+        "exit_code": 0,
+        "stdout": "e8f33921-719c-414b-b09d-33b48feb786c  1793731267  failed  /tmp/loo711-demo/Loopflow LOO-711.app/Contents/MacOS/lf help demo-intentionally-missing\n{\n  \"id\": \"e8f33921-719c-414b-b09d-33b48feb786c\",\n  \"pid\": 95220,\n  \"kind\": \"lf\",\n  \"agent_session_id\": null,\n  \"os_started_at\": 1793731267,\n  \"trace_id\": \"f69a4cc2-968c-4597-b438-1a95aa477833\",\n  \"parent_lf_process_id\": \"73055e97-5709-4966-803e-db7451334c57\",\n  \"via_agent\": false,\n  \"caller_session_id\": null,\n  \"caller_agent_process_id\": null,\n  \"command\": \"[\\\"/tmp/loo711-demo/Loopflow LOO-711.app/Contents/MacOS/lf\\\",\\\"help\\\",\\\"demo-intentionally-missing\\\"]\",\n  \"repo\": null,\n  \"cwd\": \"/private/tmp/loo711-demo/worker-demo.06bf2e-worker-updates-demo\",\n  \"started_at\": 1793731267,\n  \"completed_at\": 1793731268,\n  \"outcome\": \"failed\",\n  \"exit_code\": 2,\n  \"signal\": null,\n  \"error\": \"command exited with status 2\"\n}\n"
+      }
+    ],
+    "native_demos_rerun": false,
+    "tests_rerun": false,
+    "unproved": [
+      "native busy bursts",
+      "comprehensive reconnect/takeover",
+      "mounted run history and Files interactions",
+      "default operator skill behavior"
+    ],
+    "known_limits": [
+      "Claude/Pi uncertain writes are not replayed and may be lost",
+      "Initial Codex turn took 267664 ms for an unexplained reason"
+    ]
   }
 }

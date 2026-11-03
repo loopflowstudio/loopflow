@@ -1,6 +1,59 @@
 # LOO-711 native update demo · 2026-11-03
 
-Outcome: quiet automatic reports were observed in all four configured native harnesses: Codex, Claude, OpenCode and Pi. Each checked update preserved its unsent draft. These are assistant-observed native demonstrations, not Jack Heart's usability acceptance. LOO-711 remains at interactive `demo`; PR [#1806](https://github.com/loopflowstudio/loopflow/pull/1806) is open and landing is not armed. Jack Heart subsequently authorized shipping on November 3 after the outstanding issues were explained. The shipping process owns publication, landing and final verification. 
+Current decision: **advance** from demo, headless decision pass 1 on November 3. Quiet automatic reports were observed in all four configured native harnesses: Codex, Claude, OpenCode and Pi. Each checked update preserved its unsent draft. These are assistant-observed native demonstrations. Jack Heart subsequently gave positive feedback and authorized shipping after the outstanding issues were explained. Fresh production status reports `shipping`, running from `demo`, with PR [#1806](https://github.com/loopflowstudio/loopflow/pull/1806) open. The existing Graph owns the remaining gate, landing and verification.
+
+## Headless decision pass 1 · 2026-11-03
+
+Reviewed checkpoint `b7815609fb97df492597e8c8ddebbd165ad2496f`. It commits the
+quiet-message changes previously described here as local. The prior pass intended
+to remove raw user-style transport blocks, deliver through every native harness,
+preserve drafts, and keep Task review separate from worker exits. The saved
+captures, receipts and replies under `quiet_all_harnesses` in
+[loo-711-demo-evidence.json](loo-711-demo-evidence.json) show that progress:
+Codex/Pi hide the incoming context, Claude collapses a named peer message, and
+OpenCode displays a short synthetic notice. All four captures retain their draft.
+Earlier navigation failures and the initial slow report remain historical evidence.
+
+This pass added read-only proof through the configured fixture's actual branch
+CLI and private store (`LF_HOME=/tmp/loo711-demo/home`), with inherited `LF_*`
+cleared and stdin closed:
+
+- `target/debug/lf desktop task 06bf2e --json` returned 13 recorded runs and
+  workflow position `demo`, matching the retained four Session IDs.
+- The latest failed run, `73055e97-5709-4966-803e-db7451334c57`, contains exact
+  step Process `e8f33921-719c-414b-b09d-33b48feb786c`, outcome `failed`, exit 2.
+- `target/debug/lf history show e8f33921-719c-414b-b09d-33b48feb786c` returned
+  that Process, its failed command and exit 2. This is the same history read the
+  production step control invokes; it proves the read path, not a mounted click.
+
+The commands ran from `/tmp/loo711-demo/worker-demo` using this checkout's absolute
+binary path. Compact outputs are saved under `headless_decision_pass_1` in the
+evidence JSON. No display or provider interaction was attempted in this pass;
+native presentation and draft proof are reused from the earlier configured demos.
+Existing focused passes remain recorded below; no new test pass is claimed.
+
+**Judgment:** advance. Jack Heart's recorded “ok, this looks pretty good” followed
+by “lets ship it” is stronger direction than the older pending-review text. Acting
+in his place for this decision means honoring that choice with its disclosed limits,
+not inventing broader acceptance. No concrete new implementation defect was found.
+Missing coverage is an evidence gap, not proof of regression or lack of progress.
+No design change is proposed or attributed to Jack Heart.
+
+Remaining limits: native busy bursts and comprehensive reconnect/takeover are
+unmeasured; Claude/Pi uncertain writes may lose an update and are not replayed;
+the initial 267,664 ms Codex turn is unexplained; mounted run expansion, Files
+interaction and exact failed-Process navigation remain unshown; the disposable
+observe-only skill does not prove the default operator's behavior. These limits
+were disclosed before shipping approval. They are not newly discovered blockers.
+
+Recommended next action: continue the existing Graph into its required gate,
+repair actual failures, preserve these limits in the PR before scratch cleanup,
+then perform the already authorized landing and verification. Do not replay the
+native demonstrations solely because the lifecycle step changed. The current
+[design](loo-711-task-sessions-tell.md) and [review page](demo.html) retain this
+decision. Earlier statements below about unarmed landing, pending review, local
+changes or unavailable providers describe their dated passes and are superseded
+by this section where they conflict.
 
 ## Jack Heart’s review · 2026-11-03
 

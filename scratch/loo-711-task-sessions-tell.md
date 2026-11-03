@@ -1,8 +1,12 @@
 # LOO-711 · Task Sessions tell you what their background work is doing
 
-Status: accepted product direction; changed-run reporting is implemented.
-Focused verification passes; gate and configured-provider demo remain.
-Reviewed, repaired and reconciled 2026-11-02 through checkpoint `db5cdbbd14`.
+Status: accepted product direction; quiet native reporting is committed at
+`b7815609fb`. All four configured native demos are recorded; Jack Heart authorized
+shipping after the remaining limits were disclosed. Headless demo decision pass 1
+advances to the remaining gate and delivery on November 3. See
+[the current demo decision](loo-711-native-update-demo.md#headless-decision-pass-1--2026-11-03).
+Earlier acceptance and authorization boundaries below are historical; the
+November 3 shipping approval supersedes them.
 Requested by Jack Heart.
 
 ## Accepted outcome
@@ -126,7 +130,10 @@ Files and Session panes retain their existing owners and drafts.
   skip report formatting and silent readings skip receipt serialization/hashing.
 - `task_wait` remains unchanged; the superseded wait-only proposal is not revived.
 
-## Remaining acceptance
+## Earlier acceptance plan
+
+The November 3 demo decision and shipping approval below supersede this plan's
+pending demo and publication boundary. Current gate results follow at the end.
 
 - Gate owns affected suites and static checks: `harness::{task_updates,
   claude_updates,codex_connection,opencode}`, `context_block`,
@@ -228,3 +235,53 @@ Current proof: all four native clients delivered quiet automatic reports; Codex/
 ## Shipping approval · 2026-11-03
 
 After positive demo feedback and a review of outstanding issues, Jack Heart explicitly requested “lets ship it”. Continue the existing Task’s remaining feature graph on Codex: gate, waited landing, verify and completion. Include the local quiet-message changes in the current PR. No provider restriction. Preserve the native evidence and known limitations in the final PR body before scratch cleanup: all four configured clients demonstrated automatic quiet delivery and draft retention; native busy bursts and comprehensive reconnect/takeover remain unmeasured; Claude/Pi uncertain dispatches are not replayed and can lose an update at disconnect; the initial Codex 267,664 ms model turn remains unexplained. The latest 11 focused Rust tests, Pi extension check, CLI build, formatting and all-target clippy passed. Run the remaining required gate checks and fix actual failures. Do not claim the demo proves the default operator skill or all run-page navigation. Jack accepted shipping after these limitations were disclosed; do not turn them into a new approval request.
+
+## Gate plan · 2026-11-03
+
+Compare with the recorded checkout base `4e9ade2d04`; include the existing
+uncommitted demo evidence. Changed Rust paths reach Task observations and receipt
+storage, all four native adapters, context hooks and native launch callers.
+Run the explicit modules `harness::{task_updates,claude_updates,codex_connection,
+opencode,opencode_decode}`, `context_block`, `lf::commands::{context,util}`,
+`store::sqlite::session_events`, `builtins::tests`, plus `agent_startup_tests`,
+`session_cli_tests`, `session_steers`, `session_lifecycle_tests`, and the nested
+Task/Graph provider launch policy regression (now named `explicit_launch_policy_survives_task_runs_nested_graphs_and_provider_children`).
+Swift model, transport and view changes reach the headless app build and Swift
+suite, including RegistryQuery, WorkObservationTransport and DesktopHeadless.
+The changed-aware runner also owns architecture, inventory, rustfmt, all-target
+clippy and Swift boundaries. Run Pi and OpenCode extension checks separately.
+Use rustup stable (1.99.1), with inherited LF variables cleared and stdin closed.
+No Xcode project or FFI Rust source changed; hosted UI and unrelated integration
+binaries stay with CI. Existing configured-provider demos remain applicable.
+
+Production performance signal proposed for Product: elapsed time from a recorded
+step transition to native report arrival, separated from model response time;
+record post count during busy bursts. The native demo's unexplained 267,664 ms
+Codex model turn remains a disclosed limitation, not a gate-check timeout.
+
+## Gate results · 2026-11-03
+
+Review found one fixture defect: the new OpenCode receipt test stopped reading
+HTTP at a closing-brace byte. It now waits for a complete JSON body. This also
+removes an unmatched literal brace that fooled the architecture scanner into
+classifying the test's `/bin/sleep` as a production subprocess. No production
+behavior changed during gate. The repaired fixture was included in the 144-test
+run and passed; subsequent rustfmt changed only whitespace.
+
+Check: `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::task_updates::) | test(harness::claude_updates::) | test(harness::codex_connection::) | test(harness::opencode::) | test(harness::opencode_decode::) | test(context_block::) | test(lf::commands::context::) | test(lf::commands::util::) | test(store::sqlite::session_events::) | test(builtins::tests::) | test(agent_startup_tests::) | test(session_cli_tests::) | test(session_steers::) | binary(session_lifecycle_tests) | test(explicit_launch_policy_survives_task_runs_nested_graphs_and_provider_children)'` — 144 Rust tests passed; inventory, CLI builds, all-target clippy (Rust 1.99.1), headless Desktop build, 667 Swift tests (45 optional display diagnostics skipped), and Swift boundary checks passed; initial architecture failure repaired and rechecked separately. Original log: `.lf/tmp/gate/run-80273/`; total 520 s, no timeout.
+Check: `uv run python scripts/check_architecture.py` — passed after fixture repair, zero unexplained boundaries.
+Check: `node scripts/benchmarks/skill-invocation/test_pi_context.mjs` and `node scripts/benchmarks/skill-invocation/test_opencode_context.mjs` — passed.
+Check: `cargo fmt --all -- --check` and `git diff --check` — passed after formatting the fixture repair.
+
+The Swift pass covers nested and repeated run history, independent review
+readiness, retained history after read failures, remote Task watch routing,
+exact Process history routing, and the real asynchronous FFI write regression.
+README behavior matches the implementation. The existing macOS test-linker
+unwind-table warning remains; no new compiler/static-analysis warning was found.
+Unrelated integration binaries and Xcode/hosted diagnostics remain with their
+CI or display owners; none is claimed passed here.
+
+Remaining delivery: the existing Graph owns landing and verification. Preserve
+the shipping approval's native burst/reconnect, uncertain-delivery, initial
+Codex latency and mounted-navigation limits in PR copy before scratch cleanup.
+No new approval or design decision is required.

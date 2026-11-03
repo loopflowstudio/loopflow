@@ -320,12 +320,14 @@ broken pipes that interrupt Git after the remote ref moves; background children
 must use stdio that survives their parent's exit.
 
 Builtin skill Markdown is compiled into Rust. After editing it, run the builtin
-contract tests alongside the relevant behavior tests; PR renderer tests alone do
-not cover the prompts that generate their input. Update obsolete assertions to
+and prompt contract tests alongside the relevant behavior tests; prompt tests also
+cover composed Session instructions. PR renderer tests alone do not cover the
+prompts that generate their input. Update obsolete assertions to
 match the intended contract instead of restoring retired commands in the prose.
 
 ```bash
 cargo test -p loopflow --lib builtins::tests
+cargo test -p loopflow --lib prompt::tests
 ```
 
 When changing the builtin catalog or Graph composition, also exercise discovery.

@@ -2,6 +2,27 @@
 
 Headless choices, 2026-11-02. Each is reversible; Jack decides.
 
+- **Gate scope:** automatic viewer following applies to the owner's lifetime
+  notification. Explicit rollover calls `end_owner` (SIGTERM) and does not
+  send `Moved.successor`; an attached viewer can close while the sweep
+  resumes its conversation without a viewer. Record this limit rather than
+  adding a second control protocol while LOO-712 owns that boundary. Ordinary
+  `lf resume` still opens the moved conversation. The earlier design's claim
+  that rollover viewers always follow is too broad.
+- **Wave memory corrections proposed by gate:** the LOO-705 paragraph still
+  teaches cross-version `Option` parsing and says the Mac/Graph demo is
+  unproved. Jack's LOO-712 steer withdraws that parsing claim; the demo record
+  now supplies the narrower configured-history and next-step evidence.
+  Gate leaves Wave memory read-only; its next authorized curator should use
+  `scratch/loo-705-demo.md` and retain that record's limits.
+
+- **Demo scope, 2026-11-02:** use the configured LOO-618 Session for native
+  history evidence and a disposable private entry for the released-to-branch
+  Graph transition. Do not promote the branch on the main Machine or sweep
+  unrelated owners merely to demonstrate it. The explicit headless delegation
+  supplies the review decision; it is not a new statement from Jack. Evidence
+  and limits: [loo-705-demo.md](loo-705-demo.md).
+
 - **Mechanism chosen: replacement, not a thin stable owner.** The Task listed
   three sketches. A thin versioned owner protocol is old-peer support, which
   Jack rejected (wave memory, LOO-401). Exec-forward of the owner would need

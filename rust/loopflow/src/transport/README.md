@@ -22,7 +22,7 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 but never answers reads `detached` too; reattaching stops its provider and continues
 the same provider thread in a new owner, without replaying input.
 
-`lf resume --all` is the one automatic restart: it resumes Sessions whose owner
+`lf resume --all` restores Sessions whose owner
 never recorded an exit and is gone from the OS, as after a reboot, crash or kill.
 Leaving through the provider or detaching records an exit, so those never qualify.
 Each resumes through ordinary `lf resume` in a new owner with no viewer; its
@@ -41,6 +41,19 @@ viewer keeps it only from the detached limit; headless Runs are never ended. Eac
 owner judges only itself and ends by signaling itself, which stops its agent and
 records its exit. `lf resume` reopens the conversation from provider history under
 whichever lf runs it; `lf resume --all` skips it.
+
+`lf resume` also moves an idle owner from an earlier build onto the lf entry.
+If that owner is busy and answers its socket, resume shows the running turn;
+an owner with this lifetime policy moves when the turn ends. An older owner
+without the policy needs another resume after its turn. If a superseded owner
+does not answer, resume ends it and reports that its turn was cut off, then
+reopens the saved conversation without replaying input.
+
+`lf monitor rollover --dry-run` lists the same takeover choices across owners;
+omit `--dry-run` to move them. The sweep ends owners directly; existing viewers
+may close and need `lf resume` again. Graph runners keep running and launch each
+next step through the entry. Owners and runners whose store has advanced beyond
+their reader floor cannot recover themselves through this policy.
 
 `lf resume` reconnects to a retained native terminal. A structured Run may require
 an explicit transition to the provider's native UI. That transition preserves the

@@ -93,7 +93,11 @@ fn watch(
                 if waits {
                     let moved = match change {
                         Some(change) => {
-                            tracing::warn!(%owner, "ending a Session whose lf was {change}");
+                            tracing::warn!(
+                                %owner,
+                                path = ?executable.map(|executable| &executable.path),
+                                "ending a Session whose lf was {change}"
+                            );
                             // The notice names the command viewers run through
                             // the entry, so it survives a failed follow.
                             let session = store

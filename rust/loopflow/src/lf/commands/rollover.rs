@@ -8,8 +8,10 @@
 //! Sessions wait for a person and `lf resume` reopens them on the installed lf;
 //! rollover does that for every superseded owner at once, including owners that
 //! predate the policy: an idle owner with saved provider history is ended the
-//! way its lifetime policy ends it, each of its Sessions resumes on the selected
-//! lf, and its viewers follow. A busy owner that answers its socket stays until
+//! way its lifetime policy ends it, and each of its Sessions resumes on the
+//! selected lf. The sweep signals owners directly, so existing viewers may
+//! need to reopen; the lifetime policy itself sends the successor command.
+//! A busy owner that answers its socket stays until
 //! its turn ends; one that does not answer cannot be watched or trusted to
 //! report idle, so it moves and the cut turn is reported. A Graph runner isn't
 //! stopped: each step resolves the installed entry when it launches, so its next
@@ -396,8 +398,8 @@ async fn disposition(
 /// A Session execution owner moves when it is resumable and either waits for
 /// a person or cannot be watched: a busy owner that answers its socket finishes
 /// its turn and ends itself, as `lf resume` lets it; one that does not answer
-/// has only a claim of a turn in progress. Its viewers follow it to the
-/// selected lf. `answering` asks the owner; the unit test answers for it.
+/// has only a claim of a turn in progress. `answering` asks the owner; the unit
+/// test answers for it.
 async fn owner_disposition(
     shared: &SharedStore,
     process: &RunningLfProcess,
@@ -570,7 +572,7 @@ async fn rollover(dry_run: bool) -> Result<RolloverReport> {
 fn render_report(report: &RolloverReport) -> String {
     let mut lines = Vec::new();
     let Some(selected) = &report.selected else {
-        return "No receipt-managed installation selects an lf yet; nothing is behind.\n".into();
+        return "Could not resolve the lf entry; no processes were moved.\n".into();
     };
     let target = format!(
         "{} ({})",

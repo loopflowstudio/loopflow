@@ -988,25 +988,25 @@ October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
 
 Jack Heart selected Session posts plus an expandable run page for LOO-711
 (2026-11-02): minimal default, combined position/readiness, Files owning the diff.
-The wait-only proposal is superseded. Branch `dd2bb7bc21` implements delivery
-through Codex, Claude, OpenCode and Pi owners plus grouped run history. Focused
-transport/view checks establish components, not configured idle wake or draft
-retention; Claude hook inbox availability remains unverified. One-second settling
-is a reversible assumption for demo, not Jack's cadence choice. Session-history
-receipts prevent uncertain dispatch replay; worker Runs are excluded. Posts grant
-no operating authority. Preserve Session identity and drafts; no provider restriction
-or adjacent card substitutes for delivery. Historical run completion never proves
-Task completion. Missing summaries stay absent; prose must join the exact captured
-step separately from its exit. Gate and authored demo remain.
+The wait-only proposal is superseded. `db5cdbbd14` implements four native provider
+paths and grouped history, repairing `dd2bb7bc21`'s latest-run-only reports.
+Compare reportable facts by durable run identity and settle gaps per run: a newer
+helper must not hide an older worker's failure. Existing receipts retain compact
+observations across reconnect, suppress uncertain dispatch replay and exclude late
+acknowledgements from the observed baseline. Worker Runs receive no posts; posts
+grant no operating authority. Historical run completion never completes a Task.
+Missing summaries stay absent; prose joins the exact captured step separately
+from its exit. Focused checks prove components, not configured idle wake or draft
+retention; Claude hook inbox availability remains unverified. Preserve Session
+identity and drafts. One-second settling is a demo assumption, not Jack's choice.
+Gate and authored demo remain; provider restriction or an adjacent card is no
+substitute for delivery.
 
 Desktop launched two LOO-293 helpers while its worker still produced output.
 Missing `lf ps` rows or a finished launcher do not prove idle execution.
 
-LOO-293's bounded history, passive native output and configured proof remain;
-use current Task panes, not the deleted Watch/Monitor view. Join history by exact
-captured step, never skill name or current YAML. Earlier scope and retired
-FlowPosition mechanism: `2c23acbb8:wave/product/MEMORY.md`, **Task observation and
-Watch**. Integration is not acceptance.
+LOO-293's unproved native scope and retired Watch/FlowPosition history:
+`2c23acbb8:wave/product/MEMORY.md`, **Task observation and Watch**.
 
 ### Terminal ownership and input (branch evidence, 2026-09-22)
 

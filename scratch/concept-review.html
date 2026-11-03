@@ -38,13 +38,13 @@
 </header>
 
 <h1>Report the run that changed.</h1>
-<p><strong>Next implementation direction:</strong> a newer helper must not hide
-an older worker’s failure in the Session report. This follows Jack Heart’s
-accepted outcome and the existing rule that every associated Graph is Task work.
-No new product decision is needed.</p>
-<p class="caption">Headless review. Source inspection establishes the mismatch;
-the examples below are illustrative. Native delivery and draft preservation still
-need the configured-provider demo.</p>
+<p><strong>Review outcome: nothing to change; no open product choice.</strong>
+The repair in <code>db5cdbbd14</code> reports each changed run. A newer helper no
+longer determines which worker’s progress appears. This implements Jack Heart’s
+accepted direction; no further redesign is proposed.</p>
+<p class="caption">Headless re-review of source and regression coverage. Examples
+below are illustrative, not captured native output. Gate and the configured-provider
+demo still own acceptance; idle delivery and draft preservation remain unproved.</p>
 
 <h2>One interaction, through the model</h2>
 <ol class="flow">
@@ -59,21 +59,21 @@ need the configured-provider demo.</p>
   Files owns the diff. Receipt delivery changes no Graph position.</li>
 </ol>
 
-<h2>Current implementation</h2>
-<p><code>TaskUpdates::pending</code> hashes every run but formats its message from
-<code>graphs.last()</code>. An older run can change the hash without appearing in
-the report. The latest run’s exit/start gap can also delay unrelated settled work.</p>
+<h2>Before: the repaired mismatch</h2>
+<p>Checkpoint <code>dd2bb7bc21</code> hashed every run but formatted its message from
+<code>graphs.last()</code>. An older run could change the hash without appearing in
+the report. The latest run’s exit/start gap could also delay unrelated settled work.</p>
 <div class="sample">
   <p class="caption">Illustrative state: A failed at gate; newer B is still running.</p>
   <p>Task LOO-711: Stopped from explore. Latest run docs (B) · running · docs: running.</p>
 </div>
-<p>The reading changed because A failed. The delivered facts describe B.
-Jack still has to ask what happened to the worker.</p>
+<p>The reading changed because A failed. The delivered facts described B.
+Jack would still have had to ask what happened to the worker.</p>
 
-<h2>Proposed report; accepted page</h2>
-<blockquote>The feature run failed at gate. The docs run is still running.
-The Task stopped from explore.</blockquote>
-<p class="caption">Proposed reporting behavior, not verified current output.</p>
+<h2>After: implemented report; accepted page</h2>
+<blockquote>The feature run failed at gate. The Task stopped from explore.</blockquote>
+<p class="caption">Illustrative Session wording. The native observation supplies
+the changed run and exact step Process IDs. Unchanged helper B is not announced.</p>
 <div class="sample">
   <p><strong>Stopped from explore</strong> · Files</p>
   <details><summary>docs · running · run B</summary>
@@ -89,36 +89,52 @@ The Task stopped from explore.</blockquote>
 </div>
 <p class="caption">Illustrative page, preserving the accepted minimal ordering
 and expandable history. “Earlier” is chronology; it grants no operating authority.</p>
-<p>Proposed usage wording: “Progress posts name the runs that changed, including
+<p>Current README wording: “Progress posts name the runs that changed, including
 an earlier run that finishes or fails while newer work is running.”</p>
-<p>Proposed skill clarification: “Report each changed run by its recorded identity;
+<p>Current task-session instruction: “Report each changed run by its recorded identity;
 keep its result separate from the Task’s workflow position.” Existing instructions
 against acting on a progress post remain.</p>
 
-<h2>Keep one observation, not another workflow</h2>
-<p>Compare compact reportable facts by Task, Graph and step identity. Existing
+<h2>One observation follows existing work</h2>
+<p><code>TaskUpdates::pending</code> compares compact reportable facts by Task,
+Graph and step identity. Existing
 Session-event receipts retain the baseline or dispatched observation so reconnect
-can identify later changes. A hash alone cannot tell which run changed. No new
-table, migration, cursor or user-facing subscription is needed.</p>
-<p>The atomic receipt claim still precedes provider bytes. Native ownership fences
-still select the recipient. Busy Sessions coalesce; uncertain dispatches never
-replay. Settle a run’s exit/start gap without silencing another run’s failure.</p>
-<p>Remove the latest-run selector from report selection. Keep the existing page,
-provider transports, historical records and exact Process links. Reports neither
-advance review nor authorize publication or merge.</p>
+can identify later changes. <code>latest_task_update</code> reads that observation;
+<code>record_task_update</code> claims dispatch atomically before provider bytes.
+No new table, migration, workflow cursor or user-facing subscription is introduced.</p>
+<p>Native ownership fences select the recipient. Busy Sessions coalesce; uncertain
+dispatches never replay. Each run’s exit/start gap settles independently. A late
+acknowledgement cannot rewind the dispatched reading.</p>
+<p>The page reads existing Work observations locally and <code>watchTask</code>
+remotely. Expansion preserves repeated steps and their Process IDs;
+<code>processHistory(id:)</code> reads on the content Machine. Reports neither
+advance review nor authorize publication or merge. Session receipts describe
+delivery; Task position and Process exits retain their existing owners.</p>
+
+<h2>The next proof is the native interaction</h2>
+<p>Leave an unsent draft in the same Task Session, observe progress without typing,
+inspect a failed step, and reach an interactive stop without advancing it.
+Reconnect after an uncertain dispatch and confirm no duplicate report. Use a build
+containing this change; the prototype and ordinary installed-app routing do not
+prove it. Claude’s configured hook inbox availability remains to be established.</p>
+<p>If native delivery changes the draft or misses the selected conversation, the
+implementation fails the accepted experience. That would not authorize replacing
+the Session post with a separate card or restricting providers. One-second
+settling remains a reversible assumption for Jack Heart’s demo review.</p>
 
 <h2>Review questions and disposition</h2>
 <ol>
   <li><strong>Can an earlier run fail while a newer run is unchanged?</strong><br>
-  Yes. Both belong to the Task. Add this regression case, including the newer
-  run’s exit/start gap. The report must name the failed run.</li>
+  Yes. Both belong to the Task. Existing regressions cover the newer run being
+  unchanged, between steps or newly changing. The report names the failed run.</li>
   <li><strong>Does reconnect resend an uncertain report?</strong><br>
-  No. Preserve the dispatched observation; suppress the duplicate and prove a
-  later change to the earlier run can still produce a new report.</li>
+  No. The dispatched observation survives reconnect. Existing regression coverage
+  checks duplicate suppression, a later failure of the older run, and the newer
+  run’s next step after its deferred gap.</li>
   <li><strong>Is any product choice unresolved?</strong><br>
-  None identified. One-second settling remains a reversible demo assumption.
-  <strong>Outcome: design changed.</strong> Implement changed-work reporting;
-  preserve gate and Jack Heart’s authored demo.</li>
+  None identified. <strong>Outcome: nothing to change.</strong> The earlier design
+  change is repaired. Gate and Jack Heart’s authored demo remain; this review
+  adds no implementation work or publication authority.</li>
 </ol>
 </main></body>
 </html>

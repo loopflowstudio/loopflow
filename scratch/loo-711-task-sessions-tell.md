@@ -2,7 +2,7 @@
 
 Status: accepted product direction; changed-run reporting is implemented.
 Focused verification passes; gate and configured-provider demo remain.
-Reviewed and repaired 2026-11-02.
+Reviewed, repaired and reconciled 2026-11-02 through checkpoint `db5cdbbd14`.
 Requested by Jack Heart.
 
 ## Accepted outcome
@@ -25,11 +25,14 @@ Original exploration and superseded wait-only design:
 
 ## Delivery design and implementation · 2026-11-02
 
-The earlier loop feedback described the notes-only branch. Checkpoint
-`dd2bb7bc21` now contains native delivery, receipt admission, the run page and
-focused tests. Source inspection during realign confirms those paths exist;
-it does not establish the authored demo's idle wake, draft or usability outcome.
-The prior Swift checks remain applicable to the unchanged run page.
+Checkpoint `dd2bb7bc21` introduced native delivery, receipt admission and the run
+page. The supplied iteration feedback identifies a defect in that checkpoint;
+`db5cdbbd14` contains the changed-run repair and focused regressions. Source
+inspection during realign confirms that repair, including observation retention
+at all four provider dispatch sites. It does not establish the authored demo's
+idle wake, draft or usability outcome. The prior Swift checks remain applicable
+to the unchanged run page. The recorded upstream tip remains `4e9ade2d04`, already
+integrated here; its installed-app routing still constrains demo evidence.
 
 `harness/task_updates.rs` reads existing Task/Graph/Process facts. Only interactive,
 unfinished Sessions receive reports; worker Runs are excluded. The first reading
@@ -148,11 +151,32 @@ Files and Session panes retain their existing owners and drafts.
   `lf open` and the prototype HTML prove neither this UI nor native delivery.
 - Publication, merge and live-store migration remain outside this request.
 
-Check: `cargo test -p loopflow --lib task_update` with inherited `LF_*` cleared and stdin closed (10 passed after compression); `cargo fmt`, `git diff --check` and `lf context` pass, under both budgets. Prior unchanged-page `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'DesktopHeadlessTests/nestedRunHistory|DesktopHeadlessTests/runPositionReadiness|DesktopHeadlessTests/taskWorkFollowsTheStream'` (app built, 3 passed) remains applicable. Existing linker unwind warning remains; broader suites/static checks belong to gate, configured delivery/drafts to demo.
+Check: realign `git diff --check` and `lf context` pass, under both budgets; reused unchanged-code `cargo test -p loopflow --lib task_update` with inherited `LF_*` cleared and stdin closed (10 passed after compression), `cargo fmt`, and unchanged-page `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter 'DesktopHeadlessTests/nestedRunHistory|DesktopHeadlessTests/runPositionReadiness|DesktopHeadlessTests/taskWorkFollowsTheStream'` (app built, 3 passed). Existing linker unwind warning remains; broader suites/static checks belong to gate, configured delivery/drafts to demo.
 
 ## Concept review · 2026-11-02
 
-**Design changed: report the work that changed.** Jack Heart's selected experience
+**Current outcome: nothing to change; no open product choice.** Re-review of
+`db5cdbbd14` confirms the earlier changed-run correction is implemented. The
+accepted concepts remain Task position, recorded runs/steps, and the existing
+Session; delivery receipts add no workflow or operating authority. The review
+page now distinguishes the historical mismatch from the current implementation.
+
+Normal progress, an older worker failing beside a newer helper, and reconnect
+after uncertain dispatch all fit that contract. Exact Process identity survives
+repeated labels; late acknowledgements cannot replace the dispatched observation.
+The existing README and task-session instructions express the accepted experience
+and need no further conceptual rewrite. Source and regression inspection support
+this finding; no new configured-provider execution or test pass is claimed.
+
+Next proof remains gate and Jack Heart's authored demo: native idle delivery with
+an unsent draft, failure inspection, an interactive stop that stays at review,
+and reconnect without duplicate delivery. A provider unable to deliver without
+altering the draft would invalidate the implementation's acceptance, not authorize
+a substitute surface or narrower provider scope. No new implement direction.
+
+### Earlier finding, now repaired
+
+**Prior design change: report the work that changed.** Jack Heart's selected experience
 remains Session posts plus screen 2's minimal, expandable run page. The repository
 contract includes every associated Graph in a Task's work; the newest Graph has
 no special authority. Using it as the sole subject of progress reports leaves
@@ -167,46 +191,14 @@ settled failure. This is a source-derived counterexample, not a newly executed
 provider test. A and B remain equally Task work even when B is taskless execution
 in the same checkout.
 
-### Experience and proposed wording
+### Applied correction and evidence limits
 
-The repair preserves the usage docs and authority limits. Added to
-`swift/README.md`: “Progress posts name the runs that changed,
-including an earlier run that finishes or fails while newer work is running.”
-Added task-session clarification: “Report each changed run by its recorded
-identity; keep its result separate from the Task's workflow position.” These describe the repaired path; configured-provider delivery still belongs to demo.
-
-Illustrative report: “The feature run failed at gate. The docs run is still
-running. The Task stopped from explore.” The post may coalesce settled changes;
-it must not substitute an unchanged helper for the failed worker. Exact Process
-history remains available by expanding that run, including under Earlier runs.
-Keep Files as the diff owner and the current minimal page ordering. No second
-notification surface, operation button or user-facing subscription concept is
-needed.
-
-### Consequences across layers
-
-- **Model and API:** compare reportable Task position and per-Graph/step facts by
-  their durable IDs. Derive the report from changed facts in `task_overview`, not
-  from one latest-run selector. Remove that selector as the report's authority;
-  keep latest-first ordering in the page. Do not add another Task cursor.
-- **Persistence:** retain enough of the last baseline/dispatched observation in
-  existing Session-event receipts to identify changed runs after reconnect.
-  A hash alone cannot name what changed. Keep one atomic claim of the coalesced
-  reading before provider bytes, and retain accepted/rejected/uncertain evidence.
-  Store compact reportable facts, not a second copy of compiled Graph history.
-  No new table or migration is called for.
-- **Execution and ownership:** the native provider owners still deliver to their
-  selected Session. Scope settling of exit/start gaps to the affected run so an
-  unrelated run cannot suppress a settled failure. Busy Sessions still receive
-  the latest coalesced reading; worker Runs stay excluded. Observations confer
-  no launch, review, publication or merge authority.
-- **Recovery:** uncertain dispatched readings remain non-replayable. Reconnect
-  compares later facts with the durable observation; late acknowledgements must
-  not rewind it. Historical runs, loop occurrences, exact Process IDs, Session
-  identity and drafts must survive. A disconnected or unavailable provider does
-  not become a terminal-input fallback.
-
-### Focused proof and remaining judgment
+Checkpoint `db5cdbbd14` replaces the latest-run selector with compact observations
+keyed by durable Task/run identities, retained in existing Session receipts.
+Each run settles independently; a gap retains only that run's previous facts.
+The report names changed runs and keeps Task position separate. The README and
+task-session skill describe this behavior. Latest-first page ordering, Files
+ownership and all native delivery/authority boundaries remain unchanged.
 
 Regressions cover an older run failing while newer work is unchanged, between
 steps or newly changing. A repeated step label retains its exact Process ID;
@@ -218,8 +210,8 @@ late acknowledgement and provider fencing checks remain on the existing path.
 
 No unresolved product choice was found. One-second settling remains the recorded
 reversible assumption, subject to Jack Heart's authored demo; configured provider
-delivery and draft preservation remain proof obligations. The review changed the design; this implement pass applies that correction
-without changing the page, provider ownership or authority limits.
-
-Concept-review outcome was **design changed**. The remaining work after this
-repair is gate and the authored demo; publication and merge remain unauthorized.
+delivery and draft preservation remain proof obligations. Concept review's
+**design changed** finding is historical; its implementation repair is present.
+Remaining acceptance is gate and the authored demo listed above, with no
+publication or merge authorization. Product memory was read in full; this
+checkout has no child Product memory directories to incorporate.

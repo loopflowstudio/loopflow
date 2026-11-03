@@ -806,8 +806,7 @@ pub(crate) async fn open(
         if session.interactive && moving.is_none() {
             if let Some(owner) = store.sqlite.session_transport(&session.id)? {
                 if crate::transport::current() != Some(&owner)
-                    && owner_running(&store.sqlite, &owner)?
-                    && answering(&owner)
+                    && attaches(&store.sqlite, session, &owner)?
                 {
                     // This viewer takes control, so the conversation is now
                     // shown where it runs, not where it was launched.
@@ -1104,10 +1103,83 @@ pub(crate) fn owner_running(store: &SqliteStore, owner: &crate::id::LfProcessId)
             != crate::journal::ProcessIdentityEvidence::Dead)
 }
 
+/// Whether opening attaches to `owner`, `session`'s running execution owner.
+/// An owner from another build is never negotiated with: once its Sessions
+/// wait for a person it is ended as its own lifetime policy ends it, stopping
+/// its agent and recording its exit, and the conversation resumes on the lf
+/// the entry launches now. A turn in progress is watched instead when the
+/// owner can show it (this viewer attaches, the owner ends itself after the
+/// turn and the viewer follows); one the owner cannot show is cut and
+/// reported, never cut silently. The build is judged against the entry, not
+/// this viewer, so a development build opening a conversation in the main
+/// Home relaunches through the installed lf.
+fn attaches(
+    store: &SqliteStore,
+    session: &LfSession,
+    owner: &crate::id::LfProcessId,
+) -> Result<bool> {
+    if !owner_running(store, owner)? {
+        return Ok(false);
+    }
+    let superseded = crate::journal::live_process_pid(store, owner)
+        .and_then(|pid| Some((pid, crate::journal::OsProcess::executable(pid)?)))
+        .filter(|(_, executable)| crate::installation::superseded(executable));
+    let Some((pid, executable)) = superseded else {
+        return Ok(answering(owner));
+    };
+    let turn_cut_off = !store.owner_waits_for_person(owner)?;
+    if turn_cut_off && answering(owner) {
+        return Ok(true);
+    }
+    end_owner(store, owner, pid).with_context(|| {
+        format!(
+            "end the owner on {} so the conversation can move here",
+            executable.display()
+        )
+    })?;
+    eprintln!(
+        "Moved {} off {}; continuing on the installed lf.{}",
+        if session.title.is_empty() {
+            session.id.as_str()
+        } else {
+            session.title.as_str()
+        },
+        executable.display(),
+        if turn_cut_off {
+            " Its last turn was cut off; ask again."
+        } else {
+            ""
+        }
+    );
+    Ok(false)
+}
+
+/// End the execution owner running as `pid` as its lifetime policy does: its
+/// signal handler stops the agent and records the exit. Returns once the
+/// owner is gone.
+pub(crate) fn end_owner(
+    store: &SqliteStore,
+    owner: &crate::id::LfProcessId,
+    pid: u32,
+) -> Result<()> {
+    const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+    crate::platform::kill_process(pid);
+    let deadline = std::time::Instant::now() + STOP_TIMEOUT;
+    while owner_running(store, owner)? {
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "pid {pid} did not stop within {}s",
+            STOP_TIMEOUT.as_secs()
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
 /// Whether a running owner answers its socket. One that does not, as an owner
 /// from an earlier lf may not after an upgrade, can never hand its terminal to
 /// a viewer, so opening takes the conversation over on the same provider thread.
-fn answering(owner: &crate::id::LfProcessId) -> bool {
+pub(crate) fn answering(owner: &crate::id::LfProcessId) -> bool {
     match crate::transport::controlled(owner) {
         Ok(_) => true,
         Err(error) => {

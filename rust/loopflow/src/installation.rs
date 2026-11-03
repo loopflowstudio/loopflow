@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -822,39 +822,9 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
         return Ok(());
     }
 
-    let switch_capability = _switch_capability(role);
-    let selection = match read_state(&root)? {
-        InstallationState::Legacy => {
-            return Err(anyhow!(
-                "installation entry gate {} has no settled install receipt",
-                gate.display()
-            ))
-        }
-        InstallationState::Switching(receipt)
-            if switch_capability.as_deref() == Some(receipt.id.as_str())
-                && receipt.phase.order() >= SwitchPhase::Activated.order()
-                && receipt.target_store_advanced =>
-        {
-            receipt.target
-        }
-        // A switch this process is not driving (typically one that failed or was
-        // abandoned mid-flight) must not brick ordinary startup: dispatch through
-        // the last good install instead of refusing.
-        InstallationState::Switching(receipt) => startup_selection_during_switch(&receipt)?,
-        InstallationState::Settled(active) => active.selection,
-    };
-    let artifact = selection
-        .artifact_set
-        .artifacts
-        .iter()
-        .find(|artifact| artifact_matches_runtime_role(&artifact.role, role))
-        .ok_or_else(|| {
-            anyhow!(
-                "active installation {} has no {:?} artifact",
-                selection.installation_id,
-                role
-            )
-        })?;
+    let selection = gate_selection(&root, _switch_capability(role).as_deref())
+        .with_context(|| format!("installation entry gate {}", gate.display()))?;
+    let artifact = gate_artifact(&selection, role)?;
     artifact.verify()?;
     if artifact.path == gate {
         return Err(anyhow!(
@@ -887,6 +857,85 @@ pub fn dispatch_entry_gate(role: &ArtifactRole) -> Result<()> {
     }
 }
 
+/// The install the gate dispatches to: the switch this process drives once it
+/// is activated, else the last good install.
+fn gate_selection(root: &Path, switch_capability: Option<&str>) -> Result<InstallSelection> {
+    Ok(match read_state(root)? {
+        InstallationState::Legacy => bail!("no settled install receipt"),
+        InstallationState::Switching(receipt)
+            if switch_capability == Some(receipt.id.as_str())
+                && receipt.phase.order() >= SwitchPhase::Activated.order()
+                && receipt.target_store_advanced =>
+        {
+            receipt.target
+        }
+        // A switch this process is not driving (typically one that failed or was
+        // abandoned mid-flight) must not brick ordinary startup: dispatch through
+        // the last good install instead of refusing.
+        InstallationState::Switching(receipt) => startup_selection_during_switch(&receipt)?,
+        InstallationState::Settled(active) => active.selection,
+    })
+}
+
+fn gate_artifact<'a>(
+    selection: &'a InstallSelection,
+    role: &ArtifactRole,
+) -> Result<&'a ArtifactIdentity> {
+    selection
+        .artifact_set
+        .artifacts
+        .iter()
+        .find(|artifact| artifact_matches_runtime_role(&artifact.role, role))
+        .ok_or_else(|| {
+            anyhow!(
+                "active installation {} has no {:?} artifact",
+                selection.installation_id,
+                role
+            )
+        })
+}
+
+/// Whether a launch through the entry now runs another build than
+/// `executable`: the one judgement behind a Session owner ending at idle,
+/// `lf resume` taking an owner over, and a viewer following the entry. An
+/// entry or executable nobody can read is not superseded; it is judged again.
+pub(crate) fn superseded(executable: &Path) -> bool {
+    launch_target().is_ok_and(|target| !same_build(executable, &target))
+}
+
+/// The executable a launch through the entry runs now: the gate's selected CLI
+/// artifact, else the file the entry names after following symlinks.
+pub(crate) fn launch_target() -> Result<PathBuf> {
+    let entry = crate::os_process::resolve_lf_binary()?;
+    let canonical = fs::canonicalize(&entry)
+        .with_context(|| format!("resolve lf entry {}", entry.display()))?;
+    let root = root()?;
+    let gate = entry_gate_path(&root, &ArtifactRole::Cli)?;
+    if !fs::canonicalize(&gate).is_ok_and(|gate| gate == canonical) {
+        return Ok(canonical);
+    }
+    let selection = gate_selection(&root, None)?;
+    let artifact = gate_artifact(&selection, &ArtifactRole::Cli)?;
+    fs::canonicalize(&artifact.path)
+        .with_context(|| format!("resolve selected lf {}", artifact.path.display()))
+}
+
+/// Whether two executables are one build: the same file, or the same bytes at
+/// different paths, as Desktop's bundled lf and the installed CLI artifact are.
+fn same_build(a: &Path, b: &Path) -> bool {
+    let (Ok(a), Ok(b)) = (fs::canonicalize(a), fs::canonicalize(b)) else {
+        return false;
+    };
+    if a == b {
+        return true;
+    }
+    let same_len = match (fs::metadata(&a), fs::metadata(&b)) {
+        (Ok(a), Ok(b)) => a.len() == b.len(),
+        _ => false,
+    };
+    same_len && matches!((file_sha256(&a), file_sha256(&b)), (Ok(a), Ok(b)) if a == b)
+}
+
 pub fn read_state(root: &Path) -> Result<InstallationState> {
     let switch_path = root.join(SWITCH_FILE);
     if path_exists(&switch_path)? {
@@ -901,20 +950,6 @@ pub fn read_state(root: &Path) -> Result<InstallationState> {
         return Ok(InstallationState::Settled(Box::new(active)));
     }
     Ok(InstallationState::Legacy)
-}
-
-/// Ordinary launches use published artifacts even if an old development
-/// installation is still selected. Its store never participates in routing.
-pub(crate) fn installed_artifacts(root: &Path) -> Result<Option<ArtifactSet>> {
-    let active = match read_state(root)? {
-        InstallationState::Legacy => return Ok(None),
-        InstallationState::Settled(active) => *active,
-        InstallationState::Switching(receipt) => startup_active_during_switch(&receipt)?,
-    };
-    Ok(Some(match active.selection.source {
-        InstallSource::Published => active.selection.artifact_set,
-        InstallSource::Development => active.published_fallback,
-    }))
 }
 
 /// The install selection ordinary startup should use while a switch receipt is
@@ -1618,30 +1653,6 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("digest mismatch"));
-    }
-
-    #[test]
-    fn ordinary_cli_uses_published_artifacts_through_legacy_development_selection() {
-        let directory = tempfile::tempdir().unwrap();
-        let root = directory.path().join("authority");
-        let installed_cli = |root: &std::path::Path| {
-            super::installed_artifacts(root)
-                .unwrap()
-                .and_then(|set| set.artifact(&ArtifactRole::Cli).cloned())
-        };
-        assert!(installed_cli(&root).is_none());
-        let published = selection(directory.path(), "published", InstallSource::Published);
-        let development = selection(directory.path(), "development", InstallSource::Development);
-        let expected = published.artifact_set.artifact(&ArtifactRole::Cli).unwrap();
-        for selected in [published.clone(), development.clone()] {
-            let active = active(selected, published.artifact_set.clone());
-            write_atomic_json(&root, &root.join(ACTIVE_FILE), &active).unwrap();
-            assert_eq!(installed_cli(&root).as_ref(), Some(expected));
-        }
-        let next = selection(directory.path(), "next", InstallSource::Published);
-        let receipt = switch(development, next, published.artifact_set.clone());
-        write_switch(&root, &receipt).unwrap();
-        assert_eq!(installed_cli(&root).as_ref(), Some(expected));
     }
 
     #[test]

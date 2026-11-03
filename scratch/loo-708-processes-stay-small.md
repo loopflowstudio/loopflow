@@ -50,7 +50,7 @@ all survive. So nothing learns to wait on a non-child.
   so the existing launcher settles each step before the Graph continues.
 - **connect → `lf -i`.** `serve_locked` `exec`s the `lf -i` command instead of
   spawning it; the launch lock crosses the exec as an inherited descriptor
-  (`LF_SESSION_LAUNCH_LOCK`) and the launcher drops it where it already drops
+  (`LF_LAUNCH_LOCK`) and the launcher drops it where it already drops
   the resume path's lock. Handoff env uses `carry_across_exec`.
 - **Viewer → relay.** `transport::attach` completes the viewer's ledger row
   and `exec`s `lf session attach OWNER [--moved TEXT] [--session-json SESSION]`,
@@ -155,13 +155,16 @@ neither branch is merged here.
 - Exit/continuation checks cover returning and handed-off exits 7/130, failed
   exec with one failed capture, JSON on initial launch/reconnection/takeover,
   and stale-owner settlement preserving a replacement attachment.
-- Gate owns lifecycle/launch-contract, startup-cost and journal acceptance
-  checks against the final implementation. Transport's exit, takeover, resume,
-  reboot recovery and Graph checks passed after compression. Earlier lifecycle (28),
-  launch-contract (25) and focused unit (111) passes are baseline evidence.
-- PR #1802 includes the footprint comparison. Real Desktop/Claude process-count
-  acceptance remains unproved. The release measurement below predates
-  compression; no final-tree measurement is claimed.
+- Gate passed the affected lifecycle, launch-contract, startup-cost, journal,
+  transport, command and Graph checks: 299 tests across the main run and the
+  focused test repair below. Linux and disposable-installation coverage stays
+  with CI; installed Desktop/Claude acceptance remains separate.
+- PR #1802 includes the historical footprint comparison. The
+  [headless demo](loo-708-demo.md) measures the current release build at
+  `238b70ef9c`: owner 20–21 MB, relay about 2.5 MB, no retained launcher.
+  Desktop's returned command passed detach/reopen/takeover/exit and JSON
+  continuation with a provider stand-in. Real Desktop/Claude process-count
+  acceptance remains unproved; the older measurement below remains historical.
 - Integration after LOO-705 must retain the explicit successor through the
   thin relay. LOO-712 owns subsequent encoding changes.
 - Concept review below resolves the draft compatibility assumptions by preserving
@@ -188,8 +191,9 @@ The transport README already describes that experience; no usage or skill
 rewrite is needed. The review page now shows the current result instead of
 presenting the repaired gaps as proposed work.
 
-Next proof remains the affected gate suites and final Desktop/Claude process
-count and footprint acceptance listed above. Integration must preserve successor
+The later headless demo supplies current-build footprint and prepared-command
+proof; gate now supplies the affected automated checks below. Installed
+Desktop/Claude acceptance remains unproved. Integration must preserve successor
 selection and preview cleanup across exec; these are established obligations,
 not new product choices or permission to take over LOO-705/710/712. This review
 changes no implementation, starts no provider, and claims no new runtime pass.
@@ -250,3 +254,66 @@ owner's handoff, preserving one settlement path.
 ## Checks
 
 2026-11-02: reused unchanged-code results recorded at `04552ff2b4`: `cargo test -p loopflow --test transport_tests` passed (30), `cargo test -p loopflow --lib harness::native_exit::` passed (1; nonfatal linker unwind-size warning), `cargo fmt` and `cargo clippy --all-targets -- -D warnings` passed (tests cleared inherited `LF_*` and closed stdin); reconciliation: `git diff --check` passed and `lf context` within both budgets. Gate owns remaining affected suites; authored review owns Desktop/footprint judgment.
+
+
+## Gate plan — 2026-11-02
+
+Compare the complete working tree with checkout base `4e9ade2d04`; preserve the
+existing demo and review evidence. No new provider turn or rendering is needed.
+
+- `bin/lf.rs`, command `run/session/util`, and `ops/human_session`: CLI unit
+  tests, human-session and command unit tests, lifecycle and launch-contract
+  binaries, Session CLI, startup-cost, default-conversation and context-launch
+  integration modules. These cover entry dispatch, mutation/JSON continuation,
+  startup failure, returning launchers and reopen semantics.
+- `transport.rs`, `transport/{lifetime,native}.rs`, harness `agent_process` and
+  `native_exit`, `process.rs`, `terminal_output.rs`: transport unit/integration
+  tests plus interactive/mixed-provider Graph and explicit launch-policy
+  regressions; these prove process ancestry, exit handoff, attachment, recovery
+  and Graph ordering. The existing current-build footprint demo is reused.
+- `journal/mod.rs`, `session_record.rs`: journal and Session-record unit tests
+  for receipts, contention, capture handoff and settlement.
+- Changed instructions, transport README and infrastructure memory: architecture
+  check and diff whitespace check. No Swift, Python or website source changed.
+- Run the changed-aware runner with `--reuse-passing` and the explicit filter
+  below, then its formatting and Clippy checks. Use rustup stable (1.99.1),
+  ahead of Homebrew Rust (1.98.1), canonical TMPDIR, cleared inherited LF_* and
+  closed stdin. Linux Clippy, Linux reconnect fixtures and the disposable-account
+  `declared_agent_can_start_another_tasks_graph` installation proof remain with CI.
+  Real Desktop/Claude acceptance remains unproved, as recorded in the demo.
+
+
+## Gate result — 2026-11-02
+
+Ready for the next review within the stated headless limits. No new provider
+turn ran. Gate renamed the private inherited descriptor variable to
+`LF_LAUNCH_LOCK` to satisfy the architecture vocabulary check, updated the
+startup-failure fixture for the accepted direct-launcher error contract, and
+removed a README reference to the retired public `session connect` command.
+The fixture still proves exit code 2, the launcher's error, no prompt leakage,
+retained prepared input and successful subsequent opening.
+
+Checks used rustup stable 1.99.1 first on PATH, canonical `TMPDIR=/private/tmp`,
+unset inherited `LF_*`, and closed stdin. The 298 passing cases in the main
+run retain their result: the only later executable change was the failing
+fixture's assertions, so only that test was repeated.
+
+- `uv run python scripts/test.py --reuse-passing --rust-filter 'binary(lf) | binary(transport_tests) | binary(session_lifecycle_tests) | binary(session_launch_contract) | test(transport::) | test(harness::native_exit::) | test(harness::agent_process::) | test(terminal_output::) | test(journal::tests) | test(session_record::) | test(ops::human_session::) | test(lf::commands::util::) | test(lf::commands::session::) | test(lf::commands::run::) | test(agent_startup_tests::) | test(session_cli_tests::) | test(default_conversation_tests::) | test(context_launch_tests::) | test(interactive_graph_keeps_input_and_advances_only_after_each_provider_exits) | test(mixed_provider_graph_keeps_launch_accounts_across_steps) | test(explicit_launch_policy_survives_task_runs_nested_graphs_and_provider_children) | test(launch_nonzero_exit)'` — 298/299 passed in 186 s; sole failure was the obsolete startup diagnostic assertion; log `.lf/tmp/gate/run-67237/rust/rust.log`.
+- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(session_cli_tests::boundary_launch_and_resume_remain_openable_while_provider_waits)'` — PASS, repaired test 1/1 in 7.3 s; log `.lf/tmp/gate/run-37397/rust/rust.log`.
+- `uv run python scripts/check_architecture.py` and `uv run python scripts/check_rust_test_inventory.py` — PASS through the runner.
+- `cargo build -p loopflow --bin lf --jobs 4`, `cargo fmt --all -- --check`, `cargo clippy --all-targets --jobs 4 -- -D warnings` — PASS through the runner; test linking emitted a nonfatal macOS debug unwind-size warning.
+- `git diff --check` — PASS.
+
+The first preflight failed when another uv operation removed a temporary cache
+directory during `du`; no product test ran. A fresh measurement passed. The
+next run found the retired environment prefix and was explicitly interrupted
+before tests to repair it. Neither was a test timeout. Final preflight and
+postflight passed with more than 150 GiB free. Build cleanup remained unavailable
+(`lf build cleanup` exited 2); its warning did not claim cleanup or invalidate
+the measured capacity.
+
+Linux Clippy/reconnect fixtures and the isolated installation proof
+`declared_agent_can_start_another_tasks_graph` remain deferred to capable CI.
+The existing 20–21 MB owner / roughly 2.5 MB relay footprint evidence uses a
+provider stand-in; no installed Desktop/Claude acceptance is claimed. Preserve
+the recorded LOO-705/710/712 successor and preview-cleanup integration obligations.

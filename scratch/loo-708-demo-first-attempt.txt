@@ -1,0 +1,31 @@
+HEAD: 238b70ef9cea6b9b16605afc18078a7e92178175
+Scope: Release CLI, actual prepared open_argv in PTY; isolated Machine and provider stand-in; no authenticated agent
+Disposable directory: /private/tmp/loo708-demo-5_i_r8yp
+Prepared Session: e0c2c55565d1469e8a9a70e2915cf661
+Prepared open_argv: ['/usr/bin/env', 'LF_BIN=/Users/jack/src/loopflow.loo-708-loopflow-s-own/target/release/lf', 'LF_HOME=/private/tmp/loo708-demo-5_i_r8yp/home', '/Users/jack/src/loopflow.loo-708-loopflow-s-own/target/release/lf', 'session', 'resume', 'e0c2c55565d1469e8a9a70e2915cf661']
+Process tree: {'owner': (56512, '/Users/jack/src/loopflow.loo-708-loopflow-s-own/target/release/lf session serve --terminal -- /Users/jack/src/loopflow.loo-708-loopflow-s-own/target/release/lf session resume e0c2c55565d1469e8a9a70e2915cf661'), 'viewer': (56398, '/Users/jack/src/loopflow.loo-708-loopflow-s-own/target/release/lf session attach 0f7d4bdd-c4f3-453c-8275-63282d3aa87d'), 'provider': (56534, '/bin/sh /private/tmp/loo708-demo-5_i_r8yp/bin/claude --name repo --settings /private/tmp/loo708-demo-5_i_r8yp/home/hook-settings/claude-e843999521a9a5070e7c659e86bdc264e2f98769cd7b0221e9bd6277b6276fc4.json --no-chrome --append-system-prompt-file /private/tmp/loo708-demo-5_i_r8yp/repo.repo/.lf/prompts/20261102-160518-d09e597b-ed20-4330-afe0-91b73261744c-sJKw8r-repo-session.context.md --add-dir /private/tmp/loo708-demo-5_i_r8yp/repo --session-id b134c719-1b2c-4fb6-8dae-6c6bc0e7771e --'), 'provider_parent': 56512}
+Extra lf children beside provider: []
+First terminal: '\r\x1b[2K| Finding conversation (0s)\r\x1b[2K\r\x1b[2K| Preparing conversation (0s)\r\x1b[2K\x1b[0m\x1b[?25h\r\x1b[2K| Finding conversation (0s)\r\x1b[2K\r\x1b[2K| Preparing conversation (0s)\r\x1b[2K\x1b]7501;id=lf/cf8f998ffdd44ec6a1f52484929dc115:state=working\x1b\\\r\x1b[2K| Preparing claude (0s)\r\x1b[2K| Opening claude terminal (0s)\r\x1b[2K\x1b]0;repo\x07DEMO READY\r\n'
+owner footprint: ======================================================================
+lf [56512]: 64-bit    Footprint: 20 MB (16384 bytes per page)
+======================================================================
+
+Auxiliary data:
+    phys_footprint: 20 MB
+    phys_footprint_peak: 20 MB
+
+
+viewer footprint: ======================================================================
+lf [56398]: 64-bit    Footprint: 2560 KB (16384 bytes per page)
+======================================================================
+
+Auxiliary data:
+    phys_footprint: 2592 KB
+    phys_footprint_peak: 2592 KB
+
+
+Relay store descriptors: No loopflow.db in lsof
+Detach terminal: ''
+Detach: Provider and owner survive; relay exits 0
+State after detach: detached
+Cleanup: {'owner_remaining': '', 'provider_remaining': '', 'viewer_codes': [0, 130, 130]}

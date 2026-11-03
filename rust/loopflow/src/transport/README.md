@@ -70,8 +70,8 @@ An execution command delegates to a detached owner, which holds its PTY or pipes
 and records an ordinary Process. Loopflow launches that owner itself; it has no
 public command. Session rows name that Process; viewer tokens and
 terminal bytes remain in memory. A Claude conversation keeps one lf owner
-and one relay per terminal showing it. The process that resolves a Session
-(`lf resume`, `lf session connect`) execs into `lf session attach OWNER`, which
+and one relay per terminal showing it. `lf resume` resolves the Session,
+then execs into `lf session attach OWNER`, which
 opens no store and parses no commands. A Claude launcher under an owner hands
 the owner what it would record at exit, then execs into the provider, so Claude
 is the owner's direct child and no `lf -i` waits beside it; the owner records

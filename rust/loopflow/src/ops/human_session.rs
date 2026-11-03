@@ -644,7 +644,7 @@ async fn serve_locked(store: &SharedStore, session: &LfSession, launch_lock: Fil
 }
 
 /// Environment naming the inherited descriptor that holds a Session launch lock.
-const LAUNCH_LOCK_ENV: &str = "LF_SESSION_LAUNCH_LOCK";
+const LAUNCH_LOCK_ENV: &str = "LF_LAUNCH_LOCK";
 
 fn pass_launch_lock(command: &mut std::process::Command, lock: &File) -> Result<()> {
     use std::os::fd::AsRawFd;

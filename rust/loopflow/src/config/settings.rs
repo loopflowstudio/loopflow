@@ -344,7 +344,8 @@ pub fn resolve_layers(
     layers: &[ConfigLayerValues],
     skill: Option<&Skill>,
 ) -> Result<ResolvedSettings, LoadError> {
-    let mut candidates: Vec<(ConfigLayer, SettingScope, u8, String, String, Value)> = Vec::new();
+    // Each block shares provenance; specificity orders blocks within a source/scope.
+    let mut candidates = Vec::new();
     let mut defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
     insert(&mut defaults, &["agent"], super::default_agent().into());
     insert(
@@ -365,47 +366,53 @@ pub fn resolve_layers(
         );
     }
     candidates.push((
-        ConfigLayer::Builtin,
-        SettingScope::Global,
         0,
-        "builtin".into(),
-        "general".into(),
-        defaults,
+        SettingCandidate {
+            layer: ConfigLayer::Builtin,
+            scope: SettingScope::Global,
+            source: "builtin".into(),
+            target: "general".into(),
+            value: defaults,
+        },
     ));
     if let Some(skill) = skill {
         let source = skill.source.as_ref();
         let layer = definition_layer(source.map(|source| source.path.as_path()));
         candidates.push((
-            layer,
-            if layer == ConfigLayer::Repo {
-                SettingScope::Repository
-            } else {
-                SettingScope::Global
-            },
             1,
-            source.map_or_else(
-                || "builtin".into(),
-                |source| source.path.display().to_string(),
-            ),
-            format!("skill:{}", skill.name),
-            skill_values(skill),
-        ));
-        if let Some(occurrence) = &skill.occurrence {
-            candidates.push((
-                occurrence.layer,
-                if occurrence.layer == ConfigLayer::Repo {
+            SettingCandidate {
+                layer,
+                scope: if layer == ConfigLayer::Repo {
                     SettingScope::Repository
                 } else {
                     SettingScope::Global
                 },
-                2,
-                format!("graph:{}", occurrence.graph),
-                format!(
-                    "graph:{}/{}",
-                    occurrence.graph,
-                    occurrence.id.as_deref().unwrap_or("anonymous")
+                source: source.map_or_else(
+                    || "builtin".into(),
+                    |source| source.path.display().to_string(),
                 ),
-                occurrence.values.clone(),
+                target: format!("skill:{}", skill.name),
+                value: skill_values(skill),
+            },
+        ));
+        if let Some(occurrence) = &skill.occurrence {
+            candidates.push((
+                2,
+                SettingCandidate {
+                    layer: occurrence.layer,
+                    scope: if occurrence.layer == ConfigLayer::Repo {
+                        SettingScope::Repository
+                    } else {
+                        SettingScope::Global
+                    },
+                    source: format!("graph:{}", occurrence.graph),
+                    target: format!(
+                        "graph:{}/{}",
+                        occurrence.graph,
+                        occurrence.id.as_deref().unwrap_or("anonymous")
+                    ),
+                    value: occurrence.values.clone(),
+                },
             ));
         }
     }
@@ -432,17 +439,14 @@ pub fn resolve_layers(
                 }
             }
         }
-        let source = layer.path.display().to_string();
         // Scope orders scopes within one source; authored repo metadata shares repo scope.
-        let scope = layer.scope;
-        candidates.push((
-            layer.layer,
-            scope,
-            0,
-            source.clone(),
-            "general".into(),
-            layer.value.clone(),
-        ));
+        let mut candidate = SettingCandidate {
+            layer: layer.layer,
+            scope: layer.scope,
+            source: layer.path.display().to_string(),
+            target: "general".into(),
+            value: Value::Null,
+        };
         if let Some(skill) = skill {
             let portable = crate::definition::name::portable_name(&skill.name);
             if let Some(value) = layer
@@ -451,12 +455,12 @@ pub fn resolve_layers(
                 .and_then(|skills| skills.get(&skill.name).or_else(|| skills.get(&portable)))
             {
                 candidates.push((
-                    layer.layer,
-                    scope,
                     1,
-                    source.clone(),
-                    format!("skill:{}", skill.name),
-                    value.clone(),
+                    SettingCandidate {
+                        target: format!("skill:{}", skill.name),
+                        value: value.clone(),
+                        ..candidate.clone()
+                    },
                 ));
             }
             if let Some(occurrence) = &skill.occurrence {
@@ -469,26 +473,31 @@ pub fn resolve_layers(
                         .get(id)
                 }) {
                     candidates.push((
-                        layer.layer,
-                        scope,
                         2,
-                        source.clone(),
-                        format!(
-                            "graph:{}/{}",
-                            occurrence.graph,
-                            occurrence.id.as_deref().expect("matched id")
-                        ),
-                        value.clone(),
+                        SettingCandidate {
+                            target: format!(
+                                "graph:{}/{}",
+                                occurrence.graph,
+                                occurrence.id.as_deref().expect("matched id")
+                            ),
+                            value: value.clone(),
+                            ..candidate.clone()
+                        },
                     ));
                 }
             }
         }
+        candidate.value = layer.value.clone();
+        candidates.push((0, candidate));
     }
-    candidates.sort_by_key(|(source, scope, target, ..)| (rank(*source), *scope, *target));
+    candidates.sort_by_key(|(specificity, candidate)| {
+        (rank(candidate.layer), candidate.scope, *specificity)
+    });
     let allowed = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
     let mut merged = Value::Mapping(Default::default());
     let mut explanations: BTreeMap<String, EffectiveSetting> = BTreeMap::new();
-    for (layer, scope, _, source, target, mut values) in candidates {
+    for (_, mut candidate) in candidates {
+        let mut values = std::mem::replace(&mut candidate.value, Value::Null);
         if let Some(map) = values.as_mapping_mut() {
             if let Some(graph) = map.remove("workflow") {
                 map.entry(Value::String("graph".into())).or_insert(graph);
@@ -511,11 +520,8 @@ pub fn resolve_layers(
                     candidates: Vec::new(),
                 });
             entry.candidates.push(SettingCandidate {
-                source: source.clone(),
-                layer,
-                scope,
-                target: target.clone(),
                 value: value.clone(),
+                ..candidate.clone()
             });
             let previous = std::mem::replace(&mut entry.value, Value::Null);
             entry.value = if super::ADDITIVE_KEYS.contains(&key.as_str()) {

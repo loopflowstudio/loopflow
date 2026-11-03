@@ -697,7 +697,10 @@ Global exports go to `~/.claude/skills` and `~/.agents/skills`; repository expor
 go to the corresponding checkout directories, never home. Release promotion’s
 skill sync includes builtin Graphs. Recipes capture Graph topology at sync time;
 sync again after adding, editing, removing or overriding repository definitions.
-Headless commands load their skills when launched.
+Headless commands retain the defining Graph, authored step ID and source precedence
+in invocation files beside the recipe. Skill definitions and personal, DB,
+environment and CLI preferences resolve in the launch repository. Sync refreshes and prunes
+these captures with their recipe, preserving unrelated bundle assets.
 
 Exact names win: `.lf/skills/wave/session.md` and `.lf/skills/wave-session.md`
 are distinct definitions. `lf skill wave/session` selects the first; `lf skill

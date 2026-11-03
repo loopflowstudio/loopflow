@@ -455,24 +455,6 @@ impl Cli {
         }
     }
 
-    pub fn chrome_setting(&self) -> Option<bool> {
-        self.chrome.map(|mode| mode == BrowserMode::On).or_else(|| {
-            std::env::var(crate::config::CHROME_OVERRIDE_ENV)
-                .ok()
-                .map(|value| value == "on")
-        })
-    }
-
-    pub fn diff_files_setting(&self) -> Option<bool> {
-        self.diff
-            .map(|mode| matches!(mode, DiffContext::Files | DiffContext::Both))
-    }
-
-    pub fn diff_setting(&self) -> Option<bool> {
-        self.diff
-            .map(|mode| matches!(mode, DiffContext::Patch | DiffContext::Both))
-    }
-
     /// The most specific Work selected for direct execution.
     pub fn work_subject_selector(&self) -> Option<String> {
         self.task

@@ -432,7 +432,8 @@ fn resolve_cli_target(
     };
     let repo = loopflow::repo::working_directory()?;
     if let Some(path) = &cli.skill_input {
-        let invocation = loopflow::skills::invocation::SkillInvocation::read(path)?;
+        let invocation =
+            loopflow::skills::invocation::SkillInvocation::read(path, &repo, message.as_deref())?;
         anyhow::ensure!(
             invocation.skill.name == name,
             "captured skill does not match {name}"
@@ -1995,7 +1996,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
             &loopflow::ops::task::TaskProcessOptions {
                 wave: cli.wave.clone(),
                 reason: reason.clone(),
-                agent: cli.agent.clone(),
                 name: name.clone(),
                 graph: graph.clone(),
                 from: from.clone(),
@@ -2463,7 +2463,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             loopflow::ops::task::TaskProcessOptions {
                 wave: cli.wave.clone(),
                 reason: reason.clone(),
-                agent: cli.agent.clone(),
                 name: name.clone(),
                 graph: graph.clone(),
                 from: from.clone(),

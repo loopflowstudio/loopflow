@@ -79,7 +79,6 @@ pub enum TaskWaitUntil {
 pub struct TaskProcessOptions {
     pub wave: Option<String>,
     pub reason: Option<String>,
-    pub agent: Option<String>,
     pub name: Option<String>,
     pub graph: Option<String>,
     /// The step `lf task run --from` starts the Task's Graph at.

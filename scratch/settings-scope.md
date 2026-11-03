@@ -5,7 +5,7 @@ Jack Heart approved this direction and requested implementation on 2026-11-02
 first-PR design, superseding storage-model.md, route-design.md and the selection
 questions in design-questions.md. Preserve the separate recovery outcome below.
 
-## What to build
+## Accepted outcome
 
 One settings model across CLI, environment, lfdb, personal config, repository/Wave
 config, skill files and graph-step files, with personal overrides for particular
@@ -44,7 +44,7 @@ of implement can differ. Eligible settings use the same names/types in each bloc
 not separate skill_agents/skill_docs/skill_yolo maps. Agent remains harness[:model];
 a bare harness preserves its native model default. Resolve each setting separately.
 
-Proposed matching CLI to implement:
+Implemented matching CLI:
 
 ```sh
 lf set --global skills.implement.agent codex
@@ -53,11 +53,10 @@ lf unset --global graphs.release.steps.write-code.agent
 ```
 
 Retain repository/Wave DB scopes too. Unset exposes the next applicable layer.
-Effective-setting inspection must explain winning source, target and value plus
-shadowed candidates for direct skills and composed Graph steps. Extend existing
-config/setup APIs with one resolver; CLI and Desktop must agree. Prefer a config
-show command with skill/graph context and JSON, checked against existing navigation.
-No credential values in diagnostics.
+`lf config show --skill implement --json` and `lf config show --graph release
+--step write-code --json` expose effective values and candidate provenance through
+the shared CLI/Desktop read operation. Agreement with provider launches remains
+part of acceptance. Diagnostics contain no credential values.
 
 ## Resolution and propagation
 
@@ -89,13 +88,12 @@ internal LF_* identity plumbing is not another preference layer.
 
 ## Coverage and implementation
 
-First inventory every settable item: Config fields, personal-only readers, CLI,
-public environment, lf set, machine/account preferences, Desktop/API, skill metadata
-and Graph metadata. Complete a current-to-proposed coverage table. Use it to build
-consistent supported combinations, not defer everything except agent. Semantic
-restrictions may remain with reasons: UI theme/terminal are personal; planning and
-release describe repository work; graph topology is authored structure; lifecycle
-commands, registrations, credentials and usage observations are not scalar settings.
+The inventory below covers Config fields, personal-only readers, CLI, public
+environment, lf set, machine/account preferences, Desktop/API, skill metadata and
+Graph metadata. Semantic restrictions remain explicit: UI theme/terminal are
+personal; planning and release describe repository work; graph topology is authored
+structure; lifecycle commands, registrations, credentials and usage observations
+are not scalar settings. An inventory entry alone does not establish launch proof.
 
 Each preference has a canonical key/type, valid sources/scopes/targets, default,
 merge/reset rule, propagation boundary and reader/writer. Share typed semantics
@@ -114,40 +112,29 @@ negation and collection replacement as well as scalar precedence.
 Native provider metadata remains native: Claude agent: Explore is not an lf
 harness. Only Loopflow-owned metadata participates.
 
-## Current system; delete, do not maintain
+## Implemented authority cut — reconciled 2026-11-02
 
-Main cut points: config.rs merging/PersonalSettings; prompt/process.rs::resolve_agent;
-bin/lf.rs CLI/env setup; AgentConfig override application; ops/task.rs task selection;
-graph compilation and child launch; commands/setting.rs dispatch; work/wave/setup.rs
-provenance; Session and remote launch paths. Builtin skills use default_agent today.
+`config/settings.rs` now retains source layers through resolution and produces
+effective configuration plus candidate provenance. Prompt preparation, configuration
+inspection and Wave setup consume that resolver. CLI and Desktop select
+`InvocationSettings`; the duplicate `CALL_AGENT` / `AgentSelection` store and the
+`layer_setting` / `graph_setting` wrappers are removed. CLI outranks environment;
+resolved Session defaults are no longer exported as future policy.
 
-Delete in the same cut:
+The single `settings_authority.sql` migration drops `tasks.agent` and converts DB
+`skill_agents.*` keys to `skills.<name>.agent`. Task API/DTO mirrors no longer carry
+an agent preference. Execution/provider history and `provider_routes` remain.
+Builtin metadata uses `agent`; retained captured Graphs deserialize old
+`default_agent` without restoring a separate authority tier. Runtime Graph children
+receive their captured `SkillInvocation`, including occurrence source and settings.
+Native recipe export now uses the same invocation reader and settings resolver,
+retaining authored occurrence identity and source authority.
 
-- Session-to-Task agent persistence and future selection from tasks.agent; retain
-  actual execution/provider history. Cut over obsolete API/DTO consumers with a
-  production migration and mirror updates where necessary.
-- Env outranking CLI and export of resolved Session defaults as future policy.
-- The unused `layer_setting` lookup and redundant `graph_setting` wrapper; setup
-  and Graph selection now consume the resolver directly.
-- The duplicate `CALL_AGENT` / `AgentSelection` store and its agent-only API wrapper;
-  CLI and Desktop writes select the same `InvocationSettings`.
-- skill_agents after migration to skills.<name>.agent; no parallel authority.
-- Separate authored agent/default_agent precedence tiers when source provenance
-  supplies builtin/repo/personal rank. Migrate builtin metadata and tests, preserving
-  native dialects.
-
-Keep scope_settings and provider_routes: DB preferences plus files were selected.
-Use one Task migration if needed, tested from the released frontier. Shared config
-files must remain readable by released lf until installation; any necessary temporary
-reader follows AGENTS.md's scoped exception, not an indefinite compatibility layer.
+Shared configuration must remain readable by released lf until installation;
+the existing `workflow` alias is marked for LOO-637. No second Task migration or
+parallel settings authority is selected.
 
 ## Internal slices and proof
-
-This slice: inventory existing settings/consumers; replace authority and targeting
-end to end, deleting/migrating old representations. Then wire eligible settings
-through personal/DB/repo/skill/graph surfaces, inspection and existing Desktop/API
-projections. Finish docs, fixtures and the complete coverage table. Unsupported
-combinations need a reason; unexplained holes are unfinished work.
 
 Audit Jack's actual configuration (config-audit.md) and preserve intended values.
 Do not rewrite account order, native model defaults or unrelated repo changes.
@@ -166,11 +153,14 @@ Stand-in providers must prove:
   intentional collection merging; inspected effective values match actual launches.
 - Existing routing, remote launch, native metadata, history and migrations survive.
 
-Run focused config/prompt/graph and CLI tests with inherited LF_* stripped and stdin
-closed, cargo fmt, and cargo clippy --all-targets -- -D warnings. Use scripts/test.py
---list for affected gate suites once; update DTO fixtures and documented commands.
-No paid-provider test is required. Review includes the settings matrix, personal
-audit and concrete before/after demo. Implementation checks are recorded below.
+The existing checks cover distinct boundaries: resolver units prove precedence and
+collection semantics; `wave_setup_tests::setting_targets_inspect_and_unset_through_the_cli`
+proves persisted targeting and inspection; the composed-occurrence unit test agrees
+with prompt preparation. `settings_launch_tests` launches stand-ins for explicit
+Graph selection through composition and a provider-issued child command selecting
+its own agent. Native launch/resume fixtures cover fresh settings with preserved
+provider history. These passes do not by themselves prove the whole acceptance
+matrix above. No paid-provider test is required.
 
 ## Second PR: recovery
 
@@ -211,12 +201,60 @@ transcripts based on the superseded Route draft. This PR leaves recovery open.
 | skill action_style, native metadata; Graph topology, interactive, returns | authored behavior | definition files only; personal overrides select execution preferences without rewriting instructions/topology |
 | Desktop autosave/history filter/render diagnostics | local view preferences | UserDefaults; no repository, Wave, or agent-step meaning |
 
-Remaining: native Graph export still renders authored occurrence agents as explicit
-`-a` commands and does not carry the occurrence selector or its other settings.
-Realign must reconcile this surface with personal Graph-step preferences before
-claiming complete coverage. Runtime Graph launches retain occurrence identity.
-Then Graph review and gate's affected architecture, Rust, website and Swift suites;
-publication is for review. Recovery remains a separate PR.
+## Delete — do not maintain
+
+- Removed `graph/instructions.rs::headless_command`'s authored-agent-to-`-a`
+  promotion, direct-skill export and separate command-collision resolver. Captured
+  `SkillInvocation` commands explicitly select `skill --`; conversational steps,
+  native controls and exact shell-safe names remain.
+- Removed the unused `TaskProcessOptions.agent` and its construction sites; Task
+  placement carries no execution preference. Graph execution retains the CLI.
+- Removed unused `Cli::{chrome_setting,diff_files_setting,diff_setting}` readers.
+  `setting_values` and the shared resolver own these preferences. No exclusive
+  tests or fixtures remain for these removed paths; no deletion target is open.
+- No new settings authority or migration is required. Sync owns the captures in
+  each generated bundle; content-addressed files are listed in its frontmatter,
+  refreshed before recipe publication and pruned only while their contents match.
+  A recipe captures a named skill reference plus occurrence metadata. It must load
+  the skill in the launch repository: a global builtin recipe cannot freeze out a
+  repository's skill override. Runtime Graph captures retain their exact bodies;
+  both paths use `SkillInvocation` and the shared settings resolver.
+
+## Remaining first-PR work — 2026-11-02
+
+Graph review and gate own the affected architecture, Rust, website and Swift
+suites, followed by the concrete settings demo and publication for Jack's review.
+Auto-Ship remains stopped; no merge or Task completion is authorized. Recovery
+remains the second PR, with its exact mechanisms still unselected.
+
+## Export and launch proof
+
+Native recipes now invoke `lf -b --skill-input <capture> skill -- <name>`.
+Each capture retains a named skill reference and its authored occurrence. Loading
+in the launch repository preserves repository overrides of global recipes and
+current skill defaults. Already resolved runtime captures retain their original
+body and arguments. Command messages become the named recipe invocation's
+arguments, while runtime correction direction remains separate.
+
+Sync atomically writes content-addressed captures before their recipe, lists them
+in generated frontmatter, repairs missing captures and interrupted first exports,
+and prunes replaced/removed captures only when their contents still match. Foreign
+assets and replaced captures remain untouched. Conversational steps stay in their
+current Session and retain native controls. No second settings resolver was added.
+
+`settings_launch_tests` now correlates inspection with stand-in provider arguments
+and delivered documents for repeated/composed occurrences, same-ID unrelated
+occurrences, changed skill defaults, personal YAML, global/repository/Wave DB
+settings, unset, CLI/environment precedence, explicit false, empty collections and
+additive document merging. Both runtime Graphs and executed exported commands
+participate. An explicit Graph agent reaches routers and a repeated loop pass.
+A native Claude Session and its model-switched resume each run an existing local
+Task and create/run another Task: all four implement workers select Codex.
+
+Claude's documented headless permission floor remains independent of `yolo`;
+`yolo: false` removes explicit bypass preference, not that floor. Terminal yolo
+negation remains covered by the existing native launch/resume checks. The launch
+matrix proves headless false/empty behavior with chrome and document settings.
 
 Implementation decisions (2026-11-02): repeated composed interactive stops get
 unique captured navigation names (`review#1`, `review#2`); preference targeting
@@ -228,8 +266,9 @@ to avoid carrying one provider's fields into another provider. File and database
 settings share scope validation: Machine presentation stays global, and repository
 planning/delivery settings cannot be scoped to a Wave.
 
-Compression keeps source layers intact through sorting rather than reconstructing
-them from numeric ranks. Prompt preparation consumes one resolved configuration;
+Compression carries candidate blocks in `SettingCandidate` through sorting and
+leaf resolution rather than a parallel six-field tuple. Source layers remain
+intact. Prompt preparation consumes one resolved configuration;
 Wave setup loads its layers once and resolves each distinct skill once. Occurrence
 capture copies only preference values, avoiding serialization of skill bodies and
 source frontmatter. Already captured occurrences do not reread their source files.
@@ -237,11 +276,19 @@ Bare references keep loaded skill defaults at their own source; they never becom
 authored occurrence overrides simply because the Graph used shorthand.
 Native terminal commands carry resolved isolation through bootstrap and client
 routing; resolving it again in an account worker loses thread-local CLI settings.
-Exported Graph recipes no longer promote skill defaults to CLI overrides; their
-explicit authored occurrence agents retain the existing recipe behavior above.
+Native exit settlement now also carries the launch's isolation choice when
+pinning the account home; the upstream merge had left that caller incomplete.
 
 The selection/child-launch proof moved from the library fixture module to the
 `settings_launch_tests` integration module, using Cargo’s fixture binary.
 The replaced assertion was removed; the remaining library fixtures retain their coverage.
 
-Check result: `cargo nextest run -p loopflow --lib --test integration --test served_reads --no-fail-fast -E 'test(config::settings::) | test(graph::) | test(wave_setup_tests::) | binary(served_reads)'` 111 PASS; `cargo nextest run` native launch/resume 25 PASS, prompt/config/child-launch checks PASS; prior unchanged migration and Swift results retained; `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `git diff --check` PASS. Gate owns broader affected suites from `scripts/test.py --list`; realign owns the native recipe targeting gap above.
+Upstream reconciliation: fetched `origin/main` remains `ece53eec1b`, already merged
+in `d6d7057d97`. The Session screen/mode restoration, owner/viewer reduction and
+installed-entry resume changes are present. The native exit caller repair above
+completes their integration with the settings authority change.
+Infrastructure and its immediate Release child's goal/memory were read. Release's
+entry-point lesson applies directly: runtime Graph proof cannot establish exported
+recipe behavior. Broader live/installed recovery is not established by either.
+
+Check result: `cargo nextest run -p loopflow --lib --test integration -E 'test(config::settings::tests::) | test(settings_launch_tests::) | test(skills::tests::global_recipe_selects_repository_skill_and_keeps_authored_occurrence) | test(skills::tests::graph_captures_refresh_and_prune_with_their_recipe_preserving_foreign_assets)'` with inherited `LF_*` unset and null stdin — 14 PASS; earlier recipe/export/native proof covered 29 distinct checks; `cargo fmt --check`, `git diff --check`, and both context budgets PASS; gate owns broader suites, Clippy and demo. Auto-Ship remains stopped per the prior `lf desktop task LOO-714 --json` read.

@@ -562,6 +562,7 @@ fn run_native_session(
             capture.observe_provider(agent_session.cloned(), account.clone());
         }
         let exit = crate::harness::native_exit::NativeExit {
+            isolate: command.isolate,
             session: owner.1.clone(),
             attachment: owner.2.clone(),
             provider: command.program.clone(),

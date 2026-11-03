@@ -46,6 +46,12 @@ enum Vendor {
     Codex,
 }
 
+#[derive(Debug, Default)]
+struct Export {
+    content: String,
+    inputs: BTreeMap<String, String>,
+}
+
 /// Copy a builtin skill only when the repository has no local definition.
 pub fn customize(name: &str, repo: &Path) -> Result<PathBuf, LoadError> {
     let local = SkillCatalog::load(Some(repo), None, false)?;
@@ -83,12 +89,7 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             .collect(),
     };
     let repo = options.repo.as_ref().map(std::path::absolute).transpose()?;
-    let mut all_graphs = crate::builtins::builtin_graph_names()
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    all_graphs.extend(graphs.iter().cloned());
-    let mut recipes = BTreeMap::new();
+    let mut compiled_graphs = BTreeMap::new();
     let mut targets = Vec::new();
     let mut report = SkillSyncReport::default();
     // Resolve and validate the entire export set before touching either provider.
@@ -110,7 +111,13 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
             }) {
                 continue;
             }
-            exports.insert(name.clone(), render_skill(skill, name, vendor)?);
+            exports.insert(
+                name.clone(),
+                Export {
+                    content: render_skill(skill, name, vendor)?,
+                    ..Export::default()
+                },
+            );
         }
         for (name, graph) in project_names(graphs.iter().map(String::as_str)) {
             if skills.contains_key(&name) {
@@ -122,24 +129,51 @@ pub fn sync_skills(options: &SkillSyncOptions) -> Result<SkillSyncReport, LoadEr
                 report.skipped.push(path);
                 continue;
             }
-            let recipe = match recipes.entry(graph.clone()) {
+            let steps = match compiled_graphs.entry(graph.clone()) {
                 std::collections::btree_map::Entry::Occupied(entry) => entry.into_mut(),
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     let definition = DefinitionLoader::new(options.repo.as_deref(), &catalog)
                         .load_graph(&graph)?;
                     let steps = compile_graph_with_catalog(&definition, &catalog)?;
-                    entry.insert(render_graph_instructions(&graph, &steps, &all_graphs)?)
+                    entry.insert(steps)
                 }
             };
+            let mut inputs = BTreeMap::new();
+            let directory = std::path::absolute(root.join(&name))?;
+            let recipe = render_graph_instructions(&graph, steps, &mut |skill| {
+                let invocation = invocation::SkillInvocation {
+                    skill: crate::graph::Skill {
+                        occurrence: skill.occurrence.clone(),
+                        ..crate::graph::Skill::named(&skill.name)
+                    },
+                    arguments: String::new(),
+                };
+                let content = serde_json::to_string(&invocation)
+                    .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
+                let filename = input_filename(&content);
+                inputs.insert(filename.clone(), content);
+                Ok(directory.join(filename))
+            })?;
             sources.insert(name.clone(), graph.clone());
             exports.insert(
                 name.clone(),
-                render_graph_skill(&graph, &name, vendor, recipe),
+                Export {
+                    content: render_graph_skill(&graph, &name, vendor, &recipe, &inputs),
+                    inputs,
+                },
             );
         }
         let blocked = exports
             .keys()
-            .filter(|name| !writable_target(base, &root, name))
+            .filter(|name| {
+                !writable_target(base, &root, name, &exports[*name].inputs)
+                    || exports[*name].inputs.iter().any(|(file, content)| {
+                        let path = root.join(name).join(file);
+                        path.is_symlink()
+                            || (path.exists()
+                                && fs::read_to_string(path).ok().as_ref() != Some(content))
+                    })
+            })
             .cloned()
             .collect::<BTreeSet<_>>();
         let blocked_sources = blocked.iter().map(|name| sources[name].clone()).collect();
@@ -221,7 +255,12 @@ fn suffixed_name(name: &str, suffix: &str) -> String {
     format!("{}-{suffix}", prefix.trim_end_matches('-'))
 }
 
-fn writable_target(base: &Path, root: &Path, name: &str) -> bool {
+fn writable_target(
+    base: &Path,
+    root: &Path,
+    name: &str,
+    inputs: &BTreeMap<String, String>,
+) -> bool {
     let directory = root.join(name);
     let path = directory.join(SKILL_FILE_NAME);
     // The selected home/repository may use filesystem aliases (e.g. macOS /var).
@@ -243,27 +282,47 @@ fn writable_target(base: &Path, root: &Path, name: &str) -> bool {
     if path.exists() {
         return path.is_file() && is_generated(&path);
     }
-    // A new bundle must not hide an existing namespace or claim its assets.
+    // A new bundle must not claim foreign assets. An interrupted export may
+    // have published only its content-addressed captures; finish that write.
     !directory.is_dir()
-        || fs::read_dir(&directory).is_ok_and(|mut entries| entries.next().is_none())
+        || fs::read_dir(&directory).is_ok_and(|mut entries| {
+            entries.all(|entry| {
+                entry.is_ok_and(|entry| {
+                    let path = entry.path();
+                    !path.is_symlink()
+                        && inputs
+                            .get(&entry.file_name().to_string_lossy().into_owned())
+                            .is_some_and(|content| {
+                                fs::read_to_string(path).ok().as_ref() == Some(content)
+                            })
+                })
+            })
+        })
 }
 
-fn render_graph_skill(graph: &str, name: &str, vendor: Vendor, recipe: &str) -> String {
+fn render_graph_skill(
+    graph: &str,
+    name: &str,
+    vendor: Vendor,
+    recipe: &str,
+    inputs: &BTreeMap<String, String>,
+) -> String {
     let user_only = if vendor == Vendor::Claude {
         "disable-model-invocation: true\n"
     } else {
         ""
     };
-    format!("---\nname: {name}\ndescription: Follow the {name} Graph in this conversation.\nloopflow: true\nloopflow-kind: graph\nloopflow-graph: {}\n{user_only}---\n{recipe}", yaml_string(graph))
+    format!("---\nname: {name}\ndescription: Follow the {name} Graph in this conversation.\nloopflow: true\nloopflow-kind: graph\nloopflow-graph: {}\nloopflow-inputs: {}\n{user_only}---\n{recipe}", yaml_string(graph), serde_json::to_string(&inputs.keys().collect::<Vec<_>>()).expect("input names serialize"))
 }
 
 fn write_targets(
-    exports: &BTreeMap<String, String>,
+    exports: &BTreeMap<String, Export>,
     blocked: &BTreeSet<String>,
     target_root: &Path,
     report: &mut SkillSyncReport,
 ) -> Result<(), LoadError> {
-    for (name, content) in exports {
+    for (name, export) in exports {
+        let content = &export.content;
         let path = target_root.join(name).join(SKILL_FILE_NAME);
         if blocked.contains(name) {
             eprintln!(
@@ -273,18 +332,38 @@ fn write_targets(
             report.skipped.push(path);
             continue;
         }
-        if fs::read_to_string(&path).ok().as_deref() == Some(content.as_str()) {
-            continue;
+        let previous = owned_inputs(&path);
+        let directory = path.parent().expect("skill destination has a parent");
+        fs::create_dir_all(directory)?;
+        // Publish captures first: a recipe must never reference an absent input.
+        for (name, input) in &export.inputs {
+            let target = directory.join(name);
+            if !target.exists() {
+                write_export(&target, input, target_root)?;
+            }
         }
-        fs::create_dir_all(path.parent().expect("skill destination has a parent"))?;
-        fs::write(&path, content)?;
-        report.written.push(path);
+        if fs::read_to_string(&path).ok().as_deref() != Some(content.as_str()) {
+            write_export(&path, content, target_root)?;
+            report.written.push(path.clone());
+        }
+        for old in previous {
+            if !export.inputs.contains_key(&old) {
+                remove_owned_input(directory, &old)?;
+            }
+        }
     }
     Ok(())
 }
 
+fn write_export(path: &Path, content: &str, root: &Path) -> Result<(), LoadError> {
+    let temporary = tempfile::NamedTempFile::new_in(root)?;
+    fs::write(temporary.path(), content)?;
+    temporary.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
+
 fn prune_targets(
-    exports: &BTreeMap<String, String>,
+    exports: &BTreeMap<String, Export>,
     blocked_sources: &BTreeSet<String>,
     base: &Path,
     target_root: &Path,
@@ -308,9 +387,54 @@ fn prune_targets(
         {
             continue;
         }
+        for input in owned_inputs(&path) {
+            remove_owned_input(path.parent().expect("skill has a directory"), &input)?;
+        }
         fs::remove_file(&path)?;
         report.pruned.push(path.clone());
         prune_empty_skill_dir(&path, target_root)?;
+    }
+    Ok(())
+}
+
+// Content-addressed captures belong to the generated recipe's manifest. Never
+// overwrite or prune a foreign file, including a replaced capture or symlink.
+fn input_filename(content: &str) -> String {
+    format!(
+        "loopflow-input-{:x}.json",
+        Sha256::digest(content.as_bytes())
+    )
+}
+
+fn owned_inputs(path: &Path) -> Vec<String> {
+    let Some(content) = fs::read_to_string(path).ok() else {
+        return Vec::new();
+    };
+    let Some((header, _)) = split_frontmatter(&content) else {
+        return Vec::new();
+    };
+    let Ok(fields) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(header) else {
+        return Vec::new();
+    };
+    fields
+        .get("loopflow-inputs")
+        .and_then(serde_yaml_ng::Value::as_sequence)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_yaml_ng::Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn remove_owned_input(directory: &Path, name: &str) -> Result<(), LoadError> {
+    if name.contains('/') || name.contains('\\') {
+        return Ok(());
+    }
+    let path = directory.join(name);
+    if !path.is_symlink()
+        && fs::read_to_string(&path).is_ok_and(|content| input_filename(&content) == name)
+    {
+        fs::remove_file(path)?;
     }
     Ok(())
 }
@@ -630,7 +754,7 @@ mod tests {
             let root = repo.path().join(provider).join("skills");
             let wrapper = fs::read_to_string(root.join("team-ship/SKILL.md")).unwrap();
             assert!(wrapper.contains("# Graph: team/ship"));
-            assert!(wrapper.contains("1. Run `lf -b implement`."));
+            assert!(wrapper.contains(" skill -- implement`."));
             assert!(wrapper.contains("loopflow-kind: graph"));
             assert!(!wrapper.contains("--instructions"));
             assert!(root.join("team-check/SKILL.md").exists());
@@ -639,6 +763,120 @@ mod tests {
         assert!(sync_skills(&options).unwrap().written.is_empty());
         fs::remove_file(repo.path().join(".lf/graphs/team/ship.yaml")).unwrap();
         assert_eq!(sync_skills(&options).unwrap().pruned.len(), 2);
+    }
+
+    #[test]
+    fn global_recipe_selects_repository_skill_and_keeps_authored_occurrence() {
+        let home = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        sync_skills(&options_for(&home)).unwrap();
+        let recipe = home.path().join(".agents/skills/code/SKILL.md");
+        let inputs = super::owned_inputs(&recipe);
+        let path = inputs
+            .iter()
+            .map(|name| recipe.parent().unwrap().join(name))
+            .find(|path| {
+                let input: crate::skills::invocation::SkillInvocation =
+                    serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+                input.skill.name == "implement"
+            })
+            .unwrap();
+        fs::create_dir_all(repo.path().join(".lf/skills")).unwrap();
+        let source = repo.path().join(".lf/skills/implement.md");
+        fs::write(
+            &source,
+            "---\nagent: claude:repo\n---\nRepository implementation.",
+        )
+        .unwrap();
+        let selected = crate::skills::invocation::SkillInvocation::read(
+            &path,
+            repo.path(),
+            Some("Exact request"),
+        )
+        .unwrap();
+        assert_eq!(
+            selected.skill.content.as_deref(),
+            Some("Repository implementation.")
+        );
+        assert_eq!(selected.skill.agent.as_deref(), Some("claude:repo"));
+        assert_eq!(selected.skill.occurrence.as_ref().unwrap().graph, "pursue");
+        assert_eq!(selected.arguments, "Exact request");
+        // A runtime Graph's already resolved capture retains its body/arguments.
+        let captured = home.path().join("runtime.json");
+        fs::write(&captured, serde_json::to_vec(&selected).unwrap()).unwrap();
+        fs::write(source, "Changed after runtime capture.").unwrap();
+        let runtime = crate::skills::invocation::SkillInvocation::read(
+            &captured,
+            repo.path(),
+            Some("Correction direction"),
+        )
+        .unwrap();
+        assert_eq!(runtime, selected);
+    }
+
+    #[test]
+    fn graph_captures_refresh_and_prune_with_their_recipe_preserving_foreign_assets() {
+        let home = TempDir::new().unwrap();
+        let repo = TempDir::new().unwrap();
+        fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
+        let graph = repo.path().join(".lf/graphs/proof.yaml");
+        fs::write(
+            &graph,
+            "- step: {name: implement, id: work, agent: claude}\n",
+        )
+        .unwrap();
+        let options = SkillSyncOptions {
+            repo: Some(repo.path().to_owned()),
+            ..options_for(&home)
+        };
+        sync_skills(&options).unwrap();
+        let directory = repo.path().join(".agents/skills/proof");
+        let recipe = directory.join(SKILL_FILE_NAME);
+        let original = super::owned_inputs(&recipe).pop().unwrap();
+        // A crash between publishing inputs and the recipe is recoverable.
+        let before = fs::read_to_string(&recipe).unwrap();
+        fs::remove_file(&recipe).unwrap();
+        sync_skills(&options).unwrap();
+        assert_eq!(fs::read_to_string(&recipe).unwrap(), before);
+        let input = crate::skills::invocation::SkillInvocation::read(
+            &directory.join(&original),
+            repo.path(),
+            None,
+        )
+        .unwrap();
+        let occurrence = input.skill.occurrence.unwrap();
+        assert_eq!(occurrence.graph, "proof");
+        assert_eq!(occurrence.id.as_deref(), Some("work"));
+        assert_eq!(occurrence.values["agent"].as_str(), Some("claude"));
+        fs::write(directory.join("notes.txt"), "User asset").unwrap();
+        fs::write(
+            &graph,
+            "- step: {name: implement, id: work, agent: codex}\n",
+        )
+        .unwrap();
+        sync_skills(&options).unwrap();
+        assert!(!directory.join(original).exists());
+        let current = super::owned_inputs(&recipe).pop().unwrap();
+        assert!(directory.join(&current).exists());
+        // A missing capture is repaired even when the checklist itself is unchanged.
+        fs::remove_file(directory.join(&current)).unwrap();
+        sync_skills(&options).unwrap();
+        assert!(directory.join(&current).exists());
+        // A replaced capture is no longer owned; neither refresh nor pruning touches it.
+        fs::write(directory.join(&current), "User replacement").unwrap();
+        assert!(sync_skills(&options).unwrap().skipped.contains(&recipe));
+        fs::remove_file(graph).unwrap();
+        sync_skills(&options).unwrap();
+        assert!(!recipe.exists());
+        assert_eq!(
+            fs::read_to_string(directory.join(current)).unwrap(),
+            "User replacement"
+        );
+        assert_eq!(
+            fs::read_to_string(directory.join("notes.txt")).unwrap(),
+            "User asset"
+        );
+        assert!(!repo.path().join(".claude/skills/proof").exists());
     }
 
     #[test]
@@ -679,7 +917,7 @@ mod tests {
         fs::write(&graph, "- compress\n").unwrap();
         sync_skills(&options).unwrap();
         let updated = fs::read_to_string(local).unwrap();
-        assert!(updated.contains("1. Run `lf -b compress`."));
+        assert!(updated.contains(" skill -- compress`."));
         assert!(!updated.contains("Execute the skill `demo`"));
         assert_eq!(fs::read_to_string(global).unwrap(), original);
     }
@@ -739,8 +977,8 @@ mod tests {
             for (source, body) in [
                 ("team/check", "Slash"),
                 ("team-check", "Dash"),
-                ("team/ship", "lf -b team/check"),
-                ("team-ship", "lf -b team-check"),
+                ("team/ship", "skill -- team/check"),
+                ("team-ship", "skill -- team-check"),
             ] {
                 let contents = files
                     .iter()

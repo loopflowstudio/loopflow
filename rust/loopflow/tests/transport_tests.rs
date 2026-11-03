@@ -140,6 +140,7 @@ impl Fixture {
             &digest[..16]
         ))
     }
+    #[track_caller]
     fn viewer(&self, id: &str, control: bool) -> Viewer {
         self.attach(
             id,
@@ -147,6 +148,7 @@ impl Fixture {
                 "own":control.then_some("take"),"rows":24,"cols":80}),
         )
     }
+    #[track_caller]
     fn attach(&self, id: &str, request: Value) -> Viewer {
         let mut viewer = self.connect(id);
         viewer.request(request);
@@ -352,6 +354,7 @@ fn frame(tag: u8, payload: &[u8]) -> Vec<u8> {
 }
 
 /// The next frame from `reader`, or `None` at EOF.
+#[track_caller]
 fn read_frame(reader: &mut impl Read) -> Option<(u8, Vec<u8>)> {
     let mut header = [0; 5];
     if reader.read(&mut header[..1]).unwrap() == 0 {
@@ -403,6 +406,7 @@ impl Viewer {
         self.nonce = attached["nonce"].as_str().unwrap().to_owned();
     }
     /// The next item, or `None` once the owner closes this connection.
+    #[track_caller]
     fn next(&mut self) -> Option<Item> {
         let (tag, payload) = read_frame(&mut self.socket)?;
         self.wire += 5 + payload.len() as u64;
@@ -439,6 +443,7 @@ impl Viewer {
         }
         moves
     }
+    #[track_caller]
     fn until_reply(&mut self) -> Value {
         loop {
             if let Item::Reply(reply) = self.next().expect("owner closed before replying") {
@@ -447,6 +452,7 @@ impl Viewer {
         }
     }
     /// Everything up to and including the first event of `kind`.
+    #[track_caller]
     fn until_event(&mut self, kind: &str) -> Vec<Item> {
         until(
             self,
@@ -458,6 +464,7 @@ impl Viewer {
             .write_all(&frame(INPUT, text.as_bytes()))
             .unwrap();
     }
+    #[track_caller]
     fn finish(&mut self) {
         let items = self.until_event("child_exited");
         let Some(Item::Event(exit)) = items.last() else {
@@ -2994,6 +3001,7 @@ while read -r line; do
 done
 "#;
 
+#[track_caller]
 fn until_out(viewer: &mut Viewer, text: &str) -> Vec<Item> {
     until(viewer, |items| {
         String::from_utf8_lossy(&out(items)).contains(text)
@@ -3001,6 +3009,7 @@ fn until_out(viewer: &mut Viewer, text: &str) -> Vec<Item> {
 }
 
 /// Items up to the first that satisfies `done` over everything so far.
+#[track_caller]
 fn until(viewer: &mut Viewer, done: impl Fn(&[Item]) -> bool) -> Vec<Item> {
     let mut items = Vec::new();
     loop {
@@ -3015,6 +3024,7 @@ fn until(viewer: &mut Viewer, done: impl Fn(&[Item]) -> bool) -> Vec<Item> {
 }
 
 /// Items up to the owner event naming `id`.
+#[track_caller]
 fn until_owner(viewer: &mut Viewer, id: &str) -> Vec<Item> {
     until(viewer, |items| {
         matches!(items.last(), Some(Item::Event(event))

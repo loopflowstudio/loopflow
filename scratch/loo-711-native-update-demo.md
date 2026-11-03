@@ -1,6 +1,14 @@
-# LOO-711 native update demo · 2026-11-02
+# LOO-711 native update demo · 2026-11-03
 
-Outcome: partial configured-provider proof, incomplete Desktop demo. Available for Jack Heart's review; no acceptance recorded. LOO-711 remains at interactive `demo`, with no PR and no graph continuation.
+Outcome: partial configured-provider proof, incomplete Desktop demo. Available for Jack Heart's review; no acceptance recorded. LOO-711 remains at interactive `demo`. PR [#1806](https://github.com/loopflowstudio/loopflow/pull/1806) is open; this review has not continued its Graph or armed landing.
+
+## In-app retry · 2026-11-03
+
+Jack Heart clarified: “i want to demo it in the app.” The terminal evidence and HTML account do not satisfy that interaction request. His question about the 4m28s result was answered as model-turn duration, not transport latency; no timing cause or acceptance was inferred.
+
+The existing preview restored after choosing macOS “Don’t Reopen” for its crashed windows. Its fixture Task became visible, but opening a pane triggered another app termination. A debugger reproduced EXC_BAD_ACCESS while a cooperative Swift executor called `lf_write`; the failing instruction was a stack probe, with `LoopflowLibrary.call` in the stack. The earlier snapshot-only navigation diagnosis is incomplete: native layout persistence itself can exceed the debug build's cooperative stack.
+
+A local repair moves synchronous one-shot FFI calls off `Task.detached` onto native threads with an 8 MiB stack. The existing watch owner is unchanged. A focused regression invokes the real library from an async caller and verifies it writes a graph customization. The rebuilt native app and focused regression passed: `scripts/test_desktop.sh --jobs 4 -Xswiftc -gnone --filter WorkObservationTransportTests/writeFromAsyncCaller` (1 test). The repaired app survives Task focus and graph-log opening through the Desktop API; its process remained alive for several minutes. The API reports the correct fixture Task, existing Session (elsewhere, with Move here available), and selected Graph processes tab. This is application-state evidence, not proof of visible rendering. UI control then returned `cgWindowNotFound` for Loopflow, Finder and Chrome. Jack was asked whether the desktop is unlocked; the answer is pending. No new native screenshot or completed in-app interaction is claimed. No Graph was restarted and no new design choice was attributed to Jack Heart.
 
 ## Experience and setup
 
@@ -44,4 +52,4 @@ Proposed next direction: expose a concise progress post without displaying the t
 
 Reconnect without duplicate/uncertain replay, all other configured providers (Claude, OpenCode, Pi), mounted run-page interaction, cadence/noise judgment and broader gate remain. The native draft specimen and isolated app are left available; no Session was completed or closed. No worker restart, publication or merge followed this review.
 
-Recommended next action: review `scratch/demo.html`, then use the existing Task for a bounded repair/demo pass chosen by Jack Heart. Preserve the first-delay and opening failures. Do not call the overall demo successful from the native delivery evidence alone.
+Recommended next action: resume the requested native demo when the desktop is accessible. Open `/Users/jack/Applications/Loopflow LOO-711 Demo.app`, select Worker updates demo, and use Move here for the disposable existing Codex Session. Jack should type a fresh unsent draft and say ready in the ongoing conversation before a harmless fixture Graph runs. The existing specimen draft belongs to the fixture and is not expected to transfer. Preserve the first-delay and opening failures. Do not call the overall demo successful from the native delivery evidence alone.

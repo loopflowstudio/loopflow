@@ -9,6 +9,22 @@ import Testing
 /// Every window starts with the plan and the live-process watch.
 @Suite("Workspace watch transport", .serialized)
 struct WorkObservationTransportTests {
+    @Test("A native library write completes from an async caller")
+    func writeFromAsyncCaller() async throws {
+        setenv("LF_HOME", Self.home.path, 1)
+        defer { unsetenv("LF_HOME") }
+        let repo = Self.home.appendingPathComponent("write-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let lf = try BuiltLf(home: Self.home, cwd: repo)
+        _ = try await lf.run(["init", "--quiet"], executable: "/usr/bin/git")
+
+        let printed = try #require(try await LoopflowLibrary.write(.graphCustomize(directory: repo.path, name: "code")))
+        let path = printed.trimmingCharacters(in: .whitespacesAndNewlines)
+        let graph = try String(contentsOfFile: path, encoding: .utf8)
+        #expect(graph.contains("implement"))
+    }
+
     @Test("Loopflow's library serves a read in the app and ends it on cancel")
     func servedInProcess() async throws {
         setenv("LF_HOME", Self.home.path, 1)

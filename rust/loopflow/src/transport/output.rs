@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use crate::ghostty_vt;
 use crate::program_status::State;
 
-use super::{terminal, Response, Viewer, LIMIT};
+use super::{terminal, LIMIT};
 
 pub(super) enum Output {
     Terminal(Box<Terminal>),
@@ -49,35 +49,42 @@ impl Output {
         Ok(())
     }
 
-    pub fn attach(&self, viewer: &mut Viewer) -> Result<()> {
-        let bytes = match self {
-            Self::Terminal(terminal) => {
-                let mut bytes =
-                    terminal::repaint(&terminal.terminal).context("Repaint the owner's screen")?;
-                for report in terminal.reports.values() {
-                    bytes.extend(report);
-                }
-                bytes.extend(terminal.terminal.continuation().context(
-                    "Provider sequence exceeds snapshot limit; attach after it completes",
-                )?);
-                bytes
-            }
-            Self::Pipes { .. } => Vec::new(),
+    /// The terminal snapshot a fresh viewer's stream begins with; `None` for pipes.
+    pub fn snapshot(&self) -> Result<Option<Vec<u8>>> {
+        let Self::Terminal(terminal) = self else {
+            return Ok(None);
         };
-        viewer.queue(&Response::Attached {
-            token: viewer.token.clone(),
-            terminal: matches!(self, Self::Terminal(_)),
-            bytes,
-        })?;
-        if let Self::Pipes { tail, .. } = self {
-            for (stream, bytes) in tail {
-                viewer.queue(&Response::Output {
-                    stream: *stream,
-                    bytes: bytes.clone(),
-                })?;
-            }
+        let mut bytes =
+            terminal::repaint(&terminal.terminal).context("Repaint the owner's screen")?;
+        for report in terminal.reports.values() {
+            bytes.extend(report);
         }
-        Ok(())
+        bytes.extend(
+            terminal
+                .terminal
+                .continuation()
+                .context("Provider sequence exceeds snapshot limit; attach after it completes")?,
+        );
+        Ok(Some(bytes))
+    }
+
+    /// The retained pipe tail a fresh viewer's stream begins with.
+    pub fn tail(&self) -> impl Iterator<Item = (u8, &[u8])> {
+        let tail = match self {
+            Self::Pipes { tail, .. } => Some(tail),
+            Self::Terminal(_) => None,
+        };
+        tail.into_iter()
+            .flatten()
+            .map(|(stream, bytes)| (*stream, bytes.as_slice()))
+    }
+
+    /// Whether the stream stands between complete sequences, where an event may go.
+    pub fn ready(&self) -> bool {
+        match self {
+            Self::Terminal(terminal) => terminal.terminal.at_ground(),
+            Self::Pipes { .. } => true,
+        }
     }
 
     /// Feed the program's output to the retained state. Returns the replies
@@ -142,19 +149,14 @@ impl Output {
         }
     }
 
-    /// Reports may be inserted only between complete terminal sequences and
-    /// UTF-8 characters; raw provider bytes stay unchanged.
-    pub fn take_reports(&mut self) -> Option<Response> {
+    pub fn take_reports(&mut self) -> Option<Vec<u8>> {
         let Self::Terminal(terminal) = self else {
             return None;
         };
         if terminal.pending_reports.is_empty() || !terminal.terminal.at_ground() {
             return None;
         }
-        Some(Response::Output {
-            stream: 1,
-            bytes: std::mem::take(&mut terminal.pending_reports),
-        })
+        Some(std::mem::take(&mut terminal.pending_reports))
     }
 
     /// The retained terminal, for the snapshot an ending owner leaves behind.

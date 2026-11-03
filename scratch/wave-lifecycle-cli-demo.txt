@@ -1,0 +1,53 @@
+Observed 2026-11-02; branch binary built from 5f9632547855524322b52e441d4ada33f9fdcf0c.
+Isolated repository: /private/tmp/loo-500-cli-2us495qp/repo
+No Linear connection or live provider.
+
+$ lf wave add research --objective 'Improve research tools'
+Added Wave research; committed .lf/wave/research on /private/tmp/loo-500-cli-2us495qp/repo (eac3c6602f)
+[exit 0]
+
+$ lf wave rename research discovery
+Renamed Wave research → discovery
+Still mentioned in: .lf/wave/discovery/GOAL.md:3, .lf/wave/discovery/MEMORY.md:1.
+[exit 0]
+
+$ lf wave remove discovery --preview
+discovery has no Tasks or Sessions.
+1 chapter stays readable in history.
+.lf/wave/discovery is deleted on the main checkout; Git history keeps it.
+[exit 0]
+
+$ git checkout --detach
+HEAD is now at 3807cbb lf wave rename: research
+[exit 0]
+
+$ lf wave remove discovery
+Removed Wave discovery.
+discovery has no Tasks or Sessions.
+1 chapter stays readable in history.
+Authored changes for .lf/wave/discovery remain pending on the main checkout.
+.lf/wave/discovery is not committed: /private/tmp/loo-500-cli-2us495qp/repo is not on a branch.
+Saved locally; planning synchronization pending. See `lf planning status`.
+[exit 0]
+
+$ git checkout main
+D	.lf/wave/discovery/GOAL.md
+D	.lf/wave/discovery/MEMORY.md
+D	.lf/wave/discovery/config.yaml
+Switched to branch 'main'
+[exit 0]
+
+$ lf wave remove discovery
+discovery was already removed.
+[exit 0]
+
+$ lf wave show discovery
+discovery  removed
+  removed at 2026-11-03T02:09:40Z
+  chapter   research (proj_a3e61800771e422b920fd4f65805bc14) · current · started
+  (no plan rows)
+[exit 0]
+
+$ lf wave list
+No waves in the registry.
+[exit 0]

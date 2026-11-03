@@ -236,6 +236,11 @@ fn validate_preferences(value: &Value, targeted: bool, strict: bool) -> Result<(
         let key = key
             .as_str()
             .ok_or_else(|| invalid("setting names must be strings"))?;
+        let key = if !targeted && key == super::GRAPH_ALIAS {
+            "graph"
+        } else {
+            key
+        };
         if key == "skill_agents" || key == "default_agent" {
             return Err(invalid(format!(
                 "{key} is retired; use skills.<name>.agent or agent"
@@ -431,11 +436,13 @@ pub fn resolve_layers(
         },
     ];
     for layer in layers.iter().chain(&invocation) {
-        validate_preferences(&layer.value, false, false)?;
+        validate_preferences(&layer.value, false, layer.layer == ConfigLayer::Wave)
+            .map_err(|error| invalid(format!("{}: {error}", layer.path.display())))?;
         if let Some(values) = layer.value.as_mapping() {
             for key in values.keys().filter_map(Value::as_str) {
                 if !["skills", "graphs"].contains(&key) && preference_path(key).is_ok() {
-                    validate_scope(key, layer.layer, layer.scope)?;
+                    validate_scope(key, layer.layer, layer.scope)
+                        .map_err(|error| invalid(format!("{}: {error}", layer.path.display())))?;
                 }
             }
         }
@@ -494,12 +501,11 @@ pub fn resolve_layers(
         (rank(candidate.layer), candidate.scope, *specificity)
     });
     let allowed = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
-    let mut merged = Value::Mapping(Default::default());
     let mut explanations: BTreeMap<String, EffectiveSetting> = BTreeMap::new();
     for (_, mut candidate) in candidates {
         let mut values = std::mem::replace(&mut candidate.value, Value::Null);
         if let Some(map) = values.as_mapping_mut() {
-            if let Some(graph) = map.remove("workflow") {
+            if let Some(graph) = map.remove(super::GRAPH_ALIAS) {
                 map.entry(Value::String("graph".into())).or_insert(graph);
             }
             map.retain(|key, _| {
@@ -512,7 +518,6 @@ pub fn resolve_layers(
         let mut flat = Vec::new();
         leaves(&values, "", &mut flat);
         for (key, value) in flat {
-            let path: Vec<_> = key.split('.').collect();
             let entry = explanations
                 .entry(key.clone())
                 .or_insert_with(|| EffectiveSetting {
@@ -535,8 +540,16 @@ pub fn resolve_layers(
             } else {
                 value
             };
-            insert(&mut merged, &path, entry.value.clone());
         }
+    }
+    // Execution and inspection share the final values, including list resets.
+    let mut merged = Value::Mapping(Default::default());
+    for (key, setting) in &explanations {
+        insert(
+            &mut merged,
+            &key.split('.').collect::<Vec<_>>(),
+            setting.value.clone(),
+        );
     }
     let mut config: Config =
         serde_yaml_ng::from_value(merged).map_err(|error| invalid(error.to_string()))?;

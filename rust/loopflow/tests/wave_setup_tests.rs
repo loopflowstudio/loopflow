@@ -354,3 +354,74 @@ fn setting_targets_inspect_and_unset_through_the_cli() {
     ));
     assert_eq!(selected[0]["settings"]["chrome"]["value"], false);
 }
+
+#[test]
+fn setting_targets_inspect_the_defining_graph_and_authored_id() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    repo.create_file(".lf/skills/probe.md", "Probe.");
+    repo.create_file(
+        ".lf/graphs/inner.yaml",
+        "- interactive: {name: probe, id: work}\n- step: {name: probe, id: child-only}\n",
+    );
+    repo.create_file(
+        ".lf/graphs/team/outer.yaml",
+        "- graph: inner\n- xor:\n    paths:\n      selected:\n        graph: inner\n        description: Run again\n      skipped:\n        description: Skip\n- interactive: {name: probe, id: work}\n",
+    );
+    for (key, value) in [
+        ("graphs.inner.steps.work.agent", "claude:inner"),
+        ("graphs.team/outer.steps.work.agent", "codex:outer"),
+    ] {
+        let output = lf(repo.path(), home.path(), &["set", "--global", key, value]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let inspect = |graph: &str, step: Option<&str>| {
+        let mut args = vec!["config", "show", "--graph", graph, "--json"];
+        if let Some(step) = step {
+            args.extend(["--step", step]);
+        }
+        lf(repo.path(), home.path(), &args)
+    };
+    // Interactive navigation names change during composition; settings IDs do not.
+    let whole = json(inspect("team/outer", None));
+    let occurrences = whole.as_array().unwrap();
+    assert_eq!(occurrences.len(), 6);
+    assert_eq!(occurrences[2]["skill"], "xor-route");
+    for index in [0, 3] {
+        assert_eq!(occurrences[index]["occurrence"]["graph"], "inner");
+        assert_eq!(occurrences[index]["occurrence"]["id"], "work");
+        assert_eq!(
+            occurrences[index]["settings"]["agent"]["value"],
+            "claude:inner"
+        );
+    }
+    for index in [1, 4] {
+        assert_eq!(occurrences[index]["occurrence"]["graph"], "inner");
+        assert_eq!(occurrences[index]["occurrence"]["id"], "child-only");
+    }
+    assert_eq!(occurrences[5]["occurrence"]["graph"], "team/outer");
+    assert_eq!(occurrences[5]["occurrence"]["id"], "work");
+    assert_eq!(occurrences[5]["settings"]["agent"]["value"], "codex:outer");
+
+    for graph in ["team/outer", "team-outer"] {
+        assert_eq!(
+            json(inspect(graph, Some("work"))),
+            serde_json::json!([occurrences[5]])
+        );
+        let missing = inspect(graph, Some("child-only"));
+        assert!(!missing.status.success());
+        assert!(String::from_utf8_lossy(&missing.stderr).contains("no matching agent steps"));
+    }
+    assert_eq!(
+        json(inspect("inner", Some("work"))),
+        serde_json::json!([occurrences[0]])
+    );
+    assert_eq!(
+        json(inspect("inner", Some("child-only"))),
+        serde_json::json!([occurrences[1]])
+    );
+}

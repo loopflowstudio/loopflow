@@ -108,9 +108,7 @@ for line in sys.stdin:
             "- graph: pursue\n- interactive: {name: demo, id: review}\n",
         ),
     ] {
-        let path = repo.path().join(path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, content).unwrap();
+        repo.create_file(path, content);
     }
     repo.stage_all();
     repo.commit("Define agent selection fixtures");
@@ -218,9 +216,7 @@ for line in sys.stdin:
             "- step: {name: default-proof, agent: 'claude:sonnet'}\n",
         ),
     ] {
-        let path = unbound.path().join(path);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, content).unwrap();
+        unbound.create_file(path, content);
     }
     unbound.stage_all();
     unbound.commit("Define default agent fixtures");

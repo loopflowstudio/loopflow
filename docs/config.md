@@ -102,6 +102,17 @@ IDs use skill and general preferences. Duplicate IDs within a definition are
 invalid. Repeated interactive stops receive distinct navigation names such as
 `review#1`; settings still select their original authored IDs.
 
+```bash
+lf config show --graph outer --json              # every composed agent step and router
+lf config show --graph outer --step work --json  # only authored outer/work
+lf config show --graph inner --step work --json  # authored inner/work
+```
+
+`--step` selects the defining Graph and original authored ID, just like `set`.
+If `work` exists only in a composed child, targeting `outer/work` reports no
+matching step; inspect the child Graph instead. Without `--step`, inspection
+retains every occurrence, including repeated compositions.
+
 Launch targets accept `agent`, `yolo`, `chrome`, `isolate`, `docs`, `context`,
 `exclude`, `diff`, `diff_files`, `paste`, `summaries`, and `summary_tokens`.
 Repository delivery, planning, default Graph, retries and context authoring

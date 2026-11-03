@@ -68,22 +68,26 @@ pub fn inspect(
     if let Some(graph) = graph {
         fn collect(
             steps: &[crate::graph::ConcreteStep],
-            id: Option<&str>,
+            target: Option<(&str, &str)>,
             out: &mut Vec<crate::graph::Skill>,
         ) {
             for step in steps {
                 match step {
                     crate::graph::ConcreteStep::Skill(skill)
-                        if id.is_none() || skill.id.as_deref() == id =>
+                        if target.is_none_or(|(graph, id)| {
+                            skill.skill.occurrence.as_ref().is_some_and(|occurrence| {
+                                occurrence.graph == graph && occurrence.id.as_deref() == Some(id)
+                            })
+                        }) =>
                     {
                         out.push(skill.skill.clone())
                     }
                     crate::graph::ConcreteStep::Xor(branch) => {
-                        if id.is_none() {
+                        if target.is_none() {
                             out.push(branch.router.clone());
                         }
                         for path in branch.paths.values() {
-                            collect(&path.steps, id, out);
+                            collect(&path.steps, target, out);
                         }
                     }
                     _ => {}
@@ -93,7 +97,7 @@ pub fn inspect(
         let definition = crate::graph::load_authored_graph(graph, repo)?;
         collect(
             &crate::graph::compile_graph(&definition, repo)?,
-            step,
+            step.map(|id| (definition.name.as_str(), id)),
             &mut selections,
         );
         anyhow::ensure!(!selections.is_empty(), "no matching agent steps in {graph}");

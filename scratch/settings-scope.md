@@ -155,12 +155,11 @@ Stand-in providers must prove:
 
 The existing checks cover distinct boundaries: resolver units prove precedence and
 collection semantics; `wave_setup_tests::setting_targets_inspect_and_unset_through_the_cli`
-proves persisted targeting and inspection; the composed-occurrence unit test agrees
-with prompt preparation. `settings_launch_tests` launches stand-ins for explicit
-Graph selection through composition and a provider-issued child command selecting
-its own agent. Native launch/resume fixtures cover fresh settings with preserved
-provider history. These passes do not by themselves prove the whole acceptance
-matrix above. No paid-provider test is required.
+proves persisted targeting and inspection. `settings_launch_tests` now covers the
+previously missing exported-command parity and Session/resume-to-Task cases,
+detailed below. Native launch/resume fixtures cover fresh settings with preserved
+provider history. Together these establish focused source behavior, not broader
+gate, installed acceptance or recovery. No paid-provider test is required.
 
 ## Second PR: recovery
 
@@ -203,6 +202,16 @@ transcripts based on the superseded Route draft. This PR leaves recovery open.
 
 ## Delete — do not maintain
 
+- Removed `config.rs::validate_wave_keys` and the separate repository presentation
+  key check. The shared resolver validates file and database scopes; Wave files
+  still reject unknown keys and accept the released `workflow` alias. Diagnostics
+  retain the source path. Effective Config values now derive once from the final
+  provenance map, avoiding parallel merging state. Skill loading parses `docs`
+  once and preserves explicit empty-list resets.
+- Removed `commands/config.rs::inspect`'s compiled-local-ID filter. Targeted reads
+  now match the loaded definition's canonical name and `OccurrenceSettings.id`;
+  whole-Graph traversal still includes repeated children and routers. The CLI
+  composition regression preserves coverage on this single inspection path.
 - Removed `graph/instructions.rs::headless_command`'s authored-agent-to-`-a`
   promotion, direct-skill export and separate command-collision resolver. Captured
   `SkillInvocation` commands explicitly select `skill --`; conversational steps,
@@ -222,10 +231,72 @@ transcripts based on the superseded Route draft. This PR leaves recovery open.
 
 ## Remaining first-PR work — 2026-11-02
 
+The supplied iteration feedback predates the current export and stand-in launch
+changes. Source inspection at `d7561a4512` confirms those implementation gaps are
+closed: `headless_command` uses `--skill-input` without promoting authored agents
+to CLI authority; the captures retain occurrence values, source, Graph and ID.
+The launch tests exercise the requested precedence, non-agent and Session/Task
+cases. No further product decision or bounded code repair emerged in reconciliation.
+
+The subsequent concept review below found one bounded inspection correction,
+now implemented with regression coverage for canonical aliases, repeated
+composition, conflicting parent/child preferences and child-only IDs.
 Graph review and gate own the affected architecture, Rust, website and Swift
 suites, followed by the concrete settings demo and publication for Jack's review.
 Auto-Ship remains stopped; no merge or Task completion is authorized. Recovery
 remains the second PR, with its exact mechanisms still unselected.
+
+## Concept review — 2026-11-02
+
+Outcome: **design clarified; inspection correction implemented**. Jack Heart's accepted
+defining-Graph/local-ID target must mean the same thing in inspection and writes.
+No new product choice is needed for this first-PR correction.
+
+The normal interaction remains: set a personal preference for `outer/work`,
+inspect that target, launch it, and unset the preference to expose the next
+layer. A Session's explicit agent remains conversation-local; an explicit Graph
+agent reaches that execution's steps. Source precedes specificity, collections
+retain their declared merging rules, and history never becomes Task policy.
+
+Counterexample: `outer` composes `inner` twice and declares its own `work` step;
+`inner` also declares `work`. Personal settings select `claude:inner` for
+`inner/work` and `codex:outer` for `outer/work`. The branch binary's
+`config show --graph outer --step work --json` returns all three occurrences,
+although `graphs.outer.steps.work.agent` changes only the outer occurrence.
+`commands/config.rs::inspect` filters the flattened steps by local ID alone.
+The resolver already retains and matches both parts of `OccurrenceSettings`.
+This creates two meanings for the target precisely when composition is reused.
+
+Proposed usage clarification for `docs/config.md`:
+
+```sh
+lf config show --graph outer --json              # every composed agent step
+lf config show --graph outer --step work --json  # only authored outer/work
+lf config show --graph inner --step work --json  # authored inner/work
+```
+
+With `--step`, inspection must select by the loaded definition's canonical name
+and the original authored ID in `OccurrenceSettings`; a child's same-named ID
+must not satisfy a missing parent target. Preserve whole-Graph inspection of
+composed steps and routers when `--step` is absent. Do not add an instance selector,
+new persisted identity, or alternate resolver. CLI and Desktop's existing
+`Read::Settings` share this operation, so the correction belongs there. Existing
+skill guidance needs no change.
+
+Failure and recovery: a mismatched target must report no matching step; inspect
+the defining child Graph to find its value. Unset continues to reveal the next
+source without changing shared definitions. Preserve occurrence origin through
+capture, repeated composition and loops, and preserve Session/provider history.
+Automatic limit fallback and reset waiting remain the separate second PR; this
+inspection correction adds no retry, account transfer or Task-completion policy.
+
+The `wave_setup_tests` regression writes distinct parent/child preferences through
+`lf set`, compares targeted reads with their whole-Graph occurrences, checks both
+canonical and alias Graph names, and rejects a child-only ID on the parent.
+Repeated interactive steps exercise original IDs after navigation renaming; a
+composed XOR path preserves router and child inspection. `docs/config.md` explains
+the target and missing-parent behavior. Existing launch parity tests continue to
+own provider selection; gate and demo remain pending.
 
 ## Export and launch proof
 
@@ -291,4 +362,4 @@ Infrastructure and its immediate Release child's goal/memory were read. Release'
 entry-point lesson applies directly: runtime Graph proof cannot establish exported
 recipe behavior. Broader live/installed recovery is not established by either.
 
-Check result: `cargo nextest run -p loopflow --lib --test integration -E 'test(config::settings::tests::) | test(settings_launch_tests::) | test(skills::tests::global_recipe_selects_repository_skill_and_keeps_authored_occurrence) | test(skills::tests::graph_captures_refresh_and_prune_with_their_recipe_preserving_foreign_assets)'` with inherited `LF_*` unset and null stdin — 14 PASS; earlier recipe/export/native proof covered 29 distinct checks; `cargo fmt --check`, `git diff --check`, and both context budgets PASS; gate owns broader suites, Clippy and demo. Auto-Ship remains stopped per the prior `lf desktop task LOO-714 --json` read.
+Check result: with inherited `LF_*` unset and null stdin, `cargo test -p loopflow --lib config::` (45), `cargo test -p loopflow --lib skills::catalog::` (8), `cargo test -p loopflow --test integration settings_launch_tests::runtime_and_exported_occurrences_resolve_live_preferences_at_the_same_authority` (1), and `cargo test -p loopflow --test integration wave_setup_tests::setting_targets_inspect` (2) PASS; `cargo fmt`, `git diff --check`, and `lf context` PASS. The test linker warns about its oversized unwind table. Prior launch/Session evidence remains applicable outside these reductions. Gate owns broader suites and Clippy; demo and review-only publication remain pending. Auto-Ship remains stopped per the prior `lf desktop task LOO-714 --json` read.

@@ -120,11 +120,11 @@ an agent. History never becomes future Task policy. This supersedes LOO-440's
 broader inheritance; its dated proof and unresolved release-lock cause remain at
 `d6d7057d97:.lf/wave/infrastructure/MEMORY.md`, Global agent override.
 
-Release's entry-point lesson applies to settings: runtime capture, native recipe
-export, inspection and provider launch are separate boundaries. Resolver proofs
-cannot establish launch propagation; serializing authored settings as CLI flags
-changes authority. LOO-714's source implements the resolver; recipe parity and
-complete launch proof remain open. Publication is for review, not landing.
+Release's entry-point lesson applies: resolver proof alone cannot establish launch
+propagation. Exporting authored settings as CLI flags changes authority. Recipe
+captures retain occurrence authority and load current repository skills; runtime
+captures retain their bodies. Stand-ins prove recipe/inspection parity and
+Session/Task separation. Broader gate and demo remain open; publication is review only.
 
 Jack retained automatic limit recovery for interactive Sessions and headless steps
 as a second PR. Routing and retry must agree on account choice; failed preparation

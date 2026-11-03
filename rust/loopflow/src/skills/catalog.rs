@@ -70,6 +70,25 @@ impl SkillSource {
                 self.name
             );
         }
+        let docs = loopflow
+            .then(|| metadata.and_then(|map| map.get("docs")))
+            .flatten()
+            .map(skill_docs)
+            .transpose()?;
+        let mut settings = if loopflow {
+            let mut value = metadata.cloned().map(Value::Mapping).unwrap_or(Value::Null);
+            if let Some(docs) = &docs {
+                value["docs"] = serde_yaml_ng::to_value(docs).expect("document paths serialize");
+            }
+            crate::config::settings::metadata(&value)?
+        } else {
+            BTreeMap::new()
+        };
+        settings.remove("agent");
+        // Nonempty docs live on Skill; retain an explicit empty list as a reset.
+        if docs.as_ref().is_some_and(|docs| !docs.is_empty()) {
+            settings.remove("docs");
+        }
         Ok(Skill {
             name: self.name.clone(),
             source: self.path.as_ref().map(|path| SkillOrigin {
@@ -80,32 +99,9 @@ impl SkillSource {
             // Claude's `agent: Explore` describes its subagent, not an lf harness.
             agent: loopflow.then(|| field("agent")).flatten(),
             occurrence: None,
-            settings: if loopflow {
-                let mut value = metadata.cloned().map(Value::Mapping).unwrap_or(Value::Null);
-                if let Some(docs) = metadata.and_then(|map| map.get("docs")) {
-                    value["docs"] = serde_yaml_ng::to_value(skill_docs(docs)?)
-                        .expect("document paths serialize");
-                }
-                let mut settings = crate::config::settings::metadata(&value)?;
-                settings.remove("agent");
-                if settings
-                    .get("docs")
-                    .and_then(Value::as_sequence)
-                    .is_some_and(|docs| !docs.is_empty())
-                {
-                    settings.remove("docs");
-                }
-                settings
-            } else {
-                BTreeMap::new()
-            },
+            settings,
             action_style: field("action_style"),
-            docs: loopflow
-                .then(|| metadata.and_then(|map| map.get("docs")))
-                .flatten()
-                .map(skill_docs)
-                .transpose()?
-                .unwrap_or_default(),
+            docs: docs.unwrap_or_default(),
             content: Some(body.to_string()),
         })
     }

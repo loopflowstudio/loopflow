@@ -745,14 +745,6 @@ fn config_layers_with(
     if let Some(repo_root) = repo_root {
         let repo_path = repo_root.join(".lf/config.yaml");
         if let Some(value) = load_yaml_file(&repo_path)? {
-            for key in ["user", "repo_root", "session"] {
-                if value.get(key).is_some() {
-                    return Err(LoadError::InvalidGraph(format!(
-                        "{key} belongs in personal config, not {}",
-                        repo_path.display()
-                    )));
-                }
-            }
             layers.push(ConfigLayerValues {
                 layer: ConfigLayer::Repo,
                 scope: settings::SettingScope::Repository,
@@ -764,7 +756,6 @@ fn config_layers_with(
             if let Some((path, value)) = crate::work::wave::config::read_wave_layer(repo_root, wave)
                 .map_err(|error| LoadError::InvalidGraph(error.to_string()))?
             {
-                validate_wave_keys(&path, &value)?;
                 layers.push(ConfigLayerValues {
                     layer: ConfigLayer::Wave,
                     scope: settings::SettingScope::Wave,
@@ -910,31 +901,6 @@ pub fn wave_config_keys() -> BTreeSet<String> {
         .filter(|key| !REPO_ONLY_KEYS.contains(key))
         .map(str::to_owned)
         .collect()
-}
-
-fn validate_wave_keys(path: &Path, value: &serde_yaml_ng::Value) -> Result<(), LoadError> {
-    let Some(mapping) = value.as_mapping() else {
-        return Err(LoadError::InvalidGraph(format!(
-            "{} must be a mapping",
-            path.display()
-        )));
-    };
-    let allowed = wave_config_keys();
-    for key in mapping.keys().filter_map(|key| key.as_str()) {
-        if REPO_ONLY_KEYS.contains(&key) {
-            return Err(LoadError::InvalidGraph(format!(
-                "{}: `{key}` belongs to the repository's .lf/config.yaml, not a Wave",
-                path.display()
-            )));
-        }
-        if !allowed.contains(key) && key != GRAPH_ALIAS {
-            return Err(LoadError::InvalidGraph(format!(
-                "{}: unknown key `{key}`",
-                path.display()
-            )));
-        }
-    }
-    Ok(())
 }
 
 /// Load only Machine-local user configuration.
@@ -1362,11 +1328,26 @@ release:
                 .agent(),
             "claude"
         );
-        std::fs::write(&wave, "planning:\n  provider: git\n").unwrap();
-        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_err());
-        std::fs::write(&wave, "agnet: claude\n").unwrap();
-        assert!(load_wave_config(Some(repo.path()), Some("infra")).is_err());
+        std::fs::write(&wave, "workflow: code\n").unwrap();
+        assert_eq!(
+            load_wave_config(Some(repo.path()), Some("infra"))
+                .unwrap()
+                .unwrap()
+                .graph
+                .as_deref(),
+            Some("code")
+        );
+        for invalid in ["planning: {provider: git}\n", "agnet: claude\n"] {
+            std::fs::write(&wave, invalid).unwrap();
+            let error = load_wave_config(Some(repo.path()), Some("infra")).unwrap_err();
+            assert!(error.to_string().contains(wave.to_str().unwrap()));
+        }
         assert!(load_config(Some(repo.path())).is_ok());
+        let repo_config = repo.path().join(".lf/config.yaml");
+        std::fs::write(&repo_config, "session: {terminal: ghostty}\n").unwrap();
+        let error = load_config(Some(repo.path())).unwrap_err().to_string();
+        assert!(error.contains("Machine-local"));
+        assert!(error.contains(repo_config.to_str().unwrap()));
     }
 
     #[test]

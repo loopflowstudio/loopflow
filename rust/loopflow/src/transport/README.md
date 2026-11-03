@@ -39,6 +39,8 @@ build, a rebuilt Dev.app, `lf install` selecting another build) ends once it
 waits for a person, viewed or not, and logs the path to `logs/lf.log`; an
 attached viewer prints why and runs the `lf resume <session>` the owner sends
 through the lf entry, so it lands in the reopened conversation without typing.
+The viewer restores its terminal before running that command and preserves its
+exit status or launch error.
 A turn in progress or a Graph step keeps its owner running until it settles; a
 viewer keeps it only from the detached limit; headless Runs are never ended. Each
 owner judges only itself and ends by signaling itself, which stops its agent and
@@ -98,6 +100,62 @@ Snapshot format v1 promises no compatibility
 across revisions, so another revision's file reads as absent.
 Headless observation retains a bounded output tail and preserves stdout/stderr on
 delivery. Slow viewers disconnect; execution continues draining.
+
+## Viewer stream
+
+One Unix socket per owner; one connection per viewer or control client. Every
+message is a frame: `tag u8 · len u32 BE · payload`. Stream frames carry at most
+64 KiB; a payload over 4 MiB is a protocol error.
+
+| tag | direction | payload |
+|---|---|---|
+| `0x01` reply | owner → viewer | JSON answering one request: `answers` (its `id`), `seq`, `kind` |
+| `0x02` snapshot | owner → viewer | the terminal snapshot a fresh stream begins with |
+| `0x03` out | owner → viewer | stream 1: PTY output, or stdout of a piped command |
+| `0x04` err | owner → viewer | stream 2: stderr of a piped command |
+| `0x11` request | viewer → owner | JSON with `id` and `kind` |
+| `0x12` input | viewer → owner | keystrokes from the connection holding input control |
+
+A viewer's stream is the bytes of its snapshot, out and err frames in order. The
+viewer counts them; the owner spools the last 1 MiB per viewer.
+
+```json
+{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null}
+{"answers":1,"seq":0,"kind":"attached","viewer":"…","reconnect":"…","nonce":"…","token":"…","terminal":true,"grace_ms":60000,"owner":"…"}
+```
+
+The stream then opens with the snapshot (pipes: the retained tail), a `resize`
+event, a `theme` event when one is known, an `owner` event, and live output.
+
+Events ride stream 1 as ``ESC _ lf1;<nonce>;<json> ESC \``, inserted only between
+complete terminal sequences. The nonce is the viewer's own, so a program
+printing the same bytes passes through as output. An event may span frames.
+Pending events share the viewer's 4 MiB output queue limit even while waiting
+for a terminal sequence to finish. Each carries a gapless `seq`
+per viewer, and every reply carries the `seq` of the last event queued when it
+was computed. Kinds: `resize {rows,cols}`, `theme {theme}`,
+`owner {viewer,name,held}`, `control {held,notice,successor}` (input control
+left this connection), `child_exited {code}`, `detached`, `hint {text}` and
+`return {detach}`. A retiring owner sends `control` with `held: false` and
+`successor: [entry, "session", "resume", session_id]`. The viewer runs that
+command after restoring its terminal; `successor: null` simply leaves.
+
+A connection that ends without a `leave` request keeps its stream for 60 s.
+`{"kind":"resume","reconnect":…,"received":N,…}` continues from byte `N` with no
+snapshot; a byte the spool no longer holds answers `reconnect_required`, and the
+viewer attaches afresh. Input control and ownership release when the connection
+ends; a resume asks for them again.
+
+Ownership arbitrates only size and colors. `own: "take"` replaces the owner,
+who receives `owner` with `held: false` and stays attached; `own: "request"`
+queues until the owner leaves. A viewer may report its size and colors before
+it owns them. Reports are remembered through reconnect grace; only the selected
+owner's reports are broadcast as effective appearance. When ownership changes,
+its known size and colors follow it. A viewer that has not reported colors
+supplies no color override; fresh observers receive only the selected owner's
+known theme. Who may type is separate: the `token`
+of a controlling attach, `busy` when control is held and `replace` is false,
+and a `control` event to the connection that lost it.
 
 An execution command delegates to a detached owner, which holds its PTY or pipes
 and records an ordinary Process. Loopflow launches that owner itself; it has no

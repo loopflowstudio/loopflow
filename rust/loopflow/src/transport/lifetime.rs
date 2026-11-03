@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
-use super::Response;
+use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
 
@@ -30,12 +30,12 @@ const EXECUTABLE_PAUSE: Duration = Duration::from_secs(2);
 
 /// Record viewer changes sent on the first channel. Once the executable is gone
 /// or superseded, or the owner has gone unviewed past its limit, send the second
-/// channel the `Response::Moved` for attached viewers; the serve loop delivers
+/// channel the `Event::Control` for attached viewers; the serve loop delivers
 /// it and ends the owner.
 pub(super) fn spawn(
     owner: LfProcessId,
     waker: UnixStream,
-) -> (mpsc::Sender<bool>, mpsc::Receiver<Response>) {
+) -> (mpsc::Sender<bool>, mpsc::Receiver<Event>) {
     let executable = Executable::current();
     let (viewers, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
@@ -53,7 +53,7 @@ fn watch(
     owner: &LfProcessId,
     executable: Option<&Executable>,
     changes: &mpsc::Receiver<bool>,
-    end: &mpsc::Sender<Response>,
+    end: &mpsc::Sender<Event>,
 ) -> Result<()> {
     let store = crate::journal::process_ledger()?;
     let repo = store.process(owner)?.and_then(|process| process.repo);
@@ -124,14 +124,16 @@ fn watch(
                             let notice = format!(
                                 "This Session's lf was {change}; reopening it as `lf resume {session}`"
                             );
-                            Response::Moved {
+                            Event::Control {
+                                held: false,
                                 notice: Some(notice),
                                 successor,
                             }
                         }
                         None => {
                             tracing::info!(%owner, "ending a Session nobody has viewed");
-                            Response::Moved {
+                            Event::Control {
+                                held: false,
                                 notice: None,
                                 successor: None,
                             }

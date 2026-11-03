@@ -1,13 +1,14 @@
 //! Descriptor changes and signal cleanup run only in disposable child processes.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{attach_with_terminal, endpoint, start, terminal_pair, Response, ViewerTerminal};
+use super::wire::{self, Decoder, Incoming, Outgoing, Reply, Request, Tag};
+use super::{attach_with_terminal, endpoint, start, terminal_pair, ViewerTerminal};
 use crate::ghostty_vt::{Terminal, REVISION};
 use crate::id::LfProcessId;
 
@@ -49,11 +50,19 @@ fn snapshot_preview_fixture() {
     let listener = UnixListener::bind(endpoint(&owner).unwrap()).unwrap();
     let peer = std::thread::spawn(move || {
         let (mut socket, _) = listener.accept().unwrap();
-        let mut request = String::new();
-        BufReader::new(socket.try_clone().unwrap())
-            .read_line(&mut request)
-            .unwrap();
-        assert!(request.contains("attach"));
+        let mut decoder = Decoder::default();
+        loop {
+            let mut bytes = [0; 4096];
+            let n = socket.read(&mut bytes).unwrap();
+            assert_ne!(n, 0);
+            decoder.extend(&bytes[..n]);
+            if let Some((tag, payload)) = decoder.next().unwrap() {
+                assert_eq!(tag, Tag::Request);
+                let request: Incoming = serde_json::from_slice(&payload).unwrap();
+                assert!(matches!(request.request, Request::Attach { .. }));
+                break;
+            }
+        }
         if case == "cancel" {
             std::fs::write(home.join("pending"), "1").unwrap();
             let mut discarded = Vec::new();
@@ -65,32 +74,40 @@ fn snapshot_preview_fixture() {
             live.write(MODES);
         }
         let bytes = super::terminal::repaint(&live).unwrap();
-        writeln!(
-            socket,
-            "{}",
-            serde_json::to_string(&Response::Attached {
+        let reply = Outgoing {
+            answers: 1,
+            seq: 0,
+            reply: Reply::Attached {
+                viewer: "viewer".into(),
+                reconnect: "reconnect".into(),
+                nonce: "nonce".into(),
                 token: Some("claim".into()),
                 terminal: true,
-                bytes,
-            })
-            .unwrap()
-        )
-        .unwrap();
-        // A marker outside the screen lets the parent inspect the exact blank
-        // handoff before detaching. It is ordinary live transport output.
-        writeln!(
-            socket,
-            "{}",
-            serde_json::to_string(&Response::Output {
-                stream: 1,
-                bytes: b"\x1b]777;live-ready\x07".to_vec(),
-            })
-            .unwrap()
-        )
-        .unwrap();
+                grace_ms: 60000,
+                owner: Some("viewer".into()),
+            },
+        };
+        socket
+            .write_all(&wire::frame(
+                Tag::Reply,
+                &serde_json::to_vec(&reply).unwrap(),
+            ))
+            .unwrap();
+        socket
+            .write_all(&wire::frame(Tag::Snapshot, &bytes))
+            .unwrap();
+        // A marker outside the screen lets the parent inspect the blank handoff.
+        socket
+            .write_all(&wire::frame(Tag::Out, b"\x1b]777;live-ready\x07"))
+            .unwrap();
         let mut input = Vec::new();
         socket.read_to_end(&mut input).unwrap();
-        assert!(input.is_empty(), "preview input reached the new provider");
+        decoder.extend(&input);
+        while let Some((tag, payload)) = decoder.next().unwrap() {
+            assert_eq!(tag, Tag::Request, "preview input reached the new provider");
+            let request: Incoming = serde_json::from_slice(&payload).unwrap();
+            assert!(matches!(request.request, Request::Leave));
+        }
     });
     attach_with_terminal(&owner, None, preview).unwrap();
     peer.join().unwrap();

@@ -38,6 +38,36 @@ private final class Feed {
 @Suite("Desktop without a display")
 @MainActor
 struct DesktopHeadlessTests {
+    @Test("Run history preserves nested positions, repeated nodes and failed exits")
+    func nestedRunHistory() throws {
+        func step(_ id: String, _ iterations: [[UInt32]], outcome: String = "succeeded") -> GraphStepProcess {
+            GraphStepProcess(lfProcessId: id, label: "implement", key: 0, iterations: iterations,
+                             startedAt: 10, completedAt: 15, outcome: outcome, exitCode: outcome == "failed" ? 1 : 0)
+        }
+        let steps = [step("a", [[0], [1]]), step("b", [[0], [1]]),
+                     step("c", [[0, 1]]), step("d", [[0], [1]], outcome: "failed")]
+        let groups = GraphStepGroup.groups(steps)
+        #expect(groups.map(\.id) == ["a", "c", "d"])
+        #expect(groups.flatMap(\.steps) == steps)
+        #expect(groups[0].label == "level 1: loop 1 pass 1 · level 2: loop 1 pass 2")
+        #expect(groups[1].label == "level 1: loop 1 pass 1, loop 2 pass 2")
+        let view = GraphRunHistory(steps: steps)
+        for group in groups {
+            _ = try view.inspect().find(viewWithAccessibilityIdentifier: "graph-process-loop-\(group.id)")
+        }
+        let failed = GraphRunStep(step: steps[3])
+        #expect(try failed.inspect().find(text: "failed").string() == "failed")
+        #expect(try failed.inspect().find(text: "5s").string() == "5s")
+        #expect(throws: (any Error).self) { try failed.inspect().find(text: "Summary") }
+    }
+
+    @Test("The run page names interactive review independently of completed runs")
+    func runPositionReadiness() throws {
+        let workflow = TaskGraph(name: "feature", interactiveSteps: [], position: .at(step: "demo"))
+        let view = TaskRunPosition(workflow: workflow, execution: nil)
+        #expect(try view.inspect().find(text: "demo · available for review").string() == view.label)
+    }
+
     @Test("The repository roadmap reads Git planning through the ordinary query")
     func roadmapPeerPlanning() async throws {
         let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
@@ -194,12 +224,13 @@ struct DesktopHeadlessTests {
         let starter = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-started-by-\(latest.id)")
         #expect(try starter.text().string() == "started by Session \"LOO-1 task\" for Maya")
         model.navigation.expandedGraphProcesses.insert(graph.id)
-        _ = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-id-\(graph.id)")
         let detail = try #require(model.graphProcesses[graph.id])
-        let status = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-status-\(graph.id)").text().string()
+        let expandedRun = GraphProcessView(model: model, graph: graph, run: detail)
+        _ = try expandedRun.inspect().find(viewWithAccessibilityIdentifier: "graph-process-id-\(graph.id)")
+        let status = try expandedRun.inspect().find(viewWithAccessibilityIdentifier: "graph-process-status-\(graph.id)").text().string()
         #expect(status == "Running implement · pass 2")
-        for step in detail.steps {
-            _ = try log.inspect().find(viewWithAccessibilityIdentifier: "graph-process-step-\(step.lfProcessId)")
+        for group in GraphStepGroup.groups(detail.steps) {
+            _ = try expandedRun.inspect().find(viewWithAccessibilityIdentifier: "graph-process-loop-\(group.id)")
         }
         #expect(detail.presentation.execution == .running)
         #expect(detail.current == 0)
@@ -244,6 +275,10 @@ struct DesktopHeadlessTests {
         #expect(await calls.calls == [
             ["task", "run", task.task.identifier, "--from", "demo"],
         ])
+        feed.send(WorkFrame(sequence: 8, answers: 3, unavailable: "offline", content: .task(nil), wire: nil))
+        try await eventually { model.taskWork[task.id].errorMessage == "offline" }
+        _ = try log.inspect().find(text: "Graph processes could not be read: offline")
+        _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
     }
 
     @Test("Same-name definitions keep separate destinations and a failed refresh retains visible stale data")

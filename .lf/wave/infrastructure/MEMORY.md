@@ -245,23 +245,31 @@ do not establish installed/native adoption; viewer absence is not provider death
 Earlier patch evidence and constraints:
 `72dbe0344f:.lf/wave/infrastructure/MEMORY.md`, Program Status direction.
 
-## Session continuity (LOO-416, reconciled 2026-10-17)
+## Session continuity (LOO-416/710, reconciled 2026-11-02)
 
 Jack Heart accepted per-Session lf owners (per-shell PTY owners for shells),
-shared Work-keyed lfdb presentation intent, and uniform repository/Wave/Task
-creation and lifecycle, including nested CLI callers without Desktop. No shared
-daemon, automatic turn replay or selected eager-start policy. LOO-415 owns
-transport; PR #1581 supplies the independent owner (LOO-618 folded its attach-only
-path into `lf resume`), with terminal restoration limits still explicit. LOO-497 owns the shared layout API;
-LOO-489 integrates it.
+shared Work-keyed layout intent, and uniform repository/Wave/Task lifecycle,
+including nested CLI. No shared daemon, automatic replay or selected eager-start
+policy. LOO-415 owns transport (#1581); LOO-618 folds attachment into `lf resume`.
+LOO-497 owns layout APIs and LOO-489 integrates them.
 
-Application retention now keeps repository registries across window closure;
-headless tests cover twelve Work layouts/drafts, not twelve live providers.
-Known scenes render before lookup; fresh resolution still owns new link delivery.
-App death destroys Desktop runtime state: durable identity, native history and
-repaint alone cannot restore live input or exact scrollback. Exact renderer recovery
-and layout replication across Desktop installations remain unresolved. The owner
-retains bounded vt100 text state, not a complete native terminal snapshot.
+Retained registries and twelve-layout headless fixtures prove no live-provider
+continuity. Known scenes render before lookup; fresh resolution owns new links.
+App death destroys Desktop runtime state; repaint alone restores neither input
+nor cross-installation layout. LOO-710's November 2 source keeps libghostty-vt
+state and writes `screens/<session>.ghostsnp`; each file names its Ghostty revision
+because format v1 promises no cross-revision compatibility. GhosttyKit exposes no
+decoder (LOO-672).
+
+Preview and live bytes need one cleanup owner before startup. Launch failure and
+pre-acknowledgement cancellation restore modes/colors; even blank live state
+supersedes the preview. Freshness means no output, not empty text. Jack Heart's fidelity
+requirement also covers inactive primary content: paint retained history/primary
+before alternate, inspect only a disposable snapshot copy, and preserve the cursor
+1049 saves. Explicit color overrides need the override mask, not comparison with
+default values; untouched colors follow the viewer theme. LOO-710 fixtures prove
+bare return to primary, snapshot round trips, rendered colors and public resume
+recovery with stand-ins, not configured Claude, Desktop or four-target packaging.
 
 Admission is not execution: Task filing and explicit Wave admission now commit
 uncaptured primary Sessions; explicit execution reserves input and claims the

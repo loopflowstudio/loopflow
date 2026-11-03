@@ -7,17 +7,12 @@
 use std::os::fd::RawFd;
 use std::time::{Duration, Instant};
 
-use super::terminal::AlternateScreen;
+use super::terminal::{AlternateScreen, RESET_MODES};
 use super::LIMIT;
 
 /// Output after a client restores its terminal is exit text only if the client
 /// exits within this window; otherwise it was ordinary output.
 const EXIT_WINDOW: Duration = Duration::from_secs(5);
-
-/// Input and display modes a full-screen client may leave on: kitty keyboard,
-/// focus, mouse, bracketed paste, then cursor visibility and attributes.
-const RESET_MODES: &[u8] =
-    b"\x1b[<u\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m";
 
 #[derive(Debug)]
 pub(super) struct NativeClient {

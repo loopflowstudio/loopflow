@@ -24,8 +24,19 @@ JOBS = (SWIFT_TEST, MACOS_PROCESS_TEST, LOOPFLOW_UI_TEST)
 
 _EVERY_JOB = (".github/workflows/", "scripts/macos_inputs.py")
 # The app sources, project.yml and GhosttyKit patches all live under swift/.
-_UI_INPUTS = ("swift/", "scripts/build_xcode_ci.py", "scripts/swift_cache.py")
+_DESKTOP_BUILD_INPUTS = (
+    "scripts/loopflow-dev.py",
+    "rust/loopflow/build.rs",
+    "rust/loopflow/ghostty-vt",
+)
+_UI_INPUTS = (
+    "swift/",
+    "scripts/build_xcode_ci.py",
+    "scripts/swift_cache.py",
+    *_DESKTOP_BUILD_INPUTS,
+)
 _SWIFT_TEST_INPUTS = (
+    *_DESKTOP_BUILD_INPUTS,
     "swift/",
     "tests/fixtures/dto/",
     "scripts/swift_",

@@ -322,6 +322,9 @@ cargo clippy --all-targets -- -D warnings                # lint after tests (war
 uv sync                                                  # install Python dependencies
 ```
 
+`build.rs` downloads the pinned `libghostty-vt` archive for the build target once
+per target directory (`rust/loopflow/ghostty-vt.json`, `rust/loopflow/ghostty-vt-patches/README.md`);
+offline, point `LOOPFLOW_GHOSTTY_VT_DIR` at a directory holding `libghostty-vt.a`.
 Run one cargo command at a time: concurrent builds wait on one target lock.
 CI runs the full matrix; locally, run it only to reproduce a CI failure.
 When accepted work needs a developer tool the Machine lacks, install it

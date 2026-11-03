@@ -1,0 +1,27 @@
+--- a/src/build/GhosttyLibVt.zig
++++ b/src/build/GhosttyLibVt.zig
+@@ -242,7 +242,10 @@
+         // problems if you're linking multiple static Zig libraries but
+         // we'll cross that bridge when we get to it.
+         lib.bundle_compiler_rt = true;
+-        lib.bundle_ubsan_rt = true;
++        // Darwin consumers also link GhosttyKit, which bundles these strong
++        // symbols. ReleaseFast VT has no UBSan instrumentation; keep the
++        // handlers out of its archive rather than exporting them twice.
++        lib.bundle_ubsan_rt = !target.result.os.tag.isDarwin();
+ 
+         // Enable PIC so the static library can be linked into PIE
+         // executables, which is the default on most Linux distributions.
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -190,7 +190,9 @@
+         // emitted. This must stay inside the root guard so that
+         // downstream Zig module consumers don't get the override
+         // injected into their binaries. See quirks_memset.zig.
+-        _ = @import("quirks_memset.zig");
++        // Darwin uses libSystem's optimized memset. GhosttyKit also exports
++        // an override, so VT must not contribute another strong definition.
++        if (!builtin.os.tag.isDarwin()) _ = @import("quirks_memset.zig");
+ 
+         const c = terminal.c_api;
+         const features = terminal.options;

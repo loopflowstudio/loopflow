@@ -33,6 +33,8 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalo
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.
+On macOS it also builds the CLI before isolated Python cleanup tests, so native
+archives and Cargo dependencies are fetched before networking is disabled.
 `binary(name)` matches the standalone `[[test]]` binaries in
 `rust/loopflow/Cargo.toml` and the CLI's own unit tests as `binary(lf)`;
 suites inside `integration` take `test(name::)`, and an unknown binary name
@@ -42,7 +44,9 @@ A filtered run covers `-p loopflow` only: run `cargo test -p loopflow-ffi`
 separately when the app's library changed. Substring filters such as
 `test(ship)` or `test(planning::)` also reach slow suites (`land_tests`,
 `local_planning`) and can exhaust the Rust phase's 1200 s budget; name modules.
-Changes to `swift/project.yml` reach the Xcode build: run `--loopflow`.
+Changes to `swift/project.yml`, `scripts/loopflow-dev.py`, or the libghostty-vt
+pin/build reach both Desktop link paths: run `--swift --loopflow`. SwiftPM
+links GhosttyKit alongside the Rust archive; Xcode runs the build phases.
 The runner's network sandbox blocks SwiftPM fetches; if the Swift suite fails
 with `transport 'https' not allowed`, run `swift package resolve` in `swift/` once
 and rerun.

@@ -867,7 +867,11 @@ pub(crate) async fn open(
                 }
             }
         }
-        if crate::transport::delegate_session(false, json.then_some(session.id.as_str()))? {
+        if crate::transport::delegate_session(
+            false,
+            json.then_some(session.id.as_str()),
+            session.interactive.then_some(session.id.as_str()),
+        )? {
             return surface(store, session).await;
         }
     }

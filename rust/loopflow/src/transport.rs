@@ -137,9 +137,13 @@ enum Response {
         code: u8,
     },
     Detached,
-    /// Another viewer took input control; this one prints `notice` and leaves.
+    /// Another viewer took input control, or the owner is ending because its
+    /// lf was removed, replaced or superseded; this viewer prints `notice` and
+    /// leaves. An ending owner also sends `successor`, the command that reopens
+    /// the conversation through the lf entry, and the viewer runs it.
     Moved {
         notice: Option<String>,
+        successor: Option<Vec<String>>,
     },
     Busy,
     /// How a viewer that detaches can return.
@@ -662,6 +666,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 }
                 let _ = v.queue(&Response::Moved {
                     notice: notice.clone(),
+                    successor: None,
                 });
                 let _ = v.flush();
                 false
@@ -681,11 +686,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 });
             }
         }
-        if let Ok(hint) = ending.try_recv() {
+        if let Ok(moved) = ending.try_recv() {
             for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                if let Some(hint) = &hint {
-                    let _ = viewer.queue(&Response::InputHint { hint: hint.clone() });
-                }
+                let _ = viewer.queue(&moved);
                 let _ = viewer.flush();
             }
             crate::platform::kill_process(std::process::id());
@@ -1078,12 +1081,15 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                         }
                     }
                     Response::Detached => return Ok(()),
-                    Response::Moved { notice } => {
+                    Response::Moved { notice, successor } => {
                         drop(terminal.take());
                         if let Some(notice) = notice {
                             eprintln!("\n{notice}");
                         }
-                        return Ok(());
+                        return match successor {
+                            Some(command) => follow(&command),
+                            None => Ok(()),
+                        };
                     }
                     Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                     Response::Return { detach } => returning = Some(detach),
@@ -1145,6 +1151,24 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                 )?;
             }
         }
+    }
+}
+
+/// Run `command`, the `<entry> session resume <id>` an ending owner sent, so
+/// this terminal lands in the conversation on the lf the entry launches now.
+/// The owner judged itself; this viewer only follows.
+fn follow(command: &[String]) -> Result<()> {
+    let (program, args) = command
+        .split_first()
+        .context("the owner sent an empty successor command")?;
+    let status = Command::new(program)
+        .args(args)
+        .status()
+        .with_context(|| format!("run {}", command.join(" ")))?;
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(code) => Err(crate::process::CommandExit(code as u8).into()),
+        None => bail!("{program} ended by a signal"),
     }
 }
 

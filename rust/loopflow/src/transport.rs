@@ -695,7 +695,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let (viewing, ending) = lifetime::spawn(id.clone());
     let mut viewed = None;
     loop {
-        let mut replaced = None;
+        let mut replaced = Vec::new();
         let mut owner_change = false;
         let mut size_change = false;
         let mut theme_change = false;
@@ -704,9 +704,21 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             socket.set_nonblocking(true)?;
             viewers.push(Viewer::new(socket));
         }
+        // Observe every connection before admitting claims. A viewer earlier
+        // in the list must not see Busy for a controller whose EOF is ready.
+        viewers.retain_mut(|viewer| match viewer.read() {
+            Ok(()) => !viewer.connection.expired(),
+            Err(error) => survive(viewer, &error),
+        });
+        owner_change |= ownership.settle(&viewers);
+        if !viewers
+            .iter()
+            .any(|viewer| viewer.token.is_some() && viewer.token == control)
+        {
+            control = None;
+        }
         viewers.retain_mut(|viewer| {
             let result = (|| -> Result<()> {
-                viewer.read()?;
                 while let Some((tag, payload)) = viewer.decoder.next()? {
                     let request = match tag {
                         Tag::Input => {
@@ -785,7 +797,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                             if wants_control {
                                 hint_due = true;
                                 if viewer.token != control {
-                                    replaced = control.clone().map(|token| (token, moved));
+                                    if let Some(token) = &control {
+                                        replaced.push((token.clone(), moved));
+                                    }
                                 }
                                 let token = uuid::Uuid::new_v4().to_string();
                                 control = Some(token.clone());
@@ -950,7 +964,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         }
         // The viewer that held control learns where it went; LOO-618's viewer
         // leaves on that, a shared viewer may stay.
-        if let Some((token, notice)) = replaced {
+        for (token, notice) in replaced {
             for viewer in viewers
                 .iter_mut()
                 .filter(|viewer| viewer.token.as_ref() == Some(&token))
@@ -1166,11 +1180,14 @@ fn end_viewers(viewers: &mut [Viewer], event: Event) {
 /// feeding the raw stream to a terminal never sees one split. After the
 /// execution has ended nothing more completes, so they go at once.
 fn place_events(output: &output::Output, viewers: &mut Vec<Viewer>, announced: bool) {
-    if !(output.ready() || announced) {
-        return;
-    }
+    let ready = output.ready() || announced;
     viewers.retain_mut(|viewer| {
-        viewer.events.is_empty() || {
+        // Pending events and replies consume the same bounded queue as output,
+        // including while the program leaves a terminal sequence unfinished.
+        if viewer.output.len() + viewer.events.iter().map(Vec::len).sum::<usize>() > LIMIT {
+            return false;
+        }
+        !ready || viewer.events.is_empty() || {
             let written = viewer.flush_events().and_then(|()| viewer.flush());
             keep(viewer, written)
         }
@@ -1731,7 +1748,8 @@ mod tests {
     use std::process::Command;
 
     use super::{
-        carry_across_exec, Handoff, Own, Ownership, Viewer, CONTROL_ENV, OWNER_ENV, PARENT_ENV,
+        carry_across_exec, output, place_events, wire, Event, Handoff, Own, Ownership, Viewer,
+        CONTROL_ENV, LIMIT, OWNER_ENV, PARENT_ENV,
     };
     use crate::id::LfProcessId;
 
@@ -1755,6 +1773,29 @@ mod tests {
             None,
             "a fulfilled request cannot reclaim ownership"
         );
+    }
+
+    #[test]
+    fn pending_events_are_bounded_even_inside_an_unfinished_terminal_sequence() {
+        let mut output = output::Output::new(true);
+        output.process(1, b"\x1b]unfinished", false);
+        assert!(!output.ready());
+        let (first, _first_peer) = UnixStream::pair().unwrap();
+        let (second, _second_peer) = UnixStream::pair().unwrap();
+        let mut viewers = vec![Viewer::new(first), Viewer::new(second)];
+        let survivor = viewers[1].id.clone();
+        for _ in 0..=LIMIT / wire::CHUNK {
+            viewers[0].event(Event::Hint {
+                text: "x".repeat(wire::CHUNK),
+            });
+        }
+        place_events(&output, &mut viewers, false);
+        assert_eq!(
+            viewers.len(),
+            1,
+            "pending controls must share the viewer's queue limit"
+        );
+        assert_eq!(viewers[0].id, survivor);
     }
 
     fn env<'a>(command: &'a Command, key: &str) -> Option<&'a OsStr> {

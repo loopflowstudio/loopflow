@@ -19,6 +19,16 @@ struct Fixture {
     home: tempfile::TempDir,
     repo: TestRepo,
 }
+
+struct PausedOwner(libc::pid_t);
+
+impl Drop for PausedOwner {
+    fn drop(&mut self) {
+        // SAFETY: only the fixture's paused owner is resumed, including on panic.
+        unsafe { libc::kill(self.0, libc::SIGCONT) };
+    }
+}
+
 impl Fixture {
     fn new() -> Self {
         Self {
@@ -169,6 +179,26 @@ impl Fixture {
     }
     fn sql(&self) -> rusqlite::Connection {
         rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
+    }
+
+    fn pause(&self, owner: &str) -> PausedOwner {
+        let pid = self
+            .sql()
+            .query_row("SELECT pid FROM processes WHERE id=?1", [owner], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        // SAFETY: this process owns the child; waitpid observes only its stopped state.
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+        let paused = PausedOwner(pid);
+        let mut status = 0;
+        // SAFETY: status is writable and pid names this fixture's child.
+        assert_eq!(
+            unsafe { libc::waitpid(pid, &mut status, libc::WUNTRACED) },
+            pid
+        );
+        assert!(libc::WIFSTOPPED(status));
+        paused
     }
     /// Put a `claude` stand-in that logs each launch to `launches` and waits on
     /// its terminal first on a PATH, returned.
@@ -504,23 +534,66 @@ fn automatic_attachment_claims_control_after_the_previous_viewer_disconnects() {
         "-c",
         "stty -echo; read -r answer; printf '%s' \"$answer\" > \"$HOME/answer\"",
     ]);
+    // The waiting viewer precedes the controller in the owner's connection list.
+    let mut waiting = fixture.viewer(&owner, false);
     let controller = fixture.viewer(&owner, true);
     let token = controller.token.clone();
-    // SHUT_WR lets the owner observe EOF before it accepts the next viewer.
+    let paused = fixture.pause(&owner);
     controller
         .socket
         .shutdown(std::net::Shutdown::Both)
         .unwrap();
     drop(controller);
-    let mut waiting = fixture.viewer(&owner, false);
     waiting.request(json!({"kind":"attach","control":true,"replace":false,"rows":24,"cols":80}));
+    drop(paused);
     let attached = waiting.until_reply();
+    if attached["kind"] != "attached" {
+        fixture.stop(&owner);
+    }
     assert_eq!(attached["kind"], "attached");
     waiting.accept(&attached);
     assert_ne!(waiting.token, token);
     waiting.input("reconnected\n");
     waiting.finish();
     assert_eq!(fixture.wait_file("answer"), "reconnected");
+}
+
+#[test]
+fn every_replaced_controller_gets_a_notice_during_concurrent_takeovers() {
+    let fixture = Fixture::new();
+    let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
+    fixture.wait_file("drawn");
+    let mut first = fixture.viewer(&owner, true);
+    let mut second = fixture.viewer(&owner, false);
+    let mut third = fixture.viewer(&owner, false);
+    let paused = fixture.pause(&owner);
+    for viewer in [&mut second, &mut third] {
+        viewer.request(json!({"kind":"attach","control":true,"replace":true,
+            "rows":24,"cols":80,"moved":"moved elsewhere"}));
+    }
+    drop(paused);
+    assert_eq!(third.until_reply()["kind"], "attached");
+    // Both takeovers have been processed before these barriers are answered.
+    first.request(json!({"kind":"controlled"}));
+    second.until_reply();
+    second.request(json!({"kind":"controlled"}));
+    let notices: Vec<_> = [&mut first, &mut second]
+        .into_iter()
+        .map(|viewer| {
+            let items = until(viewer, |items| matches!(items.last(), Some(Item::Reply(_))));
+            events(&items, "control")
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    third.input("done\n");
+    third.finish();
+    for notice in notices {
+        assert_eq!(notice.len(), 1, "{notice:?}");
+        assert_eq!(notice[0]["held"], false);
+        assert_eq!(notice[0]["notice"], "moved elsewhere");
+    }
 }
 
 /// Stands in for a Task step: registers its live controls with the owner, then
@@ -2032,39 +2105,14 @@ fn a_dropped_viewer_resumes_from_its_byte_count_without_a_snapshot() {
 
 #[test]
 fn an_immediate_resume_can_reclaim_input_and_resize() {
-    struct PausedOwner(libc::pid_t);
-    impl Drop for PausedOwner {
-        fn drop(&mut self) {
-            // SAFETY: only the fixture's paused owner is resumed, including on panic.
-            unsafe { libc::kill(self.0, libc::SIGCONT) };
-        }
-    }
-
     let fixture = Fixture::new();
     let owner = fixture.start(&["/bin/sh", "-c", ECHO_LINES]);
     fixture.wait_file("drawn");
     let mut first = fixture.viewer(&owner, true);
     first.until_event("owner");
     let mut resumed = fixture.connect(&owner);
-    let pid: libc::pid_t = fixture
-        .sql()
-        .query_row("SELECT pid FROM processes WHERE id=?1", [&owner], |r| {
-            r.get(0)
-        })
-        .unwrap();
     // Deliver EOF and resume in one owner pass, without a scheduling sleep.
-    // SAFETY: this process owns the child; waitpid observes only its stopped state.
-    unsafe {
-        assert_eq!(libc::kill(pid, libc::SIGSTOP), 0);
-    }
-    let paused = PausedOwner(pid);
-    let mut status = 0;
-    // SAFETY: status is writable and pid names this fixture's child.
-    assert_eq!(
-        unsafe { libc::waitpid(pid, &mut status, libc::WUNTRACED) },
-        pid
-    );
-    assert!(libc::WIFSTOPPED(status));
+    let paused = fixture.pause(&owner);
     first.socket.shutdown(std::net::Shutdown::Both).unwrap();
     resumed.request(json!({"kind":"resume","reconnect":first.reconnect,
         "received":first.received,"control":true,"own":"take","rows":35,"cols":110}));

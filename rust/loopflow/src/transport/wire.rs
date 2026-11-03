@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 pub(super) const CHUNK: usize = 64 * 1024;
 /// The largest payload either side accepts.
 pub(super) const MAX_PAYLOAD: usize = 4 * 1024 * 1024;
-/// An event longer than this is a program's output, not ours.
-const MAX_EVENT: usize = CHUNK;
+/// Events may span stream frames, up to the transport's payload limit.
+const MAX_EVENT: usize = MAX_PAYLOAD;
 const HEADER: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,7 +335,7 @@ impl Scanner {
             }
             let body = &rest[self.prefix.len()..];
             match body.windows(2).position(|w| w == b"\x1b\\") {
-                Some(end) => {
+                Some(end) if self.prefix.len() + end + 2 <= MAX_EVENT => {
                     if let Ok(Sequenced { seq, event }) = serde_json::from_slice(&body[..end]) {
                         if !text.is_empty() {
                             pieces.push(Piece::Bytes(std::mem::take(&mut text)));
@@ -350,7 +350,7 @@ impl Scanner {
                     self.held = rest.to_vec();
                     break;
                 }
-                None => {
+                _ => {
                     text.push(0x1b);
                     i += 1;
                 }
@@ -477,6 +477,25 @@ mod tests {
         assert_eq!(
             scanner.scan(b"\x1b[0m"),
             vec![Piece::Bytes(b"\x1b[0m".to_vec())]
+        );
+    }
+
+    #[test]
+    fn a_large_event_is_independent_of_read_boundaries() {
+        let theme = Event::Theme {
+            theme: serde_json::json!({"palette": "x".repeat(2 * super::CHUNK)}),
+        };
+        let bytes = event("0123456789abcdef", 1, theme.clone());
+        let expected = vec![Piece::Event(1, theme)];
+        assert_eq!(Scanner::new("0123456789abcdef").scan(&bytes), expected);
+        let mut scanner = Scanner::new("0123456789abcdef");
+        let pieces: Vec<_> = bytes
+            .chunks(8192)
+            .flat_map(|chunk| scanner.scan(chunk))
+            .collect();
+        assert!(
+            pieces == expected,
+            "a fragmented event must not become terminal output"
         );
     }
 

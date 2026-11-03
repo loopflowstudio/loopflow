@@ -93,7 +93,9 @@ event, a `theme` event when one is known, an `owner` event, and live output.
 
 Events ride stream 1 as ``ESC _ lf1;<nonce>;<json> ESC \``, inserted only between
 complete terminal sequences. The nonce is the viewer's own, so a program
-printing the same bytes passes through as output. Each carries a gapless `seq`
+printing the same bytes passes through as output. An event may span frames.
+Pending events share the viewer's 4 MiB output queue limit even while waiting
+for a terminal sequence to finish. Each carries a gapless `seq`
 per viewer, and every reply carries the `seq` of the last event queued when it
 was computed. Kinds: `resize {rows,cols}`, `theme {theme}`,
 `owner {viewer,name,held}`, `control {held,notice,successor}` (input control

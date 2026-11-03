@@ -70,5 +70,5 @@ local effect journal; completed records prove prior identity but never replay ef
 Remove the scan, DTO field and receipts; preserve ordinary prose without
 reporting it. Explicit authored path rewrites remain. Jack also reported New
 Wave disappearing on repository selection and requested comparison with Linear,
-Figma and Slack for long lists. A fixed New Wave footer is available in Dev for
-review; its position is still a proposal.
+Figma and Slack for long lists. Jack Heart accepted a permanent New Wave footer below the scrolling list
+and removal of prose warnings (“ok sounds good”). No merge instruction was given.

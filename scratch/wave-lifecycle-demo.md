@@ -111,7 +111,7 @@ New Wave's repository-scope button also opened the native creation form; it
 was dismissed without creating data. The warning-free app and bundled CLI were installed and signed, then reopened
 on the same private world. Accessibility inspection confirmed the repository
 window and the fixed New Wave footer. Changes are published as `57720b602e`.
-Native hands-on acceptance of the footer position remains open.
+Jack Heart accepted the dedicated footer and removal of prose warnings on November 3 (“ok sounds good”). This accepts those choices; it is not merge approval or a claim that every lifecycle path was demonstrated.
 
 For the requested comparison, current official docs show Linear team creation
 in Settings → Your teams → +; Figma folder creation on the team/folder page via
@@ -120,6 +120,5 @@ These are documented entry points, not live verification of their scrolling.
 Sources: https://linear.app/docs/teams ;
 https://help.figma.com/hc/en-us/articles/360038006494-Create-and-manage-folders ;
 https://slack.com/help/articles/201402297-Create-a-channel .
-The proposed Loopflow footer keeps New Wave visible independently of list length
-and selected scope, at the cost of one permanent row. No final placement choice
-from Jack Heart has been recorded.
+The accepted Loopflow footer keeps New Wave visible independently of list length
+and selected scope, at the cost of one permanent row.

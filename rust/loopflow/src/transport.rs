@@ -612,6 +612,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         Request::DropExitRecord { key } if key == control_key => {
                             exit_record = None;
                             planning = None;
+                            viewer.queue(&Response::Accepted)?;
                         }
                         Request::Attach {
                             control: wants_control,
@@ -1398,7 +1399,8 @@ pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
         .context("this launch has no execution owner to hand its wait to")?;
     let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
     socket.set_write_timeout(Some(Duration::from_secs(1)))?;
-    socket.set_read_timeout(Some(Duration::from_secs(2)))?;
+    // A delayed reply does not undo the owner's acceptance. Wait for its
+    // decision or a closed connection before choosing who records the exit.
     send(
         &mut socket,
         &Request::ExitRecord {
@@ -1427,7 +1429,14 @@ pub(crate) fn drop_exit_record() {
             &Request::DropExitRecord {
                 key: handoff.key.clone(),
             },
-        )
+        )?;
+        // Do not let launcher exit overtake cancellation in the owner's loop.
+        let mut line = String::new();
+        BufReader::new(socket).read_line(&mut line)?;
+        match serde_json::from_str(&line)? {
+            Response::Accepted => Ok(()),
+            other => bail!("owner refused exit record cancellation: {other:?}"),
+        }
     })();
     if let Err(error) = dropped {
         tracing::warn!(%error, "could not cancel the exit record for a failed exec");

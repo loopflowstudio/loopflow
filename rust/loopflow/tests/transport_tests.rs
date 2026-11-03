@@ -1067,6 +1067,63 @@ fn native_exit_preserves_returning_launcher_results() {
 }
 
 #[test]
+fn a_delayed_owner_keeps_exclusive_ownership_of_the_provider_wait() {
+    let fixture = Fixture::new();
+    let path = parented_provider(&fixture);
+    let mut command = fixture.serve(
+        true,
+        &[
+            "/bin/sh",
+            "-c",
+            "while [ ! -f \"$HOME/start-launch\" ]; do sleep 0.01; done; kill -STOP \"$PPID\"; exec \"$@\"",
+            "launcher",
+            env!("CARGO_BIN_EXE_lf"),
+            "-i",
+            "-a",
+            "claude",
+            ":",
+            "delayed handoff",
+        ],
+    );
+    command.env("PATH", path);
+    let owner = fixture.owner(command);
+    let owner_pid = pid_of_process(&fixture, &owner);
+    std::fs::write(fixture.home.path().join("start-launch"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let opened = loop {
+        let opened: bool = fixture.sql().query_row(
+            "SELECT EXISTS(SELECT 1 FROM session_events WHERE json_extract(payload,'$.type')='interactive_opened')",
+            [], |row| row.get(0),
+        ).unwrap();
+        if opened || Instant::now() >= deadline {
+            break opened;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // Exceed the former acknowledgement timeout while the owner is stopped.
+    std::thread::sleep(Duration::from_secs(3));
+    // SAFETY: this fixture owns the stopped process and resumes it before assertions.
+    unsafe { libc::kill(owner_pid as libc::pid_t, libc::SIGCONT) };
+    assert!(opened, "launcher never reached its exit handoff");
+    let launch = fixture.launches(1)[0].clone();
+    let parent: i64 = launch.split(':').nth(1).unwrap().parse().unwrap();
+    let mut viewer = fixture.viewer(&owner, true);
+    viewer.input("done\n");
+    let frames = read_until(&mut viewer, "exit");
+    fixture.ends(&owner);
+    assert_eq!(
+        parent, owner_pid,
+        "a delayed acknowledgement restored a waiting launcher"
+    );
+    assert_eq!(frames.last().unwrap()["code"], 0);
+    let settlements: i64 = fixture.sql().query_row(
+        "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.source')='terminal.json'",
+        [], |row| row.get(0),
+    ).unwrap();
+    assert_eq!(settlements, 1, "the capture must settle exactly once");
+}
+
+#[test]
 fn failed_native_exec_settles_once_without_launching_a_provider() {
     let fixture = Fixture::new();
     // Discovery succeeds, then exec meets an absent interpreter. No real

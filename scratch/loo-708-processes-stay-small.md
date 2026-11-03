@@ -159,9 +159,9 @@ neither branch is merged here.
   checks against the final implementation. Transport's exit, takeover, resume,
   reboot recovery and Graph checks passed after compression. Earlier lifecycle (28),
   launch-contract (25) and focused unit (111) passes are baseline evidence.
-- Still required: real Desktop/Claude process-count acceptance and PR inclusion
-  of the footprint comparison. No PR exists yet. The release measurement below
-  predates compression; no final-tree measurement is claimed.
+- PR #1802 includes the footprint comparison. Real Desktop/Claude process-count
+  acceptance remains unproved. The release measurement below predates
+  compression; no final-tree measurement is claimed.
 - Integration after LOO-705 must retain the explicit successor through the
   thin relay. LOO-712 owns subsequent encoding changes.
 - Concept review below resolves the draft compatibility assumptions by preserving

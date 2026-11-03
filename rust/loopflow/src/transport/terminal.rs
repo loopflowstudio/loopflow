@@ -6,7 +6,7 @@ use crate::ghostty_vt::{Error, Terminal};
 /// Kitty keyboard flags, modifyOtherKeys, application keys, focus and mouse reporting, bracketed
 /// paste; then a visible cursor, plain style and the viewer's configured colors.
 pub(super) const RESET_MODES: &[u8] =
-    b"\x1b[<u\x1b[>4;0m\x1b[?1l\x1b>\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m\x1b]104\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\";
+    b"\x1b[<65535u\x1b[>4;0m\x1b[?1l\x1b>\x1b[?1004l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m\x1b]104\x1b\\\x1b]110\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\";
 
 /// Scrollback rows a repaint carries at most. The whole repaint travels in one
 /// transport response, so the byte bound below wins when rows are wide or styled.
@@ -263,5 +263,75 @@ mod tests {
             viewer.write(RESET_MODES);
             assert_eq!(viewer.foreground(0, 0), theme);
         }
+    }
+
+    #[test]
+    fn reattachment_preserves_origin_relative_cursor_and_future_output() {
+        for alternate in [false, true] {
+            for saved in [false, true] {
+                let mut owner = Terminal::new(80, 24).unwrap();
+                if alternate {
+                    owner.write(b"\x1b[?1049h");
+                }
+                for row in 1..=24 {
+                    owner.write(format!("\x1b[{row};1Hrow {row}").as_bytes());
+                }
+                owner.write(b"\x1b[5;20r\x1b[?69h\x1b[7;70s\x1b[?6h\x1b[3;8Hinside");
+                if saved {
+                    owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+                }
+                let mut viewer = viewer_showing(&repaint(&owner).unwrap());
+                assert_eq!(viewer.cursor(), owner.cursor());
+                assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+                owner.write(b" next");
+                viewer.write(b" next");
+                assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn reattachment_preserves_keyboard_stack_when_program_pops_a_mode() {
+        for saved in [false, true] {
+            for depth in [2, 10] {
+                let mut owner = Terminal::new(80, 24).unwrap();
+                for flags in 1..=depth {
+                    owner.write(format!("\x1b[>{flags}u").as_bytes());
+                }
+                if saved {
+                    owner = Terminal::decode(&owner.encode().unwrap()).unwrap();
+                }
+                let mut viewer = viewer_showing(&repaint(&owner).unwrap());
+                for _ in 0..10 {
+                    for terminal in [&mut owner, &mut viewer] {
+                        terminal.write(b"\x1b[?u");
+                    }
+                    assert_eq!(viewer.take_replies(), owner.take_replies());
+                    owner.write(b"\x1b[<u");
+                    viewer.write(b"\x1b[<u");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cleanup_clears_all_nested_keyboard_modes() {
+        let mut viewer = viewer_showing(b"\x1b[>5u\x1b[>1u");
+        viewer.write(RESET_MODES);
+        viewer.write(b"\x1b[?u");
+        assert_eq!(viewer.take_replies(), b"\x1b[?0u");
+    }
+
+    #[test]
+    fn reattachment_preserves_pending_wrap_after_a_wide_character() {
+        let mut owner = Terminal::new(80, 24).unwrap();
+        owner.write(b"\x1b[1;79H");
+        owner.write("界".as_bytes());
+        let mut viewer = viewer_showing(&repaint(&owner).unwrap());
+        assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+        owner.write(b"next");
+        viewer.write(b"next");
+        assert_eq!(viewer.text().unwrap(), owner.text().unwrap());
+        assert_eq!(viewer.cursor(), owner.cursor());
     }
 }

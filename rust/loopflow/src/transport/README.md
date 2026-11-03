@@ -61,7 +61,7 @@ The owner keeps a libghostty-vt terminal (the Ghostty revision pinned in
 cursor, device and mode queries while no viewer's terminal is there to. A new viewer
 is repainted through Ghostty's VT formatter: the newest scrollback rows (up to 2,000,
 under 768 KiB) above its own history, then the active screen with colors and
-styles, OSC 8 hyperlinks, cursor position, Kitty keyboard flags, charsets, modes
+styles, OSC 8 hyperlinks, cursor position, Kitty keyboard stack, charsets, modes
 (alternate screen, application keys, bracketed paste, mouse, focus), scrolling
 region, tabstops and pwd. Reattach while a program uses its alternate screen;
 returning to its primary screen keeps the conversation and retained history.

@@ -248,3 +248,15 @@ acceptance from fixtures. No code or Wave memory was changed in this step.
 Check: `cargo test -p loopflow --lib -- transport::terminal:: transport::viewer_tests:: transport::native:: ghostty_vt::` (inherited `LF_*` unset, stdin closed) — 25 passed after simplification at `9371e126f4` (reused for this prose-only reconciliation); macOS linker warned about compact-unwind size. Prior `cargo fmt --all` and `uv run python -m py_compile scripts/loopflow-dev.py` passed; this reconciliation passed `git diff --check` and `lf context` (both memory/scratch budgets met). Prior `ghostty-vt-build --publish` palette/hyperlink tests and four `lf4` archive readbacks remain applicable. Gate (including Clippy), configured-provider demo and four-target package linking remain later obligations.
 
 Publication check (2026-11-02): `lf sync` merged main without conflicts; `cargo test -p loopflow --test transport_tests` (inherited `LF_*` unset, stdin closed) — 20 passed; `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings` — passed on macOS. The earlier integration-binary transport filter selected zero tests and is not counted. `git diff --check origin/main...HEAD -- ':!*.patch'` passed; patch files retain required blank context-line prefixes. The full gate, Linux Clippy, four-target package linking and configured-provider demo remain with their existing Graph boundaries.
+
+## Manual demo and simulated review — 2026-11-02
+
+Jack Heart requested manual verification, a Mitchell Hashimoto-inspired review,
+repairs, and Auto-Ship. See `scratch/loo-710-demo-review.md` and `scratch/demo.html`.
+Real Claude attach, same-Session reopen, and exit snapshot decoding passed.
+The review repaired origin-relative cursor/content restoration, the full Kitty
+keyboard stack and cleanup, and static linking from a local Zig output directory.
+Archive lf6 includes the third formatter patch; lf5 is superseded. The new
+30-test focused pass, nine Python tests, formatting and macOS Clippy are recorded
+in the review note. Remaining gate and package CI retain their authored steps;
+the completed-Session lifetime limitation and LOO-705/709 integration remain explicit.

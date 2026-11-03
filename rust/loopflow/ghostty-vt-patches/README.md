@@ -43,3 +43,8 @@ changed entries, including overrides equal to the owner's default. It also emits
 program foreground, background and cursor overrides. A viewer keeps its configured
 theme for every untouched color. HTML palette output is unchanged. The build runs
 `TerminalFormatter vt with palette` round-trip and pin-map tests as well.
+
+`0003-vt-cursor-keyboard-state.patch`: restore origin-relative cursor coordinates
+and the full Kitty keyboard stack. A later mode pop preserves the program's
+previous flags. The build runs the cursor/stack round trip, pin-map check, and
+existing terminal/keyboard formatter tests before publishing archives.

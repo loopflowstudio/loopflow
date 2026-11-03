@@ -388,7 +388,12 @@ def cmd_ghostty_vt_build(publish: bool = False) -> int:
     if (code := _apply_patches(source, GHOSTTY_VT_PIN.parent / "ghostty-vt-patches")) != 0:
         return code
     # Prove each formatter patch before producing archives.
-    for test_filter in ("hyperlink", "TerminalFormatter vt with palette"):
+    for test_filter in (
+        "hyperlink",
+        "TerminalFormatter vt with palette",
+        "Screen vt with kitty",
+        "Terminal vt with",
+    ):
         result = run(
             [
                 zig,

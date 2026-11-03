@@ -551,7 +551,17 @@ fn link_ghostty_vt(manifest_dir: &Path, out_dir: &Path) {
             .expect("ghostty-vt.json is valid");
     println!("cargo:rustc-env=LOOPFLOW_GHOSTTY_REVISION={}", pin.revision);
     let lib_dir = match env::var_os("LOOPFLOW_GHOSTTY_VT_DIR") {
-        Some(dir) => PathBuf::from(dir),
+        Some(dir) => {
+            let archive = PathBuf::from(dir).join("libghostty-vt.a");
+            println!("cargo:rerun-if-changed={}", archive.display());
+            // Zig also emits a dylib here. Apple's linker prefers it even for
+            // rustc's static request; search a directory containing only the archive.
+            let dir = out_dir.join("ghostty-vt-local");
+            fs::create_dir_all(&dir).expect("create local libghostty-vt directory");
+            fs::copy(&archive, dir.join("libghostty-vt.a"))
+                .unwrap_or_else(|error| panic!("copy {}: {error}", archive.display()));
+            dir
+        }
         None => fetch_ghostty_vt(&pin, out_dir),
     };
     assert!(

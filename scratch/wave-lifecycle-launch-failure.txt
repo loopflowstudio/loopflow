@@ -1,0 +1,24 @@
+(lldb) target create "/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/Loopflow Dev"
+Current executable set to '/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/Loopflow Dev' (arm64).
+(lldb) settings set -- target.run-args  "--repo" "/tmp/loo-500-synced-demo/repo"
+(lldb) run
+2026-11-02 18:25:57.768175-0800 Loopflow Dev[47904:234573114] [default] ghostty version=1.3.2-jack-heart-431eee-make-loopflow-coherent+3d92073ad0
+2026-11-02 18:25:57.768196-0800 Loopflow Dev[47904:234573114] [default] ghostty build optimize=ReleaseFast
+2026-11-02 18:25:57.768200-0800 Loopflow Dev[47904:234573114] [default] runtime=.none
+2026-11-02 18:25:57.768202-0800 Loopflow Dev[47904:234573114] [default] font_backend=.coretext
+2026-11-02 18:25:57.768204-0800 Loopflow Dev[47904:234573114] [default] renderer=renderer.generic.Renderer(renderer.Metal)
+2026-11-02 18:25:57.768206-0800 Loopflow Dev[47904:234573114] [default] libxev default backend=kqueue
+2026-11-02 18:25:57.768317-0800 Loopflow Dev[47904:234573114] [default] os_locale: setlocale from env result=C.UTF-8
+2026-11-02 18:25:57.769091-0800 Loopflow Dev[47904:234573114] [default] reading configuration file path=/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loopflow-ghostty-B3D4EBEC-D2A3-44BC-B9AA-78A90B9B0F14
+2026-11-02 18:25:57.769279-0800 Loopflow Dev[47904:234573526] [default] sentry: crash report written to disk path=/Users/jack/.local/state/ghostty/crash/ec853c83-c259-40d3-176f-c8973d271acb.ghosttycrash
+2026-11-02 18:25:57.769362-0800 Loopflow Dev[47904:234573114] [default] config: default shell source=env value=/bin/zsh
+2026-11-02 18:25:57.770267-0800 Loopflow Dev[47904:234573114] [default] reading configuration file path=/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loopflow-ghostty-14255617-1574-473E-9BDD-B63A152CA1C6
+2026-11-02 18:25:57.770476-0800 Loopflow Dev[47904:234573114] [default] config: default shell source=env value=/bin/zsh
+2026-11-02 18:25:58.623353-0800 Loopflow Dev[47904:234573114] [sessions-latency] metric=time_to_sessions scope=repo value_ms=81.989542 count=2
+warning: This version of LLDB has no plugin for the language "rust". Inspection of frame variables will be limited.
+Process 47904 launched: '/Users/jack/Applications/Loopflow Dev.app/Contents/MacOS/Loopflow Dev' (arm64)
+Process 47904 stopped
+* thread #19, name = 'Task 25', queue = 'com.apple.root.user-initiated-qos.cooperative', stop reason = EXC_BAD_ACCESS (code=2, address=0x1700bf280)
+    frame #0: 0x000000010342d2e4 Loopflow Dev`<loopflow::lf::Commands as clap_builder::derive::Subcommand>::augment_subcommands at lib.rs:0
+Note: this address is compiler-generated code in function <loopflow::lf::Commands as clap_builder::derive::Subcommand>::augment_subcommands that has no source code associated with it.
+Target 0: (Loopflow Dev) stopped.

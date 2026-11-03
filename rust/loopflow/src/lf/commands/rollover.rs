@@ -413,7 +413,7 @@ async fn owner_disposition(
     }
     let turn_cut_off = !store.owner_waits_for_person(&process.id)?;
     if turn_cut_off && answering(&process.id) {
-        return stays("a turn, Graph step or headless Run is in progress");
+        return stays("a turn, pending request, Graph step or headless Run holds the conversation");
     }
     for session in &sessions {
         let key = shared
@@ -505,8 +505,10 @@ pub fn run(dry_run: bool, json: bool) -> Result<()> {
 }
 
 async fn rollover(dry_run: bool) -> Result<RolloverReport> {
-    // Concurrent `lf resume --all` would start a second owner for a Session we stop.
-    let _resuming = restore::lock_resume_all().await?;
+    // Concurrent sweeps must not start two owners for the same stopped Session.
+    let _resuming =
+        tokio::task::spawn_blocking(|| crate::ops::human_session::lock_session_process("rollover"))
+            .await??;
     let inventory = inventory()?;
     let store: SharedStore = std::sync::Arc::new(open_store(&storage_config_from_env()?).await?);
     let mut report = RolloverReport {

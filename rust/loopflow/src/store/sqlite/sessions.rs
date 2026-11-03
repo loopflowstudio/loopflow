@@ -39,19 +39,20 @@ const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
 /// viewed; a report nobody refreshes is history, not a turn. Otherwise the
 /// facts the provider's own attachment wrote decide: open tools or an
 /// unyielded turn. A row with neither says nothing is running.
-/// Owned background work holds even a viewed terminal sitting at its prompt.
+/// Owned work and pending requests hold even a viewed terminal at its prompt.
 const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
     JOIN processes p ON p.id=s.agent_process_id
     WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
     AND p.completed_at IS NULL
     AND CASE
-        WHEN act.attachment_token IS p.attachment_token AND act.open_tools>0 THEN 1
+        WHEN act.attachment_token IS p.attachment_token
+            AND (act.open_tools>0 OR act.pending_input>0) THEN 1
         WHEN act.program_status IS NOT NULL
             AND EXISTS(SELECT 1 FROM processes o WHERE o.id=s.transport_lf_process_id AND o.viewed=1) THEN
         NOT EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
             WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
         ELSE act.attachment_token IS p.attachment_token
-            AND act.pending_input=0 AND act.yielded=0
+            AND act.yielded=0
     END)";
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
@@ -571,37 +572,6 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Unfinished interactive Sessions whose execution owner last had a viewer
-    /// and never recorded its own exit, with that owner. Provider exit or idle
-    /// ending records one; a crash or kill does not, and a dead
-    /// row retention closed afterwards still has none. Liveness is the
-    /// caller's observation.
-    pub(crate) fn interrupted_session_owners(
-        &self,
-    ) -> StoreResult<Vec<(String, crate::id::LfProcessId)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT s.id, s.transport_lf_process_id FROM agent_sessions s
-             JOIN processes o ON o.id=s.transport_lf_process_id
-             WHERE s.interactive=1 AND s.completed_at IS NULL
-             AND o.outcome IS NULL AND o.viewed=1
-             ORDER BY s.id",
-        )?;
-        let rows = query
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows.into_iter()
-            .map(|(session, owner)| {
-                Ok((
-                    session,
-                    crate::id::LfProcessId::parse(&owner).map_err(invalid)?,
-                ))
-            })
-            .collect()
-    }
-
     /// Whether the Session's current AgentProcess last reported work in progress,
     /// rather than waiting for a person, when it stopped.
     pub(crate) fn session_turn_was_running(&self, session: &str) -> StoreResult<bool> {
@@ -637,7 +607,11 @@ impl SqliteStore {
         &self,
         owner: &crate::id::LfProcessId,
     ) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let conn = conn.savepoint()?;
+        if super::native_input::pending(&conn, owner)? {
+            return Ok(false);
+        }
         // A running Graph started inside an owner, as from a terminal, holds
         // its steps there. CROSS JOIN seeds the walk from the few Graphs, not
         // every Process.

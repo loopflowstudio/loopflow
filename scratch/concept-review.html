@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-709 · What survives closing a Session?</title>
+<style>
+:root{color-scheme:light dark;--bg:#faf9f6;--ink:#242924;--muted:#626b64;--line:#d6dcd4;--panel:#eef2eb;--accent:#355a43}
+@media(prefers-color-scheme:dark){:root{--bg:#161b18;--ink:#e8eee7;--muted:#a7b4a9;--line:#39473c;--panel:#222e25;--accent:#b7d6b5}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,sans-serif}main{max-width:820px;margin:auto;padding:28px 28px 40px}header{font-size:12px;color:var(--muted)}h1{font-size:clamp(27px,4.7vw,38px);line-height:1.1;letter-spacing:-.035em;margin:12px 0}h2{font-size:18px;margin:24px 0 8px}p{margin:9px 0}.lead{font-size:18px;max-width:690px}.callout{border-left:3px solid var(--accent);padding:10px 17px;background:var(--panel);margin:18px 0}.callout p{margin:3px 0}.small,small{font-size:13px;color:var(--muted)}code{font: .87em ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere}table{border-collapse:collapse;width:100%;font-size:14px;margin-top:12px}th,td{text-align:left;vertical-align:top;padding:9px 10px 9px 0;border-bottom:1px solid var(--line)}th{font-weight:600;color:var(--muted);font-size:12px}td:first-child{width:25%;font-weight:600}td:nth-child(2){width:29%}.flow{font-size:14px;border-bottom:1px solid var(--line);padding:10px 0 14px}.mock{font:14px/1.5 ui-monospace,SFMono-Regular,monospace;padding:12px 16px;border:1px solid var(--line);margin:9px 0;white-space:pre-wrap}details{font-size:13px;color:var(--muted);margin:16px 0}summary{cursor:pointer;color:var(--accent)}a{color:var(--accent)}ol{padding-left:22px;margin:10px 0}li{padding:4px 0 10px}strong{font-weight:650}.choice{display:block;font-size:14px;margin:5px 0}a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px}@media(max-width:560px){main{padding:20px 18px}table{font-size:12px}td,th{padding-right:7px}.lead{font-size:16px}}
+</style>
+</head>
+<body><main>
+<header>LOO-709 · Concept review · 3 November 2026 · Branch b2f0b64463<br>
+Built from the working design, transport README, lifetime/Session activity, native callbacks and snapshot/preview code.</header>
+<h1>What survives closing a Session?</h1>
+<p class="lead">Jack Heart accepted editable drafts and answerable pending questions on 3 November. Implementation and shipping are authorized after the required checks.</p>
+<div class="callout"><p><strong>A familiar screen can hide a restarted interaction.</strong></p>
+<p>A saved terminal image can show a draft or an approval prompt. Reopening provider history does not, by itself, restore its editor buffer or the same unanswered request.</p></div>
+
+<table aria-label="Actions and the change in behavior">
+<thead><tr><th>Your action</th><th>Before this change</th><th>Current branch / accepted scope</th></tr></thead>
+<tbody>
+<tr><td>Switch Rex Task tabs</td><td>Agent stays attached.</td><td>Same running agent on return. Accepted by Jack Heart; no memory saving from tab switching.</td></tr>
+<tr><td>Close a settled Session</td><td>24h default; failures could retain it for days.</td><td>After 2m quiet, save screen and end agent. <code>lf resume --task LOO-709</code> reopens history, with a saved preview when available.</td></tr>
+<tr><td>Close while a watch runs</td><td>No reliable short-grace protection proof.</td><td>Provider-owned work holds the agent until settlement. Five focused tests and real Claude callback evidence support the repair.</td></tr>
+<tr><td>Close with unfinished input</td><td>A retained process can keep transient state.</td><td>Editable draft recovery is unproved. Pending questions have no uniform lifetime guarantee.</td></tr>
+</tbody></table>
+
+<p class="flow"><strong>Actions → concepts → APIs</strong><br>
+Close viewer → keep the Session, judge its live work → <code>owner_waits_for_person</code>.<br>
+Settled grace expires → save display, end owner → <code>snapshot::leave</code>.<br>
+Return → attach live owner or reopen history → <code>lf resume</code> + <code>snapshot::last_screen</code>.</p>
+
+<p><strong>Workspace direction:</strong> remove <code>lf resume --all</code> here. <a href="loopflow://loopflow/task/LOO-498">LOO-498</a> owns workspace launch/restore, Rex first and Herder second.</p>
+<h2>The interaction to protect</h2>
+<div class="mock" aria-label="Illustrative unsent draft">You type: “Before changing the migration, check…”
+You detach → wait past 2m → resume
+Can you put the cursor back and finish that exact draft?</div>
+<p class="small">Illustration, not a demonstrated result. The equivalent approval case is returning to answer the same “Allow this command?” request.</p>
+
+<details><summary>Evidence, tradeoffs and recovery limits</summary>
+<p><code>ViewerTerminal::preview</code> writes terminal bytes; it does not reconstruct the provider’s editor. Native draft persistence has not been demonstrated. <code>TURN_LIVE</code> protects open tools, but pending input without an open tool does not hold an unviewed owner; native callback paths differ.</p>
+<p>Two minutes trades memory for startup/auth delay. A preview does not establish input readiness. <code>resume --all</code> selects viewed owners with no recorded exit; clean shutdowns and unviewed work are excluded. Missing work snapshots favor preservation and may retain an agent longer. A failed or incompatible snapshot can omit the preview; provider history remains separate.</p>
+<p>Next proof: detach/resume a distinctive unsent draft and a pending native request; edit or answer the same interaction. Check slow/failed startup without replay. Full twenty-return, permission-wait, gate and installed acceptance remain outstanding.</p>
+<p>Sources: <code>scratch/loo-709-idle-sessions-end.md</code>; <code>transport/{README.md,lifetime.rs,snapshot.rs}</code>; <code>transport.rs</code>; <code>store/sqlite/{sessions.rs,steers.rs}</code>; <code>harness/codex_decode.rs</code>; <code>ops/human_session/restore.rs</code>. Source review; no new runtime validation.</p>
+</details>
+
+<h2>Accepted promise — 1a and 2a</h2>
+<p>“Closing a Session keeps unfinished input and pending questions intact. Only a fully settled Session releases its agent.”</p>
+<ol>
+<li><strong>What happens to an unsent draft?</strong>
+<span class="choice"><strong>1a.</strong> Preserve it as editable input. <em>Recommended.</em><br><strong>1b.</strong> Promise only submitted history; a draft may be lost.</span></li>
+<li><strong>What happens to a pending approval or question?</strong>
+<span class="choice"><strong>2a.</strong> Keep the same request answerable. <em>Recommended.</em><br><strong>2b.</strong> Allow it to expire; returning may require asking again.</span></li>
+</ol>
+</main></body></html>

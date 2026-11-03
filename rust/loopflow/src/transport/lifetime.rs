@@ -2,7 +2,7 @@
 //!
 //! A terminal owner nobody views ends after `session.end_detached_after` of
 //! quiet: no viewer, no output from its command, and nothing in the store
-//! holding it (a turn in progress, a running Graph, a headless Run). An owner
+//! holding it (a turn, pending request, running Graph or headless Run). An owner
 //! whose lf executable is removed, replaced or superseded (a worktree deleted,
 //! a build relinked, Dev.app rebuilt, another installed build selected) ends once
 //! its Sessions wait for a person and its command has been quiet for one poll,
@@ -10,8 +10,7 @@
 //! otherwise run a vanished or outdated build indefinitely. Its attached viewers
 //! are told why and follow the resume command through the lf entry. Ending
 //! writes the last screen, stops the agent and records the exit, so `lf resume`
-//! reopens the conversation from provider history and `lf resume --all` leaves
-//! it alone.
+//! reopens the conversation from provider history.
 //!
 //! The clock is wall time: a laptop asleep overnight ends its idle Sessions at
 //! the first poll after it wakes. A store that cannot be read is judged again
@@ -31,6 +30,19 @@ use crate::store::sqlite::SqliteStore;
 
 /// How often an owner looks at the clock and its executable.
 const POLL: Duration = Duration::from_secs(2);
+
+/// Recheck a queued ending after the serving owner has accepted new viewers/input.
+pub(super) fn may_end(ending: &Response, viewed: bool, input_queued: bool) -> bool {
+    !input_queued
+        && (!viewed
+            || !matches!(
+                ending,
+                Response::Moved {
+                    notice: None,
+                    successor: None
+                }
+            ))
+}
 
 /// What the serve loop tells the policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,9 +68,14 @@ pub(super) fn spawn(
     let (activity, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
     std::thread::spawn(move || {
-        watch(&owner, executable.as_ref(), terminal, &changes, &end);
-        // Wake the descriptor loop once the policy has spoken.
-        let _ = (&waker).write_all(&[1]);
+        watch(
+            &owner,
+            executable.as_ref(),
+            terminal,
+            &changes,
+            &end,
+            &waker,
+        );
     });
     (activity, ending)
 }
@@ -95,6 +112,7 @@ fn watch(
     terminal: bool,
     changes: &mpsc::Receiver<Activity>,
     end: &mpsc::Sender<Response>,
+    mut waker: &UnixStream,
 ) {
     let mut store = Store::default();
     let mut last_output = SystemTime::now();
@@ -202,9 +220,11 @@ fn watch(
             }
         };
         if end.send(moved).is_err() {
-            crate::platform::kill_process(std::process::id());
+            return;
         }
-        return;
+        let _ = waker.write_all(&[1]);
+        // Input accepted since the judgment can veto it in the serving owner.
+        // Keep judging until that owner exits or drops this channel.
     }
 }
 
@@ -321,7 +341,26 @@ fn limit(repo: Option<&str>) -> DetachedLimit {
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{Activity, DetachedLimit, Grace};
+    use super::{may_end, Activity, DetachedLimit, Grace, Response};
+
+    #[test]
+    fn a_viewer_arriving_after_idle_judgment_keeps_its_conversation() {
+        let idle = Response::Moved {
+            notice: None,
+            successor: None,
+        };
+        assert!(may_end(&idle, false, false));
+        assert!(!may_end(&idle, true, false));
+        let rollover = Response::Moved {
+            notice: Some("replaced".into()),
+            successor: None,
+        };
+        assert!(may_end(&rollover, true, false));
+        for ending in [&idle, &rollover] {
+            assert!(!may_end(ending, false, true));
+            assert!(!may_end(ending, true, true));
+        }
+    }
 
     #[test]
     fn the_grace_runs_from_the_last_viewer_or_output_in_wall_time() {

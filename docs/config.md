@@ -175,7 +175,7 @@ For most settings, the nearer file wins; `context_budgets` and `skill_agents` me
 agent: claude:opus
 session:
   terminal: Ghostty       # presents review GraphStep sessions on this Machine
-  end_detached_after: 2m  # an unviewed, quiet Session's agent ends; `lf resume` reopens it
+  end_detached_after: 2m  # ends an unviewed Session once work and unfinished input settle
 
 # .lf/config.yaml (repo)
 agent: codex        # overrides global

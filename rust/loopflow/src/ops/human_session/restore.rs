@@ -1,12 +1,4 @@
-//! `lf resume --all`: bring back what was on screen when a restart or crash
-//! cut it off.
-//!
-//! A Session is interrupted when its execution owner had a viewer, never
-//! recorded its own exit, and the OS shows it gone. Leaving with the
-//! provider's own exit or idling out never qualifies, and a
-//! conversation nobody was viewing is left for `lf resume`. Each Session
-//! resumes through the ordinary `lf resume` path in a new owner with no
-//! viewer; terminals attach when they show it.
+//! Reopen stopped Sessions during an installed-build rollover.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -14,7 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use super::{lock_session_process, owner_running};
+use super::owner_running;
 use crate::store::SharedStore;
 
 /// How long one owner may take to bind before it is reported as still starting.
@@ -38,44 +30,6 @@ pub enum ResumeOutcome {
     Failed {
         reason: String,
     },
-}
-
-/// Interrupted Sessions on this machine, ordered by id.
-async fn interrupted(store: &SharedStore) -> Result<Vec<crate::session::LfSession>> {
-    let mut sessions = Vec::new();
-    for (id, owner) in store.sqlite.interrupted_session_owners()? {
-        if owner_running(&store.sqlite, &owner)? {
-            continue;
-        }
-        let Some(session) = store.session(&id).await? else {
-            continue;
-        };
-        // Only saved provider history can be reopened without replaying input.
-        let history = match session.artifact_key.as_deref() {
-            Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
-            None => false,
-        };
-        if history {
-            sessions.push(session);
-        }
-    }
-    Ok(sessions)
-}
-
-pub(crate) async fn resume_all(store: &SharedStore) -> Result<Vec<ResumedSession>> {
-    // Concurrent runs would each start an owner for the same Session.
-    let _all = lock_resume_all().await?;
-    let binary = std::env::current_exe()?;
-    let mut resumed = Vec::new();
-    for session in interrupted(store).await? {
-        resumed.push(resume(store, &session, &binary).await?);
-    }
-    Ok(resumed)
-}
-
-/// Serializes every caller that starts owners for Sessions it found stopped.
-pub(crate) async fn lock_resume_all() -> Result<std::fs::File> {
-    tokio::task::spawn_blocking(|| lock_session_process("resume-all")).await?
 }
 
 /// Reopen one stopped Session in a new owner running `binary`.
@@ -136,15 +90,6 @@ async fn start(
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-}
-
-pub(crate) fn render(resumed: &[ResumedSession]) -> String {
-    if resumed.is_empty() {
-        return "No interrupted conversations.".into();
-    }
-    let mut lines = resumed.iter().map(describe).collect::<Vec<_>>();
-    lines.push("Open one with: lf resume <id>".into());
-    lines.join("\n")
 }
 
 /// One line saying how `session` came back.

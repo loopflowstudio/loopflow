@@ -538,6 +538,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut viewers: Vec<Viewer> = Vec::new();
     let mut control: Option<String> = None;
     let mut pending_input = VecDeque::new();
+    let mut recorded_input = 0;
     let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
@@ -779,15 +780,26 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         drain(&wake);
-        if let Ok(moved) = ending.try_recv() {
-            for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                let _ = viewer.queue(&moved);
-                let _ = viewer.flush();
-            }
-            snapshot::leave(&id, &output);
-            crate::platform::kill_process(std::process::id());
-        }
         let now_viewed = viewers.iter().any(|v| v.attached);
+        if let Ok(moved) = ending.try_recv() {
+            // A key or callback may have arrived after the policy's judgment.
+            // Only the serving owner can decide after accepting that input.
+            let settled = lifetime::may_end(&moved, now_viewed, !pending_input.is_empty())
+                && crate::journal::process_ledger()
+                .and_then(|store| store.owner_waits_for_person(&id))
+                .inspect_err(|error| {
+                    tracing::warn!(%error, owner = %id, "cannot confirm Session ending; judging again later");
+                })
+                .unwrap_or(false);
+            if settled {
+                for viewer in viewers.iter_mut().filter(|v| v.attached) {
+                    let _ = viewer.queue(&moved);
+                    let _ = viewer.flush();
+                }
+                snapshot::leave(&id, &output);
+                crate::platform::kill_process(std::process::id());
+            }
+        }
         if viewed != Some(now_viewed) {
             viewed = Some(now_viewed);
             let _ = activity.send(lifetime::Activity::Viewed(now_viewed));
@@ -802,12 +814,28 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             viewers.retain_mut(|v| !v.attached || v.queue(&response).is_ok());
         }
         if let Some(input) = input.as_mut().filter(|_| !pending_input.is_empty()) {
-            match input.write(pending_input.as_slices().0) {
-                Ok(n) => {
-                    pending_input.drain(..n);
+            let recorded = if terminal && recorded_input < pending_input.len() {
+                let bytes = &pending_input.make_contiguous()[recorded_input..];
+                crate::journal::process_ledger()
+                    .and_then(|store| store.record_owner_input(&id, bytes))
+                    .map(|()| recorded_input = pending_input.len())
+                    .inspect_err(|error| tracing::warn!(%error, "cannot retain terminal input; retrying before delivery"))
+                    .is_ok()
+            } else {
+                true
+            };
+            if recorded {
+                match input.write(pending_input.as_slices().0) {
+                    Ok(n) => {
+                        pending_input.drain(..n);
+                        recorded_input = recorded_input.saturating_sub(n);
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(_) => {
+                        pending_input.clear();
+                        recorded_input = 0;
+                    }
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(_) => pending_input.clear(),
             }
         }
         if end_input && pending_input.is_empty() {
@@ -878,6 +906,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         let status = child_exit.try_recv().ok().transpose()?;
         if viewers.iter().any(|viewer| viewer.ending) || (status.is_some() && exit_record.is_some())
         {
+            if let Err(error) =
+                crate::journal::process_ledger().and_then(|store| store.clear_owner_input(&id))
+            {
+                tracing::warn!(%error, "cannot clear ended native input; retaining its owner");
+            }
+            recorded_input = 0;
             if let Some(ended) = client.take() {
                 finish_client(
                     ended,

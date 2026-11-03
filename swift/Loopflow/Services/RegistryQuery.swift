@@ -799,12 +799,6 @@ public struct RegistryQuery: Sendable {
         _ = try await write(.shipStop(directory: cwd ?? "/", issue: issue))
     }
 
-    /// Reopen every conversation on this Machine that a restart or crash cut off,
-    /// each in its own owner with no viewer; panes attach when they show it.
-    public func resumeInterrupted() async throws {
-        _ = try await run(["resume", "--all"], nil)
-    }
-
     public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
         _ = try await write(.taskMove(directory: cwd ?? "/", issue: issue, wave: wave))
     }

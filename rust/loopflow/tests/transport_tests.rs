@@ -90,6 +90,16 @@ impl Fixture {
     fn start(&self, argv: &[&str]) -> String {
         self.owner(self.serve(true, argv))
     }
+    /// Launch a native Claude fixture under the selected owner executable.
+    fn native(&self, binary: &Path, path: &str, prompt: &str) -> Command {
+        let mut command = self.command_from(binary, &["session", "serve", "--terminal"]);
+        command
+            .arg("--")
+            .arg(binary)
+            .args(["-i", "-a", "claude", ":", prompt])
+            .env("PATH", path);
+        command
+    }
     /// A Session row naming `owner`, so `lf session resume` attaches to it.
     fn session(&self, owner: &str) -> String {
         let session = "session_5e55105e000040008000000000000001";
@@ -1621,208 +1631,10 @@ fn interactive_graph_settles_each_step_before_starting_the_next() {
     fixture.ends(&owner);
 }
 
-/// A restart kills every owner and provider without recording an exit. `lf resume
-/// --all` reopens exactly those conversations from saved history, once; one the
-/// person left stays stopped.
-#[test]
-fn resume_all_restores_interrupted_sessions_and_leaves_left_ones() {
-    let fixture = Fixture::new();
-    let path = fixture.waiting_provider();
-    let mut owners = Vec::new();
-    for input in ["first", "second", "left", "unseen"] {
-        let mut owner = fixture.serve(
-            true,
-            &[
-                env!("CARGO_BIN_EXE_lf"),
-                "--interactive",
-                "--agent",
-                "claude",
-                ":",
-                input,
-            ],
-        );
-        owner.env("PATH", &path);
-        owners.push(fixture.owner(owner));
-        fixture.launches(owners.len());
-    }
-    let sql = fixture.sql();
-    let started = fixture.launches(4);
-    let sessions: Vec<String> = started.iter().map(|line| session_of(&sql, line)).collect();
-    // The first two are on screen; nobody opened the fourth.
-    let viewers: Vec<Viewer> = owners[..2]
-        .iter()
-        .map(|owner| fixture.viewer(owner, false))
-        .collect();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    for owner in &owners[..2] {
-        while !sql
-            .query_row("SELECT viewed FROM processes WHERE id=?1", [owner], |r| {
-                r.get::<_, Option<bool>>(0)
-            })
-            .unwrap()
-            .unwrap_or(false)
-        {
-            assert!(
-                Instant::now() < deadline,
-                "{owner} never recorded its viewer"
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-    // The person leaves the third conversation through the provider's own exit.
-    let mut viewer = fixture.viewer(&owners[2], true);
-    viewer.input("exit\n");
-    viewer.finish();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while sql
-        .query_row(
-            "SELECT completed_at IS NULL FROM processes WHERE id=?1",
-            [&owners[2]],
-            |r| r.get::<_, bool>(0),
-        )
-        .unwrap()
-    {
-        assert!(
-            Instant::now() < deadline,
-            "left owner never recorded its exit"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    // Its exit left the last screen for whoever opens it next.
-    assert!(fixture
-        .last_screen(&sessions[2])
-        .text()
-        .unwrap()
-        .contains("ready for"));
-    // A restart: the owner, its lf and the provider die without a word.
-    let crash = |owner: &str, line: &str| {
-        let receipt: Value = serde_json::from_slice(
-            &std::fs::read(
-                fixture
-                    .home
-                    .path()
-                    .join(format!("runtime/exec-processes/{owner}.json")),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let provider: i64 = line.split(':').next().unwrap().parse().unwrap();
-        let parent = Command::new("ps")
-            .args(["-o", "ppid=", "-p", &provider.to_string()])
-            .output()
-            .unwrap();
-        let inner: i64 = String::from_utf8(parent.stdout)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        let pids = [receipt["pid"].as_i64().unwrap(), inner, provider];
-        // Freeze first so no survivor observes another's death and records an exit.
-        for signal in [libc::SIGSTOP, libc::SIGKILL] {
-            for pid in pids {
-                // SAFETY: test-owned PIDs read from this fixture's receipts and launches.
-                unsafe { libc::kill(pid as libc::pid_t, signal) };
-            }
-        }
-    };
-    for (owner, line) in owners.iter().zip(&started).take(2) {
-        crash(owner, line);
-    }
-    crash(&owners[3], &started[3]);
-    drop(viewers);
-    std::thread::sleep(Duration::from_millis(200));
-    // Retention after the reboot closed the first dead row from its pre-boot
-    // start time; the owner still never recorded an exit of its own.
-    sql.execute(
-        "UPDATE processes SET completed_at=strftime('%s','now') WHERE id=?1",
-        [&owners[0]],
-    )
-    .unwrap();
-    // The first was mid-turn when the machine went down; the second was waiting.
-    sql.execute(
-        r#"INSERT INTO session_activity(session_id,observed_at,open_tools,pending_input,yielded,agent_process_id,program_status)
-           SELECT id,0,1,0,0,agent_process_id,'{"seen":true,"records":[{"state":"working","id":null,"kind":null,"progress":null,"app":null,"title":null,"msg":null}]}' FROM agent_sessions WHERE id=?1
-           ON CONFLICT(session_id) DO UPDATE SET program_status=excluded.program_status,
-               agent_process_id=excluded.agent_process_id"#,
-        [&sessions[0]],
-    )
-    .unwrap();
-    let resume_all = || -> Value {
-        let output = fixture
-            .command(&["resume", "--all", "--json"])
-            .env("PATH", &path)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        serde_json::from_slice(&output.stdout).unwrap()
-    };
-    let resumed = resume_all();
-    let ids: Vec<&str> = resumed
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|entry| entry["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(
-        ids.iter()
-            .copied()
-            .collect::<std::collections::BTreeSet<_>>(),
-        sessions[..2]
-            .iter()
-            .map(String::as_str)
-            .collect::<std::collections::BTreeSet<_>>(),
-        "{resumed}"
-    );
-    assert!(
-        resumed
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|entry| entry["outcome"]["kind"] == "resumed"),
-        "{resumed}"
-    );
-    for entry in resumed.as_array().unwrap() {
-        assert_eq!(
-            entry["turn_cut_off"],
-            entry["id"] == sessions[0].as_str(),
-            "{resumed}"
-        );
-    }
-    let reopened = fixture.launches(6);
-    assert_eq!(reopened.len(), 6, "{reopened:?}");
-    for line in &reopened[4..] {
-        let (_, resumed) = line
-            .split_once(" --resume ")
-            .unwrap_or_else(|| panic!("reopened without history: {line}"));
-        assert!(!resumed.contains(' '), "input replayed: {line}");
-    }
-    // Rerunning finds nothing to do and starts no provider.
-    assert_eq!(resume_all(), json!([]));
-    std::thread::sleep(Duration::from_millis(300));
-    let reopened = fixture.launches(6);
-    assert_eq!(reopened.len(), 6);
-    // Resumed owners outlive the command; stop them with the fixture.
-    for line in &reopened[4..] {
-        let owner: String = sql
-            .query_row(
-                "SELECT s.transport_lf_process_id FROM agent_sessions s JOIN session_events e
-                 ON e.session_id=s.id WHERE e.kind='captured' AND e.receipt_key=?1",
-                [line.split(':').nth(1).unwrap()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        crash(&owner, line);
-    }
-}
-
 /// Closing every view of a conversation ends its agent once
 /// `session.end_detached_after` of quiet passes. A viewer, live turn, output or
 /// running Graph keeps it; stale status and finished Graphs do not. The ended
-/// conversation reopens from saved history and stays out of `lf resume --all`.
+/// conversation reopens from saved history without replaying its input.
 #[test]
 fn detached_sessions_end_after_their_limit() {
     let fixture = Fixture::new();
@@ -1904,20 +1716,6 @@ fn detached_sessions_end_after_their_limit() {
     ] {
         assert!(fixture.running(owner), "{owner} ended");
     }
-    let resumed = fixture
-        .command(&["resume", "--all", "--json"])
-        .env("PATH", &path)
-        .output()
-        .unwrap();
-    assert!(
-        resumed.status.success(),
-        "{}",
-        String::from_utf8_lossy(&resumed.stderr)
-    );
-    assert_eq!(
-        serde_json::from_slice::<Value>(&resumed.stdout).unwrap(),
-        json!([])
-    );
     // The idle owner left what its terminal showed when it ended.
     let screen = fixture.last_screen(&idle);
     assert!(
@@ -1953,6 +1751,115 @@ fn detached_sessions_end_after_their_limit() {
     for owner in [&busy_owner, &reopened] {
         fixture.stop(owner);
     }
+}
+
+/// A retained editor accepts corrections after both deadlines; plain submissions settle.
+#[test]
+fn native_drafts_remain_editable_and_acknowledged_prompts_can_end() {
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.home.path().join("config.yaml"),
+        "session:\n  end_detached_after: 2s\n",
+    )
+    .unwrap();
+    let path = fixture.provider(
+        r#"#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys, tty
+if sys.argv[1:] == ["--version"]:
+    print("2.1.317")
+    sys.exit(0)
+home = pathlib.Path(os.environ["HOME"])
+name = os.environ["EDITOR_CASE"]
+settings = json.loads(pathlib.Path(sys.argv[sys.argv.index("--settings") + 1]).read_text())
+def hook(event, **extra):
+    command = settings["hooks"][event][0]["hooks"][0]["command"]
+    payload = dict(session_id=name, hook_event_name=event, **extra)
+    subprocess.run(command, shell=True, input=json.dumps(payload).encode(), stdout=subprocess.DEVNULL, check=True)
+hook("SessionStart", source="startup")
+hook("UserPromptSubmit", prompt_id="seed", prompt="initial")
+hook("Stop", prompt_id="seed", background_tasks=[], session_crons=[])
+terminal = os.open("/dev/tty", os.O_RDWR)
+tty.setraw(terminal)
+(home / (name + "-ready")).write_text("ready")
+os.write(1, b"EDITOR_READY\r\n")
+draft = bytearray()
+while True:
+    key = os.read(terminal, 1)
+    if key == b'\x04': break
+    if key == b'\x7f':
+        draft = draft[:-1]
+    elif key == b'\r':
+        prompt = draft.decode()
+        hook("UserPromptSubmit", prompt_id="typed", prompt=prompt)
+        hook("Stop", prompt_id="typed", background_tasks=[], session_crons=[])
+        (home / (name + "-submitted")).write_text(prompt)
+        draft.clear()
+    else:
+        draft.extend(key)
+    os.write(1, b'\r\nEDITOR:' + draft + b'\r\n')
+"#,
+    );
+    let removable = fixture.home.path().join("bin/lf-editor");
+    std::fs::copy(env!("CARGO_BIN_EXE_lf"), &removable).unwrap();
+    let mut owners = Vec::new();
+    for (name, binary) in [
+        ("draft", removable.as_path()),
+        ("submitted", Path::new(env!("CARGO_BIN_EXE_lf"))),
+    ] {
+        let mut command = fixture.native(binary, &path, "initial");
+        command.env("EDITOR_CASE", name);
+        let owner = fixture.owner(command);
+        let mut viewer = fixture.viewer(&owner, true);
+        while !fixture.home.path().join(format!("{name}-ready")).exists() {
+            let message = viewer.read();
+            let bytes: Vec<u8> =
+                serde_json::from_value(message["bytes"].clone()).unwrap_or_default();
+            println!("provider startup: {}", String::from_utf8_lossy(&bytes));
+        }
+        viewer.input(if name == "draft" {
+            "draft worlX"
+        } else {
+            "simple\r"
+        });
+        if name == "submitted" {
+            fixture.wait_file("submitted-submitted");
+        } else {
+            loop {
+                let message = viewer.read();
+                let bytes: Vec<u8> =
+                    serde_json::from_value(message["bytes"].clone()).unwrap_or_default();
+                if String::from_utf8_lossy(&bytes).contains("EDITOR:draft worlX") {
+                    break;
+                }
+            }
+        }
+        drop(viewer);
+        owners.push(owner);
+    }
+    fixture.ends(&owners[1]);
+    assert!(
+        fixture.running(&owners[0]),
+        "an unsent draft ended after its grace"
+    );
+    std::fs::remove_file(&removable).unwrap();
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(
+        fixture.running(&owners[0]),
+        "an unsent draft ended with its executable"
+    );
+    let mut viewer = fixture.viewer(&owners[0], true);
+    viewer.input("\x7fd\r");
+    fixture.wait_file("draft-submitted");
+    assert_eq!(
+        std::fs::read_to_string(fixture.home.path().join("draft-submitted")).unwrap(),
+        "draft world"
+    );
+    // An edit is deliberately not reconstructed: its editor remains owned.
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(fixture.running(&owners[0]));
+    viewer.input("\x04");
+    viewer.finish();
+    fixture.ends(&owners[0]);
 }
 
 /// Native start/stop callbacks preserve silent work across both deadlines.
@@ -2021,18 +1928,8 @@ while True:
         ("idle", Path::new(env!("CARGO_BIN_EXE_lf"))),
         ("gone", removable.as_path()),
     ] {
-        let mut command = fixture.command_from(executable, &["session", "serve", "--terminal"]);
+        let mut command = fixture.native(executable, &path, "silent turn");
         command
-            .args([
-                "--",
-                executable.to_str().unwrap(),
-                "--interactive",
-                "--agent",
-                "claude",
-                ":",
-                "silent turn",
-            ])
-            .env("PATH", &path)
             .env("BACKGROUND_WATCH", background.to_string())
             .env("SILENT_CASE", name);
         let owner = fixture.owner(command);

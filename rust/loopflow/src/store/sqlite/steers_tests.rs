@@ -40,16 +40,14 @@ fn fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
     (home, store, adapter)
 }
 
-#[test]
-fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
-    let (_home, store, adapter) = fixture();
-    let first = store.session_attachment("session").unwrap().unwrap();
-    let owner = first.lf_process_id.as_ref().unwrap();
+fn native_fixture() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
+    let (home, store, adapter) = fixture();
+    let attachment = store.session_attachment("session").unwrap().unwrap();
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
             "UPDATE agent_sessions SET interactive=1,transport_lf_process_id=?1 WHERE id='session'",
-            [owner],
+            [attachment.lf_process_id.as_ref().unwrap()],
         )
         .unwrap();
         conn.execute(
@@ -58,6 +56,109 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
         )
         .unwrap();
     }
+    (home, store, adapter)
+}
+
+#[test]
+fn native_input_acknowledgements_cannot_cross_provider_replacement() {
+    let (_home, store, adapter) = native_fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
+    store.record_owner_input(owner, b"draft\r").unwrap();
+    assert!(store
+        .acknowledge_native_input(&adapter, "other-thread", "one", Some("draft"))
+        .is_err());
+    store
+        .acknowledge_native_input(&adapter, "native", "one", Some("draft"))
+        .unwrap();
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    let next = store
+        .claim_session_attachment("session", Some(&first), owner, false)
+        .unwrap();
+    store
+        .acknowledge_native_input(&adapter, "native", "one", None)
+        .unwrap();
+    assert!(store.owner_waits_for_person(owner).unwrap());
+    store.record_owner_input(owner, b"next\r").unwrap();
+    store
+        .acknowledge_native_input(&adapter, "native", "two", Some("next"))
+        .unwrap();
+    store
+        .replace_session_agent_process("session", &next, None, || Ok(true))
+        .unwrap();
+    assert!(store
+        .acknowledge_native_input(&adapter, "native", "two", None)
+        .is_err());
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    store.clear_owner_input(owner).unwrap();
+    assert!(store.owner_waits_for_person(owner).unwrap());
+}
+
+#[test]
+fn pending_requests_hold_the_owner_until_the_current_attachment_settles_them() {
+    let (_home, store, _adapter) = fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET interactive=1,transport_lf_process_id=?1 WHERE id='session'",
+            [owner],
+        )
+        .unwrap();
+    let mut activity = crate::session::SessionActivity {
+        preview: None,
+        observed_at: 1,
+        open_tools: 0,
+        pending_input: 1,
+        yielded: true,
+    };
+    store
+        .record_session_activity("session", &first, &activity)
+        .unwrap();
+    for viewed in [false, true] {
+        store.record_owner_viewers(owner, viewed).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
+                [],
+            )
+            .unwrap();
+        assert!(!store.owner_waits_for_person(owner).unwrap());
+    }
+    let next = store
+        .claim_session_attachment("session", Some(&first), owner, false)
+        .unwrap();
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    activity.pending_input = 0;
+    store
+        .record_session_activity("session", &first, &activity)
+        .unwrap();
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    store
+        .record_session_activity("session", &next, &activity)
+        .unwrap();
+    assert!(store.owner_waits_for_person(owner).unwrap());
+    activity.pending_input = 1;
+    store
+        .record_session_activity("session", &next, &activity)
+        .unwrap();
+    store
+        .replace_session_agent_process("session", &next, None, || Ok(true))
+        .unwrap();
+    assert!(store.owner_waits_for_person(owner).unwrap());
+}
+
+#[test]
+fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
+    let (_home, store, adapter) = native_fixture();
+    let first = store.session_attachment("session").unwrap().unwrap();
+    let owner = first.lf_process_id.as_ref().unwrap();
     store
         .record_native_turn(&adapter, "native", false, None)
         .unwrap();

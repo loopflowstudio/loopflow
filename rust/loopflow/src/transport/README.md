@@ -25,36 +25,30 @@ earlier lf, which cannot record its viewers in a store a newer lf advanced, read
 but never answers reads `detached` too; reattaching stops its provider and continues
 the same provider thread in a new owner, without replaying input.
 
-`lf resume --all` is the one automatic restart: it resumes Sessions that were on
-screen when the machine went down, as after a reboot, crash or kill: their owner
-had a viewer, never recorded its own exit, and is gone from the OS. Leaving
-through the provider or idling out records an exit, so those never
-qualify, and a conversation nobody was viewing waits for `lf resume`. Dead PIDs,
-pre-boot start times and rows retention already closed read as gone and block
-nothing. Each resumes through ordinary `lf resume` in a new owner with no
-viewer; its interrupted turn is flagged, not replayed. It reports each Session
-it resumes or skips. Desktop runs it at launch.
-
 A Session nobody views ends after `session.end_detached_after` (default `2m`,
 `off` disables it) of quiet. The grace counts wall time, including laptop sleep,
-from the last viewer change, command output or held work. A turn or running
-Graph keeps its owner and restarts the grace; finished Graphs do not. Native
-Claude prompt/stop hooks preserve even silent tool or network waits. A reply
-with background tasks or scheduled wakeups keeps its owner until Claude reports
-that work has settled.
-Terminal status counts only while a viewer is attached to refresh it. Headless
-Runs never end for want of viewers.
+from the last viewer change, command output or held work. A turn, pending request
+or running Graph keeps its owner and restarts the grace; finished Graphs do not.
+Native Claude prompt/stop hooks preserve silent waits, background tasks and
+scheduled wakeups until Claude reports settlement. Terminal status counts only
+while a viewer is attached to refresh it. Headless Runs never end for want of viewers.
 
-Removing, replacing or superseding the owner's lf executable ends it after two seconds of
-command silence, once no turn, running Graph or headless Run holds it. Viewers
-cannot extend this interval. The owner logs the path to `logs/lf.log`; attached
-viewers receive the reason and run the resume command through the lf entry. Failed store judgments retry
-at the next poll.
+Unsubmitted input keeps its native editor alive so returning can edit it.
+A plain, single Claude submission can release this protection after its exact
+text and prompt ID are acknowledged and settled, with no later typing.
+Edits, paste, long input, input during a turn, ambiguous submissions and missing
+prompt IDs retain the owner until the native client exits. Other providers
+retain typed input because they have no matching acknowledgement here. Clearing
+the screen or showing an idle prompt cannot discard that protection. Pending
+approvals and questions stay with their original provider until answered or canceled.
 
-At policy or command exit, the owner saves
-`$LF_HOME/screens/<session>.ghostsnp`. Policy exit then signals the owner,
-stops its agent and records its exit. `lf resume` reopens provider history at
-the bottom without starting a turn; `lf resume --all` skips this recorded exit.
+Removing, replacing or superseding the owner's lf executable ends it after two
+seconds of command silence, once no input, turn, pending request, running Graph
+or headless Run holds it. Viewers cannot extend this interval. The owner logs the
+path to `logs/lf.log`; attached viewers receive the reason and run the resume
+command through the lf entry. Failed store judgments retry at the next poll.
+Policy exit saves the screen, stops the agent and records its exit. `lf resume`
+reopens provider history without starting a turn. Other ended Sessions stay stopped.
 
 `lf resume` also moves an idle owner from an earlier build onto the lf entry.
 If that owner is busy and answers its socket, resume shows the running turn;
@@ -100,7 +94,8 @@ reset program colors to that configured theme. Images are not repainted.
 
 When an owner ends it writes `<Machine home>/screens/<session>.ghostsnp`: a header
 line naming the Ghostty revision, then Ghostty's snapshot stream with both screens,
-scrollback, styles, hyperlinks, modes and unfinished input. `lf resume` paints that
+scrollback, styles, hyperlinks, modes and unfinished terminal sequences. It does
+not restore the provider's editor or pending requests. `lf resume` paints that
 screen while the provider starts. The live owner takes over its display and input
 modes, including a blank screen. Startup failure or cancellation restores the
 terminal; resume the same Session again. A fresh owner without a saved preview
@@ -112,8 +107,8 @@ delivery. Slow viewers disconnect; execution continues draining.
 
 An execution command delegates to a detached owner, which holds its PTY or pipes
 and records an ordinary Process. Loopflow launches that owner itself; it has no
-public command. Session rows name that Process; viewer tokens and
-terminal bytes remain in memory. A Claude conversation keeps one lf owner
+public command. Session rows name that Process; viewer tokens remain in memory,
+and unresolved native input is recorded on the owner Process. A Claude conversation keeps one lf owner
 and one relay per terminal showing it. `lf resume` resolves the Session,
 then execs into `lf session attach OWNER`, which
 opens no store while relaying and parses no commands. It carries the original

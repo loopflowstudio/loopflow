@@ -1,0 +1,11 @@
+{
+  "head": "2512cd5a3ebce7d6d6271cdc36bcd688591fadad",
+  "artifact": "lf6",
+  "snapshot": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo710-demo-i6hveez3/screens/session_ed81039482c94e209d46a178f0daa7ca.ghostsnp",
+  "snapshot_sha256": "c21c3c0deb4c66e1373b413c52899a9ee7934735a89fbd6c48885f172c43fd1e",
+  "revision_header_matches": true,
+  "saved_snapshot_decoded_again": true,
+  "saved_text_and_cursor_match_recorded_viewer": true,
+  "recorded_live_viewers_match": true,
+  "scope": "Read-only revalidation of existing real-provider demo artifacts; no new provider launch or human observation."
+}

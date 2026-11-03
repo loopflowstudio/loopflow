@@ -1,0 +1,56 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>LOO-710 demo and review</title><style>:root{color-scheme:light dark}body{max-width:850px;margin:48px auto;padding:0 24px;font:17px/1.6 system-ui}h1,h2{line-height:1.2}pre{overflow:auto;padding:24px;background:light-dark(#f1f3f5,#191e24);font:12px/1.5 monospace}li{margin:12px 0}summary{cursor:pointer}</style>
+<header><p>LOO-710 · Manual demo and simulated review · November 2, 2026</p><h1>Advance the snapshot demo to delivery checks</h1><p>Headless decision pass 1: Codex advances under Jack Heart’s delegation. No new personal observation or acceptance by Jack is claimed.</p><p>Jack Heart authorized manual verification, repairs and Auto-Ship. The review repairs pass their focused tests and lint.</p><p>Built from loo-710-demo-review.md, loo-710-session-snapshots.md, demo-provider-evidence.json, demo-snapshot-evidence.json and demo-decision-evidence.json. These are captured terminal streams rendered through Ghostty, not Desktop screenshots.</p></header>
+<h2>Attach another viewer to real Claude</h2><p>Expected: the same display, cursor and modes. Observed: both rendered text and HTML match exactly; both are on the alternate screen at cursor (2,20).</p><pre>
+ ▐▛███▛█   Claude Code v2.1.316
+▝▜██████▀  Opus 5.5 · Claude Ultra
+ ▝▝   ▝▝   /…/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo710-demo-i6hveez3/repo
+
+
+❯ &lt;lf:message&gt;
+  Reply with exactly LOO710-DEMO-READY. Do not use tools.
+  &lt;/lf:message&gt;
+
+⏺ LOO710-DEMO-READY
+
+✻ Baked for 1s · done 4:09 PM
+
+
+
+
+
+  You&#x27;ve used 75% of your weekly limit · resets Nov 4 at 4am (America/Los_Ang…
+─────────────────────────────────────────────────────────── Reply with exactly ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  jack@Jacks-MacBook-Pro-2 repo (HEAD)
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents</pre><details><summary>First viewer</summary><pre>
+ ▐▛███▛█   Claude Code v2.1.316
+▝▜██████▀  Opus 5.5 · Claude Ultra
+ ▝▝   ▝▝   /…/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/loo710-demo-i6hveez3/repo
+
+
+❯ &lt;lf:message&gt;
+  Reply with exactly LOO710-DEMO-READY. Do not use tools.
+  &lt;/lf:message&gt;
+
+⏺ LOO710-DEMO-READY
+
+✻ Baked for 1s · done 4:09 PM
+
+
+
+
+
+  You&#x27;ve used 75% of your weekly limit · resets Nov 4 at 4am (America/Los_Ang…
+─────────────────────────────────────────────────────────── Reply with exactly ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  jack@Jacks-MacBook-Pro-2 repo (HEAD)
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents</pre></details>
+<h2>Exit, decode the snapshot, and reopen</h2><p>The real owner wrote its Session-keyed snapshot. Decoding reproduced the final text and cursor exactly. A separate PTY reopened the same conversation, retaining its response without submitting the prompt again.</p><pre>
+Left “Reply with exactly”. Continue with: lf resume session_ed81039482c94e209d46
+a178f0daa7ca  (Ctrl+] steps away without stopping)</pre>
+<h2>Review findings repaired</h2><ol><li>Nested keyboard modes: restoring only current flags lost the previous flags after a pop. The formatter now preserves the stack, and detach clears it fully.</li><li>Origin mode: cursor placement double-counted margins, and repainting with origin already enabled shifted content. Drawing now precedes restoration of margins and origin.</li><li>Local static builds: the macOS linker selected a neighboring dylib. The build now stages only the archive; the repaired binary runs with no Ghostty dylib dependency.</li></ol>
+<p>30 focused Rust tests, nine Python tests, formatting and macOS Clippy passed. The Rust cases include primary/alternate screens, snapshot round trips, next output, keyboard stack overflow, wide-character wrap and preview failure/cancellation.</p>
+<h2>Limits retained</h2><p>Claude's displayed screen did not exercise every hyperlink or keyboard mode; dedicated fixtures cover those. Removing a disposable executable did not end an already-completed Session that had been resumed; the lifetime policy requires an unfinished Session. Native exit snapshotting passed. Desktop rendering, sibling lifetime integration and cross-platform executable packaging remain separate proofs.</p><p>This simulated review is Codex's assessment of explicit state and operational correctness. Mitchell Hashimoto did not participate.</p>
+<h2>Decision evidence</h2><p>The saved real-provider snapshot decoded again at commit <code>2512cd5a3e</code>; its revision, final text and cursor match the recorded evidence. The earlier resume trace and repaired-build attachment trace are separate runs. Live capture proves the conversation display; the final snapshot captures the exit hint. Scrollback, hyperlinks and nested keyboard modes retain their focused fixture evidence.</p><p>No design change is proposed. Advance through the existing Graph’s delivery checks; package CI and sibling lifetime integration remain outstanding. This pass reused the configured-provider demonstration and launched no new provider.</p>

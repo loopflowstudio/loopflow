@@ -326,6 +326,19 @@ def _python_commands(changed: list[str]) -> list[Command]:
             "python",
         ),
     ]
+    if platform.system() == "Darwin" and (
+        not test_files or touches_source or "python/tests/test_disk_cleanup.py" in test_files
+    ):
+        # The cleanup proof builds lf under network isolation. Fetch native
+        # archives and Cargo dependencies before entering that boundary.
+        commands.insert(
+            1,
+            Command(
+                ["cargo", "build", "-p", "loopflow", "--bin", "lf", "--jobs", str(MAX_PARALLEL_JOBS)],
+                REPO_ROOT,
+                "python-cli",
+            ),
+        )
     # macOS refuses nested Seatbelt profiles. This fixture installs its own
     # network-denying, read-only policy around the observed subprocesses.
     if platform.system() == "Darwin" and (

@@ -64,11 +64,60 @@ alternate cursor state, nested/overflowed stacks, subsequent output, and cleanup
 ## Remaining
 
 All four final lf6 archives were published and checksum-verified on readback.
-Continue through the existing Task's Auto-Ship path. The
-repaired candidate passed all 30 focused tests and macOS Clippy. A second real
-Claude attach and snapshot demonstration on the repaired binary also matched. Then use the existing Task's Auto-Ship path for the affected gate,
-publication, CI, merge and verification. Preserve the LOO-705/709 integration
+The repaired candidate passed all 30 focused tests and macOS Clippy. A second real
+Claude attach and snapshot demonstration on the repaired binary also matched.
+The headless decision below advances this demo; the existing Task's Auto-Ship
+path retains the affected gate, publication, CI, merge and verification. Preserve the LOO-705/709 integration
 requirements in the current design and durable PR copy. This note does not claim
 that gate, cross-target package linking, merge, or Task completion has happened.
 
 Check: `cargo test -p loopflow --lib -- transport::terminal:: transport::viewer_tests:: transport::native:: transport::snapshot:: ghostty_vt::` with `LF_*` unset and local repaired archive — 30 passed; `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` passed; `uv run pytest python/tests/test_loopflow_dev.py -q` — 9 passed; `otool -L` confirms no Ghostty dylib dependency.
+
+
+## Headless demo decision, pass 1 — 2026-11-02
+
+**Advance.** Jack Heart delegated this decision to the headless run. Codex's
+assessment is that the work before this step holds: the previous review intended
+to repair keyboard-stack restoration, origin-relative cursor/content placement,
+and static linking; commit `2512cd5a3e` contains those repairs. The recorded
+30-test pass, lint, archive readbacks and second configured-Claude demonstration
+supply progress beyond the earlier findings. No concrete remaining implementation
+defect was established by this pass. This is a delegated assessment, not a claim
+that Jack personally observed or accepted the display. No new human feedback was
+received, and no design change is proposed or attributed to Jack.
+
+The existing configured-provider demonstration was reused; no provider turn was
+replayed. A read-only probe decoded its on-disk snapshot again, checked the header
+against the current Ghostty revision, and reproduced the recorded final screen
+and cursor. It also checked equality of the recorded live viewers' text and state.
+The earlier `same_html` observation remains recorded evidence, not a new HTML
+comparison in this pass. See [decision evidence](demo-decision-evidence.json),
+[live attachment evidence](demo-provider-evidence.json),
+[exit snapshot evidence](demo-snapshot-evidence.json), and
+[same-Session resume evidence](demo-resume-evidence.json).
+
+The latest attachment/snapshot run used `loo710-demo-i6hveez3`, Session
+`session_ed81039482c94e209d46a178f0daa7ca`; the earlier resume run used
+`loo710-demo-5hb8my7m`, Session `session_1e6055eec274459cb30fd85fc4b8fba9`.
+These are two demonstrations, not one continuous trace. The final snapshot shows
+the exit hint after Claude left; live conversation fidelity is established by the
+separate live-attachment capture. Its history count of zero versus the viewer's
+one row does not establish scrollback equality; retained-history behavior remains
+covered by the focused fixtures. The native capture did not exercise OSC 8 links
+or nested keyboard stacks. No Desktop screenshot or new installed-build proof is
+claimed.
+
+The unsuccessful executable-removal probe remains evidence of an unmet fixture
+precondition (completed Session, no activity row), not lifetime-policy acceptance.
+LOO-705/709 integration and four-target linking retain the owners described in the
+[current design](loo-710-session-snapshots.md#remaining). Neither absence of a
+person nor provider exit supplies approval. No unresolved product question requires
+a backward edge to implementation.
+
+Next action: advance the existing Graph to its delivery checks, retaining the
+outstanding gate and package CI obligations. The [review page](demo.html) is a
+view of this record; this headless pass requested no interactive action and
+started no background process.
+
+Check: read-only `uv run python` snapshot/evidence probe — passed at `2512cd5a3e`;
+existing focused test and lint results reused because production files are unchanged.

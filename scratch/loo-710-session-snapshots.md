@@ -1,10 +1,11 @@
 # LOO-710: Session snapshots at Rex fidelity with libghostty-vt
 
 Status: **accepted** (Jack Heart's Task brief, 2026-11-02; mechanisms below are
-this plan's choices). Reconciled 2026-11-02 against `9371e126f4`. Preview recovery,
-retained primary-buffer restoration and explicit program-color restoration are implemented.
-Gate, package CI and configured-provider demo remain acceptance work. No product
-decision is pending.
+this plan's choices). Reconciled 2026-11-02 against `2512cd5a3e` and gate repairs.
+Preview recovery, both buffers, program colors, origin-relative cursors and
+keyboard stacks are implemented. The configured-provider demo passed with the
+limits recorded below; remaining delivery checks are listed under Gate results.
+No product decision is pending.
 
 ## Outcome
 
@@ -46,7 +47,7 @@ writes a Ghostty-format (`GHOSTSNP`) snapshot when it ends so `lf resume` and
   emission to Ghostty's explicit override mask, including overrides equal to an
   owner's default, plus foreground/background/cursor overrides. Untouched colors
   stay at the viewer's defaults. Cleanup and preview handoff reset program colors
-  to the viewer's configured theme. HTML formatting is unchanged. Archive `lf4`
+  to the viewer's configured theme. HTML formatting is unchanged. Archive `lf6`
   carries the patch; its build runs palette round-trip/pin-map and hyperlink tests.
 - **Queries answered by the library.** `GHOSTTY_TERMINAL_OPT_WRITE_PTY` collects DSR
   and mode-report replies; a device-attributes callback answers DA1/DA2 as Ghostty
@@ -72,13 +73,11 @@ writes a Ghostty-format (`GHOSTSNP`) snapshot when it ends so `lf resume` and
 
 ## Remaining
 
-- **Gate and CI.** The concept-review repairs are implemented and focused PTY/CLI
-  proofs pass. Gate retains the affected transport and Session suites, including
-  `transport_tests`, `agent_startup_tests`, `session_cli_tests`, the interactive
-  Graph input proof and disposable installation proof named in the tests README.
-  Linux Clippy and four-target package linking remain CI's obligations. These
-  checks and the interactive demo are still acceptance work; source fixtures do
-  not establish installed/native-provider behavior.
+- **CI and delivery.** Local gate passed after the two repairs recorded below:
+  transport and Session suites, interactive Graph input and the disposable Linux
+  installation proof. Linux Clippy and four-target release-package linking remain
+  CI's obligations. The configured-Claude demo passed within its recorded limits;
+  source fixtures do not establish Desktop rendering or installed acceptance.
 - **Meeting LOO-709.** The November 2 status read reports unfinished work and no
   PR; the prior code inspection found its branch writes `screens/<session>.vt` through
   `transport::save_last_screen`/`last_screen_path`, `Output::last_screen` and
@@ -260,3 +259,46 @@ Archive lf6 includes the third formatter patch; lf5 is superseded. The new
 30-test focused pass, nine Python tests, formatting and macOS Clippy are recorded
 in the review note. Remaining gate and package CI retain their authored steps;
 the completed-Session lifetime limitation and LOO-705/709 integration remain explicit.
+
+## Gate plan — 2026-11-02
+
+Comparison: `origin/main...2512cd5a3e`, plus the existing uncommitted demo
+records. Preserve those records and the prior implementation. Changed terminal
+FFI, transport, preview and resume paths reach `transport::`, `ghostty_vt::`,
+`ops::human_session::`, `transport_tests`, `agent_startup_tests`,
+`session_cli_tests`, the CLI binary and the interactive Graph input proof.
+`build.rs`, Cargo dependencies and archive tooling reach architecture checks,
+Python tooling tests, formatting and Clippy. The changed-aware runner selects
+architecture, Python and filtered Rust; no Swift UI or website paths changed.
+The installation boundary additionally requires the disposable
+`declared_agent_can_start_another_tasks_graph` proof. Linux Clippy and all four
+release-target links remain CI obligations; native macOS linking is exercised
+by the gate's CLI build using the published pin. Existing real-provider evidence
+is retained without replaying a provider turn.
+
+## Gate results — 2026-11-02
+
+The review found two concrete delivery defects: dependency removal left the
+notices inventory stale, and the macOS cleanup fixture tried to fetch the new
+native archive from inside network isolation. Refreshed notices remove `vt100`,
+`vte` and their unused dependencies. The gate now prepares the CLI before isolated
+macOS cleanup tests; a focused plan regression verifies that order and leaves
+unrelated Python-only checks without a Rust build. The script README and shared
+testing commands document the boundary. No terminal-code repair was needed.
+
+- `uv run python scripts/test.py --reuse-passing --rust-filter 'test(transport::) | test(ghostty_vt::) | test(ops::human_session::) | binary(transport_tests) | test(agent_startup_tests::) | test(session_cli_tests::) | test(interactive_graph_keeps_input_and_advances_only_after_each_provider_exits) | binary(lf)'` — architecture, inventory, formatting, published-archive CLI build, 131 Rust tests and macOS Clippy passed; initial Python run had 510 passes, one intentional nested-sandbox skip and the two failures above; log `/tmp/loo710-gate.log`.
+- `uv run python scripts/third_party.py refresh` — regenerated notices for 270 components; generated text/resources need no Swift compilation, and the notice validation below passed.
+- `uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/test_disk_cleanup.py python/tests/test_third_party.py python/tests/test_gate_bounded.py -q` — 72 passed, including both repaired failures and the new build-order regression; log `/tmp/loo710-gate-repairs.log`.
+- `uv run --no-sync pytest python/tests/test_desktop_performance.py::test_checkout_observation_preserves_read_boundary_and_detects_changes -q` — 1 passed, completing the separately sandboxed check the first Python failure prevented.
+- `uv run python scripts/test_task_installation.py --test declared_agent_can_start_another_tasks_graph` — passed in disposable Linux with Rust 1.99.1, including both migration preconditions; published native archive linked, all three proofs passed and the container was removed; log `/tmp/loo710-installation.log`.
+- `git diff --check -- ':!*.patch'` — passed; patch files retain required blank context-line prefixes.
+
+All commands ran with inherited `LF_*` unset and stdin closed. No check timed out.
+Rust inputs were unchanged by the Python runner/notice repairs, so the passing
+Rust phase was retained without repeating it. The remaining Python tests keep
+their earlier pass; this is a repaired composite gate, not a claim that the first
+runner invocation exited successfully. The existing configured-provider demo was
+not replayed. CI still owns Linux Clippy and the four release-package links;
+this local Linux debug/install proof does not establish the release matrix.
+The LOO-705/709 second-landing requirements above remain explicit. No background
+process started by this gate remains.

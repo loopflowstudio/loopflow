@@ -1591,6 +1591,21 @@ fn validate_desktop_platform(cli: &Cli) -> anyhow::Result<()> {
 }
 
 fn run() -> anyhow::Result<()> {
+    // A terminal relay is exec'd by the process that resolved its connection.
+    // While relaying it opens no store or command tree: socket in, terminal out.
+    let raw_args: Vec<String> = std::env::args().collect();
+    if let Some((owner, moved, json_session)) = loopflow::transport::relay_args(&raw_args) {
+        journal::mark_effect_free_read();
+        journal::continue_after_exec()?;
+        ctrlc::set_handler(|| loopflow::agent::exit_on_interrupt())
+            .expect("failed to set Ctrl+C handler");
+        loopflow::transport::relay(&owner, moved)?;
+        // Only after relaying ends may the command reopen its store/runtime.
+        if let Some(session) = json_session {
+            loopflow::lf::commands::session::print_returned(&session)?;
+        }
+        return Ok(());
+    }
     loopflow::installation::dispatch_entry_gate(&loopflow::installation::ArtifactRole::Cli)?;
     // Validate addressed commands once, before help, repository lookup, or admission.
     // A rejected destination must not create even a fallback Process on that Machine.
@@ -1605,7 +1620,6 @@ fn run() -> anyhow::Result<()> {
     // to SIGTERM and SIGHUP: `tmux kill-session` delivers SIGHUP, which
     // otherwise bypasses every cleanup (observed live: it orphaned the wave
     // loop's codex app-server pair and left a stale .wave-endpoint).
-    let raw_args: Vec<String> = std::env::args().collect();
     if let Some((remote, command)) = loopflow::lf::navigation::machine_invocation(&raw_args)
         .map_err(|error| {
             let code = u8::try_from(error.exit_code()).expect("Clap exit status fits a byte");

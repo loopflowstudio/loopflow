@@ -4,7 +4,10 @@
 mod lifetime;
 mod native;
 mod output;
+mod snapshot;
 mod terminal;
+#[cfg(test)]
+mod viewer_tests;
 
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
@@ -15,13 +18,14 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::harness::native_exit::NativeExit;
 use crate::id::LfProcessId;
 
 const OWNER_ENV: &str = "LF_TRANSPORT_OWNER";
@@ -119,6 +123,17 @@ enum Request {
     },
     /// Whether some viewer holds input control, asked before opening another.
     Controlled,
+    /// The direct child is about to exec into its provider; the owner records
+    /// this when that provider exits. Acknowledged before the exec.
+    ExitRecord {
+        key: String,
+        pid: u32,
+        record: Box<NativeExit>,
+    },
+    /// The exec failed; the launcher records its own failure.
+    DropExitRecord {
+        key: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -137,9 +152,13 @@ enum Response {
         code: u8,
     },
     Detached,
-    /// Another viewer took input control; this one prints `notice` and leaves.
+    /// Another viewer took input control, or the owner is ending because its
+    /// lf was removed, replaced or superseded; this viewer prints `notice` and
+    /// leaves. An ending owner also sends `successor`, the command that reopens
+    /// the conversation through the lf entry, and the viewer runs it.
     Moved {
         notice: Option<String>,
+        successor: Option<Vec<String>>,
     },
     Busy,
     /// How a viewer that detaches can return.
@@ -153,6 +172,7 @@ enum Response {
     Controlled {
         held: bool,
     },
+    Accepted,
 }
 
 /// Consume the direct execution handoff. Provider tools and nested lf calls do
@@ -170,27 +190,63 @@ pub(crate) fn current() -> Option<&'static LfProcessId> {
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again.
 pub fn delegate_current(batch: bool) -> Result<bool> {
+    delegate_session(batch, None, None)
+}
+
+pub(crate) fn delegate_session(
+    batch: bool,
+    json_session: Option<&str>,
+    preview_session: Option<&str>,
+) -> Result<bool> {
+    let mut argv: Vec<String> = std::env::args().collect();
+    if json_session.is_some() {
+        // The viewer owns this continuation, including an early detach.
+        argv.retain(|arg| arg != "--json");
+    }
+    delegate(batch, json_session, preview_session, argv)
+}
+
+/// Open the resulting Session after a fork or thread replacement, without
+/// repeating the command that prepared it.
+pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
+    delegate(
+        false,
+        json.then_some(id),
+        Some(id),
+        vec![String::new(), "session".into(), "resume".into(), id.into()],
+    )
+}
+
+fn delegate(
+    batch: bool,
+    json_session: Option<&str>,
+    preview_session: Option<&str>,
+    mut argv: Vec<String>,
+) -> Result<bool> {
     if current().is_some() {
         return Ok(false);
     }
     // Library tests do not execute the CLI entry point.
     #[cfg(test)]
     {
-        let _ = batch;
+        let _ = (batch, json_session, preview_session, &mut argv);
         Ok(false)
     }
     #[cfg(not(test))]
     {
-        let mut argv: Vec<String> = std::env::args().collect();
-        crate::journal::admit_process(&std::env::current_dir()?, &argv);
+        crate::journal::admit_process(
+            &std::env::current_dir()?,
+            &std::env::args().collect::<Vec<_>>(),
+        );
         crate::journal::current_lf_process_id()
             .context("Execution requires an admitted invocation; check the process ledger and caller provenance")?;
         argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
         // `lf -b … > file` typed at a terminal writes only the answer, never a
         // relayed screen; an interactive run keeps the terminal it reads from.
         let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
+        let preview = ViewerTerminal::preview(preview_session)?;
         let owner = start(&argv, terminal, &std::env::current_dir()?, &|_| {})?;
-        attach(&owner, None)?;
+        attach_with_preview(&owner, None, json_session, preview)?;
         Ok(true)
     }
 }
@@ -320,8 +376,8 @@ pub(crate) fn terminal_pair() -> io::Result<(File, File)> {
 }
 
 fn dimensions(rows: u16, cols: u16) -> (u16, u16) {
-    // An unopened terminal may report zero. vt100 needs room for a wide glyph
-    // and a previous row when wrapping, even in a temporarily collapsed pane.
+    // An unopened terminal may report zero. The owner's terminal needs room for
+    // a wide glyph and a previous row when wrapping, even in a collapsed pane.
     (
         if rows == 0 { 24 } else { rows.clamp(2, 500) },
         if cols == 0 { 80 } else { cols.clamp(2, 500) },
@@ -480,7 +536,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut viewers: Vec<Viewer> = Vec::new();
     let mut control: Option<String> = None;
     let mut pending_input = VecDeque::new();
-    let mut output = output::Output::new(terminal);
+    let mut output = output::Output::new(terminal)?;
     let mut exit: Option<(u8, Instant)> = None;
     let mut detach = false;
     let mut client: Option<native::NativeClient> = None;
@@ -488,8 +544,21 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
     let mut hint_due = false;
     let mut announced = false;
     let mut attached = false;
-    let (viewing, ending) = lifetime::spawn(id.clone());
+    // The lifetime policy and a blocking child wait wake the descriptor loop.
+    // Keep SIGCHLD available to runtimes used by the owner's background work.
+    let (wake, waker) = UnixStream::pair()?;
+    wake.set_nonblocking(true)?;
+    waker.set_nonblocking(true)?;
+    let (viewing, ending) = lifetime::spawn(id.clone(), waker.try_clone()?);
+    let child_pid = child.id();
+    let (finished, child_exit) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = finished.send(child.wait());
+        let _ = (&waker).write_all(&[1]);
+    });
     let mut viewed = None;
+    let mut exit_record: Option<Box<NativeExit>> = None;
+    let mut planning = None;
     loop {
         let mut replaced = None;
         while let Ok((socket, _)) = listener.accept() {
@@ -539,6 +608,30 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 held: control.is_some(),
                             })?;
                         }
+                        Request::ExitRecord { key, pid, record } if key == control_key => {
+                            // Graph steps share this terminal, but their Graph
+                            // still owns their wait. Only our child can hand it off.
+                            if pid != child_pid {
+                                viewer.queue(&Response::Busy)?;
+                                continue;
+                            }
+                            // The launcher kept its repository's planning in
+                            // sync while it waited; that wait is now ours.
+                            planning = crate::ops::planning_sync::PlanningSync::start_for_directory(
+                                &record.cwd,
+                            )
+                            .inspect_err(|error| {
+                                tracing::warn!(%error, "planning sync unavailable to this owner")
+                            })
+                            .ok();
+                            exit_record = Some(record);
+                            viewer.queue(&Response::Accepted)?;
+                        }
+                        Request::DropExitRecord { key } if key == control_key => {
+                            exit_record = None;
+                            planning = None;
+                            viewer.queue(&Response::Accepted)?;
+                        }
                         Request::Attach {
                             control: wants_control,
                             replace,
@@ -573,7 +666,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                         rows,
                                         cols,
                                     )?;
-                                    output.resize(rows, cols);
+                                    output.resize(rows, cols)?;
                                 }
                             } else {
                                 if viewer.token.is_some() && viewer.token == control {
@@ -643,7 +736,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                                 rows,
                                 cols,
                             )?;
-                            output.resize(rows, cols);
+                            output.resize(rows, cols)?;
                         }
                         _ => {} // stale and passive viewers cannot write or release another claim
                     }
@@ -662,6 +755,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 }
                 let _ = v.queue(&Response::Moved {
                     notice: notice.clone(),
+                    successor: None,
                 });
                 let _ = v.flush();
                 false
@@ -681,13 +775,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 });
             }
         }
-        if let Ok(hint) = ending.try_recv() {
+        drain(&wake);
+        if let Ok(moved) = ending.try_recv() {
             for viewer in viewers.iter_mut().filter(|v| v.attached) {
-                if let Some(hint) = &hint {
-                    let _ = viewer.queue(&Response::InputHint { hint: hint.clone() });
-                }
+                let _ = viewer.queue(&moved);
                 let _ = viewer.flush();
             }
+            snapshot::leave(&id, &output);
             crate::platform::kill_process(std::process::id());
         }
         let now_viewed = viewers.iter().any(|v| v.attached);
@@ -770,34 +864,18 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 detached,
             );
         }
-        // The client has exited and its parent waits for acknowledgement, so
-        // everything it printed is already readable.
-        if viewers.iter().any(|viewer| viewer.ending) {
-            if let Some(mut ended) = client.take() {
-                for (stream, reader) in &mut readers {
-                    let mut bytes = [0; 16384];
-                    for _ in 0..LIMIT / bytes.len() {
-                        let Ok(n @ 1..) = reader.read(&mut bytes) else {
-                            break;
-                        };
-                        let ready = ended.accept(reader.as_raw_fd(), &bytes[..n]);
-                        deliver(
-                            &mut output,
-                            &mut viewers,
-                            &mut pending_input,
-                            *stream,
-                            &ready,
-                            detached,
-                        );
-                    }
-                }
-                let exit = ended.finish();
-                deliver(
+        // The child wait reports once. A returning launcher announces its
+        // client's end; an exec'd launcher leaves that announcement to our wait.
+        let status = child_exit.try_recv().ok().transpose()?;
+        if viewers.iter().any(|viewer| viewer.ending) || (status.is_some() && exit_record.is_some())
+        {
+            if let Some(ended) = client.take() {
+                finish_client(
+                    ended,
+                    &mut readers,
                     &mut output,
                     &mut viewers,
                     &mut pending_input,
-                    1,
-                    &exit,
                     detached,
                 );
             }
@@ -807,14 +885,53 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 let _ = viewer.flush();
             }
         }
-        if exit.is_none() {
-            if let Some(status) = child.try_wait()? {
-                use std::os::unix::process::ExitStatusExt;
-                let code = status
-                    .code()
-                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(1))
-                    as u8;
-                exit = Some((code, Instant::now()));
+        if let Some(status) = status {
+            let code = if let Some(record) = exit_record.take() {
+                let settled = match crate::harness::native_exit::settle(&record, status) {
+                    Ok(settled) => settled,
+                    Err(error) => {
+                        tracing::warn!(%error, session = %record.session, "provider exit was not recorded");
+                        crate::harness::native_exit::Settled {
+                            code: 1,
+                            lines: vec![format!("Loopflow could not record this exit: {error:#}")],
+                        }
+                    }
+                };
+                for line in &settled.lines {
+                    deliver(
+                        &mut output,
+                        &mut viewers,
+                        &mut pending_input,
+                        1,
+                        format!("\r\n{line}\r\n").as_bytes(),
+                        detached,
+                    );
+                }
+                let process = format!(
+                    "lf/{}",
+                    record
+                        .attachment
+                        .provider_lf_process_id
+                        .as_str()
+                        .replace('-', "")
+                );
+                output.report(
+                    format!("{process}/step"),
+                    crate::program_status::State::Clear,
+                    None,
+                );
+                output.report(
+                    process,
+                    match settled.code {
+                        0 => crate::program_status::State::Done,
+                        130 => crate::program_status::State::Idle,
+                        _ => crate::program_status::State::Error,
+                    },
+                    None,
+                );
+                planning = None;
+                settled.code
+            } else {
                 // A launch that died before reporting its client's end.
                 if let Some(held) = client.take().map(native::NativeClient::release) {
                     deliver(
@@ -826,7 +943,12 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                         detached,
                     );
                 }
-            }
+                use std::os::unix::process::ExitStatusExt;
+                status
+                    .code()
+                    .unwrap_or_else(|| 128 + status.signal().unwrap_or(1)) as u8
+            };
+            exit = Some((code, Instant::now()));
         }
         if let Some((code, at)) = exit {
             if !announced && readers.is_empty() && at.elapsed() > Duration::from_millis(50) {
@@ -843,6 +965,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             {
                 group.disarm();
                 let _ = std::fs::remove_file(path);
+                snapshot::leave(&id, &output);
                 return if code == 0 {
                     Ok(())
                 } else {
@@ -850,7 +973,90 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 };
             }
         }
-        std::thread::sleep(Duration::from_millis(5));
+        // Sleep until a descriptor has work; only held exit text and a
+        // pending exit announcement are timed.
+        let deadline = match exit {
+            Some((_, at)) if announced => Some(at + Duration::from_secs(2)),
+            Some((_, at)) if readers.is_empty() => Some(at + Duration::from_millis(50)),
+            _ => client.as_ref().and_then(native::NativeClient::expires_at),
+        };
+        wait_for_activity(
+            &listener,
+            &wake,
+            &viewers,
+            &readers,
+            input.as_ref().filter(|_| !pending_input.is_empty()),
+            deadline.map(|at| at.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
+/// Drain and deliver what a finished native client still held, then its exit line.
+fn finish_client(
+    mut ended: native::NativeClient,
+    readers: &mut [(u8, File)],
+    output: &mut output::Output,
+    viewers: &mut Vec<Viewer>,
+    pending_input: &mut VecDeque<u8>,
+    detached: bool,
+) {
+    for (stream, reader) in readers.iter_mut() {
+        let mut bytes = [0; 16384];
+        for _ in 0..LIMIT / bytes.len() {
+            let Ok(n @ 1..) = reader.read(&mut bytes) else {
+                break;
+            };
+            let ready = ended.accept(reader.as_raw_fd(), &bytes[..n]);
+            deliver(output, viewers, pending_input, *stream, &ready, detached);
+        }
+    }
+    let exit = ended.finish();
+    deliver(output, viewers, pending_input, 1, &exit, detached);
+}
+
+fn drain(wake: &UnixStream) {
+    let mut bytes = [0; 64];
+    while matches!((&*wake).read(&mut bytes), Ok(1..)) {}
+}
+
+/// Block until a viewer, the execution's output, the wake pipe or a writable
+/// input descriptor has work, or `timeout` passes.
+fn wait_for_activity(
+    listener: &UnixListener,
+    wake: &UnixStream,
+    viewers: &[Viewer],
+    readers: &[(u8, File)],
+    input: Option<&File>,
+    timeout: Option<Duration>,
+) {
+    let pollfd = |fd: RawFd, events: libc::c_short| libc::pollfd {
+        fd,
+        events,
+        revents: 0,
+    };
+    let mut fds = vec![
+        pollfd(listener.as_raw_fd(), libc::POLLIN),
+        pollfd(wake.as_raw_fd(), libc::POLLIN),
+    ];
+    for viewer in viewers {
+        let mut events = libc::POLLIN;
+        if !viewer.output.is_empty() {
+            events |= libc::POLLOUT;
+        }
+        fds.push(pollfd(viewer.socket.as_raw_fd(), events));
+    }
+    for (_, reader) in readers {
+        fds.push(pollfd(reader.as_raw_fd(), libc::POLLIN));
+    }
+    if let Some(input) = input {
+        fds.push(pollfd(input.as_raw_fd(), libc::POLLOUT));
+    }
+    let timeout = timeout.map_or(-1, |timeout| {
+        libc::c_int::try_from(timeout.as_millis()).unwrap_or(libc::c_int::MAX)
+    });
+    // SAFETY: poll reads a live array of exactly fds.len() descriptors.
+    unsafe {
+        libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout);
     }
 }
 
@@ -896,75 +1102,133 @@ fn size() -> (u16, u16) {
     dimensions(size.ws_row, size.ws_col)
 }
 
-struct RawTerminal {
-    original: Option<libc::termios>,
-    // Drop restores terminal modes before output announces any diagnostics.
-    output: crate::terminal_output::TerminalOutput,
-    alternate: terminal::AlternateScreen,
+struct ViewerTerminal {
+    state: Arc<Mutex<ViewerState>>,
 }
-impl RawTerminal {
-    fn enter() -> Result<Self> {
-        let output = crate::terminal_output::TerminalOutput::enter()?;
-        if !io::stdin().is_terminal() {
-            return Ok(Self {
-                original: None,
-                output,
-                alternate: Default::default(),
-            });
+
+struct ViewerState {
+    // ViewerTerminal restores modes before this announces any diagnostics.
+    output: crate::terminal_output::TerminalOutput,
+    original: Option<libc::termios>,
+    alternate: terminal::AlternateScreen,
+    restored: bool,
+}
+
+impl ViewerState {
+    fn reset_display(&mut self) -> io::Result<()> {
+        // Kitty keyboard state belongs to each screen; reset both when leaving.
+        self.output.stdout.write_all(terminal::RESET_MODES)?;
+        if self.alternate.entered {
+            self.output.stdout.write_all(b"\x1b[?1049l")?;
+            self.alternate.entered = false;
+            self.output.stdout.write_all(terminal::RESET_MODES)?;
         }
-        // SAFETY: termios is initialized by tcgetattr before it is read.
-        let original = unsafe {
-            let mut value = std::mem::zeroed();
-            if libc::tcgetattr(0, &mut value) < 0 {
-                return Err(io::Error::last_os_error().into());
-            }
-            value
-        };
-        let restore = original;
-        crate::agent::register_interrupt_cleanup(move || {
+        // Restore the drawing state too; soft reset support varies by terminal.
+        self.output
+            .stdout
+            .write_all(b"\x1b[?6l\x1b[?7h\x1b[r\x1b(B\x1b)B\x0f\x1b]8;;\x1b\\")
+    }
+
+    fn restore(&mut self) {
+        if self.restored {
+            return;
+        }
+        self.restored = true;
+        if self.output.stdout.is_terminal() {
+            let _ = self.reset_display();
+        }
+        if let Some(original) = self.original {
+            // Discard input the viewer never forwarded, including terminal reports.
             // SAFETY: restores attributes previously read from stdin.
-            unsafe {
-                libc::tcsetattr(0, libc::TCSANOW, &restore);
+            unsafe { libc::tcsetattr(0, libc::TCSAFLUSH, &original) };
+        }
+    }
+}
+
+impl ViewerTerminal {
+    fn enter() -> Result<Self> {
+        let original = if io::stdin().is_terminal() {
+            // SAFETY: termios is initialized by tcgetattr before it is read.
+            Some(unsafe {
+                let mut value = std::mem::zeroed();
+                if libc::tcgetattr(0, &mut value) < 0 {
+                    return Err(io::Error::last_os_error().into());
+                }
+                value
+            })
+        } else {
+            None
+        };
+        let output = crate::terminal_output::TerminalOutput::enter()?;
+        let state = Arc::new(Mutex::new(ViewerState {
+            output,
+            original,
+            alternate: Default::default(),
+            restored: false,
+        }));
+        let cleanup = Arc::downgrade(&state);
+        crate::agent::register_interrupt_cleanup(move || {
+            if let Some(state) = cleanup.upgrade() {
+                state
+                    .lock()
+                    .expect("viewer terminal lock poisoned")
+                    .restore();
             }
         });
-        let mut raw = original;
-        // SAFETY: raw is initialized; these calls only change terminal attributes.
-        unsafe {
-            libc::cfmakeraw(&mut raw);
-            libc::tcsetattr(0, libc::TCSANOW, &raw);
+        Ok(Self { state })
+    }
+
+    fn preview(session: Option<&str>) -> Result<Option<Self>> {
+        if !io::stdout().is_terminal() {
+            return Ok(None);
         }
-        Ok(Self {
-            original: Some(original),
-            output,
-            alternate: Default::default(),
-        })
+        let Some(bytes) = session.and_then(snapshot::last_screen) else {
+            return Ok(None);
+        };
+        let mut terminal = Self::enter()?;
+        terminal.write(1, &bytes)?;
+        // Keep cooked input until acknowledgement, so Ctrl+C still cancels startup.
+        Ok(Some(terminal))
+    }
+
+    fn make_raw(&self) -> Result<()> {
+        let state = self.state.lock().expect("viewer terminal lock poisoned");
+        if let Some(mut raw) = state.original {
+            // SAFETY: raw was read from stdin; only terminal attributes change.
+            unsafe {
+                libc::cfmakeraw(&mut raw);
+                if libc::tcsetattr(0, libc::TCSANOW, &raw) < 0 {
+                    return Err(io::Error::last_os_error().into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handoff(&mut self) -> io::Result<()> {
+        let mut state = self.state.lock().expect("viewer terminal lock poisoned");
+        state.reset_display()?;
+        // The live owner is authoritative even when its first screen is blank.
+        state.output.stdout.write_all(b"\x1b[H\x1b[2J")
     }
 
     fn write(&mut self, stream: u8, bytes: &[u8]) -> io::Result<()> {
-        self.alternate.observe(bytes);
+        // An interrupt cannot restore the terminal midway through an output write.
+        let mut state = self.state.lock().expect("viewer terminal lock poisoned");
+        state.alternate.observe(bytes);
         if stream == 2 {
-            self.output.stderr.write_all(bytes)
+            state.output.stderr.write_all(bytes)
         } else {
-            self.output.stdout.write_all(bytes)
+            state.output.stdout.write_all(bytes)
         }
     }
 }
-impl Drop for RawTerminal {
+impl Drop for ViewerTerminal {
     fn drop(&mut self) {
-        if let Some(original) = self.original {
-            // Discard input the viewer never forwarded, such as mouse reports
-            // queued while it waited on the owner; the shell would run them.
-            // SAFETY: restores attributes previously read from stdin.
-            unsafe {
-                libc::tcsetattr(0, libc::TCSAFLUSH, &original);
-            }
-            let _ = self.output.stdout.write_all(
-                b"\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[0m",
-            );
-            if self.alternate.entered {
-                let _ = self.output.stdout.write_all(b"\x1b[?1049l");
-            }
-        }
+        self.state
+            .lock()
+            .expect("viewer terminal lock poisoned")
+            .restore();
     }
 }
 
@@ -982,7 +1246,111 @@ fn send(socket: &mut UnixStream, request: &Request) -> Result<()> {
 
 /// Attach this terminal with input control, taking it from any other viewer;
 /// that viewer prints `moved` as it leaves.
-pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
+///
+/// The process that resolved the connection built it with a store, a command
+/// tree and often a runtime; none of that serves a relay. It carries its
+/// Process receipt into the relay, which opens no store until it returns.
+pub(crate) fn attach(
+    id: &LfProcessId,
+    moved: Option<String>,
+    json_session: Option<&str>,
+) -> Result<()> {
+    attach_with_preview(id, moved, json_session, None)
+}
+
+fn attach_with_preview(
+    id: &LfProcessId,
+    moved: Option<String>,
+    json_session: Option<&str>,
+    terminal: Option<ViewerTerminal>,
+) -> Result<()> {
+    let mut command = Command::new(std::env::current_exe()?);
+    if let Some(terminal) = &terminal {
+        let state = terminal
+            .state
+            .lock()
+            .expect("viewer terminal lock poisoned");
+        // Preview input is still cooked. Carry its display and original output
+        // descriptors into the relay without resetting the screen across exec.
+        state.output.configure_child(&mut command)?;
+        command.env(
+            RELAY_PREVIEW_ENV,
+            if state.alternate.entered {
+                "alternate"
+            } else {
+                "primary"
+            },
+        );
+    }
+    command.args([RELAY_COMMAND[0], RELAY_COMMAND[1], id.as_str()]);
+    if let Some(moved) = &moved {
+        command.args([RELAY_MOVED_FLAG, moved]);
+    }
+    if let Some(session) = json_session {
+        command.args([RELAY_JSON_FLAG, session]);
+    }
+    crate::journal::carry_across_exec(&mut command)?;
+    let error = command.exec();
+    tracing::warn!(%error, "cannot exec the terminal relay; relaying here");
+    attach_with_terminal(id, moved, terminal)
+}
+
+const RELAY_PREVIEW_ENV: &str = "LF_RELAY_PREVIEW";
+const RELAY_COMMAND: [&str; 2] = ["session", "attach"];
+const RELAY_MOVED_FLAG: &str = "--moved";
+const RELAY_JSON_FLAG: &str = "--session-json";
+
+/// The owner and notice a relay invocation names: `lf session attach OWNER
+/// [--moved TEXT] [--session-json SESSION]`. Recognized before command parsing.
+pub fn relay_args(args: &[String]) -> Option<(LfProcessId, Option<String>, Option<String>)> {
+    let [_, command, subcommand, owner, rest @ ..] = args else {
+        return None;
+    };
+    if command != RELAY_COMMAND[0] || subcommand != RELAY_COMMAND[1] {
+        return None;
+    }
+    let owner = LfProcessId::parse(owner).ok()?;
+    let mut moved = None;
+    let mut json_session = None;
+    for pair in rest.chunks(2) {
+        match pair {
+            [flag, value] if flag == RELAY_MOVED_FLAG && moved.is_none() => {
+                moved = Some(value.clone());
+            }
+            [flag, value] if flag == RELAY_JSON_FLAG && json_session.is_none() => {
+                json_session = Some(value.clone());
+            }
+            _ => return None,
+        }
+    }
+    Some((owner, moved, json_session))
+}
+
+/// Relay this terminal to the execution owner: socket in, terminal out.
+pub fn relay(id: &LfProcessId, moved: Option<String>) -> Result<()> {
+    let preview = std::env::var(RELAY_PREVIEW_ENV).ok();
+    std::env::remove_var(RELAY_PREVIEW_ENV);
+    let terminal = if let Some(screen) = preview {
+        let terminal = ViewerTerminal::enter()?;
+        terminal
+            .state
+            .lock()
+            .expect("viewer terminal lock poisoned")
+            .alternate
+            .entered = screen == "alternate";
+        Some(terminal)
+    } else {
+        None
+    };
+    attach_with_terminal(id, moved, terminal)
+}
+
+fn attach_with_terminal(
+    id: &LfProcessId,
+    moved: Option<String>,
+    mut terminal: Option<ViewerTerminal>,
+) -> Result<()> {
+    let mut preview = terminal.is_some();
     let mut socket = UnixStream::connect(endpoint(id)?).context(
         "Execution owner is unavailable; no provider was restarted and no input was replayed",
     )?;
@@ -999,7 +1367,6 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
             moved,
         },
     )?;
-    let mut terminal = None;
     let mut token = None;
     let mut returning = None;
     let mut buffer = Vec::new();
@@ -1029,8 +1396,11 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
             },
         ];
         // SAFETY: poll receives a live array of exactly two descriptors.
-        if unsafe { libc::poll(fds.as_mut_ptr(), 2, 100) } < 0 {
-            return Err(io::Error::last_os_error().into());
+        if unsafe { libc::poll(fds.as_mut_ptr(), 2, 250) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error.into());
+            }
         }
         if fds[0].revents != 0 {
             let mut bytes = [0; 16384];
@@ -1049,26 +1419,20 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                     } => {
                         acknowledgement_deadline = None;
                         token = claim;
+                        if preview {
+                            terminal.as_mut().expect("preview owns a terminal").handoff()?;
+                            preview = false;
+                        }
                         if is_terminal {
-                            terminal = Some(RawTerminal::enter()?);
+                            if terminal.is_none() {
+                                terminal = Some(ViewerTerminal::enter()?);
+                            }
+                            terminal.as_ref().expect("terminal entered").make_raw()?;
                         }
-                        if let Some(terminal) = &mut terminal {
-                            terminal.write(1, &bytes)?;
-                        } else {
-                            io::stdout().write_all(&bytes)?;
-                            io::stdout().flush()?;
-                        }
+                        write_output(&mut terminal, 1, &bytes)?;
                     }
                     Response::Output { stream, bytes } => {
-                        if let Some(terminal) = &mut terminal {
-                            terminal.write(stream, &bytes)?;
-                        } else if stream == 2 {
-                            io::stderr().write_all(&bytes)?;
-                            io::stderr().flush()?;
-                        } else {
-                            io::stdout().write_all(&bytes)?;
-                            io::stdout().flush()?;
-                        }
+                        write_output(&mut terminal, stream, &bytes)?;
                     }
                     Response::Exit { code } => {
                         return if code == 0 {
@@ -1078,19 +1442,22 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                         }
                     }
                     Response::Detached => return Ok(()),
-                    Response::Moved { notice } => {
+                    Response::Moved { notice, successor } => {
                         drop(terminal.take());
                         if let Some(notice) = notice {
                             eprintln!("\n{notice}");
                         }
-                        return Ok(());
+                        return match successor {
+                            Some(command) => follow(&command),
+                            None => Ok(()),
+                        };
                     }
                     Response::Busy => anyhow::bail!("Session is attached in another viewer; use an explicit attachment to move input control here"),
                     Response::Return { detach } => returning = Some(detach),
-                    Response::NativeEnded | Response::Controlled { .. } => {}
+                    Response::NativeEnded | Response::Controlled { .. } | Response::Accepted => {}
                     Response::InputHint { hint } => {
                         if let Some(terminal) = &mut terminal {
-                            write!(terminal.output.stderr, "\r\n{hint}\r\n")?;
+                            terminal.write(2, format!("\r\n{hint}\r\n").as_bytes())?;
                         } else {
                             eprintln!("{hint}");
                         }
@@ -1145,6 +1512,88 @@ pub(crate) fn attach(id: &LfProcessId, moved: Option<String>) -> Result<()> {
                 )?;
             }
         }
+    }
+}
+
+fn write_output(terminal: &mut Option<ViewerTerminal>, stream: u8, bytes: &[u8]) -> io::Result<()> {
+    if let Some(terminal) = terminal {
+        terminal.write(stream, bytes)
+    } else if stream == 2 {
+        io::stderr().write_all(bytes)?;
+        io::stderr().flush()
+    } else {
+        io::stdout().write_all(bytes)?;
+        io::stdout().flush()
+    }
+}
+
+/// Hand the owner what to record when this process, about to exec into its
+/// provider, exits. A nested launcher keeps its own wait and returns false.
+pub(crate) fn hand_exit_record(record: &NativeExit) -> Result<bool> {
+    let handoff = HANDOFF
+        .get()
+        .context("this launch has no execution owner to hand its wait to")?;
+    let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+    socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+    // A delayed reply does not undo the owner's acceptance. Wait for its
+    // decision or a closed connection before choosing who records the exit.
+    send(
+        &mut socket,
+        &Request::ExitRecord {
+            key: handoff.key.clone(),
+            pid: std::process::id(),
+            record: Box::new(record.clone()),
+        },
+    )?;
+    let mut line = String::new();
+    BufReader::new(socket).read_line(&mut line)?;
+    match serde_json::from_str(&line)? {
+        Response::Accepted => Ok(true),
+        Response::Busy => Ok(false),
+        other => bail!("owner refused the exit record: {other:?}"),
+    }
+}
+
+/// The exec failed; the launcher records its own failure.
+pub(crate) fn drop_exit_record() {
+    let dropped = (|| -> Result<()> {
+        let handoff = HANDOFF.get().context("no execution owner")?;
+        let mut socket = UnixStream::connect(endpoint(&handoff.owner)?)?;
+        socket.set_write_timeout(Some(Duration::from_secs(1)))?;
+        send(
+            &mut socket,
+            &Request::DropExitRecord {
+                key: handoff.key.clone(),
+            },
+        )?;
+        // Do not let launcher exit overtake cancellation in the owner's loop.
+        let mut line = String::new();
+        BufReader::new(socket).read_line(&mut line)?;
+        match serde_json::from_str(&line)? {
+            Response::Accepted => Ok(()),
+            other => bail!("owner refused exit record cancellation: {other:?}"),
+        }
+    })();
+    if let Err(error) = dropped {
+        tracing::warn!(%error, "could not cancel the exit record for a failed exec");
+    }
+}
+
+/// Run `command`, the `<entry> session resume <id>` an ending owner sent, so
+/// this terminal lands in the conversation on the lf the entry launches now.
+/// The owner judged itself; this viewer only follows.
+fn follow(command: &[String]) -> Result<()> {
+    let (program, args) = command
+        .split_first()
+        .context("the owner sent an empty successor command")?;
+    let status = Command::new(program)
+        .args(args)
+        .status()
+        .with_context(|| format!("run {}", command.join(" ")))?;
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(code) => Err(crate::process::CommandExit(code as u8).into()),
+        None => bail!("{program} ended by a signal"),
     }
 }
 

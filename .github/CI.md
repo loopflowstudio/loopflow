@@ -32,14 +32,14 @@ queue, and only where its changes reach them (`scripts/macos_inputs.py`):
 
 | Job | Runs for |
 |-----|----------|
-| `loopflow-ui-test` | `swift/` (app, `project.yml`, GhosttyKit patches), its build scripts |
+| `loopflow-ui-test` | `swift/` (app, `project.yml`, GhosttyKit patches), its build scripts, Rust `build.rs` and libghostty-vt pin/patches |
 | `swift-test` | the above, `tests/fixtures/dto/`, the scripts and Python check it runs |
 | `macos-process-test` | Rust files containing `target_os = "macos"`, data clones, store copy, OS process identity, `lf install` |
 
 CI changes, the classifier, an unknown diff or a failed classifier run all
-three. A Rust-only PR reaches Swift only through the `lf --json` wire, which the
-DTO fixtures pin, so it runs none. The queue proves the Linux suite on top of
-main. After merge, `macos-main.yml` runs the jobs the batch since the
+three. Ordinary Rust changes reach Swift through the `lf --json` wire, which the
+DTO fixtures pin; native build inputs also run both Desktop link paths. The queue
+proves the Linux suite on top of main. After merge, `macos-main.yml` runs the jobs the batch since the
 `last-green` tag reaches: one run at a time, the waiting run testing the newest
 main. Green moves `last-green`; red bisects the batch by dispatching the same
 workflow on first-parent commits and opens an unarmed revert PR for the culprit.

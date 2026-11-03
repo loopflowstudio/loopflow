@@ -324,16 +324,14 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 .env("LF_BIN", &rejected)
                 .output()
                 .unwrap();
-            assert!(!failed.status.success());
+            assert_eq!(failed.status.code(), Some(2));
             let error = String::from_utf8_lossy(&failed.stderr);
-            assert!(error.contains(rejected.to_str().unwrap()), "{error}");
-            assert!(error.contains("sha256"), "{error}");
+            // Connect becomes the launcher, preserving its error and pending input.
             assert!(
-                error.contains(home.path().join("loopflow.db").to_str().unwrap()),
+                error.contains("fixture launcher rejected invocation"),
                 "{error}"
             );
-            assert!(error.contains("before becoming resumable"), "{error}");
-            assert!(error.contains(run_id), "{error}");
+            assert!(dir.join("prepared").exists());
             assert!(!error.contains("Local proof"), "prompt leaked: {error}");
         }
         let evidence = home.path().join("resumed");

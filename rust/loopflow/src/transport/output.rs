@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use anyhow::{Context, Result};
 
+use crate::ghostty_vt;
 use crate::program_status::State;
 
 use super::{terminal, Response, Viewer, LIMIT};
@@ -17,48 +18,46 @@ pub(super) enum Output {
 }
 
 pub(super) struct Terminal {
-    parser: vt100::Parser<terminal::Queries>,
-    boundary: terminal::Boundary,
+    terminal: ghostty_vt::Terminal,
     reports: BTreeMap<String, Vec<u8>>,
     pending_reports: Vec<u8>,
 }
 
 impl Output {
-    pub fn new(terminal: bool) -> Self {
+    pub fn new(terminal: bool) -> Result<Self> {
         if terminal {
-            Self::Terminal(Box::new(Terminal {
-                parser: vt100::Parser::new_with_callbacks(
-                    24,
-                    80,
-                    2000,
-                    terminal::Queries::default(),
-                ),
-                boundary: terminal::Boundary::new(),
+            Ok(Self::Terminal(Box::new(Terminal {
+                terminal: ghostty_vt::Terminal::new(80, 24).context("Open the owner's terminal")?,
                 reports: BTreeMap::new(),
                 pending_reports: Vec::new(),
-            }))
+            })))
         } else {
-            Self::Pipes {
+            Ok(Self::Pipes {
                 tail: VecDeque::new(),
                 bytes: 0,
-            }
+            })
         }
     }
 
-    pub fn resize(&mut self, rows: u16, cols: u16) {
+    pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
         if let Self::Terminal(terminal) = self {
-            terminal.parser.screen_mut().set_size(rows, cols);
+            terminal
+                .terminal
+                .resize(cols, rows)
+                .context("Resize the owner's terminal")?;
         }
+        Ok(())
     }
 
     pub fn attach(&self, viewer: &mut Viewer) -> Result<()> {
         let bytes = match self {
             Self::Terminal(terminal) => {
-                let mut bytes = terminal::snapshot(terminal.parser.screen());
+                let mut bytes =
+                    terminal::repaint(&terminal.terminal).context("Repaint the owner's screen")?;
                 for report in terminal.reports.values() {
                     bytes.extend(report);
                 }
-                bytes.extend(terminal.boundary.pending().context(
+                bytes.extend(terminal.terminal.continuation().context(
                     "Provider sequence exceeds snapshot limit; attach after it completes",
                 )?);
                 bytes
@@ -81,13 +80,18 @@ impl Output {
         Ok(())
     }
 
+    /// Feed the program's output to the retained state. Returns the replies
+    /// its queries are owed while no viewer's terminal is there to answer.
     pub fn process(&mut self, stream: u8, bytes: &[u8], detached: bool) -> Vec<u8> {
         match self {
             Self::Terminal(terminal) => {
-                terminal.parser.callbacks_mut().detached = detached;
-                terminal.parser.process(bytes);
-                terminal.boundary.advance(bytes);
-                std::mem::take(&mut terminal.parser.callbacks_mut().replies)
+                terminal.terminal.write(bytes);
+                let replies = terminal.terminal.take_replies();
+                if detached {
+                    replies
+                } else {
+                    Vec::new()
+                }
             }
             Self::Pipes {
                 tail,
@@ -138,16 +142,26 @@ impl Output {
         }
     }
 
+    /// Reports may be inserted only between complete terminal sequences and
+    /// UTF-8 characters; raw provider bytes stay unchanged.
     pub fn take_reports(&mut self) -> Option<Response> {
         let Self::Terminal(terminal) = self else {
             return None;
         };
-        if terminal.pending_reports.is_empty() || !terminal.boundary.ready() {
+        if terminal.pending_reports.is_empty() || !terminal.terminal.at_ground() {
             return None;
         }
         Some(Response::Output {
             stream: 1,
             bytes: std::mem::take(&mut terminal.pending_reports),
         })
+    }
+
+    /// The retained terminal, for the snapshot an ending owner leaves behind.
+    pub fn terminal(&self) -> Option<&ghostty_vt::Terminal> {
+        match self {
+            Self::Terminal(terminal) => Some(&terminal.terminal),
+            Self::Pipes { .. } => None,
+        }
     }
 }

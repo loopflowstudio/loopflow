@@ -156,7 +156,7 @@ pub struct AgentCaller {
 
 /// An exact attachment capability, not another process or lifecycle owner.
 /// Every claim gets a new token, even when the same lf process reattaches.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionAttachment {
     pub agent_process_id: LfProcessId,
     pub lf_process_id: Option<LfProcessId>,

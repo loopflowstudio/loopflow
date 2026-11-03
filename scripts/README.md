@@ -211,6 +211,7 @@ stderr bytes, subprocess diagnostics and resume identity without a provider inst
 
 ```bash
 uv sync
+cargo build -p loopflow --bin lf  # macOS cleanup proof; fetch native archives before isolation
 uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
 ```
 

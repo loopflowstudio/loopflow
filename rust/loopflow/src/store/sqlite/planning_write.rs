@@ -102,12 +102,15 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
     let mut values = match table {
         "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id,retired_at FROM waves WHERE id=?1", id, |row| {
                     let retired: Option<i64> = row.get(3)?;
+                    let project: Option<String> = row.get(2)?;
                     Ok([
                         WorkValue::WaveName(row.get(0)?),
                         WorkValue::WaveParent(row.get(1)?),
-                        WorkValue::WaveProject(row.get(2)?),
                     ]
                     .into_iter()
+                    // A clone registers authored Waves before it acquires their
+                    // planning. Missing selection is not an edit clearing a peer's.
+                    .chain(project.map(|id| WorkValue::WaveProject(Some(id))))
                     .chain(retired.map(|at| WorkValue::WaveRetired(Some(at))))
                     .collect())
         }),

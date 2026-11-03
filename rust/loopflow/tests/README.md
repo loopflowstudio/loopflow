@@ -35,6 +35,10 @@ so Cargo subcommands cannot select an older Homebrew Clippy or rustfmt.
 For migration changes, run `uv run python scripts/check_migrations.py` before
 the Rust suites. Schema construction can pass even when a released migration
 was edited; this check also verifies immutable history against main and tags.
+Include `store::sqlite::revisions::tests::store_revisions_cover_every_table`
+when adding a table: give displayed rows revision triggers and classify operation-only
+receipts as never displayed. Wave lifecycle changes also run `--test two_people`;
+its shared repository publishes authored files that lifecycle operations may already commit.
 
 `cargo test -p loopflow --test integration agent_startup_tests::` exercises bare `lf` and
 Session reconnect to a stand-in provider with an empty environment and no

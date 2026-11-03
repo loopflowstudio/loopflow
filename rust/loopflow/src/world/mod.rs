@@ -337,7 +337,9 @@ impl World {
     /// Commit everything under `.lf/` (Wave goals, Graphs, config) and push it.
     pub fn push_authored(&self, message: &str) -> Result<()> {
         git(Some(&self.repo), &["add", ".lf"])?;
-        git(Some(&self.repo), &["commit", "-m", message])?;
+        if !git(Some(&self.repo), &["diff", "--cached", "--name-only"])?.is_empty() {
+            git(Some(&self.repo), &["commit", "-m", message])?;
+        }
         git(Some(&self.repo), &["push", "origin", "main"])?;
         Ok(())
     }

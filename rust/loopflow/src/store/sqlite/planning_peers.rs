@@ -647,6 +647,36 @@ mod tests {
     }
 
     #[test]
+    fn registering_a_cloned_wave_preserves_its_shared_project() {
+        let home = tempfile::tempdir().unwrap();
+        let author = SqliteStore::open_ephemeral(&home.path().join("author")).unwrap();
+        let peer = SqliteStore::open_ephemeral(&home.path().join("peer")).unwrap();
+        let wave = Wave::new(WaveId::new(), "shared".into(), "/repo".into());
+        author.create_wave(&wave).unwrap();
+        let project = author.ensure_project(wave.id(), wave.slug()).unwrap();
+        let author_route = destination(&author, "/repo", "shared");
+        let original = author.export_peer_planning("/repo", &author_route).unwrap();
+
+        // The clone registers the authored identity before fetching planning.
+        peer.create_wave(&wave).unwrap();
+        let peer_route = destination(&peer, "/repo", "shared");
+        peer.import_peer_planning("/repo", &peer_route, "one", &original)
+            .unwrap();
+        assert_eq!(
+            peer.selected_project(wave.id()).unwrap().unwrap().id,
+            project
+        );
+        let returned = peer.export_peer_planning("/repo", &peer_route).unwrap();
+        author
+            .import_peer_planning("/repo", &author_route, "two", &returned)
+            .unwrap();
+        assert_eq!(
+            author.selected_project(wave.id()).unwrap().unwrap().id,
+            project
+        );
+    }
+
+    #[test]
     fn a_removed_wave_reaches_a_peer_as_retired_and_live_waves_carry_no_retirement() {
         let home = tempfile::tempdir().unwrap();
         let author = SqliteStore::open_ephemeral(&home.path().join("author")).unwrap();

@@ -248,11 +248,11 @@ impl SqliteStore {
     }
 
     /// A late provider acknowledgement must not rewind the last observed reading.
-    pub(crate) fn latest_task_update(&self, session: &str) -> StoreResult<Option<String>> {
+    pub(crate) fn latest_task_update(&self, session: &str) -> StoreResult<Option<Value>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
+        let observation: Option<String> = conn
             .query_row(
-                "SELECT json_extract(payload,'$.key') FROM session_events
+                "SELECT json_extract(payload,'$.observation') FROM session_events
              WHERE session_id=?1 AND kind='observed' AND json_valid(payload)
                AND json_extract(payload,'$.source')='task_update'
                AND json_extract(payload,'$.state') IN ('baseline','dispatched')
@@ -260,7 +260,10 @@ impl SqliteStore {
                 [crate::id::canonical_session(session)],
                 |row| row.get(0),
             )
-            .optional()?)
+            .optional()?;
+        observation
+            .map(|value| serde_json::from_str(&value).map_err(Into::into))
+            .transpose()
     }
 
     /// Baseline and dispatch share a receipt: only one observer can claim a
@@ -271,6 +274,7 @@ impl SqliteStore {
         session: &str,
         key: &str,
         state: &str,
+        observation: &Value,
     ) -> StoreResult<bool> {
         let phase = match state {
             "baseline" | "dispatched" => "observed",
@@ -283,7 +287,8 @@ impl SqliteStore {
              FROM agent_sessions WHERE id=?1
              ON CONFLICT DO NOTHING",
             params![crate::id::canonical_session(session), format!("task_update:{key}:{phase}"),
-                serde_json::json!({"source":"task_update","key":key,"state":state}).to_string()],
+                serde_json::json!({"source":"task_update","key":key,"state":state,
+                    "observation":observation}).to_string()],
         )? != 0)
     }
 

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-711 · Concept review</title>
+<style>
+  :root { color-scheme: light dark; --bg:#faf8f4; --fg:#292724; --muted:#605c55; --line:#ccc4b8; --panel:#eee9e0; --accent:#823d31; }
+  @media (prefers-color-scheme:dark) { :root { --bg:#24272b; --fg:#f0ede6; --muted:#c1bab0; --line:#53575b; --panel:#303439; --accent:#f2b3a2; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:17px/1.6 system-ui,sans-serif; }
+  main { max-width:780px; margin:auto; padding:40px 24px 80px; }
+  header { font-size:13px; color:var(--muted); }
+  h1 { font:500 clamp(30px,6vw,44px)/1.15 Georgia,serif; margin:28px 0 20px; }
+  h2 { font:500 26px/1.3 Georgia,serif; margin:42px 0 16px; }
+  h3 { font-size:16px; margin:24px 0 8px; }
+  p { margin:12px 0; }
+  a { color:inherit; text-underline-offset:3px; }
+  code { font:0.85em/1.5 ui-monospace,monospace; overflow-wrap:anywhere; }
+  blockquote { margin:20px 0; padding:12px 20px; border-left:3px solid var(--accent); background:var(--panel); }
+  .caption { font-size:14px; color:var(--muted); }
+  .sample { border-block:1px solid var(--line); margin:20px 0; padding:14px 0; }
+  .flow { padding:0; list-style:none; }
+  .flow li { margin:16px 0; padding-bottom:16px; border-bottom:1px solid var(--line); }
+  details { margin:14px 0; padding-left:12px; border-left:1px solid var(--line); }
+  summary { cursor:pointer; }
+  li { margin:16px 0; }
+  @media(max-width:480px) { main { padding:24px 18px 48px; } body { font-size:16px; } }
+</style>
+</head>
+<body><main>
+<header>
+  LOO-711 · concept-review · November 2, 2026<br>
+  Built from <a href="loo-711-task-sessions-tell.md">the working design</a>,
+  <a href="prototype-screens.html">prototype screen 2</a>,
+  <code>harness/task_updates.rs</code>, <code>store/sqlite/session_events.rs</code>,
+  <code>TaskWorkView.swift</code> and <code>task_session.md</code>.
+</header>
+
+<h1>Report the run that changed.</h1>
+<p><strong>Next implementation direction:</strong> a newer helper must not hide
+an older worker’s failure in the Session report. This follows Jack Heart’s
+accepted outcome and the existing rule that every associated Graph is Task work.
+No new product decision is needed.</p>
+<p class="caption">Headless review. Source inspection establishes the mismatch;
+the examples below are illustrative. Native delivery and draft preservation still
+need the configured-provider demo.</p>
+
+<h2>One interaction, through the model</h2>
+<ol class="flow">
+  <li><strong>Leave the Task Session open with a draft.</strong><br>
+  Session → existing native provider owner → progress arrives in the selected
+  conversation. No terminal typing or replacement conversation.</li>
+  <li><strong>Worker A runs; helper B starts later; A fails.</strong><br>
+  Task + both Graph processes → <code>task_overview</code> → a settled observation
+  names A’s failure. The Task’s workflow position remains separate.</li>
+  <li><strong>Inspect the failure, then decide what to do.</strong><br>
+  Run → recorded step → <code>processHistory(id:)</code> on its content Machine.
+  Files owns the diff. Receipt delivery changes no Graph position.</li>
+</ol>
+
+<h2>Current implementation</h2>
+<p><code>TaskUpdates::pending</code> hashes every run but formats its message from
+<code>graphs.last()</code>. An older run can change the hash without appearing in
+the report. The latest run’s exit/start gap can also delay unrelated settled work.</p>
+<div class="sample">
+  <p class="caption">Illustrative state: A failed at gate; newer B is still running.</p>
+  <p>Task LOO-711: Stopped from explore. Latest run docs (B) · running · docs: running.</p>
+</div>
+<p>The reading changed because A failed. The delivered facts describe B.
+Jack still has to ask what happened to the worker.</p>
+
+<h2>Proposed report; accepted page</h2>
+<blockquote>The feature run failed at gate. The docs run is still running.
+The Task stopped from explore.</blockquote>
+<p class="caption">Proposed reporting behavior, not verified current output.</p>
+<div class="sample">
+  <p><strong>Stopped from explore</strong> · Files</p>
+  <details><summary>docs · running · run B</summary>
+    <p>Recorded step: docs · running.</p>
+  </details>
+  <details><summary>Earlier runs (1)</summary>
+    <details><summary>feature · stopped · run A</summary>
+      <details><summary>gate · failed</summary>
+        <p>Exact Process history, recorded timestamps and exit evidence belong here.</p>
+      </details>
+    </details>
+  </details>
+</div>
+<p class="caption">Illustrative page, preserving the accepted minimal ordering
+and expandable history. “Earlier” is chronology; it grants no operating authority.</p>
+<p>Proposed usage wording: “Progress posts name the runs that changed, including
+an earlier run that finishes or fails while newer work is running.”</p>
+<p>Proposed skill clarification: “Report each changed run by its recorded identity;
+keep its result separate from the Task’s workflow position.” Existing instructions
+against acting on a progress post remain.</p>
+
+<h2>Keep one observation, not another workflow</h2>
+<p>Compare compact reportable facts by Task, Graph and step identity. Existing
+Session-event receipts retain the baseline or dispatched observation so reconnect
+can identify later changes. A hash alone cannot tell which run changed. No new
+table, migration, cursor or user-facing subscription is needed.</p>
+<p>The atomic receipt claim still precedes provider bytes. Native ownership fences
+still select the recipient. Busy Sessions coalesce; uncertain dispatches never
+replay. Settle a run’s exit/start gap without silencing another run’s failure.</p>
+<p>Remove the latest-run selector from report selection. Keep the existing page,
+provider transports, historical records and exact Process links. Reports neither
+advance review nor authorize publication or merge.</p>
+
+<h2>Review questions and disposition</h2>
+<ol>
+  <li><strong>Can an earlier run fail while a newer run is unchanged?</strong><br>
+  Yes. Both belong to the Task. Add this regression case, including the newer
+  run’s exit/start gap. The report must name the failed run.</li>
+  <li><strong>Does reconnect resend an uncertain report?</strong><br>
+  No. Preserve the dispatched observation; suppress the duplicate and prove a
+  later change to the earlier run can still produce a new report.</li>
+  <li><strong>Is any product choice unresolved?</strong><br>
+  None identified. One-second settling remains a reversible demo assumption.
+  <strong>Outcome: design changed.</strong> Implement changed-work reporting;
+  preserve gate and Jack Heart’s authored demo.</li>
+</ol>
+</main></body>
+</html>

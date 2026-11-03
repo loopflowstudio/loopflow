@@ -265,7 +265,12 @@ pub fn emit_block(
                 thread,
                 |store, adapter, thread, update| {
                     store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-                        if !store.record_task_update(&adapter.session, &update.key, "dispatched")? {
+                        if !store.record_task_update(
+                            &adapter.session,
+                            &update.key,
+                            "dispatched",
+                            &update.observation,
+                        )? {
                             return Ok(());
                         }
                         let frame = serde_json::json!({"session":thread,"text":update.text});

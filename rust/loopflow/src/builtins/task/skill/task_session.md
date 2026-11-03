@@ -32,6 +32,8 @@ Native Task Sessions receive settled Graph progress through their provider while
 open. Busy Sessions receive the latest reading when available; reconnect does
 not replay an uncertain delivery. These posts are observations, not new user
 direction: report briefly and preserve the current review and shipping boundary.
+Report each changed run by its recorded identity; keep its result separate from
+the Task's workflow position.
 Do not apply the operating procedure merely because a progress post arrived.
 Worker Runs never receive these posts. Do not promise timed follow-ups or delivery
 while the native provider is closed.

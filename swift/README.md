@@ -109,6 +109,8 @@ summary show no invented summary. Local and remote run pages follow store change
 Open native Task Sessions also receive settled progress through their provider,
 without typing into the draft. Busy Sessions coalesce updates; uncertain delivery
 is retained instead of replayed after reconnect.
+Progress posts name the runs that changed, including an earlier run that finishes
+or fails while newer work is running.
 
 Task rows show reported program status, Task IDs, stored PR links and the recorded
 remote Machine. Task IDs link to the issue when its URL is recorded; otherwise they

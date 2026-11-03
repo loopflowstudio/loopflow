@@ -788,7 +788,12 @@ async fn post(
         let (store, session, attachment) = owner;
         store.with_session_dispatch(&session, &attachment, || {
             if let Some(update) = &update {
-                if !store.record_task_update(&session, &update.key, "dispatched")? {
+                if !store.record_task_update(
+                    &session,
+                    &update.key,
+                    "dispatched",
+                    &update.observation,
+                )? {
                     return Ok(false);
                 }
             }
@@ -806,7 +811,7 @@ async fn post(
                     ))
                 })?;
             if let Some(update) = &update {
-                store.record_task_update(&session, &update.key, "accepted")?;
+                store.record_task_update(&session, &update.key, "accepted", &update.observation)?;
             }
             Ok(true)
         })
@@ -981,6 +986,7 @@ mod tests {
         });
         let update = crate::harness::task_updates::TaskUpdate {
             key: "transition".into(),
+            observation: serde_json::json!({}),
             text: "gate: failed".into(),
         };
         let authorization = reqwest::header::HeaderValue::from_static("fixture");

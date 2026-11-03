@@ -676,7 +676,7 @@ impl CodexConnection {
                             if update_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
                                 let (_, update) = update_request.take().expect("matched update request");
                                 let state = if rpc.get("error").is_some() { busy = false; "rejected" } else { "accepted" };
-                                self.store.record_task_update(&self.session_id, &update.key, state)?;
+                                self.store.record_task_update(&self.session_id, &update.key, state, &update.observation)?;
                                 continue;
                             }
                             if initial_request.as_ref().is_some_and(|(id, _)| rpc.get("id") == Some(id)) {
@@ -753,6 +753,7 @@ impl CodexConnection {
                             &connection.session_id,
                             &update.key,
                             "dispatched",
+                            &update.observation,
                         )? {
                             return Ok(false);
                         }
@@ -966,10 +967,9 @@ mod tests {
                     .unwrap();
             assert_eq!(request["method"], "turn/start");
             assert_eq!(request["params"]["threadId"], "native-thread");
-            assert!(request["params"]["input"][0]["text"]
-                .as_str()
-                .unwrap()
-                .contains("gate: failed"));
+            let progress = request["params"]["input"][0]["text"].as_str().unwrap();
+            assert!(progress.contains("gate ("));
+            assert!(progress.contains("): failed"));
             fixture_send(&mut socket, json!({"id":request["id"],"result":{"turn":{"id":"report","status":"inProgress","items":[]}}})).await;
             fixture_send(&mut socket, json!({"method":"turn/started","params":{"threadId":"native-thread","turn":{"id":"report","status":"inProgress","items":[]}}})).await;
             let _ = socket.next().await;
@@ -1021,6 +1021,7 @@ mod tests {
         let mut receiver = receiver.unwrap();
         let update = crate::harness::task_updates::TaskUpdate {
             key: "transition".into(),
+            observation: serde_json::json!({}),
             text: "At demo".into(),
         };
         let request = json!({"id":"update","method":"turn/start","params":{"threadId":"saved", "input":[{"type":"text","text":update.text}]}});
@@ -1059,6 +1060,7 @@ mod tests {
             .unwrap();
         let newer = crate::harness::task_updates::TaskUpdate {
             key: "next-transition".into(),
+            observation: serde_json::json!({}),
             text: "Stopped".into(),
         };
         let (_, sent) = connection

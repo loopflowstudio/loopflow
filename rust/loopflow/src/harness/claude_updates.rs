@@ -52,7 +52,12 @@ fn deliver(
             "priority":"next","from":"loopflow", "message":{"role":"user","content":update.text}})
     );
     store.with_provider_context(adapter, thread, NativeBoundary::Turn, || {
-        if !store.record_task_update(&adapter.session, &update.key, "dispatched")? {
+        if !store.record_task_update(
+            &adapter.session,
+            &update.key,
+            "dispatched",
+            &update.observation,
+        )? {
             return Ok(());
         }
         socket.write_all(bytes.as_bytes()).map_err(io_error)?;
@@ -98,6 +103,7 @@ mod tests {
         let token = uuid::Uuid::new_v4().to_string();
         let update = TaskUpdate {
             key: "failure".into(),
+            observation: serde_json::json!({}),
             text: "gate: failed".into(),
         };
         deliver(
@@ -135,6 +141,7 @@ mod tests {
         assert!(wire.is_empty(), "uncertain delivery is never replayed");
         let wrong = TaskUpdate {
             key: "different".into(),
+            observation: serde_json::json!({}),
             text: "stopped".into(),
         };
         assert!(deliver(

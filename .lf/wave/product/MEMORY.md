@@ -304,8 +304,8 @@ Jack Heart (LOO-383) selected operating Wave conversations: move started Tasks,
 leave unstarted backlog alone, and report PR-linked work as waiting, moving or
 stuck. Leaving unarmed merges to Jack remained unreviewed. Current session/operate
 skills and Work APIs supersede the old wrapper and process-inspection recipe.
-Stopped execution is history, not permission to resume; an open conversation
-schedules nothing. Naming the Wave as next owner must not evade its own duty.
+Stopped execution is history, not permission to resume; progress observations
+grant no operating authority. Naming the Wave as next owner must not evade its own duty.
 Original decisions, continuation history and evidence limits:
 `28588f8910:.lf/wave/product/MEMORY.md`, this heading.
 The review established simulations and read-only model runs, not installed behavior.
@@ -988,14 +988,16 @@ October 4 supersedes Ask/Ready/Complete and Task-review controls; history:
 
 Jack Heart selected Session posts plus an expandable run page for LOO-711
 (2026-11-02): minimal default, combined position/readiness, Files owning the diff.
-The wait-only proposal is superseded; implementation and demo remain unproved.
-Graph/Process facts already record movement. Steers alone do not wake an idle
-Session, and the Codex native relay and Claude wake probes establish starting
-points, not production delivery. Provider restriction or a card beside the
-terminal is not an accepted substitute. Preserve drafts and Session identity;
-uncertain dispatch cannot authorize replay. Historical run completion does not
-prove Task completion. Prototype summaries/costs are simulated: prose must join
-the exact captured step, separate from its mechanical exit.
+The wait-only proposal is superseded. Branch `dd2bb7bc21` implements delivery
+through Codex, Claude, OpenCode and Pi owners plus grouped run history. Focused
+transport/view checks establish components, not configured idle wake or draft
+retention; Claude hook inbox availability remains unverified. One-second settling
+is a reversible assumption for demo, not Jack's cadence choice. Session-history
+receipts prevent uncertain dispatch replay; worker Runs are excluded. Posts grant
+no operating authority. Preserve Session identity and drafts; no provider restriction
+or adjacent card substitutes for delivery. Historical run completion never proves
+Task completion. Missing summaries stay absent; prose must join the exact captured
+step separately from its exit. Gate and authored demo remain.
 
 Desktop launched two LOO-293 helpers while its worker still produced output.
 Missing `lf ps` rows or a finished launcher do not prove idle execution.

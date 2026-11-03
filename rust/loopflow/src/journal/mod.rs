@@ -1239,6 +1239,31 @@ pub(crate) fn process_evidence(
     )
 }
 
+/// The OS PID a recorded Process runs under now; `None` unless its recorded
+/// identity proves it live.
+pub(crate) fn live_process_pid(store: &SqliteStore, process: &LfProcessId) -> Option<u32> {
+    let record = store.process(process).ok()??;
+    let receipt = recorded_process_receipt(store, &record);
+    let mut live = None;
+    recorded_process_evidence(&record, &receipt, |pid, started_at| {
+        let evidence = process_identity_evidence(pid, started_at);
+        if evidence == ProcessIdentityEvidence::Live {
+            live = Some(pid);
+        }
+        evidence
+    });
+    live
+}
+
+/// The executable this process runs, as the kernel names it: the file itself,
+/// even when the symlink it was launched through has since been re-pointed.
+pub(crate) fn current_executable() -> std::io::Result<PathBuf> {
+    match OsProcess::executable(std::process::id()) {
+        Some(path) => Ok(path),
+        None => std::env::current_exe().and_then(fs::canonicalize),
+    }
+}
+
 /// The recorded Process's own receipt, read by its locator without listing others.
 pub(crate) fn recorded_process_receipt(
     store: &SqliteStore,

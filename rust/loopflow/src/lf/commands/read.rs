@@ -71,7 +71,7 @@ pub enum Read {
     },
     /// `lf task file <issue> <path>`: one file of a Task's checkout.
     TaskFile { issue: String, path: String },
-    /// `lf wave list --all`: every Wave on this Machine that is not removed.
+    /// `lf wave list --all --current`: every current Wave on this Machine.
     Waves,
     /// `lf machine id`: this Machine's identity.
     MachineId,
@@ -204,7 +204,7 @@ impl Read {
                 argv
             }
             Self::TaskFile { issue, path } => words(&["task", "file", issue, path, "--json"]),
-            Self::Waves => words(&["wave", "list", "--all", "--json"]),
+            Self::Waves => words(&["wave", "list", "--all", "--current", "--json"]),
             Self::MachineId => words(&["machine", "id", "--json"]),
             Self::Portfolio => words(&["portfolio", "--json"]),
             // `desktop layout` always prints JSON.
@@ -370,7 +370,7 @@ impl Read {
             } => pretty(&task_diff(issue, path.as_deref(), base, draft.as_deref())?),
             Self::TaskFile { issue, path } => pretty(&task_file(issue, path, false)?),
             Self::Waves => {
-                let waves = block_on(list_waves(true))??;
+                let waves = block_on(list_waves(true, true))??;
                 pretty(&waves.unwrap_or_default())
             }
             Self::MachineId => pretty(&block_on(local_machine())??),

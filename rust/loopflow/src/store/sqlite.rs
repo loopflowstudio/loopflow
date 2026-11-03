@@ -63,7 +63,6 @@ pub(crate) mod task_history;
 pub(crate) mod task_state_delivery;
 pub(crate) mod task_work;
 pub(crate) mod wave_definitions;
-mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
 pub(crate) use graph_inventory::{entry_of, GraphExecutionFacts};
@@ -2004,16 +2003,48 @@ impl SqliteStore {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?;
-            if let Some(collision) = collision {
+            if collision.as_deref()
+                != update
+                    .retire_collision
+                    .as_ref()
+                    .map(crate::id::WaveId::as_str)
+            {
                 return Err(StoreError::InvalidData(format!(
-                    "Wave {}/{} already exists as {collision}",
+                    "target {}/{} collision changed while relocation was staged",
                     update.target.repo(),
                     update.target.slug()
                 )));
             }
+            if let Some(collision) = &update.retire_collision {
+                let blockers = Self::wave_retirement_blockers_in(&tx, collision)?;
+                if !blockers.is_empty() {
+                    return Err(StoreError::InvalidData(format!(
+                        "cannot retire destination Wave {collision}: {}",
+                        blockers.join(", ")
+                    )));
+                }
+            }
         }
 
         for update in updates {
+            if let Some(collision) = &update.retire_collision {
+                let retired_at = now_unix();
+                tx.execute(
+                    "UPDATE waves
+                     SET retired_at = ?2,
+                         superseded_by_wave_id = ?3,
+                         retirement_reason = ?4,
+                         work_state = 'abandoned',
+                         work_terminal_at = ?2
+                     WHERE id = ?1 AND retired_at IS NULL",
+                    params![
+                        collision,
+                        retired_at,
+                        update.wave_id,
+                        "registration-only destination shadow retired during relocation"
+                    ],
+                )?;
+            }
             let (parent_slug, name) = update
                 .target
                 .slug()
@@ -2047,6 +2078,73 @@ impl SqliteStore {
                 ),
             )?;
         }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub(crate) fn wave_retirement_blockers(&self, wave_id: &WaveId) -> StoreResult<Vec<String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Self::wave_retirement_blockers_in(&conn, wave_id)
+    }
+
+    fn wave_retirement_blockers_in(
+        conn: &Connection,
+        wave_id: &WaveId,
+    ) -> StoreResult<Vec<String>> {
+        let mut blockers = Vec::new();
+        let projects: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM projects WHERE wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if projects > 0 {
+            blockers.push(format!("{projects} Projects"));
+        }
+        let tasks: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM tasks JOIN projects ON projects.id = tasks.project_id
+             WHERE projects.wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if tasks > 0 {
+            blockers.push(format!("{tasks} Tasks"));
+        }
+        let children: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM waves
+             WHERE parent_wave_id = ?1 AND retired_at IS NULL",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if children > 0 {
+            blockers.push(format!("{children} child Waves"));
+        }
+        let snapshots: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pm_wave_sync WHERE wave_id = ?1",
+            params![wave_id],
+            |row| row.get(0),
+        )?;
+        if snapshots > 0 {
+            blockers.push("PM snapshot".to_string());
+        }
+        let promoted = conn
+            .query_row(
+                "SELECT promoted_at FROM waves WHERE id = ?1",
+                params![wave_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten();
+        if promoted.is_some() {
+            blockers.push("promotion receipt".to_string());
+        }
+        Ok(blockers)
+    }
+
+    pub fn delete_wave(&self, wave_id: &WaveId) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM waves WHERE id = ?1", params![wave_id])?;
         tx.commit()?;
         Ok(())
     }

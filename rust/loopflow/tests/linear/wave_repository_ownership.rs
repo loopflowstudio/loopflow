@@ -6,6 +6,7 @@ use support::planning;
 use std::path::Path;
 use std::process::Command;
 
+use loopflow::durable::{WorkRef, WorkStatus};
 use loopflow::id::WaveId;
 use loopflow::linear::{LinearIssueId, LinearProjectId};
 use loopflow::store::StorageConfig;
@@ -432,7 +433,9 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let collision = relocate_wave(&store, alpha.id(), &repo_a, None, Some("occupied"))
         .await
         .unwrap_err();
-    assert!(collision.to_string().contains("occupied already exists"));
+    assert!(collision.to_string().contains(alpha.id().as_str()));
+    assert!(collision.to_string().contains(occupied.id().as_str()));
+    assert!(collision.to_string().contains("PM snapshot"));
 
     author_wave(&repo_a, "platform", "divergent");
     // Unimported repository files neither select nor block the saved plan.
@@ -464,12 +467,20 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .execute_batch("DROP TRIGGER fail_wave_relocation")
         .unwrap();
 
-    // Store relocation moves addresses only; `lf wave rename` moves files (wave_lifecycle).
-    let relocation = relocate_wave(&store, alpha.id(), &repo_a, None, Some("platform"))
-        .await
-        .unwrap();
-    assert_eq!(relocation.wave_id, alpha.id().as_str());
-    assert_eq!(relocation.waves_moved, 3);
+    let relocation = lf(
+        &home,
+        &repo_a,
+        &[
+            "wave",
+            "rename",
+            alpha.id().as_str(),
+            "--name",
+            "platform",
+            "--json",
+        ],
+    );
+    assert_eq!(relocation["wave_id"], alpha.id().as_str());
+    assert_eq!(relocation["waves_moved"], 3);
     let renamed = store.get_wave(alpha.id()).await.unwrap().unwrap();
     assert_eq!(renamed.slug(), "platform");
     assert_eq!(
@@ -608,24 +619,7 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
             "--json",
         ],
     );
-    assert_eq!(relocated["id"], wave.id().as_str());
-    assert_eq!(relocated["renamed"], true);
-    assert_eq!(relocated["files"]["state"], "uncommitted");
-    let retried = lf(
-        &home,
-        &target,
-        &[
-            "wave",
-            "rename",
-            wave.id().as_str(),
-            "--repo",
-            target.to_str().unwrap(),
-            "--json",
-        ],
-    );
-    assert_eq!(retried["id"], relocated["id"]);
-    assert_eq!(retried["renamed"], false);
-    assert_eq!(retried["files"]["state"], "uncommitted");
+    assert_eq!(relocated["wave_id"], wave.id().as_str());
     let repaired = store.get_wave(wave.id()).await.unwrap().unwrap();
     assert_eq!(
         repaired.repo(),
@@ -637,7 +631,128 @@ async fn missing_repository_wave_can_be_disabled_and_relocated_from_its_target()
 }
 
 #[tokio::test]
-async fn relocation_refuses_a_taken_destination() {
+async fn relocation_retires_an_identical_destination_shadow_without_losing_identity() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("cadenza");
+    let target = tmp.path().join("kata");
+    repository(&source);
+    repository(&target);
+    for slug in ["core", "ear", "theory"] {
+        author_wave(&source, slug, slug);
+        author_wave(&target, slug, slug);
+    }
+    author_wave(&target, "scores", "scores");
+    let home = tmp.path().join("home");
+    let _env = support::EnvGuard::with_lf_home(&[], &home);
+    std::fs::create_dir_all(&home).unwrap();
+    let database = home.join("loopflow.db");
+    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
+        .await
+        .unwrap();
+    let identities = ["core", "ear", "theory"].map(|slug| {
+        (
+            registered_wave(&source, slug),
+            registered_wave(&target, slug),
+        )
+    });
+    let scores = registered_wave(&target, "scores");
+    for (established, shadow) in &identities {
+        store.create_wave(established).await.unwrap();
+        store.create_wave(shadow).await.unwrap();
+    }
+    store.create_wave(&scores).await.unwrap();
+    let initial_wave_count: i64 = rusqlite::Connection::open(&database)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM waves", [], |row| row.get(0))
+        .unwrap();
+
+    for (established, shadow) in &identities {
+        let receipt = relocate_wave(&store, established.id(), &source, Some(&target), None)
+            .await
+            .unwrap();
+        assert_eq!(receipt.wave_id, established.id().as_str());
+        assert!(source
+            .join(".lf/wave")
+            .join(established.slug())
+            .join("GOAL.md")
+            .is_file());
+
+        let active = store
+            .get_wave_at(&WaveLocator::discover(&target, established.slug()).unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(active.id(), established.id());
+        let retired = store.get_wave(shadow.id()).await.unwrap().unwrap();
+        assert!(retired.is_retired());
+        assert_eq!(retired.superseded_by_wave_id(), Some(established.id()));
+        assert!(retired
+            .retirement_reason()
+            .unwrap()
+            .contains("registration-only"));
+        assert_eq!(
+            store
+                .work_status(&WorkRef::Wave(shadow.id().clone()))
+                .await
+                .unwrap(),
+            WorkStatus::Abandoned
+        );
+
+        let historical = resolve_managed_wave(
+            Some(&store),
+            Some(&target),
+            Some(shadow.id().as_str()),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(historical.id(), shadow.id());
+        assert!(historical.is_retired());
+        let historical_status = String::from_utf8(
+            lf_output(&home, &target, &["wave", "status", shadow.id().as_str()]).stdout,
+        )
+        .unwrap();
+        assert!(historical_status.contains("retired at"));
+        assert!(historical_status.contains(established.id().as_str()));
+    }
+    assert_eq!(
+        rusqlite::Connection::open(&database)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM waves", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        initial_wave_count,
+        "relocation must not mint another Wave identity"
+    );
+    assert_eq!(
+        store
+            .get_wave_at(&WaveLocator::discover(&target, "scores").unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .id(),
+        scores.id()
+    );
+    assert_eq!(store.list_waves(None).await.unwrap().len(), 4);
+
+    let reopened = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database))
+        .await
+        .unwrap();
+    assert_eq!(reopened.list_waves(None).await.unwrap().len(), 4);
+    for (established, _) in &identities {
+        assert_eq!(
+            reopened
+                .get_wave_at(&WaveLocator::discover(&target, established.slug()).unwrap())
+                .await
+                .unwrap()
+                .unwrap()
+                .id(),
+            established.id()
+        );
+    }
+}
+
+#[tokio::test]
+async fn relocation_refuses_meaningful_destination_history() {
     let tmp = tempfile::tempdir().unwrap();
     let source = tmp.path().join("source");
     let target = tmp.path().join("target");
@@ -646,22 +761,74 @@ async fn relocation_refuses_a_taken_destination() {
     author_wave(&source, "core", "core");
     let _env = support::EnvGuard::with_lf_home(&[], tmp.path());
     let database = tmp.path().join("loopflow.db");
-    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database))
+    let store = loopflow::store::open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
         .await
         .unwrap();
     let established = registered_wave(&source, "core");
     store.create_wave(&established).await.unwrap();
-    // Even a registration-only Wave keeps its address until someone removes it.
+
+    let project_shadow = registered_wave(&target, "with-task");
+    store.create_wave(&project_shadow).await.unwrap();
+    let owned_project = project(&project_shadow);
+    store.create_project(&owned_project).await.unwrap();
+    rusqlite::Connection::open(&database)
+        .unwrap()
+        .execute(
+            "UPDATE waves SET current_project_id=?2 WHERE id=?1",
+            rusqlite::params![owned_project.wave_id, owned_project.id.as_str()],
+        )
+        .unwrap();
+    let (owned_task, owned_pr) = task(&store, &project_shadow, &owned_project, &target);
+    planning::seed_unplaced_task(&database, &owned_task);
     store
-        .create_wave(&registered_wave(&target, "core"))
+        .place_task(
+            &owned_task.id,
+            owned_task.worktree.as_ref().unwrap(),
+            &owned_task.workspace_slug,
+            &owned_pr,
+            None,
+        )
         .await
         .unwrap();
 
-    let error = relocate_wave(&store, established.id(), &source, Some(&target), None)
+    let child_shadow = registered_wave(&target, "with-child");
+    store.create_wave(&child_shadow).await.unwrap();
+    let child = registered_wave(&target, "nested").with_parent(child_shadow.id().clone());
+    store.create_wave(&child).await.unwrap();
+
+    let pm_shadow = registered_wave(&target, "with-pm");
+    store.create_wave(&pm_shadow).await.unwrap();
+    store
+        .seed_inventory(
+            InventoryFixture {
+                wave_id: pm_shadow.id().clone(),
+                provider: "linear".to_string(),
+                initiative: "initiative-pm".to_string(),
+                synced_at: 1,
+                snapshot: crate::test_linear_input::Inventory {
+                    projects: vec![],
+                    items: vec![],
+                },
+            },
+            None,
+        )
         .await
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("core already exists"), "{error}");
+        .unwrap();
+
+    for (slug, shadow, evidence) in [
+        ("with-task", &project_shadow, "Tasks"),
+        ("with-child", &child_shadow, "child Waves"),
+        ("with-pm", &pm_shadow, "PM snapshot"),
+    ] {
+        let error = relocate_wave(&store, established.id(), &source, Some(&target), Some(slug))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(established.id().as_str()), "{error}");
+        assert!(error.contains(shadow.id().as_str()), "{error}");
+        assert!(error.contains(evidence), "{error}");
+    }
+
     assert_eq!(
         store
             .get_wave(established.id())

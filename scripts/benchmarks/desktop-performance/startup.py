@@ -43,7 +43,7 @@ def capture(repo: Path, output: Path) -> None:
         return text
 
     home = json.loads(record("home", "home.json", ["machine", "id", "--json"]))["id"]
-    record("wave", "waves.json", ["wave", "list", "--all", "--json"])
+    record("wave", "waves.json", ["wave", "list", "--all", "--current", "--json"])
     record("roadmap", "roadmap.json", ["desktop", "plan", "--all", "--json"])
     record("activity", "activity.json", ["history", "--since", "7d", "--limit", "50", "--json"])
     after, page = None, 0

@@ -12,6 +12,9 @@ public struct Wave: Sendable, Identifiable, Hashable {
     public let status: WorkStatus
     public let activeTasks: Int
     public let parentWaveId: String?
+    public let retiredAt: String?
+    public let supersededByWaveId: String?
+    public let retirementReason: String?
 
     public var displayName: String {
         guard !name.contains(where: \.isUppercase) else { return name }
@@ -27,7 +30,10 @@ public struct Wave: Sendable, Identifiable, Hashable {
         repo: String,
         status: WorkStatus,
         activeTasks: Int = 0,
-        parentWaveId: String? = nil
+        parentWaveId: String? = nil,
+        retiredAt: String? = nil,
+        supersededByWaveId: String? = nil,
+        retirementReason: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -35,5 +41,8 @@ public struct Wave: Sendable, Identifiable, Hashable {
         self.status = status
         self.activeTasks = activeTasks
         self.parentWaveId = parentWaveId
+        self.retiredAt = retiredAt
+        self.supersededByWaveId = supersededByWaveId
+        self.retirementReason = retirementReason
     }
 }

@@ -1234,45 +1234,6 @@ fn repo_people_keep_unresolved_github_identity_explicit() {
 }
 
 #[test]
-fn wave_removal_preview_round_trips() {
-    use loopflow::ops::wave_lifecycle::WaveRemoval;
-    let json = include_str!("../../../tests/fixtures/dto/wave_removal.json");
-    let removal: WaveRemoval = serde_json::from_str(json).unwrap();
-    assert!(removal.moved[1].started);
-    assert_eq!(
-        serde_json::from_str::<WaveRemoval>(&serde_json::to_string(&removal).unwrap()).unwrap(),
-        removal
-    );
-}
-
-#[test]
-fn wave_added_receipt_round_trips_with_its_leftover() {
-    use loopflow::ops::wave_lifecycle::WaveAdded;
-    let json = include_str!("../../../tests/fixtures/dto/wave_added.json");
-    let added: WaveAdded = serde_json::from_str(json).unwrap();
-    assert!(added.created);
-    assert_eq!(added.project.wave_id, added.id);
-    assert_eq!(added.summary.len(), 1);
-    assert_eq!(
-        serde_json::to_value(&added).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-}
-
-#[test]
-fn wave_renamed_receipt_round_trips_with_its_leftovers() {
-    use loopflow::ops::wave_lifecycle::WaveRenamed;
-    let json = include_str!("../../../tests/fixtures/dto/wave_renamed.json");
-    let renamed: WaveRenamed = serde_json::from_str(json).unwrap();
-    assert!(renamed.renamed);
-    assert_eq!(renamed.summary.len(), 1);
-    assert_eq!(
-        serde_json::to_value(&renamed).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-}
-
-#[test]
 fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
     let receipts: Vec<loopflow::lf::commands::task_create::TaskCreateReceipt> =

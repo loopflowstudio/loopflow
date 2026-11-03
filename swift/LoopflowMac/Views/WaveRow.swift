@@ -39,8 +39,7 @@ struct WaveRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
     var indentLevel: Int = 0
-    var onRemove: (() -> Void)? = nil
-    var onRename: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     @State private var isHovering = false
 
@@ -70,8 +69,12 @@ struct WaveRow: View {
             if selected { isHovering = false }
         }
         .contextMenu {
-            if let onRename, let onRemove {
-                WaveLifecycleMenu(onRename: onRename, onRemove: onRemove)
+            if let onDelete {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete Wave", systemImage: "trash")
+                }
             }
         }
         .accessibilityElement(children: .combine)

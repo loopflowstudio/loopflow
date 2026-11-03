@@ -1125,9 +1125,8 @@ impl WaveCommand {
             Self::Show { .. } | Self::Graph { .. } | Self::List { .. } => false,
             Self::Status { sync, .. } => *sync,
             Self::NewChapter { dry_run, .. } => !dry_run,
-            Self::Remove { preview, .. } => !preview,
             Self::EditPlan { .. }
-            | Self::Add { .. }
+            | Self::Ensure { .. }
             | Self::BindProject { .. }
             | Self::Rename { .. }
             | Self::UpdatePlan { .. }
@@ -1775,27 +1774,9 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Add a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
-    /// and start its first chapter. Adding an existing Wave changes nothing.
-    Add {
+    /// Ensure the configured Project is active, or create one with a durable identity
+    Ensure {
         wave: String,
-        /// Objective text for the new Wave's GOAL.md
-        #[arg(long)]
-        objective: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Remove a Wave and its child Waves. Open Tasks move to the parent Wave, or the
-    /// repository; chapters, completed Tasks and Sessions stay readable in history.
-    #[command(after_help = "Run again to finish an interrupted removal.")]
-    Remove {
-        wave: String,
-        /// Show what removal does without changing anything
-        #[arg(long)]
-        preview: bool,
-        /// Delete unstarted Tasks instead of moving them; started Tasks always move
-        #[arg(long)]
-        delete_backlog: bool,
         #[arg(long)]
         json: bool,
     },
@@ -1806,7 +1787,7 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// List this repository's Waves; removed Waves stay readable by `lf wave show`.
+    /// List authored Waves and retained planning identities without starting work.
     List {
         /// Emit the wave snapshot as JSON (Loopflow's dashboard snapshot)
         #[arg(long)]
@@ -1815,6 +1796,9 @@ pub enum WaveCommand {
         /// current repository (worktrees collapse to their main checkout).
         #[arg(long)]
         all: bool,
+        /// Exclude abandoned and retired registrations from current navigation.
+        #[arg(long)]
+        current: bool,
     },
     /// Show one Wave's current plan, Task details, and execution evidence.
     Status {
@@ -1830,15 +1814,13 @@ pub enum WaveCommand {
         #[arg(long, requires = "json")]
         watch: bool,
     },
-    /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
-    /// chapters and Sessions keep their identity
+    /// Rename or relocate an authored Wave and its provider mapping
     Rename {
         wave: String,
-        /// The new name; omit to keep it while changing --repo or --title
-        new_name: Option<String>,
-        /// Move the Wave to another repository
         #[arg(long)]
         repo: Option<PathBuf>,
+        #[arg(long)]
+        name: Option<String>,
         /// Change the linked Initiative display title
         #[arg(long)]
         title: Option<String>,
@@ -1853,7 +1835,7 @@ pub enum WaveCommand {
         #[arg(long)]
         plan: std::path::PathBuf,
     },
-    /// Connect a Wave to its Initiative and the repository's Team (Task prefix); a new name is added first
+    /// Connect a Wave to its Initiative and the repository's Team (Task prefix)
     Connect {
         /// Wave name (auto-detected if omitted)
         wave: Option<String>,
@@ -3204,7 +3186,8 @@ mod tests {
             Some(Commands::Wave {
                 cmd: WaveCommand::List {
                     json: true,
-                    all: false
+                    all: false,
+                    current: false
                 }
             })
         ));

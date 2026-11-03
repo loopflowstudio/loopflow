@@ -90,7 +90,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .taskFile(let issue, let path):
             return ["task", "file", issue, path, "--json"]
         case .waves:
-            return ["wave", "list", "--all", "--json"]
+            return ["wave", "list", "--all", "--current", "--json"]
         case .machineId:
             return ["machine", "id", "--json"]
         case .portfolio:
@@ -237,7 +237,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     /// The repository's conversation when it names no Session, Task or Wave.
     case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
     case sessionNew(directory: String, id: String, agent: String?)
-    case waveAdd(directory: String, wave: String, objective: String?)
+    case waveEnsure(directory: String, wave: String)
     case planningRefresh(directory: String, wave: String)
     case newChapter(directory: String, name: String, plan: String, preview: Bool)
     case graphCustomize(directory: String, name: String)
@@ -272,7 +272,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let id, let agent):
             Self.prepared(agent, ["session", "new", id], repo: nil)
-        case .waveAdd(_, let wave, let objective): ["wave", "add", wave] + Self.option("--objective", objective) + ["--json"]
+        case .waveEnsure(_, let wave): ["wave", "ensure", wave, "--json"]
         case .planningRefresh(_, let wave): ["wave", "status", wave, "--sync", "--json"]
         case .newChapter(_, let name, _, let preview):
             ["wave", "new-chapter", "--all", name, "--plan", "/dev/stdin", "--json"] + (preview ? ["--dry-run"] : [])
@@ -346,8 +346,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                             "agent": agent])
         case .sessionNew(let directory, let id, let agent):
             TaggedFields("session_new", ["directory": directory, "id": id, "agent": agent])
-        case .waveAdd(let directory, let wave, let objective):
-            TaggedFields("wave_add", ["directory": directory, "wave": wave, "objective": objective])
+        case .waveEnsure(let directory, let wave):
+            TaggedFields("wave_ensure", ["directory": directory, "wave": wave])
         case .planningRefresh(let directory, let wave):
             TaggedFields("planning_refresh", ["directory": directory, "wave": wave])
         case .newChapter(let directory, let name, let plan, let preview):
@@ -666,33 +666,16 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
+
     /// Refresh one Wave's planning from its provider (Linear, or the
     /// repository's Git planning ref), retrying pending deliveries.
     public func syncPlanning(wave: String, cwd: String) async throws {
         _ = try await write(.planningRefresh(directory: cwd, wave: wave))
     }
 
-    /// `lf wave add`: registers the Wave, commits its files on the main checkout and
-    /// ensures its first Project. Adding an existing Wave changes nothing, so this
-    /// is also the explicit opening/retry operation; periodic reads stay observational.
-    /// The receipt's `summary` names anything left to finish.
-    @discardableResult
-    public func addWave(name: String, objective: String? = nil, cwd: String) async throws -> WaveAdded {
-        let objective = objective.flatMap { $0.isEmpty ? nil : $0 }
-        return try Self.decode(WaveAdded.self, from: await write(.waveAdd(directory: cwd, wave: name, objective: objective)))
-    }
-
-    /// `lf wave rename`: same Wave id, Tasks and chapters; its files move on main.
-    /// The receipt's `summary` names anything left to finish.
-    public func renameWave(wave: String, newName: String, cwd: String) async throws -> WaveRenamed {
-        try Self.decode(WaveRenamed.self, from: await run(["wave", "rename", wave, newName, "--json"], cwd))
-    }
-
-    /// `lf wave remove`: with `preview`, the consequences without changing anything.
-    public func removeWave(name: String, preview: Bool, cwd: String) async throws -> WaveRemoval {
-        var args = ["wave", "remove", name, "--json"]
-        if preview { args.append("--preview") }
-        return try Self.decode(WaveRemoval.self, from: await run(args, cwd))
+    /// Explicit opening/retry operation. Periodic status reads remain observational.
+    public func ensureProject(wave: String, cwd: String) async throws {
+        _ = try await write(.waveEnsure(directory: cwd, wave: wave))
     }
 
     public func realignProjects(name: String, plan: String, preview: Bool, cwd: String) async throws -> ProjectRotationPreview {
@@ -1098,8 +1081,7 @@ public enum WorkMachineTarget: Sendable, Hashable {
 }
 
 /// `WaveSnapshot` (`lf/commands/waves.rs`) — every field present, Optionals
-/// explicit (no serde defaults on the wire). `lf wave list` never lists a removed
-/// Wave, so the app row carries no retirement; `lf wave show` reads one.
+/// explicit (no serde defaults on the wire).
 public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
     public let id: String
     public let name: String
@@ -1135,7 +1117,10 @@ public struct WaveSnapshot: Decodable, Sendable, Hashable, Identifiable {
             repo: repo,
             status: status,
             activeTasks: activeTasks,
-            parentWaveId: parentWaveId
+            parentWaveId: parentWaveId,
+            retiredAt: retiredAt,
+            supersededByWaveId: supersededByWaveId,
+            retirementReason: retirementReason
         )
     }
 }

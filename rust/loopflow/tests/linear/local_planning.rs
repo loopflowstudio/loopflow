@@ -150,7 +150,7 @@ fn concurrent_creations_are_distinct_and_failed_checkout_retains_its_task() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "add", "inbox", "--json"],
+        &["wave", "ensure", "inbox", "--json"],
     );
     let args = [
         "task",
@@ -235,7 +235,11 @@ fn stored_rotation_commits_all_waves_and_serializes_new_work() {
     let mut predecessors = Vec::new();
     let successor = uuid::Uuid::new_v4().to_string();
     for name in ["first", "second"] {
-        lf(repo.path(), home.path(), &["wave", "add", name, "--json"]);
+        lf(
+            repo.path(),
+            home.path(),
+            &["wave", "ensure", name, "--json"],
+        );
         let wave = lf(
             repo.path(),
             home.path(),
@@ -602,7 +606,7 @@ fn nested_waves_create_files_and_store_project_identity() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "rename", "tools", "instruments", "--json"],
+        &["wave", "rename", "tools", "--name", "instruments", "--json"],
     );
     let renamed = lf(
         repo.path(),
@@ -613,7 +617,7 @@ fn nested_waves_create_files_and_store_project_identity() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "add", "instruments/lexer", "--json"],
+        &["wave", "ensure", "instruments/lexer", "--json"],
     );
     lf(
         repo.path(),
@@ -639,6 +643,11 @@ fn nested_waves_create_files_and_store_project_identity() {
     );
     assert_eq!(wave["tasks"]["items"].as_array().unwrap().len(), 1);
     let wave_id = wave["wave"]["id"].as_str().unwrap();
+    lf(
+        repo.path(),
+        home.path(),
+        &["wave", "ensure", wave_id, "--json"],
+    );
     let by_id = lf(
         repo.path(),
         home.path(),
@@ -666,7 +675,7 @@ fn public_task_prefixes_resolve_and_report_ambiguity() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "add", "inbox", "--json"],
+        &["wave", "ensure", "inbox", "--json"],
     );
     let store =
         loopflow::store::sqlite::SqliteStore::new(&home.path().join("loopflow.db")).unwrap();
@@ -947,11 +956,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         .output()
         .unwrap();
     assert!(changed.status.success());
-    // Task creation committed the new Wave's files; only this test's own edits remain.
-    assert_eq!(
-        String::from_utf8_lossy(&changed.stdout),
-        ".lf/wave/inbox/GOAL.md\n.lf/wave/inbox/MEMORY.md\n"
-    );
+    assert!(changed.stdout.is_empty());
 }
 
 #[test]
@@ -1154,7 +1159,7 @@ fn project_creation_binding_and_activation_save_offline() {
             canonical.to_string(),
         );
         store.create_wave(&wave).unwrap();
-        let args = ["wave", "add", "product", "--json"];
+        let args = ["wave", "ensure", "product", "--json"];
         let mut first = command(repo.path(), home.path(), &args)
             .stdout(std::process::Stdio::null())
             .spawn()
@@ -1162,7 +1167,7 @@ fn project_creation_binding_and_activation_save_offline() {
         let second = lf(repo.path(), home.path(), &args);
         assert!(first.wait().unwrap().success());
         let created = lf(repo.path(), home.path(), &args);
-        assert_eq!(created["project"], second["project"]);
+        assert_eq!(created, second);
         let projects = store.list_projects(Some(wave.id())).unwrap();
         assert_eq!(projects.len(), 1);
         let id = projects[0].id.clone();
@@ -1227,7 +1232,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     bound
                 );
             }
-            let active = lf(repo.path(), home.path(), &args)["project"].clone();
+            let active = lf(repo.path(), home.path(), &args);
             assert_eq!(active["status"], "started");
             assert_eq!(active["name"], "Authored name");
             assert_eq!(active["summary"], "Retain summary");
@@ -2152,7 +2157,7 @@ fn rotation_saves_membership_and_pending_effects_offline() {
         lf(
             repo.path(),
             home.path(),
-            &["wave", "add", "product", "--json"],
+            &["wave", "ensure", "product", "--json"],
         );
         let project = store.list_projects(Some(wave.id())).unwrap().remove(0);
         let db = rusqlite::Connection::open(&path).unwrap();
@@ -2548,7 +2553,11 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 canonical.to_string(),
             );
             store.create_wave(&wave).unwrap();
-            lf(repo.path(), home.path(), &["wave", "add", name, "--json"]);
+            lf(
+                repo.path(),
+                home.path(),
+                &["wave", "ensure", name, "--json"],
+            );
             let mut project = store.list_projects(Some(wave.id())).unwrap().remove(0);
             if mapped {
                 // Bind through the writer so foreground Git exchange sees the same
@@ -2800,7 +2809,7 @@ fn wave_documents_and_graphs_follow_files() {
         let project = lf(
             repo.path(),
             home.path(),
-            &["wave", "add", "tools/parser", "--json"],
+            &["wave", "ensure", "tools/parser", "--json"],
         );
         assert!(project["id"].is_string());
         let task = lf(
@@ -2881,7 +2890,7 @@ fn wave_documents_and_graphs_follow_files() {
         lf(
             repo.path(),
             home.path(),
-            &["wave", "rename", "tools", "instruments", "--json"],
+            &["wave", "rename", "tools", "--name", "instruments", "--json"],
         );
         let status = lf(
             repo.path(),
@@ -3123,7 +3132,7 @@ fn planning_sync_tracks_creation_errors_uncertainty_conflicts_and_settlement() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "add", "inbox", "--json"],
+        &["wave", "ensure", "inbox", "--json"],
     );
     let created = lf(
         repo.path(),
@@ -3455,41 +3464,23 @@ fn wave_planning_distinguishes_missing_registry_from_unreadable_and_removes_old_
 }
 
 #[test]
-fn wave_add_commits_on_main_and_checkout_edits_reach_status() {
+fn wave_files_are_checkout_local_and_edits_reach_status_without_ensure() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let checkout = repo.create_named_worktree("wave-documents");
-    let before = repo.head_sha();
-    let args = [
-        "wave",
-        "add",
-        "local",
-        "--objective",
-        "The shared objective.",
-        "--json",
-    ];
-    let added = lf(&checkout, home.path(), &args);
-    assert_eq!(added["created"], true);
-    assert_eq!(added["files"]["state"], "committed");
-    assert_ne!(repo.head_sha(), before, "add commits on the main checkout");
-    assert_eq!(
-        std::fs::read_to_string(repo.path().join(".lf/wave/local/GOAL.md")).unwrap(),
-        "## Objective\n\nThe shared objective.\n"
+    lf(
+        &checkout,
+        home.path(),
+        &["wave", "ensure", "local", "--json"],
     );
-    assert!(
-        !checkout.join(".lf/wave/local").exists(),
-        "add must not strand files in the invoking worktree"
-    );
-    let again = lf(&checkout, home.path(), &args);
-    assert_eq!(again["created"], false);
-    assert_eq!(again["id"], added["id"]);
-    assert_eq!(again["files"]["state"], "unchanged");
-    let listing = lf(repo.path(), home.path(), &["wave", "list", "--json"]);
-    assert_eq!(listing.as_array().unwrap().len(), 1);
-
     let goal = checkout.join(".lf/wave/local/GOAL.md");
     let memory = checkout.join(".lf/wave/local/MEMORY.md");
-    std::fs::create_dir_all(goal.parent().unwrap()).unwrap();
+    assert!(goal.is_file());
+    assert!(memory.is_file());
+    assert!(
+        !repo.path().join(".lf/wave/local").exists(),
+        "creation must not write main"
+    );
     std::fs::write(&goal, "## Objective\n\nThe checkout objective.\n").unwrap();
     std::fs::write(&memory, "A freshly edited decision.").unwrap();
     let status = lf(
@@ -3506,8 +3497,8 @@ fn wave_add_commits_on_main_and_checkout_edits_reach_status() {
         &["wave", "status", "local", "--json"],
     );
     assert_eq!(
-        main["wave"]["goal"], "The shared objective.",
-        "each checkout reads its own files"
+        main["wave"]["goal"], "",
+        "no other checkout or stored fallback"
     );
     let context = lf(
         &checkout,
@@ -3871,7 +3862,7 @@ fn waveless_task_lifecycle() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "add", "product", "--json"],
+        &["wave", "ensure", "product", "--json"],
     );
     lf(
         repo.path(),
@@ -3970,7 +3961,7 @@ fn your_graph_for_a_wave_selects_the_builtin_auto() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "add", "product", "--json"],
+        &["wave", "ensure", "product", "--json"],
     );
     lf(
         repo.path(),
@@ -4016,7 +4007,7 @@ fn graph_defaults_follow_task_wave_and_repository() {
     lf(
         repo.path(),
         home.path(),
-        &["wave", "add", "product", "--json"],
+        &["wave", "ensure", "product", "--json"],
     );
     lf(
         repo.path(),
@@ -4098,9 +4089,9 @@ fn task_creation_defaults_to_standalone_in_bound_contexts() {
     let wave = lf(
         repo.path(),
         home.path(),
-        &["wave", "add", "product", "--json"],
+        &["wave", "ensure", "product", "--json"],
     );
-    let wave_id = wave["id"].as_str().unwrap();
+    let wave_id = wave["wave_id"].as_str().unwrap();
     let parent = lf(
         repo.path(),
         home.path(),

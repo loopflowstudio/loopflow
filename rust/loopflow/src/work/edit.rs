@@ -75,8 +75,6 @@ macro_rules! work_values {
 work_values! {
     (WaveName, "wave_name", String),
     (WaveParent, "wave_parent", Option<String>),
-    // Captured only once a Wave is removed, so live Waves exchange as before.
-    (WaveRetired, "wave_retired", Option<i64>),
     (WaveProject, "wave_project", Option<String>),
     (ProjectWave, "project_wave", String),
     (ProjectLinearId, "project_linear_id", Option<String>),

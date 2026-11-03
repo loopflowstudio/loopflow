@@ -928,35 +928,14 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             team_name.as_deref(),
         ),
         WaveCommand::Reteam { apply } => loopflow::lf::commands::ops::reteam(repo, *apply),
-        WaveCommand::Add {
-            wave,
-            objective,
-            json,
-        } => {
-            let added = tokio::runtime::Runtime::new()?.block_on(
-                loopflow::ops::wave_lifecycle::add(repo, wave, objective.as_deref()),
-            )?;
+        WaveCommand::Ensure { wave, json } => {
+            let result = tokio::runtime::Runtime::new()?.block_on(project::ensure(repo, wave))?;
             if *json {
-                println!("{}", serde_json::to_string_pretty(&added)?);
-            } else {
-                println!("{}", loopflow::ops::wave_lifecycle::render_added(&added));
-            }
-            Ok(())
-        }
-        WaveCommand::Remove {
-            wave,
-            preview,
-            delete_backlog,
-            json,
-        } => {
-            let removal =
-                loopflow::ops::wave_lifecycle::remove(repo, wave, *preview, *delete_backlog)?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&removal)?);
+                println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
                 println!(
-                    "{}",
-                    loopflow::ops::wave_lifecycle::render_removed(&removal)
+                    "Wave {wave}: Project {} ({}) is active locally",
+                    result.name, result.id
                 );
             }
             Ok(())
@@ -978,31 +957,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         WaveCommand::List { .. } | WaveCommand::Status { .. } | WaveCommand::Show { .. } => {
             unreachable!("read commands dispatch separately")
         }
-        WaveCommand::Rename {
-            wave,
-            new_name,
-            repo: target,
-            title,
-            json,
-        } => {
-            let renamed =
-                tokio::runtime::Runtime::new()?.block_on(loopflow::ops::wave_lifecycle::rename(
-                    repo,
-                    wave,
-                    new_name.as_deref(),
-                    target.as_deref(),
-                    title.as_deref(),
-                ))?;
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&renamed)?);
-            } else {
-                println!(
-                    "{}",
-                    loopflow::ops::wave_lifecycle::render_renamed(&renamed)
-                );
-            }
-            Ok(())
-        }
+        WaveCommand::Rename { .. } => loopflow::lf::commands::wave_rename::rename(repo, command),
         WaveCommand::UpdatePlan { wave, plan } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -2775,8 +2730,8 @@ fn execute_command(
                 },
         }) => loopflow::lf::commands::ops::run_sync_skills(*yes, *no_prune, *repo),
         Some(Commands::Wave {
-            cmd: WaveCommand::List { json, all },
-        }) => loopflow::lf::commands::waves::ls(*json, *all),
+            cmd: WaveCommand::List { json, all, current },
+        }) => loopflow::lf::commands::waves::ls(*json, *all, *current),
         Some(Commands::Wave {
             cmd: WaveCommand::Status {
                 wave, watch: true, ..

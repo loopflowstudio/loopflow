@@ -42,10 +42,10 @@ watch, check back or follow up later.
 ## Begin work in a Wave
 
 At explicit Wave opening or beginning new planning work, run
-`lf wave add <wave> --json`. An existing Wave keeps its shared exact Project
-binding; a new one gets its first Project. Ordinary Projects need no chapter or workflow.
+`lf wave ensure <wave> --json`. It reuses the shared exact Project binding or
+recovers one reserved creation; ordinary Projects need no chapter or workflow.
 An outage is not absence. Report the cause and retry the same operation. Keep
-status and operator refresh passes observational; do not add on each poll.
+status and operator refresh passes observational; do not ensure on each poll.
 Started Tasks in prior Projects retain their execution and unfinished work.
 Chapter changes use start-chapter's KR planning, exact-ID creation and separate
 Task admission. Never rotate merely to make ordinary work possible.

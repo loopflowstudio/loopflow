@@ -49,6 +49,29 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
         .map_err(project_error)
 }
 
+/// Explicit activation; ordinary planning reads never call this operation.
+pub async fn ensure(repo: &Path, name: &str) -> OpsResult<Project> {
+    let store = super::planning_sync::planning_store().await?;
+    let wave = crate::work::wave::ensure_wave_row(&store, repo, name)
+        .await
+        .map_err(project_error)?;
+    store
+        .sqlite
+        .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
+        .map_err(project_error)?;
+    let acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
+    import_binding(&store, &wave, &acquisition)?;
+    let id = store
+        .sqlite
+        .ensure_project(wave.id(), wave.slug())
+        .map_err(project_error)?;
+    store
+        .sqlite
+        .project(&id)
+        .map_err(project_error)?
+        .ok_or_else(|| project_error("selected Project is missing"))
+}
+
 pub async fn update_plan(
     repo: &Path,
     wave: Option<&str>,

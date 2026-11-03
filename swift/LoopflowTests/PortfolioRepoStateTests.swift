@@ -45,22 +45,6 @@ struct PortfolioRepoStateTests {
         #expect(state.waves.map(\.id) == ["mine"])
     }
 
-    @Test("a renamed Wave keeps its plan; a replacement at its old address does not inherit it")
-    func plansFollowWaveIdentity() {
-        let repo = PortfolioRepo(path: "/tmp/portfolio-rename", error: nil)
-        let state = PortfolioRepoState(repo: repo)
-        let original = Wave(id: "original", name: "product", repo: repo.path, status: .ready)
-        let plans = [original.id: WavePlan(objective: "Keep the workspace usable.")]
-        state.applyConnectedWaves([original], plans: plans)
-
-        let renamed = Wave(id: original.id, name: "prod", repo: repo.path, status: .ready)
-        let replacement = Wave(id: "replacement", name: "product", repo: repo.path, status: .ready)
-        state.applyConnectedWaves([renamed, replacement], plans: plans)
-
-        #expect(state.waves.first { $0.id == original.id }?.plan?.objective == "Keep the workspace usable.")
-        #expect(state.waves.first { $0.id == replacement.id }?.plan == nil)
-    }
-
     @Test("waves hold one stable alphabetical order, not a status regrouping")
     func wavesSortStableAlphabetical() {
         let repoURL = URL(fileURLWithPath: "/tmp/portfolio-priority")
@@ -132,7 +116,7 @@ struct PortfolioRepoStateTests {
         }]
         """
         let query = RegistryQuery { args, _ in
-            #expect(args == ["wave", "list", "--all", "--json"])
+            #expect(args == ["wave", "list", "--all", "--current", "--json"])
             return json
         }
         let state = PortfolioRepoState(repo: repo, registryQuery: query)
@@ -140,6 +124,48 @@ struct PortfolioRepoStateTests {
         await state.refresh()
 
         #expect(state.waves.map(\.id) == ["goals"], "a dev worktree sees its origin's registry row")
+    }
+
+    @Test("createWave writes GOAL.md at the origin repo, not the worktree")
+    func createWaveWritesAtOrigin() async throws {
+        // Authoring from a worktree rail must land .lf/wave/<name>/GOAL.md at the
+        // ORIGIN — every reader (endpoint discovery, launcher, probe) resolves
+        // the origin, so a worktree-local GOAL.md is a wave nobody finds.
+        // Real git, like WaveOriginTests: the origin resolution is the point.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("create-wave-\(UUID().uuidString)", isDirectory: true)
+        let origin = root.appendingPathComponent("repo", isDirectory: true)
+        let worktree = root.appendingPathComponent("repo.wt", isDirectory: true)
+        try FileManager.default.createDirectory(at: origin, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        func git(_ args: [String], at dir: URL) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["git", "-C", dir.path] + args
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try process.run()
+            process.waitUntilExit()
+            try #require(process.terminationStatus == 0, "git \(args.joined(separator: " "))")
+        }
+        try git(["init", "-q"], at: origin)
+        try git(
+            ["-c", "user.email=t@t", "-c", "user.name=t",
+             "commit", "--allow-empty", "-q", "-m", "init"],
+            at: origin
+        )
+        try git(["worktree", "add", "-q", worktree.path], at: origin)
+
+        let repo = PortfolioRepo(path: worktree.path.normalizedFilePath, error: nil)
+        let state = PortfolioRepoState(repo: repo)
+        try await state.createWave(name: "goals")
+
+        let originGoal = origin.appendingPathComponent(".lf/wave/goals/GOAL.md")
+        let worktreeGoal = worktree.appendingPathComponent(".lf/wave/goals/GOAL.md")
+        #expect(FileManager.default.fileExists(atPath: originGoal.path), "GOAL.md lands at the origin")
+        #expect(FileManager.default.fileExists(atPath: origin.appendingPathComponent(".lf/wave/goals/MEMORY.md").path))
+        #expect(!FileManager.default.fileExists(atPath: worktreeGoal.path), "nothing written into the worktree")
     }
 
     private func makeWave(id: String, repoPath: String, status: WorkStatus) -> Wave {

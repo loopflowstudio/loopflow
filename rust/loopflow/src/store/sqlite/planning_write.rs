@@ -21,7 +21,6 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
     match value {
         WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
-        | WorkValue::WaveRetired(_)
         | WorkValue::WaveProject(_)
         | WorkValue::HistoricalWaveWorkflow(_) => "waves",
         WorkValue::ProjectWave(_)
@@ -61,7 +60,6 @@ fn column(value: &WorkValue) -> &'static str {
     match value {
         WorkValue::WaveName(_) => "name",
         WorkValue::WaveParent(_) => "parent_wave_id",
-        WorkValue::WaveRetired(_) => "retired_at",
         WorkValue::WaveProject(_) => "current_project_id",
         WorkValue::HistoricalWaveWorkflow(_) => "workflow",
         WorkValue::ProjectWave(_) => "wave_id",
@@ -100,19 +98,12 @@ fn column(value: &WorkValue) -> &'static str {
 
 pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<WorkValue>> {
     let mut values = match table {
-        "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id,retired_at FROM waves WHERE id=?1", id, |row| {
-                    let retired: Option<i64> = row.get(3)?;
-                    let project: Option<String> = row.get(2)?;
-                    Ok([
+        "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id FROM waves WHERE id=?1", id, |row| {
+                    Ok(vec![
                         WorkValue::WaveName(row.get(0)?),
                         WorkValue::WaveParent(row.get(1)?),
-                    ]
-                    .into_iter()
-                    // A clone registers authored Waves before it acquires their
-                    // planning. Missing selection is not an edit clearing a peer's.
-                    .chain(project.map(|id| WorkValue::WaveProject(Some(id))))
-                    .chain(retired.map(|at| WorkValue::WaveRetired(Some(at))))
-                    .collect())
+                        WorkValue::WaveProject(row.get(2)?),
+                    ])
         }),
         "projects" => read_record(conn, "SELECT wave_id,external_project_id,project_slug,project_name,project_summary,description,status,planning_rank,planning_initiatives,planning_teams,krs,metric_targets FROM projects WHERE id=?1", id, |row| {
                     Ok(vec![

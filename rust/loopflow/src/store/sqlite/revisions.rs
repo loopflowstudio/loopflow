@@ -117,8 +117,6 @@ mod tests {
         "store_revisions",
         "task_linear_ingested_comments",
         "tool_responses",
-        // Wave retry receipts are read only by explicit lifecycle operations.
-        "wave_lifecycle_operations",
     ];
 
     fn store() -> (tempfile::TempDir, SqliteStore) {

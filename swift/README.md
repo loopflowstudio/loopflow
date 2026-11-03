@@ -558,9 +558,10 @@ which does not establish a fresh provider sync. The outline retains an empty Wav
 as an inspectable leaf; it compresses structural levels only when descendants
 can take their place.
 
-Wave navigation reads `lf wave list --all --json`. Desktop and `lf wave list` read
-the same rows: every registered Wave that `lf wave remove` has not removed. A
-removed Wave stays readable by `lf wave show <id>`.
+Current Wave navigation reads `lf wave list --all --current --json`. The CLI excludes
+abandoned and retired registrations; unfiltered `lf wave list` retains historical
+registry visibility. Authored `.lf/wave/<name>/GOAL.md` files still appear before
+their first registration.
 
 Repository scope filters the Work and Wave snapshots locally; live process
 evidence remains machine-wide.

@@ -16,6 +16,10 @@ code Graph owns the remaining demo, gate, publication, landing and verification.
   owner. Finished Graphs and stale unviewed terminal status do not. Store failures
   retry. Executable removal/replacement/supersession uses two seconds of output
   silence and the same protection, including while viewed.
+- Jack Heart clarified on 2026-11-03 that long Working turns, including quiet
+  build/test/CI waits and Task Session supervision of a running Graph, remain
+  active until completion or a concrete reported blocker. Recent interaction is
+  not required. No sleeping supervisor or new wake-up scheduler is requested.
 - Open Rex Task Session tabs retain viewers when another tab is selected;
   Jack accepted this boundary. Visibility integration is outside this Task.
 - Save the last screen before normal/policy exit using LOO-710's integrated
@@ -30,8 +34,12 @@ code Graph owns the remaining demo, gate, publication, landing and verification.
   No workspace implementation or duplicate Task here. LOO-708 owns process
   overhead; LOO-705's monitor rollover owns the 27 old pre-policy owners.
 
-## Current implementation and input authority
+## Current implementation and input authority — reconciled 2026-11-03
 
+Upstream main `2bc29a72e0` integrates LOO-705 rollover, LOO-708 launcher/relay
+reduction, LOO-710 Ghostty snapshots and LOO-712 viewer byte-resume. This checkout
+is synced to that base; queued ending now travels as `Event::Control`, preserving
+the successor command. No parallel snapshot or viewer protocol is needed.
 The existing silent-turn/watch repair and Ghostty integration remain intact.
 Pending input now precedes viewed terminal-idle evidence in `TURN_LIVE`.
 Retained-provider attachment handoff carries its current activity reading to the
@@ -84,7 +92,14 @@ bulk-only transport test, current usage docs, `RegistryQueryLocal.resumeInterrup
 and its app startup call. Preserve `restore::{resume,describe,ResumeOutcome,
 ResumedSession}` for rollover and its serialized sweep. Published historical
 release notes retain their dated description. Single-Session/pane resume remains;
-no deletion targets remain in this cut.
+no deletion targets remain in this cut. The ending-race repair replaces the bare
+`Event` candidate and pre-drain `may_end` check with one revision-bearing candidate;
+the old path and terminal-idle precedence over unyielded turns are removed.
+Candidates now carry an explicit executable change (or idle expiry), rather than
+encoding policy in a viewer event. `Ending::confirm` owns the final activity/store
+check and constructs the notice only on success, so vetoed candidates no longer
+log an exit. `TURN_LIVE` directly accepts either fenced provider work or viewed
+working status; neither source can negate the other's protection.
 
 The input ledger now represents submitted text and acknowledged prompt IDs as
 separate states. Matching acknowledgement discards the text; only matching Stop
@@ -98,11 +113,49 @@ executable-gone judgment, unreadable-config disabling, UserPromptSubmit's steer
 shortcut, native Stop's unconditional work clearing and terminal-idle precedence
 over owned work. Do not reintroduce them or a parallel input/lifetime authority.
 
+## Concept review repair — 2026-11-03
+
+Jack Heart's accepted experience remains: detach without losing unfinished
+interaction; return to the same editor/request while it exists, or reopen settled
+history without replay. The input ledger retains an owner; it is not a recoverable
+editor. Ghostty preserves display, not readiness or request authority. No new
+product choice or scheduler is needed. LOO-498 retains workspace restoration.
+
+The reviewed source defects were a queued ending consumed before ready output,
+and a viewed idle report taking precedence over a fenced unyielded turn. The
+serving owner now drains output before judging an ending candidate. Each candidate
+carries the output/viewer revisions the policy observed; every read advances the
+output revision, including native bytes temporarily held from display. New or
+unreported output invalidates either policy's candidate and flushes current
+activity back to restart its quiet interval. Idle endings also require unchanged
+viewer history and no current viewer; executable rollover ignores viewer changes.
+Pending input and the shared store judgment still veto ending. Repeated identical
+activity does not extend quiet or create a retry loop.
+
+`TURN_LIVE` now prioritizes current-attachment unyielded work alongside open tools
+and pending requests, before viewed terminal status. The handoff regression keeps
+an unyielded turn with zero tools/input despite viewed idle status, then proves
+settlement and provider replacement fences. The native transport fixture survives
+both deadlines, including viewed executable removal, then survives native
+settlement while its Graph remains live and ends after the Graph completes.
+This adds no authority from Task membership.
+
+Focused transport regressions force queued output, read-but-unconsumed activity,
+throttled output and queue/attach ordering through the real serve loop in isolated
+test processes. Both ending policies retain the updated screen. The policy clock
+regression checks that fresh output restarts both intervals and subsequent quiet
+permits ending. These checks use internal policy channels and synthetic provider
+streams; they establish no configured/installed or twenty-return acceptance.
+
+The pre-repair uncommitted review is retained in
+`.lf/tmp/loo-709-before-ending-repair.patch`. Existing draft, same-request, watch,
+attachment, Graph and snapshot protections remain on their original paths.
+
 ## Remaining acceptance and delivery
 
 1. Gate the input-ledger and activity regressions alongside existing silent-turn,
    watch, Graph and headless cases. Include rejected prompt/startup boundaries and
-   the queued idle-ending/new-viewer race; focused proof is recorded below.
+   the forced queued-ending/output/new-viewer regressions.
 2. Demo through the configured/installed path and inspect slow/failed startup
    without replay. The real native probe below uses a local model fixture; it
    does not establish installed or configured-account behavior.
@@ -114,8 +167,9 @@ over owned work. Do not reintroduce them or a parallel input/lifetime authority.
    `harness::context`, `lf::commands::{context,session,work_route,rollover}`,
    CLI parsing/explanation (`binary(lf)`), `transport_tests`,
    `integration::session_cli_tests`, launch-contract checks and `world_recipes`
-   watch cases. Narrow Swift deletion still needs headless compilation of
-   RegistryQuery and LoopflowApp consumers; documentation checks also apply.
+   watch cases. Prior headless compilation of RegistryQuery and LoopflowApp
+   consumers and 17 RegistryQuery tests passed; reuse that unchanged proof.
+   Documentation checks still apply.
 5. Update PR copy with actual proof and limitations; publish, land, verify merged
    behavior and complete the Task through the authored Graph. No further shipping
    permission is required. Do not merge without editable-draft proof.
@@ -160,9 +214,18 @@ Graph membership, policy snapshots and installed symlink changes. Source integra
 with LOO-710 is complete at main `ece53eec1b0274bd549525be5efbdc0bfb3965f2`.
 
 Longer prior evidence/design: `42552d07c70d453836b548e943a4fe87356006eb:scratch/loo-709-idle-sessions-end.md`.
+Reconciliation read Infrastructure's full memory and its sole immediate child,
+Release's GOAL/MEMORY. Release's distinction between source proof and installed
+acceptance still applies; no child-specific execution history moved to the parent.
+Older parent planning/recovery detail remains at
+`39f57361dd597044c0939d0f3ca1aa67d223ea6a:.lf/wave/infrastructure/MEMORY.md`.
+No product choice remains unresolved; the conservative retention limits above are
+explicit implementation coverage, not permission to drop editable interaction.
+
 Pre-ledger uncommitted review material is preserved in
-`.lf/tmp/loo-709-before-input-ledger.patch` and `scratch/concept-review.html`.
+`.lf/tmp/loo-709-before-input-ledger.patch`; the earlier review page remains at
+`39f57361dd:scratch/concept-review.html`. The current page reflects this review.
 
 ## Check result
 
-With inherited `LF_*` unset and stdin closed, `cargo test -p loopflow --lib --test transport_tests -- store::sqlite::native_input native_input_acknowledgements silent_native_turns_follow_the_provider native_drafts_remain_editable silent_native_turns_survive native_background_watches_survive transport::lifetime`: 12 passed. `cargo fmt --check`, diff and context limits passed. Earlier unchanged migration inventory/upgrade and headless Desktop proof (`scripts/test_desktop.sh --filter RegistryQueryTests -Xswiftc -gnone`, app/library compiled, 17 tests) remains applicable. Gate owns broader affected suites and Clippy; demo owns configured/installed acceptance and all twenty returns. No publication or landing in this step.
+With inherited `LF_*` unset and stdin closed: `cargo test -p loopflow --lib --test transport_tests -- transport::lifetime store::sqlite::steers_tests:: native_background_watches_survive silent_native_turns_survive detached_sessions_end_after_their_limit sessions_end_when_their_lf_executable_goes` passed 9 tests; `cargo test -p loopflow --lib store::sqlite::steers::tests::` passed 17. The serve-loop test forces seven orderings. `cargo fmt --check`, `git diff --check` and `lf context` passed. The existing macOS large-unwind linker warning remains. Earlier unchanged input-ledger, migration and headless Desktop proof remains applicable. Gate owns broader affected suites and Clippy; demo owns configured/installed acceptance and all twenty returns.

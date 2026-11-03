@@ -167,12 +167,7 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
         .claim_session_attachment("session", Some(&first), owner, false)
         .unwrap();
     assert_ne!(first.token, next.token);
-    // The provider itself survived; its stop belongs to its current attachment.
-    store
-        .record_native_turn(&adapter, "native", true, Some(1))
-        .unwrap();
-    assert!(!store.owner_waits_for_person(owner).unwrap());
-    // A viewed prompt can say idle while its provider still owns a watch.
+    // No editor input or open tool is needed to keep an unyielded turn.
     {
         let conn = store.conn.lock().unwrap();
         conn.execute("UPDATE processes SET viewed=1 WHERE id=?1", [owner])
@@ -180,9 +175,14 @@ fn silent_native_turns_follow_the_provider_through_attachment_handoff() {
         conn.execute(
             r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}' WHERE session_id='session'"#,
             [],
-        )
-        .unwrap();
+        ).unwrap();
     }
+    assert!(!store.owner_waits_for_person(owner).unwrap());
+    // The provider itself survived; its stop belongs to its current attachment.
+    store
+        .record_native_turn(&adapter, "native", true, Some(1))
+        .unwrap();
+    // A viewed prompt also cannot settle its provider-owned watch.
     assert!(!store.owner_waits_for_person(owner).unwrap());
     store
         .record_native_turn(&adapter, "native", true, Some(0))

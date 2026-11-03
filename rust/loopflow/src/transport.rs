@@ -2,6 +2,8 @@
 //! Viewers hold revocable input tokens, never provider attachment capabilities.
 
 mod lifetime;
+#[cfg(test)]
+mod lifetime_tests;
 mod native;
 mod output;
 mod snapshot;
@@ -748,11 +750,13 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
         let _ = finished.send(child.wait());
         let _ = (&waker).write_all(&[1]);
     });
-    let mut viewed = None;
+    let mut observed = lifetime::Activity::default();
     let mut output_told: Option<Instant> = None;
     let mut exit_record: Option<Box<NativeExit>> = None;
     let mut planning = None;
     loop {
+        #[cfg(test)]
+        lifetime_tests::before_read(&id, &mut readers, &mut output_told)?;
         let mut replaced = Vec::new();
         let mut owner_change = false;
         let mut size_change = false;
@@ -1078,27 +1082,6 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
             }
         }
         drain(&wake);
-        let now_viewed = viewers.iter().any(|v| v.live());
-        if let Ok(moved) = ending.try_recv() {
-            // A key or callback may have arrived after the policy's judgment.
-            // Only the serving owner can decide after accepting that input.
-            let settled = lifetime::may_end(&moved, now_viewed, !pending_input.is_empty())
-                && crate::journal::process_ledger()
-                .and_then(|store| store.owner_waits_for_person(&id))
-                .inspect_err(|error| {
-                    tracing::warn!(%error, owner = %id, "cannot confirm Session ending; judging again later");
-                })
-                .unwrap_or(false);
-            if settled {
-                end_viewers(&mut viewers, moved);
-                snapshot::leave(&id, &output);
-                crate::platform::kill_process(std::process::id());
-            }
-        }
-        if viewed != Some(now_viewed) {
-            viewed = Some(now_viewed);
-            let _ = activity.send(lifetime::Activity::Viewed(now_viewed));
-        }
         let detached = !viewers
             .iter()
             .any(|v| v.token.is_some() && v.token == control);
@@ -1160,6 +1143,7 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                     Err(e) => return Err(e.into()),
                 };
+                observed.output += 1;
                 let ready = match client.as_mut().filter(|_| terminal) {
                     Some(client) => client.accept(reader.as_raw_fd(), &bytes[..n]),
                     None => bytes[..n].to_vec(),
@@ -1172,11 +1156,9 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                     &ready,
                     detached,
                 );
-                if !ready.is_empty()
-                    && output_told.is_none_or(|told| told.elapsed() >= OUTPUT_ACTIVITY_PAUSE)
-                {
+                if output_told.is_none_or(|told| told.elapsed() >= OUTPUT_ACTIVITY_PAUSE) {
                     output_told = Some(Instant::now());
-                    let _ = activity.send(lifetime::Activity::Output);
+                    let _ = activity.send(observed);
                 }
             }
         }
@@ -1315,6 +1297,34 @@ pub fn serve(argv: &[String], terminal: bool) -> Result<()> {
                 };
             }
         }
+        // Ready output and viewer changes precede the final ending judgment.
+        // A throttled/unconsumed activity report also invalidates the candidate.
+        if observed.view(viewers.iter().any(|v| v.live())) {
+            let _ = activity.send(observed);
+        }
+        #[cfg(test)]
+        lifetime_tests::before_judgment();
+        if let Ok(ending) = ending.try_recv() {
+            let event = ending
+                .confirm(&id, observed, !pending_input.is_empty())
+                .inspect_err(|error| {
+                    tracing::warn!(%error, owner = %id, "cannot confirm Session ending; judging again later");
+                })
+                .ok()
+                .flatten();
+            if let Some(event) = event {
+                end_viewers(&mut viewers, event);
+                snapshot::leave(&id, &output);
+                crate::platform::kill_process(std::process::id());
+            }
+            // Flush even throttled activity so the applicable quiet interval
+            // starts again and a settled owner can eventually end.
+            if ending.activity != observed {
+                let _ = activity.send(observed);
+            }
+        }
+        #[cfg(test)]
+        lifetime_tests::after_judgment(&output, observed)?;
         // Sleep until a descriptor has work; only held exit text and a
         // pending exit announcement are timed.
         let deadline = match exit {

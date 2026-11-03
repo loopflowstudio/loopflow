@@ -31,7 +31,8 @@ from the last viewer change, command output or held work. A turn, pending reques
 or running Graph keeps its owner and restarts the grace; finished Graphs do not.
 Native Claude prompt/stop hooks preserve silent waits, background tasks and
 scheduled wakeups until Claude reports settlement. Terminal status counts only
-while a viewer is attached to refresh it. Headless Runs never end for want of viewers.
+while a viewer is attached to refresh it; an idle prompt cannot settle an
+unfinished native turn. Headless Runs never end for want of viewers.
 
 Unsubmitted input keeps its native editor alive so returning can edit it.
 A plain, single Claude submission can release this protection after its exact

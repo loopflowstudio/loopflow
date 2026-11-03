@@ -6,8 +6,7 @@
 //! whose lf executable is removed, replaced or superseded (a worktree deleted,
 //! a build relinked, Dev.app rebuilt, another installed build selected) ends once
 //! its Sessions wait for a person and its command has been quiet for one poll,
-//! viewers notwithstanding: it would
-//! otherwise run a vanished or outdated build indefinitely. Its attached viewers
+//! even while viewed. Its attached viewers
 //! are told why and follow the resume command through the lf entry. Ending
 //! writes the last screen, stops the agent and records the exit, so `lf resume`
 //! reopens the conversation from provider history.
@@ -23,6 +22,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
 
+use anyhow::Result;
+
 use super::wire::Event;
 use crate::config::DetachedLimit;
 use crate::id::LfProcessId;
@@ -31,40 +32,104 @@ use crate::store::sqlite::SqliteStore;
 /// How often an owner looks at the clock and its executable.
 const POLL: Duration = Duration::from_secs(2);
 
-/// Recheck a queued ending after the serving owner has accepted new viewers/input.
-pub(super) fn may_end(ending: &Event, viewed: bool, input_queued: bool) -> bool {
-    !input_queued
-        && (!viewed
-            || !matches!(
-                ending,
-                Event::Control {
-                    held: false,
-                    notice: None,
-                    successor: None
-                }
-            ))
+/// Activity accepted by the serving owner. Revisions include changes whose
+/// notification is still queued or throttled on its way to the policy.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Activity {
+    pub viewed: bool,
+    pub viewers: u64,
+    pub output: u64,
 }
 
-/// What the serve loop tells the policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Activity {
-    /// Whether any viewer is attached, sent on each change.
-    Viewed(bool),
-    /// The command wrote to its terminal: a turn is in progress as far as
-    /// the owner can see.
-    Output,
+impl Activity {
+    pub fn view(&mut self, viewed: bool) -> bool {
+        if self.viewed == viewed {
+            return false;
+        }
+        self.viewed = viewed;
+        self.viewers += 1;
+        true
+    }
+}
+
+/// An ending candidate carries the activity the policy actually judged.
+#[derive(Debug)]
+pub(super) struct Ending {
+    /// None means the detached grace expired.
+    pub change: Option<(Change, PathBuf)>,
+    pub activity: Activity,
+}
+
+impl Ending {
+    pub fn may_end(&self, activity: Activity, input_queued: bool) -> bool {
+        !input_queued
+            && activity.output == self.activity.output
+            && (self.change.is_some()
+                || (!activity.viewed && activity.viewers == self.activity.viewers))
+    }
+
+    /// Recheck the serving owner's current evidence before preparing its exit.
+    pub fn confirm(
+        &self,
+        owner: &LfProcessId,
+        activity: Activity,
+        input_queued: bool,
+    ) -> Result<Option<Event>> {
+        if !self.may_end(activity, input_queued) {
+            return Ok(None);
+        }
+        let store = crate::journal::process_ledger()?;
+        if !store.owner_waits_for_person(owner)? {
+            return Ok(None);
+        }
+        let (notice, successor) = match &self.change {
+            Some((change, path)) => {
+                let Some(session) = store.owner_sessions(owner)?.into_iter().next() else {
+                    return Ok(None);
+                };
+                let successor = crate::os_process::resolve_lf_binary().ok().map(|entry| {
+                    vec![
+                        entry.to_string_lossy().into_owned(),
+                        "session".into(),
+                        "resume".into(),
+                        session.clone(),
+                    ]
+                });
+                tracing::warn!(%owner, ?path, "ending a Session whose lf was {change}");
+                (
+                    Some(format!(
+                        "This Session's lf was {change}; reopening it as `lf resume {session}`"
+                    )),
+                    successor,
+                )
+            }
+            None => {
+                tracing::info!(%owner, "ending a Session nobody has viewed");
+                (None, None)
+            }
+        };
+        Ok(Some(Event::Control {
+            held: false,
+            notice,
+            successor,
+        }))
+    }
 }
 
 /// Record activity sent on the first channel. Once the executable is gone or
 /// the owner has gone unviewed and quiet past its limit, send the second
-/// channel what to tell attached viewers; the serve loop delivers it and ends
-/// the owner. Only a terminal owner (`terminal`) ends for want of viewers;
+/// channel a candidate for the serve loop to confirm before ending the owner.
+/// Only a terminal owner (`terminal`) ends for want of viewers;
 /// a pipe owner is a headless Run.
 pub(super) fn spawn(
     owner: LfProcessId,
     terminal: bool,
     waker: UnixStream,
-) -> (mpsc::Sender<Activity>, mpsc::Receiver<Event>) {
+) -> (mpsc::Sender<Activity>, mpsc::Receiver<Ending>) {
+    #[cfg(test)]
+    if let Some(channels) = super::lifetime_tests::channels() {
+        return channels;
+    }
     let executable = Executable::current();
     let (activity, changes) = mpsc::channel();
     let (end, ending) = mpsc::channel();
@@ -87,21 +152,23 @@ struct Grace {
     /// Unknown until the store names the owner's repository; a pipe owner
     /// never learns one and never ends for want of viewers.
     limit: Option<DetachedLimit>,
-    viewed: bool,
+    activity: Activity,
     quiet_since: SystemTime,
 }
 
 impl Grace {
     fn note(&mut self, activity: Activity, now: SystemTime) {
-        if let Activity::Viewed(viewed) = activity {
-            self.viewed = viewed;
+        if activity != self.activity {
+            self.quiet_since = now;
+            self.activity = activity;
         }
-        self.quiet_since = now;
     }
 
     fn expired(&self, now: SystemTime) -> bool {
         match self.limit {
-            Some(DetachedLimit::After(limit)) if !self.viewed => now >= self.quiet_since + limit,
+            Some(DetachedLimit::After(limit)) if !self.activity.viewed => {
+                now >= self.quiet_since + limit
+            }
             _ => false,
         }
     }
@@ -112,25 +179,25 @@ fn watch(
     executable: Option<&Executable>,
     terminal: bool,
     changes: &mpsc::Receiver<Activity>,
-    end: &mpsc::Sender<Event>,
+    end: &mpsc::Sender<Ending>,
     mut waker: &UnixStream,
 ) {
     let mut store = Store::default();
     let mut last_output = SystemTime::now();
     let mut grace = Grace {
         limit: None,
-        viewed: false,
+        activity: Activity::default(),
         quiet_since: last_output,
     };
     loop {
         match changes.recv_timeout(POLL) {
             Ok(activity) => {
                 let now = SystemTime::now();
-                grace.note(activity, now);
-                if activity == Activity::Output {
+                if activity.output != grace.activity.output {
                     last_output = now;
                 }
-                if let Activity::Viewed(viewed) = activity {
+                if activity.viewers != grace.activity.viewers {
+                    let viewed = activity.viewed;
                     // A store a newer lf has advanced refuses this write. The
                     // policy keeps running; readers ask this owner directly.
                     if let Some(store) = store.open(owner) {
@@ -139,6 +206,7 @@ fn watch(
                         }
                     }
                 }
+                grace.note(activity, now);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -154,7 +222,11 @@ fn watch(
             }
         }
         let now = SystemTime::now();
-        let change = executable.and_then(Executable::change);
+        let change = executable.and_then(|executable| {
+            executable
+                .change()
+                .map(|change| (change, executable.path.clone()))
+        });
         // Native turns may leave only terminal output. Viewers never prolong a
         // vanished build, so their activity cannot reset this quiet interval.
         let quiet = match change {
@@ -180,49 +252,13 @@ fn watch(
                 continue;
             }
         }
-        let moved = match change {
-            Some(change) => {
-                tracing::warn!(
-                    %owner,
-                    path = ?executable.map(|executable| &executable.path),
-                    "ending a Session whose lf was {change}"
-                );
-                let session = match store.owner_sessions(owner) {
-                    Ok(sessions) => sessions.into_iter().next(),
-                    Err(error) => {
-                        tracing::warn!(%error, %owner, "cannot find the Session to reopen; judging again later");
-                        continue;
-                    }
-                };
-                let Some(session) = session else {
-                    continue;
-                };
-                let successor = crate::os_process::resolve_lf_binary().ok().map(|entry| {
-                    vec![
-                        entry.to_string_lossy().into_owned(),
-                        "session".into(),
-                        "resume".into(),
-                        session.clone(),
-                    ]
-                });
-                Event::Control {
-                    held: false,
-                    notice: Some(format!(
-                        "This Session's lf was {change}; reopening it as `lf resume {session}`"
-                    )),
-                    successor,
-                }
-            }
-            None => {
-                tracing::info!(%owner, "ending a Session nobody has viewed");
-                Event::Control {
-                    held: false,
-                    notice: None,
-                    successor: None,
-                }
-            }
-        };
-        if end.send(moved).is_err() {
+        if end
+            .send(Ending {
+                change,
+                activity: grace.activity,
+            })
+            .is_err()
+        {
             return;
         }
         let _ = waker.write_all(&[1]);
@@ -269,7 +305,7 @@ struct Executable {
 
 /// What became of the owner's executable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Change {
+pub(super) enum Change {
     Removed,
     Replaced,
     /// The entry now dispatches to another build.
@@ -344,26 +380,86 @@ fn limit(repo: Option<&str>) -> DetachedLimit {
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{may_end, Activity, DetachedLimit, Event, Grace};
+    use super::{Activity, Change, DetachedLimit, Ending, Grace};
+
+    fn ending(idle: bool, activity: Activity) -> Ending {
+        Ending {
+            change: (!idle).then(|| (Change::Replaced, "replaced".into())),
+            activity,
+        }
+    }
 
     #[test]
-    fn a_viewer_arriving_after_idle_judgment_keeps_its_conversation() {
-        let idle = Event::Control {
-            held: false,
-            notice: None,
-            successor: None,
-        };
-        assert!(may_end(&idle, false, false));
-        assert!(!may_end(&idle, true, false));
-        let rollover = Event::Control {
-            held: false,
-            notice: Some("replaced".into()),
-            successor: None,
-        };
-        assert!(may_end(&rollover, true, false));
-        for ending in [&idle, &rollover] {
-            assert!(!may_end(ending, false, true));
-            assert!(!may_end(ending, true, true));
+    fn queued_endings_require_current_output_and_idle_viewer_evidence() {
+        for idle in [true, false] {
+            let mut activity = Activity::default();
+            let candidate = ending(idle, activity);
+            assert!(candidate.may_end(activity, false));
+            activity.view(true);
+            assert_eq!(candidate.may_end(activity, false), !idle);
+            activity.view(false);
+            // Attaching and leaving again still restarts the idle grace.
+            assert_eq!(candidate.may_end(activity, false), !idle);
+            activity.output += 1;
+            assert!(!candidate.may_end(activity, false));
+            let fresh = ending(idle, activity);
+            assert!(fresh.may_end(activity, false));
+            assert!(!fresh.may_end(activity, true));
+        }
+    }
+
+    #[test]
+    fn output_restarts_both_policies_then_quiet_allows_ending() {
+        let guard = crate::journal::TestLedgerGuard::new();
+        let store = crate::journal::process_ledger().unwrap();
+        let owner = crate::id::LfProcessId::new();
+        let db = guard.home().join("loopflow.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
+            [owner.as_str()],
+        )
+        .unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        conn.execute(
+            "UPDATE agent_sessions SET interactive=1, transport_lf_process_id=?1 WHERE id='session'",
+            [owner.as_str()],
+        ).unwrap();
+        std::fs::write(
+            guard.home().join("config.yaml"),
+            "session:\n  end_detached_after: 2s\n",
+        )
+        .unwrap();
+        for removed in [false, true] {
+            let executable = removed.then(|| super::Executable {
+                path: guard.home().join("removed"),
+                identity: (0, 0, 0, 0, 0),
+            });
+            let (activity, changes) = std::sync::mpsc::channel();
+            let (end, ending) = std::sync::mpsc::channel();
+            let (_wake, waker) = std::os::unix::net::UnixStream::pair().unwrap();
+            let owner = owner.clone();
+            let db = db.clone();
+            let policy = std::thread::spawn(move || {
+                crate::journal::with_test_ledger(db, || {
+                    super::watch(&owner, executable.as_ref(), true, &changes, &end, &waker);
+                });
+            });
+            let candidate = ending.recv_timeout(Duration::from_secs(8)).unwrap();
+            let observed = Activity {
+                output: 1,
+                ..Activity::default()
+            };
+            assert!(!candidate.may_end(observed, false));
+            activity.send(observed).unwrap();
+            assert!(matches!(
+                ending.recv_timeout(Duration::from_secs(1)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ));
+            let fresh = ending.recv_timeout(Duration::from_secs(8)).unwrap();
+            assert!(fresh.may_end(observed, false));
+            drop(activity);
+            policy.join().unwrap();
         }
     }
 
@@ -372,19 +468,28 @@ mod tests {
         let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000);
         let mut grace = Grace {
             limit: Some(DetachedLimit::After(Duration::from_secs(120))),
-            viewed: false,
+            activity: Activity::default(),
             quiet_since: start,
         };
         assert!(!grace.expired(start + Duration::from_secs(119)));
         // A night asleep counts: the clock, not uptime, decides.
         assert!(grace.expired(start + Duration::from_secs(8 * 3_600)));
-        grace.note(Activity::Output, start + Duration::from_secs(100));
+        let mut activity = Activity {
+            output: 1,
+            ..Activity::default()
+        };
+        grace.note(activity, start + Duration::from_secs(100));
         assert!(!grace.expired(start + Duration::from_secs(200)));
         assert!(grace.expired(start + Duration::from_secs(220)));
-        grace.note(Activity::Viewed(true), start + Duration::from_secs(300));
+        activity.view(true);
+        grace.note(activity, start + Duration::from_secs(300));
         assert!(!grace.expired(start + Duration::from_secs(1_000)));
-        grace.note(Activity::Viewed(false), start + Duration::from_secs(400));
+        activity.view(false);
+        grace.note(activity, start + Duration::from_secs(400));
         assert!(!grace.expired(start + Duration::from_secs(519)));
+        assert!(grace.expired(start + Duration::from_secs(520)));
+        // A veto can repeat an already reported snapshot without extending quiet.
+        grace.note(activity, start + Duration::from_secs(519));
         assert!(grace.expired(start + Duration::from_secs(520)));
         grace.limit = Some(DetachedLimit::Off);
         assert!(!grace.expired(start + Duration::from_secs(1_000)));

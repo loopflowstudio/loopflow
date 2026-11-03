@@ -2261,6 +2261,16 @@ while True:
             "silent native turn ended after its grace"
         );
     }
+    // A viewed idle terminal cannot settle a quiet supervisor's native turn.
+    let _viewed = fixture.viewer(&owners[1], false);
+    fixture
+        .sql()
+        .execute(
+            r#"UPDATE session_activity SET program_status='{"records":[{"state":"idle"}]}'
+           WHERE session_id=(SELECT id FROM agent_sessions WHERE transport_lf_process_id=?1)"#,
+            [&owners[1]],
+        )
+        .unwrap();
     std::fs::remove_file(&removable).unwrap();
     std::thread::sleep(Duration::from_secs(4));
     for owner in &owners {
@@ -2269,6 +2279,25 @@ while True:
             "silent native turn ended with its executable"
         );
     }
+    // A live Graph continues to hold a supervisor after its native turn yields.
+    let sql = fixture.sql();
+    let graphs = if background {
+        Vec::new()
+    } else {
+        owners
+            .iter()
+            .map(|owner| {
+                sql.query_row(
+                    "INSERT INTO graph_processes(lf_process_id,graph,compiled)
+                 SELECT id,'supervised','{}' FROM processes WHERE parent_lf_process_id=?1 LIMIT 1
+                 RETURNING lf_process_id",
+                    [owner],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>()
+    };
     for (name, owner) in ["idle", "gone"].iter().zip(&owners) {
         std::fs::write(fixture.home.path().join(format!("{name}-settle")), "").unwrap();
         if background {
@@ -2278,6 +2307,18 @@ while True:
             std::fs::write(fixture.home.path().join(format!("{name}-unschedule")), "").unwrap();
         }
         fixture.wait_file(&format!("{name}-settled"));
+    }
+    if !background {
+        std::thread::sleep(Duration::from_secs(6));
+        for owner in &owners {
+            assert!(fixture.running(owner), "quiet Graph supervisor ended");
+        }
+        for graph in graphs {
+            sql.execute("UPDATE processes SET completed_at=1 WHERE id=?1", [graph])
+                .unwrap();
+        }
+    }
+    for owner in &owners {
         fixture.ends(owner);
     }
 }

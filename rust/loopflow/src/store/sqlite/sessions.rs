@@ -34,26 +34,18 @@ const TURN_RUNNING: &str = "EXISTS(SELECT 1 FROM session_activity act
         EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
             WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
     ELSE act.pending_input>0 OR (act.open_tools=0 AND act.yielded=1) END)";
-/// Session `s` has a turn in progress now. A terminal's status report is
-/// observed by a viewer, so it counts only while the Session's owner is
-/// viewed; a report nobody refreshes is history, not a turn. Otherwise the
-/// facts the provider's own attachment wrote decide: open tools or an
-/// unyielded turn. A row with neither says nothing is running.
-/// Owned work and pending requests hold even a viewed terminal at its prompt.
+/// Current provider work or a viewed terminal's working status holds Session `s`.
+/// Terminal idle cannot settle owned work; unviewed status is only history.
 const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
     JOIN processes p ON p.id=s.agent_process_id
     WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
     AND p.completed_at IS NULL
-    AND CASE
-        WHEN act.attachment_token IS p.attachment_token
-            AND (act.open_tools>0 OR act.pending_input>0) THEN 1
-        WHEN act.program_status IS NOT NULL
-            AND EXISTS(SELECT 1 FROM processes o WHERE o.id=s.transport_lf_process_id AND o.viewed=1) THEN
-        NOT EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
-            WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done'))
-        ELSE act.attachment_token IS p.attachment_token
-            AND act.yielded=0
-    END)";
+    AND ((act.attachment_token IS p.attachment_token
+            AND (act.open_tools>0 OR act.pending_input>0 OR act.yielded=0))
+        OR (act.program_status IS NOT NULL
+            AND EXISTS(SELECT 1 FROM processes o WHERE o.id=s.transport_lf_process_id AND o.viewed=1)
+            AND NOT EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
+                WHERE json_extract(r.value,'$.state') IN ('idle','blocked','done')))))";
 
 const SESSION_SELECT: &str = concat!("SELECT s.id,c.receipt_key AS artifact_key,s.title,s.title_source,
     (SELECT json_extract(feedback.payload,'$.summary') FROM session_events feedback WHERE feedback.session_id=s.id AND feedback.kind='observed' AND feedback.receipt_key='legacy_review_feedback') AS feedback_summary,s.completed_at,s.created_at,s.request,s.interactive,s.repo,
